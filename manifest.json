@@ -1,0 +1,38 @@
+{
+  "name": "LotCheck",
+  "short_name": "LotCheck",
+  "description": "Did you LotCheck it? Canada's car market intelligence platform. Track prices, spot deals, check EVAP rebates.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#020617",
+  "theme_color": "#16a34a",
+  "lang": "en-CA",
+  "categories": ["finance", "shopping", "automotive"],
+  "icons": [
+    { "src": "/icons/icon-72.png",   "sizes": "72x72",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-96.png",   "sizes": "96x96",   "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-192.png",  "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-512.png",  "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Best deals today",
+      "short_name": "Deals",
+      "url": "/?sort=lotscore",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "EV & PHEV listings",
+      "short_name": "EV",
+      "url": "/?fuel=BEV,PHEV",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Alberta allocations",
+      "short_name": "Allocations",
+      "url": "/?tab=allocations",
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96" }]
+    }
+  ]
+}
