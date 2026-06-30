@@ -19,11 +19,106 @@ const GLOBAL_CSS = `
      xl:  1280px+   (desktop, large monitors)
   ────────────────────────────────────────────────────────────────────────── */
 
+  /* ── Live background animation ──────────────────────────────────────────── */
+  .lc-live-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: #020617;
+  }
+  .lc-live-bg::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(22,163,74,0.06) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(14,165,233,0.06) 0%, transparent 40%);
+  }
+  .lc-pulse-dot {
+    position: absolute;
+    border-radius: 50%;
+    background: #16a34a;
+    box-shadow: 0 0 12px 2px rgba(22,163,74,0.6);
+    animation: lc-pulse-fade 3.5s ease-in-out infinite;
+  }
+  .lc-pulse-dot.blue {
+    background: #0ea5e9;
+    box-shadow: 0 0 12px 2px rgba(14,165,233,0.6);
+  }
+  @keyframes lc-pulse-fade {
+    0%   { opacity: 0; transform: scale(0.4); }
+    15%  { opacity: 0.9; transform: scale(1); }
+    40%  { opacity: 0.5; }
+    100% { opacity: 0; transform: scale(1.6); }
+  }
+  .lc-grid-line {
+    position: absolute;
+    background: linear-gradient(90deg, transparent, rgba(22,163,74,0.15), transparent);
+    height: 1px;
+    width: 100%;
+    animation: lc-scan 8s linear infinite;
+  }
+  @keyframes lc-scan {
+    0%   { transform: translateY(-10vh); opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { transform: translateY(110vh); opacity: 0; }
+  }
+
+  /* Live ticker strip */
+  .lc-ticker-wrap {
+    background: #040810;
+    border-bottom: 1px solid #1e293b;
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+    height: 30px;
+    display: flex;
+    align-items: center;
+  }
+  .lc-ticker-track {
+    display: inline-flex;
+    align-items: center;
+    gap: 28px;
+    animation: lc-ticker-scroll 38s linear infinite;
+    will-change: transform;
+  }
+  .lc-ticker-wrap:hover .lc-ticker-track { animation-play-state: paused; }
+  @keyframes lc-ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+  .lc-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+  }
+  .lc-ticker-item .name { color: #94a3b8; }
+  .lc-ticker-item .up { color: #22c55e; }
+  .lc-ticker-item .down { color: #ef4444; }
+  .lc-ticker-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #22c55e;
+    animation: lc-blink 1.6s ease-in-out infinite;
+  }
+  @keyframes lc-blink {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.25; }
+  }
+
+  /* Card content sits above the live background */
   .lc-layout {
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    position: relative;
+    z-index: 1;
   }
+
 
   /* Header */
   .lc-header {
@@ -416,11 +511,14 @@ function ConnectModal({listing,onClose}){
   const [name,setName]=useState("");
   const [phone,setPhone]=useState("");
   const [email,setEmail]=useState("");
+  const [wantsDelivery,setWantsDelivery]=useState(false);
+  const [deliveryCity,setDeliveryCity]=useState("");
   const [step,setStep]=useState("form");
   const [err,setErr]=useState("");
   async function submit(){
     if(!name.trim())return setErr("Please enter your name.");
     if(!phone.trim()&&!email.trim())return setErr("Please enter phone or email.");
+    if(wantsDelivery&&!deliveryCity.trim())return setErr("Please enter your delivery city.");
     setErr("");setStep("sending");
     await new Promise(r=>setTimeout(r,1500));
     setStep("done");
@@ -433,6 +531,12 @@ function ConnectModal({listing,onClose}){
             <div style={{fontSize:52,marginBottom:12}}>✅</div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>LotChecked!</div>
             <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request sent. The dealer will contact you within 2 hours.</div>
+            {wantsDelivery&&(
+              <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:12,padding:"12px 16px",marginBottom:16,textAlign:"left"}}>
+                <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:4}}>🚚 Delivery requested</div>
+                <div style={{fontSize:13,color:"#475569"}}>You asked about delivery to <strong style={{color:"#94a3b8"}}>{deliveryCity}</strong>. The dealer will confirm availability and cost when they call.</div>
+              </div>
+            )}
             {rebate.total>0&&(
               <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
                 <div style={{fontSize:13,color:"#22c55e",fontWeight:700,marginBottom:4}}>⚡ Remind the dealer about your rebate</div>
@@ -455,6 +559,23 @@ function ConnectModal({listing,onClose}){
               </div>
               {rebate.total>0&&<div style={{fontSize:12,color:"#22c55e",fontWeight:600,marginTop:6}}>⚡ After rebates: ~${(listing.price-rebate.total).toLocaleString()}</div>}
             </div>
+
+            <div onClick={()=>setWantsDelivery(!wantsDelivery)} style={{display:"flex",alignItems:"center",gap:10,background:wantsDelivery?"#0d1e3a":"#0f172a",border:`1px solid ${wantsDelivery?"#1e3a5f":"#1e293b"}`,borderRadius:10,padding:"12px 14px",marginBottom:14,cursor:"pointer"}}>
+              <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${wantsDelivery?"#3b82f6":"#475569"}`,background:wantsDelivery?"#3b82f6":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                {wantsDelivery&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>🚚 I'd like this delivered to me</div>
+                <div style={{fontSize:11,color:"#475569"}}>Ask the dealer about delivery — not all dealers offer this</div>
+              </div>
+            </div>
+            {wantsDelivery&&(
+              <div style={{marginBottom:14}}>
+                <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:4}}>Delivery city *</label>
+                <input type="text" placeholder="e.g. Edmonton, AB" value={deliveryCity} onChange={e=>setDeliveryCity(e.target.value)} className="lc-modal-input"/>
+              </div>
+            )}
+
             {[["Full name *","text","Jane Smith",name,setName],["Phone","tel","403-555-0100",phone,setPhone],["Email","email","jane@email.com",email,setEmail]].map(([l,t,ph,v,s])=>(
               <div key={l}>
                 <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:4}}>{l}</label>
@@ -473,7 +594,309 @@ function ConnectModal({listing,onClose}){
   );
 }
 
-// ── Pro Modal ─────────────────────────────────────────────────────────────────
+// ── Test Drive Booking Modal ────────────────────────────────────────────────────
+const TEST_DRIVE_DAYS=["Today","Tomorrow","This weekend","Next week","Flexible"];
+const TEST_DRIVE_TIMES=["Morning","Afternoon","Evening","Anytime"];
+
+function TestDriveModal({listing,onClose}){
+  const [name,setName]=useState("");
+  const [phone,setPhone]=useState("");
+  const [email,setEmail]=useState("");
+  const [day,setDay]=useState("This weekend");
+  const [time,setTime]=useState("Anytime");
+  const [licenseConfirm,setLicenseConfirm]=useState(false);
+  const [step,setStep]=useState("form");
+  const [err,setErr]=useState("");
+
+  async function submit(){
+    if(!name.trim())return setErr("Please enter your name.");
+    if(!phone.trim()&&!email.trim())return setErr("Please enter phone or email.");
+    if(!licenseConfirm)return setErr("Please confirm you have a valid driver's license.");
+    setErr("");setStep("sending");
+    await new Promise(r=>setTimeout(r,1500));
+    setStep("done");
+  }
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="lc-modal">
+        {step==="done"?(
+          <div style={{textAlign:"center",padding:"16px 0"}}>
+            <div style={{fontSize:52,marginBottom:12}}>🚗</div>
+            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Test drive requested!</div>
+            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>The dealer will call you within 2 hours to confirm an exact time.</div>
+            <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
+              <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:6}}>🗓️ Your preference</div>
+              <div style={{fontSize:13,color:"#94a3b8"}}>{day} · {time}</div>
+            </div>
+            <button onClick={onClose} className="lc-modal-btn">Done</button>
+          </div>
+        ):(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}>🚗 Book a test drive</div>
+              <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
+            </div>
+
+            <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:600,color:"#e2e8f0",marginBottom:6}}>{listing.name}</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}><FuelTag fuel={listing.fuel}/><span style={{fontSize:13,color:"#64748b"}}>{listing.km.toLocaleString()} km</span></div>
+                <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9"}}>${listing.price.toLocaleString()}</div>
+              </div>
+            </div>
+
+            <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:6}}>When works for you?</label>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+              {TEST_DRIVE_DAYS.map(d=>(
+                <button key={d} onClick={()=>setDay(d)} style={{padding:"8px 14px",background:day===d?"#16a34a":"transparent",border:`1px solid ${day===d?"#16a34a":"#334155"}`,borderRadius:20,color:day===d?"#fff":"#94a3b8",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                  {d}
+                </button>
+              ))}
+            </div>
+
+            <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:6}}>What time of day?</label>
+            <div style={{display:"flex",gap:6,marginBottom:18}}>
+              {TEST_DRIVE_TIMES.map(t=>(
+                <button key={t} onClick={()=>setTime(t)} style={{flex:1,padding:"9px 0",background:time===t?"#16a34a":"transparent",border:`1px solid ${time===t?"#16a34a":"#334155"}`,borderRadius:8,color:time===t?"#fff":"#94a3b8",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            {[["Full name *","text","Jane Smith",name,setName],["Phone","tel","403-555-0100",phone,setPhone],["Email","email","jane@email.com",email,setEmail]].map(([l,t,ph,v,s])=>(
+              <div key={l}>
+                <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:4}}>{l}</label>
+                <input type={t} placeholder={ph} value={v} onChange={e=>s(e.target.value)} className="lc-modal-input"/>
+              </div>
+            ))}
+
+            <div onClick={()=>setLicenseConfirm(!licenseConfirm)} style={{display:"flex",alignItems:"center",gap:10,background:licenseConfirm?"#0d2010":"#0f172a",border:`1px solid ${licenseConfirm?"#16a34a40":"#1e293b"}`,borderRadius:10,padding:"12px 14px",marginBottom:14,cursor:"pointer"}}>
+              <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${licenseConfirm?"#16a34a":"#475569"}`,background:licenseConfirm?"#16a34a":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+                {licenseConfirm&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
+              </div>
+              <div style={{fontSize:13,color:"#94a3b8"}}>I confirm I have a valid driver's license</div>
+            </div>
+
+            {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:12}}>{err}</div>}
+            <div style={{fontSize:12,color:"#334155",marginBottom:14}}>Your info and license confirmation are shared with the dealer only.</div>
+            <button onClick={submit} disabled={step==="sending"} className="lc-modal-btn" style={{background:step==="sending"?"#1e3a5f":"#16a34a"}}>
+              {step==="sending"?"Sending…":"Request test drive →"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APPRAISAL / TRADE-IN FLOW
+// Phase 1 (live now): user submits car details → single dealer gets the lead
+//   → LotCheck invoices dealer a flat fee, same pattern as buyer leads.
+// Phase 2 (future upgrade — see BID MARKETPLACE notes below): same submission
+//   goes out to ALL active dealers in that city/make, each can submit a real
+//   $ offer within a 24-48h window, user compares offers side by side and
+//   picks one. LotCheck charges per-bid or a % of the closing offer instead
+//   of a flat referral fee. The data model below (AppraisalRequest) is built
+//   so Phase 2 just adds an `offers: []` array and a countdown — no rework
+//   needed on the submission form itself.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MAKES_DEALERS={
+  Toyota:"Cochrane Toyota", Hyundai:"Hyundai on Macleod", Kia:"Sherwood Kia",
+  Chevrolet:"Courtesy Chevrolet", Ford:"Courtesy Ford", Volkswagen:"Capilano VW",
+  Mitsubishi:"Stampede Mitsubishi",
+};
+
+function estimateAppraisal(make,model,year,km,condition){
+  // Rough placeholder estimate — same style of math as the CBB panel.
+  // Replace with real CBB/market data once Supabase is connected.
+  const baseByAge={2026:42000,2025:38000,2024:34000,2023:30000,2022:26000,2021:22000,2020:18000,2019:15000};
+  let base=baseByAge[year]||Math.max(8000,42000-(2026-year)*4000);
+  const kmFactor=Math.max(0.55,1-(km/250000)*0.45);
+  const condFactor={Excellent:1.08,Good:1.0,Fair:0.88,Poor:0.7}[condition]||1.0;
+  const estimate=Math.round(base*kmFactor*condFactor/100)*100;
+  return{
+    low:Math.round(estimate*0.9/100)*100,
+    mid:estimate,
+    high:Math.round(estimate*1.1/100)*100,
+  };
+}
+
+function AppraisalModal({onClose}){
+  const [step,setStep]=useState("form"); // form | result | dealer | sending | done
+  const [make,setMake]=useState("Toyota");
+  const [model,setModel]=useState("");
+  const [year,setYear]=useState(2022);
+  const [km,setKm]=useState("");
+  const [condition,setCondition]=useState("Good");
+  const [name,setName]=useState("");
+  const [phone,setPhone]=useState("");
+  const [email,setEmail]=useState("");
+  const [wantsPickup,setWantsPickup]=useState(false);
+  const [pickupAddress,setPickupAddress]=useState("");
+  const [err,setErr]=useState("");
+
+  const estimate=step!=="form"?estimateAppraisal(make,model,Number(year),Number(km)||50000,condition):null;
+  const dealer=MAKES_DEALERS[make]||"a LotCheck partner dealer";
+
+  function handleGetEstimate(){
+    if(!model.trim()){setErr("Please enter your car's model.");return;}
+    if(!km||Number(km)<=0){setErr("Please enter your odometer reading.");return;}
+    setErr("");
+    setStep("result");
+  }
+
+  async function handleSubmitToDealer(){
+    if(!name.trim()){setErr("Please enter your name.");return;}
+    if(!phone.trim()&&!email.trim()){setErr("Please enter phone or email.");return;}
+    if(wantsPickup&&!pickupAddress.trim()){setErr("Please enter your pickup address.");return;}
+    setErr("");
+    setStep("sending");
+    await new Promise(r=>setTimeout(r,1500));
+    setStep("done");
+  }
+
+  const inp={width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:15,boxSizing:"border-box",outline:"none",fontFamily:"inherit",marginBottom:10};
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="lc-modal" style={{maxWidth:460}}>
+
+        {step==="form"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}>💰 What's your car worth?</div>
+            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+          </div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>Free instant estimate · No obligation · Takes 30 seconds</div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:0}}>
+            <div>
+              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Make</label>
+              <select value={make} onChange={e=>setMake(e.target.value)} style={{...inp,appearance:"auto"}}>
+                {Object.keys(MAKES_DEALERS).map(m=><option key={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Year</label>
+              <select value={year} onChange={e=>setYear(e.target.value)} style={{...inp,appearance:"auto"}}>
+                {[2026,2025,2024,2023,2022,2021,2020,2019,2018,2017,2016,2015].map(y=><option key={y}>{y}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Model</label>
+          <input type="text" placeholder="e.g. RAV4, Tacoma, Camry" value={model} onChange={e=>setModel(e.target.value)} style={inp}/>
+
+          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Odometer (km)</label>
+          <input type="number" placeholder="e.g. 65000" value={km} onChange={e=>setKm(e.target.value)} style={inp}/>
+
+          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Condition</label>
+          <div style={{display:"flex",gap:6,marginBottom:14}}>
+            {["Excellent","Good","Fair","Poor"].map(c=>(
+              <button key={c} onClick={()=>setCondition(c)}
+                style={{flex:1,padding:"10px 0",background:condition===c?"#16a34a":"transparent",border:`1px solid ${condition===c?"#16a34a":"#334155"}`,borderRadius:8,color:condition===c?"#fff":"#94a3b8",cursor:"pointer",fontSize:12,fontWeight:600}}>
+                {c}
+              </button>
+            ))}
+          </div>
+
+          {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:12}}>{err}</div>}
+
+          <button onClick={handleGetEstimate} className="lc-modal-btn">Get my free estimate →</button>
+        </>}
+
+        {step==="result"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#f1f5f9"}}>Your estimated value</div>
+            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+          </div>
+
+          <div style={{fontSize:13,color:"#64748b",marginBottom:14}}>{year} {make} {model} · {Number(km).toLocaleString()} km · {condition} condition</div>
+
+          <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:14,padding:"18px",marginBottom:16,textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>ESTIMATED TRADE-IN VALUE</div>
+            <div style={{fontSize:32,fontWeight:800,color:"#22c55e",marginBottom:4}}>${estimate.mid.toLocaleString()}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Range: ${estimate.low.toLocaleString()} – ${estimate.high.toLocaleString()}</div>
+          </div>
+
+          <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#94a3b8",lineHeight:1.6}}>
+            💡 This is a market estimate, not a guaranteed offer. Get a real, no-obligation offer from {dealer} below.
+          </div>
+
+          <button onClick={()=>setStep("dealer")} className="lc-modal-btn">Get a real offer from a dealer →</button>
+          <button onClick={()=>setStep("form")} style={{width:"100%",background:"transparent",border:"none",color:"#475569",fontSize:12,cursor:"pointer",marginTop:10,textAlign:"center"}}>← Edit my car details</button>
+        </>}
+
+        {(step==="dealer"||step==="sending")&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#f1f5f9"}}>Get your real offer</div>
+            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+          </div>
+          <div style={{fontSize:13,color:"#64748b",marginBottom:16}}>{dealer} will review your {year} {make} {model} and contact you with a real offer within 2 business hours.</div>
+
+          <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:13,color:"#94a3b8"}}>Estimated value</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#22c55e"}}>${estimate.mid.toLocaleString()}</span>
+          </div>
+
+          <div onClick={()=>setWantsPickup(!wantsPickup)} style={{display:"flex",alignItems:"center",gap:10,background:wantsPickup?"#0d1e3a":"#0f172a",border:`1px solid ${wantsPickup?"#1e3a5f":"#1e293b"}`,borderRadius:10,padding:"12px 14px",marginBottom:14,cursor:"pointer"}}>
+            <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${wantsPickup?"#3b82f6":"#475569"}`,background:wantsPickup?"#3b82f6":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+              {wantsPickup&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
+            </div>
+            <div>
+              <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>🚚 I'd like my car picked up</div>
+              <div style={{fontSize:11,color:"#475569"}}>Skip the drive — ask the dealer about pickup</div>
+            </div>
+          </div>
+          {wantsPickup&&(
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Pickup address *</label>
+              <input type="text" placeholder="Street address, city" value={pickupAddress} onChange={e=>setPickupAddress(e.target.value)} style={inp}/>
+            </div>
+          )}
+
+          {[["Full name *","text","Jane Smith",name,setName],["Phone","tel","403-555-0100",phone,setPhone],["Email","email","jane@email.com",email,setEmail]].map(([l,t,ph,v,s])=>(
+            <div key={l}>
+              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>{l}</label>
+              <input type={t} placeholder={ph} value={v} onChange={e=>s(e.target.value)} style={inp}/>
+            </div>
+          ))}
+
+          {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:12}}>{err}</div>}
+          <div style={{fontSize:11,color:"#334155",marginBottom:14}}>Your info is shared with {dealer} only. LotCheck never sells your data.</div>
+
+          <button onClick={handleSubmitToDealer} disabled={step==="sending"} className="lc-modal-btn" style={{background:step==="sending"?"#1e3a5f":"#16a34a"}}>
+            {step==="sending"?"Sending…":"Submit to dealer →"}
+          </button>
+        </>}
+
+        {step==="done"&&(
+          <div style={{textAlign:"center",padding:"16px 0"}}>
+            <div style={{fontSize:52,marginBottom:10}}>✅</div>
+            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request sent to {dealer}!</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:20,lineHeight:1.6}}>They'll review your {year} {make} {model} and call you within 2 business hours with a real offer.</div>
+            {wantsPickup&&(
+              <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"left"}}>
+                <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:4}}>🚚 Pickup requested</div>
+                <div style={{fontSize:13,color:"#475569"}}>Pickup address: <strong style={{color:"#94a3b8"}}>{pickupAddress}</strong>. The dealer will confirm availability when they call.</div>
+              </div>
+            )}
+            <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:10,padding:"12px 16px",marginBottom:20,fontSize:12,color:"#475569"}}>
+              💡 Tip: get offers from multiple dealers to compare before you commit.
+            </div>
+            <button onClick={onClose} className="lc-modal-btn">Done</button>
+          </div>
+        )}
+
+
+      </div>
+    </div>
+  );
+}
+
 function ProModal({onStart,onClose}){
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -497,10 +920,148 @@ function ProModal({onStart,onClose}){
   );
 }
 
+// ── Unlock Modal — pay-per-use, no subscription required ──────────────────────
+function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
+  const [step,setStep]=useState("offer"); // offer | paying | done
+  const labels={
+    vin:{title:"Unlock VIN History",icon:"🔍",desc:"Full accident history, ownership count, and odometer check for this vehicle."},
+    cbb:{title:"Unlock Black Book Value",icon:"📊",desc:"Retail, trade-in, and wholesale value estimates for this exact vehicle."},
+  };
+  const info=labels[feature]||labels.vin;
+
+  async function pay(){
+    setStep("paying");
+    await new Promise(r=>setTimeout(r,1300));
+    setStep("done");
+  }
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="lc-modal" style={{maxWidth:420}}>
+        {step==="done"?(
+          <div style={{textAlign:"center",padding:"16px 0"}}>
+            <div style={{fontSize:48,marginBottom:10}}>✅</div>
+            <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9",marginBottom:6}}>Unlocked!</div>
+            <div style={{fontSize:13,color:"#64748b",marginBottom:20}}>This feature is now available for this vehicle.</div>
+            <button onClick={()=>{onUnlock();onClose();}} className="lc-modal-btn">Continue →</button>
+          </div>
+        ):(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:16,fontWeight:700,color:"#f1f5f9"}}>{info.icon} {info.title}</div>
+              <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+            </div>
+            <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6,marginBottom:18}}>{info.desc}</div>
+
+            <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"16px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                <span style={{fontSize:13,color:"#94a3b8"}}>One-time unlock</span>
+                <span style={{fontSize:24,fontWeight:800,color:"#f1f5f9"}}>${price.toFixed(2)}</span>
+              </div>
+              <div style={{fontSize:11,color:"#475569"}}>No subscription · No account needed · Instant access</div>
+            </div>
+
+            <button onClick={pay} disabled={step==="paying"} className="lc-modal-btn" style={{marginBottom:10,background:step==="paying"?"#1e3a5f":"#16a34a"}}>
+              {step==="paying"?"Processing…":`Pay $${price.toFixed(2)} & unlock →`}
+            </button>
+
+            <div style={{textAlign:"center",fontSize:11,color:"#334155",marginBottom:14}}>— or —</div>
+
+            <button onClick={()=>{onUpgrade();onClose();}} style={{width:"100%",background:"transparent",border:"1px solid #1e3a5f",borderRadius:12,padding:"13px 0",color:"#60a5fa",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+              ✦ Get unlimited with Pro — 3 days free
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── VIN History Panel ─────────────────────────────────────────────────────────
+function VINHistoryPanel({listing}){
+  const [vin,setVin]=useState("");
+  const [error,setError]=useState("");
+
+  function validateVIN(v){
+    const clean=v.toUpperCase().replace(/\s/g,"");
+    if(clean.length!==17)return "VIN must be 17 characters";
+    if(/[IOQ]/.test(clean))return "VIN cannot contain letters I, O, or Q";
+    if(!/^[A-Z0-9]+$/.test(clean))return "VIN can only contain letters and numbers";
+    return "";
+  }
+
+  function handleCheck(){
+    const err=validateVIN(vin);
+    if(err){setError(err);return;}
+    setError("");
+    const carfaxUrl=`https://www.carfax.ca/vehicle-history-report?vin=${vin.toUpperCase()}&utm_source=lotcheck&utm_medium=affiliate&utm_campaign=vin_lookup`;
+    window.open(carfaxUrl,"_blank");
+  }
+
+  return(
+    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <span style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>VEHICLE HISTORY REPORT</span>
+        <span style={{fontSize:10,background:"#3b82f620",color:"#3b82f6",borderRadius:4,padding:"1px 6px",border:"1px solid #3b82f630"}}>Powered by CARFAX</span>
+      </div>
+      <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6,marginBottom:14}}>
+        Check accident history, number of owners, odometer rollback flags, and service records before you buy.
+      </div>
+      <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:5}}>Vehicle Identification Number (VIN)</label>
+      <input type="text" placeholder="e.g. 1HGCM82633A123456" value={vin}
+        onChange={e=>{setVin(e.target.value.toUpperCase());setError("");}} maxLength={17}
+        style={{width:"100%",background:"#1e293b",border:`1px solid ${error?"#7f1d1d":"#334155"}`,borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:15,fontFamily:"monospace",letterSpacing:1,outline:"none",boxSizing:"border-box",marginBottom:6}}/>
+      <div style={{fontSize:11,color:error?"#ef4444":"#334155",marginBottom:14}}>
+        {error||`${vin.length}/17 characters · VIN is on the door jamb or dashboard`}
+      </div>
+      <button onClick={handleCheck} disabled={vin.length!==17}
+        style={{width:"100%",background:vin.length===17?"#16a34a":"#1e3a5f",border:"none",borderRadius:12,padding:"14px 0",color:"#fff",fontSize:15,fontWeight:700,cursor:vin.length===17?"pointer":"not-allowed"}}>
+        🔍 Check Vehicle History →
+      </button>
+      <div style={{fontSize:11,color:"#334155",marginTop:8,textAlign:"center"}}>
+        ~$45 CAD via CARFAX Canada · Opens in new tab
+      </div>
+    </div>
+  );
+}
+
+// ── Insurance Quote Panel (Kanetix affiliate) ──────────────────────────────────
+function InsurancePanel({listing}){
+  const KANETIX_AFFILIATE_ID="YOUR_AFFILIATE_ID";
+  const kanetixUrl=`https://www.kanetix.ca/auto-insurance-quotes?aff=${KANETIX_AFFILIATE_ID}&utm_source=lotcheck&vehicle=${encodeURIComponent(listing.name)}`;
+  const estMonthly=Math.round((listing.price*0.025)/12/10)*10;
+
+  return(
+    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+        <span style={{fontSize:11,fontWeight:700,color:"#f59e0b",letterSpacing:1}}>INSURANCE ESTIMATE</span>
+        <span style={{fontSize:10,background:"#f59e0b20",color:"#f59e0b",borderRadius:4,padding:"1px 6px",border:"1px solid #f59e0b30"}}>via Kanetix</span>
+      </div>
+      <div style={{background:"#1a1200",border:"1px solid #f59e0b30",borderRadius:10,padding:"14px",marginBottom:14}}>
+        <div style={{fontSize:11,color:"#475569",marginBottom:4}}>Rough monthly estimate (Alberta avg.)</div>
+        <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>~${estMonthly}<span style={{fontSize:14,color:"#64748b"}}>/mo</span></div>
+        <div style={{fontSize:11,color:"#475569",marginTop:4}}>Actual rate depends on your driving record, age, and location</div>
+      </div>
+      <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.6,marginBottom:14}}>
+        Compare real quotes from 50+ Canadian insurers in under 5 minutes. Free, no obligation.
+      </div>
+      <a href={kanetixUrl} target="_blank" rel="noreferrer"
+        style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",background:"#f59e0b",border:"none",borderRadius:12,padding:"14px 0",color:"#020617",fontSize:15,fontWeight:700,textDecoration:"none",boxSizing:"border-box"}}>
+        🛡️ Compare Insurance Quotes →
+      </a>
+      <div style={{fontSize:11,color:"#334155",marginTop:8,textAlign:"center"}}>
+        Opens Kanetix.ca in a new tab · Free comparison · No signup required
+      </div>
+    </div>
+  );
+}
+
 // ── Detail Panel ──────────────────────────────────────────────────────────────
-function DetailPanel({listing,isPro,onConnect,onUpgrade}){
+function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
   const [history]=useState(()=>genHistory(listing.price));
   const [tab,setTab]=useState("chart");
+  const [unlocks,setUnlocks]=useState({}); // { [listingId-feature]: true }
+  const [unlockModal,setUnlockModal]=useState(null); // "vin" | "cbb" | null
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel);
   const score=lotScore(listing,LISTINGS);
@@ -511,6 +1072,10 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade}){
   const domain=[Math.round(Math.min(...history.map(h=>h.price))*0.97),Math.round(Math.max(...history.map(h=>h.price))*1.03)];
   const cbb={retail:Math.round(listing.price*1.05),trade:Math.round(listing.price*Math.max(0.4,1-(2026-listing.year)*0.08)*Math.max(0.7,1-(listing.km/300000)*0.35)*0.82)};
   cbb.wholesale=Math.round(cbb.trade*0.91);
+
+  const key=f=>`${listing.id}-${f}`;
+  const isUnlocked=f=>isPro||unlocks[key(f)];
+  const unlockPrice={vin:2.99,cbb:1.99};
 
   return(
     <div style={{padding:"16px"}}>
@@ -528,12 +1093,16 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade}){
       </div>
       {/* Tabs */}
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isPro?"📊 Black Book":"🔒 Black Book"]].map(([t,l])=>(
-          <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{if(t==="cbb"&&!isPro){onUpgrade();return;}setTab(t);}}>
+        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Black Book":"🔒 Black Book $1.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN History $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+          <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{
+            if((t==="cbb"||t==="vin")&&!isUnlocked(t)){setUnlockModal(t);return;}
+            setTab(t);
+          }}>
             {l}
           </button>
         ))}
       </div>
+
       {/* Chart */}
       {tab==="chart"&&<>
         <div style={{height:180,marginBottom:16}}>
@@ -587,7 +1156,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade}){
         )}
       </>}
       {/* CBB */}
-      {tab==="cbb"&&isPro&&(
+      {tab==="cbb"&&isUnlocked("cbb")&&(
         <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px"}}>
           <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:12}}>CANADIAN BLACK BOOK · PRO</div>
           <div className="lc-stats">
@@ -604,12 +1173,31 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade}){
           </div>
         </div>
       )}
+      {/* VIN History */}
+      {tab==="vin"&&isUnlocked("vin")&&<VINHistoryPanel listing={listing}/>}
+      {/* Insurance */}
+      {tab==="insurance"&&<InsurancePanel listing={listing}/>}
       {/* Connect */}
-      <button onClick={onConnect} className="lc-connect-btn">
-        <span>🤝</span>
-        <span>Connect me with a dealer</span>
-        {rebate.total>0&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:6,padding:"2px 8px",fontSize:12}}>⚡ ${rebate.total.toLocaleString()}</span>}
-      </button>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onConnect} className="lc-connect-btn" style={{flex:2}}>
+          <span>🤝</span>
+          <span>Connect me with a dealer</span>
+          {rebate.total>0&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:6,padding:"2px 8px",fontSize:12}}>⚡ ${rebate.total.toLocaleString()}</span>}
+        </button>
+        <button onClick={onTestDrive} style={{flex:1,background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"0 14px",color:"#60a5fa",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,whiteSpace:"nowrap"}}>
+          <span>🚗</span><span>Test drive</span>
+        </button>
+      </div>
+
+      {unlockModal&&(
+        <UnlockModal
+          feature={unlockModal}
+          price={unlockPrice[unlockModal]}
+          onUnlock={()=>{setUnlocks(prev=>({...prev,[key(unlockModal)]:true}));setTab(unlockModal);}}
+          onClose={()=>setUnlockModal(null)}
+          onUpgrade={()=>{setUnlockModal(null);onUpgrade();}}
+        />
+      )}
     </div>
   );
 }
@@ -639,11 +1227,90 @@ function ListingCard({listing,onClick,active}){
   );
 }
 
+// ── Live Background — pulsing dots + scanning lines, evokes a live market ─────
+function LiveBackground(){
+  const [dots,setDots]=useState([]);
+  const idRef=useRef(0);
+
+  useEffect(()=>{
+    const spawn=()=>{
+      const id=idRef.current++;
+      const dot={
+        id,
+        top:Math.random()*100,
+        left:Math.random()*100,
+        size:4+Math.random()*6,
+        blue:Math.random()>0.5,
+      };
+      setDots(prev=>[...prev.slice(-14),dot]);
+    };
+    spawn();
+    const interval=setInterval(spawn,900);
+    return()=>clearInterval(interval);
+  },[]);
+
+  return(
+    <div className="lc-live-bg" aria-hidden="true">
+      <div className="lc-grid-line" style={{left:"15%",animationDelay:"0s"}}/>
+      <div className="lc-grid-line" style={{left:"55%",animationDelay:"2.5s"}}/>
+      <div className="lc-grid-line" style={{left:"85%",animationDelay:"5s"}}/>
+      {dots.map(d=>(
+        <div key={d.id} className={`lc-pulse-dot${d.blue?" blue":""}`}
+          style={{top:`${d.top}%`,left:`${d.left}%`,width:d.size,height:d.size}}/>
+      ))}
+    </div>
+  );
+}
+
+// ── Live Ticker — scrolling strip of "live" price movements ───────────────────
+function LiveTicker(){
+  const [items,setItems]=useState(()=>
+    LISTINGS.map(l=>({
+      id:l.id,
+      name:`${l.make} ${l.model}`,
+      price:l.price,
+      change:Math.round((Math.random()-0.5)*1200),
+    }))
+  );
+
+  useEffect(()=>{
+    const interval=setInterval(()=>{
+      setItems(prev=>prev.map(it=>{
+        if(Math.random()>0.7){
+          const delta=Math.round((Math.random()-0.5)*400);
+          return{...it,price:Math.max(15000,it.price+delta),change:it.change+delta};
+        }
+        return it;
+      }));
+    },2500);
+    return()=>clearInterval(interval);
+  },[]);
+
+  const doubled=[...items,...items];
+
+  return(
+    <div className="lc-ticker-wrap">
+      <div className="lc-ticker-track">
+        {doubled.map((it,i)=>(
+          <span key={i} className="lc-ticker-item">
+            <span className="lc-ticker-dot"/>
+            <span className="name">{it.name}</span>
+            <span>${it.price.toLocaleString()}</span>
+            <span className={it.change>=0?"up":"down"}>{it.change>=0?"▲":"▼"} ${Math.abs(it.change).toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function App(){
   const [isPro,setIsPro]=useState(false);
   const [showPro,setShowPro]=useState(false);
+  const [showAppraisal,setShowAppraisal]=useState(false);
   const [showConnect,setShowConnect]=useState(false);
+  const [showTestDrive,setShowTestDrive]=useState(false);
   const [selected,setSelected]=useState(null);
   const [province,setProvince]=useState("ALL");
   const [fuelFilter,setFuelFilter]=useState("All");
@@ -679,9 +1346,10 @@ export default function App(){
             <div style={{flex:1,fontSize:13,fontWeight:600,color:"#f1f5f9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.name}</div>
             {isPro?<span style={{fontSize:11,color:"#22c55e",fontWeight:700}}>✅ Pro</span>:<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Pro</button>}
           </div>
-          <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)}/>
+          <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
         </div>
         {showConnect&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
+        {showTestDrive&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
         {showPro&&<ProModal onStart={()=>setIsPro(true)} onClose={()=>setShowPro(false)}/>}
       </>
     );
@@ -691,6 +1359,7 @@ export default function App(){
     <>
       <style>{GLOBAL_CSS}</style>
       <div className="lc-layout">
+        <LiveBackground/>
         {/* Header */}
         <header className="lc-header">
           <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -700,11 +1369,18 @@ export default function App(){
               <div style={{fontSize:10,color:"#334155",fontStyle:"italic"}}>Did you LotCheck it?</div>
             </div>
           </div>
-          {isPro
-            ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#22c55e",fontWeight:700}}>✅ Pro · 3d left</div>
-            :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>Try Pro free</button>
-          }
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <button onClick={()=>setShowAppraisal(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"8px 12px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>💰 My car's worth</button>
+            {isPro
+              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#22c55e",fontWeight:700}}>✅ Pro · 3d left</div>
+              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>Try Pro free</button>
+            }
+          </div>
         </header>
+
+        <LiveTicker/>
+
+        {showAppraisal&&<AppraisalModal onClose={()=>setShowAppraisal(false)}/>}
 
         {/* Province filter */}
         <div className="lc-provinces">
@@ -737,7 +1413,7 @@ export default function App(){
           {/* Detail panel — desktop/tablet only */}
           <div className="lc-detail">
             {selected?(
-              <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)}/>
+              <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
             ):(
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",color:"#334155",textAlign:"center",padding:"40px 20px"}}>
                 <div style={{fontSize:48,marginBottom:16}}>✅</div>
@@ -750,6 +1426,7 @@ export default function App(){
       </div>
 
       {showConnect&&selected&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
+      {showTestDrive&&selected&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
       {showPro&&<ProModal onStart={()=>setIsPro(true)} onClose={()=>setShowPro(false)}/>}
     </>
   );
