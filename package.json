@@ -1,7 +1,8 @@
 {
   "name": "lotcheck",
   "version": "1.0.0",
-  "description": "Canada's car market intelligence platform - Did you LotCheck it?",
+  "type": "module",
+  "description": "Canada's car market intelligence platform",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
