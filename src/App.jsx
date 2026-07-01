@@ -525,8 +525,9 @@ function useListings(){
           .select(`
             id, name, make, model, year, price, km, fuel,
             province, city, source, dealer, listing_url, image_url,
-            scraped_at
+            scraped_at, verification_score
           `)
+          .eq("status", "published")
           .order("scraped_at", {ascending:false})
           .limit(500);
 
