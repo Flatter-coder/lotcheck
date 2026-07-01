@@ -1158,38 +1158,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
         </div>
       </>}
       {/* Rebates */}
-      {tab==="rebates"&&<>
-        {rebate.total>0?(
-          <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:14,padding:"16px"}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#22c55e",marginBottom:12}}>⚡ Available rebates in {PROVINCES[listing.province]||listing.province}</div>
-            {rebate.federal>0&&(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a1e10",borderRadius:10,padding:"12px 14px",marginBottom:8}}>
-                <div><div style={{fontSize:14,color:"#e2e8f0",fontWeight:600}}>Federal EVAP</div><div style={{fontSize:11,color:"#475569"}}>Transport Canada · all provinces</div></div>
-                <div style={{fontSize:18,fontWeight:700,color:"#22c55e"}}>${rebate.federal.toLocaleString()}</div>
-              </div>
-            )}
-            {rebate.provincial>0&&(
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a1e10",borderRadius:10,padding:"12px 14px",marginBottom:8}}>
-                <div><div style={{fontSize:14,color:"#e2e8f0",fontWeight:600}}>{rebate.prov_name}</div><div style={{fontSize:11,color:"#475569"}}>Provincial · {PROVINCES[listing.province]}</div></div>
-                <div style={{fontSize:18,fontWeight:700,color:"#3b82f6"}}>${rebate.provincial.toLocaleString()}</div>
-              </div>
-            )}
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#052010",borderRadius:10,padding:"12px 14px",marginBottom:8}}>
-              <div style={{fontSize:14,color:"#94a3b8"}}>Total stacked</div>
-              <div style={{fontSize:20,fontWeight:800,color:"#22c55e"}}>${rebate.total.toLocaleString()}</div>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#052010",borderRadius:10,padding:"12px 14px"}}>
-              <div style={{fontSize:14,color:"#94a3b8"}}>After all rebates</div>
-              <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>${(listing.price-rebate.total).toLocaleString()}</div>
-            </div>
-            {rebate.note&&<div style={{fontSize:12,color:"#475569",marginTop:10}}>{rebate.note}</div>}
-          </div>
-        ):(
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",color:"#64748b",fontSize:14}}>
-            No EV/PHEV rebates apply to this vehicle in {PROVINCES[listing.province]||listing.province}.
-          </div>
-        )}
-      </>}
+      {tab==="rebates"&&<EVAPRebateTab listing={listing} rebate={rebate}/>}
       {/* CBB */}
       {tab==="cbb"&&isUnlocked("cbb")&&(
         <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px"}}>
@@ -1262,6 +1231,224 @@ function ListingCard({listing,onClick,active}){
   );
 }
 
+
+// ── EVAP Rebate Tab — analytics panel with live countdown + declining schedule ──
+function EVAPRebateTab({listing, rebate}){
+  // Live countdown to Jan 1 2027 (next rebate drop)
+  const [timeLeft, setTimeLeft] = useState({});
+  const [showInfo, setShowInfo] = useState(false);
+
+  useEffect(()=>{
+    const calc=()=>{
+      const now=new Date();
+      const drop=new Date("2027-01-01T00:00:00");
+      const diff=drop-now;
+      if(diff<=0){setTimeLeft({expired:true});return;}
+      const d=Math.floor(diff/(1000*60*60*24));
+      const h=Math.floor((diff%(1000*60*60*24))/(1000*60*60));
+      const m=Math.floor((diff%(1000*60*60))/(1000*60));
+      const s=Math.floor((diff%60000)/1000);
+      setTimeLeft({d,h,m,s});
+    };
+    calc();
+    const t=setInterval(calc,1000);
+    return()=>clearInterval(t);
+  },[]);
+
+  // EVAP declining schedule — real Transport Canada data
+  const schedule=[
+    {year:"2026",bev:5000,phev:2500,active:true,label:"NOW"},
+    {year:"2027",bev:4000,phev:2000,active:false,label:"Jan 1, 2027"},
+    {year:"2028–29",bev:3000,phev:1500,active:false,label:"Jan 1, 2028"},
+    {year:"2030",bev:2000,phev:1000,active:false,label:"Jan 1, 2030"},
+  ];
+
+  // Program timeline bar: Feb 16 2026 → Mar 31 2031
+  const progStart=new Date("2026-02-16");
+  const progEnd=new Date("2031-03-31");
+  const now=new Date();
+  const pct=Math.min(100,Math.max(0,((now-progStart)/(progEnd-progStart))*100));
+  const daysLeft=Math.max(0,Math.floor((progEnd-now)/(1000*60*60*24)));
+
+  const isEV=listing.fuel==="BEV"||listing.fuel==="PHEV";
+
+  if(!isEV) return(
+    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:20,color:"#64748b",fontSize:14,textAlign:"center"}}>
+      <div style={{fontSize:28,marginBottom:8}}>⛽</div>
+      <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>No federal rebates for gas vehicles</div>
+      <div style={{fontSize:12,color:"#475569"}}>EVAP applies to BEV and PHEV purchases only. Switch the fuel filter to see eligible vehicles.</div>
+    </div>
+  );
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+
+      {/* ── Header + Info tooltip ──────────────────────────────── */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#22c55e"}}>⚡ Federal EVAP Rebates · {PROVINCES[listing.province]||listing.province}</div>
+        <div style={{position:"relative"}}>
+          <button
+            onClick={()=>setShowInfo(v=>!v)}
+            style={{background:"none",border:"1px solid #334155",borderRadius:"50%",width:22,height:22,cursor:"pointer",color:"#64748b",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}
+            title="About this rebate"
+          >ℹ</button>
+          {showInfo&&(
+            <div style={{position:"absolute",right:0,top:28,zIndex:99,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",width:290,boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}>ℹ️ ABOUT THESE REBATES</div>
+              <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.65}}>
+                These are <strong style={{color:"#f1f5f9"}}>new vehicle purchase rebates</strong> from Transport Canada. Used cars listed here don't qualify — but knowing the rebate helps you compare the real cost of buying new vs. used.
+                <div style={{background:"#1a1000",border:"1px solid #f59e0b30",borderRadius:8,padding:"8px 10px",margin:"8px 0"}}>
+                  <strong style={{color:"#f59e0b",fontSize:11}}>⚠️ Rebate tier locks to the dealer's submission date</strong>
+                  <div style={{color:"#94a3b8",marginTop:3,fontSize:11}}>Per Transport Canada: the tier is determined by when the dealer submits the eligibility assessment — not your order date or delivery date. Confirm with your dealer that they can submit before the tier drops.</div>
+                </div>
+                The rebate is <strong style={{color:"#f1f5f9"}}>applied by the dealer at point of sale</strong> — you never claim it yourself. Only enrolled dealerships can submit to Transport Canada.
+                <br/><br/>
+                Final transaction value must be <strong style={{color:"#f1f5f9"}}>≤ $50,000</strong>. No cap for Canadian-made EVs. One incentive per person over the 5-year program.
+              </div>
+              <button onClick={()=>setShowInfo(false)} style={{marginTop:10,background:"none",border:"none",color:"#475569",fontSize:11,cursor:"pointer",padding:0}}>Close ✕</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Current rebate amounts ─────────────────────────────── */}
+      {rebate.total>0?(
+        <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"14px 16px"}}>
+          {rebate.federal>0&&(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div>
+                <div style={{fontSize:14,color:"#e2e8f0",fontWeight:600}}>Federal EVAP</div>
+                <div style={{fontSize:11,color:"#475569"}}>Transport Canada · all provinces</div>
+              </div>
+              <div style={{fontSize:18,fontWeight:700,color:"#22c55e"}}>${rebate.federal.toLocaleString()}</div>
+            </div>
+          )}
+          {rebate.provincial>0&&(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div>
+                <div style={{fontSize:14,color:"#e2e8f0",fontWeight:600}}>{rebate.prov_name}</div>
+                <div style={{fontSize:11,color:"#475569"}}>Provincial · {PROVINCES[listing.province]}</div>
+              </div>
+              <div style={{fontSize:18,fontWeight:700,color:"#3b82f6"}}>${rebate.provincial.toLocaleString()}</div>
+            </div>
+          )}
+          <div style={{borderTop:"1px solid #16a34a20",paddingTop:10,marginTop:4,display:"flex",justifyContent:"space-between"}}>
+            <div style={{fontSize:13,color:"#94a3b8"}}>Total stacked</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#22c55e"}}>${rebate.total.toLocaleString()}</div>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
+            <div style={{fontSize:13,color:"#94a3b8"}}>After all rebates</div>
+            <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9"}}>${(listing.price-rebate.total).toLocaleString()}</div>
+          </div>
+          {rebate.note&&<div style={{fontSize:11,color:"#475569",marginTop:8,borderTop:"1px solid #16a34a15",paddingTop:8}}>{rebate.note}</div>}
+        </div>
+      ):(
+        <div style={{background:"#0a1526",border:"1px solid #1e293b",borderRadius:12,padding:"12px 14px",fontSize:13,color:"#64748b"}}>
+          No provincial rebate in {PROVINCES[listing.province]||listing.province} — federal EVAP applies nationwide.
+        </div>
+      )}
+
+      {/* ── Countdown to next rebate drop ─────────────────────── */}
+      <div style={{background:"#0d1526",border:"1px solid #f59e0b30",borderRadius:12,padding:"14px 16px"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#f59e0b",letterSpacing:0.8,marginBottom:4}}>⏳ REBATE DROPS JAN 1, 2027</div>
+        <div style={{fontSize:11,color:"#64748b",marginBottom:10}}>
+          The tier is locked to the <strong style={{color:"#94a3b8"}}>dealer's eligibility submission date</strong> — not delivery date. Dealer must submit to Transport Canada before Jan 1, 2027 for you to get the current rate. Confirm this timeline with your dealer.
+        </div>
+        {timeLeft.expired?(
+          <div style={{color:"#ef4444",fontWeight:700,fontSize:13}}>Rebate has already decreased. See schedule below.</div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+            {[["DAYS",timeLeft.d],["HRS",timeLeft.h],["MIN",timeLeft.m],["SEC",timeLeft.s]].map(([label,val])=>(
+              <div key={label} style={{background:"#0a0f1e",borderRadius:8,padding:"8px 4px",textAlign:"center",border:"1px solid #1e293b"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",fontVariantNumeric:"tabular-nums",letterSpacing:-0.5}}>
+                  {String(val??0).padStart(2,"0")}
+                </div>
+                <div style={{fontSize:9,color:"#475569",fontWeight:600,letterSpacing:0.5,marginTop:2}}>{label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Declining rebate schedule ─────────────────────────── */}
+      <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8,marginBottom:10}}>📉 EVAP REBATE DECLINING SCHEDULE</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,marginBottom:6}}>
+          <div style={{fontSize:10,color:"#475569",fontWeight:600}}>PERIOD</div>
+          <div style={{fontSize:10,color:"#475569",fontWeight:600,textAlign:"center"}}>BEV</div>
+          <div style={{fontSize:10,color:"#475569",fontWeight:600,textAlign:"center"}}>PHEV</div>
+        </div>
+        {schedule.map((s,i)=>{
+          const isNow=s.active;
+          const fuel=listing.fuel;
+          return(
+            <div key={i} style={{
+              display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,
+              padding:"8px 10px",borderRadius:8,marginBottom:4,
+              background:isNow?"#0d2010":"transparent",
+              border:isNow?"1px solid #16a34a30":"1px solid transparent",
+            }}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                {isNow&&<span style={{fontSize:8,background:"#16a34a",color:"#fff",borderRadius:3,padding:"1px 4px",fontWeight:700,letterSpacing:0.3}}>NOW</span>}
+                <span style={{fontSize:12,color:isNow?"#e2e8f0":"#475569",fontWeight:isNow?700:400}}>{s.year}</span>
+              </div>
+              <div style={{textAlign:"center",fontSize:13,fontWeight:isNow&&fuel==="BEV"?800:500,color:isNow&&fuel==="BEV"?"#22c55e":isNow?"#e2e8f0":"#475569"}}>
+                ${s.bev.toLocaleString()}
+              </div>
+              <div style={{textAlign:"center",fontSize:13,fontWeight:isNow&&fuel==="PHEV"?800:500,color:isNow&&fuel==="PHEV"?"#f59e0b":isNow?"#e2e8f0":"#475569"}}>
+                ${s.phev.toLocaleString()}
+              </div>
+            </div>
+          );
+        })}
+        <div style={{fontSize:10,color:"#334155",marginTop:6}}>
+          Source: Transport Canada · tc.canada.ca · Updated May 11, 2026
+        </div>
+      </div>
+
+      {/* ── Funding burn rate ────────────────────────────────── */}
+      <div style={{background:"#0a0f1e",border:"1px solid #ef444430",borderRadius:12,padding:"14px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#ef4444",letterSpacing:0.8}}>💰 FUNDING STATUS</div>
+          <div style={{fontSize:11,color:"#64748b"}}>First-come, first-served</div>
+        </div>
+        {/* $2.13B remaining of $2.275B as of June 1 2026 — real TC data */}
+        <div style={{height:7,background:"#1e293b",borderRadius:4,overflow:"hidden",marginBottom:8}}>
+          <div style={{height:"100%",width:"93.6%",background:"linear-gradient(90deg,#22c55e 0%,#f59e0b 70%,#ef4444 100%)",borderRadius:4}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:800,color:"#f1f5f9"}}>$2.13B</div>
+            <div style={{fontSize:10,color:"#475569"}}>remaining of $2.275B · as of June 1, 2026</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#ef4444"}}>~$145M claimed</div>
+            <div style={{fontSize:10,color:"#475569"}}>in first ~3.5 months</div>
+          </div>
+        </div>
+        <div style={{fontSize:10,color:"#334155",marginTop:8,borderTop:"1px solid #1e293b",paddingTop:8}}>
+          Program ends Mar 31, 2031 <strong style={{color:"#64748b"}}>or when funds run out</strong> — whichever comes first. At current burn rate, funding may not last the full 5 years.
+        </div>
+      </div>
+
+      {/* ── Program timeline ──────────────────────────────── */}
+      <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8}}>📅 PROGRAM WINDOW</div>
+          <div style={{fontSize:11,color:"#64748b"}}>{daysLeft.toLocaleString()} days remaining</div>
+        </div>
+        <div style={{height:6,background:"#1e293b",borderRadius:3,overflow:"hidden",marginBottom:6}}>
+          <div style={{height:"100%",width:`${pct}%`,background:"linear-gradient(90deg,#22c55e,#16a34a)",borderRadius:3,transition:"width 0.5s"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between"}}>
+          <span style={{fontSize:10,color:"#334155"}}>Feb 16, 2026</span>
+          <span style={{fontSize:10,color:"#334155"}}>Mar 31, 2031</span>
+        </div>
+      </div>
+
+    </div>
+  );
+}
 
 // ── Apple-style particle background — calm flowing sand/dust particles ─────────
 function LiveBackground(){
