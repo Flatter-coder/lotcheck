@@ -158,6 +158,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <button class="nav-btn" onclick="showTab('leads',this)">📋 Leads</button>
       <button class="nav-btn" onclick="showTab('listings',this)">🚗 Listings</button>
       <button class="nav-btn" onclick="showTab('revenue',this)">💰 Revenue</button>
+      <button class="nav-btn" onclick="showTab('review',this)">🔍 Review <span id="review-count-badge" style="background:#ef444422;color:#ef4444;border-radius:99px;padding:1px 6px;font-size:10px;margin-left:4px"></span></button>
     </nav>
     <button class="admin-signout" onclick="signout()">Sign out</button>
   </header>
@@ -312,6 +313,47 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           <thead><tr><th>Dealer</th><th>Leads</th><th>Lead Revenue</th><th>Featured</th><th>Monthly Recurring</th><th>Total</th></tr></thead>
           <tbody id="revenue-tbody">
             <tr><td colspan="6" class="empty">Add dealers to see revenue breakdown</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- REVIEW TAB -->
+    <div id="tab-review" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">🔍 Listings Pending Review</div>
+            <div class="section-sub">Flagged by the verification pipeline — approve or reject before they go live</div>
+          </div>
+          <button class="add-btn" style="background:#334155" onclick="loadReviewListings()">↻ Refresh</button>
+        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Price</th>
+              <th>Score</th>
+              <th>Flags</th>
+              <th>Source</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="review-tbody">
+            <tr><td colspan="6" class="empty">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section" style="margin-top:16px">
+        <div class="section-header">
+          <div class="section-title">❌ Rejected Listings</div>
+          <div class="section-sub">Auto-rejected by pipeline — scams, bad prices, missing data</div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Vehicle</th><th>Price</th><th>Score</th><th>Reason</th><th>Date</th></tr></thead>
+          <tbody id="rejected-tbody">
+            <tr><td colspan="5" class="empty">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -742,6 +784,84 @@ const _origShowTab = showTab;
 window.showTab = function(tab, btn) {
   _origShowTab(tab, btn);
   if (tab === "dealers") loadDealerInventory();
+};
+
+// ── Review queue ──────────────────────────────────────────────────────────────
+async function loadReviewListings() {
+  const tbody = document.getElementById("review-tbody");
+  const rejTbody = document.getElementById("rejected-tbody");
+  try {
+    // Pending review
+    const review = await sb("listings?status=eq.review&select=id,external_id,name,price,fuel,source,city,province,verification_score,verification_flags,scraped_at&order=scraped_at.desc&limit=100");
+    const badge = document.getElementById("review-count-badge");
+    if(badge) badge.textContent = review.length || "";
+
+    if(!review.length){
+      tbody.innerHTML=`<tr><td colspan="6" class="empty">✅ No listings pending review — pipeline approved everything</td></tr>`;
+    } else {
+      tbody.innerHTML = review.map(l=>{
+        const score = l.verification_score||0;
+        const scoreColor = score>=70?"var(--green)":score>=50?"var(--amber)":"var(--red)";
+        const flags = (l.verification_flags||"").split(" | ").filter(Boolean);
+        return `<tr>
+          <td><div style="font-weight:600;font-size:13px">${l.name||"—"}</div>
+            <div style="font-size:11px;color:var(--dim)">${l.city||""}, ${l.province||""}</div></td>
+          <td style="color:var(--green);font-weight:700">$${(l.price||0).toLocaleString()}</td>
+          <td><span style="font-size:14px;font-weight:800;color:${scoreColor}">${score}</span></td>
+          <td style="max-width:220px">
+            ${flags.map(f=>`<div style="font-size:10px;color:var(--amber);margin-bottom:2px">⚠ ${f}</div>`).join("")}
+          </td>
+          <td><span class="badge badge-dim">${l.source||"Kijiji"}</span></td>
+          <td>
+            <button class="action-btn" style="color:var(--green);border-color:var(--green)"
+              onclick="approveReview('${l.external_id}','${(l.name||"").replace(/'/g,"\'")}')">✓ Approve</button>
+            <button class="action-btn danger"
+              onclick="rejectReview('${l.external_id}')">✗ Reject</button>
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    // Rejected
+    const rejected = await sb("listings?status=eq.reject&select=name,price,verification_score,verification_flags,scraped_at&order=scraped_at.desc&limit=50");
+    if(!rejected.length){
+      rejTbody.innerHTML=`<tr><td colspan="5" class="empty">No rejected listings yet</td></tr>`;
+    } else {
+      rejTbody.innerHTML = rejected.map(l=>`<tr>
+        <td style="font-size:13px">${l.name||"—"}</td>
+        <td>$${(l.price||0).toLocaleString()}</td>
+        <td style="color:var(--red);font-weight:700">${l.verification_score||0}</td>
+        <td style="font-size:11px;color:var(--dim);max-width:260px">${(l.verification_flags||"").split(" | ")[0]||"—"}</td>
+        <td style="font-size:11px;color:var(--dim)">${new Date(l.scraped_at).toLocaleDateString("en-CA")}</td>
+      </tr>`).join("");
+    }
+  } catch(e){
+    tbody.innerHTML=`<tr><td colspan="6" class="empty">Run add_verification.sql in Supabase first: ${e.message}</td></tr>`;
+  }
+}
+
+async function approveReview(externalId, name) {
+  if(!confirm(`Approve "${name}" and publish to LotCheck?`)) return;
+  await sb(`listings?external_id=eq.${encodeURIComponent(externalId)}`,{
+    method:"PATCH", prefer:"return=minimal",
+    body:JSON.stringify({status:"published"})
+  });
+  loadReviewListings();
+}
+
+async function rejectReview(externalId) {
+  await sb(`listings?external_id=eq.${encodeURIComponent(externalId)}`,{
+    method:"PATCH", prefer:"return=minimal",
+    body:JSON.stringify({status:"reject"})
+  });
+  loadReviewListings();
+}
+
+// Load review count on admin open
+const _origLoadAll = loadAll;
+window.loadAll = async function() {
+  await _origLoadAll();
+  loadReviewListings();
 };
 
 // ── Keyboard shortcut ─────────────────────────────────────────────────────────
