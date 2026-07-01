@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LotCheck — Daily Scraper (GitHub Actions)
+# Runs every morning at 6am Calgary time (1pm UTC)
+# Completely free — no server needed
+# ─────────────────────────────────────────────────────────────────────────────
+# SETUP (one time only):
+#   1. Push this file to .github/workflows/scrape.yml in your repo
+#   2. Go to: github.com/Flatter-coder/lotcheck → Settings → Secrets → Actions
+#   3. Add 3 secrets:
+#        APIFY_TOKEN  → from apify.com → Settings → Integrations → API tokens
+#        SUPABASE_URL → https://debigtyjhjamipooajhk.supabase.co
+#        SUPABASE_KEY → your publishable key from Supabase Settings → API
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: LotCheck Daily Scrape
+
+on:
+  schedule:
+    - cron: "0 13 * * *"   # 1pm UTC = 6am Calgary (MDT)
+  workflow_dispatch:        # lets you trigger manually from GitHub Actions tab
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install @supabase/supabase-js apify-client
+
+      - name: Run LotCheck scraper
+        env:
+          APIFY_TOKEN:  ${{ secrets.APIFY_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node scraper.js
+
+      - name: Log completion
+        if: success()
+        run: echo "✅ LotCheck scrape complete — $(date)"
+
+      - name: Log failure
+        if: failure()
+        run: echo "❌ Scraper failed — check logs above"
