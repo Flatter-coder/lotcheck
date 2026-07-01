@@ -845,6 +845,7 @@ function AppraisalModal({onClose}){
   const [email,setEmail]=useState("");
   const [wantsPickup,setWantsPickup]=useState(false);
   const [pickupAddress,setPickupAddress]=useState("");
+  const [vin,setVin]=useState("");
   const [err,setErr]=useState("");
 
   const estimate=step!=="form"?estimateAppraisal(make,model,Number(year),Number(km)||50000,condition):null;
@@ -901,6 +902,13 @@ function AppraisalModal({onClose}){
           <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Odometer (km)</label>
           <input type="number" placeholder="e.g. 65000" value={km} onChange={e=>setKm(e.target.value)} style={inp}/>
 
+          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>
+            VIN <span style={{color:"#334155",fontWeight:400,fontSize:11}}>(optional — helps dealer skip extra steps)</span>
+          </label>
+          <input type="text" placeholder="e.g. 2T3BFREV1JW123456" value={vin} onChange={e=>setVin(e.target.value.toUpperCase())} style={{...inp,fontFamily:"monospace",letterSpacing:"0.5px"}} maxLength={17}/>
+          {vin&&vin.length===17&&<div style={{fontSize:11,color:"#22c55e",marginTop:-8,marginBottom:10}}>✓ Valid VIN length</div>}
+          {vin&&vin.length>0&&vin.length!==17&&<div style={{fontSize:11,color:"#f59e0b",marginTop:-8,marginBottom:10}}>VINs are 17 characters ({vin.length}/17)</div>}
+
           <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Condition</label>
           <div style={{display:"flex",gap:6,marginBottom:14}}>
             {["Excellent","Good","Fair","Poor"].map(c=>(
@@ -944,6 +952,11 @@ function AppraisalModal({onClose}){
             <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
           </div>
           <div style={{fontSize:13,color:"#64748b",marginBottom:16}}>{dealer} will review your {year} {make} {model} and contact you with a real offer within 2 business hours.</div>
+          {vin&&<div style={{background:"#0a1220",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,display:"flex",gap:8,alignItems:"center"}}>
+            <span style={{color:"#64748b"}}>VIN:</span>
+            <span style={{fontFamily:"monospace",color:"#94a3b8",letterSpacing:"0.5px"}}>{vin}</span>
+            <span style={{color:"#22c55e",fontSize:11}}>✓</span>
+          </div>}
 
           <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
             <span style={{fontSize:13,color:"#94a3b8"}}>Estimated value</span>
@@ -986,6 +999,10 @@ function AppraisalModal({onClose}){
             <div style={{fontSize:52,marginBottom:10}}>✅</div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request sent to {dealer}!</div>
             <div style={{fontSize:13,color:"#64748b",marginBottom:20,lineHeight:1.6}}>They'll review your {year} {make} {model} and call you within 2 business hours with a real offer.</div>
+            {vin&&<div style={{background:"#0a1220",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:12,textAlign:"left"}}>
+              <span style={{color:"#64748b"}}>VIN included: </span>
+              <span style={{fontFamily:"monospace",color:"#94a3b8",letterSpacing:"0.5px"}}>{vin}</span>
+            </div>}
             {wantsPickup&&(
               <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"12px 16px",marginBottom:16,textAlign:"left"}}>
                 <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:4}}>🚚 Pickup requested</div>
