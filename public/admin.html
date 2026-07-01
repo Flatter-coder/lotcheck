@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LotCheck Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#020617;--surface:#060d18;--card:#0a1220;
+  --border:#1e293b;--border2:#334155;
+  --green:#22c55e;--green-dim:#16a34a;
+  --blue:#3b82f6;--amber:#f59e0b;--red:#ef4444;
+  --text:#f1f5f9;--muted:#94a3b8;--dim:#475569;
+  --radius:10px;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+
+/* ── Login Screen ── */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-box{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:380px;text-align:center}
+.login-logo{font-size:32px;margin-bottom:4px}
+.login-title{font-size:22px;font-weight:700;margin-bottom:4px}
+.login-sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+.login-input{width:100%;background:#0d1526;border:1px solid var(--border);border-radius:8px;padding:12px 14px;color:var(--text);font-size:14px;margin-bottom:12px;outline:none}
+.login-input:focus{border-color:var(--green)}
+.login-btn{width:100%;background:var(--green-dim);border:none;border-radius:8px;padding:13px;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+.login-btn:hover{background:var(--green)}
+
+/* ── Admin Layout ── */
+#admin-app{display:none;min-height:100vh}
+.admin-header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.admin-logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px}
+.admin-logo-icon{width:30px;height:30px;background:linear-gradient(135deg,#16a34a,#0ea5e9);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.admin-nav{display:flex;gap:4px}
+.nav-btn{background:none;border:none;padding:7px 14px;border-radius:8px;color:var(--muted);cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.nav-btn:hover{background:var(--card);color:var(--text)}
+.nav-btn.active{background:var(--green-dim)22;color:var(--green)}
+.admin-signout{background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px}
+
+.admin-body{padding:24px;max-width:1200px;margin:0 auto}
+
+/* ── Stats Row ── */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.stat-label{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.5px;margin-bottom:6px;text-transform:uppercase}
+.stat-value{font-size:26px;font-weight:800;color:var(--text)}
+.stat-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.stat-green{color:var(--green)}
+.stat-amber{color:var(--amber)}
+
+/* ── Section ── */
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.section-title{font-size:14px;font-weight:700;color:var(--text)}
+.section-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.add-btn{background:var(--green-dim);border:none;border-radius:8px;padding:7px 14px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px}
+.add-btn:hover{background:var(--green)}
+
+/* ── Table ── */
+.admin-table{width:100%;border-collapse:collapse}
+.admin-table th{padding:10px 16px;text-align:left;font-size:11px;font-weight:600;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.admin-table td{padding:12px 16px;border-bottom:1px solid #0d1526;font-size:13px;vertical-align:middle}
+.admin-table tr:last-child td{border-bottom:none}
+.admin-table tr:hover td{background:#0a1220aa}
+
+/* ── Dealer specific ── */
+.dealer-name{font-weight:600;color:var(--text);font-size:14px}
+.dealer-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.live-dot{display:inline-flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot-live{background:var(--green);box-shadow:0 0 0 0 rgba(34,197,94,.4);animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%{box-shadow:0 0 0 0 rgba(34,197,94,.5)}70%{box-shadow:0 0 0 8px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}
+.dot-off{background:var(--dim)}
+
+/* ── Toggle switch ── */
+.toggle{position:relative;width:40px;height:22px;flex-shrink:0}
+.toggle input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;inset:0;background:#1e293b;border-radius:11px;cursor:pointer;transition:.25s}
+.toggle-slider:before{content:"";position:absolute;width:16px;height:16px;left:3px;bottom:3px;background:#64748b;border-radius:50%;transition:.25s}
+.toggle input:checked+.toggle-slider{background:var(--green-dim)}
+.toggle input:checked+.toggle-slider:before{transform:translateX(18px);background:#fff}
+
+/* ── Badge ── */
+.badge{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600}
+.badge-green{background:#16a34a22;color:var(--green)}
+.badge-amber{background:#f59e0b22;color:var(--amber)}
+.badge-blue{background:#3b82f622;color:var(--blue)}
+.badge-red{background:#ef444422;color:var(--red)}
+.badge-dim{background:#334155;color:var(--muted)}
+.badge-sold{background:#7c3aed22;color:#a78bfa;border:1px solid #7c3aed44}
+.badge-sold-red{background:#ef444422;color:#ef4444}
+
+/* ── Action buttons ── */
+.action-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--muted);cursor:pointer;font-size:12px;margin-right:4px;transition:all .15s}
+.action-btn:hover{border-color:var(--green);color:var(--green)}
+.action-btn.danger:hover{border-color:var(--red);color:var(--red)}
+
+/* ── Modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto}
+.modal-title{font-size:18px;font-weight:700;margin-bottom:20px}
+.form-group{margin-bottom:14px}
+.form-label{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;display:block;text-transform:uppercase;letter-spacing:.4px}
+.form-input{width:100%;background:#0d1526;border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:13px;outline:none}
+.form-input:focus{border-color:var(--green)}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal-actions{display:flex;gap:10px;margin-top:20px}
+.btn-primary{flex:1;background:var(--green-dim);border:none;border-radius:8px;padding:11px;color:#fff;font-size:14px;font-weight:700;cursor:pointer}
+.btn-primary:hover{background:var(--green)}
+.btn-cancel{flex:1;background:none;border:1px solid var(--border);border-radius:8px;padding:11px;color:var(--muted);font-size:14px;cursor:pointer}
+
+/* ── Lead card ── */
+.lead-row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #0d1526}
+.lead-row:last-child{border-bottom:none}
+.lead-avatar{width:36px;height:36px;border-radius:50%;background:var(--green-dim)33;color:var(--green);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0}
+.lead-info{flex:1;min-width:0}
+.lead-name{font-weight:600;font-size:13px}
+.lead-car{font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lead-time{font-size:11px;color:var(--dim)}
+.lead-value{font-size:14px;font-weight:700;color:var(--green)}
+
+/* ── Empty state ── */
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.empty-icon{font-size:32px;margin-bottom:10px}
+
+/* ── Responsive ── */
+@media(max-width:700px){
+  .stats-row{grid-template-columns:1fr 1fr}
+  .admin-nav{display:none}
+  .admin-table th:nth-child(n+4),.admin-table td:nth-child(n+4){display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">✅</div>
+    <div class="login-title">LotCheck Admin</div>
+    <div class="login-sub">Dealer management dashboard</div>
+    <input id="login-pass" class="login-input" type="password" placeholder="Enter admin password" onkeydown="if(event.key==='Enter')login()"/>
+    <div id="login-error" style="color:#ef4444;font-size:12px;margin-bottom:10px;display:none">Incorrect password</div>
+    <button class="login-btn" onclick="login()">Sign in →</button>
+  </div>
+</div>
+
+<!-- ADMIN APP -->
+<div id="admin-app">
+  <header class="admin-header">
+    <div class="admin-logo">
+      <div class="admin-logo-icon">✅</div>
+      LotCheck Admin
+    </div>
+    <nav class="admin-nav">
+      <button class="nav-btn active" onclick="showTab('dealers',this)">🏢 Dealers</button>
+      <button class="nav-btn" onclick="showTab('leads',this)">📋 Leads</button>
+      <button class="nav-btn" onclick="showTab('listings',this)">🚗 Listings</button>
+      <button class="nav-btn" onclick="showTab('revenue',this)">💰 Revenue</button>
+    </nav>
+    <button class="admin-signout" onclick="signout()">Sign out</button>
+  </header>
+
+  <div class="admin-body">
+
+    <!-- STATS -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Active Dealers</div>
+        <div class="stat-value" id="stat-dealers">0</div>
+        <div class="stat-sub">on LotCheck network</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Leads This Month</div>
+        <div class="stat-value stat-green" id="stat-leads">0</div>
+        <div class="stat-sub" id="stat-leads-rev">$0 in referral fees</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Featured Dealers</div>
+        <div class="stat-value stat-amber" id="stat-featured">0</div>
+        <div class="stat-sub" id="stat-featured-rev">$0/mo recurring</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Live Lots</div>
+        <div class="stat-value" id="stat-live">0</div>
+        <div class="stat-sub">showing real-time inventory</div>
+      </div>
+    </div>
+
+    <!-- DEALERS TAB -->
+    <div id="tab-dealers">
+      <div class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">🏢 Dealer Network</div>
+            <div class="section-sub">Manage dealerships, toggle live lot and featured status</div>
+          </div>
+          <button class="add-btn" onclick="openAddDealer()">+ Add Dealer</button>
+        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Dealer</th>
+              <th>Makes</th>
+              <th>Live Lot</th>
+              <th>Featured</th>
+              <th>Leads</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="dealers-tbody">
+            <tr><td colspan="6" class="empty"><div class="empty-icon">🏢</div>No dealers yet — add your first one</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- DEALER INVENTORY STATUS -->
+    <div id="tab-dealers">
+    </div>
+    <div class="section" id="dealer-inventory-section" style="display:none">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🚗 Dealer Submitted Inventory</div>
+          <div class="section-sub">Mark vehicles as sold to trigger commission tracking</div>
+        </div>
+        <button class="add-btn" style="background:#7c3aed" onclick="loadDealerInventory()">↻ Refresh</button>
+      </div>
+      <table class="admin-table">
+        <thead><tr><th>Vehicle</th><th>Dealer</th><th>Price</th><th>Plan</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="inventory-tbody">
+          <tr><td colspan="6" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- LEADS TAB -->
+    <div id="tab-leads" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">📋 Incoming Leads</div>
+            <div class="section-sub">Every "Connect me with a dealer" submission</div>
+          </div>
+          <span class="badge badge-green" id="leads-badge">0 this month</span>
+        </div>
+        <div id="leads-list">
+          <div class="empty"><div class="empty-icon">📋</div>No leads yet — they'll appear here when buyers submit the connect form</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LISTINGS TAB -->
+    <div id="tab-listings" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <div>
+            <div class="section-title">🚗 Live Listings</div>
+            <div class="section-sub">All listings currently in Supabase from the daily scrape</div>
+          </div>
+          <span class="badge badge-blue" id="listings-count-badge">Loading...</span>
+        </div>
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Vehicle</th>
+              <th>Price</th>
+              <th>Location</th>
+              <th>Fuel</th>
+              <th>Source</th>
+              <th>Scraped</th>
+            </tr>
+          </thead>
+          <tbody id="listings-tbody">
+            <tr><td colspan="6" class="empty">Loading listings from Supabase...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- REVENUE TAB -->
+    <div id="tab-revenue" style="display:none">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Total Revenue</div>
+          <div class="stat-value stat-green" id="rev-total">$0</div>
+          <div class="stat-sub">all time</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Lead Fees</div>
+          <div class="stat-value" id="rev-leads">$0</div>
+          <div class="stat-sub">@ $100/lead</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Featured Listings</div>
+          <div class="stat-value" id="rev-featured">$0</div>
+          <div class="stat-sub">@ $300/mo/dealer</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pro Subscriptions</div>
+          <div class="stat-value" id="rev-pro">$0</div>
+          <div class="stat-sub">@ $9.99/mo</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">💰 Revenue Breakdown by Dealer</div>
+        </div>
+        <table class="admin-table">
+          <thead><tr><th>Dealer</th><th>Leads</th><th>Lead Revenue</th><th>Featured</th><th>Monthly Recurring</th><th>Total</th></tr></thead>
+          <tbody id="revenue-tbody">
+            <tr><td colspan="6" class="empty">Add dealers to see revenue breakdown</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ADD DEALER MODAL -->
+<div id="dealer-modal" class="modal-bg" style="display:none">
+  <div class="modal">
+    <div class="modal-title">🏢 Add Dealer</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Dealership Name *</label>
+        <input id="d-name" class="form-input" placeholder="Cochrane Toyota"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contact Name</label>
+        <input id="d-contact" class="form-input" placeholder="Ryan Smith"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Phone</label>
+      <input id="d-phone" class="form-input" placeholder="403-932-9900"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input id="d-email" class="form-input" placeholder="ryan@cochranetoyota.com"/>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">City</label>
+        <input id="d-city" class="form-input" placeholder="Cochrane"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Province</label>
+        <select id="d-province" class="form-input">
+          <option>AB</option><option>BC</option><option>ON</option>
+          <option>QC</option><option>MB</option><option>SK</option>
+          <option>NS</option><option>NB</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Makes (comma separated)</label>
+      <input id="d-makes" class="form-input" placeholder="Toyota, Lexus"/>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Live Lot</label>
+        <select id="d-live" class="form-input">
+          <option value="false">No</option>
+          <option value="true">Yes — show flashing dot</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Featured Listing</label>
+        <select id="d-featured" class="form-input">
+          <option value="false">No</option>
+          <option value="true">Yes — $300/mo</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <input id="d-notes" class="form-input" placeholder="Met at Costco, interested in leads package"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveDealer()">Save Dealer →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const ADMIN_PASSWORD = "LotCheck2026!";
+const SUPABASE_URL   = "https://debigtyjhjamipooajhk.supabase.co";
+const SUPABASE_KEY   = "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq";
+
+// ── Supabase helper ───────────────────────────────────────────────────────────
+async function sb(endpoint, opts={}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": opts.prefer || "return=representation",
+      ...opts.headers
+    },
+    ...opts
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(err);
+  }
+  return opts.method === "DELETE" ? null : res.json();
+}
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let dealers = JSON.parse(localStorage.getItem("lc_dealers") || "[]");
+let leads   = JSON.parse(localStorage.getItem("lc_leads") || "[]");
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function login() {
+  const pass = document.getElementById("login-pass").value;
+  if (pass === ADMIN_PASSWORD) {
+    document.getElementById("login-screen").style.display = "none";
+    document.getElementById("admin-app").style.display = "block";
+    loadAll();
+  } else {
+    document.getElementById("login-error").style.display = "block";
+    document.getElementById("login-pass").value = "";
+  }
+}
+
+function signout() {
+  document.getElementById("login-screen").style.display = "flex";
+  document.getElementById("admin-app").style.display = "none";
+  document.getElementById("login-pass").value = "";
+}
+
+// ── Tab navigation ────────────────────────────────────────────────────────────
+function showTab(tab, btn) {
+  ["dealers","leads","listings","revenue"].forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === tab ? "block" : "none";
+  });
+  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  if (tab === "listings") loadListings();
+}
+
+// ── Load everything ───────────────────────────────────────────────────────────
+async function loadAll() {
+  renderDealers();
+  renderLeads();
+  updateStats();
+  await loadListings();
+}
+
+// ── Dealers ───────────────────────────────────────────────────────────────────
+function renderDealers() {
+  const tbody = document.getElementById("dealers-tbody");
+  if (!dealers.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty"><div class="empty-icon">🏢</div>No dealers yet — add your first one</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = dealers.map((d,i) => `
+    <tr>
+      <td>
+        <div class="dealer-name">${d.name}</div>
+        <div class="dealer-meta">${d.contact||""} · ${d.city||""}, ${d.province||""}</div>
+      </td>
+      <td><span class="badge badge-blue">${d.makes||"—"}</span></td>
+      <td>
+        <div class="live-dot">
+          <span class="dot ${d.live?'dot-live':'dot-off'}"></span>
+          <label class="toggle" title="${d.live?'Live':'Offline'}">
+            <input type="checkbox" ${d.live?"checked":""} onchange="toggleLive(${i},this.checked)"/>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" ${d.featured?"checked":""} onchange="toggleFeatured(${i},this.checked)"/>
+          <span class="toggle-slider"></span>
+        </label>
+        ${d.featured?'<span class="badge badge-amber" style="margin-left:6px">$300/mo</span>':""}
+      </td>
+      <td>
+        <span class="badge badge-green">${d.leads||0} leads</span>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">$${(d.leads||0)*100}</div>
+      </td>
+      <td>
+        ${d.soldCount?`<span class="badge badge-sold">${d.soldCount} sold</span>`:'<span style="color:var(--dim);font-size:12px">—</span>'}
+      </td>
+      <td>
+        <button class="action-btn" onclick="editDealer(${i})">Edit</button>
+        <button class="action-btn danger" onclick="deleteDealer(${i})">Delete</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function openAddDealer() {
+  ["d-name","d-contact","d-phone","d-email","d-city","d-makes","d-notes"].forEach(id=>document.getElementById(id).value="");
+  document.getElementById("d-province").value = "AB";
+  document.getElementById("d-live").value = "false";
+  document.getElementById("d-featured").value = "false";
+  document.getElementById("dealer-modal").style.display = "flex";
+  window._editIdx = null;
+}
+
+function editDealer(i) {
+  const d = dealers[i];
+  document.getElementById("d-name").value    = d.name||"";
+  document.getElementById("d-contact").value = d.contact||"";
+  document.getElementById("d-phone").value   = d.phone||"";
+  document.getElementById("d-email").value   = d.email||"";
+  document.getElementById("d-city").value    = d.city||"";
+  document.getElementById("d-province").value= d.province||"AB";
+  document.getElementById("d-makes").value   = d.makes||"";
+  document.getElementById("d-notes").value   = d.notes||"";
+  document.getElementById("d-live").value    = String(d.live||false);
+  document.getElementById("d-featured").value= String(d.featured||false);
+  document.getElementById("dealer-modal").style.display = "flex";
+  window._editIdx = i;
+}
+
+function saveDealer() {
+  const dealer = {
+    name:     document.getElementById("d-name").value.trim(),
+    contact:  document.getElementById("d-contact").value.trim(),
+    phone:    document.getElementById("d-phone").value.trim(),
+    email:    document.getElementById("d-email").value.trim(),
+    city:     document.getElementById("d-city").value.trim(),
+    province: document.getElementById("d-province").value,
+    makes:    document.getElementById("d-makes").value.trim(),
+    notes:    document.getElementById("d-notes").value.trim(),
+    live:     document.getElementById("d-live").value === "true",
+    featured: document.getElementById("d-featured").value === "true",
+    leads:    0,
+    addedAt:  new Date().toISOString(),
+  };
+  if (!dealer.name) { alert("Dealer name is required"); return; }
+  if (window._editIdx !== null) {
+    dealer.leads = dealers[window._editIdx].leads || 0;
+    dealers[window._editIdx] = dealer;
+  } else {
+    dealers.push(dealer);
+  }
+  saveDealers();
+  closeModal();
+}
+
+function toggleLive(i, val) {
+  dealers[i].live = val;
+  saveDealers();
+}
+
+function toggleFeatured(i, val) {
+  dealers[i].featured = val;
+  saveDealers();
+}
+
+function deleteDealer(i) {
+  if (!confirm(`Delete ${dealers[i].name}?`)) return;
+  dealers.splice(i, 1);
+  saveDealers();
+}
+
+function saveDealers() {
+  localStorage.setItem("lc_dealers", JSON.stringify(dealers));
+  renderDealers();
+  updateStats();
+}
+
+function closeModal() {
+  document.getElementById("dealer-modal").style.display = "none";
+}
+
+// ── Leads ─────────────────────────────────────────────────────────────────────
+function renderLeads() {
+  const list = document.getElementById("leads-list");
+  if (!leads.length) {
+    list.innerHTML = `<div class="empty"><div class="empty-icon">📋</div>No leads yet — they'll appear here when buyers submit the connect form</div>`;
+    return;
+  }
+  list.innerHTML = leads.map(l => `
+    <div class="lead-row">
+      <div class="lead-avatar">${(l.name||"?")[0].toUpperCase()}</div>
+      <div class="lead-info">
+        <div class="lead-name">${l.name||"Anonymous"} ${l.phone?`· ${l.phone}`:""}</div>
+        <div class="lead-car">Interested in: ${l.car||"—"} · ${l.dealer||"Unassigned"}</div>
+        <div class="lead-time">${l.time||""} ${l.delivery?"· 🚚 Wants delivery":""}</div>
+      </div>
+      <div class="lead-value">$100</div>
+    </div>
+  `).join("");
+  document.getElementById("leads-badge").textContent = `${leads.length} this month`;
+}
+
+// ── Live Listings from Supabase ───────────────────────────────────────────────
+async function loadListings() {
+  const badge = document.getElementById("listings-count-badge");
+  const tbody = document.getElementById("listings-tbody");
+  badge.textContent = "Loading...";
+  try {
+    const data = await sb("listings?select=name,price,city,province,fuel,source,scraped_at&order=scraped_at.desc&limit=100");
+    badge.textContent = `${data.length} listings`;
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">No listings yet — run the scraper first</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(l => {
+      const age = Math.floor((Date.now()-new Date(l.scraped_at))/(1000*60*60));
+      return `<tr>
+        <td><div style="font-weight:600">${l.name||"—"}</div></td>
+        <td style="color:var(--green);font-weight:700">$${(l.price||0).toLocaleString()}</td>
+        <td>${l.city||"—"}, ${l.province||""}</td>
+        <td><span class="badge ${l.fuel==="BEV"?"badge-green":l.fuel==="PHEV"?"badge-amber":"badge-dim"}">${l.fuel||"Gas"}</span></td>
+        <td>${l.source||"Kijiji"}</td>
+        <td style="color:var(--dim)">${age < 1?"Just now":age+"h ago"}</td>
+      </tr>`;
+    }).join("");
+  } catch(e) {
+    badge.textContent = "Error";
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">Could not load: ${e.message}</td></tr>`;
+  }
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const active   = dealers.filter(d=>d.live).length;
+  const featured = dealers.filter(d=>d.featured).length;
+  const totalLeads = dealers.reduce((s,d)=>s+(d.leads||0),0) + leads.length;
+  document.getElementById("stat-dealers").textContent  = dealers.length;
+  document.getElementById("stat-leads").textContent    = totalLeads;
+  document.getElementById("stat-featured").textContent = featured;
+  document.getElementById("stat-live").textContent     = active;
+  document.getElementById("stat-leads-rev").textContent   = `$${totalLeads*100} in referral fees`;
+  document.getElementById("stat-featured-rev").textContent= `$${featured*300}/mo recurring`;
+
+  // Revenue tab
+  const leadRev    = totalLeads * 100;
+  const featuredRev= featured * 300;
+  document.getElementById("rev-total").textContent    = `$${leadRev+featuredRev}`;
+  document.getElementById("rev-leads").textContent    = `$${leadRev}`;
+  document.getElementById("rev-featured").textContent = `$${featuredRev}`;
+
+  // Revenue by dealer
+  const rtbody = document.getElementById("revenue-tbody");
+  if (!dealers.length) {
+    rtbody.innerHTML = `<tr><td colspan="6" class="empty">Add dealers to see revenue breakdown</td></tr>`;
+  } else {
+    rtbody.innerHTML = dealers.map(d=>`<tr>
+      <td><div style="font-weight:600">${d.name}</div><div style="font-size:11px;color:var(--muted)">${d.city},${d.province}</div></td>
+      <td>${d.leads||0}</td>
+      <td style="color:var(--green)">$${(d.leads||0)*100}</td>
+      <td>${d.featured?'<span class="badge badge-amber">Featured</span>':'—'}</td>
+      <td style="color:var(--amber)">${d.featured?"$300/mo":"$0"}</td>
+      <td style="font-weight:700;color:var(--green)">$${(d.leads||0)*100+(d.featured?300:0)}</td>
+    </tr>`).join("");
+  }
+}
+
+// ── Dealer Inventory (submitted via dealer portal) ────────────────────────────
+async function loadDealerInventory() {
+  const tbody = document.getElementById("inventory-tbody");
+  if (!tbody) return;
+  document.getElementById("dealer-inventory-section").style.display = "block";
+  tbody.innerHTML = `<tr><td colspan="6" class="empty">Loading...</td></tr>`;
+  try {
+    const data = await sb("dealer_listings?select=id,dealer,make,model,year,price,fuel,plan,status,submitted_at&order=submitted_at.desc&limit=100",
+      { headers: { "Range": "0-99" } });
+    if (!data.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty"><div class="empty-icon">🚗</div>No dealer submissions yet</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.map(v => {
+      const isSold = v.status === "sold";
+      const isLive = v.status === "live";
+      const statusBadge = isSold
+        ? `<span class="badge badge-sold">✓ Sold</span>`
+        : isLive
+        ? `<span class="badge badge-green">● Live</span>`
+        : `<span class="badge badge-dim">Pending</span>`;
+      return `<tr>
+        <td>
+          <div style="font-weight:600">${v.year||""} ${v.make||""} ${v.model||""}</div>
+          <div style="font-size:11px;color:var(--dim)">${new Date(v.submitted_at).toLocaleDateString("en-CA")}</div>
+        </td>
+        <td style="font-size:13px">${v.dealer||"—"}</td>
+        <td style="color:var(--green);font-weight:700">$${(v.price||0).toLocaleString()}</td>
+        <td><span class="badge ${v.plan==="commission"?"badge-amber":"badge-blue"}">${v.plan==="commission"?"1% commission":"$100/lead"}</span></td>
+        <td>${statusBadge}</td>
+        <td>
+          ${!isSold ? `<button class="action-btn" style="color:var(--green);border-color:var(--green)" onclick="markSold(${v.id},'${v.dealer}','${v.year} ${v.make} ${v.model}',${v.price},'${v.plan}')">✓ Mark Sold</button>` : `<span style="color:var(--dim);font-size:12px">Closed</span>`}
+          ${!isLive && !isSold ? `<button class="action-btn" onclick="publishListing(${v.id})">Publish</button>` : ""}
+        </td>
+      </tr>`;
+    }).join("");
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">Could not load: ${e.message}<br><small>Run dealer_listings.sql in Supabase first</small></td></tr>`;
+  }
+}
+
+async function publishListing(id) {
+  await sb(`dealer_listings?id=eq.${id}`, {
+    method: "PATCH", prefer: "return=minimal",
+    body: JSON.stringify({ status: "live", published_at: new Date().toISOString() })
+  });
+  loadDealerInventory();
+}
+
+async function markSold(id, dealer, vehicle, price, plan) {
+  const commission = plan === "commission" ? Math.round(price * 0.01) : 100;
+  const planLabel  = plan === "commission" ? `1% of $${price.toLocaleString()} = $${commission.toLocaleString()}` : "$100 flat lead fee";
+  if (!confirm(`Mark ${vehicle} from ${dealer} as SOLD?\n\nCommission due: ${planLabel}\n\nThis will log the sale for your records.`)) return;
+
+  await sb(`dealer_listings?id=eq.${id}`, {
+    method: "PATCH", prefer: "return=minimal",
+    body: JSON.stringify({ status: "sold" })
+  });
+
+  // Log to local sold tracking
+  const sold = JSON.parse(localStorage.getItem("lc_sold") || "[]");
+  sold.push({ id, dealer, vehicle, price, plan, commission, soldAt: new Date().toISOString() });
+  localStorage.setItem("lc_sold", JSON.stringify(sold));
+
+  // Update dealer sold count
+  const dealerIdx = dealers.findIndex(d => d.name === dealer);
+  if (dealerIdx >= 0) {
+    dealers[dealerIdx].soldCount = (dealers[dealerIdx].soldCount || 0) + 1;
+    if (plan === "lead") dealers[dealerIdx].leads = (dealers[dealerIdx].leads || 0) + 1;
+    saveDealers();
+  }
+
+  alert(`✅ Marked as sold!\nCommission to collect: $${commission.toLocaleString()}`);
+  loadDealerInventory();
+  updateStats();
+}
+
+// Auto-load inventory when dealers tab is active
+const _origShowTab = showTab;
+window.showTab = function(tab, btn) {
+  _origShowTab(tab, btn);
+  if (tab === "dealers") loadDealerInventory();
+};
+
+// ── Keyboard shortcut ─────────────────────────────────────────────────────────
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape") closeModal();
+});
+</script>
+</body>
+</html>
