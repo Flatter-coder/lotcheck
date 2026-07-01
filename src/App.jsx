@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { createClient } from "@supabase/supabase-js";
+
+// ── Supabase client (publishable key — safe to expose in frontend) ────────────
+const supabase = createClient(
+  "https://debigtyjhjamipooajhk.supabase.co",
+  "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq"
+);
 
 // ── Global responsive styles injected once ────────────────────────────────────
 const GLOBAL_CSS = `
@@ -22,7 +29,7 @@ const GLOBAL_CSS = `
   /* ── Apple-style particle background ─────────────────────────────────────── */
   .lc-live-bg {
     position: fixed;
-    inset: 0;
+    top: 0; left: 0; right: 0; bottom: 0;
     z-index: 0;
     overflow: hidden;
     pointer-events: none;
@@ -30,10 +37,10 @@ const GLOBAL_CSS = `
   }
   .lc-live-bg canvas {
     position: absolute;
-    inset: 0;
+    top: 0; left: 0;
     width: 100%;
     height: 100%;
-    opacity: 0.85;
+    display: block;
   }
 
 
@@ -103,6 +110,7 @@ const GLOBAL_CSS = `
     min-height: 100vh;
     position: relative;
     z-index: 1;
+    isolation: isolate;
   }
 
 
@@ -110,13 +118,24 @@ const GLOBAL_CSS = `
   .lc-header {
     background: #060d18;
     border-bottom: 1px solid #1e293b;
-    padding: 12px 16px;
+    padding: 10px 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     position: sticky;
     top: 0;
     z-index: 100;
+    gap: 8px;
+  }
+  .lc-header-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  @media (max-width: 400px) {
+    .lc-header { padding: 8px 10px; }
+    .lc-header-appraisal-text { display: none; }
   }
 
   /* Main content area — stacked on mobile, side by side on tablet+ */
@@ -442,22 +461,74 @@ const EVAP_LIST=[
 ];
 function getEVAP(l){return EVAP_LIST.find(e=>e.year===l.year&&l.make?.toLowerCase()===e.make.toLowerCase()&&(l.model?.toLowerCase().includes(e.model.toLowerCase())||e.model.toLowerCase().includes(l.model?.toLowerCase())))||null;}
 
-const LISTINGS=[
+// ── Demo listings — shown while Supabase loads or if empty ───────────────────
+const DEMO_LISTINGS=[
   {id:1,name:"2025 Toyota RAV4 Prime XSE",make:"Toyota",model:"RAV4 Prime",year:2025,price:49900,km:8000,fuel:"PHEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
   {id:2,name:"2025 Hyundai IONIQ 5 Preferred",make:"Hyundai",model:"IONIQ 5",year:2025,price:48500,km:5200,fuel:"BEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
   {id:3,name:"2026 Chevrolet Equinox EV LT",make:"Chevrolet",model:"Equinox EV",year:2026,price:47498,km:1200,fuel:"BEV",province:"AB",city:"Edmonton",source:"Kijiji",dealer:true},
   {id:4,name:"2022 Toyota Tundra Platinum",make:"Toyota",model:"Tundra",year:2022,price:47698,km:151041,fuel:"Hybrid",province:"AB",city:"Calgary",source:"Kijiji",dealer:false},
   {id:5,name:"2025 Kia EV6 Standard RWD",make:"Kia",model:"EV6",year:2025,price:44900,km:3100,fuel:"BEV",province:"BC",city:"Vancouver",source:"Kijiji",dealer:true},
-  {id:6,name:"2024 Toyota RAV4 Prime XSE",make:"Toyota",model:"RAV4 Prime",year:2024,price:47500,km:18000,fuel:"PHEV",province:"BC",city:"Victoria",source:"Facebook",dealer:false},
+  {id:6,name:"2024 Toyota RAV4 Prime XSE",make:"Toyota",model:"RAV4 Prime",year:2024,price:47500,km:18000,fuel:"PHEV",province:"BC",city:"Victoria",source:"Kijiji",dealer:false},
   {id:7,name:"2025 Ford Escape PHEV SE",make:"Ford",model:"Escape",year:2025,price:44999,km:9000,fuel:"PHEV",province:"ON",city:"Toronto",source:"Kijiji",dealer:true},
   {id:8,name:"2025 Hyundai IONIQ 6 Preferred",make:"Hyundai",model:"IONIQ 6",year:2025,price:47499,km:4100,fuel:"BEV",province:"ON",city:"Ottawa",source:"Kijiji",dealer:true},
   {id:9,name:"2025 Chevrolet Bolt EV LT",make:"Chevrolet",model:"Bolt EV",year:2025,price:38998,km:500,fuel:"BEV",province:"QC",city:"Montreal",source:"Kijiji",dealer:true},
-  {id:10,name:"2025 VW ID.4 Pro AWD",make:"Volkswagen",model:"ID.4",year:2025,price:49500,km:2200,fuel:"BEV",province:"AB",city:"Calgary",source:"Facebook",dealer:false},
+  {id:10,name:"2025 VW ID.4 Pro AWD",make:"Volkswagen",model:"ID.4",year:2025,price:49500,km:2200,fuel:"BEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:false},
   {id:11,name:"2024 Toyota Tacoma TRD Off-Road",make:"Toyota",model:"Tacoma",year:2024,price:55900,km:12300,fuel:"Gas",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
   {id:12,name:"2023 Toyota Camry XSE",make:"Toyota",model:"Camry",year:2023,price:38900,km:33000,fuel:"Gas",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
   {id:13,name:"2025 Kia Niro EV Wind",make:"Kia",model:"Niro EV",year:2025,price:39995,km:4500,fuel:"BEV",province:"NS",city:"Halifax",source:"Kijiji",dealer:true},
   {id:14,name:"2025 Mitsubishi Outlander PHEV",make:"Mitsubishi",model:"Outlander",year:2025,price:44998,km:6200,fuel:"PHEV",province:"QC",city:"Quebec City",source:"Kijiji",dealer:true},
 ];
+
+// ── Hook: fetch live listings from Supabase, fallback to demo ─────────────────
+function useListings(){
+  const [listings, setListings]=useState(DEMO_LISTINGS);
+  const [loading, setLoading]=useState(true);
+  const [isLive, setIsLive]=useState(false);
+
+  useEffect(()=>{
+    async function fetchLive(){
+      try{
+        const {data, error}=await supabase
+          .from("listings")
+          .select(`
+            id, name, make, model, year, price, km, fuel,
+            province, city, source, dealer, listing_url, image_url,
+            scraped_at
+          `)
+          .order("scraped_at", {ascending:false})
+          .limit(500);
+
+        if(error) throw error;
+
+        if(data && data.length > 0){
+          // Normalize Supabase rows to match app's expected shape
+          const normalized = data.map(r=>({
+            ...r,
+            province: r.province || "AB",
+            city: r.city || "Canada",
+            source: r.source || "Kijiji",
+            dealer: Boolean(r.dealer),
+          }));
+          setListings(normalized);
+          setIsLive(true);
+          console.log(`🍁 LotCheck: ${normalized.length} live listings loaded`);
+        } else {
+          console.log("📋 No live listings yet — showing demo data");
+        }
+      } catch(err){
+        console.warn("⚠️ Supabase fetch failed, using demo data:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchLive();
+  },[]);
+
+  return {listings, loading, isLive};
+}
+
+// Keep LISTINGS as alias for places that reference it directly (price history etc)
+const LISTINGS=DEMO_LISTINGS;
 
 function genHistory(price){
   const h=[];let p=price*(1+(Math.random()*0.08-0.02));
@@ -1460,13 +1531,25 @@ function LiveBackground(){
     if(!canvas)return;
     const ctx=canvas.getContext("2d");
 
-    let W=canvas.width=window.innerWidth;
-    let H=canvas.height=window.innerHeight;
+    // Use devicePixelRatio for crisp rendering on mobile retina screens
+    const dpr=Math.min(window.devicePixelRatio||1,2);
 
-    const resize=()=>{
-      W=canvas.width=window.innerWidth;
-      H=canvas.height=window.innerHeight;
+    const setSize=()=>{
+      const vw=window.innerWidth;
+      const vh=window.innerHeight;
+      canvas.width=vw*dpr;
+      canvas.height=vh*dpr;
+      canvas.style.width=vw+"px";
+      canvas.style.height=vh+"px";
+      ctx.scale(dpr,dpr);
+      W=vw; H=vh;
     };
+
+    let W=window.innerWidth;
+    let H=window.innerHeight;
+    setSize();
+
+    const resize=()=>{ ctx.setTransform(1,0,0,1,0,0); setSize(); };
     window.addEventListener("resize",resize);
 
     // Particle system — Apple "sand" aesthetic: tiny, slow, organic
@@ -1616,13 +1699,16 @@ export default function App(){
   const [search,setSearch]=useState("");
   const [isMobile,setIsMobile]=useState(window.innerWidth<768);
 
+  // Live data from Supabase — falls back to demo if empty/error
+  const {listings:liveListings, loading:dataLoading, isLive}=useListings();
+
   useEffect(()=>{
     const handler=()=>setIsMobile(window.innerWidth<768);
     window.addEventListener("resize",handler);
     return()=>window.removeEventListener("resize",handler);
   },[]);
 
-  const filtered=LISTINGS.filter(l=>{
+  const filtered=liveListings.filter(l=>{
     const q=search.toLowerCase();
     return(province==="ALL"||l.province===province)
       &&(fuelFilter==="All"||l.fuel===fuelFilter)
@@ -1661,18 +1747,20 @@ export default function App(){
         <LiveBackground/>
         {/* Header */}
         <header className="lc-header">
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:34,height:34,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✅</div>
-            <div>
-              <div style={{fontWeight:800,fontSize:18,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
-              <div style={{fontSize:10,color:"#334155",fontStyle:"italic"}}>Did you LotCheck it?</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+            <div style={{width:32,height:32,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>✅</div>
+            <div style={{minWidth:0}}>
+              <div style={{fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
+              <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
             </div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <button onClick={()=>setShowAppraisal(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"8px 12px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>💰 My car's worth</button>
+          <div className="lc-header-right">
+            <button onClick={()=>setShowAppraisal(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
+              💰 <span className="lc-header-appraisal-text">My car's worth</span>
+            </button>
             {isPro
-              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 12px",fontSize:12,color:"#22c55e",fontWeight:700}}>✅ Pro · 3d left</div>
-              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>Try Pro free</button>
+              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ Pro</div>
+              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>Try Pro free</button>
             }
           </div>
         </header>
@@ -1705,7 +1793,12 @@ export default function App(){
               </div>
             </div>
             <div className="lc-listings">
-              <div style={{fontSize:12,color:"#334155",marginBottom:8}}>{filtered.length} listings · Canada</div>
+              <div style={{fontSize:12,color:"#334155",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+                {dataLoading
+                  ?<span>⏳ Loading live listings...</span>
+                  :<><span style={{color:isLive?"#22c55e":"#475569"}}>{isLive?"🟢":"⚪"}</span> {filtered.length} listings · {isLive?"Live · Canada":"Demo data"}</>
+                }
+              </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
               {filtered.map(l=><ListingCard key={l.id} listing={l} onClick={handleSelect} active={selected?.id===l.id}/>)}
             </div>
