@@ -132,10 +132,14 @@ function verifyListing(listing) {
   // ── Final score cap ───────────────────────────────────────────────────────
   score = Math.max(0, score);
 
+  // Flags that are informational only — do NOT trigger review
+  const INFO_ONLY_FLAGS = ["OVER_EVAP_CAP"];
+  const qualityFlags = flags.filter(f => !INFO_ONLY_FLAGS.some(info => f.startsWith(info)));
+
   // Override action based on score
   if (score < 30) action = "reject";
   else if (score < 70) action = "review";
-  else if (action === "publish" && flags.length > 0) action = "review";
+  else if (action === "publish" && qualityFlags.length > 0) action = "review";
 
   return {
     passed: action === "publish",
