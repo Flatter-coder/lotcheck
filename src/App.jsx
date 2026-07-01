@@ -427,15 +427,25 @@ const GLOBAL_CSS = `
 `;
 
 // ── Data ──────────────────────────────────────────────────────────────────────
+// Provincial rebates — verified July 2026 from official government sources
+// BC CVAP cancelled May 15, 2025 · QC Roulez Vert reduced Jan 2025, ends Dec 31 2026
 const REBATES = {
-  AB:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,note:"Federal EVAP only"},
-  BC:{federal_bev:5000,federal_phev:2500,prov_bev:4000,prov_phev:1500,prov_name:"BC CVAP",note:"Stack federal + provincial. Scrap old car = +$2K."},
-  ON:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,note:"Federal only — Ontario cancelled provincial 2018."},
-  QC:{federal_bev:5000,federal_phev:2500,prov_bev:7000,prov_phev:4000,prov_name:"Roulez Vert",note:"Best rebates in Canada. Stack federal + provincial."},
-  MB:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,note:"Federal EVAP only"},
-  SK:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,note:"Federal EVAP only"},
-  NS:{federal_bev:5000,federal_phev:2500,prov_bev:3000,prov_phev:1500,prov_name:"NS ZEVIP",note:"Stack federal + provincial."},
-  NB:{federal_bev:5000,federal_phev:2500,prov_bev:2500,prov_phev:1000,prov_name:"NB EV",note:"Stack federal + provincial."},
+  AB:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,
+    note:"Federal EVAP only — Alberta has no provincial EV rebate."},
+  BC:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,
+    note:"BC cancelled its provincial EV rebate (CVAP) on May 15, 2025. Federal EVAP only."},
+  ON:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,
+    note:"Federal only — Ontario cancelled its provincial rebate in 2018."},
+  QC:{federal_bev:5000,federal_phev:2500,prov_bev:2000,prov_phev:500,prov_name:"Roulez Vert",
+    note:"QC Roulez Vert reduced in 2026: BEV $2,000, PHEV (under 15kWh) $500, PHEV (15kWh+) $1,000. Program ends Dec 31, 2026."},
+  MB:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,
+    note:"Federal EVAP only — Manitoba has no provincial EV rebate."},
+  SK:{federal_bev:5000,federal_phev:2500,prov_bev:0,prov_phev:0,prov_name:null,
+    note:"Federal EVAP only — Saskatchewan has no provincial EV rebate."},
+  NS:{federal_bev:5000,federal_phev:2500,prov_bev:3000,prov_phev:1500,prov_name:"NS ZEVIP",
+    note:"Stack federal + provincial. Verify current NS ZEVIP availability at nszev.ca."},
+  NB:{federal_bev:5000,federal_phev:2500,prov_bev:2500,prov_phev:1000,prov_name:"NB EV",
+    note:"Stack federal + provincial. Verify current NB program availability."},
 };
 const PROVINCES={AB:"Alberta",BC:"British Columbia",ON:"Ontario",QC:"Quebec",MB:"Manitoba",SK:"Saskatchewan",NS:"Nova Scotia",NB:"New Brunswick"};
 
