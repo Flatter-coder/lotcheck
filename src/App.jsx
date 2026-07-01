@@ -415,7 +415,10 @@ function getRebate(province,fuel,listing){
   if(!listing||fuel==="Gas"||fuel==="Hybrid"||fuel==="Diesel"){
     return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,ineligibleReason:"Gas and standard hybrid vehicles are not eligible for EVAP."};
   }
-  const isUsed = listing.km > 10000;
+  // A vehicle is used if: km > 10,000 OR it's more than 1 model year old
+  // This catches listings where km data is missing/zero but the car is clearly used
+  const currentYear = new Date().getFullYear();
+  const isUsed = listing.km > 10000 || (listing.year < currentYear - 1);
   const overPriceCap = listing.price > 50000;
   if(isUsed){
     const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
