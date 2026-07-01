@@ -980,7 +980,7 @@ function ProModal({onStart,onClose}){
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Cancel anytime. Then $9.99/mo CAD.</div>
-        {[["📊","Canadian Black Book","Retail, trade & wholesale on every listing"],["⚡","EVAP Rebate Checker","Federal + provincial incentives stacked"],["🗓️","Alberta Allocations","Incoming inventory before it hits the lot"],["🔔","Unlimited Alerts","Price drop push notifications"],].map(([icon,title,sub])=>(
+        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["⚡","EVAP Rebate Checker","Federal + provincial incentives stacked"],["🗓️","Alberta Allocations","Incoming inventory before it hits the lot"],["🔔","Unlimited Alerts","Price drop push notifications"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
             <div><div style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{title}</div><div style={{fontSize:12,color:"#475569"}}>{sub}</div></div>
@@ -997,7 +997,7 @@ function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
   const [step,setStep]=useState("offer");
   const labels={
     vin:{title:"Unlock VIN History",icon:"🔍",desc:"Full accident history, ownership count, and odometer check for this vehicle."},
-    cbb:{title:"Unlock Black Book Value",icon:"📊",desc:"Retail, trade-in, and wholesale value estimates for this exact vehicle."},
+    cbb:{title:"Unlock Value Estimate",icon:"📊",desc:"LotCheck's retail, trade-in, and wholesale estimate for this exact vehicle, based on asking price, mileage, and age."},
   };
   const info=labels[feature]||labels.vin;
 
@@ -1305,7 +1305,7 @@ function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive
         {rebate.total>0&&<div style={{fontSize:14,color:"#22c55e",fontWeight:700,marginTop:4}}>After all rebates: ~${(currentPrice-rebate.total).toLocaleString()}</div>}
       </div>
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Black Book":"🔒 Black Book $2.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Value Est.":"🔒 Value Est. $2.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
           <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{
             if((t==="cbb"||t==="vin")&&!isUnlocked(t)){setUnlockModal(t);return;}
             setTab(t);
@@ -1346,7 +1346,8 @@ function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive
       {tab==="rebates"&&<EVAPRebateTab listing={listing} rebate={rebate}/>}
       {tab==="cbb"&&isUnlocked("cbb")&&(
         <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:12}}>CANADIAN BLACK BOOK · PRO</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:4}}>LOTCHECK VALUE ESTIMATE · PRO</div>
+          <div style={{fontSize:11,color:"#475569",marginBottom:12,lineHeight:1.5}}>Our own algorithmic estimate based on this vehicle's asking price, mileage, and age — not a licensed third-party valuation.</div>
           <div className="lc-stats">
             {[["Retail",cbb.retail,"#22c55e","Dealer asking range"],["Trade-in",cbb.trade,"#f59e0b","What dealer pays"],["Wholesale",cbb.wholesale,"#94a3b8","Auction estimate"]].map(([l,v,c,sub])=>(
               <div key={l} className="lc-stat" style={{borderColor:"#1e3a5f"}}>
@@ -1457,22 +1458,13 @@ function LiveBackground(){
 }
 
 function LiveTicker({listings,onSelect}){
+  // Shows real listings with real current prices, scrolling. No fabricated
+  // price movement — a previous version randomly nudged prices every 2.5s
+  // to simulate "live" ticks, which was fake data on real car names. Real
+  // price changes will show once price_history has enough points per listing
+  // to justify a real delta; until then this is a straight snapshot ticker.
   const src=listings&&listings.length>0?listings:DEMO_LISTINGS;
-  const [items,setItems]=useState(()=>
-    src.map(l=>({id:l.id,listing:l,name:`${l.make} ${l.model}`,price:l.price,change:Math.round((Math.random()-0.5)*1200)}))
-  );
-  useEffect(()=>{
-    const interval=setInterval(()=>{
-      setItems(prev=>prev.map(it=>{
-        if(Math.random()>0.7){
-          const delta=Math.round((Math.random()-0.5)*400);
-          return{...it,price:Math.max(15000,it.price+delta),change:it.change+delta};
-        }
-        return it;
-      }));
-    },2500);
-    return()=>clearInterval(interval);
-  },[]);
+  const items=src.map(l=>({id:l.id,listing:l,name:`${l.make} ${l.model}`,price:l.price}));
   const doubled=[...items,...items];
   return(
     <div className="lc-ticker-wrap">
@@ -1482,7 +1474,6 @@ function LiveTicker({listings,onSelect}){
             <span className="lc-ticker-dot"/>
             <span className="name">{it.name}</span>
             <span style={{color:"#f1f5f9",fontWeight:600}}>${it.price.toLocaleString()}</span>
-            <span className={it.change>=0?"up":"down"}>{it.change>=0?"▲":"▼"} ${Math.abs(it.change).toLocaleString()}</span>
           </span>
         ))}
       </div>
