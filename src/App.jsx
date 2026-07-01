@@ -449,12 +449,32 @@ const REBATES = {
 };
 const PROVINCES={AB:"Alberta",BC:"British Columbia",ON:"Ontario",QC:"Quebec",MB:"Manitoba",SK:"Saskatchewan",NS:"Nova Scotia",NB:"New Brunswick"};
 
-function getRebate(province,fuel){
+function getRebate(province,fuel,listing){
   const r=REBATES[province];
-  if(!r)return{federal:0,provincial:0,total:0,prov_name:null,note:""};
+  if(!r)return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,ineligibleReason:""};
+  if(!listing||fuel==="Gas"||fuel==="Hybrid"||fuel==="Diesel"){
+    return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,ineligibleReason:"Gas and standard hybrid vehicles are not eligible for EVAP."};
+  }
+  // EVAP only applies to NEW vehicles from enrolled dealers
+  // Used cars on Kijiji/marketplace are NOT eligible
+  const isUsed = listing.km > 10000; // >10,000 km = used (EVAP allows demo vehicles up to 10k km)
+  const isPrivate = listing.dealer === false;
+  const overPriceCap = listing.price > 50000;
+  if(isUsed){
+    const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
+    const provincial=fuel==="BEV"?r.prov_bev:fuel==="PHEV"?r.prov_phev:0;
+    return{federal:0,provincial:0,total:0,prov_name:r.prov_name,note:r.note,eligible:false,
+      ineligibleReason:"EVAP applies to NEW vehicles only. Used vehicles are not eligible regardless of age.",
+      newEquivalent:{federal,provincial,total:federal+provincial}};
+  }
+  if(overPriceCap){
+    return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,
+      ineligibleReason:`This vehicle's price ($${listing.price.toLocaleString()}) exceeds the EVAP cap of $50,000. Not eligible for federal rebate.`};
+  }
+  // Eligible — new vehicle under $50k
   const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
   const provincial=fuel==="BEV"?r.prov_bev:fuel==="PHEV"?r.prov_phev:0;
-  return{federal,provincial,total:federal+provincial,prov_name:r.prov_name,note:r.note};
+  return{federal,provincial,total:federal+provincial,prov_name:r.prov_name,note:r.note,eligible:true,ineligibleReason:""};
 }
 
 const EVAP_LIST=[
@@ -625,7 +645,7 @@ function EVAPTag({evap}){
 
 // ── Connect Modal ─────────────────────────────────────────────────────────────
 function ConnectModal({listing,onClose}){
-  const rebate=getRebate(listing.province,listing.fuel);
+  const rebate=getRebate(listing.province,listing.fuel,listing);
   const [name,setName]=useState("");
   const [phone,setPhone]=useState("");
   const [email,setEmail]=useState("");
@@ -675,7 +695,7 @@ function ConnectModal({listing,onClose}){
                 <div style={{display:"flex",gap:6,alignItems:"center"}}><FuelTag fuel={listing.fuel}/><span style={{fontSize:13,color:"#64748b"}}>{listing.km.toLocaleString()} km</span></div>
                 <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9"}}>${listing.price.toLocaleString()}</div>
               </div>
-              {rebate.total>0&&<div style={{fontSize:12,color:"#22c55e",fontWeight:600,marginTop:6}}>⚡ After rebates: ~${(listing.price-rebate.total).toLocaleString()}</div>}
+              {rebate.eligible&&rebate.total>0&&<div style={{fontSize:12,color:"#22c55e",fontWeight:600,marginTop:6}}>⚡ After rebates: ~${(listing.price-rebate.total).toLocaleString()}</div>}
             </div>
 
             <div onClick={()=>setWantsDelivery(!wantsDelivery)} style={{display:"flex",alignItems:"center",gap:10,background:wantsDelivery?"#0d1e3a":"#0f172a",border:`1px solid ${wantsDelivery?"#1e3a5f":"#1e293b"}`,borderRadius:10,padding:"12px 14px",marginBottom:14,cursor:"pointer"}}>
@@ -1198,7 +1218,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
   const [unlocks,setUnlocks]=useState({}); // { [listingId-feature]: true }
   const [unlockModal,setUnlockModal]=useState(null); // "vin" | "cbb" | null
   const evap=getEVAP(listing);
-  const rebate=getRebate(listing.province,listing.fuel);
+  const rebate=getRebate(listing.province,listing.fuel,listing);
   const score=lotScore(listing,LISTINGS);
   const currentPrice=history[history.length-1]?.price??listing.price;
   const firstPrice=history[0]?.price??listing.price;
@@ -1286,7 +1306,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
         <button onClick={onConnect} className="lc-connect-btn" style={{flex:2}}>
           <span>🤝</span>
           <span>Connect me with a dealer</span>
-          {rebate.total>0&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:6,padding:"2px 8px",fontSize:12}}>⚡ ${rebate.total.toLocaleString()}</span>}
+          {rebate.eligible&&rebate.total>0&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:6,padding:"2px 8px",fontSize:12}}>⚡ ${rebate.total.toLocaleString()}</span>}
         </button>
         <button onClick={onTestDrive} style={{flex:1,background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"0 14px",color:"#60a5fa",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,whiteSpace:"nowrap"}}>
           <span>🚗</span><span>Test drive</span>
@@ -1310,7 +1330,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
 function ListingCard({listing,onClick,active}){
   const score=lotScore(listing,LISTINGS);
   const evap=getEVAP(listing);
-  const rebate=getRebate(listing.province,listing.fuel);
+  const rebate=getRebate(listing.province,listing.fuel,listing);
   return(
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
@@ -1320,7 +1340,7 @@ function ListingCard({listing,onClick,active}){
       <div className="lc-card-bottom">
         <div>
           <div className="lc-price">${listing.price.toLocaleString()}</div>
-          {rebate.total>0&&<div className="lc-after-rebate">~${(listing.price-rebate.total).toLocaleString()} after rebates</div>}
+          {rebate.eligible&&rebate.total>0&&<div className="lc-after-rebate">~${(listing.price-rebate.total).toLocaleString()} after rebates</div>}
         </div>
         <div className="lc-meta">
           <div className="lc-city">{listing.city}, {listing.province}</div>
@@ -1372,11 +1392,50 @@ function EVAPRebateTab({listing, rebate}){
 
   const isEV=listing.fuel==="BEV"||listing.fuel==="PHEV";
 
+  // Not an EV/PHEV
   if(!isEV) return(
-    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:20,color:"#64748b",fontSize:14,textAlign:"center"}}>
+    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:20,textAlign:"center"}}>
       <div style={{fontSize:28,marginBottom:8}}>⛽</div>
       <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>No federal rebates for gas vehicles</div>
-      <div style={{fontSize:12,color:"#475569"}}>EVAP applies to BEV and PHEV purchases only. Switch the fuel filter to see eligible vehicles.</div>
+      <div style={{fontSize:12,color:"#475569"}}>EVAP applies to BEV and PHEV new purchases only.</div>
+    </div>
+  );
+
+  // INELIGIBLE — used vehicle or over price cap
+  if(!rebate.eligible) return(
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{background:"#1a0a00",border:"1px solid #f59e0b40",borderRadius:14,padding:"16px 18px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <span style={{fontSize:20}}>⚠️</span>
+          <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>Not eligible for EVAP rebate</div>
+        </div>
+        <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.7,marginBottom:12}}>
+          {rebate.ineligibleReason}
+        </div>
+        {rebate.newEquivalent&&(
+          <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:10,padding:"12px 14px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#22c55e",marginBottom:8,letterSpacing:0.5}}>💡 BUYING NEW EQUIVALENT INSTEAD?</div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <span style={{fontSize:13,color:"#94a3b8"}}>Federal EVAP (new vehicle)</span>
+              <span style={{fontSize:14,fontWeight:700,color:"#22c55e"}}>${rebate.newEquivalent.federal.toLocaleString()}</span>
+            </div>
+            {rebate.newEquivalent.provincial>0&&(
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:13,color:"#94a3b8"}}>{rebate.prov_name} (new vehicle)</span>
+                <span style={{fontSize:14,fontWeight:700,color:"#3b82f6"}}>${rebate.newEquivalent.provincial.toLocaleString()}</span>
+              </div>
+            )}
+            <div style={{borderTop:"1px solid #16a34a20",paddingTop:8,marginTop:4,display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:13,color:"#94a3b8"}}>Total if buying new</span>
+              <span style={{fontSize:16,fontWeight:800,color:"#22c55e"}}>${rebate.newEquivalent.total.toLocaleString()}</span>
+            </div>
+            <div style={{fontSize:11,color:"#475569",marginTop:8}}>
+              Compare: this used car at ${listing.price.toLocaleString()} vs new with ${rebate.newEquivalent.total.toLocaleString()} back = 
+              effective new price ~$${(listing.price+rebate.newEquivalent.total).toLocaleString()}+ before negotiation
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 
