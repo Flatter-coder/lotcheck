@@ -53,20 +53,34 @@ function detectProvince(location = "") {
 
 // ── FUEL TYPE DETECTION ───────────────────────────────────────────────────────
 function detectFuel(item) {
-  // 1. Trust Kijiji's own "Fuel Type" attribute first — most reliable
-  const attr = (item.attributes?.["Fuel Type"] || item.attributes?.fuelType || "").toLowerCase();
-  if (attr === "electric")                          return "BEV";
-  if (attr === "hybrid-electric")                   return "Hybrid";
-  if (attr === "plug-in hybrid" || attr === "phev") return "PHEV";
-  if (attr === "diesel")                            return "Diesel";
-  if (attr === "gas" || attr === "gasoline")        return "Gas";
+  const title = (item.title || "").toLowerCase();
+  const desc  = (item.description || "").toLowerCase();
+  const text  = title + " " + desc;
 
-  // 2. Fall back to scanning title + description text
-  const text = `${item.title || ""} ${item.description || ""}`.toLowerCase();
-  if (text.includes("plug-in hybrid") || text.includes("phev")) return "PHEV";
-  if (text.includes("hybrid"))                                   return "Hybrid";
-  if (text.includes("electric") && !text.includes("hybrid"))    return "BEV";
-  if (text.includes("diesel"))                                   return "Diesel";
+  // Always check title first for PHEV keywords — most reliable signal
+  // Kijiji's "Fuel Type" attribute often says "Hybrid" for PHEVs
+  const isPHEVTitle = text.includes("plug-in hybrid") || text.includes("phev")
+    || text.includes("prime") || text.includes(" phev")
+    || title.includes("outlander phev") || title.includes("escape phev")
+    || title.includes("rav4 prime") || title.includes("prius prime")
+    || title.includes("pacifica hybrid") || title.includes("sportage phev")
+    || title.includes("niro phev") || title.includes("sorento phev")
+    || title.includes("cx-70 phev") || title.includes("cx-90 phev")
+    || title.includes("tucson phev") || title.includes("santa fe phev");
+  if (isPHEVTitle) return "PHEV";
+
+  // 2. Trust Kijiji's own "Fuel Type" attribute
+  const attr = (item.attributes?.["Fuel Type"] || item.attributes?.fuelType || "").toLowerCase();
+  if (attr === "electric" || attr === "battery electric") return "BEV";
+  if (attr === "plug-in hybrid" || attr === "phev")       return "PHEV";
+  if (attr === "hybrid-electric" || attr === "hybrid")    return "Hybrid";
+  if (attr === "diesel")                                  return "Diesel";
+  if (attr === "gas" || attr === "gasoline")              return "Gas";
+
+  // 3. Fall back to title/description scanning
+  if (text.includes("electric") && !text.includes("hybrid")) return "BEV";
+  if (text.includes("hybrid"))                               return "Hybrid";
+  if (text.includes("diesel"))                               return "Diesel";
   return "Gas";
 }
 
