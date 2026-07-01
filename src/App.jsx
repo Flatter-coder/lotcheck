@@ -36,6 +36,23 @@ const GLOBAL_CSS = `
     opacity: 0.85;
   }
 
+
+  /* ── Fuel type animations ─────────────────────────────────────────────────── */
+  @keyframes lc-charge {
+    0%,100% { opacity:0.5; transform:scale(0.85); }
+    50%     { opacity:1;   transform:scale(1.2); }
+  }
+  @keyframes lc-pump {
+    0%,100% { transform:translateY(0); }
+    30%     { transform:translateY(-3px); }
+    60%     { transform:translateY(0); }
+    80%     { transform:translateY(-1px); }
+  }
+  @keyframes lc-spin {
+    0%   { transform:rotate(0deg); }
+    100% { transform:rotate(360deg); }
+  }
+
   /* Live ticker strip */
   .lc-ticker-wrap {
     background: #040810;
@@ -275,8 +292,8 @@ const GLOBAL_CSS = `
     border-radius: 10px;
     padding: 12px 14px;
   }
-  .lc-stat-label { font-size: 10px; color: #475569; margin-bottom: 3px; }
-  .lc-stat-value { font-size: 15px; font-weight: 700; color: #f1f5f9; }
+  .lc-stat-label { font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 500; }
+  .lc-stat-value { font-size: 15px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px; }
 
   /* Connect button */
   .lc-connect-btn {
@@ -465,9 +482,58 @@ function ScorePill({score}){
   const l=score>=70?"✓ Great Deal":score>=45?"~ Fair Price":"↑ Above Market";
   return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>;
 }
+// ── Fuel SVG Icons — matching reference: BEV=battery/bolt, PHEV=plug+pump, Hybrid=recycle+pump, Gas=pump
+function FuelIcon({fuel,size=14}){
+  const s=size;
+  // BEV — green battery with lightning bolt (like reference image)
+  if(fuel==="BEV") return(
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" style={{animation:"lc-charge 1.6s ease-in-out infinite",flexShrink:0}}>
+      <rect x="2" y="6" width="18" height="13" rx="2" stroke="#22c55e" strokeWidth="2" fill="none"/>
+      <path d="M20 10h2v5h-2" stroke="#22c55e" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M13 7l-5 6h5l-3 5" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  // PHEV — plug + small pump (orange like reference)
+  if(fuel==="PHEV") return(
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" style={{animation:"lc-charge 2s ease-in-out infinite",flexShrink:0}}>
+      <path d="M7 2v4M11 2v4" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M9 17v4" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round"/>
+      <rect x="17" y="5" width="4" height="3" rx="1" stroke="#f59e0b" strokeWidth="1.8"/>
+    </svg>
+  );
+  // Hybrid — recycle arrows (purple like reference)
+  if(fuel==="Hybrid") return(
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" style={{animation:"lc-spin 4s linear infinite",flexShrink:0}}>
+      <path d="M12 2a10 10 0 0110 10" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M22 12a10 10 0 01-10 10" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M12 22a10 10 0 01-10-10" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M2 12a10 10 0 0110-10" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeDasharray="3 3"/>
+      <path d="M22 10l-1.5 2.5L18 11" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M2 14l1.5-2.5L6 13" stroke="#8b5cf6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  // Gas — fuel pump silhouette (grey/white)
+  return(
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" style={{animation:"lc-pump 2.2s ease-in-out infinite",flexShrink:0}}>
+      <path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M3 9h12" stroke="#94a3b8" strokeWidth="2"/>
+      <path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M17 13h2" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
+      <rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" strokeWidth="1.5"/>
+    </svg>
+  );
+}
+
 function FuelTag({fuel}){
-  const c={BEV:"#22c55e",PHEV:"#3b82f6",Hybrid:"#8b5cf6",Gas:"#64748b"}[fuel]||"#64748b";
-  return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}30`}}>{fuel}</span>;
+  const c={BEV:"#22c55e",PHEV:"#f59e0b",Hybrid:"#8b5cf6",Gas:"#94a3b8"}[fuel]||"#94a3b8";
+  return(
+    <span className="badge" style={{background:c+"1a",color:c,border:`1px solid ${c}40`,display:"inline-flex",alignItems:"center",gap:5,fontWeight:700,paddingTop:3,paddingBottom:3}}>
+      <FuelIcon fuel={fuel} size={13}/>
+      {fuel}
+    </span>
+  );
 }
 function EVAPTag({evap}){
   if(!evap)return null;
@@ -1077,9 +1143,9 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
         <div style={{height:180,marginBottom:16}}>
           <ResponsiveContainer>
             <LineChart data={history} margin={{top:4,right:4,bottom:0,left:0}}>
-              <XAxis dataKey="date" tick={{fontSize:9,fill:"#475569"}} interval={15} tickLine={false} axisLine={false}/>
-              <YAxis domain={domain} tick={{fontSize:9,fill:"#475569"}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={36}/>
-              <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:8,fontSize:12}} labelStyle={{color:"#94a3b8"}}/>
+              <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} interval={15} tickLine={false} axisLine={false}/>
+              <YAxis domain={domain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={42}/>
+              <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
               <ReferenceLine y={avgHist} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} label={{value:`avg`,fill:"#f59e0b",fontSize:9,position:"insideTopRight"}}/>
               <Line type="monotone" dataKey="price" stroke="#16a34a" strokeWidth={2} dot={false}/>
             </LineChart>
@@ -1444,7 +1510,10 @@ export default function App(){
               <input className="lc-search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search make, model, city…"/>
               <div className="lc-fuel-filters">
                 {["All","BEV","PHEV","Hybrid","Gas"].map(f=>(
-                  <button key={f} className={`lc-fuel-btn${fuelFilter===f?" active":""}`} onClick={()=>setFuelFilter(f)}>{f}</button>
+                  <button key={f} className={`lc-fuel-btn${fuelFilter===f?" active":""}`} onClick={()=>setFuelFilter(f)} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
+                    {f!=="All"&&<FuelIcon fuel={f} size={12}/>}
+                    {f}
+                  </button>
                 ))}
               </div>
             </div>
