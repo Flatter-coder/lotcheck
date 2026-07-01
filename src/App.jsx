@@ -545,7 +545,7 @@ function useListings(){
         const {data, error}=await supabase
           .from("listings")
           .select(`
-            id, name, make, model, year, price, km, fuel,
+            id, external_id, name, make, model, year, price, km, fuel,
             province, city, source, dealer, listing_url, image_url,
             scraped_at, verification_score
           `)
@@ -581,26 +581,27 @@ function useListings(){
   return {listings, loading, isLive};
 }
 
-const LISTINGS=DEMO_LISTINGS;
+// NOTE: previously there was a `genHistory()` function here that generated a
+// fake 60-day price chart using Math.random(). It has been removed. Real price
+// history now comes from the `price_history` table (populated daily by
+// scraper.js) via a direct Supabase fetch inside DetailPanel, keyed on
+// listing.external_id. Do not reintroduce synthetic/random data for anything
+// presented to users as historical fact.
 
-function genHistory(price){
-  const h=[];let p=price*(1+(Math.random()*0.08-0.02));
-  for(let i=60;i>=0;i--){
-    const d=new Date();d.setDate(d.getDate()-i);
-    p=p*(1+(Math.random()-0.52)*0.022);
-    h.push({date:d.toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:Math.round(p)});
-  }
-  h[h.length-1].price=price;return h;
-}
+// lotScore now requires a real comparable set (liveListings) — it must never
+// be called against DEMO_LISTINGS. Returns null (not a fabricated 50) when
+// there isn't enough real data to compute a meaningful score.
 function lotScore(l,all){
+  if(!all||!all.length) return null;
   const c=all.filter(x=>x.model===l.model&&x.id!==l.id);
-  if(!c.length)return 50;
+  if(!c.length)return null;
   const aP=c.reduce((s,x)=>s+x.price,0)/c.length;
   const aK=c.reduce((s,x)=>s+x.km,0)/c.length;
   return Math.max(0,Math.min(100,Math.round(50+((aP-l.price)/aP)*120+((aK-l.km)/aK)*40)));
 }
 
 function ScorePill({score}){
+  if(score==null) return <span className="badge" style={{background:"#1e293b80",color:"#64748b",border:"1px solid #33415560"}}>No comps yet</span>;
   const c=score>=70?"#16a34a":score>=45?"#d97706":"#dc2626";
   const l=score>=70?"✓ Great Deal":score>=45?"~ Fair Price":"↑ Above Market";
   return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>;
@@ -1234,19 +1235,53 @@ function EVAPRebateTab({listing, rebate}){
   );
 }
 
-function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
-  const [history]=useState(()=>genHistory(listing.price));
+function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive}){
+  const [priceHistory,setPriceHistory]=useState([]);
+  const [historyLoading,setHistoryLoading]=useState(true);
   const [tab,setTab]=useState("chart");
   const [unlocks,setUnlocks]=useState({});
   const [unlockModal,setUnlockModal]=useState(null);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
-  const score=lotScore(listing,LISTINGS);
-  const currentPrice=history[history.length-1]?.price??listing.price;
-  const firstPrice=history[0]?.price??listing.price;
-  const change=currentPrice-firstPrice;
-  const avgHist=Math.round(history.reduce((s,h)=>s+h.price,0)/history.length);
-  const domain=[Math.round(Math.min(...history.map(h=>h.price))*0.97),Math.round(Math.max(...history.map(h=>h.price))*1.03)];
+  const score=lotScore(listing,liveListings);
+
+  // Fetch REAL price history for this exact listing from Supabase.
+  // This is populated once per day by scraper.js — it will start thin
+  // (one point) and build a genuine trend over time. We never fabricate
+  // points to fill gaps.
+  useEffect(()=>{
+    let cancelled=false;
+    async function fetchHistory(){
+      setHistoryLoading(true);
+      if(!listing.external_id){ setPriceHistory([]); setHistoryLoading(false); return; }
+      try{
+        const {data,error}=await supabase
+          .from("price_history")
+          .select("price, recorded_at")
+          .eq("listing_external_id", listing.external_id)
+          .order("recorded_at",{ascending:true});
+        if(error) throw error;
+        if(!cancelled) setPriceHistory(data||[]);
+      }catch(err){
+        console.warn("⚠️ price_history fetch failed:", err.message);
+        if(!cancelled) setPriceHistory([]);
+      }finally{
+        if(!cancelled) setHistoryLoading(false);
+      }
+    }
+    fetchHistory();
+    return()=>{cancelled=true;};
+  },[listing.external_id]);
+
+  const currentPrice=listing.price;
+  const hasTrend=priceHistory.length>=2;
+  const firstPrice=hasTrend?priceHistory[0].price:currentPrice;
+  const change=hasTrend?currentPrice-firstPrice:0;
+  const spanDays=hasTrend?Math.max(1,Math.round((new Date(priceHistory[priceHistory.length-1].recorded_at)-new Date(priceHistory[0].recorded_at))/86400000)):0;
+  const avgHist=hasTrend?Math.round(priceHistory.reduce((s,h)=>s+h.price,0)/priceHistory.length):currentPrice;
+  const chartData=priceHistory.map(h=>({date:new Date(h.recorded_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:h.price}));
+  const domain=hasTrend?[Math.round(Math.min(...priceHistory.map(h=>h.price))*0.97),Math.round(Math.max(...priceHistory.map(h=>h.price))*1.03)]:undefined;
+
   const cbb={retail:Math.round(listing.price*1.05),trade:Math.round(listing.price*Math.max(0.4,1-(2026-listing.year)*0.08)*Math.max(0.7,1-(listing.km/300000)*0.35)*0.82)};
   cbb.wholesale=Math.round(cbb.trade*0.91);
 
@@ -1263,7 +1298,10 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
       </div>
       <div className="lc-price-hero">
         <div className="lc-price-big">${currentPrice.toLocaleString()}</div>
-        <div style={{fontSize:14,color:change>=0?"#ef4444":"#22c55e",fontWeight:600,marginTop:4}}>{change>=0?"▲":"▼"} ${Math.abs(change).toLocaleString()} ({change>=0?"+":""}{((change/firstPrice)*100).toFixed(1)}%) 60d</div>
+        {hasTrend
+          ? <div style={{fontSize:14,color:change>=0?"#ef4444":"#22c55e",fontWeight:600,marginTop:4}}>{change>=0?"▲":"▼"} ${Math.abs(change).toLocaleString()} ({change>=0?"+":""}{((change/firstPrice)*100).toFixed(1)}%) over {spanDays}d tracked</div>
+          : <div style={{fontSize:12,color:"#475569",fontWeight:500,marginTop:4}}>{historyLoading?"Loading price history…":"Price tracking started — trend builds as we re-scrape this listing"}</div>
+        }
         {rebate.total>0&&<div style={{fontSize:14,color:"#22c55e",fontWeight:700,marginTop:4}}>After all rebates: ~${(currentPrice-rebate.total).toLocaleString()}</div>}
       </div>
       <div className="lc-tabs">
@@ -1278,19 +1316,29 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
       </div>
 
       {tab==="chart"&&<>
-        <div style={{height:180,marginBottom:16}}>
-          <ResponsiveContainer>
-            <LineChart data={history} margin={{top:4,right:4,bottom:0,left:0}}>
-              <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} interval={15} tickLine={false} axisLine={false}/>
-              <YAxis domain={domain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={42}/>
-              <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
-              <ReferenceLine y={avgHist} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} label={{value:`avg`,fill:"#f59e0b",fontSize:9,position:"insideTopRight"}}/>
-              <Line type="monotone" dataKey="price" stroke="#16a34a" strokeWidth={2} dot={false}/>
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {hasTrend?(
+          <div style={{height:180,marginBottom:16}}>
+            <ResponsiveContainer>
+              <LineChart data={chartData} margin={{top:4,right:4,bottom:0,left:0}}>
+                <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false}/>
+                <YAxis domain={domain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={42}/>
+                <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
+                <ReferenceLine y={avgHist} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} label={{value:`avg`,fill:"#f59e0b",fontSize:9,position:"insideTopRight"}}/>
+                <Line type="monotone" dataKey="price" stroke="#16a34a" strokeWidth={2} dot={{r:3}}/>
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ):(
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"28px 20px",textAlign:"center",marginBottom:16}}>
+            <div style={{fontSize:26,marginBottom:8}}>📈</div>
+            <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>
+              {historyLoading?"Loading price history…":"Not enough price history yet"}
+            </div>
+            <div style={{fontSize:12,color:"#475569"}}>LotCheck re-scrapes this listing daily. A real trend will appear here once we've tracked it over multiple days.</div>
+          </div>
+        )}
         <div className="lc-stats">
-          {[["Asking",`$${listing.price.toLocaleString()}`],["Deal Score",`${score}/100`],["Location",`${listing.city}, ${listing.province}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
+          {[["Asking",`$${listing.price.toLocaleString()}`],["Deal Score",score==null?"No comps yet":`${score}/100`],["Location",`${listing.city}, ${listing.province}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
             <div key={l} className="lc-stat"><div className="lc-stat-label">{l}</div><div className="lc-stat-value">{v}</div></div>
           ))}
         </div>
@@ -1333,8 +1381,8 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
   );
 }
 
-function ListingCard({listing,onClick,active}){
-  const score=lotScore(listing,LISTINGS);
+function ListingCard({listing,liveListings,onClick,active}){
+  const score=lotScore(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   return(
@@ -1484,7 +1532,7 @@ export default function App(){
             <div style={{flex:1,fontSize:13,fontWeight:600,color:"#f1f5f9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.name}</div>
             {isPro?<span style={{fontSize:11,color:"#22c55e",fontWeight:700}}>✅ Pro</span>:<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Pro</button>}
           </div>
-          <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+          <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
         </div>
         {showConnect&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
         {showTestDrive&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
@@ -1549,14 +1597,14 @@ export default function App(){
                 }
               </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
-              {filtered.map(l=><ListingCard key={l.id} listing={l} onClick={handleSelect} active={selected?.id===l.id}/>)}
+              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} onClick={handleSelect} active={selected?.id===l.id}/>)}
             </div>
             <div className="lc-footer">© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
           </div>
 
           <div className="lc-detail">
             {selected?(
-              <DetailPanel listing={selected} isPro={isPro} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+              <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
             ):(
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",color:"#334155",textAlign:"center",padding:"40px 20px"}}>
                 <div style={{fontSize:48,marginBottom:16}}>✅</div>
