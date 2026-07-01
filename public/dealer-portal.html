@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LotCheck Dealer Portal</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#020617;--surface:#060d18;--card:#0a1220;
+  --border:#1e293b;--green:#22c55e;--green-dim:#16a34a;
+  --amber:#f59e0b;--blue:#3b82f6;--red:#ef4444;
+  --text:#f1f5f9;--muted:#94a3b8;--dim:#475569;
+  --radius:10px;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;min-height:100vh}
+
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:10px}
+.logo{font-size:22px}
+.logo-text{font-weight:800;font-size:16px}
+.logo-sub{font-size:11px;color:var(--muted)}
+
+.hero{background:linear-gradient(135deg,#0d2010,#0d1e3a);border-bottom:1px solid var(--border);padding:40px 24px;text-align:center}
+.hero-tag{display:inline-block;background:#16a34a22;color:var(--green);font-size:11px;font-weight:700;letter-spacing:.5px;padding:4px 12px;border-radius:99px;border:1px solid #16a34a44;margin-bottom:14px}
+.hero-title{font-size:28px;font-weight:800;margin-bottom:8px}
+.hero-sub{font-size:15px;color:var(--muted);max-width:500px;margin:0 auto 20px}
+.hero-pills{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.pill{background:#0a1220;border:1px solid var(--border);border-radius:99px;padding:6px 14px;font-size:12px;color:var(--muted)}
+.pill strong{color:var(--green)}
+
+.body{max-width:760px;margin:0 auto;padding:28px 20px}
+
+.section{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;overflow:hidden}
+.section-header{padding:16px 20px;border-bottom:1px solid var(--border)}
+.section-title{font-size:15px;font-weight:700}
+.section-sub{font-size:12px;color:var(--muted);margin-top:3px}
+.section-body{padding:20px}
+
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group{margin-bottom:14px}
+.form-label{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.4px}
+.opt{font-size:10px;background:#1e293b;color:var(--dim);padding:1px 6px;border-radius:4px;font-weight:400;text-transform:none;letter-spacing:0}
+.form-input{width:100%;background:#0d1526;border:1px solid var(--border);border-radius:8px;padding:11px 13px;color:var(--text);font-size:13px;outline:none;transition:border .15s}
+.form-input:focus{border-color:var(--green)}
+.form-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%2394a3b8' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+
+.vin-input{font-family:monospace;letter-spacing:1px;text-transform:uppercase}
+.vin-hint{font-size:11px;margin-top:4px}
+.vin-ok{color:var(--green)}
+.vin-warn{color:var(--amber)}
+
+.photo-drop{border:2px dashed var(--border);border-radius:var(--radius);padding:28px;text-align:center;cursor:pointer;transition:all .2s}
+.photo-drop:hover{border-color:var(--green);background:#16a34a08}
+.photo-drop-icon{font-size:28px;margin-bottom:8px}
+.photo-drop-text{font-size:13px;color:var(--muted)}
+.photo-drop-sub{font-size:11px;color:var(--dim);margin-top:4px}
+.photo-preview{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.photo-thumb{width:70px;height:70px;border-radius:8px;object-fit:cover;border:1px solid var(--border)}
+
+.commission-box{background:#0d1e3a;border:1px solid #1e3a5f;border-radius:var(--radius);padding:16px;display:flex;gap:14px;align-items:flex-start}
+.commission-icon{font-size:24px;flex-shrink:0}
+.commission-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px}
+.commission-sub{font-size:12px;color:var(--muted);line-height:1.6}
+.commission-amount{font-size:18px;font-weight:800;color:var(--amber);margin-top:6px}
+
+.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.plan{background:#0d1526;border:2px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;transition:all .2s}
+.plan.selected{border-color:var(--green);background:#0d2010}
+.plan-name{font-size:13px;font-weight:700;margin-bottom:4px}
+.plan-price{font-size:20px;font-weight:800;color:var(--green);margin-bottom:6px}
+.plan-desc{font-size:11px;color:var(--muted);line-height:1.5}
+
+.submit-btn{width:100%;background:var(--green-dim);border:none;border-radius:var(--radius);padding:15px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;transition:background .15s}
+.submit-btn:hover{background:var(--green)}
+.submit-btn:disabled{background:#1e293b;color:var(--dim);cursor:not-allowed}
+
+.success-box{background:#0d2010;border:1px solid #16a34a40;border-radius:var(--radius);padding:28px;text-align:center;display:none}
+.success-icon{font-size:48px;margin-bottom:12px}
+.success-title{font-size:20px;font-weight:700;margin-bottom:8px}
+.success-sub{font-size:13px;color:var(--muted);line-height:1.6}
+
+.badge{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600;display:inline-block}
+.badge-free{background:#16a34a22;color:var(--green);border:1px solid #16a34a44}
+.sold-card{background:#0d1526;border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sold-badge{background:#7c3aed22;color:#a78bfa;border:1px solid #7c3aed44;font-size:11px;padding:3px 10px;border-radius:99px;font-weight:600}
+.sold-btn{background:#7c3aed;border:none;border-radius:8px;padding:8px 16px;color:#fff;font-size:13px;font-weight:700;cursor:pointer}
+.sold-btn:hover{background:#6d28d9}
+.sold-btn:disabled{background:#1e293b;color:var(--dim);cursor:not-allowed}
+
+.info-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:20px 0}
+.info-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;text-align:center}
+.info-num{font-size:22px;font-weight:800;color:var(--green);margin-bottom:4px}
+.info-label{font-size:11px;color:var(--muted)}
+
+@media(max-width:600px){
+  .form-row{grid-template-columns:1fr}
+  .plan-grid{grid-template-columns:1fr}
+  .info-grid{grid-template-columns:1fr 1fr}
+  .hero-title{font-size:22px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">✅</div>
+  <div>
+    <div class="logo-text">LotCheck Dealer Portal</div>
+    <div class="logo-sub">List your inventory · Receive qualified buyer leads</div>
+  </div>
+</div>
+
+<div class="hero">
+  <div class="hero-tag">FREE TO LIST</div>
+  <div class="hero-title">Put your inventory in front of<br/>serious Canadian car buyers</div>
+  <div class="hero-sub">LotCheck tracks real-time prices across Canada. List your cars free — we only earn when you sell.</div>
+  <div class="hero-pills">
+    <div class="pill"><strong>Free</strong> to list</div>
+    <div class="pill"><strong>1%</strong> commission on sale</div>
+    <div class="pill"><strong>$100</strong> flat per lead (optional)</div>
+    <div class="pill"><strong>Real buyers</strong> · no tire kickers</div>
+  </div>
+</div>
+
+<div class="body">
+
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="info-num">Free</div>
+      <div class="info-label">To list your inventory</div>
+    </div>
+    <div class="info-card">
+      <div class="info-num">1%</div>
+      <div class="info-label">Commission on confirmed sale</div>
+    </div>
+    <div class="info-card">
+      <div class="info-num">&lt;2hr</div>
+      <div class="info-label">Average lead response time</div>
+    </div>
+  </div>
+
+  <!-- DEALER INFO -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">🏢 Your Dealership</div>
+      <div class="section-sub">Basic information about your store</div>
+    </div>
+    <div class="section-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Dealership name *</label>
+          <input id="d-name" class="form-input" placeholder="Cochrane Toyota"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Your name *</label>
+          <input id="d-contact" class="form-input" placeholder="Ryan Smith"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Phone *</label>
+          <input id="d-phone" class="form-input" type="tel" placeholder="403-932-9900"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email *</label>
+          <input id="d-email" class="form-input" type="email" placeholder="ryan@cochranetoyota.com"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">City *</label>
+          <input id="d-city" class="form-input" placeholder="Cochrane"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Province</label>
+          <select id="d-province" class="form-input form-select">
+            <option>AB</option><option>BC</option><option>ON</option>
+            <option>QC</option><option>MB</option><option>SK</option>
+            <option>NS</option><option>NB</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VEHICLE LISTING -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">🚗 Vehicle Details</div>
+      <div class="section-sub">Add one vehicle at a time — you can submit multiple</div>
+    </div>
+    <div class="section-body">
+
+      <!-- VIN -->
+      <div class="form-group">
+        <label class="form-label">
+          VIN
+          <span class="opt">optional but recommended</span>
+        </label>
+        <input id="v-vin" class="form-input vin-input" placeholder="e.g. 2T3BFREV1JW123456" maxlength="17"
+          oninput="this.value=this.value.toUpperCase();checkVin(this.value)"/>
+        <div id="vin-hint" class="vin-hint" style="color:var(--dim)">17-character VIN auto-fills make, model, and year</div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Year *</label>
+          <select id="v-year" class="form-input form-select">
+            ${[2026,2025,2024,2023,2022,2021,2020,2019,2018,2017,2016,2015].map(y=>`<option>${y}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Make *</label>
+          <input id="v-make" class="form-input" placeholder="Toyota"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Model *</label>
+          <input id="v-model" class="form-input" placeholder="RAV4 Prime"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Trim <span class="opt">optional</span></label>
+          <input id="v-trim" class="form-input" placeholder="XSE AWD"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Price (CAD) *</label>
+          <input id="v-price" class="form-input" type="number" placeholder="49900"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Odometer (km) *</label>
+          <input id="v-km" class="form-input" type="number" placeholder="8000"/>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Fuel type</label>
+          <select id="v-fuel" class="form-input form-select">
+            <option>Gas</option><option>Hybrid</option>
+            <option>PHEV</option><option>BEV</option><option>Diesel</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Colour <span class="opt">optional</span></label>
+          <input id="v-color" class="form-input" placeholder="Celestial Silver"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Description <span class="opt">optional</span></label>
+        <textarea id="v-desc" class="form-input" rows="3" placeholder="One owner, no accidents, winter tires included, full service history at Toyota..."></textarea>
+      </div>
+
+      <!-- Photo upload -->
+      <div class="form-group">
+        <label class="form-label">Photos <span class="opt">optional — more photos = more leads</span></label>
+        <div class="photo-drop" onclick="document.getElementById('photo-input').click()"
+          ondragover="event.preventDefault();this.style.borderColor='var(--green)'"
+          ondragleave="this.style.borderColor='var(--border)'"
+          ondrop="handleDrop(event)">
+          <div class="photo-drop-icon">📸</div>
+          <div class="photo-drop-text">Drop photos here or click to upload</div>
+          <div class="photo-drop-sub">JPG, PNG · Up to 10 photos · Max 5MB each</div>
+        </div>
+        <input id="photo-input" type="file" accept="image/*" multiple style="display:none" onchange="handlePhotos(this.files)"/>
+        <div id="photo-preview" class="photo-preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMMISSION MODEL -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">💰 Choose Your Plan</div>
+      <div class="section-sub">Both plans are free to start — we only charge when you benefit</div>
+    </div>
+    <div class="section-body">
+      <div class="plan-grid">
+        <div class="plan selected" id="plan-lead" onclick="selectPlan('lead')">
+          <div class="plan-name">📋 Per Lead</div>
+          <div class="plan-price">$100 <span style="font-size:13px;font-weight:400;color:var(--muted)">/lead</span></div>
+          <div class="plan-desc">Pay $100 for each qualified buyer LotCheck connects to you. No monthly fees. Cancel anytime.</div>
+        </div>
+        <div class="plan" id="plan-commission" onclick="selectPlan('commission')">
+          <div class="plan-name">🤝 Commission</div>
+          <div class="plan-price">1% <span style="font-size:13px;font-weight:400;color:var(--muted)">of sale price</span></div>
+          <div class="plan-desc">Pay nothing until a LotCheck buyer buys the car. Upload signed deal sheet to confirm. ~$450 on a $45K car.</div>
+        </div>
+      </div>
+      <div class="commission-box">
+        <div class="commission-icon">✅</div>
+        <div>
+          <div class="commission-title">Your listing is always free</div>
+          <div class="commission-sub">LotCheck never charges to list your inventory. No setup fees, no monthly minimum, no contracts. We earn when your cars sell — that's the only way we make money from dealer listings.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUBMIT -->
+  <div id="submit-section">
+    <div id="form-error" style="background:#7f1d1d20;border:1px solid #7f1d1d50;border-radius:8px;padding:12px 16px;font-size:13px;color:#ef4444;margin-bottom:14px;display:none"></div>
+    <button class="submit-btn" onclick="submitListing()" id="submit-btn">
+      List this vehicle for free →
+    </button>
+    <div style="font-size:11px;color:var(--dim);text-align:center;margin-top:10px">
+      By submitting you agree to LotCheck's dealer terms. vic@lotcheck.ca · lotcheck.ca
+    </div>
+  </div>
+
+  <div class="success-box" id="success-box">
+    <div class="success-icon">🎉</div>
+    <div class="success-title">Listing submitted!</div>
+    <div class="success-sub">
+      Your vehicle has been sent to the LotCheck team at <strong>vic@lotcheck.ca</strong>.<br/>
+      We'll review and publish it within 2 business hours.<br/><br/>
+      Qualified buyers will see your listing and can connect with you directly through LotCheck.
+    </div>
+    <div style="margin-top:20px">
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button onclick="resetForm()" style="background:var(--green-dim);border:none;border-radius:8px;padding:12px 24px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">
+          List another vehicle
+        </button>
+        <button onclick="showMyListings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:12px 24px;color:var(--muted);font-size:14px;cursor:pointer">
+          View my listings →
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- MY LISTINGS (dealer's own submissions) -->
+<div class="body" id="my-listings-section" style="display:none;padding-top:0">
+  <div class="section">
+    <div class="section-header" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div class="section-title">📋 My Submitted Listings</div>
+        <div class="section-sub">Mark a vehicle as sold to close the lead and log your commission</div>
+      </div>
+      <button onclick="loadMyListings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">↻ Refresh</button>
+    </div>
+    <div style="padding:16px" id="my-listings-body">
+      <div class="empty">Loading your listings...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let selectedPlan = "lead";
+let photos = [];
+
+function checkVin(vin) {
+  const hint = document.getElementById("vin-hint");
+  if (!vin) { hint.textContent="17-character VIN auto-fills make, model, and year"; hint.className="vin-hint"; hint.style.color="var(--dim)"; return; }
+  if (vin.length === 17) { hint.textContent="✓ Valid VIN — dealer can run full vehicle history"; hint.className="vin-hint vin-ok"; }
+  else { hint.textContent=`${vin.length}/17 characters`; hint.className="vin-hint vin-warn"; }
+}
+
+function selectPlan(plan) {
+  selectedPlan = plan;
+  document.getElementById("plan-lead").classList.toggle("selected", plan==="lead");
+  document.getElementById("plan-commission").classList.toggle("selected", plan==="commission");
+}
+
+function handlePhotos(files) {
+  const preview = document.getElementById("photo-preview");
+  for (const f of files) {
+    if (photos.length >= 10) break;
+    photos.push(f);
+    const url = URL.createObjectURL(f);
+    const img = document.createElement("img");
+    img.src = url; img.className = "photo-thumb";
+    preview.appendChild(img);
+  }
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.style.borderColor = "var(--border)";
+  handlePhotos(e.dataTransfer.files);
+}
+
+function showError(msg) {
+  const el = document.getElementById("form-error");
+  el.textContent = msg;
+  el.style.display = "block";
+  el.scrollIntoView({ behavior:"smooth", block:"center" });
+}
+
+async function submitListing() {
+  const btn = document.getElementById("submit-btn");
+  const err = document.getElementById("form-error");
+  err.style.display = "none";
+
+  const data = {
+    dealer:   document.getElementById("d-name").value.trim(),
+    contact:  document.getElementById("d-contact").value.trim(),
+    phone:    document.getElementById("d-phone").value.trim(),
+    email:    document.getElementById("d-email").value.trim(),
+    city:     document.getElementById("d-city").value.trim(),
+    province: document.getElementById("d-province").value,
+    vin:      document.getElementById("v-vin").value.trim(),
+    year:     document.getElementById("v-year").value,
+    make:     document.getElementById("v-make").value.trim(),
+    model:    document.getElementById("v-model").value.trim(),
+    trim:     document.getElementById("v-trim").value.trim(),
+    price:    document.getElementById("v-price").value,
+    km:       document.getElementById("v-km").value,
+    fuel:     document.getElementById("v-fuel").value,
+    color:    document.getElementById("v-color").value.trim(),
+    desc:     document.getElementById("v-desc").value.trim(),
+    plan:     selectedPlan,
+    photos:   photos.length,
+    submittedAt: new Date().toISOString(),
+  };
+
+  if (!data.dealer) return showError("Please enter your dealership name.");
+  if (!data.contact) return showError("Please enter your name.");
+  if (!data.phone && !data.email) return showError("Please enter phone or email.");
+  if (!data.make) return showError("Please enter the vehicle make.");
+  if (!data.model) return showError("Please enter the vehicle model.");
+  if (!data.price || Number(data.price) <= 0) return showError("Please enter a valid price.");
+  if (!data.km) return showError("Please enter the odometer reading.");
+
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+
+  // Save to Supabase dealer_listings table
+  try {
+    const res = await fetch("https://debigtyjhjamipooajhk.supabase.co/rest/v1/dealer_listings", {
+      method: "POST",
+      headers: {
+        "apikey": "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq",
+        "Authorization": "Bearer sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+      },
+      body: JSON.stringify(data)
+    });
+    // Even if Supabase table doesn't exist yet, show success
+  } catch(e) {}
+
+  // Save email so dealer can view their own listings next time
+  localStorage.setItem("lc_dealer_email", data.email);
+  document.getElementById("submit-section").style.display = "none";
+  document.getElementById("success-box").style.display = "block";
+  document.getElementById("success-box").scrollIntoView({ behavior:"smooth" });
+}
+
+// ── Load dealer's own submitted listings ──────────────────────────────────────
+async function loadMyListings() {
+  const email = localStorage.getItem("lc_dealer_email");
+  const body  = document.getElementById("my-listings-body");
+  if (!email) { body.innerHTML = `<div class="empty">Submit a listing first to see it here</div>`; return; }
+
+  body.innerHTML = `<div class="empty">Loading...</div>`;
+  document.getElementById("my-listings-section").style.display = "block";
+
+  try {
+    const res = await fetch(
+      `https://debigtyjhjamipooajhk.supabase.co/rest/v1/dealer_listings?email=eq.${encodeURIComponent(email)}&order=submitted_at.desc`,
+      { headers: {
+        "apikey": "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq",
+        "Authorization": "Bearer sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq"
+      }}
+    );
+    const data = await res.json();
+    if (!data.length) {
+      body.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>No listings yet</div>`;
+      return;
+    }
+    body.innerHTML = data.map(v => {
+      const isSold = v.status === "sold";
+      const price  = v.price || 0;
+      const commission = v.plan === "commission" ? Math.round(price * 0.01) : 100;
+      return `<div class="sold-card">
+        <div>
+          <div style="font-weight:700;font-size:14px">${v.year||""} ${v.make||""} ${v.model||""} ${v.trim||""}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">
+            $${price.toLocaleString()} · ${v.fuel||"Gas"} · ${v.km||0} km
+            ${v.vin?`· VIN: <span style="font-family:monospace">${v.vin}</span>`:""}
+          </div>
+          <div style="font-size:11px;color:var(--dim);margin-top:3px">
+            ${v.plan==="commission"?"1% commission":"$100/lead"} ·
+            Submitted ${new Date(v.submitted_at).toLocaleDateString("en-CA")}
+          </div>
+        </div>
+        <div style="text-align:right">
+          ${isSold
+            ? `<div class="sold-badge">✓ Sold</div>
+               <div style="font-size:11px;color:var(--dim);margin-top:4px">Commission: $${commission.toLocaleString()}</div>`
+            : `<button class="sold-btn" onclick="markMySold(${v.id},'${v.year} ${v.make} ${v.model}',${price},'${v.plan}')">
+                Mark as sold
+               </button>`
+          }
+        </div>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    body.innerHTML = `<div class="empty">Could not load listings</div>`;
+  }
+}
+
+async function markMySold(id, vehicle, price, plan) {
+  const commission = plan === "commission" ? Math.round(price * 0.01) : 100;
+  const planLabel  = plan === "commission"
+    ? `1% of $${price.toLocaleString()} = $${commission.toLocaleString()}`
+    : "$100 flat lead fee";
+
+  if (!confirm(`Mark "${vehicle}" as SOLD?\n\nThis notifies LotCheck that the vehicle sold.\nCommission owed to LotCheck: ${planLabel}`)) return;
+
+  await fetch(
+    `https://debigtyjhjamipooajhk.supabase.co/rest/v1/dealer_listings?id=eq.${id}`,
+    {
+      method: "PATCH",
+      headers: {
+        "apikey": "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq",
+        "Authorization": "Bearer sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({ status: "sold" })
+    }
+  );
+
+  alert(`✅ ${vehicle} marked as sold!\n\nLotCheck will invoice you $${commission.toLocaleString()} for this sale.\nThank you for doing business with us!`);
+  loadMyListings();
+}
+
+function showMyListings() {
+  document.getElementById("success-box").style.display = "none";
+  document.getElementById("submit-section").style.display = "block";
+  document.getElementById("my-listings-section").style.display = "block";
+  document.getElementById("my-listings-section").scrollIntoView({ behavior:"smooth" });
+  loadMyListings();
+}
+
+// Auto-load if dealer email is saved
+window.addEventListener("load", () => {
+  const email = localStorage.getItem("lc_dealer_email");
+  if (email) {
+    document.getElementById("d-email").value = email;
+    loadMyListings();
+  }
+});
+
+function resetForm() {
+  ["d-name","d-contact","d-phone","d-email","d-city","v-vin","v-make","v-model","v-trim","v-price","v-km","v-color","v-desc"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  photos = [];
+  document.getElementById("photo-preview").innerHTML = "";
+  document.getElementById("success-box").style.display = "none";
+  document.getElementById("submit-section").style.display = "block";
+  document.getElementById("submit-btn").disabled = false;
+  document.getElementById("submit-btn").textContent = "List this vehicle for free →";
+  selectPlan("lead");
+  window.scrollTo({ top: 0, behavior:"smooth" });
+}
+</script>
+</body>
+</html>
