@@ -19,7 +19,7 @@ const GLOBAL_CSS = `
      xl:  1280px+   (desktop, large monitors)
   ────────────────────────────────────────────────────────────────────────── */
 
-  /* ── Live background animation ──────────────────────────────────────────── */
+  /* ── Apple-style particle background ─────────────────────────────────────── */
   .lc-live-bg {
     position: fixed;
     inset: 0;
@@ -28,43 +28,12 @@ const GLOBAL_CSS = `
     pointer-events: none;
     background: #020617;
   }
-  .lc-live-bg::before {
-    content: "";
+  .lc-live-bg canvas {
     position: absolute;
     inset: 0;
-    background:
-      radial-gradient(circle at 20% 30%, rgba(22,163,74,0.06) 0%, transparent 40%),
-      radial-gradient(circle at 80% 70%, rgba(14,165,233,0.06) 0%, transparent 40%);
-  }
-  .lc-pulse-dot {
-    position: absolute;
-    border-radius: 50%;
-    background: #16a34a;
-    box-shadow: 0 0 12px 2px rgba(22,163,74,0.6);
-    animation: lc-pulse-fade 3.5s ease-in-out infinite;
-  }
-  .lc-pulse-dot.blue {
-    background: #0ea5e9;
-    box-shadow: 0 0 12px 2px rgba(14,165,233,0.6);
-  }
-  @keyframes lc-pulse-fade {
-    0%   { opacity: 0; transform: scale(0.4); }
-    15%  { opacity: 0.9; transform: scale(1); }
-    40%  { opacity: 0.5; }
-    100% { opacity: 0; transform: scale(1.6); }
-  }
-  .lc-grid-line {
-    position: absolute;
-    background: linear-gradient(90deg, transparent, rgba(22,163,74,0.15), transparent);
-    height: 1px;
     width: 100%;
-    animation: lc-scan 8s linear infinite;
-  }
-  @keyframes lc-scan {
-    0%   { transform: translateY(-10vh); opacity: 0; }
-    10%  { opacity: 1; }
-    90%  { opacity: 1; }
-    100% { transform: translateY(110vh); opacity: 0; }
+    height: 100%;
+    opacity: 0.85;
   }
 
   /* Live ticker strip */
@@ -493,8 +462,8 @@ function lotScore(l,all){
 // ── Badges ────────────────────────────────────────────────────────────────────
 function ScorePill({score}){
   const c=score>=70?"#16a34a":score>=45?"#d97706":"#dc2626";
-  const l=score>=70?"🔥 Hot":score>=45?"Fair":"High";
-  return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l} · {score}</span>;
+  const l=score>=70?"✓ Great Deal":score>=45?"~ Fair Price":"↑ Above Market";
+  return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>;
 }
 function FuelTag({fuel}){
   const c={BEV:"#22c55e",PHEV:"#3b82f6",Hybrid:"#8b5cf6",Gas:"#64748b"}[fuel]||"#64748b";
@@ -906,7 +875,7 @@ function ProModal({onStart,onClose}){
           <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
-        <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Cancel anytime. Then $29/mo CAD.</div>
+        <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Cancel anytime. Then $9.99/mo CAD.</div>
         {[["📊","Canadian Black Book","Retail, trade & wholesale on every listing"],["⚡","EVAP Rebate Checker","Federal + provincial incentives stacked"],["🗓️","Alberta Allocations","Incoming inventory before it hits the lot"],["🔔","Unlimited Alerts","Price drop push notifications"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
@@ -1075,7 +1044,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
 
   const key=f=>`${listing.id}-${f}`;
   const isUnlocked=f=>isPro||unlocks[key(f)];
-  const unlockPrice={vin:2.99,cbb:1.99};
+  const unlockPrice={vin:2.99,cbb:2.99};
 
   return(
     <div style={{padding:"16px"}}>
@@ -1093,7 +1062,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
       </div>
       {/* Tabs */}
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Black Book":"🔒 Black Book $1.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN History $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Black Book":"🔒 Black Book $2.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN History $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
           <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{
             if((t==="cbb"||t==="vin")&&!isUnlocked(t)){setUnlockModal(t);return;}
             setTab(t);
@@ -1117,7 +1086,7 @@ function DetailPanel({listing,isPro,onConnect,onUpgrade,onTestDrive}){
           </ResponsiveContainer>
         </div>
         <div className="lc-stats">
-          {[["Asking",`$${listing.price.toLocaleString()}`],["LotScore",`${score}/100`],["Location",`${listing.city}, ${listing.province}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
+          {[["Asking",`$${listing.price.toLocaleString()}`],["Deal Score",`${score}/100`],["Location",`${listing.city}, ${listing.province}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
             <div key={l} className="lc-stat"><div className="lc-stat-label">{l}</div><div className="lc-stat-value">{v}</div></div>
           ))}
         </div>
@@ -1227,40 +1196,117 @@ function ListingCard({listing,onClick,active}){
   );
 }
 
-// ── Live Background — pulsing dots + scanning lines, evokes a live market ─────
+
+// ── Apple-style particle background — calm flowing sand/dust particles ─────────
 function LiveBackground(){
-  const [dots,setDots]=useState([]);
-  const idRef=useRef(0);
+  const canvasRef=useRef(null);
+  const animRef=useRef(null);
 
   useEffect(()=>{
-    const spawn=()=>{
-      const id=idRef.current++;
-      const dot={
-        id,
-        top:Math.random()*100,
-        left:Math.random()*100,
-        size:4+Math.random()*6,
-        blue:Math.random()>0.5,
-      };
-      setDots(prev=>[...prev.slice(-14),dot]);
+    const canvas=canvasRef.current;
+    if(!canvas)return;
+    const ctx=canvas.getContext("2d");
+
+    let W=canvas.width=window.innerWidth;
+    let H=canvas.height=window.innerHeight;
+
+    const resize=()=>{
+      W=canvas.width=window.innerWidth;
+      H=canvas.height=window.innerHeight;
     };
-    spawn();
-    const interval=setInterval(spawn,900);
-    return()=>clearInterval(interval);
+    window.addEventListener("resize",resize);
+
+    // Particle system — Apple "sand" aesthetic: tiny, slow, organic
+    const COLORS=[
+      [22,163,74],   // green
+      [14,165,233],  // cyan
+      [99,102,241],  // indigo
+      [139,92,246],  // violet
+    ];
+
+    const N=Math.min(200, Math.floor(W*H/8000)); // density scales with screen
+    const particles=Array.from({length:N},()=>{
+      const [r,g,b]=COLORS[Math.floor(Math.random()*COLORS.length)];
+      return{
+        x:Math.random()*W,
+        y:Math.random()*H,
+        r:r,g:g,b:b,
+        size:Math.random()*1.8+0.3,
+        // slow drift — Apple uses very subtle motion
+        vx:(Math.random()-0.5)*0.15,
+        vy:(Math.random()-0.5)*0.12,
+        // each particle has a gentle sine wave offset for organic feel
+        phase:Math.random()*Math.PI*2,
+        freq:0.003+Math.random()*0.005,
+        amp:0.3+Math.random()*0.5,
+        opacity:0.15+Math.random()*0.55,
+        opacityTarget:0.15+Math.random()*0.55,
+        opacitySpeed:0.002+Math.random()*0.004,
+      };
+    });
+
+    let t=0;
+    const draw=()=>{
+      // Dark near-black fill — very subtle fade so trails feel like breath
+      ctx.fillStyle="rgba(2,6,23,0.18)";
+      ctx.fillRect(0,0,W,H);
+
+      t+=1;
+
+      for(const p of particles){
+        // Sinusoidal drift — gives organic, breathing motion
+        p.x+=p.vx+Math.sin(t*p.freq+p.phase)*p.amp*0.08;
+        p.y+=p.vy+Math.cos(t*p.freq*0.7+p.phase)*p.amp*0.06;
+
+        // Wrap edges seamlessly
+        if(p.x<-2)p.x=W+2;
+        if(p.x>W+2)p.x=-2;
+        if(p.y<-2)p.y=H+2;
+        if(p.y>H+2)p.y=-2;
+
+        // Gentle opacity breathe
+        p.opacity+=(p.opacityTarget-p.opacity)*p.opacitySpeed;
+        if(Math.abs(p.opacity-p.opacityTarget)<0.01){
+          p.opacityTarget=0.08+Math.random()*0.5;
+        }
+
+        // Draw particle — soft glow
+        const grd=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.size*3);
+        grd.addColorStop(0,`rgba(${p.r},${p.g},${p.b},${p.opacity})`);
+        grd.addColorStop(1,`rgba(${p.r},${p.g},${p.b},0)`);
+        ctx.beginPath();
+        ctx.arc(p.x,p.y,p.size*3,0,Math.PI*2);
+        ctx.fillStyle=grd;
+        ctx.fill();
+      }
+
+      // Very faint ambient glow that shifts slowly — the "sand dune" highlight
+      const gx=Math.sin(t*0.0008)*W*0.4+W*0.5;
+      const gy=Math.cos(t*0.0006)*H*0.3+H*0.45;
+      const ambient=ctx.createRadialGradient(gx,gy,0,gx,gy,Math.min(W,H)*0.7);
+      ambient.addColorStop(0,"rgba(22,163,74,0.025)");
+      ambient.addColorStop(0.5,"rgba(14,165,233,0.015)");
+      ambient.addColorStop(1,"rgba(2,6,23,0)");
+      ctx.fillStyle=ambient;
+      ctx.fillRect(0,0,W,H);
+
+      animRef.current=requestAnimationFrame(draw);
+    };
+    draw();
+
+    return()=>{
+      cancelAnimationFrame(animRef.current);
+      window.removeEventListener("resize",resize);
+    };
   },[]);
 
   return(
     <div className="lc-live-bg" aria-hidden="true">
-      <div className="lc-grid-line" style={{left:"15%",animationDelay:"0s"}}/>
-      <div className="lc-grid-line" style={{left:"55%",animationDelay:"2.5s"}}/>
-      <div className="lc-grid-line" style={{left:"85%",animationDelay:"5s"}}/>
-      {dots.map(d=>(
-        <div key={d.id} className={`lc-pulse-dot${d.blue?" blue":""}`}
-          style={{top:`${d.top}%`,left:`${d.left}%`,width:d.size,height:d.size}}/>
-      ))}
+      <canvas ref={canvasRef}/>
     </div>
   );
 }
+
 
 // ── Live Ticker — scrolling strip of "live" price movements ───────────────────
 function LiveTicker(){
