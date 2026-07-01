@@ -79,6 +79,8 @@ const GLOBAL_CSS = `
     will-change: transform;
   }
   .lc-ticker-wrap:hover .lc-ticker-track { animation-play-state: paused; }
+  .lc-ticker-item:hover { background: rgba(255,255,255,0.06); border-radius: 6px; }
+  .lc-ticker-item:hover .name { color: #22c55e; }
   @keyframes lc-ticker-scroll {
     0%   { transform: translateX(0); }
     100% { transform: translateX(-50%); }
@@ -1645,16 +1647,11 @@ function LiveBackground(){
 
 
 // ── Live Ticker — scrolling strip of "live" price movements ───────────────────
-function LiveTicker(){
+function LiveTicker({listings,onSelect}){
+  const src=listings&&listings.length>0?listings:DEMO_LISTINGS;
   const [items,setItems]=useState(()=>
-    LISTINGS.map(l=>({
-      id:l.id,
-      name:`${l.make} ${l.model}`,
-      price:l.price,
-      change:Math.round((Math.random()-0.5)*1200),
-    }))
+    src.map(l=>({id:l.id,listing:l,name:`${l.make} ${l.model}`,price:l.price,change:Math.round((Math.random()-0.5)*1200)}))
   );
-
   useEffect(()=>{
     const interval=setInterval(()=>{
       setItems(prev=>prev.map(it=>{
@@ -1667,17 +1664,16 @@ function LiveTicker(){
     },2500);
     return()=>clearInterval(interval);
   },[]);
-
   const doubled=[...items,...items];
-
   return(
     <div className="lc-ticker-wrap">
       <div className="lc-ticker-track">
         {doubled.map((it,i)=>(
-          <span key={i} className="lc-ticker-item">
+          <span key={i} className="lc-ticker-item" onClick={()=>onSelect&&onSelect(it.listing)}
+            style={{cursor:"pointer"}} title={`View ${it.name}`}>
             <span className="lc-ticker-dot"/>
             <span className="name">{it.name}</span>
-            <span>${it.price.toLocaleString()}</span>
+            <span style={{color:"#f1f5f9",fontWeight:600}}>${it.price.toLocaleString()}</span>
             <span className={it.change>=0?"up":"down"}>{it.change>=0?"▲":"▼"} ${Math.abs(it.change).toLocaleString()}</span>
           </span>
         ))}
@@ -1765,7 +1761,7 @@ export default function App(){
           </div>
         </header>
 
-        <LiveTicker/>
+        <LiveTicker listings={liveListings} onSelect={handleSelect}/>
 
         {showAppraisal&&<AppraisalModal onClose={()=>setShowAppraisal(false)}/>}
 
