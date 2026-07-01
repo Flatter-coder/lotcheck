@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 const supabase = createClient(
   "https://debigtyjhjamipooajhk.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg3MjU1MzYsImV4cCI6MjA2NDMwMTUzNn0.dTrSPj7rL4YabvPNf4TxAhshW8wRRPEPITPyHHZBBj0"
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A"
 );
 
 // ── Global responsive styles injected once ────────────────────────────────────
