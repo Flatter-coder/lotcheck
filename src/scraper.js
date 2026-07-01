@@ -69,12 +69,12 @@ function normalize(item) {
 
   // Extract year/make/model from title like "2023 Toyota RAV4 Prime XSE"
   const titleMatch = (item.title || "").match(/^(\d{4})\s+(\w+)\s+(.+)/);
-  const year  = titleMatch ? parseInt(titleMatch[1]) : (item.year || 2020);
-  const make  = titleMatch ? titleMatch[2] : (item.make || "Unknown");
-  const model = titleMatch ? titleMatch[3].split(" ").slice(0,2).join(" ") : (item.model || "Unknown");
+  const year  = titleMatch ? parseInt(titleMatch[1]) : (parseInt(item.attributes?.Year) || item.year || 2020);
+  const make  = titleMatch ? titleMatch[2] : (item.attributes?.Make || item.make || "Unknown");
+  const model = titleMatch ? titleMatch[3].split(" ").slice(0,2).join(" ") : (item.attributes?.Model || item.model || "Unknown");
 
-  const price = Math.round(parseInt(String(item.price || "0").replace(/[^0-9]/g, "")) / 100) || 0;
-  const km    = parseInt(String(item.mileage || item.kilometers || "0").replace(/[^0-9]/g, "")) || 0;
+  const price = item.priceAmount || parseInt(String(item.price || "0").replace(/[^0-9]/g, "")) || 0;
+  const km    = parseInt(String(item.attributes?.Kilometers || item.mileage || item.kilometers || "0").replace(/[^0-9]/g, "")) || 0;
 
   return {
     external_id:  item.url || item.adId || item.id,
