@@ -1,48 +1,39 @@
 name: LotCheck Daily Scrape + Verify
-
 on:
   schedule:
     - cron: "0 13 * * *"   # 6am Calgary daily
   workflow_dispatch:
-
 jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
       - name: Install dependencies
         run: npm install @supabase/supabase-js apify-client ws
-
       - name: Step 1 — Scrape listings from Kijiji
         env:
           APIFY_TOKEN:  ${{ secrets.APIFY_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           echo "🍁 Scraping Canadian listings..."
           node src/scraper.js
-
       - name: Step 2 — Verify listings before publishing
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           echo "🔍 Running verification pipeline..."
           node src/verify.js
-
       - name: Summary
         if: success()
         run: echo "✅ Scrape + verify complete — $(date)"
-
       - name: On failure
         if: failure()
         run: echo "❌ Pipeline failed — check logs"
