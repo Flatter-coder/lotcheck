@@ -92,6 +92,7 @@ function normalize(item) {
     city,
     province,
     scraped_at:   new Date().toISOString(),
+    status:       "pending",
   };
 }
 
