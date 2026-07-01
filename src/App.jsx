@@ -433,21 +433,85 @@ function getRebate(province,fuel,listing){
   return{federal,provincial,total:federal+provincial,prov_name:r.prov_name,note:r.note,eligible:true,ineligibleReason:""};
 }
 
+// ── EVAP eligible vehicle list — verified against Transport Canada July 1, 2026
+// Source: tc.canada.ca/en/road-transportation/innovative-technologies/electric-vehicles/electric-vehicle-affordability-program-evap/electric-vehicle-affordability-program-vehicle-list
+// Key rules: NEW vehicles only (< 10,000 km), final transaction value ≤ $50,000, purchased Feb 16 2026+
+// Canadian-made EVs (Dodge Charger, Chrysler Pacifica) exempt from price cap
 const EVAP_LIST=[
-  {year:2025,make:"Toyota",model:"RAV4 Prime",fuel:"PHEV",incentive:2500},
-  {year:2024,make:"Toyota",model:"RAV4 Prime",fuel:"PHEV",incentive:2500},
-  {year:2025,make:"Toyota",model:"bZ4X",fuel:"BEV",incentive:5000},
-  {year:2025,make:"Hyundai",model:"IONIQ 5",fuel:"BEV",incentive:5000},
-  {year:2025,make:"Hyundai",model:"IONIQ 6",fuel:"BEV",incentive:5000},
-  {year:2025,make:"Kia",model:"EV6",fuel:"BEV",incentive:5000},
-  {year:2025,make:"Kia",model:"Niro EV",fuel:"BEV",incentive:5000},
+  // ── Chevrolet ──────────────────────────────────────────────────────────────
+  {year:2027,make:"Chevrolet",model:"Bolt",fuel:"BEV",incentive:5000},
   {year:2026,make:"Chevrolet",model:"Equinox EV",fuel:"BEV",incentive:5000},
   {year:2025,make:"Chevrolet",model:"Equinox EV",fuel:"BEV",incentive:5000},
+  // ── Chrysler (Canadian-made — no price cap) ────────────────────────────────
+  {year:2026,make:"Chrysler",model:"Pacifica",fuel:"PHEV",incentive:2500},
+  {year:2025,make:"Chrysler",model:"Pacifica",fuel:"PHEV",incentive:2500},
+  // ── Dodge (Canadian-made — no price cap) ──────────────────────────────────
+  {year:2026,make:"Dodge",model:"Charger",fuel:"BEV",incentive:5000},
+  {year:2025,make:"Dodge",model:"Charger",fuel:"BEV",incentive:5000},
+  {year:2024,make:"Dodge",model:"Charger",fuel:"BEV",incentive:5000},
+  // ── Fiat ───────────────────────────────────────────────────────────────────
+  {year:2026,make:"Fiat",model:"500e",fuel:"BEV",incentive:5000},
+  {year:2025,make:"Fiat",model:"500e",fuel:"BEV",incentive:5000},
+  // ── Ford ───────────────────────────────────────────────────────────────────
+  {year:2026,make:"Ford",model:"Escape",fuel:"PHEV",incentive:2500},
   {year:2025,make:"Ford",model:"Escape",fuel:"PHEV",incentive:2500},
-  {year:2025,make:"Mitsubishi",model:"Outlander",fuel:"PHEV",incentive:2500},
+  {year:2024,make:"Ford",model:"Escape",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Ford",model:"Mach-e",fuel:"BEV",incentive:5000},
+  // ── Hyundai ────────────────────────────────────────────────────────────────
+  {year:2026,make:"Hyundai",model:"Kona EV",fuel:"BEV",incentive:5000},
+  {year:2025,make:"Hyundai",model:"Kona EV",fuel:"BEV",incentive:5000},
+  // NOTE: IONIQ 5 and IONIQ 6 are NOT on the 2026 EVAP list (over $50k or not enrolled)
+  // ── Kia ────────────────────────────────────────────────────────────────────
+  {year:2027,make:"Kia",model:"EV5",fuel:"BEV",incentive:5000},
+  {year:2026,make:"Kia",model:"EV4",fuel:"BEV",incentive:5000},
+  {year:2026,make:"Kia",model:"Niro EV",fuel:"BEV",incentive:5000},
+  {year:2025,make:"Kia",model:"Niro EV",fuel:"BEV",incentive:5000},
+  {year:2024,make:"Kia",model:"Niro EV",fuel:"BEV",incentive:5000},
+  {year:2025,make:"Kia",model:"EV6",fuel:"BEV",incentive:5000},
+  {year:2026,make:"Kia",model:"Niro PHEV",fuel:"PHEV",incentive:2500},
+  {year:2025,make:"Kia",model:"Niro PHEV",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Kia",model:"Sorento PHEV",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Kia",model:"Sportage PHEV",fuel:"PHEV",incentive:2500},
+  {year:2027,make:"Kia",model:"Sportage PHEV",fuel:"PHEV",incentive:2500},
+  {year:2025,make:"Kia",model:"Sportage PHEV",fuel:"PHEV",incentive:2500},
+  // ── Mazda ──────────────────────────────────────────────────────────────────
+  {year:2026,make:"Mazda",model:"CX-70 PHEV",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Mazda",model:"CX-90 PHEV",fuel:"PHEV",incentive:2500},
+  // ── MINI ───────────────────────────────────────────────────────────────────
+  {year:2027,make:"MINI",model:"Countryman SE",fuel:"BEV",incentive:5000},
+  // ── Mitsubishi ─────────────────────────────────────────────────────────────
+  {year:2026,make:"Mitsubishi",model:"Outlander PHEV",fuel:"PHEV",incentive:2500},
+  {year:2025,make:"Mitsubishi",model:"Outlander PHEV",fuel:"PHEV",incentive:2500},
+  // ── Nissan ─────────────────────────────────────────────────────────────────
+  {year:2026,make:"Nissan",model:"Leaf",fuel:"BEV",incentive:5000},
+  // ── Subaru ─────────────────────────────────────────────────────────────────
+  {year:2026,make:"Subaru",model:"Uncharted",fuel:"BEV",incentive:5000},
+  // ── Tesla ──────────────────────────────────────────────────────────────────
+  {year:2026,make:"Tesla",model:"Model Y",fuel:"BEV",incentive:5000},
+  // ── Toyota ─────────────────────────────────────────────────────────────────
+  {year:2026,make:"Toyota",model:"C-HR",fuel:"BEV",incentive:5000},
+  {year:2026,make:"Toyota",model:"Prius Plug-in Hybrid",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Toyota",model:"RAV4 Plug-In Hybrid",fuel:"PHEV",incentive:2500},
+  {year:2026,make:"Toyota",model:"bZ",fuel:"BEV",incentive:5000},
+  // ── Volkswagen ─────────────────────────────────────────────────────────────
   {year:2025,make:"Volkswagen",model:"ID.4",fuel:"BEV",incentive:5000},
+  // ── Volvo ──────────────────────────────────────────────────────────────────
+  {year:2026,make:"Volvo",model:"EX30",fuel:"BEV",incentive:5000},
 ];
-function getEVAP(l){return EVAP_LIST.find(e=>e.year===l.year&&l.make?.toLowerCase()===e.make.toLowerCase()&&(l.model?.toLowerCase().includes(e.model.toLowerCase())||e.model.toLowerCase().includes(l.model?.toLowerCase())))||null;}
+function getEVAP(l){
+  if(!l||!l.make||!l.model) return null;
+  // Only NEW vehicles qualify (< 10,000 km)
+  if((l.km||0) > 10000) return null;
+  const lMake = l.make.toLowerCase();
+  const lModel = l.model.toLowerCase();
+  return EVAP_LIST.find(e=>{
+    if(e.year !== l.year) return false;
+    if(e.make.toLowerCase() !== lMake) return false;
+    // Model matching: handle both directions, strip common suffixes
+    const eModel = e.model.toLowerCase();
+    return lModel.includes(eModel) || eModel.includes(lModel);
+  }) || null;
+}
 
 const DEMO_LISTINGS=[
   {id:1,name:"2025 Toyota RAV4 Prime XSE",make:"Toyota",model:"RAV4 Prime",year:2025,price:49900,km:8000,fuel:"PHEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
