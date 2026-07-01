@@ -73,7 +73,7 @@ function normalize(item) {
   const make  = titleMatch ? titleMatch[2] : (item.make || "Unknown");
   const model = titleMatch ? titleMatch[3].split(" ").slice(0,2).join(" ") : (item.model || "Unknown");
 
-  const price = parseInt(String(item.price || "0").replace(/[^0-9]/g, "")) || 0;
+  const price = Math.round(parseInt(String(item.price || "0").replace(/[^0-9]/g, "")) / 100) || 0;
   const km    = parseInt(String(item.mileage || item.kilometers || "0").replace(/[^0-9]/g, "")) || 0;
 
   return {
