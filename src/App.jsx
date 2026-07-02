@@ -1136,13 +1136,12 @@ function AppraisalModal({onClose}){
 const BOC_CORE_INFLATION_DEFAULT = 2.0;
 const BOC_INFLATION_AS_OF = "May 2026";
 
-function DepreciationModal({onClose, liveListings}){
+function DepreciationModal({onClose}){
   const [cost,setCost]=useState(40000);
   const [years,setYears]=useState(7);
   const [firstRate,setFirstRate]=useState(20);
   const [rate,setRate]=useState(15);
   const [inflation,setInflation]=useState(BOC_CORE_INFLATION_DEFAULT);
-  const [model,setModel]=useState("");
 
   const declining=[cost];
   let val=cost;
@@ -1163,20 +1162,6 @@ function DepreciationModal({onClose, liveListings}){
   // inflation rate above.
   const real=declining.map((v,i)=>Math.round(v/Math.pow(1+inflation/100,i)));
   const chartData=declining.map((v,i)=>({year:i,declining:v,straight:straight[i],real:real[i]}));
-
-  // Real supply volume — how many of this model are actually live on
-  // LotCheck right now, vs the average across all tracked models. This is
-  // genuine data, not a guess. It is NOT demand — LotCheck has no record of
-  // completed sales, only what's currently listed, so there's no honest way
-  // to show how fast something sells from this data alone.
-  const modelQuery=model.trim().toLowerCase();
-  const matchingSupply=modelQuery
-    ? (liveListings||[]).filter(l=>(l.model||"").toLowerCase().includes(modelQuery)||(l.name||"").toLowerCase().includes(modelQuery)).length
-    : null;
-  const modelCounts={};
-  (liveListings||[]).forEach(l=>{ if(l.model) modelCounts[l.model]=(modelCounts[l.model]||0)+1; });
-  const modelKeys=Object.keys(modelCounts);
-  const avgSupplyPerModel=modelKeys.length ? (modelKeys.reduce((s,k)=>s+modelCounts[k],0)/modelKeys.length) : 0;
 
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -1240,35 +1225,10 @@ function DepreciationModal({onClose, liveListings}){
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <div style={{display:"flex",gap:14,fontSize:11,color:"#64748b",marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:14,fontSize:11,color:"#64748b",marginBottom:4,flexWrap:"wrap"}}>
           <span><span style={{display:"inline-block",width:10,height:2,background:"#16a34a",marginRight:6,verticalAlign:"middle"}}/>Declining balance</span>
           <span><span style={{display:"inline-block",width:10,height:2,background:"#64748b",marginRight:6,verticalAlign:"middle"}}/>Straight-line</span>
           <span><span style={{display:"inline-block",width:10,height:2,background:"#f59e0b",marginRight:6,verticalAlign:"middle"}}/>Real (inflation-adjusted)</span>
-        </div>
-
-        <div style={{borderTop:"1px solid #1e293b",paddingTop:16}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:6}}>Real supply — optional</div>
-          <input type="text" placeholder="e.g. RAV4 Prime, Model Y, Sportage" value={model} onChange={e=>setModel(e.target.value)}
-            style={{width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"10px 12px",color:"#f1f5f9",fontSize:14,boxSizing:"border-box",outline:"none",marginBottom:10}}/>
-          {modelQuery&&(
-            <>
-              <div style={{display:"flex",alignItems:"flex-end",gap:16,height:70,marginBottom:6}}>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:70}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:4}}>{matchingSupply}</div>
-                  <div style={{width:"100%",height:Math.max(4,Math.min(60,matchingSupply*12)),background:"#16a34a",borderRadius:"4px 4px 0 0"}}/>
-                  <div style={{fontSize:10,color:"#475569",marginTop:4,textAlign:"center"}}>This model</div>
-                </div>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:70}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:4}}>{avgSupplyPerModel.toFixed(1)}</div>
-                  <div style={{width:"100%",height:Math.max(4,Math.min(60,avgSupplyPerModel*12)),background:"#334155",borderRadius:"4px 4px 0 0"}}/>
-                  <div style={{fontSize:10,color:"#475569",marginTop:4,textAlign:"center"}}>Avg model</div>
-                </div>
-              </div>
-              <div style={{fontSize:10,color:"#334155",lineHeight:1.5}}>
-                {matchingSupply} live listing{matchingSupply===1?"":"s"} matching "{model}" right now, vs {avgSupplyPerModel.toFixed(1)} average per model across LotCheck. This is real supply — LotCheck doesn't track completed sales, so there's no honest way to show demand or how fast something sells from this data.
-              </div>
-            </>
-          )}
         </div>
       </div>
     </div>
@@ -2221,7 +2181,7 @@ function LotCheckApp(){
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
         {showAppraisal&&<AppraisalModal onClose={()=>setShowAppraisal(false)}/>}
-        {showDepreciation&&<DepreciationModal onClose={()=>setShowDepreciation(false)} liveListings={liveListings}/>}
+        {showDepreciation&&<DepreciationModal onClose={()=>setShowDepreciation(false)}/>}
         {showArrivals&&isPro&&<ArrivalsModal liveListings={liveListings} historyMap={historyMap} onClose={()=>setShowArrivals(false)}/>}
 
         {/* Province filter — uses liveListings so only real provinces show */}
