@@ -1053,7 +1053,7 @@ function ProModal({onStart,onClose,trialStatus}){
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Full access for 48 hours, once per browser. Then $9.99/mo CAD.</div>
-        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🔍","VIN History","Skip the $2.99 unlock — free access while on Pro"],["🗓️","New Arrivals Tracker","Real listings LotCheck first saw in the last 7 days, by province"],].map(([icon,title,sub])=>(
+        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🔍","VIN History","Skip the $2.99 unlock — free access while on Pro"],["🗓️","Market Intelligence","New arrivals by province, price-drop badges, and days-on-market — all real data, all in one place"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
             <div><div style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{title}</div><div style={{fontSize:12,color:"#475569"}}>{sub}</div></div>
@@ -1466,9 +1466,17 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
           </div>
         )}
         <div className="lc-stats">
-          {[["Asking",`$${listing.price.toLocaleString()}`],["vs Comps",compAvgPrice==null?"No comps yet":`${comps.length} · avg $${compAvgPrice.toLocaleString()}`],["Odometer",`${listing.km.toLocaleString()} km`],["Tracked",daysTracked==null?"New today":`${daysTracked}d on LotCheck`]].map(([l,v])=>(
+          {[["Asking",`$${listing.price.toLocaleString()}`],["vs Comps",compAvgPrice==null?"No comps yet":`${comps.length} · avg $${compAvgPrice.toLocaleString()}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
             <div key={l} className="lc-stat"><div className="lc-stat-label">{l}</div><div className="lc-stat-value">{v}</div></div>
           ))}
+          {isPro?(
+            <div className="lc-stat"><div className="lc-stat-label">Tracked</div><div className="lc-stat-value">{daysTracked==null?"New today":`${daysTracked}d on LotCheck`}</div></div>
+          ):(
+            <div className="lc-stat" onClick={onUpgrade} style={{cursor:"pointer"}}>
+              <div className="lc-stat-label">Tracked</div>
+              <div className="lc-stat-value" style={{color:"#475569",fontSize:13}}>🔒 Pro</div>
+            </div>
+          )}
         </div>
       </>}
       {tab==="rebates"&&<EVAPRebateTab listing={listing} rebate={rebate}/>}
@@ -1510,7 +1518,7 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
   );
 }
 
-function ListingCard({listing,liveListings,history,onClick,active}){
+function ListingCard({listing,liveListings,history,isPro,onClick,active}){
   const score=lotScore(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
@@ -1525,7 +1533,7 @@ function ListingCard({listing,liveListings,history,onClick,active}){
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
-        {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
+        {isPro&&hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
         <div>
@@ -1744,7 +1752,7 @@ export default function App(){
                 }
               </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
-              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} onClick={handleSelect} active={selected?.id===l.id}/>)}
+              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} isPro={isPro} onClick={handleSelect} active={selected?.id===l.id}/>)}
             </div>
             <div className="lc-footer">© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
           </div>
