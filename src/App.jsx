@@ -746,8 +746,26 @@ function ConnectModal({listing,onClose}){
     if(!phone.trim()&&!email.trim())return setErr("Please enter phone or email.");
     if(wantsDelivery&&!deliveryCity.trim())return setErr("Please enter your delivery city.");
     setErr("");setStep("sending");
-    await new Promise(r=>setTimeout(r,1500));
-    setStep("done");
+    try{
+      const {error}=await supabase.from("leads").insert({
+        lead_type:"connect",
+        name, phone, email,
+        details:{
+          listing_external_id:listing.external_id||null,
+          listing_name:listing.name,
+          listing_price:listing.price,
+          province:listing.province,
+          wants_delivery:wantsDelivery,
+          delivery_city:wantsDelivery?deliveryCity:null,
+        },
+      });
+      if(error) throw error;
+      setStep("done");
+    }catch(err){
+      console.error("Lead submit failed:",err.message);
+      setErr("Something went wrong sending your request. Please try again.");
+      setStep("form");
+    }
   }
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
@@ -756,7 +774,7 @@ function ConnectModal({listing,onClose}){
           <div style={{textAlign:"center",padding:"16px 0"}}>
             <div style={{fontSize:52,marginBottom:12}}>✅</div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>LotChecked!</div>
-            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request sent. The dealer will contact you within 2 hours.</div>
+            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request received — we'll follow up with you directly about this listing.</div>
             {rebate.total>0&&(
               <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
                 <div style={{fontSize:13,color:"#22c55e",fontWeight:700,marginBottom:4}}>⚡ Remind the dealer about your rebate</div>
@@ -830,8 +848,27 @@ function TestDriveModal({listing,onClose}){
     if(!phone.trim()&&!email.trim())return setErr("Please enter phone or email.");
     if(!licenseConfirm)return setErr("Please confirm you have a valid driver's license.");
     setErr("");setStep("sending");
-    await new Promise(r=>setTimeout(r,1500));
-    setStep("done");
+    try{
+      const {error}=await supabase.from("leads").insert({
+        lead_type:"test_drive",
+        name, phone, email,
+        details:{
+          listing_external_id:listing.external_id||null,
+          listing_name:listing.name,
+          listing_price:listing.price,
+          province:listing.province,
+          preferred_day:day,
+          preferred_time:time,
+          license_confirmed:licenseConfirm,
+        },
+      });
+      if(error) throw error;
+      setStep("done");
+    }catch(err){
+      console.error("Lead submit failed:",err.message);
+      setErr("Something went wrong sending your request. Please try again.");
+      setStep("form");
+    }
   }
 
   return(
@@ -841,7 +878,7 @@ function TestDriveModal({listing,onClose}){
           <div style={{textAlign:"center",padding:"16px 0"}}>
             <div style={{fontSize:52,marginBottom:12}}>🚗</div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Test drive requested!</div>
-            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>The dealer will call you within 2 hours to confirm an exact time.</div>
+            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request received — we'll follow up with you directly to confirm a time.</div>
             <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
               <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:6}}>🗓️ Your preference</div>
               <div style={{fontSize:13,color:"#94a3b8"}}>{day} · {time}</div>
@@ -901,11 +938,7 @@ function TestDriveModal({listing,onClose}){
   );
 }
 
-const MAKES_DEALERS={
-  Toyota:"Cochrane Toyota", Hyundai:"Hyundai on Macleod", Kia:"Sherwood Kia",
-  Chevrolet:"Courtesy Chevrolet", Ford:"Courtesy Ford", Volkswagen:"Capilano VW",
-  Mitsubishi:"Stampede Mitsubishi",
-};
+const MAKES=["Toyota","Hyundai","Kia","Chevrolet","Ford","Volkswagen","Mitsubishi"];
 
 function estimateAppraisal(make,model,year,km,condition){
   const baseByAge={2026:42000,2025:38000,2024:34000,2023:30000,2022:26000,2021:22000,2020:18000,2019:15000};
@@ -932,7 +965,6 @@ function AppraisalModal({onClose}){
   const [err,setErr]=useState("");
 
   const estimate=step!=="form"?estimateAppraisal(make,model,Number(year),Number(km)||50000,condition):null;
-  const dealer=MAKES_DEALERS[make]||"a LotCheck partner dealer";
 
   function handleGetEstimate(){
     if(!model.trim()){setErr("Please enter your car's model.");return;}
@@ -945,8 +977,27 @@ function AppraisalModal({onClose}){
     if(!phone.trim()&&!email.trim()){setErr("Please enter phone or email.");return;}
     if(wantsPickup&&!pickupAddress.trim()){setErr("Please enter your pickup address.");return;}
     setErr("");setStep("sending");
-    await new Promise(r=>setTimeout(r,1500));
-    setStep("done");
+    try{
+      const {error}=await supabase.from("leads").insert({
+        lead_type:"appraisal",
+        name, phone, email,
+        details:{
+          make, model, year:Number(year), km:Number(km)||null, condition,
+          vin:vin||null,
+          estimate_low:estimate?.low||null,
+          estimate_mid:estimate?.mid||null,
+          estimate_high:estimate?.high||null,
+          wants_pickup:wantsPickup,
+          pickup_address:wantsPickup?pickupAddress:null,
+        },
+      });
+      if(error) throw error;
+      setStep("done");
+    }catch(err){
+      console.error("Lead submit failed:",err.message);
+      setErr("Something went wrong sending your request. Please try again.");
+      setStep("dealer");
+    }
   }
 
   const inp={width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:15,boxSizing:"border-box",outline:"none",fontFamily:"inherit",marginBottom:10};
@@ -964,7 +1015,7 @@ function AppraisalModal({onClose}){
             <div>
               <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Make</label>
               <select value={make} onChange={e=>setMake(e.target.value)} style={{...inp,appearance:"auto"}}>
-                {Object.keys(MAKES_DEALERS).map(m=><option key={m}>{m}</option>)}
+                {MAKES.map(m=><option key={m}>{m}</option>)}
               </select>
             </div>
             <div>
@@ -1033,7 +1084,8 @@ function AppraisalModal({onClose}){
         {step==="done"&&(
           <div style={{textAlign:"center",padding:"16px 0"}}>
             <div style={{fontSize:52,marginBottom:10}}>✅</div>
-            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request sent to {dealer}!</div>
+            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request received!</div>
+            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>We'll follow up with you directly about your {year} {make} {model}.</div>
             <button onClick={onClose} className="lc-modal-btn">Done</button>
           </div>
         )}
@@ -1111,10 +1163,7 @@ function ArrivalsModal({liveListings, historyMap, onClose}){
           <div style={{fontSize:11,fontWeight:700,color:"#16a34a",letterSpacing:1}}>NEW ARRIVALS TRACKER · PRO</div>
           <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
-        <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>{arrivals.length} new listing{arrivals.length===1?"":"s"} in the last {WINDOW_DAYS} days</div>
-        <div style={{fontSize:12,color:"#475569",marginBottom:16,lineHeight:1.6}}>
-          Based on when LotCheck first recorded each listing in our own scrape data — not manufacturer or dealer allocation data, which is private industry data we don't have access to.
-        </div>
+        <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:16}}>{arrivals.length} new listing{arrivals.length===1?"":"s"} in the last {WINDOW_DAYS} days</div>
 
         {chartData.length===0?(
           <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
@@ -1641,7 +1690,213 @@ function LiveTicker({listings,onSelect}){
   );
 }
 
+// ── Admin Panel ──────────────────────────────────────────────────────────
+// Reachable at lotcheck.ca/admin. Uses real Supabase Auth — not a client-
+// side password box. A text-match password screen provides no real
+// protection if the data behind it is reachable with the same public anon
+// key used everywhere else on the site; the actual security boundary here
+// is the RLS policy on the `leads` table (see create_leads_table.sql):
+// anon can INSERT, only an authenticated Supabase session can SELECT or
+// UPDATE. Create your own login at Supabase → Authentication → Users →
+// Add User with your real email + a real password.
+function AdminLogin(){
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [err,setErr]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  async function handleLogin(e){
+    e.preventDefault();
+    setErr("");setLoading(true);
+    const {error}=await supabase.auth.signInWithPassword({email,password});
+    setLoading(false);
+    if(error) setErr(error.message);
+    // On success, supabase.auth.onAuthStateChange (subscribed in AdminPanel)
+    // updates the session automatically — no manual redirect needed here.
+  }
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617"}}>
+      <form onSubmit={handleLogin} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box"}}>
+        <div style={{width:56,height:56,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,margin:"0 auto 16px"}}>✅</div>
+        <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>LotCheck Admin</div>
+        <div style={{fontSize:13,color:"#64748b",marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
+        <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
+          style={{width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
+        <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
+          style={{width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
+        {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:14,textAlign:"left"}}>{err}</div>}
+        <button type="submit" disabled={loading} className="lc-modal-btn">{loading?"Signing in…":"Sign in →"}</button>
+      </form>
+    </div>
+  );
+}
+
+function AdminPanel(){
+  const [session,setSession]=useState(null);
+  const [checkingSession,setCheckingSession]=useState(true);
+  const [leads,setLeads]=useState([]);
+  const [leadsLoading,setLeadsLoading]=useState(true);
+  const {listings:liveListings, loading:listingsLoading}=useListings();
+
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data})=>{
+      setSession(data.session);
+      setCheckingSession(false);
+    });
+    const {data:sub}=supabase.auth.onAuthStateChange((_event,newSession)=>{
+      setSession(newSession);
+    });
+    return()=>sub.subscription.unsubscribe();
+  },[]);
+
+  useEffect(()=>{
+    if(!session){ setLeads([]); return; }
+    let cancelled=false;
+    async function fetchLeads(){
+      setLeadsLoading(true);
+      try{
+        const {data,error}=await supabase.from("leads").select("*").order("created_at",{ascending:false}).limit(500);
+        if(error) throw error;
+        if(!cancelled) setLeads(data||[]);
+      }catch(err){
+        console.warn("⚠️ leads fetch failed (check you're logged in and RLS policies are applied):",err.message);
+        if(!cancelled) setLeads([]);
+      }finally{
+        if(!cancelled) setLeadsLoading(false);
+      }
+    }
+    fetchLeads();
+    return()=>{cancelled=true;};
+  },[session]);
+
+  async function updateLeadStatus(id,status){
+    const {error}=await supabase.from("leads").update({status}).eq("id",id);
+    if(!error) setLeads(prev=>prev.map(l=>l.id===id?{...l,status}:l));
+  }
+
+  if(checkingSession) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
+  if(!session) return <AdminLogin/>;
+
+  // Real analytics — computed from actual live listings and actual leads.
+  // Nothing here is estimated or fabricated; if a number is empty, it's
+  // because there's genuinely no data yet, not because it's hidden.
+  const byProvince={};
+  const byFuel={};
+  let evapCount=0;
+  liveListings.forEach(l=>{
+    byProvince[l.province]=(byProvince[l.province]||0)+1;
+    byFuel[l.fuel]=(byFuel[l.fuel]||0)+1;
+    if(getEVAP(l)) evapCount++;
+  });
+  const byLeadType={};
+  leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
+
+  return(
+    <div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",padding:"24px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,maxWidth:1100,margin:"0 auto 24px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:32,height:32,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>✅</div>
+          <div style={{fontWeight:800,fontSize:18}}>LotCheck Admin</div>
+        </div>
+        <button onClick={()=>supabase.auth.signOut()} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 14px",color:"#94a3b8",fontSize:13,cursor:"pointer"}}>Sign out</button>
+      </div>
+
+      <div style={{maxWidth:1100,margin:"0 auto"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{liveListings.length}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Total live listings</div>
+          </div>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+            <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>{evapCount}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>EVAP-eligible (new, verified)</div>
+          </div>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{Object.keys(byProvince).length}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Provinces covered</div>
+          </div>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{leads.length}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>Total leads received</div>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By province</div>
+            {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
+              <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
+                <span style={{color:"#94a3b8"}}>{p}</span><span style={{fontWeight:700}}>{c}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By fuel type</div>
+            {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
+              <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
+                <span style={{color:"#94a3b8"}}>{f}</span><span style={{fontWeight:700}}>{c}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+          LEADS · {leadsLoading?"loading…":`${leads.length} total`}
+          {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
+        </div>
+        {leadsLoading?(
+          <div style={{color:"#475569",fontSize:13}}>Loading leads…</div>
+        ):leads.length===0?(
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
+            No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
+          </div>
+        ):(
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+            {leads.map(l=>(
+              <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35",marginRight:8}}>{l.lead_type}</span>
+                    <strong style={{color:"#f1f5f9"}}>{l.name}</strong>
+                  </div>
+                  <div style={{fontSize:11,color:"#475569"}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+                </div>
+                <div style={{fontSize:13,color:"#94a3b8",marginBottom:6}}>
+                  {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
+                </div>
+                {l.details?.listing_name&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>Re: {l.details.listing_name}</div>}
+                {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
+                <div style={{display:"flex",gap:6,marginTop:8}}>
+                  {["new","contacted","closed"].map(s=>(
+                    <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
+                      style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
+                        background:l.status===s?"#16a34a":"transparent",
+                        border:`1px solid ${l.status===s?"#16a34a":"#334155"}`,
+                        color:l.status===s?"#fff":"#64748b"}}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// App is the actual default export/root — it must not call any hooks itself
+// (Rules of Hooks), so routing between the buyer-facing site and the admin
+// panel happens here by choosing which fully separate component to mount,
+// rather than an early-return inside a hook-using component.
 export default function App(){
+  return window.location.pathname.startsWith("/admin") ? <AdminPanel/> : <LotCheckApp/>;
+}
+
+function LotCheckApp(){
   const [trialStatus,setTrialStatus]=useState(()=>getTrialStatus());
   const isPro = trialStatus.state==="active";
   const [showPro,setShowPro]=useState(false);
