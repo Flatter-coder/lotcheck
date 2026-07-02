@@ -177,26 +177,47 @@ async function main() {
     }
   }
 
-  // Record price history for all valid listings
-  const priceHistory = valid.map(l => ({
-    listing_external_id: l.external_id,
-    price: l.price,
-    recorded_at: new Date().toISOString(),
-  }));
+  // Record price history for all valid listings.
+  // Previously this was ONE bulk insert for the whole run (up to ~100 rows).
+  // A Postgres multi-row INSERT is atomic — if a single row in that batch
+  // failed any constraint, the ENTIRE insert rolled back silently, meaning
+  // every listing scraped that run got zero price history, permanently
+  // (no retry). Confirmed in production: 39 of 90 live listings had zero
+  // price_history rows despite being scraped the same day as everything
+  // else. Fixed by batching (isolates failures to one batch instead of the
+  // whole run) and deduplicating by external_id first (defends against an
+  // intra-batch duplicate causing a constraint failure).
+  const seen = new Set();
+  const priceHistory = valid
+    .filter(l => {
+      if (seen.has(l.external_id)) return false;
+      seen.add(l.external_id);
+      return true;
+    })
+    .map(l => ({
+      listing_external_id: l.external_id,
+      price: l.price,
+      recorded_at: new Date().toISOString(),
+    }));
 
-  const { error: histError } = await supabase
-    .from("price_history")
-    .insert(priceHistory);
+  let historySaved = 0;
+  for (let i = 0; i < priceHistory.length; i += BATCH) {
+    const batch = priceHistory.slice(i, i + BATCH);
+    const { error: histError } = await supabase
+      .from("price_history")
+      .insert(batch);
 
-  if (histError) {
-    console.error("⚠️ Price history insert failed:", histError.message);
-  } else {
-    console.log(`📈 ${priceHistory.length} price history records saved`);
+    if (histError) {
+      console.error(`⚠️ Price history batch ${i}-${i + BATCH} failed:`, histError.message, histError.details || "");
+    } else {
+      historySaved += batch.length;
+      console.log(`📈 Price history ${historySaved}/${priceHistory.length} saved`);
+    }
   }
 
   console.log(`\n🍁 LotCheck scrape complete!`);
   console.log(`   Listings upserted: ${upserted}`);
-  console.log(`   Price points saved: ${priceHistory.length}`);
+  console.log(`   Price points saved: ${historySaved}/${priceHistory.length}`);
 }
 
 main().catch(err => {
