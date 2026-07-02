@@ -1053,7 +1053,7 @@ function ProModal({onStart,onClose,trialStatus}){
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Full access for 48 hours, once per browser. Then $9.99/mo CAD.</div>
-        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🔍","VIN History","Skip the $2.99 unlock — free access while on Pro"],["🗓️","Market Intelligence","New arrivals by province, price-drop badges, and days-on-market — all real data, all in one place"],].map(([icon,title,sub])=>(
+        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🗓️","Market Intelligence","New arrivals by province, price-drop badges, and days-on-market — all real data, all in one place"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
             <div><div style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{title}</div><div style={{fontSize:12,color:"#475569"}}>{sub}</div></div>
@@ -1141,7 +1141,7 @@ function ArrivalsModal({liveListings, historyMap, onClose}){
 function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
   const [step,setStep]=useState("offer");
   const labels={
-    vin:{title:"Unlock VIN History",icon:"🔍",desc:"Full accident history, ownership count, and odometer check for this vehicle."},
+    vin:{title:"Unlock VIN Lookup",icon:"🔍",desc:"Unlocks a direct link to CARFAX's official report page for this VIN. The CARFAX report itself is a separate ~$45 purchase with CARFAX."},
     cbb:{title:"Unlock Value Estimate",icon:"📊",desc:"LotCheck's retail, trade-in, and wholesale estimate for this exact vehicle, based on asking price, mileage, and age."},
   };
   const info=labels[feature]||labels.vin;
@@ -1180,7 +1180,7 @@ function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
             </button>
             <div style={{textAlign:"center",fontSize:11,color:"#334155",marginBottom:14}}>— or —</div>
             <button onClick={()=>{onUpgrade();onClose();}} style={{width:"100%",background:"transparent",border:"1px solid #1e3a5f",borderRadius:12,padding:"13px 0",color:"#60a5fa",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-              ✦ Get unlimited with Pro — 3 days free
+              ✦ Get unlimited with Pro — 48h free
             </button>
           </>
         )}
@@ -1210,7 +1210,8 @@ function VINHistoryPanel({listing}){
 
   return(
     <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
-      <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:10}}>VEHICLE HISTORY REPORT · CARFAX</div>
+      <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:4}}>VEHICLE HISTORY REPORT · CARFAX</div>
+      <div style={{fontSize:11,color:"#475569",marginBottom:14,lineHeight:1.5}}>This unlocks a direct link to CARFAX's official report page for this VIN. The CARFAX report itself is a separate purchase (~$45 CAD) made directly with CARFAX — not included in the LotCheck unlock.</div>
       <input type="text" placeholder="e.g. 1HGCM82633A123456" value={vin}
         onChange={e=>{setVin(e.target.value.toUpperCase());setError("");}} maxLength={17}
         style={{width:"100%",background:"#1e293b",border:`1px solid ${error?"#7f1d1d":"#334155"}`,borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:15,fontFamily:"monospace",letterSpacing:1,outline:"none",boxSizing:"border-box",marginBottom:6}}/>
@@ -1432,10 +1433,17 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
         }
         {rebate.total>0&&<div style={{fontSize:14,color:"#22c55e",fontWeight:700,marginTop:4}}>After all rebates: ~${(currentPrice-rebate.total).toLocaleString()}</div>}
       </div>
+      {/* VIN tab intentionally removed from this array — paused until a real
+          Carfax business relationship exists. Right now unlocking it would
+          only send the user to Carfax's own paid page (~$45 separately),
+          not deliver a report LotCheck actually provides. VINHistoryPanel
+          and its UnlockModal entry are left in place below, unused — add
+          ["vin", isUnlocked("vin")?"🔍 VIN History":"🔒 VIN $2.99"] back to
+          this array to re-enable once that's resolved. */}
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Value Est.":"🔒 Value Est. $2.99"],["vin",isUnlocked("vin")?"🔍 VIN History":"🔒 VIN $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Value Est.":"🔒 Value Est. $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
           <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{
-            if((t==="cbb"||t==="vin")&&!isUnlocked(t)){setUnlockModal(t);return;}
+            if(t==="cbb"&&!isUnlocked(t)){setUnlockModal(t);return;}
             setTab(t);
           }}>
             {l}
@@ -1495,7 +1503,8 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
           </div>
         </div>
       )}
-      {tab==="vin"&&isUnlocked("vin")&&<VINHistoryPanel listing={listing}/>}
+      {/* Paused — see note above tabs array. Re-enable by uncommenting:
+      {tab==="vin"&&isUnlocked("vin")&&<VINHistoryPanel listing={listing}/>} */}
       {tab==="insurance"&&<InsurancePanel listing={listing}/>}
 
       <div style={{display:"flex",gap:8}}>
@@ -1609,9 +1618,17 @@ function LiveTicker({listings,onSelect}){
   const src=listings&&listings.length>0?listings:DEMO_LISTINGS;
   const items=src.map(l=>({id:l.id,listing:l,name:`${l.make} ${l.model}`,price:l.price}));
   const doubled=[...items,...items];
+  // Duration was previously a fixed 38s regardless of item count. That was
+  // tuned for the 14-car demo array — with 51+ real listings the same 38s
+  // has to cover far more content, so the effective scroll speed increased
+  // proportionally (way too fast). Real tickers hold a constant pace, not a
+  // constant loop time — so duration now scales with item count instead.
+  const SECONDS_PER_ITEM=4;
+  const MIN_DURATION=24;
+  const duration=Math.max(MIN_DURATION, items.length*SECONDS_PER_ITEM);
   return(
     <div className="lc-ticker-wrap">
-      <div className="lc-ticker-track">
+      <div className="lc-ticker-track" style={{animationDuration:`${duration}s`}}>
         {doubled.map((it,i)=>(
           <span key={i} className="lc-ticker-item" onClick={()=>onSelect&&onSelect(it.listing)} style={{cursor:"pointer"}}>
             <span className="lc-ticker-dot"/>
