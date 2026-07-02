@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar } from "recharts";
 import { createClient } from "@supabase/supabase-js";
+import { Analytics } from "@vercel/analytics/react";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 const supabase = createClient(
@@ -94,6 +95,36 @@ const GLOBAL_CSS = `
   }
   @keyframes lc-blink {
     0%, 100% { opacity: 1; } 50% { opacity: 0.25; }
+  }
+
+  /* Radar ping — used where LotCheck is claiming genuinely live/real-time
+     data (not decorative). Concentric rings expand and fade from a solid
+     center dot. Two rings offset by 1s so a ring is always mid-expansion. */
+  .lc-radar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+  }
+  .lc-radar-core {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #22c55e;
+    z-index: 1;
+  }
+  .lc-radar-ring {
+    position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 1.5px solid #22c55e;
+    animation: lc-radar-ping 2s cubic-bezier(0,0,0.2,1) infinite;
+  }
+  .lc-radar-ring.delay { animation-delay: 1s; }
+  @keyframes lc-radar-ping {
+    0%   { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(2.8); opacity: 0; }
   }
 
   /* Card content sits above the live background */
@@ -436,6 +467,25 @@ function formatMsLeft(ms) {
   const h = Math.max(0, Math.floor(ms / 3600000));
   const m = Math.max(0, Math.floor((ms % 3600000) / 60000));
   return `${h}h ${m}m`;
+}
+
+// ── Anonymous visitor ID — persisted so repeat visits from the same browser
+// count as one unique visitor, not a new one each time. This is LotCheck's
+// real production site running in real browsers, not the Claude sandbox —
+// localStorage is the correct, normal tool for this, unlike in an artifact
+// preview where it silently fails.
+const VISITOR_ID_KEY = "lc_visitor_id";
+function getOrCreateVisitorId() {
+  try {
+    let id = window.localStorage.getItem(VISITOR_ID_KEY);
+    if (!id) {
+      id = "v_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
+      window.localStorage.setItem(VISITOR_ID_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    return null; // localStorage unavailable — view still gets logged, just not deduped
+  }
 }
 
 const PROVINCES={AB:"Alberta",BC:"British Columbia",ON:"Ontario",QC:"Quebec",MB:"Manitoba",SK:"Saskatchewan",NS:"Nova Scotia",NB:"New Brunswick"};
@@ -1921,6 +1971,8 @@ function AdminPanel(){
   const [checkingSession,setCheckingSession]=useState(true);
   const [leads,setLeads]=useState([]);
   const [leadsLoading,setLeadsLoading]=useState(true);
+  const [pageViews,setPageViews]=useState([]);
+  const [viewsLoading,setViewsLoading]=useState(true);
   const {listings:liveListings, loading:listingsLoading}=useListings();
 
   useEffect(()=>{
@@ -1954,10 +2006,48 @@ function AdminPanel(){
     return()=>{cancelled=true;};
   },[session]);
 
+  useEffect(()=>{
+    if(!session){ setPageViews([]); return; }
+    let cancelled=false;
+    async function fetchViews(){
+      setViewsLoading(true);
+      try{
+        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id").order("created_at",{ascending:true}).limit(50000);
+        if(error) throw error;
+        if(!cancelled) setPageViews(data||[]);
+      }catch(err){
+        console.warn("⚠️ page_views fetch failed (check you're logged in and RLS policies are applied):",err.message);
+        if(!cancelled) setPageViews([]);
+      }finally{
+        if(!cancelled) setViewsLoading(false);
+      }
+    }
+    fetchViews();
+    return()=>{cancelled=true;};
+  },[session]);
+
   async function updateLeadStatus(id,status){
     const {error}=await supabase.from("leads").update({status}).eq("id",id);
     if(!error) setLeads(prev=>prev.map(l=>l.id===id?{...l,status}:l));
   }
+
+  // Real rollups — no estimation. "All time" is genuinely all time since
+  // tracking started, which is however long it's actually been, not a
+  // full year — the UI says so explicitly rather than implying otherwise.
+  const now=Date.now();
+  const rollup=(windowMs)=>{
+    const cutoff=now-windowMs;
+    const inWindow=pageViews.filter(v=>new Date(v.created_at).getTime()>=cutoff);
+    return {
+      views: inWindow.length,
+      visitors: new Set(inWindow.map(v=>v.visitor_id)).size,
+    };
+  };
+  const trafficToday=rollup(24*3600000);
+  const trafficWeek=rollup(7*24*3600000);
+  const trafficMonth=rollup(30*24*3600000);
+  const trafficAllTime={views:pageViews.length, visitors:new Set(pageViews.map(v=>v.visitor_id)).size};
+  const trackingSince=pageViews.length?new Date(pageViews[0].created_at):null;
 
   if(checkingSession) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
@@ -1987,6 +2077,25 @@ function AdminPanel(){
       </div>
 
       <div style={{maxWidth:1100,margin:"0 auto"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+          TRAFFIC · {viewsLoading?"loading…":trackingSince?`tracking since ${trackingSince.toLocaleDateString("en-CA")}`:"no data yet"}
+        </div>
+        {!viewsLoading&&pageViews.length===0?(
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"20px",textAlign:"center",color:"#475569",marginBottom:28}}>
+            No page views recorded yet. This starts counting the moment someone loads the live site after this goes out — there's no way to recover data from before tracking began.
+          </div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+            {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
+              <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+                <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
+                <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
+                <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
           <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
@@ -2077,7 +2186,12 @@ function AdminPanel(){
 // panel happens here by choosing which fully separate component to mount,
 // rather than an early-return inside a hook-using component.
 export default function App(){
-  return window.location.pathname.startsWith("/admin") ? <AdminPanel/> : <LotCheckApp/>;
+  return(
+    <>
+      {window.location.pathname.startsWith("/admin") ? <AdminPanel/> : <LotCheckApp/>}
+      <Analytics/>
+    </>
+  );
 }
 
 function LotCheckApp(){
@@ -2097,6 +2211,18 @@ function LotCheckApp(){
 
   const {listings:liveListings, loading:dataLoading, isLive}=useListings();
   const {historyMap, historyLoading}=usePriceHistoryMap();
+
+  // Log a real page view once per load. Fire-and-forget — a failed insert
+  // here shouldn't ever block or slow down the actual site for a visitor.
+  useEffect(()=>{
+    const visitorId=getOrCreateVisitorId();
+    supabase.from("page_views").insert({
+      visitor_id: visitorId||"unknown",
+      path: window.location.pathname||"/",
+    }).then(({error})=>{
+      if(error) console.warn("⚠️ page_views insert failed:",error.message);
+    });
+  },[]);
 
   // Re-check trial status every minute so the UI reflects real expiry
   // instead of staying "Pro" forever once granted.
@@ -2209,7 +2335,13 @@ function LotCheckApp(){
               <div style={{fontSize:12,color:"#334155",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
                 {dataLoading
                   ?<span>⏳ Loading live listings...</span>
-                  :<><span style={{color:isLive?"#22c55e":"#475569"}}>{isLive?"🟢":"⚪"}</span> {filtered.length} listings · {isLive?"Live · Canada":"Demo data"}</>
+                  :<>
+                    {isLive
+                      ?<span className="lc-radar"><span className="lc-radar-ring"/><span className="lc-radar-ring delay"/><span className="lc-radar-core"/></span>
+                      :<span style={{color:"#475569"}}>⚪</span>
+                    }
+                    {filtered.length} listings · {isLive?"Live · Canada":"Demo data"}
+                  </>
                 }
               </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
