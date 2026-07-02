@@ -672,6 +672,30 @@ function lotScore(l,all){
   return Math.max(0,Math.min(100,Math.round(50+((aP-l.price)/aP)*120+((aK-l.km)/aK)*40)));
 }
 
+// ── Reusable info tooltip — small ⓘ icon that toggles a popover explaining
+// where a number actually comes from. Used anywhere LotCheck shows a
+// computed/estimated value, so the methodology is never hidden behind a
+// bare number.
+function InfoTooltip({title, children}){
+  const [open, setOpen] = useState(false);
+  return(
+    <div style={{position:"relative", display:"inline-block"}}>
+      <button
+        onClick={()=>setOpen(v=>!v)}
+        style={{background:"none",border:"1px solid #334155",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#64748b",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0}}
+        title={title}
+      >ℹ</button>
+      {open&&(
+        <div style={{position:"absolute",right:0,top:26,zIndex:99,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",width:280,boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}>ℹ️ {title}</div>
+          <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.65}}>{children}</div>
+          <button onClick={()=>setOpen(false)} style={{marginTop:10,background:"none",border:"none",color:"#475569",fontSize:11,cursor:"pointer",padding:0}}>Close ✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScorePill({score}){
   if(score==null) return <span className="badge" style={{background:"#1e293b80",color:"#64748b",border:"1px solid #33415560"}}>No comps yet</span>;
   const c=score>=70?"#16a34a":score>=45?"#d97706":"#dc2626";
@@ -1167,7 +1191,7 @@ function ArrivalsModal({liveListings, historyMap, onClose}){
 
         {chartData.length===0?(
           <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
-            No new arrivals recorded in the last {WINDOW_DAYS} days yet. This builds up as the daily scrape runs.
+            No new arrivals recorded in the last {WINDOW_DAYS} days yet. This builds up with each daily update.
           </div>
         ):(
           <div style={{height:Math.max(140,chartData.length*34),marginBottom:8}}>
@@ -1181,7 +1205,7 @@ function ArrivalsModal({liveListings, historyMap, onClose}){
             </ResponsiveContainer>
           </div>
         )}
-        <div style={{fontSize:10,color:"#334155",marginTop:8}}>Window: last {WINDOW_DAYS} days · updates as the daily scrape runs</div>
+        <div style={{fontSize:10,color:"#334155",marginTop:8}}>Window: last {WINDOW_DAYS} days · updates daily</div>
       </div>
     </div>
   );
@@ -1295,7 +1319,6 @@ function InsurancePanel({listing}){
 
 function EVAPRebateTab({listing, rebate}){
   const [timeLeft, setTimeLeft] = useState({});
-  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(()=>{
     const calc=()=>{
@@ -1363,6 +1386,16 @@ function EVAPRebateTab({listing, rebate}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#22c55e"}}>⚡ Federal EVAP Rebates · {PROVINCES[listing.province]||listing.province}</div>
+        <InfoTooltip title="WHERE THIS COMES FROM">
+          Federal and provincial EV rebate amounts are sourced directly from <strong style={{color:"#f1f5f9"}}>Transport Canada</strong> (tc.canada.ca) and manually verified against their official eligible-vehicle list.
+          <br/><br/>
+          Eligibility requires the vehicle be <strong style={{color:"#f1f5f9"}}>new</strong> (under 10,000 km), priced under $50,000, and on Transport Canada's current model list — LotCheck checks all three before showing a rebate.
+          <br/><br/>
+          This is not financial advice — confirm current eligibility with your dealer before purchase, as program rules can change.
+        </InfoTooltip>
+      </div>
       {rebate.total>0&&(
         <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"14px 16px"}}>
           {rebate.federal>0&&(
@@ -1478,7 +1511,7 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
         <div className="lc-price-big">${currentPrice.toLocaleString()}</div>
         {hasTrend
           ? <div style={{fontSize:14,color:change>=0?"#ef4444":"#22c55e",fontWeight:600,marginTop:4}}>{change>=0?"▲":"▼"} ${Math.abs(change).toLocaleString()} ({change>=0?"+":""}{((change/firstPrice)*100).toFixed(1)}%) over {spanDays}d tracked</div>
-          : <div style={{fontSize:12,color:"#475569",fontWeight:500,marginTop:4}}>{historyLoading?"Loading price history…":"Price tracking started — trend builds as we re-scrape this listing"}</div>
+          : <div style={{fontSize:12,color:"#475569",fontWeight:500,marginTop:4}}>{historyLoading?"Loading price history…":"Price tracking started — trend builds with each daily update"}</div>
         }
         {rebate.total>0&&<div style={{fontSize:14,color:"#22c55e",fontWeight:700,marginTop:4}}>After all rebates: ~${(currentPrice-rebate.total).toLocaleString()}</div>}
       </div>
@@ -1519,7 +1552,7 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
             <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>
               {historyLoading?"Loading price history…":"Not enough price history yet"}
             </div>
-            <div style={{fontSize:12,color:"#475569"}}>LotCheck re-scrapes this listing daily. A real trend will appear here once we've tracked it over multiple days.</div>
+            <div style={{fontSize:12,color:"#475569"}}>LotCheck updates this listing daily. A real trend will appear here once we've tracked it over multiple days.</div>
           </div>
         )}
         <div className="lc-stats">
@@ -1539,7 +1572,16 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
       {tab==="rebates"&&<EVAPRebateTab listing={listing} rebate={rebate}/>}
       {tab==="cbb"&&isUnlocked("cbb")&&(
         <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1,marginBottom:4}}>LOTCHECK VALUE ESTIMATE · PRO</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>LOTCHECK VALUE ESTIMATE · PRO</div>
+            <InfoTooltip title="HOW THIS IS CALCULATED">
+              This is <strong style={{color:"#f1f5f9"}}>not</strong> licensed Black Book, CBB, or any third-party valuation data — LotCheck doesn't have access to that.
+              <br/><br/>
+              It's a formula built entirely from <strong style={{color:"#f1f5f9"}}>this listing's own asking price</strong>: Retail = asking price + a small markup. Trade-in = asking price reduced for the vehicle's age and odometer reading. Wholesale = trade-in reduced further, as an auction estimate typically runs.
+              <br/><br/>
+              Useful as a rough reference point — not a substitute for a real appraisal or a licensed valuation service.
+            </InfoTooltip>
+          </div>
           <div style={{fontSize:11,color:"#475569",marginBottom:12,lineHeight:1.5}}>Our own algorithmic estimate based on this vehicle's asking price, mileage, and age — not a licensed third-party valuation.</div>
           <div className="lc-stats">
             {[["Retail",cbb.retail,"#22c55e","Dealer asking range"],["Trade-in",cbb.trade,"#f59e0b","What dealer pays"],["Wholesale",cbb.wholesale,"#94a3b8","Auction estimate"]].map(([l,v,c,sub])=>(
