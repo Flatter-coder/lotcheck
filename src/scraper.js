@@ -69,6 +69,17 @@ function detectFuel(item) {
     || title.includes("tucson phev") || title.includes("santa fe phev");
   if (isPHEVTitle) return "PHEV";
 
+  if (text.includes("hybrid")) return "Hybrid";
+
+  // Explicit gas-engine signature — displacement + cylinder count is about
+  // as unambiguous an internal-combustion signal as exists (e.g. "4.7L V8",
+  // "5.7L HEMI", "3.6L V6", "2.0L turbo 4-cylinder"). Checked BEFORE any
+  // looser inference, since a title stating this outright should always
+  // win. This exact pattern ("4.7L V8" in the title) was previously being
+  // overridden by the loose "electric" fallback below and mislabeled BEV.
+  const gasEngineSignature = /\d\.\d\s?l\b|\bv[- ]?6\b|\bv[- ]?8\b|\bhemi\b|\d[- ]?cylinder/i;
+  if (gasEngineSignature.test(title)) return "Gas";
+
   // 2. Trust Kijiji's own "Fuel Type" attribute
   const attr = (item.attributes?.["Fuel Type"] || item.attributes?.fuelType || "").toLowerCase();
   if (attr === "electric" || attr === "battery electric") return "BEV";
@@ -77,10 +88,16 @@ function detectFuel(item) {
   if (attr === "diesel")                                  return "Diesel";
   if (attr === "gas" || attr === "gasoline")              return "Gas";
 
-  // 3. Fall back to title/description scanning
-  if (text.includes("electric") && !text.includes("hybrid")) return "BEV";
-  if (text.includes("hybrid"))                               return "Hybrid";
-  if (text.includes("diesel"))                               return "Diesel";
+  // 3. Fall back to title/description scanning — requires a SPECIFIC
+  // EV-indicating phrase, not a bare "electric" substring. That loose
+  // match was catching "electric windows," "electric seats," "electric
+  // mirrors" — standard equipment mentions on ordinary gas vehicles — and
+  // mislabeling them BEV. Confirmed in production: a 2020 Jeep Cherokee,
+  // a 2024 Dodge Hornet, and a 2013 Ram 1500 with "4.7L V8" in the title
+  // were all incorrectly tagged BEV because of this.
+  const strongEVPattern = /\ball[- ]?electric\b|\bfully electric\b|\bbattery electric\b|\belectric vehicle\b|\b100% electric\b|\bzero emission\b/;
+  if (strongEVPattern.test(text)) return "BEV";
+  if (text.includes("diesel")) return "Diesel";
   return "Gas";
 }
 
