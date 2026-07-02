@@ -1,1 +1,59 @@
 
+{
+  "source": "Statistics Canada. Table 20-10-0086-01, New motor vehicle sales, by vehicle type, annual. Statistics Canada Open Licence.",
+  "year": "2025",
+  "data_release_time": "2026-03-16T08:30",
+  "last_checked_at": "2026-07-02T23:44:53.690Z",
+  "data": {
+    "NewfoundlandLabrador": {
+      "totalSales": 36421,
+      "zevSales": 700,
+      "zevPct": 1.9
+    },
+    "PrinceEdwardIsland": {
+      "totalSales": 8963,
+      "zevSales": 505,
+      "zevPct": 5.6
+    },
+    "NovaScotia": {
+      "totalSales": 55226,
+      "zevSales": 2433,
+      "zevPct": 4.4
+    },
+    "NewBrunswick": {
+      "totalSales": 47400,
+      "zevSales": 2175,
+      "zevPct": 4.6
+    },
+    "Quebec": {
+      "totalSales": 457077,
+      "zevSales": 72658,
+      "zevPct": 15.9
+    },
+    "Ontario": {
+      "totalSales": 787033,
+      "zevSales": 45731,
+      "zevPct": 5.8
+    },
+    "Manitoba": {
+      "totalSales": 62706,
+      "zevSales": 2561,
+      "zevPct": 4.1
+    },
+    "Saskatchewan": {
+      "totalSales": 55346,
+      "zevSales": 1082,
+      "zevPct": 2
+    },
+    "Alberta": {
+      "totalSales": 233619,
+      "zevSales": 7914,
+      "zevPct": 3.4
+    },
+    "BritishColumbia": {
+      "totalSales": 214791,
+      "zevSales": 34213,
+      "zevPct": 15.9
+    }
+  }
+}
