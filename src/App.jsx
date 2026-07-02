@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
@@ -407,6 +407,37 @@ const REBATES = {
   NB:{federal_bev:5000,federal_phev:2500,prov_bev:2500,prov_phev:1000,prov_name:"NB EV",
     note:"Stack federal + provincial. Verify current NB program availability."},
 };
+// ── Pro trial — real, persisted, actually expires ──────────────────────────
+// Previously "Start 3-day free trial" just set a React boolean with no timer,
+// no persistence, no expiry — it was permanently Pro until page refresh.
+// This is a real (if not abuse-proof) mechanism: 48h from first click,
+// persisted in localStorage so it survives refresh, and genuinely expires.
+// This is a stopgap until real accounts + Stripe subscriptions exist — at
+// that point trial state should move server-side to a real trial_end field.
+const TRIAL_MS = 48 * 60 * 60 * 1000; // 48 hours
+const TRIAL_KEY = "lc_trial_start";
+function getTrialStatus() {
+  try {
+    const raw = window.localStorage.getItem(TRIAL_KEY);
+    if (!raw) return { state: "none" };
+    const start = Number(raw);
+    if (!start || Number.isNaN(start)) return { state: "none" };
+    const elapsed = Date.now() - start;
+    if (elapsed < TRIAL_MS) return { state: "active", msLeft: TRIAL_MS - elapsed };
+    return { state: "expired" };
+  } catch (e) {
+    return { state: "none" }; // localStorage unavailable (private browsing etc.)
+  }
+}
+function startTrial() {
+  try { window.localStorage.setItem(TRIAL_KEY, String(Date.now())); } catch (e) {}
+}
+function formatMsLeft(ms) {
+  const h = Math.max(0, Math.floor(ms / 3600000));
+  const m = Math.max(0, Math.floor((ms % 3600000) / 60000));
+  return `${h}h ${m}m`;
+}
+
 const PROVINCES={AB:"Alberta",BC:"British Columbia",ON:"Ontario",QC:"Quebec",MB:"Manitoba",SK:"Saskatchewan",NS:"Nova Scotia",NB:"New Brunswick"};
 
 function getRebate(province,fuel,listing){
@@ -579,6 +610,47 @@ function useListings(){
   },[]);
 
   return {listings, loading, isLive};
+}
+
+// ── Hook: fetch ALL real price_history in one batched call ────────────────
+// Used for the detail chart, "days on LotCheck" stat, and price-drop badges
+// on cards. One shared fetch instead of one query per listing — avoids N
+// round trips and avoids IN-clause URL-length issues (external_id is often
+// a full Kijiji URL). Grouped client-side by listing_external_id.
+function usePriceHistoryMap(){
+  const [historyMap, setHistoryMap] = useState({});
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(()=>{
+    let cancelled = false;
+    async function fetchAll(){
+      try{
+        const {data, error} = await supabase
+          .from("price_history")
+          .select("listing_external_id, price, recorded_at")
+          .order("recorded_at", {ascending:true})
+          .limit(20000);
+        if(error) throw error;
+        const map = {};
+        (data||[]).forEach(row=>{
+          const id = row.listing_external_id;
+          if(!id) return;
+          if(!map[id]) map[id] = [];
+          map[id].push({price: row.price, recorded_at: row.recorded_at});
+        });
+        if(!cancelled) setHistoryMap(map);
+      }catch(err){
+        console.warn("⚠️ price_history fetch failed:", err.message);
+        if(!cancelled) setHistoryMap({});
+      }finally{
+        if(!cancelled) setHistoryLoading(false);
+      }
+    }
+    fetchAll();
+    return()=>{cancelled=true;};
+  },[]);
+
+  return {historyMap, historyLoading};
 }
 
 // NOTE: previously there was a `genHistory()` function here that generated a
@@ -970,24 +1042,97 @@ function AppraisalModal({onClose}){
   );
 }
 
-function ProModal({onStart,onClose}){
+function ProModal({onStart,onClose,trialStatus}){
+  const status = trialStatus?.state || "none";
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="lc-modal">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#16a34a",letterSpacing:1}}>LOTCHECK PRO · 3-DAY FREE TRIAL</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#16a34a",letterSpacing:1}}>LOTCHECK PRO · 48-HOUR FREE TRIAL</div>
           <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
-        <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Cancel anytime. Then $9.99/mo CAD.</div>
-        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["⚡","EVAP Rebate Checker","Federal + provincial incentives stacked"],["🗓️","Alberta Allocations","Incoming inventory before it hits the lot"],["🔔","Unlimited Alerts","Price drop push notifications"],].map(([icon,title,sub])=>(
+        <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Full access for 48 hours, once per browser. Then $9.99/mo CAD.</div>
+        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🔍","VIN History","Skip the $2.99 unlock — free access while on Pro"],["🗓️","New Arrivals Tracker","Real listings LotCheck first saw in the last 7 days, by province"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
             <div><div style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{title}</div><div style={{fontSize:12,color:"#475569"}}>{sub}</div></div>
           </div>
         ))}
-        <button onClick={()=>{onStart();onClose();}} className="lc-modal-btn" style={{marginTop:8}}>Start 3-day free trial →</button>
+        {status==="expired"?(
+          <>
+            <div style={{background:"#1a0a00",border:"1px solid #f59e0b40",borderRadius:10,padding:"12px 14px",marginTop:8,fontSize:13,color:"#f59e0b"}}>
+              Your 48-hour trial has already been used on this browser. Paid Pro subscriptions are launching soon.
+            </div>
+          </>
+        ):(
+          <button onClick={()=>{onStart();onClose();}} className="lc-modal-btn" style={{marginTop:8}}>Start 48-hour free trial →</button>
+        )}
         <div style={{textAlign:"center",marginTop:8,fontSize:12,color:"#334155"}}>Cancel anytime · No card needed</div>
+      </div>
+    </div>
+  );
+}
+
+// ── New Arrivals Tracker (Pro) ──────────────────────────────────────────────
+// Replaces the old "Alberta Allocations — incoming inventory before it hits
+// the lot" bullet, which had zero code behind it. Real manufacturer/dealer
+// allocation data is private industry data (OEM-to-dealer allotments) that
+// LotCheck has no access to and cannot honestly claim to show.
+// What this DOES show, honestly: real listings, grouped by province, where
+// the earliest price_history record we have is within the last 7 days —
+// i.e. vehicles LotCheck first observed recently. This is a first-seen
+// signal from our own scrape data, not a prediction and not OEM allocation
+// data. Labeled as such throughout.
+function ArrivalsModal({liveListings, historyMap, onClose}){
+  const now = Date.now();
+  const WINDOW_DAYS = 7;
+  const arrivals = (liveListings||[]).filter(l=>{
+    const h = historyMap[l.external_id];
+    if(!h || !h.length) return false;
+    const firstSeen = new Date(h[0].recorded_at).getTime();
+    return (now - firstSeen) <= WINDOW_DAYS*86400000;
+  });
+
+  const byProvince = {};
+  arrivals.forEach(l=>{
+    const p = l.province || "Other";
+    byProvince[p] = (byProvince[p]||0)+1;
+  });
+  const chartData = Object.keys(PROVINCES)
+    .map(code=>({province:code, count:byProvince[code]||0}))
+    .filter(d=>d.count>0)
+    .sort((a,b)=>b.count-a.count);
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="lc-modal" style={{maxWidth:480}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#16a34a",letterSpacing:1}}>NEW ARRIVALS TRACKER · PRO</div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>{arrivals.length} new listing{arrivals.length===1?"":"s"} in the last {WINDOW_DAYS} days</div>
+        <div style={{fontSize:12,color:"#475569",marginBottom:16,lineHeight:1.6}}>
+          Based on when LotCheck first recorded each listing in our own scrape data — not manufacturer or dealer allocation data, which is private industry data we don't have access to.
+        </div>
+
+        {chartData.length===0?(
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
+            No new arrivals recorded in the last {WINDOW_DAYS} days yet. This builds up as the daily scrape runs.
+          </div>
+        ):(
+          <div style={{height:Math.max(140,chartData.length*34),marginBottom:8}}>
+            <ResponsiveContainer>
+              <BarChart data={chartData} layout="vertical" margin={{top:0,right:16,bottom:0,left:0}}>
+                <XAxis type="number" allowDecimals={false} tick={{fontSize:11,fill:"#94a3b8"}} tickLine={false} axisLine={false}/>
+                <YAxis type="category" dataKey="province" width={36} tick={{fontSize:12,fill:"#e2e8f0",fontWeight:700}} tickLine={false} axisLine={false}/>
+                <Tooltip formatter={v=>[`${v} listing${v===1?"":"s"}`,"New arrivals"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
+                <Bar dataKey="count" fill="#16a34a" radius={[0,4,4,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        <div style={{fontSize:10,color:"#334155",marginTop:8}}>Window: last {WINDOW_DAYS} days · updates as the daily scrape runs</div>
       </div>
     </div>
   );
@@ -1235,43 +1380,14 @@ function EVAPRebateTab({listing, rebate}){
   );
 }
 
-function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive}){
-  const [priceHistory,setPriceHistory]=useState([]);
-  const [historyLoading,setHistoryLoading]=useState(true);
+function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnect,onUpgrade,onTestDrive}){
+  const priceHistory = history || [];
   const [tab,setTab]=useState("chart");
   const [unlocks,setUnlocks]=useState({});
   const [unlockModal,setUnlockModal]=useState(null);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   const score=lotScore(listing,liveListings);
-
-  // Fetch REAL price history for this exact listing from Supabase.
-  // This is populated once per day by scraper.js — it will start thin
-  // (one point) and build a genuine trend over time. We never fabricate
-  // points to fill gaps.
-  useEffect(()=>{
-    let cancelled=false;
-    async function fetchHistory(){
-      setHistoryLoading(true);
-      if(!listing.external_id){ setPriceHistory([]); setHistoryLoading(false); return; }
-      try{
-        const {data,error}=await supabase
-          .from("price_history")
-          .select("price, recorded_at")
-          .eq("listing_external_id", listing.external_id)
-          .order("recorded_at",{ascending:true});
-        if(error) throw error;
-        if(!cancelled) setPriceHistory(data||[]);
-      }catch(err){
-        console.warn("⚠️ price_history fetch failed:", err.message);
-        if(!cancelled) setPriceHistory([]);
-      }finally{
-        if(!cancelled) setHistoryLoading(false);
-      }
-    }
-    fetchHistory();
-    return()=>{cancelled=true;};
-  },[listing.external_id]);
 
   const currentPrice=listing.price;
   const hasTrend=priceHistory.length>=2;
@@ -1281,6 +1397,18 @@ function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive
   const avgHist=hasTrend?Math.round(priceHistory.reduce((s,h)=>s+h.price,0)/priceHistory.length):currentPrice;
   const chartData=priceHistory.map(h=>({date:new Date(h.recorded_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:h.price}));
   const domain=hasTrend?[Math.round(Math.min(...priceHistory.map(h=>h.price))*0.97),Math.round(Math.max(...priceHistory.map(h=>h.price))*1.03)]:undefined;
+
+  // Real comps — replaces the old opaque "Deal Score X/100" stat tile with
+  // the actual numbers behind it, so it's auditable instead of a black box.
+  const comps=(liveListings||[]).filter(x=>x.model===listing.model&&x.id!==listing.id);
+  const compAvgPrice=comps.length?Math.round(comps.reduce((s,x)=>s+x.price,0)/comps.length):null;
+
+  // Real "days on LotCheck" — from the first price_history point we've ever
+  // recorded for this listing. This is NOT the same as "days since posted
+  // on Kijiji" (Kijiji's postedDate is frequently null in scraped data) —
+  // it's honestly labeled as our own tracking duration only.
+  const daysTracked=priceHistory.length?Math.max(0,Math.floor((Date.now()-new Date(priceHistory[0].recorded_at))/86400000)):null;
+
 
   const cbb={retail:Math.round(listing.price*1.05),trade:Math.round(listing.price*Math.max(0.4,1-(2026-listing.year)*0.08)*Math.max(0.7,1-(listing.km/300000)*0.35)*0.82)};
   cbb.wholesale=Math.round(cbb.trade*0.91);
@@ -1338,7 +1466,7 @@ function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive
           </div>
         )}
         <div className="lc-stats">
-          {[["Asking",`$${listing.price.toLocaleString()}`],["Deal Score",score==null?"No comps yet":`${score}/100`],["Location",`${listing.city}, ${listing.province}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
+          {[["Asking",`$${listing.price.toLocaleString()}`],["vs Comps",compAvgPrice==null?"No comps yet":`${comps.length} · avg $${compAvgPrice.toLocaleString()}`],["Odometer",`${listing.km.toLocaleString()} km`],["Tracked",daysTracked==null?"New today":`${daysTracked}d on LotCheck`]].map(([l,v])=>(
             <div key={l} className="lc-stat"><div className="lc-stat-label">{l}</div><div className="lc-stat-value">{v}</div></div>
           ))}
         </div>
@@ -1382,15 +1510,22 @@ function DetailPanel({listing,isPro,liveListings,onConnect,onUpgrade,onTestDrive
   );
 }
 
-function ListingCard({listing,liveListings,onClick,active}){
+function ListingCard({listing,liveListings,history,onClick,active}){
   const score=lotScore(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
+  // Real price-drop detection: compare the two most recent recorded_at
+  // points for this exact listing. Only shows when we've actually observed
+  // a drop — never a guess or a fabricated "sale" signal.
+  const h=history||[];
+  const hasDrop=h.length>=2&&h[h.length-1].price<h[h.length-2].price;
+  const dropAmount=hasDrop?h[h.length-2].price-h[h.length-1].price:0;
   return(
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
+        {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
         <div>
@@ -1482,8 +1617,10 @@ function LiveTicker({listings,onSelect}){
 }
 
 export default function App(){
-  const [isPro,setIsPro]=useState(false);
+  const [trialStatus,setTrialStatus]=useState(()=>getTrialStatus());
+  const isPro = trialStatus.state==="active";
   const [showPro,setShowPro]=useState(false);
+  const [showArrivals,setShowArrivals]=useState(false);
   const [showAppraisal,setShowAppraisal]=useState(false);
   const [showConnect,setShowConnect]=useState(false);
   const [showTestDrive,setShowTestDrive]=useState(false);
@@ -1494,6 +1631,21 @@ export default function App(){
   const [isMobile,setIsMobile]=useState(window.innerWidth<768);
 
   const {listings:liveListings, loading:dataLoading, isLive}=useListings();
+  const {historyMap, historyLoading}=usePriceHistoryMap();
+
+  // Re-check trial status every minute so the UI reflects real expiry
+  // instead of staying "Pro" forever once granted.
+  useEffect(()=>{
+    const t=setInterval(()=>setTrialStatus(getTrialStatus()),60000);
+    return()=>clearInterval(t);
+  },[]);
+
+  const handleStartTrial=()=>{
+    if(trialStatus.state==="none"){
+      startTrial();
+      setTrialStatus(getTrialStatus());
+    }
+  };
 
   useEffect(()=>{
     const handler=()=>setIsMobile(window.innerWidth<768);
@@ -1521,13 +1673,13 @@ export default function App(){
           <div style={{background:"#060d18",borderBottom:"1px solid #1e293b",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
             <button onClick={()=>setSelected(null)} style={{background:"#1e293b",border:"none",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",cursor:"pointer",fontSize:14,fontWeight:600}}>← Back</button>
             <div style={{flex:1,fontSize:13,fontWeight:600,color:"#f1f5f9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.name}</div>
-            {isPro?<span style={{fontSize:11,color:"#22c55e",fontWeight:700}}>✅ Pro</span>:<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Pro</button>}
+            {isPro?<span style={{fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ {formatMsLeft(trialStatus.msLeft)} left</span>:<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Pro</button>}
           </div>
-          <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+          <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
         </div>
         {showConnect&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
         {showTestDrive&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
-        {showPro&&<ProModal onStart={()=>setIsPro(true)} onClose={()=>setShowPro(false)}/>}
+        {showPro&&<ProModal onStart={handleStartTrial} onClose={()=>setShowPro(false)} trialStatus={trialStatus}/>}
       </>
     );
   }
@@ -1549,15 +1701,19 @@ export default function App(){
             <button onClick={()=>setShowAppraisal(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
               💰 <span className="lc-header-appraisal-text">My car's worth</span>
             </button>
+            <button onClick={()=>{isPro?setShowArrivals(true):setShowPro(true);}} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
+              🗓️ <span className="lc-header-appraisal-text">New arrivals</span>
+            </button>
             {isPro
-              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ Pro</div>
-              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>Try Pro free</button>
+              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ {formatMsLeft(trialStatus.msLeft)} left</div>
+              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>{trialStatus.state==="expired"?"Trial ended":"Try Pro free"}</button>
             }
           </div>
         </header>
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
         {showAppraisal&&<AppraisalModal onClose={()=>setShowAppraisal(false)}/>}
+        {showArrivals&&isPro&&<ArrivalsModal liveListings={liveListings} historyMap={historyMap} onClose={()=>setShowArrivals(false)}/>}
 
         {/* Province filter — uses liveListings so only real provinces show */}
         <div className="lc-provinces">
@@ -1588,14 +1744,14 @@ export default function App(){
                 }
               </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
-              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} onClick={handleSelect} active={selected?.id===l.id}/>)}
+              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} onClick={handleSelect} active={selected?.id===l.id}/>)}
             </div>
             <div className="lc-footer">© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
           </div>
 
           <div className="lc-detail">
             {selected?(
-              <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+              <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
             ):(
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",color:"#334155",textAlign:"center",padding:"40px 20px"}}>
                 <div style={{fontSize:48,marginBottom:16}}>✅</div>
@@ -1609,7 +1765,7 @@ export default function App(){
 
       {showConnect&&selected&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
       {showTestDrive&&selected&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
-      {showPro&&<ProModal onStart={()=>setIsPro(true)} onClose={()=>setShowPro(false)}/>}
+      {showPro&&<ProModal onStart={handleStartTrial} onClose={()=>setShowPro(false)} trialStatus={trialStatus}/>}
     </>
   );
 }
