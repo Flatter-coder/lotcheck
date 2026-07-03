@@ -1650,7 +1650,17 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
 
   // Real comps — replaces the old opaque "Deal Score X/100" stat tile with
   // the actual numbers behind it, so it's auditable instead of a black box.
-  const comps=(liveListings||[]).filter(x=>x.model===listing.model&&x.id!==listing.id);
+  // Only treat other listings as real comps if they're actually comparable
+  // vehicles -- same model AND within 3 model-years. Matching on model name
+  // alone let a 2014 Santa Fe with 259,000km get "anchored" toward the
+  // average of possibly-much-newer, lower-mileage Santa Fes, producing a
+  // retail estimate wildly higher than the car's real asking price. That's
+  // exactly the kind of misleading number this feature exists to avoid.
+  const comps=(liveListings||[]).filter(x=>
+    x.model===listing.model &&
+    x.id!==listing.id &&
+    Math.abs((x.year||0)-(listing.year||0))<=3
+  );
   const compAvgPrice=comps.length?Math.round(comps.reduce((s,x)=>s+x.price,0)/comps.length):null;
 
   // Real "days on LotCheck" — from the first price_history point we've ever
@@ -1667,9 +1677,14 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
   // purely on this one listing's own asking price — which may itself be
   // underpriced, overpriced, or a quick-sale price that doesn't reflect
   // typical market value for the model.
+  // When real comps exist (other live listings of the same model, within 3
+  // model-years so they're actually comparable vehicles), nudge the retail
+  // estimate toward their real average price -- but weighted no more than
+  // 1:1 against this car's own asking price, so a couple of comps can never
+  // outvote the listing's own real, current price.
   const formulaRetail=Math.round(listing.price*1.05);
   const retailAnchor=compAvgPrice!=null
-    ? Math.round((formulaRetail*1 + compAvgPrice*Math.min(comps.length,3))/(1+Math.min(comps.length,3)))
+    ? Math.round((formulaRetail*2 + compAvgPrice*Math.min(comps.length,2))/(2+Math.min(comps.length,2)))
     : formulaRetail;
 
   // Trade-in and wholesale are flat ratios off retail, not a second
@@ -1764,7 +1779,7 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
             <InfoTooltip title="HOW THIS IS CALCULATED">
               This is <strong style={{color:"#f1f5f9"}}>not</strong> licensed Black Book, CBB, or any third-party valuation data — LotCheck doesn't have access to that, and building it would mean scraping sites like AutoTrader, which we won't do without weighing that risk deliberately.
               <br/><br/>
-              When other live LotCheck listings of the <strong style={{color:"#f1f5f9"}}>same model</strong> exist, Retail is anchored toward their real average price — not just this one seller's asking price, which could itself be under- or over-priced.
+              When other live LotCheck listings of the <strong style={{color:"#f1f5f9"}}>same model and a similar model-year (±3 years)</strong> exist, Retail is nudged toward their real average price — weighted no more than evenly against this listing's own asking price, so a couple of comps can never outvote what this specific car is actually listed for.
               <br/><br/>
               Trade-in and Wholesale are typical dealer-spread percentages off Retail (roughly 80% and 72%) — not a second age/mileage discount on top of it, since Retail already reflects this car's age and condition through its real market price. Still an approximation, not a market regression.
             </InfoTooltip>
@@ -1789,16 +1804,6 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
       {/* Paused — see note above tabs array. Re-enable by uncommenting:
       {tab==="vin"&&isUnlocked("vin")&&<VINHistoryPanel listing={listing}/>} */}
       {tab==="insurance"&&<InsurancePanel listing={listing}/>}
-
-      <div style={{display:"flex",gap:8}}>
-        <button onClick={onConnect} className="lc-connect-btn" style={{flex:2}}>
-          <span>🤝</span><span>Connect me with a dealer</span>
-          {rebate.eligible&&rebate.total>0&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:6,padding:"2px 8px",fontSize:12}}>⚡ ${rebate.total.toLocaleString()}</span>}
-        </button>
-        <button onClick={onTestDrive} style={{flex:1,background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"0 14px",color:"#60a5fa",fontSize:14,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6,whiteSpace:"nowrap"}}>
-          <span>🚗</span><span>Test drive</span>
-        </button>
-      </div>
 
       {unlockModal&&(
         <UnlockModal feature={unlockModal} price={unlockPrice[unlockModal]}
@@ -2712,9 +2717,6 @@ function LotCheckApp(){
             </div>
           </div>
           <div className="lc-header-right">
-            <button onClick={()=>setShowAppraisal(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
-              💰 <span className="lc-header-appraisal-text">My car's worth</span>
-            </button>
             <button onClick={()=>setShowDepreciation(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
               📉 <span className="lc-header-appraisal-text">Depreciation</span>
             </button>
