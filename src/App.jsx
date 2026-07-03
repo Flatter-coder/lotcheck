@@ -132,6 +132,7 @@ const GLOBAL_CSS = `
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    min-height: 100dvh;
     position: relative;
     z-index: 1;
     isolation: isolate;
@@ -183,6 +184,7 @@ const GLOBAL_CSS = `
   .lc-sidebar {
     width: 100%;
     height: calc(100vh - 57px);
+    height: calc(100dvh - 57px);
     overflow-y: auto;
     border-bottom: 1px solid #1e293b;
   }
@@ -218,6 +220,7 @@ const GLOBAL_CSS = `
     .lc-detail {
       display: block;
       height: calc(100vh - 57px);
+      height: calc(100dvh - 57px);
       position: sticky;
       top: 57px;
     }
@@ -2000,7 +2003,7 @@ function AdminLogin(){
   }
 
   return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617"}}>
+    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617"}}>
       <form onSubmit={handleLogin} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
         <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>LotCheck Admin</div>
@@ -2459,7 +2462,7 @@ function AdminPanel(){
   const trafficAllTime={views:pageViews.length, visitors:new Set(pageViews.map(v=>v.visitor_id)).size};
   const trackingSince=pageViews.length?new Date(pageViews[0].created_at):null;
 
-  if(checkingSession) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
+  if(checkingSession) return <div style={{minHeight:"100dvh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
   const byProvince={};
@@ -2474,7 +2477,7 @@ function AdminPanel(){
   leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
-    <div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",padding:"24px"}}>
+    <div style={{minHeight:"100dvh",background:"#020617",color:"#e2e8f0",padding:"24px"}}>
       {dealerModal && (
         <DealerModal
           dealer={dealerModal==="new"?null:dealerModal}
@@ -2703,7 +2706,7 @@ function LotCheckApp(){
     return(
       <>
         <style>{GLOBAL_CSS}</style>
-        <div style={{minHeight:"100vh",background:"#020617"}}>
+        <div style={{minHeight:"100dvh",background:"#020617"}}>
           <div style={{background:"#060d18",borderBottom:"1px solid #1e293b",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
             <button onClick={()=>setSelected(null)} style={{background:"#1e293b",border:"none",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",cursor:"pointer",fontSize:14,fontWeight:600}}>← Back</button>
             <div style={{flex:1,fontSize:13,fontWeight:600,color:"#f1f5f9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.name}</div>
