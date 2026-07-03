@@ -1,1 +1,36 @@
 
+name: Update StatCan ZEV data
+
+on:
+  schedule:
+    # 13:00 UTC daily = 6am Calgary time (7am during daylight saving)
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check StatCan for a new release and update the data file
+        run: node scripts/update-statcan-zev.mjs
+
+      - name: Commit if the file changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data/statcan-zev.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: daily StatCan ZEV data check"
+            git push
+          fi
