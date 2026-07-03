@@ -1933,6 +1933,36 @@ function LiveTicker({listings,onSelect}){
 // anon can INSERT, only an authenticated Supabase session can SELECT or
 // UPDATE. Create your own login at Supabase → Authentication → Users →
 // Add User with your real email + a real password.
+// ── Shared logo mark ────────────────────────────────────────────────────────
+// One consistent icon everywhere: a blue circle with a scan/search glyph,
+// replacing the old green-gradient checkmark used inconsistently across
+// admin.html, the React admin panel, the main site header, and the dealer
+// portal. Only replaces genuine brand-logo usages -- the plain checkmark
+// emoji used elsewhere as a decorative "success" indicator (trial badges,
+// empty states) is untouched, since that's a different meaning, not branding.
+function LogoMark({ size = 32 }) {
+  const iconSize = Math.round(size * 0.5);
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: "linear-gradient(135deg,#0175ff,#0057c2)",
+      boxShadow: "0 0 16px rgba(1,117,255,0.5)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0,
+    }}>
+      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none"
+        stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+        <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+        <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="m16 16-1.9-1.9" />
+      </svg>
+    </div>
+  );
+}
+
 function AdminLogin(){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
@@ -1952,7 +1982,7 @@ function AdminLogin(){
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617"}}>
       <form onSubmit={handleLogin} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box"}}>
-        <div style={{width:56,height:56,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,margin:"0 auto 16px"}}>✅</div>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
         <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>LotCheck Admin</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
         <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
@@ -1966,14 +1996,265 @@ function AdminLogin(){
   );
 }
 
+// ── Small shared bits for the new tabs ────────────────────────────────────────
+function AdminTabButton({active,onClick,children}){
+  return (
+    <button onClick={onClick} style={{
+      background: active ? "#1e293b" : "transparent",
+      border: "none", borderRadius: 8, padding: "7px 14px",
+      color: active ? "#f1f5f9" : "#64748b", fontSize: 13, fontWeight: 600,
+      cursor: "pointer",
+    }}>{children}</button>
+  );
+}
+
+function AdminEmpty({icon,children}){
+  return (
+    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"32px 20px",textAlign:"center",color:"#475569"}}>
+      {icon&&<div style={{fontSize:28,marginBottom:10}}>{icon}</div>}
+      {children}
+    </div>
+  );
+}
+
+// ── Dealers tab ────────────────────────────────────────────────────────────
+function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish}){
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1}}>
+          DEALER NETWORK · {dealersLoading?"loading…":`${dealers.length} dealer${dealers.length===1?"":"s"}`}
+        </div>
+        <button onClick={onAdd} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Dealer</button>
+      </div>
+
+      {dealersLoading ? (
+        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+      ) : dealers.length===0 ? (
+        <AdminEmpty icon="🏢">No dealers yet — add your first one</AdminEmpty>
+      ) : (
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginBottom:28}}>
+          {dealers.map(d=>(
+            <div key={d.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+              <div>
+                <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{d.name}</div>
+                <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
+                <div style={{fontSize:11,color:"#475569",marginTop:2}}>{d.makes||"—"}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!d.live} onChange={e=>onToggle(d.id,"live",e.target.checked)}/> Live lot
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!d.featured} onChange={e=>onToggle(d.id,"featured",e.target.checked)}/> Featured ($300/mo)
+                </label>
+                {d.sold_count>0 && <span className="badge" style={{background:"#7c3aed18",color:"#c4b5fd",border:"1px solid #7c3aed35"}}>{d.sold_count} sold</span>}
+                <button onClick={()=>onEdit(d)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Edit</button>
+                <button onClick={()=>onDelete(d.id,d.name)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+        DEALER SUBMITTED INVENTORY · {dealerListingsLoading?"loading…":`${dealerListings.length} vehicle${dealerListings.length===1?"":"s"}`}
+      </div>
+      {dealerListingsLoading ? (
+        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+      ) : dealerListings.length===0 ? (
+        <AdminEmpty icon="🚗">No dealer submissions yet</AdminEmpty>
+      ) : (
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+          {dealerListings.map(v=>{
+            const isSold=v.status==="sold", isLive=v.status==="live";
+            const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
+            return (
+              <div key={v.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div>
+                  <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{v.year} {v.make} {v.model}</div>
+                  <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span className="badge" style={{
+                    background: isSold?"#7c3aed18":isLive?"#16a34a18":"#33415530",
+                    color: isSold?"#c4b5fd":isLive?"#22c55e":"#94a3b8",
+                    border: `1px solid ${isSold?"#7c3aed35":isLive?"#22c55e35":"#33415560"}`,
+                  }}>{isSold?"✓ Sold":isLive?"● Live":"Pending"}</span>
+                  {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:"1px solid #22c55e",borderRadius:6,padding:"5px 10px",color:"#22c55e",fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
+                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Publish</button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Review queue tab ──────────────────────────────────────────────────────
+function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onReject}){
+  return (
+    <div>
+      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+        PENDING REVIEW · {reviewLoading?"loading…":`${reviewListings.length} listing${reviewListings.length===1?"":"s"}`}
+      </div>
+      {reviewLoading ? (
+        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+      ) : reviewListings.length===0 ? (
+        <AdminEmpty icon="✅">No listings pending review — pipeline approved everything</AdminEmpty>
+      ) : (
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginBottom:28}}>
+          {reviewListings.map(l=>{
+            const score=l.verification_score||0;
+            const scoreColor = score>=70?"#22c55e":score>=50?"#f59e0b":"#ef4444";
+            const flags=(l.verification_flags||"").split(" | ").filter(Boolean);
+            return (
+              <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{l.name}</div>
+                  <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:700}}>{score}</span></div>
+                  {flags.map((f,i)=>(<div key={i} style={{fontSize:11,color:"#f59e0b",marginTop:2}}>⚠ {f}</div>))}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:"1px solid #22c55e",borderRadius:6,padding:"6px 12px",color:"#22c55e",fontSize:12,cursor:"pointer"}}>✓ Approve</button>
+                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:"1px solid #ef4444",borderRadius:6,padding:"6px 12px",color:"#ef4444",fontSize:12,cursor:"pointer"}}>✗ Reject</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+        RECENTLY REJECTED · {rejectedListings.length}
+      </div>
+      {rejectedListings.length===0 ? (
+        <AdminEmpty>No rejected listings yet</AdminEmpty>
+      ) : (
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+          {rejectedListings.map((l,i)=>(
+            <div key={i} style={{padding:"12px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:"#f1f5f9"}}>{l.name}</span>
+              <span style={{color:"#ef4444",fontWeight:700}}>{l.verification_score||0}</span>
+              <span style={{color:"#475569",fontSize:11}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Revenue tab ────────────────────────────────────────────────────────────
+function RevenueTab({dealers}){
+  const featured = dealers.filter(d=>d.featured);
+  const featuredRev = featured.length*300;
+  return (
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+          <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>${featuredRev.toLocaleString()}</div>
+          <div style={{fontSize:12,color:"#64748b"}}>Featured listings/mo — real</div>
+        </div>
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+          <div style={{fontSize:26,fontWeight:800,color:"#475569"}}>$0</div>
+          <div style={{fontSize:12,color:"#64748b"}}>Lead referral fees</div>
+        </div>
+      </div>
+      <AdminEmpty>
+        Lead referral revenue shows $0 on purpose — leads aren't linked to a
+        specific dealer yet (the buyer-facing Connect form doesn't set
+        <code style={{background:"#1e293b",padding:"1px 5px",borderRadius:4,margin:"0 4px"}}>dealer_id</code>
+        when someone submits it). The database column exists now, but wiring
+        the actual attribution is a separate follow-up task.
+      </AdminEmpty>
+      {featured.length>0 && (
+        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginTop:20}}>
+          {featured.map(d=>(
+            <div key={d.id} style={{padding:"12px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:"#f1f5f9"}}>{d.name}</span>
+              <span style={{color:"#22c55e",fontWeight:700}}>$300/mo</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function DealerModal({dealer,onSave,onClose}){
+  const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false});
+  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const inputStyle={width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"11px 13px",color:"#f1f5f9",fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
+  const labelStyle={fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box"}}>
+        <div style={{fontSize:18,fontWeight:700,marginBottom:18,color:"#f1f5f9"}}>{dealer?"Edit Dealer":"Add Dealer"}</div>
+        <label style={labelStyle}>Dealership name *</label>
+        <input style={inputStyle} value={form.name} onChange={e=>set("name",e.target.value)} placeholder="Cochrane Toyota"/>
+        <label style={labelStyle}>Contact name</label>
+        <input style={inputStyle} value={form.contact} onChange={e=>set("contact",e.target.value)} placeholder="Ryan Smith"/>
+        <label style={labelStyle}>Phone</label>
+        <input style={inputStyle} value={form.phone} onChange={e=>set("phone",e.target.value)} placeholder="403-932-9900"/>
+        <label style={labelStyle}>Email</label>
+        <input style={inputStyle} value={form.email} onChange={e=>set("email",e.target.value)} placeholder="ryan@dealer.com"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <label style={labelStyle}>City</label>
+            <input style={inputStyle} value={form.city} onChange={e=>set("city",e.target.value)} placeholder="Cochrane"/>
+          </div>
+          <div>
+            <label style={labelStyle}>Province</label>
+            <select style={inputStyle} value={form.province} onChange={e=>set("province",e.target.value)}>
+              {["AB","BC","ON","QC","MB","SK","NS","NB","PE","NL","YT","NT","NU"].map(p=><option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+        </div>
+        <label style={labelStyle}>Makes (comma separated)</label>
+        <input style={inputStyle} value={form.makes} onChange={e=>set("makes",e.target.value)} placeholder="Toyota, Lexus"/>
+        <label style={labelStyle}>Notes</label>
+        <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Met at Costco"/>
+        <div style={{display:"flex",gap:16,marginBottom:16,marginTop:6}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#94a3b8",cursor:"pointer"}}>
+            <input type="checkbox" checked={form.live} onChange={e=>set("live",e.target.checked)}/> Live lot
+          </label>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#94a3b8",cursor:"pointer"}}>
+            <input type="checkbox" checked={form.featured} onChange={e=>set("featured",e.target.checked)}/> Featured ($300/mo)
+          </label>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onClose} style={{flex:1,background:"none",border:"1px solid #334155",borderRadius:10,padding:11,color:"#94a3b8",fontSize:14,cursor:"pointer"}}>Cancel</button>
+          <button onClick={()=>{ if(!form.name.trim()){alert("Dealer name is required");return;} onSave(form); }}
+            className="lc-modal-btn" style={{flex:1}}>Save Dealer →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
+  const [tab,setTab]=useState("overview");
+
   const [leads,setLeads]=useState([]);
   const [leadsLoading,setLeadsLoading]=useState(true);
   const [pageViews,setPageViews]=useState([]);
   const [viewsLoading,setViewsLoading]=useState(true);
   const {listings:liveListings, loading:listingsLoading}=useListings();
+
+  const [dealers,setDealers]=useState([]);
+  const [dealersLoading,setDealersLoading]=useState(true);
+  const [dealerModal,setDealerModal]=useState(null); // null | "new" | dealer object
+
+  const [dealerListings,setDealerListings]=useState([]);
+  const [dealerListingsLoading,setDealerListingsLoading]=useState(true);
+
+  const [reviewListings,setReviewListings]=useState([]);
+  const [rejectedListings,setRejectedListings]=useState([]);
+  const [reviewLoading,setReviewLoading]=useState(true);
 
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{
@@ -1996,7 +2277,7 @@ function AdminPanel(){
         if(error) throw error;
         if(!cancelled) setLeads(data||[]);
       }catch(err){
-        console.warn("⚠️ leads fetch failed (check you're logged in and RLS policies are applied):",err.message);
+        console.warn("⚠️ leads fetch failed:",err.message);
         if(!cancelled) setLeads([]);
       }finally{
         if(!cancelled) setLeadsLoading(false);
@@ -2016,7 +2297,7 @@ function AdminPanel(){
         if(error) throw error;
         if(!cancelled) setPageViews(data||[]);
       }catch(err){
-        console.warn("⚠️ page_views fetch failed (check you're logged in and RLS policies are applied):",err.message);
+        console.warn("⚠️ page_views fetch failed:",err.message);
         if(!cancelled) setPageViews([]);
       }finally{
         if(!cancelled) setViewsLoading(false);
@@ -2026,22 +2307,131 @@ function AdminPanel(){
     return()=>{cancelled=true;};
   },[session]);
 
+  async function fetchDealers(){
+    setDealersLoading(true);
+    try{
+      const {data,error}=await supabase.from("dealers").select("*").order("created_at",{ascending:false});
+      if(error) throw error;
+      setDealers(data||[]);
+    }catch(err){
+      console.warn("⚠️ dealers fetch failed (did you run create_dealers_table.sql?):",err.message);
+      setDealers([]);
+    }finally{
+      setDealersLoading(false);
+    }
+  }
+  useEffect(()=>{ if(session) fetchDealers(); else setDealers([]); },[session]);
+
+  async function fetchDealerListings(){
+    setDealerListingsLoading(true);
+    try{
+      const {data,error}=await supabase.from("dealer_listings").select("*").order("submitted_at",{ascending:false}).limit(100);
+      if(error) throw error;
+      setDealerListings(data||[]);
+    }catch(err){
+      console.warn("⚠️ dealer_listings fetch failed:",err.message);
+      setDealerListings([]);
+    }finally{
+      setDealerListingsLoading(false);
+    }
+  }
+  useEffect(()=>{ if(session) fetchDealerListings(); else setDealerListings([]); },[session]);
+
+  async function fetchReview(){
+    setReviewLoading(true);
+    try{
+      const {data:review,error:e1}=await supabase.from("listings")
+        .select("id,external_id,name,price,fuel,source,city,province,verification_score,verification_flags,scraped_at")
+        .eq("status","review").order("scraped_at",{ascending:false}).limit(100);
+      if(e1) throw e1;
+      const {data:rejected,error:e2}=await supabase.from("listings")
+        .select("name,price,verification_score,verification_flags,scraped_at")
+        .eq("status","reject").order("scraped_at",{ascending:false}).limit(50);
+      if(e2) throw e2;
+      setReviewListings(review||[]);
+      setRejectedListings(rejected||[]);
+    }catch(err){
+      console.warn("⚠️ review queue fetch failed:",err.message);
+      setReviewListings([]); setRejectedListings([]);
+    }finally{
+      setReviewLoading(false);
+    }
+  }
+  useEffect(()=>{ if(session) fetchReview(); else { setReviewListings([]); setRejectedListings([]); } },[session]);
+
   async function updateLeadStatus(id,status){
     const {error}=await supabase.from("leads").update({status}).eq("id",id);
     if(!error) setLeads(prev=>prev.map(l=>l.id===id?{...l,status}:l));
   }
 
-  // Real rollups — no estimation. "All time" is genuinely all time since
-  // tracking started, which is however long it's actually been, not a
-  // full year — the UI says so explicitly rather than implying otherwise.
+  async function saveDealer(form){
+    const payload={
+      name:form.name.trim(), contact:form.contact?.trim()||null, phone:form.phone?.trim()||null,
+      email:form.email?.trim()||null, city:form.city?.trim()||null, province:form.province||null,
+      makes:form.makes?.trim()||null, notes:form.notes?.trim()||null,
+      live:!!form.live, featured:!!form.featured,
+    };
+    if(form.id){
+      const {error}=await supabase.from("dealers").update(payload).eq("id",form.id);
+      if(error){ alert("Couldn't save: "+error.message); return; }
+    }else{
+      const {error}=await supabase.from("dealers").insert(payload);
+      if(error){ alert("Couldn't save: "+error.message); return; }
+    }
+    setDealerModal(null);
+    fetchDealers();
+  }
+
+  async function toggleDealerField(id,field,value){
+    setDealers(prev=>prev.map(d=>d.id===id?{...d,[field]:value}:d)); // optimistic
+    const {error}=await supabase.from("dealers").update({[field]:value}).eq("id",id);
+    if(error){ alert("Couldn't update: "+error.message); fetchDealers(); }
+  }
+
+  async function deleteDealer(id,name){
+    if(!confirm(`Delete ${name}?`)) return;
+    const {error}=await supabase.from("dealers").delete().eq("id",id);
+    if(error){ alert("Couldn't delete: "+error.message); return; }
+    fetchDealers();
+  }
+
+  async function markSold(v){
+    const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
+    if(!confirm(`Mark ${v.year} ${v.make} ${v.model} from ${v.dealer} as SOLD?\n\nCommission due: $${commission.toLocaleString()}`)) return;
+    const {error}=await supabase.from("dealer_listings").update({status:"sold"}).eq("id",v.id);
+    if(error){ alert("Couldn't update: "+error.message); return; }
+    const dealerIdx=dealers.findIndex(d=>d.name===v.dealer);
+    if(dealerIdx>=0){
+      await supabase.from("dealers").update({sold_count:(dealers[dealerIdx].sold_count||0)+1}).eq("id",dealers[dealerIdx].id);
+      fetchDealers();
+    }
+    fetchDealerListings();
+  }
+
+  async function publishDealerListing(id){
+    const {error}=await supabase.from("dealer_listings").update({status:"live",published_at:new Date().toISOString()}).eq("id",id);
+    if(error){ alert("Couldn't update: "+error.message); return; }
+    fetchDealerListings();
+  }
+
+  async function approveReview(externalId,name){
+    if(!confirm(`Approve "${name}" and publish to LotCheck?`)) return;
+    const {error}=await supabase.from("listings").update({status:"published"}).eq("external_id",externalId);
+    if(error){ alert("Couldn't update: "+error.message); return; }
+    fetchReview();
+  }
+
+  async function rejectReview(externalId){
+    const {error}=await supabase.from("listings").update({status:"reject"}).eq("external_id",externalId);
+    if(error){ alert("Couldn't update: "+error.message); return; }
+    fetchReview();
+  }
+
   const now=Date.now();
   const rollup=(windowMs)=>{
     const cutoff=now-windowMs;
     const inWindow=pageViews.filter(v=>new Date(v.created_at).getTime()>=cutoff);
-    return {
-      views: inWindow.length,
-      visitors: new Set(inWindow.map(v=>v.visitor_id)).size,
-    };
+    return { views: inWindow.length, visitors: new Set(inWindow.map(v=>v.visitor_id)).size };
   };
   const trafficToday=rollup(24*3600000);
   const trafficWeek=rollup(7*24*3600000);
@@ -2052,9 +2442,6 @@ function AdminPanel(){
   if(checkingSession) return <div style={{minHeight:"100vh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
-  // Real analytics — computed from actual live listings and actual leads.
-  // Nothing here is estimated or fabricated; if a number is empty, it's
-  // because there's genuinely no data yet, not because it's hidden.
   const byProvince={};
   const byFuel={};
   let evapCount=0;
@@ -2068,114 +2455,150 @@ function AdminPanel(){
 
   return(
     <div style={{minHeight:"100vh",background:"#020617",color:"#e2e8f0",padding:"24px"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,maxWidth:1100,margin:"0 auto 24px"}}>
+      {dealerModal && (
+        <DealerModal
+          dealer={dealerModal==="new"?null:dealerModal}
+          onSave={saveDealer}
+          onClose={()=>setDealerModal(null)}
+        />
+      )}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,maxWidth:1100,margin:"0 auto 20px",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:32,height:32,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>✅</div>
+          <LogoMark size={32}/>
           <div style={{fontWeight:800,fontSize:18}}>LotCheck Admin</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:4,background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:10,padding:4}}>
+          <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
+          <AdminTabButton active={tab==="dealers"} onClick={()=>setTab("dealers")}>Dealers</AdminTabButton>
+          <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
+          <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
         </div>
         <button onClick={()=>supabase.auth.signOut()} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 14px",color:"#94a3b8",fontSize:13,cursor:"pointer"}}>Sign out</button>
       </div>
 
       <div style={{maxWidth:1100,margin:"0 auto"}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
-          TRAFFIC · {viewsLoading?"loading…":trackingSince?`tracking since ${trackingSince.toLocaleDateString("en-CA")}`:"no data yet"}
-        </div>
-        {!viewsLoading&&pageViews.length===0?(
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"20px",textAlign:"center",color:"#475569",marginBottom:28}}>
-            No page views recorded yet. This starts counting the moment someone loads the live site after this goes out — there's no way to recover data from before tracking began.
+        {tab==="overview" && (<>
+          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+            TRAFFIC · {viewsLoading?"loading…":trackingSince?`tracking since ${trackingSince.toLocaleDateString("en-CA")}`:"no data yet"}
           </div>
-        ):(
+          {!viewsLoading&&pageViews.length===0?(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"20px",textAlign:"center",color:"#475569",marginBottom:28}}>
+              No page views recorded yet. This starts counting the moment someone loads the live site after this goes out — there's no way to recover data from before tracking began.
+            </div>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+              {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
+                <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+                  <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
+                  <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
+                  <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
-            {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
-              <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-                <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
-                <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
-                <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
-              </div>
-            ))}
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{liveListings.length}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>Total live listings</div>
+            </div>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>{evapCount}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>EVAP-eligible (new, verified)</div>
+            </div>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{Object.keys(byProvince).length}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>Provinces covered</div>
+            </div>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{leads.length}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>Total leads received</div>
+            </div>
           </div>
-        )}
 
-        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{liveListings.length}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Total live listings</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By province</div>
+              {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
+                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
+                  <span style={{color:"#94a3b8"}}>{p}</span><span style={{fontWeight:700}}>{c}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By fuel type</div>
+              {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
+                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
+                  <span style={{color:"#94a3b8"}}>{f}</span><span style={{fontWeight:700}}>{c}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-            <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>{evapCount}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>EVAP-eligible (new, verified)</div>
-          </div>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{Object.keys(byProvince).length}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Provinces covered</div>
-          </div>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-            <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{leads.length}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Total leads received</div>
-          </div>
-        </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By province</div>
-            {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
-              <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
-                <span style={{color:"#94a3b8"}}>{p}</span><span style={{fontWeight:700}}>{c}</span>
-              </div>
-            ))}
+          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+            LEADS · {leadsLoading?"loading…":`${leads.length} total`}
+            {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
           </div>
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By fuel type</div>
-            {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
-              <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
-                <span style={{color:"#94a3b8"}}>{f}</span><span style={{fontWeight:700}}>{c}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
-          LEADS · {leadsLoading?"loading…":`${leads.length} total`}
-          {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
-        </div>
-        {leadsLoading?(
-          <div style={{color:"#475569",fontSize:13}}>Loading leads…</div>
-        ):leads.length===0?(
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
-            No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
-          </div>
-        ):(
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
-            {leads.map(l=>(
-              <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
-                  <div>
-                    <span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35",marginRight:8}}>{l.lead_type}</span>
-                    <strong style={{color:"#f1f5f9"}}>{l.name}</strong>
+          {leadsLoading?(
+            <div style={{color:"#475569",fontSize:13}}>Loading leads…</div>
+          ):leads.length===0?(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
+              No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
+            </div>
+          ):(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+              {leads.map(l=>(
+                <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
+                    <div>
+                      <span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35",marginRight:8}}>{l.lead_type}</span>
+                      <strong style={{color:"#f1f5f9"}}>{l.name}</strong>
+                    </div>
+                    <div style={{fontSize:11,color:"#475569"}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
                   </div>
-                  <div style={{fontSize:11,color:"#475569"}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+                  <div style={{fontSize:13,color:"#94a3b8",marginBottom:6}}>
+                    {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
+                  </div>
+                  {l.details?.listing_name&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>Re: {l.details.listing_name}</div>}
+                  {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
+                  <div style={{display:"flex",gap:6,marginTop:8}}>
+                    {["new","contacted","closed"].map(s=>(
+                      <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
+                        style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
+                          background:l.status===s?"#16a34a":"transparent",
+                          border:`1px solid ${l.status===s?"#16a34a":"#334155"}`,
+                          color:l.status===s?"#fff":"#64748b"}}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div style={{fontSize:13,color:"#94a3b8",marginBottom:6}}>
-                  {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
-                </div>
-                {l.details?.listing_name&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>Re: {l.details.listing_name}</div>}
-                {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
-                <div style={{display:"flex",gap:6,marginTop:8}}>
-                  {["new","contacted","closed"].map(s=>(
-                    <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
-                      style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
-                        background:l.status===s?"#16a34a":"transparent",
-                        border:`1px solid ${l.status===s?"#16a34a":"#334155"}`,
-                        color:l.status===s?"#fff":"#64748b"}}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
+        </>)}
+
+        {tab==="dealers" && (
+          <DealersTab
+            dealers={dealers} dealersLoading={dealersLoading}
+            onAdd={()=>setDealerModal("new")} onEdit={d=>setDealerModal(d)}
+            onToggle={toggleDealerField} onDelete={deleteDealer}
+            dealerListings={dealerListings} dealerListingsLoading={dealerListingsLoading}
+            onMarkSold={markSold} onPublish={publishDealerListing}
+          />
         )}
+
+        {tab==="review" && (
+          <ReviewTab
+            reviewListings={reviewListings} reviewLoading={reviewLoading}
+            rejectedListings={rejectedListings}
+            onApprove={approveReview} onReject={rejectReview}
+          />
+        )}
+
+        {tab==="revenue" && <RevenueTab dealers={dealers}/>}
       </div>
     </div>
   );
@@ -2282,7 +2705,7 @@ function LotCheckApp(){
         <LiveBackground/>
         <header className="lc-header">
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-            <div style={{width:32,height:32,background:"linear-gradient(135deg,#16a34a,#0ea5e9)",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>✅</div>
+            <LogoMark size={32}/>
             <div style={{minWidth:0}}>
               <div style={{fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
