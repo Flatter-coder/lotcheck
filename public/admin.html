@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -164,9 +165,10 @@ body{
     <div class="login-logo">✅</div>
     <div class="login-title">LotCheck Admin</div>
     <div class="login-sub">Dealer management dashboard</div>
-    <input id="login-pass" class="login-input" type="password" placeholder="Enter admin password" onkeydown="if(event.key==='Enter')login()"/>
-    <div id="login-error" style="color:#ff5a5a;font-size:12px;margin-bottom:10px;display:none">Incorrect password</div>
-    <button class="login-btn" onclick="login()">Sign in →</button>
+    <input id="login-email" class="login-input" type="email" placeholder="Email" autocomplete="username" onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()"/>
+    <input id="login-pass" class="login-input" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()"/>
+    <div id="login-error" style="color:#ff5a5a;font-size:12px;margin-bottom:10px;display:none">Incorrect email or password</div>
+    <button id="login-btn" class="login-btn" onclick="login()">Sign in →</button>
   </div>
 </div>
 
@@ -453,16 +455,30 @@ body{
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
-const ADMIN_PASSWORD = "LotCheck2026!";
 const SUPABASE_URL   = "https://debigtyjhjamipooajhk.supabase.co";
 const SUPABASE_KEY   = "sb_publishable_T2BDbwY-Y1Lzr3r8K41lvw_Shtgo1nq";
 
-// ── Supabase helper ───────────────────────────────────────────────────────────
+// Real Supabase Auth client (loaded via the CDN script tag in <head>).
+// This replaces the old hardcoded ADMIN_PASSWORD check. There is no sign-up
+// form anywhere on this page on purpose — the only way to get an account is
+// for you to create one yourself in the Supabase dashboard. See the setup
+// guide for exact steps.
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── Supabase REST helper ──────────────────────────────────────────────────────
+// Uses the logged-in user's real session token when available, so Row Level
+// Security policies can tell the difference between "the public site reading
+// listings" and "an authenticated admin changing a status." Falls back to the
+// anon key only for calls made before login (there shouldn't be any).
 async function sb(endpoint, opts={}) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const token = session?.access_token || SUPABASE_KEY;
+
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${endpoint}`, {
     headers: {
       "apikey": SUPABASE_KEY,
-      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
       "Prefer": opts.prefer || "return=representation",
       ...opts.headers
@@ -481,23 +497,53 @@ let dealers = JSON.parse(localStorage.getItem("lc_dealers") || "[]");
 let leads   = JSON.parse(localStorage.getItem("lc_leads") || "[]");
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-function login() {
-  const pass = document.getElementById("login-pass").value;
-  if (pass === ADMIN_PASSWORD) {
+async function login() {
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-pass").value;
+  const btn = document.getElementById("login-btn");
+  const errEl = document.getElementById("login-error");
+
+  errEl.style.display = "none";
+  btn.disabled = true;
+  btn.textContent = "Signing in…";
+
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+
+  btn.disabled = false;
+  btn.textContent = "Sign in →";
+
+  if (error) {
+    errEl.textContent = error.message || "Incorrect email or password";
+    errEl.style.display = "block";
+    document.getElementById("login-pass").value = "";
+    return;
+  }
+
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("admin-app").style.display = "block";
+  loadAll();
+}
+
+async function signout() {
+  await supabaseClient.auth.signOut();
+  document.getElementById("login-screen").style.display = "flex";
+  document.getElementById("admin-app").style.display = "none";
+  document.getElementById("login-email").value = "";
+  document.getElementById("login-pass").value = "";
+}
+
+// Runs once on page load. If there's already a valid session (from a
+// previous login, persisted by the Supabase SDK), skip straight past the
+// login screen instead of making the admin re-enter their password every visit.
+async function checkExistingSession() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) {
     document.getElementById("login-screen").style.display = "none";
     document.getElementById("admin-app").style.display = "block";
     loadAll();
-  } else {
-    document.getElementById("login-error").style.display = "block";
-    document.getElementById("login-pass").value = "";
   }
 }
-
-function signout() {
-  document.getElementById("login-screen").style.display = "flex";
-  document.getElementById("admin-app").style.display = "none";
-  document.getElementById("login-pass").value = "";
-}
+checkExistingSession();
 
 // ── Tab navigation ────────────────────────────────────────────────────────────
 // FIX: "review" was missing from this array in the original file, so clicking
