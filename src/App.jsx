@@ -171,9 +171,19 @@ const GLOBAL_CSS = `
     .lc-main { flex-direction: row; }
   }
 
-  /* Sidebar */
+  /* Sidebar. This is the fix for the real bug: previously this had no
+     height limit on phones at all, so with 180+ listings it grew the
+     whole page to tens of thousands of pixels tall -- there was
+     nothing wrong with the listings, the page was just enormous.
+     Now it's a proper self-scrolling panel on every screen size, not
+     just desktop. (When a listing gets selected on a phone, a
+     separate early-return view further up takes over completely with
+     its own back button -- this sidebar is only ever what's on
+     screen here when nothing's selected yet.) */
   .lc-sidebar {
     width: 100%;
+    height: calc(100vh - 57px);
+    overflow-y: auto;
     border-bottom: 1px solid #1e293b;
   }
   @media (min-width: 768px) {
@@ -183,28 +193,33 @@ const GLOBAL_CSS = `
       max-width: 380px;
       border-bottom: none;
       border-right: 1px solid #1e293b;
-      height: calc(100vh - 57px);
       position: sticky;
       top: 57px;
-      overflow-y: auto;
     }
   }
   @media (min-width: 1024px) {
     .lc-sidebar { width: 380px; }
   }
 
-  /* Detail panel */
+  /* Detail panel. On phones, the code path that renders this always
+     has nothing selected (selecting a listing on a phone triggers the
+     separate full-screen view above instead), so its only job here on
+     a phone would be showing the empty "select a listing" placeholder
+     underneath an already-obvious list -- not useful, so it's hidden
+     on narrow screens and only appears at the desktop side-by-side
+     breakpoint. */
   .lc-detail {
+    display: none;
     flex: 1;
     padding: 16px;
     overflow-y: auto;
   }
   @media (min-width: 768px) {
     .lc-detail {
+      display: block;
       height: calc(100vh - 57px);
       position: sticky;
       top: 57px;
-      overflow-y: auto;
     }
   }
 
