@@ -308,6 +308,29 @@ const GLOBAL_CSS = `
   .lc-card-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
   .lc-card-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
   .lc-price { font-size: 22px; font-weight: 800; color: #f1f5f9; }
+
+  /* Skeleton loading cards -- shown immediately on page load, before the
+     real listings arrive, so a slow connection shows something visibly
+     alive right away instead of a small text label that's easy to miss
+     while the sidebar otherwise looks empty. */
+  .lc-skel-card {
+    background: #0a0f1e;
+    border: 2px solid #1e293b;
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .lc-skel-bar {
+    height: 14px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, #131b2e 25%, #1c2740 37%, #131b2e 63%);
+    background-size: 400% 100%;
+    animation: lc-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes lc-shimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
   .lc-after-rebate { font-size: 12px; color: #22c55e; font-weight: 600; margin-top: 2px; }
   .lc-meta { text-align: right; }
   .lc-city { font-size: 12px; color: #64748b; }
@@ -1808,6 +1831,22 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
   );
 }
 
+function SkeletonCard(){
+  return(
+    <div className="lc-skel-card">
+      <div className="lc-skel-bar" style={{width:"78%",marginBottom:10}}/>
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        <div className="lc-skel-bar" style={{width:52,height:18,borderRadius:20}}/>
+        <div className="lc-skel-bar" style={{width:44,height:18,borderRadius:20}}/>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+        <div className="lc-skel-bar" style={{width:80,height:22}}/>
+        <div className="lc-skel-bar" style={{width:70,height:14}}/>
+      </div>
+    </div>
+  );
+}
+
 function ListingCard({listing,liveListings,history,onClick,active}){
   const score=lotScore(listing,liveListings);
   const evap=getEVAP(listing);
@@ -2715,7 +2754,7 @@ function LotCheckApp(){
             <div className="lc-listings">
               <div style={{fontSize:12,color:"#334155",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
                 {dataLoading
-                  ?<span>⏳ Loading live listings...</span>
+                  ?<span style={{color:"#60a5fa",fontWeight:600}}>⏳ Loading live listings…</span>
                   :<>
                     {isLive
                       ?<span className="lc-radar"><span className="lc-radar-ring"/><span className="lc-radar-ring delay"/><span className="lc-radar-core"/></span>
@@ -2725,8 +2764,13 @@ function LotCheckApp(){
                   </>
                 }
               </div>
-              {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
-              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} onClick={handleSelect} active={selected?.id===l.id}/>)}
+              {dataLoading
+                ? Array.from({length:6}).map((_,i)=><SkeletonCard key={i}/>)
+                : <>
+                    {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
+                    {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} onClick={handleSelect} active={selected?.id===l.id}/>)}
+                  </>
+              }
             </div>
             <div className="lc-footer">© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
           </div>
