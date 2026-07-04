@@ -1648,11 +1648,9 @@ function EVAPRebateTab({listing, rebate}){
   );
 }
 
-function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnect,onUpgrade,onTestDrive}){
+function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTestDrive}){
   const priceHistory = history || [];
   const [tab,setTab]=useState("chart");
-  const [unlocks,setUnlocks]=useState({});
-  const [unlockModal,setUnlockModal]=useState(null);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   const score=lotScore(listing,liveListings);
@@ -1716,10 +1714,6 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
   const cbb={retail:retailAnchor,trade:Math.round(retailAnchor*0.80)};
   cbb.wholesale=Math.round(cbb.trade*0.90);
 
-  const key=f=>`${listing.id}-${f}`;
-  const isUnlocked=f=>isPro||unlocks[key(f)];
-  const unlockPrice={vin:2.99,cbb:2.99};
-
   return(
     <div style={{padding:"16px"}}>
       <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:8,lineHeight:1.3}}>{listing.name}</div>
@@ -1739,15 +1733,10 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
           Carfax business relationship exists. Right now unlocking it would
           only send the user to Carfax's own paid page (~$45 separately),
           not deliver a report LotCheck actually provides. VINHistoryPanel
-          and its UnlockModal entry are left in place below, unused — add
-          ["vin", isUnlocked("vin")?"🔍 VIN History":"🔒 VIN $2.99"] back to
-          this array to re-enable once that's resolved. */}
+          and its UnlockModal entry are left in place below, unused. */}
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb",isUnlocked("cbb")?"📊 Value Est.":"🔒 Value Est. $2.99"],["insurance","🛡️ Insurance"]].map(([t,l])=>(
-          <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>{
-            if(t==="cbb"&&!isUnlocked(t)){setUnlockModal(t);return;}
-            setTab(t);
-          }}>
+        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb","📊 Value Est."],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+          <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>setTab(t)}>
             {l}
           </button>
         ))}
@@ -1779,21 +1768,14 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
           {[["Asking",`$${listing.price.toLocaleString()}`],["vs Comps",compAvgPrice==null?"No comps yet":`${comps.length} · avg $${compAvgPrice.toLocaleString()}`],["Odometer",`${listing.km.toLocaleString()} km`]].map(([l,v])=>(
             <div key={l} className="lc-stat"><div className="lc-stat-label">{l}</div><div className="lc-stat-value">{v}</div></div>
           ))}
-          {isPro?(
-            <div className="lc-stat"><div className="lc-stat-label">Tracked</div><div className="lc-stat-value">{daysTracked==null?"New today":`${daysTracked}d on LotCheck`}</div></div>
-          ):(
-            <div className="lc-stat" onClick={onUpgrade} style={{cursor:"pointer"}}>
-              <div className="lc-stat-label">Tracked</div>
-              <div className="lc-stat-value" style={{color:"#475569",fontSize:13}}>🔒 Pro</div>
-            </div>
-          )}
+          <div className="lc-stat"><div className="lc-stat-label">Tracked</div><div className="lc-stat-value">{daysTracked==null?"New today":`${daysTracked}d on LotCheck`}</div></div>
         </div>
       </>}
       {tab==="rebates"&&<EVAPRebateTab listing={listing} rebate={rebate}/>}
-      {tab==="cbb"&&isUnlocked("cbb")&&(
+      {tab==="cbb"&&(
         <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:14,padding:"16px"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>LOTCHECK VALUE ESTIMATE · PRO</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>LOTCHECK VALUE ESTIMATE</div>
             <InfoTooltip title="HOW THIS IS CALCULATED">
               This is <strong style={{color:"#f1f5f9"}}>not</strong> licensed Black Book, CBB, or any third-party valuation data — LotCheck doesn't have access to that, and building it would mean scraping sites like AutoTrader, which we won't do without weighing that risk deliberately.
               <br/><br/>
@@ -1822,18 +1804,11 @@ function DetailPanel({listing,isPro,liveListings,history,historyLoading,onConnec
       {/* Paused — see note above tabs array. Re-enable by uncommenting:
       {tab==="vin"&&isUnlocked("vin")&&<VINHistoryPanel listing={listing}/>} */}
       {tab==="insurance"&&<InsurancePanel listing={listing}/>}
-
-      {unlockModal&&(
-        <UnlockModal feature={unlockModal} price={unlockPrice[unlockModal]}
-          onUnlock={()=>{setUnlocks(prev=>({...prev,[key(unlockModal)]:true}));setTab(unlockModal);}}
-          onClose={()=>setUnlockModal(null)} onUpgrade={()=>{setUnlockModal(null);onUpgrade();}}
-        />
-      )}
     </div>
   );
 }
 
-function ListingCard({listing,liveListings,history,isPro,onClick,active}){
+function ListingCard({listing,liveListings,history,onClick,active}){
   const score=lotScore(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
@@ -1848,7 +1823,7 @@ function ListingCard({listing,liveListings,history,isPro,onClick,active}){
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
-        {isPro&&hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
+        {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
         <div>
@@ -2641,12 +2616,6 @@ export default function App(){
 }
 
 function LotCheckApp(){
-  const [trialStatus,setTrialStatus]=useState(()=>getTrialStatus());
-  const isPro = trialStatus.state==="active";
-  const [showPro,setShowPro]=useState(false);
-  const [showArrivals,setShowArrivals]=useState(false);
-  const [showDepreciation,setShowDepreciation]=useState(false);
-  const [showAppraisal,setShowAppraisal]=useState(false);
   const [showConnect,setShowConnect]=useState(false);
   const [showTestDrive,setShowTestDrive]=useState(false);
   const [selected,setSelected]=useState(null);
@@ -2669,20 +2638,6 @@ function LotCheckApp(){
       if(error) console.warn("⚠️ page_views insert failed:",error.message);
     });
   },[]);
-
-  // Re-check trial status every minute so the UI reflects real expiry
-  // instead of staying "Pro" forever once granted.
-  useEffect(()=>{
-    const t=setInterval(()=>setTrialStatus(getTrialStatus()),60000);
-    return()=>clearInterval(t);
-  },[]);
-
-  const handleStartTrial=()=>{
-    if(trialStatus.state==="none"){
-      startTrial();
-      setTrialStatus(getTrialStatus());
-    }
-  };
 
   useEffect(()=>{
     const handler=()=>setIsMobile(window.innerWidth<768);
@@ -2710,13 +2665,11 @@ function LotCheckApp(){
           <div style={{background:"#060d18",borderBottom:"1px solid #1e293b",padding:"12px 16px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:100}}>
             <button onClick={()=>setSelected(null)} style={{background:"#1e293b",border:"none",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",cursor:"pointer",fontSize:14,fontWeight:600}}>← Back</button>
             <div style={{flex:1,fontSize:13,fontWeight:600,color:"#f1f5f9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selected.name}</div>
-            {isPro?<span style={{fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ {formatMsLeft(trialStatus.msLeft)} left</span>:<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Pro</button>}
           </div>
-          <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+          <DetailPanel key={selected.id} listing={selected} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onTestDrive={()=>setShowTestDrive(true)}/>
         </div>
         {showConnect&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
         {showTestDrive&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
-        {showPro&&<ProModal onStart={handleStartTrial} onClose={()=>setShowPro(false)} trialStatus={trialStatus}/>}
       </>
     );
   }
@@ -2734,24 +2687,9 @@ function LotCheckApp(){
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
             </div>
           </div>
-          <div className="lc-header-right">
-            <button onClick={()=>setShowDepreciation(true)} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
-              📉 <span className="lc-header-appraisal-text">Depreciation</span>
-            </button>
-            <button onClick={()=>{isPro?setShowArrivals(true):setShowPro(true);}} style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:10,padding:"7px 10px",color:"#60a5fa",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
-              🗓️ <span className="lc-header-appraisal-text">New arrivals</span>
-            </button>
-            {isPro
-              ?<div style={{background:"#0d2010",border:"1px solid #16a34a40",borderRadius:8,padding:"6px 10px",fontSize:11,color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✅ {formatMsLeft(trialStatus.msLeft)} left</div>
-              :<button onClick={()=>setShowPro(true)} style={{background:"#16a34a",border:"none",borderRadius:10,padding:"7px 12px",color:"#fff",cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>{trialStatus.state==="expired"?"Trial ended":"Try Pro free"}</button>
-            }
-          </div>
         </header>
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
-        {showAppraisal&&<AppraisalModal onClose={()=>setShowAppraisal(false)}/>}
-        {showDepreciation&&<DepreciationModal onClose={()=>setShowDepreciation(false)}/>}
-        {showArrivals&&isPro&&<ArrivalsModal liveListings={liveListings} historyMap={historyMap} onClose={()=>setShowArrivals(false)}/>}
 
         {/* Province filter — uses liveListings so only real provinces show */}
         <div className="lc-provinces">
@@ -2788,14 +2726,14 @@ function LotCheckApp(){
                 }
               </div>
               {filtered.length===0&&<div className="lc-empty">No listings match your filters</div>}
-              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} isPro={isPro} onClick={handleSelect} active={selected?.id===l.id}/>)}
+              {filtered.map(l=><ListingCard key={l.id} listing={l} liveListings={liveListings} history={historyMap[l.external_id]} onClick={handleSelect} active={selected?.id===l.id}/>)}
             </div>
             <div className="lc-footer">© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
           </div>
 
           <div className="lc-detail">
             {selected?(
-              <DetailPanel key={selected.id} listing={selected} isPro={isPro} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onUpgrade={()=>setShowPro(true)} onTestDrive={()=>setShowTestDrive(true)}/>
+              <DetailPanel key={selected.id} listing={selected} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onTestDrive={()=>setShowTestDrive(true)}/>
             ):(
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",color:"#334155",textAlign:"center",padding:"40px 20px"}}>
                 <div style={{fontSize:48,marginBottom:16}}>✅</div>
@@ -2809,7 +2747,6 @@ function LotCheckApp(){
 
       {showConnect&&selected&&<ConnectModal listing={selected} onClose={()=>setShowConnect(false)}/>}
       {showTestDrive&&selected&&<TestDriveModal listing={selected} onClose={()=>setShowTestDrive(false)}/>}
-      {showPro&&<ProModal onStart={handleStartTrial} onClose={()=>setShowPro(false)} trialStatus={trialStatus}/>}
     </>
   );
 }
