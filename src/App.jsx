@@ -553,7 +553,19 @@ function getRebate(province,fuel,listing){
     return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,
       ineligibleReason:`This vehicle's price ($${listing.price.toLocaleString()}) exceeds the EVAP cap of $50,000. Not eligible for federal rebate.`};
   }
-  const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
+  // Being a new-enough, under-cap BEV/PHEV is necessary but not sufficient --
+  // the specific year/make/model also has to actually be on Transport
+  // Canada's approved list. Plenty of EVs aren't (see the IONIQ 5/6 note
+  // above EVAP_LIST) even when they'd otherwise qualify on paper. This was
+  // previously never checked here at all, which is exactly how a listing
+  // like a 2025 Mach-E (only the 2026 model year is actually approved)
+  // could show a $5,000 rebate it was never really eligible for.
+  const evapMatch=getEVAP(listing);
+  if(!evapMatch){
+    return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,
+      ineligibleReason:`The ${listing.year} ${listing.make||""} ${listing.model||""} isn't on Transport Canada's current EVAP approved vehicle list. Rebate eligibility is model-year specific — a newer or older model year of the same vehicle may qualify even when this one doesn't.`};
+  }
+  const federal=evapMatch.incentive;
   const provincial=fuel==="BEV"?r.prov_bev:fuel==="PHEV"?r.prov_phev:0;
   return{federal,provincial,total:federal+provincial,prov_name:r.prov_name,note:r.note,eligible:true,ineligibleReason:""};
 }
