@@ -1814,26 +1814,34 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
             <InfoTooltip title="HOW THIS IS CALCULATED">
               This is <strong style={{color:"#f1f5f9"}}>not</strong> licensed Black Book, CBB, or any third-party valuation data — LotCheck doesn't have access to that, and building it would mean scraping sites like AutoTrader, which we won't do without weighing that risk deliberately.
               <br/><br/>
-              When other live LotCheck listings of the <strong style={{color:"#f1f5f9"}}>same model and a similar model-year (±3 years)</strong> exist, Retail is nudged toward their real average price — weighted no more than evenly against this listing's own asking price, so a couple of comps can never outvote what this specific car is actually listed for.
+              We only show an estimate once at least one other live LotCheck listing of the <strong style={{color:"#f1f5f9"}}>same model and a similar model-year (±3 years)</strong> exists to anchor it against — weighted no more than evenly against this listing's own asking price, so a couple of comps can never outvote what this specific car is actually listed for. With zero comps, there's nothing real to anchor to, so we don't show a number at all rather than presenting a guess as if it were backed by data.
               <br/><br/>
               Trade-in and Wholesale are typical dealer-spread percentages off Retail (roughly 80% and 72%) — not a second age/mileage discount on top of it, since Retail already reflects this car's age and condition through its real market price. Still an approximation, not a market regression.
             </InfoTooltip>
           </div>
-          <div style={{fontSize:11,color:"#475569",marginBottom:comps.length>0?8:12,lineHeight:1.5}}>Our own estimate based on this vehicle's asking price and, when available, real comps from other live LotCheck listings.</div>
-          {comps.length>0&&(
-            <div style={{fontSize:11,color:"#60a5fa",marginBottom:12,lineHeight:1.5}}>
-              📊 Anchored against {comps.length} other live {listing.model} listing{comps.length===1?"":"s"} on LotCheck right now, averaging ${compAvgPrice.toLocaleString()}.
+          <div style={{fontSize:11,color:"#475569",marginBottom:comps.length>0?8:12,lineHeight:1.5}}>Our own estimate based on this vehicle's asking price and real comps from other live LotCheck listings.</div>
+          {comps.length>0?(
+            <>
+              <div style={{fontSize:11,color:"#60a5fa",marginBottom:12,lineHeight:1.5}}>
+                📊 Anchored against {comps.length} other live {listing.model} listing{comps.length===1?"":"s"} on LotCheck right now, averaging ${compAvgPrice.toLocaleString()}.
+              </div>
+              <div className="lc-stats">
+                {[["Retail",cbb.retail,"#22c55e","Dealer asking range"],["Trade-in",cbb.trade,"#f59e0b","What dealer pays"],["Wholesale",cbb.wholesale,"#94a3b8","Auction estimate"]].map(([l,v,c,sub])=>(
+                  <div key={l} className="lc-stat" style={{borderColor:"#1e3a5f"}}>
+                    <div className="lc-stat-label">{l}</div>
+                    <div style={{fontSize:17,fontWeight:700,color:c,marginBottom:2}}>${v.toLocaleString()}</div>
+                    <div style={{fontSize:10,color:"#334155"}}>{sub}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ):(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"28px 20px",textAlign:"center"}}>
+              <div style={{fontSize:26,marginBottom:8}}>📊</div>
+              <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>Not enough comps yet for a reliable estimate</div>
+              <div style={{fontSize:12,color:"#475569"}}>No other live {listing.model} listings on LotCheck right now to anchor a Retail figure against. We'll show one here as soon as a real comp appears, rather than guess from the asking price alone.</div>
             </div>
           )}
-          <div className="lc-stats">
-            {[["Retail",cbb.retail,"#22c55e","Dealer asking range"],["Trade-in",cbb.trade,"#f59e0b","What dealer pays"],["Wholesale",cbb.wholesale,"#94a3b8","Auction estimate"]].map(([l,v,c,sub])=>(
-              <div key={l} className="lc-stat" style={{borderColor:"#1e3a5f"}}>
-                <div className="lc-stat-label">{l}</div>
-                <div style={{fontSize:17,fontWeight:700,color:c,marginBottom:2}}>${v.toLocaleString()}</div>
-                <div style={{fontSize:10,color:"#334155"}}>{sub}</div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
       {/* Paused — see note above tabs array. Re-enable by uncommenting:
