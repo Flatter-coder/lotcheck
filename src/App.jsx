@@ -545,6 +545,31 @@ function classifyReferrer(){
   return host; // unrecognized source -- show the real domain rather than "Other"
 }
 
+// Groups an array of timestamps into fixed time buckets. Shared by both the
+// traffic graph (bucketing page_views) and the listings-over-time graph
+// (bucketing each listing's first-ever price_history record) so both charts
+// use identical, consistent time windows rather than two separate
+// implementations that could drift out of sync with each other.
+function bucketByTime(timestamps,granularity){
+  const now=Date.now();
+  const configs={
+    hour:{bucketMs:3600000,count:24,label:d=>d.toLocaleTimeString("en-CA",{hour:"numeric"})},
+    day:{bucketMs:24*3600000,count:30,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    week:{bucketMs:7*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    month:{bucketMs:30*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short"})},
+  };
+  const cfg=configs[granularity]||configs.day;
+  const startTime=now-cfg.bucketMs*cfg.count;
+  const buckets=[];
+  for(let i=0;i<cfg.count;i++){
+    const bucketStart=startTime+i*cfg.bucketMs;
+    const bucketEnd=bucketStart+cfg.bucketMs;
+    const count=timestamps.filter(t=>t>=bucketStart&&t<bucketEnd).length;
+    buckets.push({label:cfg.label(new Date(bucketStart)),count});
+  }
+  return buckets;
+}
+
 // Groups raw page_views rows into fixed time buckets for the admin traffic
 // graph. Each bucket knows its own view count and unique-visitor count.
 function bucketPageViews(views,granularity){
@@ -1813,6 +1838,9 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         <span className="badge" style={{background:"#1e293b",color:"#64748b"}}>{listing.city}, {listing.province}</span>
+        <span className="badge" style={{background:"#1e293b",color:"#94a3b8"}}>
+          🕐 {daysTracked==null?"New on LotCheck":daysTracked===0?"Listed today":`${daysTracked}d on the market`}
+        </span>
       </div>
       <div className="lc-price-hero">
         <div className="lc-price-big">${currentPrice.toLocaleString()}</div>
@@ -1935,6 +1963,12 @@ function ListingCard({listing,liveListings,history,onClick,active}){
   const h=history||[];
   const hasDrop=h.length>=2&&h[h.length-1].price<h[h.length-2].price;
   const dropAmount=hasDrop?h[h.length-2].price-h[h.length-1].price:0;
+  // Same "days on LotCheck" logic as the detail view's Tracked stat --
+  // from the first price_history point we've ever recorded for this
+  // listing, not from the scraper's own scraped_at (which gets touched on
+  // every re-scrape, not just the first one, so it can't tell you when a
+  // listing actually first appeared).
+  const daysOnMarket=h.length?Math.max(0,Math.floor((Date.now()-new Date(h[0].recorded_at))/86400000)):null;
   return(
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
@@ -1951,6 +1985,9 @@ function ListingCard({listing,liveListings,history,onClick,active}){
           <div className="lc-city">{listing.city}, {listing.province}</div>
           <div className="lc-km" style={{color:listing.km>150000?"#ef4444":listing.km>80000?"#f59e0b":"#22c55e"}}>{listing.km.toLocaleString()} km</div>
         </div>
+      </div>
+      <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #1e293b",fontSize:11,color:"#475569"}}>
+        {daysOnMarket==null?"New on LotCheck":daysOnMarket===0?"Listed today":`${daysOnMarket} day${daysOnMarket===1?"":"s"} on the market`}
       </div>
     </div>
   );
@@ -2360,6 +2397,8 @@ function AdminPanel(){
   const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
   const {listings:liveListings, loading:listingsLoading}=useListings();
+  const {historyMap}=usePriceHistoryMap();
+  const [listingsGranularity,setListingsGranularity]=useState("day");
 
   const [dealers,setDealers]=useState([]);
   const [dealersLoading,setDealersLoading]=useState(true);
@@ -2568,11 +2607,21 @@ function AdminPanel(){
   const byProvince={};
   const byFuel={};
   let evapCount=0;
+  const firstSeenTimestamps=[];
+  const daysOnMarketValues=[];
   liveListings.forEach(l=>{
     byProvince[l.province]=(byProvince[l.province]||0)+1;
     byFuel[l.fuel]=(byFuel[l.fuel]||0)+1;
     if(getEVAP(l)) evapCount++;
+    const h=historyMap[l.external_id];
+    if(h&&h.length){
+      const firstSeen=new Date(h[0].recorded_at).getTime();
+      firstSeenTimestamps.push(firstSeen);
+      daysOnMarketValues.push(Math.max(0,Math.floor((Date.now()-firstSeen)/86400000)));
+    }
   });
+  const avgDaysOnMarket=daysOnMarketValues.length?Math.round(daysOnMarketValues.reduce((a,b)=>a+b,0)/daysOnMarketValues.length):null;
+  const bucketedListings=bucketByTime(firstSeenTimestamps,listingsGranularity);
   const byLeadType={};
   leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
@@ -2686,7 +2735,7 @@ function AdminPanel(){
           )}
 
           <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
             <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{liveListings.length}</div>
               <div style={{fontSize:12,color:"#64748b"}}>Total live listings</div>
@@ -2703,6 +2752,52 @@ function AdminPanel(){
               <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{leads.length}</div>
               <div style={{fontSize:12,color:"#64748b"}}>Total leads received</div>
             </div>
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>Avg. days on market</div>
+            </div>
+          </div>
+
+          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#94a3b8"}}>New listings tracked over time</div>
+              <div style={{display:"flex",gap:4,background:"#0d1526",border:"1px solid #1e293b",borderRadius:8,padding:3}}>
+                {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
+                  <button key={key} onClick={()=>setListingsGranularity(key)}
+                    style={{background:listingsGranularity===key?"#1e3a5f":"transparent",color:listingsGranularity===key?"#60a5fa":"#64748b",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {firstSeenTimestamps.length===0?(
+              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
+            ):(
+              <>
+                <div style={{height:180}}>
+                  <ResponsiveContainer>
+                    <BarChart data={bucketedListings} margin={{top:4,right:4,bottom:0,left:0}}>
+                      <XAxis dataKey="label" tick={{fontSize:10,fill:"#64748b"}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:11,fill:"#64748b"}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <Tooltip
+                        formatter={(v)=>[v,"New listings"]}
+                        contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:12,fontWeight:600,color:"#f1f5f9"}}
+                        labelStyle={{color:"#94a3b8",fontSize:11}}
+                      />
+                      <Bar dataKey="count" radius={[3,3,0,0]}>
+                        {bucketedListings.map((entry,i)=>(
+                          <Cell key={i} fill={i===0||entry.count>=bucketedListings[i-1].count?"#22c55e":"#f59e0b"}/>
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#475569"}}>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#22c55e",marginRight:5}}/>Up from previous period</span>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#f59e0b",marginRight:5}}/>Down from previous period</span>
+                </div>
+              </>
+            )}
           </div>
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
