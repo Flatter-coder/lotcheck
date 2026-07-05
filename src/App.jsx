@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
 
@@ -516,6 +516,64 @@ function formatMsLeft(ms) {
 // localStorage is the correct, normal tool for this, unlike in an artifact
 // preview where it silently fails.
 const VISITOR_ID_KEY = "lc_visitor_id";
+// Turns document.referrer into a clean, human-readable source label.
+// No referrer at all (empty string) means the browser didn't send one --
+// typically a bookmark, typed URL, or an app opening a link directly.
+// Referrers from lotcheck.ca itself are internal navigation (e.g. welcome
+// page -> /browse), not a real acquisition source, so they're labelled
+// separately rather than counted as "where a visitor came from."
+function classifyReferrer(){
+  const ref=document.referrer;
+  if(!ref) return "Direct";
+  let host;
+  try{ host=new URL(ref).hostname.toLowerCase(); }catch{ return "Direct"; }
+  if(host.includes("lotcheck.ca")) return "Internal navigation";
+  const known=[
+    [/google\./,"Google"],
+    [/bing\.com/,"Bing"],
+    [/duckduckgo\.com/,"DuckDuckGo"],
+    [/yahoo\./,"Yahoo"],
+    [/facebook\.com|fb\.com|m\.facebook/,"Facebook"],
+    [/instagram\.com/,"Instagram"],
+    [/kijiji\.ca/,"Kijiji"],
+    [/twitter\.com|t\.co|x\.com/,"Twitter/X"],
+    [/linkedin\.com/,"LinkedIn"],
+    [/reddit\.com/,"Reddit"],
+    [/tiktok\.com/,"TikTok"],
+  ];
+  for(const[pattern,label]of known){ if(pattern.test(host)) return label; }
+  return host; // unrecognized source -- show the real domain rather than "Other"
+}
+
+// Groups raw page_views rows into fixed time buckets for the admin traffic
+// graph. Each bucket knows its own view count and unique-visitor count.
+function bucketPageViews(views,granularity){
+  const now=Date.now();
+  const configs={
+    hour:{bucketMs:3600000,count:24,label:d=>d.toLocaleTimeString("en-CA",{hour:"numeric"})},
+    day:{bucketMs:24*3600000,count:30,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    week:{bucketMs:7*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    month:{bucketMs:30*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short"})},
+  };
+  const cfg=configs[granularity]||configs.day;
+  const startTime=now-cfg.bucketMs*cfg.count;
+  const buckets=[];
+  for(let i=0;i<cfg.count;i++){
+    const bucketStart=startTime+i*cfg.bucketMs;
+    const bucketEnd=bucketStart+cfg.bucketMs;
+    const inBucket=views.filter(v=>{
+      const t=new Date(v.created_at).getTime();
+      return t>=bucketStart&&t<bucketEnd;
+    });
+    buckets.push({
+      label:cfg.label(new Date(bucketStart)),
+      views:inBucket.length,
+      visitors:new Set(inBucket.map(v=>v.visitor_id)).size,
+    });
+  }
+  return buckets;
+}
+
 function getOrCreateVisitorId() {
   try {
     let id = window.localStorage.getItem(VISITOR_ID_KEY);
@@ -2299,6 +2357,7 @@ function AdminPanel(){
   const [leads,setLeads]=useState([]);
   const [leadsLoading,setLeadsLoading]=useState(true);
   const [pageViews,setPageViews]=useState([]);
+  const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
   const {listings:liveListings, loading:listingsLoading}=useListings();
 
@@ -2350,7 +2409,7 @@ function AdminPanel(){
     async function fetchViews(){
       setViewsLoading(true);
       try{
-        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id").order("created_at",{ascending:true}).limit(50000);
+        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source").order("created_at",{ascending:true}).limit(50000);
         if(error) throw error;
         if(!cancelled) setPageViews(data||[]);
       }catch(err){
@@ -2495,6 +2554,13 @@ function AdminPanel(){
   const trafficMonth=rollup(30*24*3600000);
   const trafficAllTime={views:pageViews.length, visitors:new Set(pageViews.map(v=>v.visitor_id)).size};
   const trackingSince=pageViews.length?new Date(pageViews[0].created_at):null;
+  const bucketedTraffic=bucketPageViews(pageViews,trafficGranularity);
+  const trafficSources={};
+  pageViews.forEach(v=>{
+    const src=v.referrer_source||"Unknown (recorded before tracking)";
+    trafficSources[src]=(trafficSources[src]||0)+1;
+  });
+  const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
 
   if(checkingSession) return <div style={{minHeight:"100dvh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
@@ -2544,15 +2610,79 @@ function AdminPanel(){
               No page views recorded yet. This starts counting the moment someone loads the live site after this goes out — there's no way to recover data from before tracking began.
             </div>
           ):(
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:28}}>
-              {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
-                <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-                  <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
-                  <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
-                  <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+            <>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+                {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
+                  <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
+                    <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
+                    <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:16}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8"}}>Visits over time</div>
+                  <div style={{display:"flex",gap:4,background:"#0d1526",border:"1px solid #1e293b",borderRadius:8,padding:3}}>
+                    {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
+                      <button key={key} onClick={()=>setTrafficGranularity(key)}
+                        style={{background:trafficGranularity===key?"#1e3a5f":"transparent",color:trafficGranularity===key?"#60a5fa":"#64748b",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+                <div style={{height:180}}>
+                  <ResponsiveContainer>
+                    <BarChart data={bucketedTraffic} margin={{top:4,right:4,bottom:0,left:0}}>
+                      <XAxis dataKey="label" tick={{fontSize:10,fill:"#64748b"}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:11,fill:"#64748b"}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <Tooltip
+                        formatter={(v,name)=>[v,name==="views"?"Views":name]}
+                        contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:12,fontWeight:600,color:"#f1f5f9"}}
+                        labelStyle={{color:"#94a3b8",fontSize:11}}
+                      />
+                      <Bar dataKey="views" radius={[3,3,0,0]}>
+                        {bucketedTraffic.map((entry,i)=>(
+                          <Cell key={i} fill={i===0||entry.views>=bucketedTraffic[i-1].views?"#22c55e":"#f59e0b"}/>
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#475569"}}>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#22c55e",marginRight:5}}/>Up from previous period</span>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#f59e0b",marginRight:5}}/>Down from previous period</span>
+                </div>
+              </div>
+
+              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Where visits come from</div>
+                {sortedSources.every(([src])=>src==="Unknown (recorded before tracking)")?(
+                  <div style={{color:"#475569",fontSize:13,lineHeight:1.6}}>
+                    Source tracking just went live — every visit before this update was recorded without it, so there's nothing real to show yet. This will fill in from here forward.
+                  </div>
+                ):(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {sortedSources.map(([src,count])=>{
+                      const pct=Math.round((count/pageViews.length)*100);
+                      return(
+                        <div key={src}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                            <span style={{color:"#e2e8f0",fontWeight:600}}>{src}</span>
+                            <span style={{color:"#64748b"}}>{count.toLocaleString()} · {pct}%</span>
+                          </div>
+                          <div style={{background:"#1e293b",borderRadius:4,height:6,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:src==="Internal navigation"?"#475569":src==="Direct"?"#60a5fa":"#22c55e"}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
@@ -2693,6 +2823,7 @@ function LotCheckApp(){
     supabase.from("page_views").insert({
       visitor_id: visitorId||"unknown",
       path: window.location.pathname||"/",
+      referrer_source: classifyReferrer(),
     }).then(({error})=>{
       if(error) console.warn("⚠️ page_views insert failed:",error.message);
     });
