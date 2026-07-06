@@ -1989,11 +1989,11 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
             <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>LOTCHECK VALUE ESTIMATE</div>
             <InfoTooltip title="HOW THIS IS CALCULATED">
-              This is <strong style={{color:"#f1f5f9"}}>not</strong> licensed Black Book, CBB, or any third-party valuation data — LotCheck doesn't have access to that, and building it would mean scraping sites like AutoTrader, which we won't do without weighing that risk deliberately.
+              LotCheck's own estimate — not an official valuation from a licensed pricing guide, since we don't have access to that data and won't scrape other sites to build one.
               <br/><br/>
-              We only show an estimate once at least one other live LotCheck listing of the <strong style={{color:"#f1f5f9"}}>same model and a similar model-year (±3 years)</strong> exists to anchor it against — weighted no more than evenly against this listing's own asking price, so a couple of comps can never outvote what this specific car is actually listed for. With zero comps, there's nothing real to anchor to, so we don't show a number at all rather than presenting a guess as if it were backed by data.
+              Only shown once a similar live listing (<strong style={{color:"#f1f5f9"}}>same model, ±3 years</strong>) exists to compare against — weighted no more than evenly with this car's own asking price, so a couple of comps can never outvote what it's actually listed for. No comps, no number.
               <br/><br/>
-              Trade-in and Wholesale are typical dealer-spread percentages off Retail (roughly 80% and 72%) — not a second age/mileage discount on top of it, since Retail already reflects this car's age and condition through its real market price. Still an approximation, not a market regression.
+              Trade-in and Wholesale are standard dealer-spread percentages off Retail (~80%/72%), not extra discounts on top.
             </InfoTooltip>
           </div>
           <div style={{fontSize:11,color:"#475569",marginBottom:comps.length>0?8:12,lineHeight:1.5}}>Our own estimate based on this vehicle's asking price and real comps from other live LotCheck listings.</div>
