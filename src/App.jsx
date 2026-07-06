@@ -888,7 +888,7 @@ function lotScoreBreakdown(l,all){
 function InfoTooltip({title, children, align="right", fixed=false}){
   const [open, setOpen] = useState(false);
   const popoverStyle = fixed
-    ? {position:"fixed",top:80,right:16,width:"min(320px, calc(100vw - 32px))",zIndex:200}
+    ? {position:"fixed",top:180,right:16,width:"min(320px, calc(100vw - 32px))",zIndex:200}
     : {position:"absolute",[align]:0,top:26,width:280,maxWidth:"calc(100vw - 32px)"};
   return(
     <div style={{position:"relative", display:"inline-block"}}>
@@ -1813,13 +1813,35 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
   const scoreBreakdown=lotScoreBreakdown(listing,liveListings);
 
   const currentPrice=listing.price;
-  const hasTrend=priceHistory.length>=2;
-  const firstPrice=hasTrend?priceHistory[0].price:currentPrice;
-  const change=hasTrend?currentPrice-firstPrice:0;
-  const spanDays=hasTrend?Math.max(1,Math.round((new Date(priceHistory[priceHistory.length-1].recorded_at)-new Date(priceHistory[0].recorded_at))/86400000)):0;
-  const avgHist=hasTrend?Math.round(priceHistory.reduce((s,h)=>s+h.price,0)/priceHistory.length):currentPrice;
-  const chartData=priceHistory.map(h=>({date:new Date(h.recorded_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:h.price}));
-  const domain=hasTrend?[Math.round(Math.min(...priceHistory.map(h=>h.price))*0.97),Math.round(Math.max(...priceHistory.map(h=>h.price))*1.03)]:undefined;
+  const hasRealTrend=priceHistory.length>=2;
+  const hasSinglePoint=priceHistory.length===1;
+  // With only one confirmed price check so far, extend it to today using the
+  // listing's current (still-live) price -- this is honest, not fabricated:
+  // we genuinely know the price was $X on day one, and the listing is still
+  // showing that same price today since nothing has changed it. It's clearly
+  // disclosed as limited data below, not presented as a real multi-day trend.
+  const firstPrice=hasRealTrend||hasSinglePoint?priceHistory[0].price:currentPrice;
+  const change=hasRealTrend||hasSinglePoint?currentPrice-firstPrice:0;
+  const firstRecordedDate=hasRealTrend||hasSinglePoint?new Date(priceHistory[0].recorded_at):null;
+  const spanDays=hasRealTrend
+    ?Math.max(1,Math.round((new Date(priceHistory[priceHistory.length-1].recorded_at)-firstRecordedDate)/86400000))
+    :hasSinglePoint
+    ?Math.max(1,Math.round((Date.now()-firstRecordedDate)/86400000))
+    :0;
+  const avgHist=hasRealTrend?Math.round(priceHistory.reduce((s,h)=>s+h.price,0)/priceHistory.length):currentPrice;
+  const chartData=hasRealTrend
+    ?priceHistory.map(h=>({date:new Date(h.recorded_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:h.price}))
+    :hasSinglePoint
+    ?[
+        {date:firstRecordedDate.toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:firstPrice},
+        {date:new Date().toLocaleDateString("en-CA",{month:"short",day:"numeric"}),price:currentPrice},
+      ]
+    :[];
+  const domain=hasRealTrend
+    ?[Math.round(Math.min(...priceHistory.map(h=>h.price))*0.97),Math.round(Math.max(...priceHistory.map(h=>h.price))*1.03)]
+    :hasSinglePoint
+    ?[Math.round(Math.min(firstPrice,currentPrice)*0.97),Math.round(Math.max(firstPrice,currentPrice)*1.03)]
+    :undefined;
 
   // Real comps — replaces the old opaque "Deal Score X/100" stat tile with
   // the actual numbers behind it, so it's auditable instead of a black box.
@@ -1883,8 +1905,12 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
       </div>
       <div className="lc-price-hero">
         <div className="lc-price-big">${currentPrice.toLocaleString()}</div>
-        {hasTrend
+        {hasRealTrend
           ? <div style={{fontSize:14,color:change>=0?"#ef4444":"#22c55e",fontWeight:600,marginTop:4}}>{change>=0?"▲":"▼"} ${Math.abs(change).toLocaleString()} ({change>=0?"+":""}{((change/firstPrice)*100).toFixed(1)}%) over {spanDays}d tracked</div>
+          : hasSinglePoint
+          ? (change!==0
+              ? <div style={{fontSize:14,color:change>=0?"#ef4444":"#22c55e",fontWeight:600,marginTop:4}}>{change>=0?"▲":"▼"} ${Math.abs(change).toLocaleString()} since first tracked {spanDays}d ago</div>
+              : <div style={{fontSize:12,color:"#475569",fontWeight:500,marginTop:4}}>No price change recorded since first tracked {spanDays}d ago</div>)
           : <div style={{fontSize:12,color:"#475569",fontWeight:500,marginTop:4}}>{historyLoading?"Loading price history…":"Price tracking started — trend builds with each daily update"}</div>
         }
         {rebate.total>0&&<div style={{fontSize:14,color:"#22c55e",fontWeight:700,marginTop:4}}>After all rebates: ~${(currentPrice-rebate.total).toLocaleString()}</div>}
@@ -1903,17 +1929,24 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
       </div>
 
       {tab==="chart"&&<>
-        {hasTrend?(
-          <div style={{height:180,marginBottom:16}}>
-            <ResponsiveContainer>
-              <LineChart data={chartData} margin={{top:4,right:4,bottom:0,left:0}}>
-                <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false}/>
-                <YAxis domain={domain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={42}/>
-                <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
-                <ReferenceLine y={avgHist} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} label={{value:`avg`,fill:"#f59e0b",fontSize:9,position:"insideTopRight"}}/>
-                <Line type="monotone" dataKey="price" stroke="#16a34a" strokeWidth={2} dot={{r:3}}/>
-              </LineChart>
-            </ResponsiveContainer>
+        {(hasRealTrend||hasSinglePoint)?(
+          <div style={{marginBottom:16}}>
+            <div style={{height:180}}>
+              <ResponsiveContainer>
+                <LineChart data={chartData} margin={{top:4,right:4,bottom:0,left:0}}>
+                  <XAxis dataKey="date" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false}/>
+                  <YAxis domain={domain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`$${(v/1000).toFixed(0)}k`} tickLine={false} axisLine={false} width={42}/>
+                  <Tooltip formatter={v=>[`$${v.toLocaleString()}`,"Price"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
+                  {hasRealTrend&&<ReferenceLine y={avgHist} stroke="#f59e0b" strokeDasharray="4 2" strokeWidth={1} label={{value:`avg`,fill:"#f59e0b",fontSize:9,position:"insideTopRight"}}/>}
+                  <Line type="monotone" dataKey="price" stroke="#16a34a" strokeWidth={2} dot={{r:3}} strokeDasharray={hasSinglePoint?"5 4":undefined}/>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            {hasSinglePoint&&(
+              <div style={{fontSize:11,color:"#475569",marginTop:6,lineHeight:1.5}}>
+                Dashed — based on 1 confirmed price check ({firstRecordedDate.toLocaleDateString("en-CA",{month:"short",day:"numeric"})}) plus today's listed price. A real day-by-day trend will fill in as we track it further.
+              </div>
+            )}
           </div>
         ):(
           <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"28px 20px",textAlign:"center",marginBottom:16}}>
