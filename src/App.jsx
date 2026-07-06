@@ -858,6 +858,29 @@ function lotScore(l,all){
   return Math.max(0,Math.min(100,Math.round(50+((aP-l.price)/aP)*120+((aK-l.km)/aK)*40)));
 }
 
+// Same comparison this listing's score is built from, but exposes the price
+// and mileage components separately so the badge can explain itself. A
+// low score can come from high mileage even when the price itself is good
+// (or vice versa) -- "Above Market" alone doesn't tell a buyer which one it
+// was, and that's exactly backwards for someone deciding whether to walk
+// away from a car that's actually well-priced.
+function lotScoreBreakdown(l,all){
+  if(!all||!all.length) return null;
+  const c=all.filter(x=>x.model===l.model&&x.id!==l.id);
+  if(!c.length) return null;
+  const aP=c.reduce((s,x)=>s+x.price,0)/c.length;
+  const aK=c.reduce((s,x)=>s+x.km,0)/c.length;
+  return{
+    compCount:c.length,
+    compAvgPrice:Math.round(aP),
+    compAvgKm:Math.round(aK),
+    priceIsBetter:l.price<aP,
+    kmIsBetter:l.km<aK,
+    priceDiff:Math.round(Math.abs(aP-l.price)),
+    kmDiff:Math.round(Math.abs(aK-l.km)),
+  };
+}
+
 // ── Reusable info tooltip — small ⓘ icon that toggles a popover explaining
 // where a number actually comes from. Used anywhere LotCheck shows a
 // computed/estimated value, so the methodology is never hidden behind a
@@ -882,11 +905,23 @@ function InfoTooltip({title, children}){
   );
 }
 
-function ScorePill({score}){
+function ScorePill({score,breakdown}){
   if(score==null) return <span className="badge" style={{background:"#1e293b80",color:"#64748b",border:"1px solid #33415560"}}>No comps yet</span>;
   const c=score>=70?"#16a34a":score>=45?"#d97706":"#dc2626";
   const l=score>=70?"✓ Great Deal":score>=45?"~ Fair Price":"↑ Above Market";
-  return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>;
+  if(!breakdown){
+    return<span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>;
+  }
+  return(
+    <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
+      <span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>
+      <InfoTooltip title="HOW THIS SCORE IS BUILT">
+        This weighs <strong style={{color:"#f1f5f9"}}>both price and mileage</strong> against {breakdown.compCount} similar live listing{breakdown.compCount===1?"":"s"} (avg ${breakdown.compAvgPrice.toLocaleString()}, {breakdown.compAvgKm.toLocaleString()} km) — not price alone. A car can show "{l}" even with a good price if its mileage is well above comps, or vice versa.
+        <br/><br/>
+        This listing: price is <strong style={{color:breakdown.priceIsBetter?"#22c55e":"#ef4444"}}>${breakdown.priceDiff.toLocaleString()} {breakdown.priceIsBetter?"below":"above"} average</strong>, mileage is <strong style={{color:breakdown.kmIsBetter?"#22c55e":"#ef4444"}}>{breakdown.kmDiff.toLocaleString()} km {breakdown.kmIsBetter?"below":"above"} average</strong>.
+      </InfoTooltip>
+    </span>
+  );
 }
 
 function FuelIcon({fuel,size=14}){
@@ -1772,6 +1807,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   const score=lotScore(listing,liveListings);
+  const scoreBreakdown=lotScoreBreakdown(listing,liveListings);
 
   const currentPrice=listing.price;
   const hasTrend=priceHistory.length>=2;
@@ -1836,7 +1872,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
     <div style={{padding:"16px"}}>
       <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:8,lineHeight:1.3}}>{listing.name}</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-        <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
+        <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         <span className="badge" style={{background:"#1e293b",color:"#64748b"}}>{listing.city}, {listing.province}</span>
         <span className="badge" style={{background:"#1e293b",color:"#94a3b8"}}>
           🕐 {daysTracked==null?"New on LotCheck":daysTracked===0?"Listed today":`${daysTracked}d on the market`}
@@ -1955,6 +1991,7 @@ function SkeletonCard(){
 
 function ListingCard({listing,liveListings,history,onClick,active}){
   const score=lotScore(listing,liveListings);
+  const scoreBreakdown=lotScoreBreakdown(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   // Real price-drop detection: compare the two most recent recorded_at
@@ -1973,7 +2010,7 @@ function ListingCard({listing,liveListings,history,onClick,active}){
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
-        <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
+        <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
@@ -2886,14 +2923,195 @@ function AdminPanel(){
   );
 }
 
-// App is the actual default export/root — it must not call any hooks itself
-// (Rules of Hooks), so routing between the buyer-facing site and the admin
-// panel happens here by choosing which fully separate component to mount,
-// rather than an early-return inside a hook-using component.
-export default function App(){
+// ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
+// MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
+// uploaded to Supabase Storage or saved anywhere -- the file is read in the
+// browser, sent once to the edge function for analysis, and discarded.
+function QuoteCheckPage(){
+  const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [analysis,setAnalysis]=useState(null);
+  const [errorMsg,setErrorMsg]=useState("");
+  const [fileName,setFileName]=useState("");
+  const [dragOver,setDragOver]=useState(false);
+  const fileInputRef=useRef(null);
+
+  const ACCEPTED_TYPES=["application/pdf","image/jpeg","image/png","image/webp"];
+
+  const handleFile=async(file)=>{
+    if(!file) return;
+    if(!ACCEPTED_TYPES.includes(file.type)){
+      setStatus("error");
+      setErrorMsg("Please upload a PDF, or a clear photo (JPG, PNG, or WEBP) of the quote.");
+      return;
+    }
+    setFileName(file.name);
+    setStatus("analyzing");
+    setErrorMsg("");
+
+    try{
+      const base64=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(reader.result.split(",")[1]);
+        reader.onerror=()=>reject(new Error("Couldn't read that file."));
+        reader.readAsDataURL(file);
+      });
+
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+        },
+        body:JSON.stringify({fileBase64:base64,mediaType:file.type}),
+      });
+
+      const data=await res.json();
+      if(!res.ok||data.error){
+        setStatus("error");
+        setErrorMsg(data.error||"Something went wrong analyzing that quote.");
+        return;
+      }
+      setAnalysis(data.analysis);
+      setStatus("done");
+    }catch(err){
+      setStatus("error");
+      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
+    }
+  };
+
+  const reset=()=>{
+    setStatus("idle");
+    setAnalysis(null);
+    setErrorMsg("");
+    setFileName("");
+  };
+
   return(
     <>
-      {window.location.pathname.startsWith("/admin") ? <AdminPanel/> : <LotCheckApp/>}
+      <style>{GLOBAL_CSS}</style>
+      <div style={{minHeight:"100dvh",background:"#020617",padding:"24px 16px"}}>
+        <div style={{maxWidth:640,margin:"0 auto"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
+            <LogoMark size={34}/>
+            <div>
+              <div style={{fontWeight:800,fontSize:18,color:"#f1f5f9"}}>LotCheck Quote Check</div>
+              <div style={{fontSize:12,color:"#475569"}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+            </div>
+          </div>
+
+          {status==="idle"&&(
+            <div
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileInputRef.current?.click()}
+              style={{
+                border:`2px dashed ${dragOver?"#3b82f6":"#1e293b"}`,
+                borderRadius:16,padding:"48px 24px",textAlign:"center",cursor:"pointer",
+                background:dragOver?"#0d1e3a":"#0a0f1e",transition:"all 0.15s",
+              }}
+            >
+              <div style={{fontSize:36,marginBottom:12}}>📄</div>
+              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>Drop your quote here, or snap a photo</div>
+              <div style={{color:"#475569",fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
+              <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{display:"none"}}
+                onChange={e=>handleFile(e.target.files[0])}/>
+            </div>
+          )}
+
+          {status==="analyzing"&&(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:"48px 24px",textAlign:"center"}}>
+              <div style={{fontSize:36,marginBottom:12}}>⏳</div>
+              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>Reading {fileName}…</div>
+              <div style={{color:"#475569",fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
+            </div>
+          )}
+
+          {status==="error"&&(
+            <div style={{background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:16,padding:"32px 24px",textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+              <div style={{color:"#fca5a5",fontWeight:700,marginBottom:8}}>{errorMsg}</div>
+              <button onClick={reset} style={{marginTop:8,background:"#0175ff",border:"none",borderRadius:10,padding:"10px 20px",color:"#fff",fontWeight:700,cursor:"pointer"}}>Try again</button>
+            </div>
+          )}
+
+          {status==="done"&&analysis&&(
+            <div>
+              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
+                <div style={{fontSize:13,color:"#64748b",marginBottom:4}}>{analysis.vehicle||"Vehicle"}</div>
+                <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:11,color:"#475569"}}>MSRP</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:11,color:"#475569"}}>Quoted price</div>
+                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
+                  </div>
+                </div>
+              </div>
+
+              {analysis.totalFlaggedCost>0&&(
+                <div style={{background:"#2a1a0a",border:"1px solid #7c4a03",borderRadius:16,padding:20,marginBottom:16}}>
+                  <div style={{fontSize:13,color:"#fbbf24",fontWeight:700}}>⚠️ ${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</div>
+                  <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                </div>
+              )}
+
+              {analysis.addOns?.length>0&&(
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Add-ons & fees</div>
+                  {analysis.addOns.map((a,i)=>(
+                    <div key={i} style={{padding:"10px 0",borderTop:i>0?"1px solid #1e293b":"none"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{color:"#f1f5f9",fontWeight:600,fontSize:14}}>{a.flagged&&"🔻 "}{a.name}</div>
+                        <div style={{color:a.flagged?"#f59e0b":"#94a3b8",fontWeight:700}}>${a.price.toLocaleString()}</div>
+                      </div>
+                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{a.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {analysis.warranty?.offered&&(
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:8}}>Warranty / protection plan</div>
+                  <div style={{color:"#f1f5f9",fontSize:14,marginBottom:4}}>{analysis.warranty.offered}{analysis.warranty.price?` — $${analysis.warranty.price.toLocaleString()}`:""}</div>
+                  <div style={{fontSize:12,color:"#64748b"}}>{analysis.warranty.assessment}</div>
+                </div>
+              )}
+
+              <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:16,padding:20,marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#3b82f6",marginBottom:8}}>Bottom line</div>
+                <div style={{color:"#e2e8f0",fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
+              </div>
+
+              <button onClick={reset} style={{width:"100%",background:"#1e293b",border:"none",borderRadius:10,padding:"12px",color:"#e2e8f0",fontWeight:700,cursor:"pointer"}}>Check another quote</button>
+            </div>
+          )}
+
+          <div style={{textAlign:"center",marginTop:20,fontSize:11,color:"#334155"}}>
+            LotCheck never saves your quote to our own systems. It's sent once to Claude (Anthropic's AI) to read and analyze, then discarded on our end — see how this works.
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+
+// App is the actual default export/root — it must not call any hooks itself
+// (Rules of Hooks), so routing between the buyer-facing site, admin panel,
+// and quote-check page happens here by choosing which fully separate
+// component to mount, rather than an early-return inside a hook-using component.
+export default function App(){
+  const path = window.location.pathname;
+  return(
+    <>
+      {path.startsWith("/admin") ? <AdminPanel/>
+        : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : <LotCheckApp/>}
       <Analytics/>
     </>
   );
