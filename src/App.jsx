@@ -885,20 +885,39 @@ function lotScoreBreakdown(l,all){
 // where a number actually comes from. Used anywhere LotCheck shows a
 // computed/estimated value, so the methodology is never hidden behind a
 // bare number.
-function InfoTooltip({title, children, align="right", fixed=false}){
+function InfoTooltip({title, children}){
   const [open, setOpen] = useState(false);
-  const popoverStyle = fixed
-    ? {position:"fixed",top:180,right:16,width:"min(320px, calc(100vw - 32px))",zIndex:200}
-    : {position:"absolute",[align]:0,top:26,width:280,maxWidth:"calc(100vw - 32px)"};
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+
+  const handleToggle=()=>{
+    if(!open&&btnRef.current){
+      const r=btnRef.current.getBoundingClientRect();
+      const boxWidth=Math.min(300,window.innerWidth-32);
+      // Prefer appearing just right of the icon, at the same height -- reads
+      // as "attached to" whatever it's explaining rather than floating
+      // somewhere unrelated. Clamped so it can never run off any edge of the
+      // viewport, at any screen width or zoom level.
+      let left=r.right+8;
+      if(left+boxWidth>window.innerWidth-16) left=window.innerWidth-boxWidth-16;
+      if(left<16) left=16;
+      let top=r.top;
+      if(top+220>window.innerHeight-16) top=Math.max(16,window.innerHeight-236);
+      setPos({top,left,width:boxWidth});
+    }
+    setOpen(v=>!v);
+  };
+
   return(
     <div style={{position:"relative", display:"inline-block"}}>
       <button
-        onClick={()=>setOpen(v=>!v)}
+        ref={btnRef}
+        onClick={handleToggle}
         style={{background:"none",border:"1px solid #334155",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#64748b",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0}}
         title={title}
       >ℹ</button>
-      {open&&(
-        <div style={{...popoverStyle,zIndex:99,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
+      {open&&pos&&(
+        <div style={{position:"fixed",top:pos.top,left:pos.left,width:pos.width,zIndex:200,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}>ℹ️ {title}</div>
           <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.65}}>{children}</div>
           <button onClick={()=>setOpen(false)} style={{marginTop:10,background:"none",border:"none",color:"#475569",fontSize:11,cursor:"pointer",padding:0}}>Close ✕</button>
@@ -918,7 +937,7 @@ function ScorePill({score,breakdown}){
   return(
     <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
       <span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>
-      <InfoTooltip title="HOW THIS SCORE IS BUILT" fixed>
+      <InfoTooltip title="HOW THIS SCORE IS BUILT">
         This weighs <strong style={{color:"#f1f5f9"}}>both price and mileage</strong> against {breakdown.compCount} similar live listing{breakdown.compCount===1?"":"s"} (avg ${breakdown.compAvgPrice.toLocaleString()}, {breakdown.compAvgKm.toLocaleString()} km) — not price alone. A car can show "{l}" even with a good price if its mileage is well above comps, or vice versa.
         <br/><br/>
         This listing: price is <strong style={{color:breakdown.priceIsBetter?"#22c55e":"#ef4444"}}>${breakdown.priceDiff.toLocaleString()} {breakdown.priceIsBetter?"below":"above"} average</strong>, mileage is <strong style={{color:breakdown.kmIsBetter?"#22c55e":"#ef4444"}}>{breakdown.kmDiff.toLocaleString()} km {breakdown.kmIsBetter?"below":"above"} average</strong>.
