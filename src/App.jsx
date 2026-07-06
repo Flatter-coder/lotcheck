@@ -2046,7 +2046,6 @@ function SkeletonCard(){
 
 function ListingCard({listing,liveListings,history,onClick,active}){
   const score=lotScore(listing,liveListings);
-  const scoreBreakdown=lotScoreBreakdown(listing,liveListings);
   const evap=getEVAP(listing);
   const rebate=getRebate(listing.province,listing.fuel,listing);
   // Real price-drop detection: compare the two most recent recorded_at
@@ -2065,7 +2064,7 @@ function ListingCard({listing,liveListings,history,onClick,active}){
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
-        <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
+        <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
