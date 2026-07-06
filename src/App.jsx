@@ -885,8 +885,11 @@ function lotScoreBreakdown(l,all){
 // where a number actually comes from. Used anywhere LotCheck shows a
 // computed/estimated value, so the methodology is never hidden behind a
 // bare number.
-function InfoTooltip({title, children, align="right"}){
+function InfoTooltip({title, children, align="right", fixed=false}){
   const [open, setOpen] = useState(false);
+  const popoverStyle = fixed
+    ? {position:"fixed",top:80,right:16,width:"min(320px, calc(100vw - 32px))",zIndex:200}
+    : {position:"absolute",[align]:0,top:26,width:280,maxWidth:"calc(100vw - 32px)"};
   return(
     <div style={{position:"relative", display:"inline-block"}}>
       <button
@@ -895,7 +898,7 @@ function InfoTooltip({title, children, align="right"}){
         title={title}
       >ℹ</button>
       {open&&(
-        <div style={{position:"absolute",[align]:0,top:26,zIndex:99,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",width:280,maxWidth:"calc(100vw - 32px)",boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
+        <div style={{...popoverStyle,zIndex:99,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}>ℹ️ {title}</div>
           <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.65}}>{children}</div>
           <button onClick={()=>setOpen(false)} style={{marginTop:10,background:"none",border:"none",color:"#475569",fontSize:11,cursor:"pointer",padding:0}}>Close ✕</button>
@@ -915,7 +918,7 @@ function ScorePill({score,breakdown}){
   return(
     <span style={{display:"inline-flex",alignItems:"center",gap:4}}>
       <span className="badge" style={{background:c+"18",color:c,border:`1px solid ${c}35`}}>{l}</span>
-      <InfoTooltip title="HOW THIS SCORE IS BUILT" align="left">
+      <InfoTooltip title="HOW THIS SCORE IS BUILT" fixed>
         This weighs <strong style={{color:"#f1f5f9"}}>both price and mileage</strong> against {breakdown.compCount} similar live listing{breakdown.compCount===1?"":"s"} (avg ${breakdown.compAvgPrice.toLocaleString()}, {breakdown.compAvgKm.toLocaleString()} km) — not price alone. A car can show "{l}" even with a good price if its mileage is well above comps, or vice versa.
         <br/><br/>
         This listing: price is <strong style={{color:breakdown.priceIsBetter?"#22c55e":"#ef4444"}}>${breakdown.priceDiff.toLocaleString()} {breakdown.priceIsBetter?"below":"above"} average</strong>, mileage is <strong style={{color:breakdown.kmIsBetter?"#22c55e":"#ef4444"}}>{breakdown.kmDiff.toLocaleString()} km {breakdown.kmIsBetter?"below":"above"} average</strong>.
