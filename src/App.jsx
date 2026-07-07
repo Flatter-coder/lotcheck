@@ -1989,7 +1989,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
             <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",letterSpacing:1}}>LOTCHECK VALUE ESTIMATE</div>
             <InfoTooltip title="HOW THIS IS CALCULATED">
-              LotCheck's own estimate — not an official valuation from a licensed pricing guide, since we don't have access to that data and won't scrape other sites to build one.
+              LotCheck's own estimate, backed by live listings on LotCheck — not an official valuation from a licensed pricing guide.
               <br/><br/>
               Only shown once a similar live listing (<strong style={{color:"#f1f5f9"}}>same model, ±3 years</strong>) exists to compare against — weighted no more than evenly with this car's own asking price, so a couple of comps can never outvote what it's actually listed for. No comps, no number.
               <br/><br/>
@@ -2223,7 +2223,7 @@ function AdminLogin(){
   }
 
   return(
-    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617"}}>
+    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617",fontFamily:"Helvetica, Arial, sans-serif"}}>
       <form onSubmit={handleLogin} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
         <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>LotCheck Admin</div>
@@ -2692,7 +2692,7 @@ function AdminPanel(){
   });
   const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
 
-  if(checkingSession) return <div style={{minHeight:"100dvh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569"}}>Loading…</div>;
+  if(checkingSession) return <div style={{minHeight:"100dvh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569",fontFamily:"Helvetica, Arial, sans-serif"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
   const byProvince={};
@@ -2717,7 +2717,7 @@ function AdminPanel(){
   leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
-    <div style={{minHeight:"100dvh",background:"#020617",color:"#e2e8f0",padding:"24px"}}>
+    <div style={{minHeight:"100dvh",background:"#020617",color:"#e2e8f0",padding:"24px",fontFamily:"Helvetica, Arial, sans-serif"}}>
       {dealerModal && (
         <DealerModal
           dealer={dealerModal==="new"?null:dealerModal}
