@@ -1,8 +1,15 @@
 name: LotCheck Daily Scrape + Verify
 on:
-  schedule:
-    - cron: "0 13 * * *"   # 6am Calgary daily
   workflow_dispatch:
+  # Scheduled daily cron ("0 13 * * *" -- 6am Calgary) removed 2026-07-07 on
+  # Vic's explicit instruction to stop scraping Kijiji entirely. Kijiji's own
+  # Terms of Use prohibit automated scraping without express written
+  # permission -- confirmed directly against help.kijiji.ca/policies/
+  # kijiji-terms-of-use. Removing just this cron line would only stop the
+  # AUTOMATIC daily runs; workflow_dispatch (the manual "Run workflow"
+  # button) is left in place so this file still shows up and stays
+  # inspectable, but src/scraper.js itself now refuses to run at all (see
+  # that file) -- so even an accidental manual trigger can't scrape Kijiji.
 jobs:
   scrape:
     runs-on: ubuntu-latest
