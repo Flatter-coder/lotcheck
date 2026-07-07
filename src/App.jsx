@@ -3211,6 +3211,42 @@ function QuoteCheckPage(){
                 </div>
               </div>
 
+              {/* EVAP rebate check -- only rendered when the quote reads as a new
+                  BEV/PHEV, since telling someone with a regular gas car "not
+                  eligible" is just noise. Reuses getRebate()/getEVAP() directly
+                  (defined elsewhere in this same file) against the structured
+                  year/make/model/fuelType/vehicleCondition fields the edge
+                  function now extracts -- same EVAP logic already used and
+                  verified for live listings, not a separate reimplementation.
+                  Province is hardcoded to "AB" since LotCheck is Alberta-only
+                  right now; revisit if that ever changes. */}
+              {analysis.vehicleCondition==="new"&&analysis.year&&analysis.make&&analysis.model
+               &&(analysis.fuelType==="BEV"||analysis.fuelType==="PHEV")&&(()=>{
+                const rebate=getRebate("AB",analysis.fuelType,{
+                  year:analysis.year,make:analysis.make,model:analysis.model,
+                  km:0,price:analysis.quotedPrice||analysis.msrp||0,
+                });
+                return(
+                  <div style={{background:rebate.eligible?"#0a2e1a":"#1e1508",border:`1px solid ${rebate.eligible?"#166534":"#7c4a03"}`,borderRadius:16,padding:20,marginBottom:16}}>
+                    <div style={{fontSize:13,fontWeight:700,color:rebate.eligible?"#4ade80":"#fbbf24",marginBottom:8}}>
+                      {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
+                    </div>
+                    {rebate.eligible?(
+                      <>
+                        <div style={{color:"#f1f5f9",fontSize:18,fontWeight:800,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
+                        <div style={{fontSize:12,color:"#94a3b8"}}>
+                          ${rebate.federal.toLocaleString()} federal
+                          {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
+                          {rebate.note&&` — ${rebate.note}`}
+                        </div>
+                      </>
+                    ):(
+                      <div style={{fontSize:13,color:"#e2e8f0"}}>{rebate.ineligibleReason}</div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {analysis.totalFlaggedCost>0&&(
                 <div style={{background:"#2a1a0a",border:"1px solid #7c4a03",borderRadius:16,padding:20,marginBottom:16}}>
                   <div style={{fontSize:13,color:"#fbbf24",fontWeight:700}}>⚠️ ${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</div>
@@ -3355,6 +3391,9 @@ function LotCheckApp(){
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
             </div>
           </div>
+          <a href="/quote-check" className="lc-header-right" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
+            📄 Check a quote
+          </a>
         </header>
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
