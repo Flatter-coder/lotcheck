@@ -17,25 +17,22 @@ if (!APIFY_TOKEN || !SUPABASE_KEY) {
   process.exit(1);
 }
 
-// ── SEARCH URLS — all major Canadian cities, all fuel types ──────────────────
-// Kijiji location IDs: Calgary=1700199, Vancouver=1700173, Toronto=1700273,
-// Montreal=1700281, Edmonton=1700203, Winnipeg=1700192, Ottawa=1700185
+// ── SEARCH URLS — Alberta only (Calgary, Edmonton), all fuel types ───────────
+// Kijiji location IDs: Calgary=1700199, Edmonton=1700203
 const SEARCH_URLS = [
-  // ── Alberta ──────────────────────────────────────────────────────────────
+  // ── Alberta only, per Vic's decision 2026-07-06: the other provinces'
+  // scraping cost real money for a market LotCheck has no actual presence
+  // in yet (no dealer relationships, no local rebate depth). Narrowing
+  // concentrates the same daily scrape capacity on Alberta specifically,
+  // meaning deeper, more frequent re-checks of the listings that actually
+  // matter right now instead of spreading thin across the whole country.
+  // The two Canada-wide EV/Hybrid searches that used to exist here were
+  // removed too, since "Canada-wide" directly conflicts with "Alberta
+  // only" -- Calgary and Edmonton's general searches below already pick up
+  // any EV/Hybrid/PHEV posted in those cities, just without that extra
+  // national-level net for those fuel types specifically.
   "https://www.kijiji.ca/b-cars-trucks/calgary/c174l1700199",
   "https://www.kijiji.ca/b-cars-trucks/edmonton/c174l1700203",
-  // ── British Columbia ──────────────────────────────────────────────────────
-  "https://www.kijiji.ca/b-cars-trucks/vancouver/c174l1700173",
-  // ── Ontario ───────────────────────────────────────────────────────────────
-  "https://www.kijiji.ca/b-cars-trucks/toronto/c174l1700273",
-  "https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185",
-  // ── Quebec ────────────────────────────────────────────────────────────────
-  "https://www.kijiji.ca/b-cars-trucks/montreal/c174l1700281",
-  // ── Manitoba ──────────────────────────────────────────────────────────────
-  "https://www.kijiji.ca/b-cars-trucks/winnipeg/c174l1700192",
-  // ── EVs across Canada ─────────────────────────────────────────────────────
-  "https://www.kijiji.ca/b-cars-trucks/canada/electric/c174l0a138",
-  "https://www.kijiji.ca/b-cars-trucks/canada/hybrid/c174l0a139",
 ];
 
 // ── PROVINCE DETECTION from city/location string ─────────────────────────────
@@ -103,7 +100,16 @@ function detectFuel(item) {
 
 // ── NORMALIZE Apify item → LotCheck listing ───────────────────────────────────
 function normalize(item) {
-  const location = item.location?.name || item.locationName || "";
+  // Fixed 2026-07-06: this was `item.location?.name || item.locationName`,
+  // but per the actor's real output schema, `location` is already a plain
+  // string (e.g. "Toronto"), not an object -- so `.name` on a string is
+  // always undefined, and `locationName` isn't a real field at all. Both
+  // halves of that fallback silently failed on every single listing,
+  // which is exactly why every listing in the database was landing on the
+  // hardcoded "AB"/"Canada" defaults below regardless of where it actually
+  // came from -- confirmed directly: 336/336 published listings showed
+  // province="AB" and city="Canada" before this fix.
+  const location = item.location || "";
   const province = detectProvince(location);
   const city = location.split(",")[0]?.trim() || "Canada";
 
@@ -158,7 +164,15 @@ async function main() {
   try {
     run = await apify.actor("automation-lab/kijiji-scraper").call({
       startUrls: SEARCH_URLS.map(url => ({ url })),
-      maxItems: 1000,
+      // Fixed 2026-07-06: this was "maxItems", which this actor doesn't
+      // actually recognize as an input -- it's silently ignored, and the
+      // actor falls back to its own default of 100 listings/run instead.
+      // The real parameter name is "maxListings". Confirmed against real
+      // Apify billing data before this fix: actual usage was running around
+      // ~186 listings/day total, nowhere near the 1000 this was meant to
+      // allow, which is exactly why most listings only ever got a single
+      // price_history point before falling out of the daily "newest" results.
+      maxListings: 1000,
       proxyConfiguration: { useApifyProxy: true },
     });
   } catch (err) {
