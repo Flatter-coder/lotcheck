@@ -2477,6 +2477,106 @@ function DealerModal({dealer,onSave,onClose}){
     </div>
   );
 }
+// ── Visitor location map ──────────────────────────────────────────────────
+// Simplified North America outline (Natural Earth 110m admin-0 countries,
+// public domain, naturalearthdata.com), pre-processed into flat SVG path
+// strings so this needs zero external map libraries or API calls -- same
+// "build it in-house" approach as the landing page's Canvas charts.
+// Projection is a plain equirectangular transform (straightforward lon/lat
+// -> x/y), verified against real city coordinates (Calgary, Toronto,
+// Vancouver, Winnipeg, Ottawa) landing in geographically correct relative
+// positions before this was embedded.
+const MAP_SCALE=4;
+const MAP_LON_OFFSET=175;
+const MAP_LAT_OFFSET=85;
+const CANADA_PATH="M208.6,144.0 L197.5,138.3 L190.3,136.7 L188.6,130.7 L183.5,129.0 L182.8,125.8 L177.9,122.8 L180.0,116.3 L173.2,113.8 L158.1,100.8 L150.2,104.4 L143.8,100.0 L136.0,98.8 L136.1,61.2 L154.0,64.4 L180.8,59.2 L183.6,60.9 L187.4,58.1 L197.0,62.1 L202.3,59.4 L202.8,62.4 L214.1,60.8 L239.0,64.4 L244.4,66.4 L238.8,68.4 L246.0,69.2 L260.2,68.1 L264.5,70.5 L268.8,68.5 L264.7,66.8 L267.3,65.4 L275.4,64.8 L294.2,69.4 L306.2,68.9 L305.8,66.4 L309.3,65.7 L315.5,67.0 L315.5,70.8 L318.0,67.6 L321.3,67.7 L323.1,63.7 L314.1,59.6 L314.4,55.2 L319.2,52.3 L328.5,54.7 L333.9,59.2 L330.4,61.2 L337.8,62.0 L337.8,66.1 L343.1,63.0 L347.9,65.5 L346.7,68.5 L350.6,71.2 L357.7,64.9 L357.9,60.5 L369.5,61.4 L374.9,63.4 L372.1,67.5 L375.0,69.6 L374.5,71.6 L366.6,74.4 L356.9,73.8 L350.7,80.9 L337.2,85.6 L336.9,88.2 L332.3,88.7 L323.0,96.4 L321.3,104.2 L327.1,104.9 L330.8,111.7 L336.4,110.9 L360.0,118.8 L370.9,119.4 L371.5,126.9 L380.3,135.2 L385.6,129.8 L380.7,121.3 L387.1,119.5 L393.8,113.9 L390.8,107.8 L385.9,104.8 L390.7,100.6 L387.6,90.7 L404.6,90.2 L414.5,95.5 L421.6,95.8 L422.8,104.2 L429.4,107.2 L435.2,104.9 L441.7,98.7 L454.4,112.1 L452.8,114.6 L470.7,121.5 L472.3,124.9 L477.0,126.9 L477.3,131.4 L459.9,139.0 L434.4,139.1 L415.6,152.7 L425.4,146.8 L439.8,143.1 L443.3,145.0 L439.5,147.7 L442.1,155.0 L447.3,157.0 L453.9,156.5 L457.9,152.0 L460.8,156.3 L438.5,165.8 L435.5,165.5 L435.4,162.1 L442.3,158.8 L431.5,159.4 L428.8,157.2 L428.8,151.7 L423.1,150.2 L414.0,160.0 L400.5,160.0 L392.7,165.5 L385.1,165.5 L383.3,166.1 L384.2,168.5 L370.2,173.3 L367.4,172.1 L371.4,165.7 L369.8,158.6 L346.5,146.8 L333.4,147.4 L322.7,145.3 L320.7,142.4 L319.4,144.0 L208.6,144.0Z M377.0,51.8 L388.7,49.0 L403.1,52.9 L403.6,54.7 L411.0,53.8 L424.9,57.9 L432.1,63.3 L424.8,65.1 L452.6,72.6 L444.3,80.0 L433.1,74.4 L427.9,74.9 L427.4,77.2 L438.7,82.5 L441.3,86.4 L439.9,89.3 L424.9,85.0 L435.3,92.3 L424.5,90.7 L400.7,81.3 L389.2,83.1 L385.8,81.7 L388.4,78.8 L404.2,78.2 L404.2,74.8 L409.4,70.9 L406.8,67.7 L392.5,64.4 L395.1,63.4 L384.2,59.3 L374.8,61.0 L345.3,58.4 L341.9,57.0 L346.1,55.1 L340.4,55.1 L339.2,51.1 L346.4,45.8 L356.7,44.8 L353.8,47.4 L356.9,49.9 L360.6,46.6 L370.7,45.0 L377.6,49.1 L377.0,51.8Z M333.7,12.4 L358.0,9.4 L367.3,10.7 L370.3,8.6 L382.8,7.5 L452.6,9.5 L429.4,14.0 L438.1,14.0 L415.3,20.8 L392.4,22.7 L397.9,23.2 L395.1,23.9 L398.4,25.9 L381.0,31.2 L388.4,32.9 L377.8,35.3 L342.0,34.1 L341.5,32.2 L348.9,31.3 L347.0,28.4 L360.1,29.8 L348.2,26.5 L359.6,22.6 L352.3,19.0 L372.6,18.1 L349.6,17.9 L333.7,12.4Z M266.4,47.6 L278.4,49.3 L282.1,56.0 L296.1,59.9 L295.6,61.7 L289.1,62.0 L291.6,63.5 L290.3,65.0 L276.2,63.3 L246.7,65.9 L230.6,60.2 L250.3,58.5 L228.4,57.8 L226.3,56.4 L235.5,54.8 L222.4,53.8 L228.5,49.2 L239.2,46.7 L243.3,47.5 L241.3,49.4 L250.2,48.2 L255.8,50.2 L260.3,48.2 L267.2,53.4 L269.3,51.7 L266.4,47.6Z M200.3,42.8 L229.8,43.3 L238.0,46.1 L223.1,49.9 L218.2,54.5 L207.6,56.4 L196.3,52.5 L204.2,45.3 L200.3,42.8Z M313.2,19.4 L322.8,16.1 L321.1,15.2 L330.4,15.0 L348.8,18.7 L356.7,22.7 L343.9,26.9 L328.5,26.6 L324.2,25.0 L327.4,22.5 L320.1,22.5 L313.2,19.4Z";
+const US_PATH="M208.6,144.0 L319.4,144.0 L320.7,142.4 L322.7,145.3 L333.4,147.4 L346.5,146.8 L369.8,158.6 L371.4,165.7 L367.5,171.7 L369.2,173.3 L384.2,168.5 L383.3,166.1 L385.1,165.5 L392.7,165.5 L400.5,160.0 L414.0,160.0 L423.1,150.2 L428.8,151.7 L428.8,157.2 L432.1,160.8 L419.5,165.3 L416.7,170.7 L420.1,173.5 L405.2,176.3 L412.2,176.3 L404.2,177.0 L400.4,184.2 L397.9,182.0 L399.8,186.4 L396.2,191.1 L397.1,188.3 L394.6,183.4 L394.7,187.7 L392.0,187.0 L394.8,188.3 L397.1,197.8 L374.7,214.2 L374.7,219.9 L379.8,232.5 L378.5,239.2 L375.3,239.2 L373.2,236.5 L365.2,220.3 L359.6,221.5 L354.4,218.4 L341.6,219.4 L342.4,223.4 L327.1,220.9 L321.2,222.1 L311.4,228.7 L311.4,236.5 L309.9,236.6 L303.9,234.5 L296.2,222.5 L290.1,221.0 L287.6,224.1 L284.2,222.9 L274.0,213.0 L255.9,214.7 L241.1,209.1 L231.5,209.9 L225.9,203.9 L217.5,201.6 L202.4,178.7 L201.9,168.9 L204.4,157.9 L201.3,147.3 L207.5,147.8 L209.7,151.6 L208.6,144.0Z M136.1,61.2 L136.0,98.8 L143.8,100.0 L150.2,104.4 L158.1,100.8 L173.2,113.8 L180.0,116.3 L177.9,120.8 L172.1,118.0 L163.7,107.5 L153.5,107.2 L140.5,101.8 L111.5,96.5 L107.1,97.3 L107.9,100.1 L93.1,103.4 L94.4,97.1 L98.6,95.9 L97.5,94.9 L83.9,102.6 L86.8,104.5 L83.1,107.4 L66.3,116.0 L40.2,121.7 L65.3,111.9 L69.1,109.7 L71.8,104.3 L63.8,106.3 L58.6,103.7 L52.1,105.3 L52.5,101.5 L49.9,100.0 L44.7,100.8 L38.6,98.0 L35.5,94.0 L37.1,91.7 L41.7,87.4 L56.9,84.9 L53.9,82.4 L56.9,80.8 L40.2,82.2 L27.6,77.3 L42.1,73.7 L45.4,73.7 L44.8,75.7 L53.3,75.5 L32.9,66.6 L35.2,64.5 L42.3,64.3 L52.4,58.7 L73.7,54.6 L82.6,57.2 L136.1,61.2Z M87.1,108.1 L91.4,109.6 L84.0,113.1 L81.9,112.0 L81.3,110.2 L87.1,108.1Z M13.1,84.9 L18.0,85.2 L25.2,86.8 L21.9,88.1 L13.8,86.7 L13.1,84.9Z M76.6,258.9 L80.8,262.0 L77.2,264.3 L75.7,261.2 L76.6,258.9Z M30.2,99.1 L37.3,98.8 L37.7,100.4 L30.2,99.1Z";
+const MEXICO_PATH="M231.5,209.9 L241.1,209.1 L255.9,214.7 L274.0,213.0 L284.2,222.9 L287.6,224.1 L290.1,221.0 L293.4,220.9 L303.9,234.5 L311.4,236.5 L308.5,250.2 L316.4,264.7 L322.3,267.4 L334.4,264.5 L336.9,262.9 L338.9,256.0 L351.8,253.8 L352.6,256.6 L348.7,267.0 L336.0,268.7 L336.0,271.0 L334.2,271.0 L338.1,275.7 L333.0,275.7 L331.1,281.8 L324.5,276.2 L313.8,277.4 L286.0,266.8 L278.0,260.2 L278.9,254.3 L275.9,248.9 L251.1,224.2 L247.4,215.3 L240.9,212.8 L240.3,214.4 L241.3,219.3 L253.5,233.3 L257.4,242.8 L262.4,246.5 L260.6,248.7 L251.3,241.0 L250.8,236.0 L239.8,229.1 L243.4,225.7 L237.9,221.8 L231.5,209.9Z";
+
+function projectLatLng(lat,lon){
+  return[
+    Math.round((lon+MAP_LON_OFFSET)*MAP_SCALE*10)/10,
+    Math.round((MAP_LAT_OFFSET-lat)*MAP_SCALE*10)/10,
+  ];
+}
+
+// Groups raw page_views rows (each with a lat/long from Vercel's built-in
+// geolocation) into visit counts per rounded coordinate -- rounding to ~1
+// decimal degree groups visitors from the same metro area together into
+// one dot sized by volume, rather than showing hundreds of overlapping
+// single-visit points.
+function groupVisitsByLocation(pageViews){
+  const groups=new Map();
+  for(const v of pageViews){
+    if(v.latitude==null||v.longitude==null)continue;
+    const key=`${Math.round(v.latitude*2)/2},${Math.round(v.longitude*2)/2}`;
+    if(!groups.has(key)){
+      groups.set(key,{lat:v.latitude,lon:v.longitude,count:0,city:v.city,country:v.country});
+    }
+    groups.get(key).count++;
+  }
+  return[...groups.values()].sort((a,b)=>b.count-a.count);
+}
+
+function VisitorMap({pageViews}){
+  const located=pageViews.filter(v=>v.latitude!=null&&v.longitude!=null);
+  const locations=groupVisitsByLocation(pageViews);
+  const maxCount=locations.length?Math.max(...locations.map(l=>l.count)):1;
+
+  if(!located.length){
+    return(
+      <div style={{textAlign:"center",padding:"32px 16px",color:"#475569"}}>
+        <div style={{fontSize:26,marginBottom:8}}>🗺️</div>
+        <div style={{fontWeight:600,color:"#94a3b8",marginBottom:4}}>No located visits yet</div>
+        <div style={{fontSize:12}}>Geolocation just went live — every visit before this update was recorded without it. This fills in from here forward.</div>
+      </div>
+    );
+  }
+
+  return(
+    <div>
+      <div style={{position:"relative",width:"100%",maxWidth:640,margin:"0 auto"}}>
+        <svg viewBox="0 0 500 300" style={{width:"100%",height:"auto",display:"block"}}>
+          <path d={US_PATH} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
+          <path d={MEXICO_PATH} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
+          <path d={CANADA_PATH} fill="#16213e" stroke="#3b82f6" strokeWidth="1.5"/>
+          {locations.map((loc,i)=>{
+            const[x,y]=projectLatLng(loc.lat,loc.lon);
+            const r=3+Math.sqrt(loc.count/maxCount)*9;
+            if(x<0||x>500||y<0||y>300)return null; // outside NA view -- skip rather than mis-plot
+            return(
+              <circle key={i} cx={x} cy={y} r={r} fill="#22c55e" fillOpacity={0.55} stroke="#22c55e" strokeWidth="1">
+                <title>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""} — {loc.count} visit{loc.count===1?"":"s"}</title>
+              </circle>
+            );
+          })}
+        </svg>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#475569",marginTop:8,maxWidth:640,margin:"8px auto 0"}}>
+        <span>{located.length.toLocaleString()} of {pageViews.length.toLocaleString()} visits located</span>
+        <span>Dot size = relative visit volume</span>
+      </div>
+      <div style={{marginTop:16,maxWidth:640,margin:"16px auto 0"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:8}}>Top locations</div>
+        {locations.slice(0,8).map((loc,i)=>{
+          const pct=Math.round((loc.count/located.length)*100);
+          return(
+            <div key={i} style={{marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
+                <span style={{color:"#e2e8f0",fontWeight:600}}>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""}</span>
+                <span style={{color:"#64748b"}}>{loc.count} · {pct}%</span>
+              </div>
+              <div style={{background:"#1e293b",borderRadius:4,height:5,overflow:"hidden"}}>
+                <div style={{width:`${pct}%`,height:"100%",background:"#22c55e"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -2539,7 +2639,7 @@ function AdminPanel(){
     async function fetchViews(){
       setViewsLoading(true);
       try{
-        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source").order("created_at",{ascending:true}).limit(50000);
+        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source, city, country, latitude, longitude").order("created_at",{ascending:true}).limit(50000);
         if(error) throw error;
         if(!cancelled) setPageViews(data||[]);
       }catch(err){
@@ -2821,6 +2921,11 @@ function AdminPanel(){
                     })}
                   </div>
                 )}
+              </div>
+
+              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Where visitors are located</div>
+                <VisitorMap pageViews={pageViews}/>
               </div>
             </>
           )}
@@ -3185,15 +3290,21 @@ function LotCheckApp(){
 
   // Log a real page view once per load. Fire-and-forget — a failed insert
   // here shouldn't ever block or slow down the actual site for a visitor.
+  // Routed through /api/track-visit (a Vercel Edge Function) rather than
+  // writing to Supabase directly from here, since real visitor geolocation
+  // can only be read server-side from the incoming request -- the browser
+  // itself has no way to see that.
   useEffect(()=>{
     const visitorId=getOrCreateVisitorId();
-    supabase.from("page_views").insert({
-      visitor_id: visitorId||"unknown",
-      path: window.location.pathname||"/",
-      referrer_source: classifyReferrer(),
-    }).then(({error})=>{
-      if(error) console.warn("⚠️ page_views insert failed:",error.message);
-    });
+    fetch("/api/track-visit",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        visitor_id: visitorId||"unknown",
+        path: window.location.pathname||"/",
+        referrer_source: classifyReferrer(),
+      }),
+    }).catch(err=>console.warn("⚠️ visit tracking failed:",err.message));
   },[]);
 
   useEffect(()=>{
