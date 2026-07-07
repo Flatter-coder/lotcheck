@@ -162,19 +162,38 @@ async function main() {
   console.log(`🔍 Scraping ${SEARCH_URLS.length} URLs...`);
   let run;
   try {
-    run = await apify.actor("automation-lab/kijiji-scraper").call({
-      startUrls: SEARCH_URLS.map(url => ({ url })),
-      // Fixed 2026-07-06: this was "maxItems", which this actor doesn't
-      // actually recognize as an input -- it's silently ignored, and the
-      // actor falls back to its own default of 100 listings/run instead.
-      // The real parameter name is "maxListings". Confirmed against real
-      // Apify billing data before this fix: actual usage was running around
-      // ~186 listings/day total, nowhere near the 1000 this was meant to
-      // allow, which is exactly why most listings only ever got a single
-      // price_history point before falling out of the daily "newest" results.
-      maxListings: 1000,
-      proxyConfiguration: { useApifyProxy: true },
-    });
+    run = await apify.actor("automation-lab/kijiji-scraper").call(
+      {
+        startUrls: SEARCH_URLS.map(url => ({ url })),
+        // Fixed 2026-07-06: this was "maxItems", which this actor doesn't
+        // actually recognize as an input -- it's silently ignored, and the
+        // actor falls back to its own default of 100 listings/run instead.
+        // The real parameter name is "maxListings". Confirmed against real
+        // Apify billing data before this fix: actual usage was running around
+        // ~186 listings/day total, nowhere near the 1000 this was meant to
+        // allow, which is exactly why most listings only ever got a single
+        // price_history point before falling out of the daily "newest" results.
+        maxListings: 1000,
+        proxyConfiguration: { useApifyProxy: true },
+      },
+      // Fixed 2026-07-07: maxListings:1000 was correctly reaching the actor,
+      // but the actor's own run timeout defaults to 300 seconds -- and
+      // Kijiji rate-limits this actor hard (repeated HTTP 429s on individual
+      // listing detail fetches, each retry costing real time). Confirmed in
+      // production: run #24 hit the 300s timeout having only made it through
+      // page 5 of the FIRST search URL (Calgary) -- it never even started
+      // the second URL (Edmonton), and only reached 184 of the requested
+      // 1000. `timeout` is a run-options argument, separate from the actor's
+      // own input above, hence the second argument here rather than folding
+      // it into the object above. 1200s (20 min) gives real headroom for
+      // Kijiji's rate limiting without an unbounded run; GitHub Actions'
+      // own job timeout defaults to hours, so it's not the binding
+      // constraint here -- only the actor's internal one was. Longer actor
+      // runtime does mean more Apify compute usage per run than before;
+      // worth a glance at the Apify usage dashboard after a few days to see
+      // the real cost impact under the Starter plan.
+      { timeout: 1200 }
+    );
   } catch (err) {
     console.error("❌ Apify run failed:", err.message);
     process.exit(1);
@@ -191,11 +210,35 @@ async function main() {
 
   console.log(`✅ ${valid.length} valid listings after filtering`);
 
+  // Fixed 2026-07-07: a run this slow gives Kijiji's own live "newest"
+  // sorting plenty of time to shift listings between pages mid-scrape (a
+  // listing gets bumped/reposted and jumps from page 3 to page 1, say),
+  // so the SAME external_id can turn up twice in `valid` across different
+  // pages of the same run. Confirmed in production: run #24's batch
+  // covering rows 100-150 failed outright with Postgres error "ON CONFLICT
+  // DO UPDATE command cannot affect row a second time" -- which fires
+  // whenever one upsert batch contains the same conflict-target value
+  // (external_id) more than once. That's not a partial failure -- the
+  // WHOLE batch of 50 gets rejected, silently losing every listing in it
+  // (and cascading into lost price_history rows for those listings' foreign
+  // keys too). Deduping by external_id before slicing into batches removes
+  // the possibility entirely, regardless of which page order caused the
+  // repeat -- keeping the LAST occurrence, which reflects whatever Kijiji
+  // returned most recently for that listing within this run.
+  const dedupedMap = new Map();
+  for (const listing of valid) {
+    dedupedMap.set(listing.external_id, listing);
+  }
+  const deduped = Array.from(dedupedMap.values());
+  if (deduped.length !== valid.length) {
+    console.log(`🔁 Removed ${valid.length - deduped.length} duplicate listing(s) seen across multiple pages this run`);
+  }
+
   // Upsert listings in batches of 50
   let upserted = 0;
   const BATCH = 50;
-  for (let i = 0; i < valid.length; i += BATCH) {
-    const batch = valid.slice(i, i + BATCH);
+  for (let i = 0; i < deduped.length; i += BATCH) {
+    const batch = deduped.slice(i, i + BATCH);
     const { error } = await supabase
       .from("listings")
       .upsert(batch, { onConflict: "external_id", ignoreDuplicates: false });
@@ -204,7 +247,7 @@ async function main() {
       console.error(`❌ Batch ${i}-${i+BATCH} failed:`, error.message);
     } else {
       upserted += batch.length;
-      console.log(`📝 Upserted ${upserted}/${valid.length} listings`);
+      console.log(`📝 Upserted ${upserted}/${deduped.length} listings`);
     }
   }
 
