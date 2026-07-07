@@ -3,15 +3,24 @@
 // Records a page view, same as the old direct client-side Supabase insert
 // did -- but this version also captures real visitor geolocation (city,
 // country, lat/long), which the browser itself has no way to see. Vercel's
-// Edge Network derives this from the request automatically, for free, as
-// a standard platform feature -- no third-party geolocation service needed.
+// Edge Network sets this as request headers automatically on every
+// deployment, for free, as a standard platform feature -- no third-party
+// geolocation service needed.
+//
+// Reads the raw x-vercel-ip-* headers directly rather than importing the
+// @vercel/functions package's geolocation() helper -- that package isn't a
+// listed dependency in this project (only @vercel/analytics is), and adding
+// it caused the very first deploy of this function to fail the build with
+// an unresolved-import error. Reading the headers directly needs zero new
+// dependencies; confirmed these exact header names directly against
+// Vercel's own open-source code for the geolocation() helper, which does
+// exactly this internally: x-vercel-ip-city, x-vercel-ip-country,
+// x-vercel-ip-latitude, x-vercel-ip-longitude.
 //
 // The browser still computes visitor_id, path, and referrer_source (since
 // those genuinely are only knowable client-side) and sends them here; this
 // function adds the location data server-side and does the actual database
 // write, so the Supabase write moves from client-side to server-side too.
-
-import { geolocation } from "@vercel/functions";
 
 export const config = { runtime: "edge" };
 
@@ -25,16 +34,21 @@ export default async function handler(req) {
 
   try {
     const body = await req.json();
-    const geo = geolocation(req);
+    const city = req.headers.get("x-vercel-ip-city");
+    const country = req.headers.get("x-vercel-ip-country");
+    const lat = req.headers.get("x-vercel-ip-latitude");
+    const lon = req.headers.get("x-vercel-ip-longitude");
 
     const row = {
       visitor_id: body.visitor_id || "unknown",
       path: body.path || "/",
       referrer_source: body.referrer_source || "Direct",
-      city: geo.city || null,
-      country: geo.country || null,
-      latitude: geo.latitude ? parseFloat(geo.latitude) : null,
-      longitude: geo.longitude ? parseFloat(geo.longitude) : null,
+      // City names are sent URI-encoded to support multi-byte characters
+      // (accented city names, etc.) -- decode before storing.
+      city: city ? decodeURIComponent(city) : null,
+      country: country || null,
+      latitude: lat ? parseFloat(lat) : null,
+      longitude: lon ? parseFloat(lon) : null,
     };
 
     const res = await fetch(`${SUPABASE_URL}/rest/v1/page_views`, {
