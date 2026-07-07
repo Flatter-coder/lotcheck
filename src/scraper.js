@@ -7,6 +7,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { ApifyClient } from "apify-client";
 
+// ── STOPPED 2026-07-07 — on Vic's explicit instruction ───────────────────────
+// Kijiji's own Terms of Use prohibit exactly what this file does: "use any
+// robot, spider, scraper or other automated means to access Kijiji and
+// collect content for any purpose without our express written permission."
+// Confirmed directly against help.kijiji.ca/policies/kijiji-terms-of-use.
+//
+// The daily cron trigger in scrape.yml has already been removed, so this
+// can no longer run on a schedule -- but scrape.yml's workflow_dispatch
+// (manual "Run workflow" button) is still there so the file stays visible
+// and inspectable. This guard means even that manual trigger can't
+// actually scrape Kijiji: nothing below this point ever runs. (The two
+// imports above are harmless on their own -- they just load library code,
+// they don't call Kijiji or Supabase by themselves -- the actual scraping
+// only happens if the code further down gets a chance to run, which this
+// stops.)
+//
+// To resume: get clarity (ideally from a lawyer, given this affects the
+// whole business, not one feature) on whether/how to proceed with Kijiji
+// specifically, then delete this block.
+console.log("🛑 Kijiji scraping is stopped -- see the comment above for why.");
+console.log("🛑 No listings were fetched or written. This is expected, not a failure.");
+process.exit(0);
+
 // ── CONFIG — reads from GitHub Secrets (never hardcode keys) ─────────────────
 const APIFY_TOKEN  = process.env.APIFY_TOKEN;
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://debigtyjhjamipooajhk.supabase.co";
