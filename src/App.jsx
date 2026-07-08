@@ -51,6 +51,12 @@ const GLOBAL_CSS = `
     0%   { transform:rotate(0deg); }
     100% { transform:rotate(360deg); }
   }
+  @keyframes lc-logo-scan {
+    0%   { top:-10px; opacity:0; }
+    16%  { opacity:1; }
+    84%  { opacity:1; }
+    100% { top:34px; opacity:0; }
+  }
 
   /* Live ticker strip */
   .lc-ticker-wrap {
@@ -2184,24 +2190,23 @@ function LiveTicker({listings,onSelect}){
 // emoji used elsewhere as a decorative "success" indicator (trial badges,
 // empty states) is untouched, since that's a different meaning, not branding.
 function LogoMark({ size = 32 }) {
-  const iconSize = Math.round(size * 0.5);
+  // Coral isometric cube with an animated blue "scan beam" sweeping over
+  // it -- the same mark used on the marketing site, so the logo is
+  // consistent everywhere in the product rather than this being the one
+  // holdout still showing the old blue scan-icon badge.
   return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: "linear-gradient(135deg,#0175ff,#0057c2)",
-      boxShadow: "0 0 16px rgba(1,117,255,0.5)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
-    }}>
-      <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none"
-        stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-        <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-        <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-        <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-        <circle cx="12" cy="12" r="3" />
-        <path d="m16 16-1.9-1.9" />
+    <div style={{ position:"relative", width:size, height:size, overflow:"hidden", borderRadius:size*0.18, flexShrink:0 }}>
+      <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 12 L52 22 L32 32 L12 22 Z" fill="#F2836B"/>
+        <path d="M12 22 L32 32 L32 52 L12 42 Z" fill="#D96A54"/>
+        <path d="M52 22 L32 32 L32 52 L52 42 Z" fill="#B4503E"/>
       </svg>
+      <div style={{
+        position:"absolute", left:-size*0.24, right:-size*0.24, height:size*0.27, borderRadius:size*0.12,
+        background:"linear-gradient(180deg, transparent, rgba(125,211,252,.95), rgba(59,130,246,.6), transparent)",
+        boxShadow:"0 0 9px 2px rgba(59,130,246,.85)",
+        animation:"lc-logo-scan 3.4s ease-in-out infinite",
+      }}/>
     </div>
   );
 }
