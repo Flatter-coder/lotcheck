@@ -3094,6 +3094,19 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const fileInputRef=useRef(null);
 
+  // Palette pulled directly from the welcome page's CSS custom properties,
+  // so this page reads as the same product rather than a leftover from the
+  // old dark theme. Kept as inline hex (not CSS vars) since this component
+  // renders standalone and doesn't share a stylesheet with the marketing page.
+  const C={
+    ink:"#33305A", inkSoft:"#5B5885", inkFaint:"#706D96",
+    paper:"#FBF5EC", paper2:"#F5EEE1", card:"#FFFFFF",
+    line:"rgba(51,48,90,.12)",
+    teal:"#2FA79A", tealInk:"#17756B", tealBg:"#E3F4F1",
+    coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
+    butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
+  };
+
   const ACCEPTED_TYPES=["application/pdf","image/jpeg","image/png","image/webp"];
 
   const handleFile=async(file)=>{
@@ -3146,67 +3159,212 @@ function QuoteCheckPage(){
     setFileName("");
   };
 
+  // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
+  // needing to save it to disk first and browse for it. Only listens while
+  // the upload zone is actually showing.
+  useEffect(()=>{
+    if(status!=="idle") return;
+    const onPaste=(e)=>{
+      const items=e.clipboardData?.items;
+      if(!items) return;
+      for(const item of items){
+        if(item.type&&item.type.startsWith("image/")){
+          const file=item.getAsFile();
+          if(file){ e.preventDefault(); handleFile(file); }
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste",onPaste);
+    return ()=>window.removeEventListener("paste",onPaste);
+  },[status]);
+
+  // Local keyframes for the isometric scan demo -- kept scoped to this page
+  // (not merged into the shared GLOBAL_CSS) since QuoteCheckPage mounts as
+  // its own standalone route and nothing else needs these.
+  const QC_CSS=`
+    @keyframes lc-iso-float {
+      0%,100% { transform:rotateX(52deg) rotateZ(-10deg) translateY(0); }
+      50%     { transform:rotateX(52deg) rotateZ(-10deg) translateY(-6px); }
+    }
+    @keyframes lc-iso-sweep {
+      0%   { top:8px;   opacity:0; }
+      12%  { opacity:1; }
+      88%  { opacity:1; }
+      100% { top:112px; opacity:0; }
+    }
+    @keyframes lc-iso-chip-1 {
+      0%,4%   { opacity:0; transform:translateY(6px); }
+      8%,17%  { opacity:1; transform:translateY(0); }
+      21%,100%{ opacity:0; transform:translateY(-6px); }
+    }
+    @keyframes lc-iso-chip-2 {
+      0%,21%  { opacity:0; transform:translateY(6px); }
+      25%,34% { opacity:1; transform:translateY(0); }
+      38%,100%{ opacity:0; transform:translateY(-6px); }
+    }
+    @keyframes lc-iso-chip-3 {
+      0%,38%  { opacity:0; transform:translateY(6px); }
+      42%,51% { opacity:1; transform:translateY(0); }
+      55%,100%{ opacity:0; transform:translateY(-6px); }
+    }
+    @keyframes lc-iso-chip-4 {
+      0%,55%  { opacity:0; transform:translateY(6px); }
+      59%,68% { opacity:1; transform:translateY(0); }
+      72%,100%{ opacity:0; transform:translateY(-6px); }
+    }
+    @keyframes lc-iso-chip-5 {
+      0%,72%  { opacity:0; transform:translateY(6px); }
+      76%,85% { opacity:1; transform:translateY(0); }
+      89%,100%{ opacity:0; transform:translateY(-6px); }
+    }
+  `;
+
+  // Five example findings the scan demo cycles through -- a representative
+  // spread across what the pipeline actually catches (verified fact,
+  // flagged fee, rebate, VIN check, warranty), not just one repeated idea.
+  const EXAMPLES=[
+    {icon:"✓",text:"MSRP verified",bg:C.tealBg,fg:C.tealInk,anim:"lc-iso-chip-1"},
+    {icon:"⚠",text:"Doc fee flagged — $599",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-2"},
+    {icon:"$",text:"$5,000 EVAP rebate found",bg:C.butterBg,fg:C.butterInk,anim:"lc-iso-chip-3"},
+    {icon:"✓",text:"VIN pattern valid",bg:C.tealBg,fg:C.tealInk,anim:"lc-iso-chip-4"},
+    {icon:"⚠",text:"Extended warranty overpriced",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-5"},
+  ];
+
+  const cardStyle={
+    background:C.card,borderRadius:26,padding:20,marginBottom:16,
+    border:`1px solid ${C.line}`,boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
+  };
+
   return(
     <>
       <style>{GLOBAL_CSS}</style>
-      <div style={{minHeight:"100dvh",background:"#020617",padding:"24px 16px"}}>
+      <style>{QC_CSS}</style>
+      <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
             <LogoMark size={34}/>
             <div>
-              <div style={{fontWeight:800,fontSize:18,color:"#f1f5f9"}}>LotCheck Quote Check</div>
-              <div style={{fontSize:12,color:"#475569"}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+              <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
+              <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
             </div>
           </div>
 
           {status==="idle"&&(
+            <>
             <div
               onDragOver={e=>{e.preventDefault();setDragOver(true);}}
               onDragLeave={()=>setDragOver(false)}
               onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
               onClick={()=>fileInputRef.current?.click()}
               style={{
-                border:`2px dashed ${dragOver?"#3b82f6":"#1e293b"}`,
-                borderRadius:16,padding:"48px 24px",textAlign:"center",cursor:"pointer",
-                background:dragOver?"#0d1e3a":"#0a0f1e",transition:"all 0.15s",
+                border:`2px dashed ${dragOver?C.teal:C.line}`,
+                borderRadius:26,padding:"40px 24px 30px",textAlign:"center",cursor:"pointer",
+                background:dragOver?C.tealBg:C.card,transition:"all 0.15s",
+                boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
               }}
             >
-              <div style={{fontSize:36,marginBottom:12}}>📄</div>
-              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>Drop your quote here, or snap a photo</div>
-              <div style={{color:"#475569",fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
+              {/* Isometric "quote on the counter" scan demo -- a real CSS 3D
+                  transform (perspective + rotateX/rotateZ), not a flat icon,
+                  with a teal scan beam sweeping across it and five example
+                  findings cycling underneath. Purely decorative/looping;
+                  sells what happens the instant a real quote lands. */}
+              <div style={{perspective:900,margin:"0 auto 4px",height:130,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <div style={{
+                  position:"relative",width:104,height:128,
+                  transform:"rotateX(52deg) rotateZ(-10deg)",
+                  animation:"lc-iso-float 3.6s ease-in-out infinite",
+                }}>
+                  <div style={{
+                    position:"absolute",inset:0,borderRadius:10,background:C.card,
+                    boxShadow:"10px 12px 0 rgba(51,48,90,.10), 0 1px 0 1px rgba(51,48,90,.08)",
+                    padding:"16px 14px",
+                  }}>
+                    <div style={{width:"60%",height:6,borderRadius:3,background:C.paper2,marginBottom:10}}/>
+                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+                    <div style={{width:"65%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+                    <div style={{width:"75%",height:4,borderRadius:2,background:"#EDE7D8"}}/>
+                  </div>
+                  <div style={{
+                    position:"absolute",left:6,right:6,top:8,height:16,borderRadius:4,
+                    background:`linear-gradient(180deg, transparent, ${C.teal}99, transparent)`,
+                    boxShadow:`0 0 14px 3px ${C.teal}77`,
+                    animation:"lc-iso-sweep 2.8s linear infinite",
+                  }}/>
+                </div>
+              </div>
+
+              <div style={{position:"relative",height:24,margin:"8px 0 14px"}}>
+                {EXAMPLES.map((ex,i)=>(
+                  <div key={i} style={{
+                    position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",gap:7,
+                    animation:`${ex.anim} 15s ease-in-out infinite`,
+                  }}>
+                    <span style={{
+                      display:"inline-flex",alignItems:"center",gap:6,
+                      background:ex.bg,color:ex.fg,fontWeight:800,fontSize:12,
+                      padding:"5px 12px",borderRadius:999,
+                    }}>
+                      <span aria-hidden="true">{ex.icon}</span>{ex.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
+              <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
+
+            <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
+              {[
+                {n:"1",label:"Upload or paste",desc:"Drop a file, click to browse, or paste (Ctrl+V / Cmd+V) a screenshot"},
+                {n:"2",label:"Claude reads it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
+                {n:"3",label:"See what's real",desc:"True MSRP, flagged add-ons, and any EVAP rebate you qualify for"},
+              ].map((s,i)=>(
+                <div key={i} style={{flex:"1 1 160px",minWidth:150}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",background:C.coral,color:"#fff",fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{s.n}</div>
+                    <div style={{color:C.ink,fontWeight:800,fontSize:13}}>{s.label}</div>
+                  </div>
+                  <div style={{color:C.inkFaint,fontSize:12,lineHeight:1.5,paddingLeft:30}}>{s.desc}</div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
 
           {status==="analyzing"&&(
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:"48px 24px",textAlign:"center"}}>
+            <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
               <div style={{fontSize:36,marginBottom:12}}>⏳</div>
-              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>Reading {fileName}…</div>
-              <div style={{color:"#475569",fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
+              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Reading {fileName}…</div>
+              <div style={{color:C.inkFaint,fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
             </div>
           )}
 
           {status==="error"&&(
-            <div style={{background:"#2a0f0f",border:"1px solid #7f1d1d",borderRadius:16,padding:"32px 24px",textAlign:"center"}}>
+            <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
               <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
-              <div style={{color:"#fca5a5",fontWeight:700,marginBottom:8}}>{errorMsg}</div>
-              <button onClick={reset} style={{marginTop:8,background:"#0175ff",border:"none",borderRadius:10,padding:"10px 20px",color:"#fff",fontWeight:700,cursor:"pointer"}}>Try again</button>
+              <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
+              <button onClick={reset} style={{marginTop:8,background:C.ink,border:"none",borderRadius:999,padding:"10px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try again</button>
             </div>
           )}
 
           {status==="done"&&analysis&&(
             <div>
-              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
-                <div style={{fontSize:13,color:"#64748b",marginBottom:4}}>{analysis.vehicle||"Vehicle"}</div>
+              <div style={cardStyle}>
+                <div style={{fontSize:13,color:C.inkFaint,marginBottom:4}}>{analysis.vehicle||"Vehicle"}</div>
                 <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
                   <div>
-                    <div style={{fontSize:11,color:"#475569"}}>MSRP</div>
-                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
+                    <div style={{fontSize:11,color:C.inkFaint}}>MSRP</div>
+                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
                   </div>
                   <div>
-                    <div style={{fontSize:11,color:"#475569"}}>Quoted price</div>
-                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
+                    <div style={{fontSize:11,color:C.inkFaint}}>Quoted price</div>
+                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
                   </div>
                 </div>
               </div>
@@ -3227,66 +3385,66 @@ function QuoteCheckPage(){
                   km:0,price:analysis.quotedPrice||analysis.msrp||0,
                 });
                 return(
-                  <div style={{background:rebate.eligible?"#0a2e1a":"#1e1508",border:`1px solid ${rebate.eligible?"#166534":"#7c4a03"}`,borderRadius:16,padding:20,marginBottom:16}}>
-                    <div style={{fontSize:13,fontWeight:700,color:rebate.eligible?"#4ade80":"#fbbf24",marginBottom:8}}>
+                  <div style={{...cardStyle,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
+                    <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
                       {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
                     </div>
                     {rebate.eligible?(
                       <>
-                        <div style={{color:"#f1f5f9",fontSize:18,fontWeight:800,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
-                        <div style={{fontSize:12,color:"#94a3b8"}}>
+                        <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
+                        <div style={{fontSize:12,color:C.inkSoft}}>
                           ${rebate.federal.toLocaleString()} federal
                           {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
                           {rebate.note&&` — ${rebate.note}`}
                         </div>
                       </>
                     ):(
-                      <div style={{fontSize:13,color:"#e2e8f0"}}>{rebate.ineligibleReason}</div>
+                      <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
                     )}
                   </div>
                 );
               })()}
 
               {analysis.totalFlaggedCost>0&&(
-                <div style={{background:"#2a1a0a",border:"1px solid #7c4a03",borderRadius:16,padding:20,marginBottom:16}}>
-                  <div style={{fontSize:13,color:"#fbbf24",fontWeight:700}}>⚠️ ${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</div>
-                  <div style={{fontSize:12,color:"#94a3b8",marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                  <div style={{fontSize:13,color:C.coralInk,fontWeight:800}}>⚠️ ${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
                 </div>
               )}
 
               {analysis.addOns?.length>0&&(
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Add-ons & fees</div>
+                <div style={cardStyle}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Add-ons & fees</div>
                   {analysis.addOns.map((a,i)=>(
-                    <div key={i} style={{padding:"10px 0",borderTop:i>0?"1px solid #1e293b":"none"}}>
+                    <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div style={{color:"#f1f5f9",fontWeight:600,fontSize:14}}>{a.flagged&&"🔻 "}{a.name}</div>
-                        <div style={{color:a.flagged?"#f59e0b":"#94a3b8",fontWeight:700}}>${a.price.toLocaleString()}</div>
+                        <div style={{color:C.ink,fontWeight:700,fontSize:14}}>{a.flagged&&"🔻 "}{a.name}</div>
+                        <div style={{color:a.flagged?C.coralInk:C.inkSoft,fontWeight:800}}>${a.price.toLocaleString()}</div>
                       </div>
-                      <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{a.reason}</div>
+                      <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{a.reason}</div>
                     </div>
                   ))}
                 </div>
               )}
 
               {analysis.warranty?.offered&&(
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:20,marginBottom:16}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:8}}>Warranty / protection plan</div>
-                  <div style={{color:"#f1f5f9",fontSize:14,marginBottom:4}}>{analysis.warranty.offered}{analysis.warranty.price?` — $${analysis.warranty.price.toLocaleString()}`:""}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>{analysis.warranty.assessment}</div>
+                <div style={cardStyle}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:8}}>Warranty / protection plan</div>
+                  <div style={{color:C.ink,fontSize:14,marginBottom:4}}>{analysis.warranty.offered}{analysis.warranty.price?` — $${analysis.warranty.price.toLocaleString()}`:""}</div>
+                  <div style={{fontSize:12,color:C.inkFaint}}>{analysis.warranty.assessment}</div>
                 </div>
               )}
 
-              <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:16,padding:20,marginBottom:16}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#3b82f6",marginBottom:8}}>Bottom line</div>
-                <div style={{color:"#e2e8f0",fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
+              <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:8}}>Bottom line</div>
+                <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
               </div>
 
-              <button onClick={reset} style={{width:"100%",background:"#1e293b",border:"none",borderRadius:10,padding:"12px",color:"#e2e8f0",fontWeight:700,cursor:"pointer"}}>Check another quote</button>
+              <button onClick={reset} style={{width:"100%",background:C.ink,border:"none",borderRadius:999,padding:"13px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Check another quote</button>
             </div>
           )}
 
-          <div style={{textAlign:"center",marginTop:20,fontSize:11,color:"#334155"}}>
+          <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
             LotCheck never saves your quote to our own systems. It's sent once to Claude (Anthropic's AI) to read and analyze, then discarded on our end — see how this works.
           </div>
         </div>
@@ -3294,7 +3452,6 @@ function QuoteCheckPage(){
     </>
   );
 }
-
 
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
