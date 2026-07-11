@@ -1403,7 +1403,7 @@ import * as THREE from "https://unpkg.com/three@0.128.0/build/three.module.js";
   var CALGARY = { x:0.1858, y:1.1892 };
   var EDMONTON = { x:0.3014, y:0.3277 };
   var DEPTH = 0.1;
-  var TEAL = 0x1e8a7e, CORAL = 0xc24c33;
+  var TEAL = 0x1e8a7e, CORAL = 0xc24c33, INK = 0x33305a;
 
   var mount = document.getElementById('abMapMount');
   if(!mount) return;
@@ -1428,7 +1428,10 @@ import * as THREE from "https://unpkg.com/three@0.128.0/build/three.module.js";
   renderer.setSize(width, height);
   mount.appendChild(renderer.domElement);
 
-  scene.add(new THREE.AmbientLight(0xfff3e6, 1.3));
+  scene.add(new THREE.AmbientLight(0xfff3e6, 1.2));
+  var keyLight = new THREE.PointLight(0xffffff, 0.9, 10);
+  keyLight.position.set(2, 3, 2);
+  scene.add(keyLight);
 
   var shape = new THREE.Shape();
   AB_POINTS.forEach(function(p, i){
@@ -1441,22 +1444,38 @@ import * as THREE from "https://unpkg.com/three@0.128.0/build/three.module.js";
     depth: DEPTH, bevelEnabled: true, bevelThickness: 0.012,
     bevelSize: 0.012, bevelSegments: 1, curveSegments: 1
   });
+  extrudeGeo.computeBoundingBox();
+  var bb = extrudeGeo.boundingBox;
+  var colorA = new THREE.Color(TEAL);
+  var colorB = new THREE.Color(CORAL);
+  var posAttr = extrudeGeo.attributes.position;
+  var vColors = new Float32Array(posAttr.count * 3);
+  for (var vi = 0; vi < posAttr.count; vi++){
+    var vt = (posAttr.getY(vi) - bb.min.y) / (bb.max.y - bb.min.y || 1);
+    var vc = colorA.clone().lerp(colorB, vt);
+    vColors[vi*3] = vc.r; vColors[vi*3+1] = vc.g; vColors[vi*3+2] = vc.b;
+  }
+  extrudeGeo.setAttribute('color', new THREE.BufferAttribute(vColors, 3));
+
+  var fillMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.6, roughness: 0.55, metalness: 0.1 });
+  var fillMesh = new THREE.Mesh(extrudeGeo, fillMat);
+
   var edgesGeo = new THREE.EdgesGeometry(extrudeGeo, 10);
   var edgesMat = new THREE.LineBasicMaterial({ color: TEAL, transparent: true, opacity: 0.9 });
   var edgesMesh = new THREE.LineSegments(edgesGeo, edgesMat);
 
   var mapGroup = new THREE.Group();
-  mapGroup.add(edgesMesh);
+  mapGroup.add(fillMesh, edgesMesh);
 
   function makeMarker(pos){
     var g = new THREE.Group();
     var core = new THREE.Mesh(
       new THREE.IcosahedronGeometry(0.04, 1),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: CORAL, emissiveIntensity: 1.5 })
+      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: INK, emissiveIntensity: 1.5 })
     );
     var ring = new THREE.Mesh(
       new THREE.RingGeometry(0.055, 0.068, 28),
-      new THREE.MeshBasicMaterial({ color: CORAL, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
     );
     ring.rotation.x = -Math.PI / 2;
     g.add(core, ring);
