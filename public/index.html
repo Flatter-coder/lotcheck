@@ -508,7 +508,28 @@ footer{padding:34px 0 44px}
   background:var(--card);border:2px solid var(--line);border-radius:var(--r-lg);
   box-shadow:var(--shadow-hard);overflow:hidden;position:relative;min-height:420px;
 }
-#abMapMount{position:absolute;inset:0}
+.ab3d-stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;perspective:1100px}
+.ab3d-tilt{width:58%;aspect-ratio:2.2/4.009;transform-style:preserve-3d;transform:rotateX(58deg)}
+.ab3d-spin{position:relative;width:100%;height:100%;transform-style:preserve-3d;animation:ab3d-spin 26s linear infinite}
+@keyframes ab3d-spin{from{transform:rotateZ(0deg)}to{transform:rotateZ(360deg)}}
+.ab3d-layer{
+  position:absolute;inset:0;transform:translateZ(var(--z));
+  clip-path:polygon(58.55% 97.23%, 57.7% 95.96%, 55.71% 95.47%, 53.86% 93.88%, 53.86% 92.45%, 52.39% 92.0%, 53.32% 90.98%, 53.11% 88.08%, 52.1% 85.56%, 49.85% 83.7%, 48.02% 83.94%, 46.85% 82.35%, 44.12% 81.3%, 44.81% 80.88%, 44.38% 80.31%, 38.53% 77.33%, 38.15% 76.08%, 35.51% 74.4%, 34.93% 73.2%, 32.56% 73.95%, 28.93% 69.89%, 26.37% 70.33%, 24.92% 69.73%, 24.28% 69.11%, 24.96% 67.99%, 22.68% 67.27%, 20.7% 68.32%, 19.59% 65.07%, 18.27% 63.74%, 17.05% 63.86%, 15.83% 61.79%, 13.84% 60.83%, 13.23% 61.68%, 11.23% 61.18%, 10.14% 59.76%, 6.93% 59.47%, 5.44% 58.4%, 5.17% 57.65%, 6.96% 57.41%, 4.55% 55.92%, 4.71% 2.83%, 95.45% 2.77%, 95.45% 97.23%);
+}
+.ab3d-top{background:linear-gradient(180deg,#1E8A7E 0%,#F2836B 100%)}
+.ab3d-marker{position:absolute;left:var(--mx);top:var(--my);transform:translate(-50%,-50%) translateZ(24.5px);width:10px;height:10px}
+.ab3d-dot{position:absolute;inset:0;border-radius:50%;background:#33305A;box-shadow:0 0 6px 1px rgba(51,48,90,.45)}
+.ab3d-ring{
+  position:absolute;top:50%;left:50%;width:10px;height:10px;margin:-5px 0 0 -5px;
+  border-radius:50%;border:1.5px solid #33305A;
+  animation:ab3d-pulse 2.4s ease-out infinite;animation-delay:var(--mdelay);
+}
+@keyframes ab3d-pulse{0%{transform:scale(1);opacity:.8}100%{transform:scale(3.6);opacity:0}}
+@media (prefers-reduced-motion: reduce){
+  .ab3d-spin{animation:none;transform:rotateZ(-16deg)}
+  .ab3d-ring{animation:none;opacity:0}
+}
+@media (max-width:860px){ .ab3d-tilt{width:44%} }
 .coverage-coords{
   position:absolute;left:18px;bottom:16px;font-family:'SF Mono',Menlo,monospace;
   font-size:.68rem;letter-spacing:.03em;color:var(--ink-faint);line-height:1.7;
@@ -815,7 +836,24 @@ footer{padding:34px 0 44px}
     </div>
     <div class="coverage-grid rv" style="--i:1">
       <div class="coverage-card">
-        <div id="abMapMount"></div>
+        <div class="ab3d-stage">
+          <div class="ab3d-tilt">
+            <div class="ab3d-spin">
+              <div class="ab3d-layer" style="--z:0px;background:#ae5e4d"></div>
+              <div class="ab3d-layer" style="--z:2.6px;background:#9b5f4f"></div>
+              <div class="ab3d-layer" style="--z:5.2px;background:#886050"></div>
+              <div class="ab3d-layer" style="--z:7.8px;background:#756052"></div>
+              <div class="ab3d-layer" style="--z:10.4px;background:#626154"></div>
+              <div class="ab3d-layer" style="--z:13px;background:#4f6156"></div>
+              <div class="ab3d-layer" style="--z:15.6px;background:#3c6257"></div>
+              <div class="ab3d-layer" style="--z:18.2px;background:#296359"></div>
+              <div class="ab3d-layer" style="--z:20.8px;background:#16635b"></div>
+              <div class="ab3d-layer ab3d-top" style="--z:23.4px"></div>
+              <div class="ab3d-marker" style="--mx:58.45%;--my:79.66%;--mdelay:0s"><span class="ab3d-dot"></span><span class="ab3d-ring"></span></div>
+              <div class="ab3d-marker" style="--mx:63.7%;--my:58.17%;--mdelay:1.1s"><span class="ab3d-dot"></span><span class="ab3d-ring"></span></div>
+            </div>
+          </div>
+        </div>
         <div class="coverage-coords">
           <div>51.05°N 114.07°W · CALGARY</div>
           <div>53.55°N 113.49°W · EDMONTON</div>
@@ -1381,150 +1419,6 @@ buildPortal();
   },{threshold:.18, rootMargin:"0px 0px -40px 0px"});
   els.forEach(function(el){ io.observe(el); });
 })();
-})();
-</script>
-<script type="module">
-import * as THREE from "https://unpkg.com/three@0.128.0/build/three.module.js";
-
-(function(){
-  var AB_POINTS = [
-    [0.1881,1.8934],[0.1693,1.8424],[0.1256,1.823],[0.0849,1.759],
-    [0.0849,1.7018],[0.0525,1.6838],[0.073,1.6427],[0.0684,1.5265],
-    [0.0461,1.4256],[-0.0032,1.3509],[-0.0436,1.3606],[-0.0692,1.2968],
-    [-0.1293,1.2546],[-0.1142,1.2379],[-0.1236,1.2152],[-0.2523,1.0955],
-    [-0.2608,1.0456],[-0.3188,0.9781],[-0.3316,0.9302],[-0.3837,0.9603],
-    [-0.4636,0.7975],[-0.5199,0.8152],[-0.5518,0.791],[-0.5658,0.7662],
-    [-0.5508,0.7212],[-0.601,0.6922],[-0.6445,0.7343],[-0.6691,0.6042],
-    [-0.6981,0.551],[-0.7248,0.5557],[-0.7518,0.4728],[-0.7956,0.4341],
-    [-0.8089,0.4683],[-0.853,0.448],[-0.877,0.3912],[-0.9475,0.3797],
-    [-0.9803,0.3366],[-0.9863,0.3067],[-0.9469,0.2971],[-1.0,0.2375],
-    [-0.9964,-1.891],[1.0,-1.8934],[0.9999,1.8934]
-  ];
-  var CALGARY = { x:0.1858, y:1.1892 };
-  var EDMONTON = { x:0.3014, y:0.3277 };
-  var DEPTH = 0.1;
-  var TEAL = 0x1e8a7e, CORAL = 0xc24c33, INK = 0x33305a;
-
-  var mount = document.getElementById('abMapMount');
-  if(!mount) return;
-
-  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var width = mount.clientWidth, height = mount.clientHeight;
-
-  var scene = new THREE.Scene();
-  var camera = new THREE.PerspectiveCamera(38, width/height, 0.1, 100);
-  var CAM_RADIUS = 4.6, CAM_Y = 2.7;
-  camera.position.set(0, CAM_Y, CAM_RADIUS);
-  camera.lookAt(0, -0.05, 0);
-
-  var renderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-  } catch(e){
-    mount.innerHTML = '<div style="padding:24px;color:#8a7f6a;font:14px system-ui;">3D preview unavailable in this browser.</div>';
-    return;
-  }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(width, height);
-  mount.appendChild(renderer.domElement);
-
-  scene.add(new THREE.AmbientLight(0xfff3e6, 1.2));
-  var keyLight = new THREE.PointLight(0xffffff, 0.9, 10);
-  keyLight.position.set(2, 3, 2);
-  scene.add(keyLight);
-
-  var shape = new THREE.Shape();
-  AB_POINTS.forEach(function(p, i){
-    if (i === 0) shape.moveTo(p[0], p[1]);
-    else shape.lineTo(p[0], p[1]);
-  });
-  shape.lineTo(AB_POINTS[0][0], AB_POINTS[0][1]);
-
-  var extrudeGeo = new THREE.ExtrudeGeometry(shape, {
-    depth: DEPTH, bevelEnabled: true, bevelThickness: 0.012,
-    bevelSize: 0.012, bevelSegments: 1, curveSegments: 1
-  });
-  extrudeGeo.computeBoundingBox();
-  var bb = extrudeGeo.boundingBox;
-  var colorA = new THREE.Color(TEAL);
-  var colorB = new THREE.Color(CORAL);
-  var posAttr = extrudeGeo.attributes.position;
-  var vColors = new Float32Array(posAttr.count * 3);
-  for (var vi = 0; vi < posAttr.count; vi++){
-    var vt = (posAttr.getY(vi) - bb.min.y) / (bb.max.y - bb.min.y || 1);
-    var vc = colorA.clone().lerp(colorB, vt);
-    vColors[vi*3] = vc.r; vColors[vi*3+1] = vc.g; vColors[vi*3+2] = vc.b;
-  }
-  extrudeGeo.setAttribute('color', new THREE.BufferAttribute(vColors, 3));
-
-  var fillMat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.6, roughness: 0.55, metalness: 0.1 });
-  var fillMesh = new THREE.Mesh(extrudeGeo, fillMat);
-
-  var edgesGeo = new THREE.EdgesGeometry(extrudeGeo, 10);
-  var edgesMat = new THREE.LineBasicMaterial({ color: TEAL, transparent: true, opacity: 0.9 });
-  var edgesMesh = new THREE.LineSegments(edgesGeo, edgesMat);
-
-  var mapGroup = new THREE.Group();
-  mapGroup.add(fillMesh, edgesMesh);
-
-  function makeMarker(pos){
-    var g = new THREE.Group();
-    var core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.04, 1),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: INK, emissiveIntensity: 1.5 })
-    );
-    var ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.055, 0.068, 28),
-      new THREE.MeshBasicMaterial({ color: INK, transparent: true, opacity: 0.85, side: THREE.DoubleSide })
-    );
-    ring.rotation.x = -Math.PI / 2;
-    g.add(core, ring);
-    g.position.set(pos.x, pos.y, DEPTH + 0.025);
-    g.userData.ring = ring;
-    g.userData.core = core;
-    return g;
-  }
-  var calgaryMarker = makeMarker(CALGARY);
-  var edmontonMarker = makeMarker(EDMONTON);
-  mapGroup.add(calgaryMarker, edmontonMarker);
-  mapGroup.rotation.x = -Math.PI / 2;
-  mapGroup.position.y = -0.05;
-  scene.add(mapGroup);
-
-  function handleResize(){
-    width = mount.clientWidth; height = mount.clientHeight;
-    if (!width || !height) return;
-    camera.aspect = width / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
-  }
-  window.addEventListener('resize', handleResize);
-  var ro = new ResizeObserver(handleResize);
-  ro.observe(mount);
-
-  var angle = 0;
-  var clock = new THREE.Clock();
-  function animate(){
-    requestAnimationFrame(animate);
-    var t = clock.getElapsedTime();
-    if (!prefersReducedMotion){
-      angle += 0.002;
-      camera.position.x = Math.sin(angle) * CAM_RADIUS;
-      camera.position.z = Math.cos(angle) * CAM_RADIUS;
-      camera.position.y = CAM_Y + Math.sin(t * 0.25) * 0.1;
-      camera.lookAt(0, -0.05, 0);
-      [calgaryMarker, edmontonMarker].forEach(function(m, i){
-        var local = (t * 0.55 + i * 0.75) % 1.6;
-        var s = 1 + local * 2.1;
-        m.userData.ring.scale.set(s, s, s);
-        m.userData.ring.material.opacity = Math.max(0, 0.85 - local * 0.6);
-        var pulse = 1 + Math.sin(t * 3 + i) * 0.08;
-        m.userData.core.scale.set(pulse, pulse, pulse);
-      });
-    }
-    renderer.render(scene, camera);
-  }
-  animate();
 })();
 </script>
 </body>
