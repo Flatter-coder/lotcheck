@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useContext, createContext } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
@@ -2230,31 +2230,75 @@ function LogoMark({ size = 32 }) {
 
 // ── Admin panel colors — LotCheck brand palette, independent of the shared
 // dark GLOBAL_CSS theme so this doesn't touch the buyer-facing site ────────
-const LC_ADMIN = {
-  ink:      "#33305A",
-  inkSoft:  "#5B5885",
-  inkFaint: "#706D96",
-  paper:    "#FBF5EC",
-  paper2:   "#F5EEE1",
-  card:     "#FFFFFF",
-  line:     "rgba(51,48,90,.12)",
-  teal:     "#2FA79A",
-  tealInk:  "#17756B",
-  tealBg:   "#E3F4F1",
-  coral:    "#F2836B",
-  coralInk: "#A63C25",
-  coralBg:  "#FDEAE5",
-  butter:   "#F5C95C",
-  butterInk:"#8A6414",
-  butterBg: "#FDF4DF",
+// Two on-brand palettes, not a light theme + a generic navy fallback — dark
+// mode is still teal/coral/purple, just recomposed for a dark background.
+const LC_THEMES = {
+  light: {
+    ink:"#33305A", inkSoft:"#5B5885", inkFaint:"#706D96",
+    paper:"#FBF5EC", paper2:"#F5EEE1", card:"#FFFFFF",
+    line:"rgba(51,48,90,.12)",
+    teal:"#2FA79A", tealInk:"#17756B", tealBg:"#E3F4F1",
+    coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
+    butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
+  },
+  dark: {
+    ink:"#F1EDE0", inkSoft:"#C9C4E8", inkFaint:"#8F8AB8",
+    paper:"#1C1A2E", paper2:"#242238", card:"#2A2840",
+    line:"rgba(255,255,255,.10)",
+    teal:"#3FC2B3", tealInk:"#7FE0D3", tealBg:"rgba(63,194,179,.15)",
+    coral:"#F2836B", coralInk:"#FFA88F", coralBg:"rgba(242,131,107,.15)",
+    butter:"#F5C95C", butterInk:"#FFD97A", butterBg:"rgba(245,201,92,.15)",
+  },
 };
+
+const AdminThemeContext = createContext(null);
+
+function useAdminTheme(){
+  const ctx = useContext(AdminThemeContext);
+  return ctx || { theme:"light", C:LC_THEMES.light, toggleTheme:()=>{} };
+}
+
+// Called once at the top of AdminLogin and once at the top of AdminPanel —
+// they're mutually exclusive (never both mounted), so each manages its own
+// state, backed by the same localStorage key so the choice persists across
+// login.
+function useThemeState(){
+  const [theme,setTheme]=useState(()=>{
+    try{ return localStorage.getItem("lc_admin_theme")||"light"; }catch{ return "light"; }
+  });
+  function toggleTheme(next){
+    setTheme(next);
+    try{ localStorage.setItem("lc_admin_theme",next); }catch{}
+  }
+  return { theme, C:LC_THEMES[theme], toggleTheme };
+}
+
+function ThemeToggle(){
+  const {theme,C,toggleTheme}=useAdminTheme();
+  return (
+    <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:9,padding:3}}>
+      <button onClick={()=>toggleTheme("dark")} style={{
+        background: theme==="dark" ? C.ink : "transparent",
+        color: theme==="dark" ? C.paper : C.inkFaint,
+        border:"none", borderRadius:6, padding:"5px 11px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+      }}>🌙 Dark</button>
+      <button onClick={()=>toggleTheme("light")} style={{
+        background: theme==="light" ? C.card : "transparent",
+        color: theme==="light" ? C.ink : C.inkFaint,
+        border:"none", borderRadius:6, padding:"5px 11px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+        boxShadow: theme==="light" ? "0 1px 4px rgba(51,48,90,.15)" : "none",
+      }}>☀️ Bright</button>
+    </div>
+  );
+}
 
 function AdminLogin(){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
-  const C=LC_ADMIN;
+  const themeState=useThemeState();
+  const {C}=themeState;
 
   async function handleLogin(e){
     e.preventDefault();
@@ -2267,28 +2311,31 @@ function AdminLogin(){
   }
 
   return(
-    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.paper,fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>
-      <form onSubmit={handleLogin} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-        <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
-        <div style={{fontSize:22,fontWeight:800,color:C.ink,marginBottom:4}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
-        <div style={{fontSize:13,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
-        <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
-          style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
-        <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
-          style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
-        {err&&<div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:8,padding:"10px 14px",fontSize:13,color:C.coralInk,marginBottom:14,textAlign:"left"}}>{err}</div>}
-        <button type="submit" disabled={loading}
-          style={{width:"100%",background:loading?C.tealInk:C.teal,border:"none",borderRadius:12,padding:"13px",color:"#fff",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:loading?"default":"pointer"}}>
-          {loading?"Signing in…":"Sign in →"}
-        </button>
-      </form>
-    </div>
+    <AdminThemeContext.Provider value={themeState}>
+      <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.paper,fontFamily:"'Nunito',Helvetica,Arial,sans-serif",position:"relative"}}>
+        <div style={{position:"absolute",top:16,right:16}}><ThemeToggle/></div>
+        <form onSubmit={handleLogin} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
+          <div style={{fontSize:22,fontWeight:800,color:C.ink,marginBottom:4}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
+          <div style={{fontSize:13,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
+          <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
+            style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
+          <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
+            style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
+          {err&&<div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:8,padding:"10px 14px",fontSize:13,color:C.coralInk,marginBottom:14,textAlign:"left"}}>{err}</div>}
+          <button type="submit" disabled={loading}
+            style={{width:"100%",background:loading?C.tealInk:C.teal,border:"none",borderRadius:12,padding:"13px",color:"#fff",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:loading?"default":"pointer"}}>
+            {loading?"Signing in…":"Sign in →"}
+          </button>
+        </form>
+      </div>
+    </AdminThemeContext.Provider>
   );
 }
 
 // ── Small shared bits for the new tabs ────────────────────────────────────────
 function AdminTabButton({active,onClick,children}){
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   return (
     <button onClick={onClick} style={{
       background: active ? C.card : "transparent",
@@ -2300,7 +2347,7 @@ function AdminTabButton({active,onClick,children}){
 }
 
 function AdminEmpty({icon,children}){
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"32px 20px",textAlign:"center",color:C.inkFaint}}>
       {icon&&<div style={{fontSize:28,marginBottom:10}}>{icon}</div>}
@@ -2311,7 +2358,7 @@ function AdminEmpty({icon,children}){
 
 // ── Dealers tab ────────────────────────────────────────────────────────────
 function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish}){
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -2389,7 +2436,7 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
 
 // ── Review queue tab ──────────────────────────────────────────────────────
 function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onReject}){
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   return (
     <div>
       <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
@@ -2446,7 +2493,7 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
 function RevenueTab({dealers}){
   const featured = dealers.filter(d=>d.featured);
   const featuredRev = featured.length*300;
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   return (
     <div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
@@ -2482,7 +2529,7 @@ function RevenueTab({dealers}){
 function DealerModal({dealer,onSave,onClose}){
   const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
   const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
   const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
 
@@ -2576,7 +2623,7 @@ function VisitorMap({pageViews}){
   const located=pageViews.filter(v=>v.latitude!=null&&v.longitude!=null);
   const locations=groupVisitsByLocation(pageViews);
   const maxCount=locations.length?Math.max(...locations.map(l=>l.count)):1;
-  const C=LC_ADMIN;
+  const {C}=useAdminTheme();
 
   if(!located.length){
     return(
@@ -2847,7 +2894,8 @@ function AdminPanel(){
   });
   const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
 
-  const C=LC_ADMIN;
+  const themeState=useThemeState();
+  const {C}=themeState;
   if(checkingSession) return <div style={{minHeight:"100dvh",background:C.paper,display:"flex",alignItems:"center",justifyContent:"center",color:C.inkFaint,fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
@@ -2873,6 +2921,7 @@ function AdminPanel(){
   leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
+    <AdminThemeContext.Provider value={themeState}>
     <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>
       {dealerModal && (
         <DealerModal
@@ -2893,7 +2942,10 @@ function AdminPanel(){
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
         </div>
-        <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Sign out</button>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <ThemeToggle/>
+          <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Sign out</button>
+        </div>
       </div>
 
       <div style={{maxWidth:1100,margin:"0 auto"}}>
@@ -3135,6 +3187,7 @@ function AdminPanel(){
         {tab==="revenue" && <RevenueTab dealers={dealers}/>}
       </div>
     </div>
+    </AdminThemeContext.Provider>
   );
 }
 
