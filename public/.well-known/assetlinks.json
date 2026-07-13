@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "ca.lotcheck.twa",
+    "sha256_cert_fingerprints": ["8C:EE:66:71:5E:23:C5:3A:6C:BF:C5:11:9A:22:10:C8:9A:7E:3D:1F:1E:A2:B6:1F:92:40:7F:51:4D:DA:9C:C4"]
+  }
+}]
