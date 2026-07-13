@@ -10,29 +10,15 @@
   "lang": "en-CA",
   "categories": ["finance", "shopping", "automotive"],
   "icons": [
-    { "src": "/icon-72.png",   "sizes": "72x72",   "type": "image/png", "purpose": "any" },
-    { "src": "/icon-96.png",   "sizes": "96x96",   "type": "image/png", "purpose": "any" },
-    { "src": "/icon-192.png",  "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icon-512.png",  "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    {
-      "name": "Best deals today",
-      "short_name": "Deals",
-      "url": "/?sort=lotscore",
-      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "EV & PHEV listings",
-      "short_name": "EV",
-      "url": "/?fuel=BEV,PHEV",
-      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "Alberta allocations",
-      "short_name": "Allocations",
-      "url": "/?tab=allocations",
-      "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
-    }
+    { "name": "Best deals today", "short_name": "Deals", "url": "/?sort=lotscore", "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }] },
+    { "name": "EV & PHEV listings", "short_name": "EV", "url": "/?fuel=BEV,PHEV", "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Alberta allocations", "short_name": "Allocations", "url": "/?tab=allocations", "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }] }
   ]
 }
