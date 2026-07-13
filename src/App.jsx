@@ -51,11 +51,11 @@ const GLOBAL_CSS = `
     0%   { transform:rotate(0deg); }
     100% { transform:rotate(360deg); }
   }
-  @keyframes lc-logo-scan {
-    0%   { top:-10px; opacity:0; }
-    16%  { opacity:1; }
-    84%  { opacity:1; }
-    100% { top:34px; opacity:0; }
+  @keyframes lc-gate-drive {
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);} 90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash {
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
   }
 
   /* Live ticker strip */
@@ -2190,32 +2190,71 @@ function LiveTicker({listings,onSelect}){
 // emoji used elsewhere as a decorative "success" indicator (trial badges,
 // empty states) is untouched, since that's a different meaning, not branding.
 function LogoMark({ size = 32 }) {
-  // Coral isometric cube with an animated blue "scan beam" sweeping over
-  // it -- the same mark used on the marketing site, so the logo is
-  // consistent everywhere in the product rather than this being the one
-  // holdout still showing the old blue scan-icon badge.
+  // Real animated gate+car mark, pulled directly from the live homepage --
+  // this replaces the old coral cube, which was never updated when the
+  // homepage logo changed. viewBox is 145x130 (not perfectly square);
+  // width/height are both set to `size` for a clean square footprint at
+  // every call site, matching what the coral cube it replaces did.
   return (
     <div style={{ position:"relative", width:size, height:size, overflow:"hidden", borderRadius:size*0.18, flexShrink:0 }}>
-      <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-        <path d="M32 12 L52 22 L32 32 L12 22 Z" fill="#F2836B"/>
-        <path d="M12 22 L32 32 L32 52 L12 42 Z" fill="#D96A54"/>
-        <path d="M52 22 L32 32 L32 52 L52 42 Z" fill="#B4503E"/>
+      <svg width={size} height={size} viewBox="-95 -45 145 130" aria-hidden="true">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g className="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
       </svg>
-      <div style={{
-        position:"absolute", left:-size*0.24, right:-size*0.24, height:size*0.27, borderRadius:size*0.12,
-        background:"linear-gradient(180deg, transparent, rgba(125,211,252,.95), rgba(59,130,246,.6), transparent)",
-        boxShadow:"0 0 9px 2px rgba(59,130,246,.85)",
-        animation:"lc-logo-scan 3.4s ease-in-out infinite",
-      }}/>
     </div>
   );
 }
+
+// ── Admin panel colors — LotCheck brand palette, independent of the shared
+// dark GLOBAL_CSS theme so this doesn't touch the buyer-facing site ────────
+const LC_ADMIN = {
+  ink:      "#33305A",
+  inkSoft:  "#5B5885",
+  inkFaint: "#706D96",
+  paper:    "#FBF5EC",
+  paper2:   "#F5EEE1",
+  card:     "#FFFFFF",
+  line:     "rgba(51,48,90,.12)",
+  teal:     "#2FA79A",
+  tealInk:  "#17756B",
+  tealBg:   "#E3F4F1",
+  coral:    "#F2836B",
+  coralInk: "#A63C25",
+  coralBg:  "#FDEAE5",
+  butter:   "#F5C95C",
+  butterInk:"#8A6414",
+  butterBg: "#FDF4DF",
+};
 
 function AdminLogin(){
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [err,setErr]=useState("");
   const [loading,setLoading]=useState(false);
+  const C=LC_ADMIN;
 
   async function handleLogin(e){
     e.preventDefault();
@@ -2228,17 +2267,20 @@ function AdminLogin(){
   }
 
   return(
-    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#020617",fontFamily:"Helvetica, Arial, sans-serif"}}>
-      <form onSubmit={handleLogin} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box"}}>
+    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:C.paper,fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>
+      <form onSubmit={handleLogin} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
-        <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>LotCheck Admin</div>
-        <div style={{fontSize:13,color:"#64748b",marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
+        <div style={{fontSize:22,fontWeight:800,color:C.ink,marginBottom:4}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
+        <div style={{fontSize:13,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
         <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
-          style={{width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
+          style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
         <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
-          style={{width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
-        {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:14,textAlign:"left"}}>{err}</div>}
-        <button type="submit" disabled={loading} className="lc-modal-btn">{loading?"Signing in…":"Sign in →"}</button>
+          style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
+        {err&&<div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:8,padding:"10px 14px",fontSize:13,color:C.coralInk,marginBottom:14,textAlign:"left"}}>{err}</div>}
+        <button type="submit" disabled={loading}
+          style={{width:"100%",background:loading?C.tealInk:C.teal,border:"none",borderRadius:12,padding:"13px",color:"#fff",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:loading?"default":"pointer"}}>
+          {loading?"Signing in…":"Sign in →"}
+        </button>
       </form>
     </div>
   );
@@ -2246,19 +2288,21 @@ function AdminLogin(){
 
 // ── Small shared bits for the new tabs ────────────────────────────────────────
 function AdminTabButton({active,onClick,children}){
+  const C=LC_ADMIN;
   return (
     <button onClick={onClick} style={{
-      background: active ? "#1e293b" : "transparent",
+      background: active ? C.card : "transparent",
       border: "none", borderRadius: 8, padding: "7px 14px",
-      color: active ? "#f1f5f9" : "#64748b", fontSize: 13, fontWeight: 600,
-      cursor: "pointer",
+      color: active ? C.ink : C.inkFaint, fontSize: 13, fontWeight: 700,
+      cursor: "pointer", boxShadow: active ? "0 2px 6px rgba(51,48,90,.12)" : "none",
     }}>{children}</button>
   );
 }
 
 function AdminEmpty({icon,children}){
+  const C=LC_ADMIN;
   return (
-    <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"32px 20px",textAlign:"center",color:"#475569"}}>
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"32px 20px",textAlign:"center",color:C.inkFaint}}>
       {icon&&<div style={{fontSize:28,marginBottom:10}}>{icon}</div>}
       {children}
     </div>
@@ -2267,70 +2311,72 @@ function AdminEmpty({icon,children}){
 
 // ── Dealers tab ────────────────────────────────────────────────────────────
 function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish}){
+  const C=LC_ADMIN;
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
           DEALER NETWORK · {dealersLoading?"loading…":`${dealers.length} dealer${dealers.length===1?"":"s"}`}
         </div>
-        <button onClick={onAdd} style={{background:"#16a34a",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Dealer</button>
+        <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Dealer</button>
       </div>
 
       {dealersLoading ? (
-        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
       ) : dealers.length===0 ? (
         <AdminEmpty icon="🏢">No dealers yet — add your first one</AdminEmpty>
       ) : (
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginBottom:28}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:28}}>
           {dealers.map(d=>(
-            <div key={d.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+            <div key={d.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
               <div>
-                <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{d.name}</div>
-                <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
-                <div style={{fontSize:11,color:"#475569",marginTop:2}}>{d.makes||"—"}</div>
+                <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.name}</div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",cursor:"pointer"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!d.live} onChange={e=>onToggle(d.id,"live",e.target.checked)}/> Live lot
                 </label>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:"#64748b",cursor:"pointer"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!d.featured} onChange={e=>onToggle(d.id,"featured",e.target.checked)}/> Featured ($300/mo)
                 </label>
-                {d.sold_count>0 && <span className="badge" style={{background:"#7c3aed18",color:"#c4b5fd",border:"1px solid #7c3aed35"}}>{d.sold_count} sold</span>}
-                <button onClick={()=>onEdit(d)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(d.id,d.name)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Delete</button>
+                {d.sold_count>0 && <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>{d.sold_count} sold</span>}
+                <button onClick={()=>onEdit(d)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
+                <button onClick={()=>onDelete(d.id,d.name)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         DEALER SUBMITTED INVENTORY · {dealerListingsLoading?"loading…":`${dealerListings.length} vehicle${dealerListings.length===1?"":"s"}`}
       </div>
       {dealerListingsLoading ? (
-        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
       ) : dealerListings.length===0 ? (
         <AdminEmpty icon="🚗">No dealer submissions yet</AdminEmpty>
       ) : (
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
           {dealerListings.map(v=>{
             const isSold=v.status==="sold", isLive=v.status==="live";
             const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
             return (
-              <div key={v.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+              <div key={v.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
-                  <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{v.year} {v.make} {v.model}</div>
-                  <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
+                  <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{v.year} {v.make} {v.model}</div>
+                  <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span className="badge" style={{
-                    background: isSold?"#7c3aed18":isLive?"#16a34a18":"#33415530",
-                    color: isSold?"#c4b5fd":isLive?"#22c55e":"#94a3b8",
-                    border: `1px solid ${isSold?"#7c3aed35":isLive?"#22c55e35":"#33415560"}`,
+                  <span style={{
+                    background: isSold?C.paper2:isLive?C.tealBg:C.paper2,
+                    color: isSold?C.ink:isLive?C.tealInk:C.inkFaint,
+                    border: `1px solid ${isSold?C.line:isLive?C.teal+"55":C.line}`,
+                    borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,
                   }}>{isSold?"✓ Sold":isLive?"● Live":"Pending"}</span>
-                  {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:"1px solid #22c55e",borderRadius:6,padding:"5px 10px",color:"#22c55e",fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
-                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:"1px solid #334155",borderRadius:6,padding:"5px 10px",color:"#64748b",fontSize:11,cursor:"pointer"}}>Publish</button>}
+                  {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"5px 10px",color:C.tealInk,fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
+                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish</button>}
                 </div>
               </div>
             );
@@ -2343,31 +2389,32 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
 
 // ── Review queue tab ──────────────────────────────────────────────────────
 function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onReject}){
+  const C=LC_ADMIN;
   return (
     <div>
-      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         PENDING REVIEW · {reviewLoading?"loading…":`${reviewListings.length} listing${reviewListings.length===1?"":"s"}`}
       </div>
       {reviewLoading ? (
-        <div style={{color:"#475569",fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
       ) : reviewListings.length===0 ? (
         <AdminEmpty icon="✅">No listings pending review — pipeline approved everything</AdminEmpty>
       ) : (
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginBottom:28}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:28}}>
           {reviewListings.map(l=>{
             const score=l.verification_score||0;
-            const scoreColor = score>=70?"#22c55e":score>=50?"#f59e0b":"#ef4444";
+            const scoreColor = score>=70?C.tealInk:score>=50?C.butterInk:C.coralInk;
             const flags=(l.verification_flags||"").split(" | ").filter(Boolean);
             return (
-              <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+              <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div style={{flex:1,minWidth:200}}>
-                  <div style={{fontWeight:700,color:"#f1f5f9",fontSize:14}}>{l.name}</div>
-                  <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:700}}>{score}</span></div>
-                  {flags.map((f,i)=>(<div key={i} style={{fontSize:11,color:"#f59e0b",marginTop:2}}>⚠ {f}</div>))}
+                  <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{l.name}</div>
+                  <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:800}}>{score}</span></div>
+                  {flags.map((f,i)=>(<div key={i} style={{fontSize:11,color:C.butterInk,marginTop:2}}>⚠ {f}</div>))}
                 </div>
                 <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:"1px solid #22c55e",borderRadius:6,padding:"6px 12px",color:"#22c55e",fontSize:12,cursor:"pointer"}}>✓ Approve</button>
-                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:"1px solid #ef4444",borderRadius:6,padding:"6px 12px",color:"#ef4444",fontSize:12,cursor:"pointer"}}>✗ Reject</button>
+                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"6px 12px",color:C.tealInk,fontSize:12,cursor:"pointer"}}>✓ Approve</button>
+                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:`1px solid ${C.coral}`,borderRadius:6,padding:"6px 12px",color:C.coralInk,fontSize:12,cursor:"pointer"}}>✗ Reject</button>
                 </div>
               </div>
             );
@@ -2375,18 +2422,18 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         RECENTLY REJECTED · {rejectedListings.length}
       </div>
       {rejectedListings.length===0 ? (
         <AdminEmpty>No rejected listings yet</AdminEmpty>
       ) : (
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
           {rejectedListings.map((l,i)=>(
-            <div key={i} style={{padding:"12px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",fontSize:13}}>
-              <span style={{color:"#f1f5f9"}}>{l.name}</span>
-              <span style={{color:"#ef4444",fontWeight:700}}>{l.verification_score||0}</span>
-              <span style={{color:"#475569",fontSize:11}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
+            <div key={i} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:C.ink}}>{l.name}</span>
+              <span style={{color:C.coralInk,fontWeight:800}}>{l.verification_score||0}</span>
+              <span style={{color:C.inkFaint,fontSize:11}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
             </div>
           ))}
         </div>
@@ -2399,31 +2446,32 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
 function RevenueTab({dealers}){
   const featured = dealers.filter(d=>d.featured);
   const featuredRev = featured.length*300;
+  const C=LC_ADMIN;
   return (
     <div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>${featuredRev.toLocaleString()}</div>
-          <div style={{fontSize:12,color:"#64748b"}}>Featured listings/mo — real</div>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+          <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>${featuredRev.toLocaleString()}</div>
+          <div style={{fontSize:12,color:C.inkFaint}}>Featured listings/mo — real</div>
         </div>
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:26,fontWeight:800,color:"#475569"}}>$0</div>
-          <div style={{fontSize:12,color:"#64748b"}}>Lead referral fees</div>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+          <div style={{fontSize:26,fontWeight:800,color:C.inkFaint}}>$0</div>
+          <div style={{fontSize:12,color:C.inkFaint}}>Lead referral fees</div>
         </div>
       </div>
       <AdminEmpty>
         Lead referral revenue shows $0 on purpose — leads aren't linked to a
         specific dealer yet (the buyer-facing Connect form doesn't set
-        <code style={{background:"#1e293b",padding:"1px 5px",borderRadius:4,margin:"0 4px"}}>dealer_id</code>
+        <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4,margin:"0 4px"}}>dealer_id</code>
         when someone submits it). The database column exists now, but wiring
         the actual attribution is a separate follow-up task.
       </AdminEmpty>
       {featured.length>0 && (
-        <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden",marginTop:20}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginTop:20}}>
           {featured.map(d=>(
-            <div key={d.id} style={{padding:"12px 16px",borderBottom:"1px solid #1e293b60",display:"flex",justifyContent:"space-between",fontSize:13}}>
-              <span style={{color:"#f1f5f9"}}>{d.name}</span>
-              <span style={{color:"#22c55e",fontWeight:700}}>$300/mo</span>
+            <div key={d.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:13}}>
+              <span style={{color:C.ink}}>{d.name}</span>
+              <span style={{color:C.tealInk,fontWeight:800}}>$300/mo</span>
             </div>
           ))}
         </div>
@@ -2434,13 +2482,14 @@ function RevenueTab({dealers}){
 function DealerModal({dealer,onSave,onClose}){
   const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const inputStyle={width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"11px 13px",color:"#f1f5f9",fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
+  const C=LC_ADMIN;
+  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
+  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box"}}>
-        <div style={{fontSize:18,fontWeight:700,marginBottom:18,color:"#f1f5f9"}}>{dealer?"Edit Dealer":"Add Dealer"}</div>
+    <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
+        <div style={{fontSize:18,fontWeight:800,marginBottom:18,color:C.ink}}>{dealer?"Edit Dealer":"Add Dealer"}</div>
         <label style={labelStyle}>Dealership name *</label>
         <input style={inputStyle} value={form.name} onChange={e=>set("name",e.target.value)} placeholder="Cochrane Toyota"/>
         <label style={labelStyle}>Contact name</label>
@@ -2466,17 +2515,17 @@ function DealerModal({dealer,onSave,onClose}){
         <label style={labelStyle}>Notes</label>
         <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Met at Costco"/>
         <div style={{display:"flex",gap:16,marginBottom:16,marginTop:6}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#94a3b8",cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
             <input type="checkbox" checked={form.live} onChange={e=>set("live",e.target.checked)}/> Live lot
           </label>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#94a3b8",cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
             <input type="checkbox" checked={form.featured} onChange={e=>set("featured",e.target.checked)}/> Featured ($300/mo)
           </label>
         </div>
         <div style={{display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,background:"none",border:"1px solid #334155",borderRadius:10,padding:11,color:"#94a3b8",fontSize:14,cursor:"pointer"}}>Cancel</button>
+          <button onClick={onClose} style={{flex:1,background:"none",border:`1px solid ${C.line}`,borderRadius:10,padding:11,color:C.inkSoft,fontSize:14,cursor:"pointer"}}>Cancel</button>
           <button onClick={()=>{ if(!form.name.trim()){alert("Dealer name is required");return;} onSave(form); }}
-            className="lc-modal-btn" style={{flex:1}}>Save Dealer →</button>
+            style={{flex:1,background:C.teal,border:"none",borderRadius:10,padding:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Save Dealer →</button>
         </div>
       </div>
     </div>
@@ -2527,12 +2576,13 @@ function VisitorMap({pageViews}){
   const located=pageViews.filter(v=>v.latitude!=null&&v.longitude!=null);
   const locations=groupVisitsByLocation(pageViews);
   const maxCount=locations.length?Math.max(...locations.map(l=>l.count)):1;
+  const C=LC_ADMIN;
 
   if(!located.length){
     return(
-      <div style={{textAlign:"center",padding:"32px 16px",color:"#475569"}}>
+      <div style={{textAlign:"center",padding:"32px 16px",color:C.inkFaint}}>
         <div style={{fontSize:26,marginBottom:8}}>🗺️</div>
-        <div style={{fontWeight:600,color:"#94a3b8",marginBottom:4}}>No located visits yet</div>
+        <div style={{fontWeight:700,color:C.inkSoft,marginBottom:4}}>No located visits yet</div>
         <div style={{fontSize:12}}>Geolocation just went live — every visit before this update was recorded without it. This fills in from here forward.</div>
       </div>
     );
@@ -2542,37 +2592,37 @@ function VisitorMap({pageViews}){
     <div>
       <div style={{position:"relative",width:"100%",maxWidth:640,margin:"0 auto"}}>
         <svg viewBox="0 0 500 300" style={{width:"100%",height:"auto",display:"block"}}>
-          <path d={US_PATH} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
-          <path d={MEXICO_PATH} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
-          <path d={CANADA_PATH} fill="#16213e" stroke="#3b82f6" strokeWidth="1.5"/>
+          <path d={US_PATH} fill="#F5EEE1" stroke="#33305A22" strokeWidth="1"/>
+          <path d={MEXICO_PATH} fill="#F5EEE1" stroke="#33305A22" strokeWidth="1"/>
+          <path d={CANADA_PATH} fill="#E3F4F1" stroke="#2FA79A" strokeWidth="1.5"/>
           {locations.map((loc,i)=>{
             const[x,y]=projectLatLng(loc.lat,loc.lon);
             const r=3+Math.sqrt(loc.count/maxCount)*9;
             if(x<0||x>500||y<0||y>300)return null; // outside NA view -- skip rather than mis-plot
             return(
-              <circle key={i} cx={x} cy={y} r={r} fill="#22c55e" fillOpacity={0.55} stroke="#22c55e" strokeWidth="1">
+              <circle key={i} cx={x} cy={y} r={r} fill="#F2836B" fillOpacity={0.55} stroke="#F2836B" strokeWidth="1">
                 <title>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""} — {loc.count} visit{loc.count===1?"":"s"}</title>
               </circle>
             );
           })}
         </svg>
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#475569",marginTop:8,maxWidth:640,margin:"8px auto 0"}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.inkFaint,marginTop:8,maxWidth:640,margin:"8px auto 0"}}>
         <span>{located.length.toLocaleString()} of {pageViews.length.toLocaleString()} visits located</span>
         <span>Dot size = relative visit volume</span>
       </div>
       <div style={{marginTop:16,maxWidth:640,margin:"16px auto 0"}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#64748b",marginBottom:8}}>Top locations</div>
+        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,marginBottom:8}}>Top locations</div>
         {locations.slice(0,8).map((loc,i)=>{
           const pct=Math.round((loc.count/located.length)*100);
           return(
             <div key={i} style={{marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
-                <span style={{color:"#e2e8f0",fontWeight:600}}>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""}</span>
-                <span style={{color:"#64748b"}}>{loc.count} · {pct}%</span>
+                <span style={{color:C.ink,fontWeight:700}}>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""}</span>
+                <span style={{color:C.inkFaint}}>{loc.count} · {pct}%</span>
               </div>
-              <div style={{background:"#1e293b",borderRadius:4,height:5,overflow:"hidden"}}>
-                <div style={{width:`${pct}%`,height:"100%",background:"#22c55e"}}/>
+              <div style={{background:C.paper2,borderRadius:4,height:5,overflow:"hidden"}}>
+                <div style={{width:`${pct}%`,height:"100%",background:"#2FA79A"}}/>
               </div>
             </div>
           );
@@ -2797,7 +2847,8 @@ function AdminPanel(){
   });
   const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
 
-  if(checkingSession) return <div style={{minHeight:"100dvh",background:"#020617",display:"flex",alignItems:"center",justifyContent:"center",color:"#475569",fontFamily:"Helvetica, Arial, sans-serif"}}>Loading…</div>;
+  const C=LC_ADMIN;
+  if(checkingSession) return <div style={{minHeight:"100dvh",background:C.paper,display:"flex",alignItems:"center",justifyContent:"center",color:C.inkFaint,fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
   const byProvince={};
@@ -2822,7 +2873,7 @@ function AdminPanel(){
   leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
-    <div style={{minHeight:"100dvh",background:"#020617",color:"#e2e8f0",padding:"24px",fontFamily:"Helvetica, Arial, sans-serif"}}>
+    <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>
       {dealerModal && (
         <DealerModal
           dealer={dealerModal==="new"?null:dealerModal}
@@ -2834,45 +2885,45 @@ function AdminPanel(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,maxWidth:1100,margin:"0 auto 20px",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <LogoMark size={32}/>
-          <div style={{fontWeight:800,fontSize:18}}>LotCheck Admin</div>
+          <div style={{fontWeight:800,fontSize:18,color:C.ink}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:4,background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:10,padding:4}}>
+        <div style={{display:"flex",alignItems:"center",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:10,padding:4}}>
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
           <AdminTabButton active={tab==="dealers"} onClick={()=>setTab("dealers")}>Dealers</AdminTabButton>
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
         </div>
-        <button onClick={()=>supabase.auth.signOut()} style={{background:"#1e293b",border:"1px solid #334155",borderRadius:8,padding:"8px 14px",color:"#94a3b8",fontSize:13,cursor:"pointer"}}>Sign out</button>
+        <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Sign out</button>
       </div>
 
       <div style={{maxWidth:1100,margin:"0 auto"}}>
         {tab==="overview" && (<>
-          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
             TRAFFIC · {viewsLoading?"loading…":trackingSince?`tracking since ${trackingSince.toLocaleDateString("en-CA")}`:"no data yet"}
           </div>
           {!viewsLoading&&pageViews.length===0?(
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"20px",textAlign:"center",color:"#475569",marginBottom:28}}>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"20px",textAlign:"center",color:C.inkFaint,marginBottom:28}}>
               No page views recorded yet. This starts counting the moment someone loads the live site after this goes out — there's no way to recover data from before tracking began.
             </div>
           ):(
             <>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
                 {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
-                  <div key={label} style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-                    <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{label}</div>
-                    <div style={{fontSize:22,fontWeight:800,color:"#f1f5f9"}}>{stats.visitors.toLocaleString()}</div>
-                    <div style={{fontSize:11,color:"#475569"}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+                  <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:6}}>{label}</div>
+                    <div style={{fontSize:22,fontWeight:800,color:C.ink}}>{stats.visitors.toLocaleString()}</div>
+                    <div style={{fontSize:11,color:C.inkFaint}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
                   </div>
                 ))}
               </div>
 
-              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:16}}>
+              <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8"}}>Visits over time</div>
-                  <div style={{display:"flex",gap:4,background:"#0d1526",border:"1px solid #1e293b",borderRadius:8,padding:3}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Visits over time</div>
+                  <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
                     {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
                       <button key={key} onClick={()=>setTrafficGranularity(key)}
-                        style={{background:trafficGranularity===key?"#1e3a5f":"transparent",color:trafficGranularity===key?"#60a5fa":"#64748b",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                        style={{background:trafficGranularity===key?C.tealBg:"transparent",color:trafficGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                         {label}
                       </button>
                     ))}
@@ -2881,31 +2932,31 @@ function AdminPanel(){
                 <div style={{height:180}}>
                   <ResponsiveContainer>
                     <BarChart data={bucketedTraffic} margin={{top:4,right:4,bottom:0,left:0}}>
-                      <XAxis dataKey="label" tick={{fontSize:10,fill:"#64748b"}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                      <YAxis tick={{fontSize:11,fill:"#64748b"}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
                       <Tooltip
                         formatter={(v,name)=>[v,name==="views"?"Views":name]}
-                        contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:12,fontWeight:600,color:"#f1f5f9"}}
-                        labelStyle={{color:"#94a3b8",fontSize:11}}
+                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}}
+                        labelStyle={{color:"#D9DBEF",fontSize:11}}
                       />
                       <Bar dataKey="views" radius={[3,3,0,0]}>
                         {bucketedTraffic.map((entry,i)=>(
-                          <Cell key={i} fill={i===0||entry.views>=bucketedTraffic[i-1].views?"#22c55e":"#f59e0b"}/>
+                          <Cell key={i} fill={i===0||entry.views>=bucketedTraffic[i-1].views?C.teal:C.butter}/>
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#475569"}}>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#22c55e",marginRight:5}}/>Up from previous period</span>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#f59e0b",marginRight:5}}/>Down from previous period</span>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:C.inkFaint}}>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.teal,marginRight:5}}/>Up from previous period</span>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.butter,marginRight:5}}/>Down from previous period</span>
                 </div>
               </div>
 
-              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Where visits come from</div>
+              <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visits come from</div>
                 {sortedSources.every(([src])=>src==="Unknown (recorded before tracking)")?(
-                  <div style={{color:"#475569",fontSize:13,lineHeight:1.6}}>
+                  <div style={{color:C.inkFaint,fontSize:13,lineHeight:1.6}}>
                     Source tracking just went live — every visit before this update was recorded without it, so there's nothing real to show yet. This will fill in from here forward.
                   </div>
                 ):(
@@ -2915,11 +2966,11 @@ function AdminPanel(){
                       return(
                         <div key={src}>
                           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
-                            <span style={{color:"#e2e8f0",fontWeight:600}}>{src}</span>
-                            <span style={{color:"#64748b"}}>{count.toLocaleString()} · {pct}%</span>
+                            <span style={{color:C.ink,fontWeight:700}}>{src}</span>
+                            <span style={{color:C.inkFaint}}>{count.toLocaleString()} · {pct}%</span>
                           </div>
-                          <div style={{background:"#1e293b",borderRadius:4,height:6,overflow:"hidden"}}>
-                            <div style={{width:`${pct}%`,height:"100%",background:src==="Internal navigation"?"#475569":src==="Direct"?"#60a5fa":"#22c55e"}}/>
+                          <div style={{background:C.paper2,borderRadius:4,height:6,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:src==="Internal navigation"?C.inkFaint:src==="Direct"?C.ink:C.teal}}/>
                           </div>
                         </div>
                       );
@@ -2928,131 +2979,131 @@ function AdminPanel(){
                 )}
               </div>
 
-              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",marginBottom:12}}>Where visitors are located</div>
+              <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visitors are located</div>
                 <VisitorMap pageViews={pageViews}/>
               </div>
             </>
           )}
 
-          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{liveListings.length}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>Total live listings</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{liveListings.length}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Total live listings</div>
             </div>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:"#22c55e"}}>{evapCount}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>EVAP-eligible (new, verified)</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>{evapCount}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>EVAP-eligible (new, verified)</div>
             </div>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{Object.keys(byProvince).length}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>Provinces covered</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{Object.keys(byProvince).length}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Provinces covered</div>
             </div>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{leads.length}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>Total leads received</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{leads.length}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Total leads received</div>
             </div>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
-              <div style={{fontSize:12,color:"#64748b"}}>Avg. days on market</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Avg. days on market</div>
             </div>
           </div>
 
-          <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px",marginBottom:28}}>
+          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:13,fontWeight:700,color:"#94a3b8"}}>New listings tracked over time</div>
-              <div style={{display:"flex",gap:4,background:"#0d1526",border:"1px solid #1e293b",borderRadius:8,padding:3}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>New listings tracked over time</div>
+              <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
                 {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
                   <button key={key} onClick={()=>setListingsGranularity(key)}
-                    style={{background:listingsGranularity===key?"#1e3a5f":"transparent",color:listingsGranularity===key?"#60a5fa":"#64748b",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                    style={{background:listingsGranularity===key?C.tealBg:"transparent",color:listingsGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                     {label}
                   </button>
                 ))}
               </div>
             </div>
             {firstSeenTimestamps.length===0?(
-              <div style={{color:"#475569",fontSize:13,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
+              <div style={{color:C.inkFaint,fontSize:13,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
             ):(
               <>
                 <div style={{height:180}}>
                   <ResponsiveContainer>
                     <BarChart data={bucketedListings} margin={{top:4,right:4,bottom:0,left:0}}>
-                      <XAxis dataKey="label" tick={{fontSize:10,fill:"#64748b"}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                      <YAxis tick={{fontSize:11,fill:"#64748b"}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
                       <Tooltip
                         formatter={(v)=>[v,"New listings"]}
-                        contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:12,fontWeight:600,color:"#f1f5f9"}}
-                        labelStyle={{color:"#94a3b8",fontSize:11}}
+                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}}
+                        labelStyle={{color:"#D9DBEF",fontSize:11}}
                       />
                       <Bar dataKey="count" radius={[3,3,0,0]}>
                         {bucketedListings.map((entry,i)=>(
-                          <Cell key={i} fill={i===0||entry.count>=bucketedListings[i-1].count?"#22c55e":"#f59e0b"}/>
+                          <Cell key={i} fill={i===0||entry.count>=bucketedListings[i-1].count?C.teal:C.butter}/>
                         ))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:"#475569"}}>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#22c55e",marginRight:5}}/>Up from previous period</span>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#f59e0b",marginRight:5}}/>Down from previous period</span>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:C.inkFaint}}>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.teal,marginRight:5}}/>Up from previous period</span>
+                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.butter,marginRight:5}}/>Down from previous period</span>
                 </div>
               </>
             )}
           </div>
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By province</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By province</div>
               {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
-                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
-                  <span style={{color:"#94a3b8"}}>{p}</span><span style={{fontWeight:700}}>{c}</span>
+                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:13}}>
+                  <span style={{color:C.inkSoft}}>{p}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
                 </div>
               ))}
             </div>
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#94a3b8",marginBottom:10}}>By fuel type</div>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
+              <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By fuel type</div>
               {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
-                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #1e293b40",fontSize:13}}>
-                  <span style={{color:"#94a3b8"}}>{f}</span><span style={{fontWeight:700}}>{c}</span>
+                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:13}}>
+                  <span style={{color:C.inkSoft}}>{f}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div style={{fontSize:13,fontWeight:700,color:"#64748b",letterSpacing:1,marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
             LEADS · {leadsLoading?"loading…":`${leads.length} total`}
             {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
           </div>
           {leadsLoading?(
-            <div style={{color:"#475569",fontSize:13}}>Loading leads…</div>
+            <div style={{color:C.inkFaint,fontSize:13}}>Loading leads…</div>
           ):leads.length===0?(
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"24px",textAlign:"center",color:"#475569"}}>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"24px",textAlign:"center",color:C.inkFaint}}>
               No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
             </div>
           ):(
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,overflow:"hidden"}}>
+            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
               {leads.map(l=>(
-                <div key={l.id} style={{padding:"14px 16px",borderBottom:"1px solid #1e293b60"}}>
+                <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
                     <div>
-                      <span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35",marginRight:8}}>{l.lead_type}</span>
-                      <strong style={{color:"#f1f5f9"}}>{l.name}</strong>
+                      <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,marginRight:8}}>{l.lead_type}</span>
+                      <strong style={{color:C.ink}}>{l.name}</strong>
                     </div>
-                    <div style={{fontSize:11,color:"#475569"}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+                    <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
                   </div>
-                  <div style={{fontSize:13,color:"#94a3b8",marginBottom:6}}>
+                  <div style={{fontSize:13,color:C.inkSoft,marginBottom:6}}>
                     {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
                   </div>
-                  {l.details?.listing_name&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>Re: {l.details.listing_name}</div>}
-                  {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:"#64748b",marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
+                  {l.details?.listing_name&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>Re: {l.details.listing_name}</div>}
+                  {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
                   <div style={{display:"flex",gap:6,marginTop:8}}>
                     {["new","contacted","closed"].map(s=>(
                       <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
                         style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
-                          background:l.status===s?"#16a34a":"transparent",
-                          border:`1px solid ${l.status===s?"#16a34a":"#334155"}`,
-                          color:l.status===s?"#fff":"#64748b"}}>
+                          background:l.status===s?C.teal:"transparent",
+                          border:`1px solid ${l.status===s?C.teal:C.line}`,
+                          color:l.status===s?"#fff":C.inkFaint}}>
                         {s}
                       </button>
                     ))}
