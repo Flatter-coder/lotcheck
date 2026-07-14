@@ -1,12 +1,12 @@
 {
   "name": "LotCheck",
   "short_name": "LotCheck",
-  "description": "Did you LotCheck it? Canada's car market intelligence platform. Track prices, spot deals, check EVAP rebates.",
+  "description": "LotCheck protects Canadian used-car buyers. Upload a dealer quote and get a verified report — market comps, open recalls, hidden fees and a negotiation leverage score.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#020617",
-  "theme_color": "#16a34a",
+  "background_color": "#FBF5EC",
+  "theme_color": "#FBF5EC",
   "lang": "en-CA",
   "categories": ["finance", "shopping", "automotive"],
   "icons": [
