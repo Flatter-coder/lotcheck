@@ -82,7 +82,6 @@ html[data-theme="dark"]{
   --shadow-hard:10px 12px 0 rgba(0,0,0,.4);
   --shadow-soft:0 18px 40px -18px rgba(0,0,0,.6);
 }
-html[data-theme="dark"] .hl{color:#241F0E}
 html[data-theme="dark"] ::selection{background:var(--butter);color:#241F0E}
 *{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -111,7 +110,7 @@ a{color:inherit}
 .kicker::before{content:"";width:22px;height:3px;border-radius:2px;background:var(--teal)}
 h1,h2,h3{font-weight:1000;line-height:1.08;letter-spacing:-.015em}
 h1{font-size:clamp(2.5rem,6.2vw,4.4rem)}
-.hl{background:linear-gradient(180deg,transparent 60%,var(--butter) 60%,var(--butter) 94%,transparent 94%);border-radius:4px;padding:0 .06em}
+.hl{}
 h2{font-size:clamp(1.9rem,3.8vw,2.9rem)}
 h3{font-size:1.25rem;line-height:1.25}
 .lede{color:var(--ink-soft);font-size:clamp(1.02rem,1.4vw,1.18rem);max-width:56ch}
@@ -410,7 +409,7 @@ section{padding:clamp(64px,9vw,120px) 0}
   padding:18px 24px;border-bottom:2px dashed var(--line);
   background:linear-gradient(180deg,#FDFBF7,#fff);
 }
-.rep-head .rep-brand{display:flex;align-items:center;gap:9px;font-weight:1000}
+.rep-head .rep-brand{display:flex;align-items:center;gap:9px;font-weight:1000;color:#33305A}
 .rep-head .rep-id{font-size:.78rem;font-weight:800;letter-spacing:.12em;color:var(--ink-faint)}
 .rep-vehicle{padding:20px 24px 6px}
 .rep-vehicle .veh{font-weight:1000;font-size:1.3rem}
@@ -504,14 +503,14 @@ section{padding:clamp(64px,9vw,120px) 0}
 
 /* ---------- footer cta + footer ---------- */
 .foot-cta{
-  background:var(--ink);color:var(--paper);
+  background:#33305A;color:#FBF5EC;
   border-radius:var(--r-lg);
   padding:clamp(40px,6vw,72px) clamp(24px,5vw,64px) 0;
   overflow:hidden;position:relative;text-align:center;
 }
 .foot-cta h2{color:#fff;max-width:16ch;margin:0 auto 14px}
 .foot-cta p{color:#B9B6D6;max-width:44ch;margin:0 auto 28px}
-.foot-cta .btn-primary{background:var(--butter);color:var(--ink);border-color:var(--butter);box-shadow:5px 6px 0 rgba(0,0,0,.25)}
+.foot-cta .btn-primary{background:var(--butter);color:#33305A;border-color:var(--butter);box-shadow:5px 6px 0 rgba(0,0,0,.25)}
 .foot-cta .btn-primary:hover{box-shadow:8px 10px 0 rgba(0,0,0,.25)}
 .foot-terminal{
   margin:34px auto 0; max-width:560px; background:#0B1220; border-radius:14px; overflow:hidden;
