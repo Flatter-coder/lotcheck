@@ -3237,6 +3237,50 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const fileInputRef=useRef(null);
 
+  // Email-a-copy state -- separate from the main analyze flow so a failed
+  // email send never wipes out the report the person can already see on
+  // screen. idle -> sending -> sent | error.
+  const [emailInput,setEmailInput]=useState("");
+  const [emailStatus,setEmailStatus]=useState("idle");
+  const [emailErr,setEmailErr]=useState("");
+
+  function isValidEmail(v){
+    // Deliberately simple -- catches typos ("bob@gmailcom") without the
+    // false-negative risk of a stricter regex rejecting a real address.
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+  }
+
+  async function sendReportEmail(){
+    const email=emailInput.trim();
+    if(!isValidEmail(email)){
+      setEmailErr("That doesn't look like a valid email address.");
+      return;
+    }
+    setEmailErr("");
+    setEmailStatus("sending");
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+        },
+        body:JSON.stringify({email,analysis}),
+      });
+      const data=await res.json();
+      if(!res.ok||data.error){
+        setEmailStatus("error");
+        setEmailErr(data.error||"Couldn't send that email. Please try again.");
+        return;
+      }
+      setEmailStatus("sent");
+    }catch(err){
+      setEmailStatus("error");
+      setEmailErr("Couldn't reach the email service. Check your connection and try again.");
+    }
+  }
+
   // Two palettes, pulled directly from the welcome page's CSS custom
   // properties (both the :root light values and the html[data-theme="dark"]
   // overrides) -- not invented separately, so Quote Check's dark mode is
@@ -3651,6 +3695,34 @@ function QuoteCheckPage(){
               <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:8}}>Bottom line</div>
                 <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
+              </div>
+
+              <div style={cardStyle}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>📧 Email me this report</div>
+                {emailStatus==="sent"?(
+                  <div style={{display:"flex",alignItems:"center",gap:8,color:C.tealInk,fontWeight:700,fontSize:14}}>
+                    <span>✓</span> Sent to {emailInput.trim()}
+                  </div>
+                ):(
+                  <>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <input
+                        type="email"
+                        placeholder="you@email.com"
+                        value={emailInput}
+                        onChange={e=>{setEmailInput(e.target.value);if(emailErr)setEmailErr("");}}
+                        disabled={emailStatus==="sending"}
+                        style={{flex:"1 1 200px",background:C.paper,border:`2px solid ${emailErr?C.coral:C.line}`,borderRadius:10,padding:"11px 14px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
+                      />
+                      <button onClick={sendReportEmail} disabled={emailStatus==="sending"}
+                        style={{background:emailStatus==="sending"?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontWeight:800,fontSize:14,cursor:emailStatus==="sending"?"default":"pointer",whiteSpace:"nowrap"}}>
+                        {emailStatus==="sending"?"Sending…":"Send"}
+                      </button>
+                    </div>
+                    {emailErr&&<div style={{fontSize:12,color:C.coralInk,marginTop:8}}>{emailErr}</div>}
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>Used once to send this report, then not kept.</div>
+                  </>
+                )}
               </div>
 
               <button onClick={reset} style={{width:"100%",background:C.ink,border:"none",borderRadius:999,padding:"13px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Check another quote</button>
