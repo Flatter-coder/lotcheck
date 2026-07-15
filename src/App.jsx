@@ -848,6 +848,38 @@ function usePriceHistoryMap(){
   return {historyMap, historyLoading};
 }
 
+// ── Hook: fetch real API usage/cost log for the admin Costs section ───────
+// Only ever populated by the edge functions' service-role writes -- nothing
+// on the buyer-facing site reads or writes this table.
+function useApiUsage(){
+  const [usage, setUsage] = useState([]);
+  const [usageLoading, setUsageLoading] = useState(true);
+
+  useEffect(()=>{
+    let cancelled = false;
+    async function fetchUsage(){
+      try{
+        const {data, error} = await supabase
+          .from("api_usage_log")
+          .select("feature, success, input_tokens, output_tokens, cost_usd, created_at")
+          .order("created_at", {ascending:true})
+          .limit(50000);
+        if(error) throw error;
+        if(!cancelled) setUsage(data||[]);
+      }catch(err){
+        console.warn("⚠️ api_usage_log fetch failed (did you run create_api_usage_log_table.sql?):", err.message);
+        if(!cancelled) setUsage([]);
+      }finally{
+        if(!cancelled) setUsageLoading(false);
+      }
+    }
+    fetchUsage();
+    return()=>{cancelled=true;};
+  },[]);
+
+  return {usage, usageLoading};
+}
+
 // NOTE: previously there was a `genHistory()` function here that generated a
 // fake 60-day price chart using Math.random(). It has been removed. Real price
 // history now comes from the `price_history` table (populated daily by
@@ -2493,10 +2525,60 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
 }
 
 // ── Revenue tab ────────────────────────────────────────────────────────────
-function RevenueTab({dealers}){
+function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   const featured = dealers.filter(d=>d.featured);
   const featuredRev = featured.length*300;
   const {C}=useAdminTheme();
+
+  // Manually-entered subscriber count -- there's no real subscription
+  // billing system yet (no accounts, no Stripe), so this is a stand-in you
+  // type in yourself, not something pulled from real billing data. Labeled
+  // as such below rather than presented as if it were live.
+  const [subscribers,setSubscribers]=useState(()=>{
+    try{ return Number(localStorage.getItem("lc_admin_subscriber_count"))||0; }catch{ return 0; }
+  });
+  function updateSubscribers(v){
+    const n=Math.max(0,Number(v)||0);
+    setSubscribers(n);
+    try{ localStorage.setItem("lc_admin_subscriber_count",String(n)); }catch{}
+  }
+
+  const now=Date.now();
+  const rollupCost=(windowMs)=>{
+    const cutoff=now-windowMs;
+    const inWindow=apiUsage.filter(u=>new Date(u.created_at).getTime()>=cutoff);
+    const cost=inWindow.reduce((s,u)=>s+(Number(u.cost_usd)||0),0);
+    const succeeded=inWindow.filter(u=>u.success).length;
+    return {
+      requests: inWindow.length,
+      cost,
+      successRate: inWindow.length ? Math.round((succeeded/inWindow.length)*100) : null,
+    };
+  };
+  const costToday=rollupCost(24*3600000);
+  const costWeek=rollupCost(7*24*3600000);
+  const costMonth=rollupCost(30*24*3600000);
+
+  const assumedRevenue = subscribers*9.99;
+  const margin = assumedRevenue - costMonth.cost;
+
+  // Last 14 days, cost per day -- simple fixed window, no granularity
+  // toggle, since this is a cost trend at a glance, not a detailed explorer.
+  const DAYS=14;
+  const dailyCost=[];
+  for(let i=DAYS-1;i>=0;i--){
+    const dayStart=now-i*86400000;
+    const dayEnd=dayStart+86400000;
+    const inDay=apiUsage.filter(u=>{
+      const t=new Date(u.created_at).getTime();
+      return t>=dayStart-86400000&&t<dayEnd-86400000;
+    });
+    dailyCost.push({
+      label:new Date(dayStart-86400000).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),
+      cost:inDay.reduce((s,u)=>s+(Number(u.cost_usd)||0),0),
+    });
+  }
+
   return (
     <div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
@@ -2517,7 +2599,7 @@ function RevenueTab({dealers}){
         the actual attribution is a separate follow-up task.
       </AdminEmpty>
       {featured.length>0 && (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginTop:20}}>
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginTop:20,marginBottom:28}}>
           {featured.map(d=>(
             <div key={d.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:13}}>
               <span style={{color:C.ink}}>{d.name}</span>
@@ -2525,6 +2607,67 @@ function RevenueTab({dealers}){
             </div>
           ))}
         </div>
+      )}
+
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+        QUOTE CHECK COST · {apiUsageLoading?"loading…":`${apiUsage.length} logged call${apiUsage.length===1?"":"s"}`}
+      </div>
+      {!apiUsageLoading&&apiUsage.length===0?(
+        <AdminEmpty icon="📊">
+          No usage logged yet — this fills in the moment someone runs a real quote through Quote Check, once the analyze-quote function's logging is live.
+        </AdminEmpty>
+      ):(
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+            {[["Today",costToday],["Last 7 days",costWeek],["Last 30 days",costMonth]].map(([label,stats])=>(
+              <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
+                <div style={{fontSize:12,color:C.inkFaint,marginBottom:6}}>{label}</div>
+                <div style={{fontSize:22,fontWeight:800,color:C.ink}}>${stats.cost.toFixed(2)}</div>
+                <div style={{fontSize:11,color:C.inkFaint}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Cost per day, last 14 days</div>
+            <div style={{height:160}}>
+              <ResponsiveContainer>
+                <BarChart data={dailyCost} margin={{top:4,right:4,bottom:0,left:0}}>
+                  <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                  <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={40} tickFormatter={v=>`$${v.toFixed(0)}`}/>
+                  <Tooltip formatter={v=>[`$${Number(v).toFixed(3)}`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
+                  <Bar dataKey="cost" radius={[3,3,0,0]} fill={C.teal}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Cost vs. subscription — estimate</div>
+            <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
+              There's no real subscriber billing yet — type in a subscriber count to see an estimated margin. This is a manual stand-in, not live billing data.
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+              <label style={{fontSize:12,color:C.inkSoft,whiteSpace:"nowrap"}}>Subscribers at $9.99/mo:</label>
+              <input type="number" min="0" value={subscribers} onChange={e=>updateSubscribers(e.target.value)}
+                style={{width:90,background:C.paper,border:`2px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.ink,fontSize:13,outline:"none"}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)}</div>
+                <div style={{fontSize:11,color:C.inkFaint}}>Assumed monthly revenue</div>
+              </div>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:C.ink}}>${costMonth.cost.toFixed(2)}</div>
+                <div style={{fontSize:11,color:C.inkFaint}}>Actual cost, last 30 days</div>
+              </div>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:margin>=0?C.tealInk:C.coralInk}}>{margin>=0?"+":"-"}${Math.abs(margin).toFixed(2)}</div>
+                <div style={{fontSize:11,color:C.inkFaint}}>Estimated margin</div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -2694,6 +2837,7 @@ function AdminPanel(){
   const [viewsLoading,setViewsLoading]=useState(true);
   const {listings:liveListings, loading:listingsLoading}=useListings();
   const {historyMap}=usePriceHistoryMap();
+  const {usage:apiUsage, usageLoading:apiUsageLoading}=useApiUsage();
   const [listingsGranularity,setListingsGranularity]=useState("day");
 
   const [dealers,setDealers]=useState([]);
@@ -3218,7 +3362,7 @@ function AdminPanel(){
           />
         )}
 
-        {tab==="revenue" && <RevenueTab dealers={dealers}/>}
+        {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
