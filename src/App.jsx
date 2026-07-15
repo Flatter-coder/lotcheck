@@ -3415,6 +3415,45 @@ function AdminPanel(){
   );
 }
 
+// ── Reusable isometric 3D scan visual -- a real CSS 3D transform
+// (perspective + rotateX/rotateZ), not a flat icon, with a scan beam
+// sweeping across a tilted document. Used both as the idle-state teaser
+// (slow, ambient loop) and the "analyzing" loading state (faster, more
+// active loop) -- one consistent visual instead of a flat emoji for the
+// real moment a file is actually being read.
+function IsoScanVisual({C, speed="idle"}){
+  const floatDur = speed==="active" ? 2.2 : 3.6;
+  const sweepDur = speed==="active" ? 1.3 : 2.8;
+  return (
+    <div style={{perspective:900,margin:"0 auto 4px",height:130,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{
+        position:"relative",width:104,height:128,
+        transform:"rotateX(52deg) rotateZ(-10deg)",
+        animation:`lc-iso-float ${floatDur}s ease-in-out infinite`,
+      }}>
+        <div style={{
+          position:"absolute",inset:0,borderRadius:10,background:C.card,
+          boxShadow:"10px 12px 0 rgba(51,48,90,.10), 0 1px 0 1px rgba(51,48,90,.08)",
+          padding:"16px 14px",
+        }}>
+          <div style={{width:"60%",height:6,borderRadius:3,background:C.paper2,marginBottom:10}}/>
+          <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+          <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+          <div style={{width:"65%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+          <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
+          <div style={{width:"75%",height:4,borderRadius:2,background:"#EDE7D8"}}/>
+        </div>
+        <div style={{
+          position:"absolute",left:6,right:6,top:8,height:16,borderRadius:4,
+          background:`linear-gradient(180deg, transparent, ${C.teal}99, transparent)`,
+          boxShadow:`0 0 14px 3px ${C.teal}77`,
+          animation:`lc-iso-sweep ${sweepDur}s linear infinite`,
+        }}/>
+      </div>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
@@ -3753,37 +3792,7 @@ function QuoteCheckPage(){
                 boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
               }}
             >
-              {/* Isometric "quote on the counter" scan demo -- a real CSS 3D
-                  transform (perspective + rotateX/rotateZ), not a flat icon,
-                  with a teal scan beam sweeping across it and five example
-                  findings cycling underneath. Purely decorative/looping;
-                  sells what happens the instant a real quote lands. */}
-              <div style={{perspective:900,margin:"0 auto 4px",height:130,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <div style={{
-                  position:"relative",width:104,height:128,
-                  transform:"rotateX(52deg) rotateZ(-10deg)",
-                  animation:"lc-iso-float 3.6s ease-in-out infinite",
-                }}>
-                  <div style={{
-                    position:"absolute",inset:0,borderRadius:10,background:C.card,
-                    boxShadow:"10px 12px 0 rgba(51,48,90,.10), 0 1px 0 1px rgba(51,48,90,.08)",
-                    padding:"16px 14px",
-                  }}>
-                    <div style={{width:"60%",height:6,borderRadius:3,background:C.paper2,marginBottom:10}}/>
-                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
-                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
-                    <div style={{width:"65%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
-                    <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
-                    <div style={{width:"75%",height:4,borderRadius:2,background:"#EDE7D8"}}/>
-                  </div>
-                  <div style={{
-                    position:"absolute",left:6,right:6,top:8,height:16,borderRadius:4,
-                    background:`linear-gradient(180deg, transparent, ${C.teal}99, transparent)`,
-                    boxShadow:`0 0 14px 3px ${C.teal}77`,
-                    animation:"lc-iso-sweep 2.8s linear infinite",
-                  }}/>
-                </div>
-              </div>
+              <IsoScanVisual C={C} speed="idle"/>
 
               <div style={{position:"relative",height:24,margin:"8px 0 14px"}}>
                 {EXAMPLES.map((ex,i)=>(
@@ -3853,7 +3862,7 @@ function QuoteCheckPage(){
 
           {status==="analyzing"&&(
             <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
-              <div style={{fontSize:36,marginBottom:12}}>⏳</div>
+              <IsoScanVisual C={C} speed="active"/>
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Reading {fileName}…</div>
               <div style={{color:C.inkFaint,fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
             </div>
@@ -3882,6 +3891,20 @@ function QuoteCheckPage(){
                   </div>
                 </div>
               </div>
+
+              {/* Standard/included manufacturer warranty -- NOT an upsell
+                  product (that's the separate "warranty" section further
+                  down for a PURCHASED extended plan). This is what already
+                  comes free with the vehicle, framed positively so buyers
+                  know it's already covered before anyone tries to sell them
+                  something that overlaps with it. */}
+              {analysis.standardWarranty?.coverage&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:6}}>✓ Included manufacturer warranty</div>
+                  <div style={{color:C.ink,fontSize:14,marginBottom:4}}>{analysis.standardWarranty.coverage}</div>
+                  {analysis.standardWarranty.note&&<div style={{fontSize:12,color:C.inkFaint}}>{analysis.standardWarranty.note}</div>}
+                </div>
+              )}
 
               {/* EVAP rebate check -- only rendered when the quote reads as a new
                   BEV/PHEV, since telling someone with a regular gas car "not
@@ -3929,15 +3952,25 @@ function QuoteCheckPage(){
               {analysis.addOns?.length>0&&(
                 <div style={cardStyle}>
                   <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Add-ons & fees</div>
-                  {analysis.addOns.map((a,i)=>(
-                    <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div style={{color:C.ink,fontWeight:700,fontSize:14}}>{a.flagged&&"🔻 "}{a.name}</div>
-                        <div style={{color:a.flagged?C.coralInk:C.inkSoft,fontWeight:800}}>${a.price.toLocaleString()}</div>
+                  {analysis.addOns.map((a,i)=>{
+                    // verdict: "good" (genuine buyer benefit -- a fair/legit
+                    // rate, a real discount), "flagged" (worth questioning),
+                    // or "standard" (a mandatory, unremarkable pass-through
+                    // like tax/registration -- neither a win nor a problem,
+                    // shown plainly so it isn't mislabeled as a "positive").
+                    const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
+                    const marker=v==="good"?"✓ ":v==="flagged"?"🔻 ":"";
+                    const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
+                    return (
+                      <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <div style={{color:C.ink,fontWeight:700,fontSize:14}}>{marker}{a.name}</div>
+                          <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString()}</div>
+                        </div>
+                        <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
                       </div>
-                      <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{a.reason}</div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
