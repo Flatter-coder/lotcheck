@@ -3425,6 +3425,7 @@ function QuoteCheckPage(){
   const [errorMsg,setErrorMsg]=useState("");
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
+  const [urlInput,setUrlInput]=useState("");
   const fileInputRef=useRef(null);
 
   // Email-a-copy state -- separate from the main analyze flow so a failed
@@ -3595,11 +3596,52 @@ function QuoteCheckPage(){
     }
   };
 
+  function isValidUrl(v){
+    try{ const u=new URL(v.trim()); return u.protocol==="http:"||u.protocol==="https:"; }catch{ return false; }
+  }
+
+  const handleUrlAnalyze=async()=>{
+    const url=urlInput.trim();
+    if(!isValidUrl(url)){
+      setStatus("error");
+      setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
+      return;
+    }
+    setFileName(new URL(url).hostname);
+    setStatus("analyzing");
+    setErrorMsg("");
+
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+        },
+        body:JSON.stringify({url}),
+      });
+
+      const data=await res.json();
+      if(!res.ok||data.error){
+        setStatus("error");
+        setErrorMsg(data.error||"Something went wrong analyzing that listing.");
+        return;
+      }
+      setAnalysis(data.analysis);
+      setStatus("done");
+    }catch(err){
+      setStatus("error");
+      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
+    }
+  };
+
   const reset=()=>{
     setStatus("idle");
     setAnalysis(null);
     setErrorMsg("");
     setFileName("");
+    setUrlInput("");
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -3764,6 +3806,31 @@ function QuoteCheckPage(){
               <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
+            </div>
+
+            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
+              <div style={{flex:1,height:1,background:C.line}}/>
+              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
+              <div style={{flex:1,height:1,background:C.line}}/>
+            </div>
+
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"16px 18px"}}>
+              <div style={{color:C.ink,fontWeight:800,fontSize:14,marginBottom:8}}>Paste a dealer listing link instead</div>
+              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically.</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input
+                  type="url"
+                  placeholder="https://dealer-site.com/inventory/..."
+                  value={urlInput}
+                  onChange={e=>setUrlInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
+                  style={{flex:"1 1 220px",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 14px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
+                />
+                <button onClick={handleUrlAnalyze}
+                  style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 22px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Analyze →
+                </button>
+              </div>
             </div>
 
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
