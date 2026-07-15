@@ -608,6 +608,42 @@ function bucketPageViews(views,granularity){
   return buckets;
 }
 
+// USD -> CAD is a fixed snapshot rate, not a live lookup (1 USD = 1.406 CAD,
+// verified July 15 2026). Fine for a rough admin-only cost dashboard where
+// amounts are tiny fractions of a cent -- but this will drift from the real
+// rate over time and would need a manual update (or a real FX API) if
+// precise accounting ever depends on it.
+const USD_TO_CAD = 1.406;
+
+// Same bucketing pattern as bucketPageViews, but sums cost_usd per bucket
+// instead of counting rows -- used for the admin Costs section's chart.
+function bucketApiUsage(usage,granularity){
+  const now=Date.now();
+  const configs={
+    hour:{bucketMs:3600000,count:24,label:d=>d.toLocaleTimeString("en-CA",{hour:"numeric"})},
+    day:{bucketMs:24*3600000,count:30,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    week:{bucketMs:7*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
+    month:{bucketMs:30*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short"})},
+  };
+  const cfg=configs[granularity]||configs.day;
+  const startTime=now-cfg.bucketMs*cfg.count;
+  const buckets=[];
+  for(let i=0;i<cfg.count;i++){
+    const bucketStart=startTime+i*cfg.bucketMs;
+    const bucketEnd=bucketStart+cfg.bucketMs;
+    const inBucket=usage.filter(u=>{
+      const t=new Date(u.created_at).getTime();
+      return t>=bucketStart&&t<bucketEnd;
+    });
+    buckets.push({
+      label:cfg.label(new Date(bucketStart)),
+      cost:inBucket.reduce((s,u)=>s+(Number(u.cost_usd)||0),0),
+      requests:inBucket.length,
+    });
+  }
+  return buckets;
+}
+
 function getOrCreateVisitorId() {
   try {
     let id = window.localStorage.getItem(VISITOR_ID_KEY);
@@ -2543,6 +2579,8 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
     try{ localStorage.setItem("lc_admin_subscriber_count",String(n)); }catch{}
   }
 
+  const [costGranularity,setCostGranularity]=useState("day");
+
   const now=Date.now();
   const rollupCost=(windowMs)=>{
     const cutoff=now-windowMs;
@@ -2562,21 +2600,17 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   const assumedRevenue = subscribers*9.99;
   const margin = assumedRevenue - costMonth.cost;
 
-  // Last 14 days, cost per day -- simple fixed window, no granularity
-  // toggle, since this is a cost trend at a glance, not a detailed explorer.
-  const DAYS=14;
-  const dailyCost=[];
-  for(let i=DAYS-1;i>=0;i--){
-    const dayStart=now-i*86400000;
-    const dayEnd=dayStart+86400000;
-    const inDay=apiUsage.filter(u=>{
-      const t=new Date(u.created_at).getTime();
-      return t>=dayStart-86400000&&t<dayEnd-86400000;
-    });
-    dailyCost.push({
-      label:new Date(dayStart-86400000).toLocaleDateString("en-CA",{month:"short",day:"numeric"}),
-      cost:inDay.reduce((s,u)=>s+(Number(u.cost_usd)||0),0),
-    });
+  const bucketedCost = bucketApiUsage(apiUsage,costGranularity);
+
+  // Shows both currencies stacked -- USD first (what you're actually billed
+  // in) with the CAD estimate underneath in smaller, muted text.
+  function CostFigure({usd, size=22, color}){
+    return (
+      <>
+        <div style={{fontSize:size,fontWeight:800,color:color||C.ink}}>${usd.toFixed(4)} <span style={{fontSize:size*0.5,fontWeight:700,color:C.inkFaint}}>USD</span></div>
+        <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>≈ ${(usd*USD_TO_CAD).toFixed(4)} CAD</div>
+      </>
+    );
   }
 
   return (
@@ -2609,33 +2643,44 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:2}}>
         QUOTE CHECK COST · {apiUsageLoading?"loading…":`${apiUsage.length} logged call${apiUsage.length===1?"":"s"}`}
       </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:10}}>USD is what you're actually billed — CAD is an estimate at a fixed 1 USD = {USD_TO_CAD} CAD rate (July 15, 2026), not a live conversion.</div>
       {!apiUsageLoading&&apiUsage.length===0?(
         <AdminEmpty icon="📊">
           No usage logged yet — this fills in the moment someone runs a real quote through Quote Check, once the analyze-quote function's logging is live.
         </AdminEmpty>
       ):(
         <>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
             {[["Today",costToday],["Last 7 days",costWeek],["Last 30 days",costMonth]].map(([label,stats])=>(
               <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
                 <div style={{fontSize:12,color:C.inkFaint,marginBottom:6}}>{label}</div>
-                <div style={{fontSize:22,fontWeight:800,color:C.ink}}>${stats.cost.toFixed(2)}</div>
-                <div style={{fontSize:11,color:C.inkFaint}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
+                <CostFigure usd={stats.cost}/>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
               </div>
             ))}
           </div>
 
           <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-            <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Cost per day, last 14 days</div>
-            <div style={{height:160}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Cost over time</div>
+              <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
+                {[["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
+                  <button key={key} onClick={()=>setCostGranularity(key)}
+                    style={{background:costGranularity===key?C.tealBg:"transparent",color:costGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{height:180}}>
               <ResponsiveContainer>
-                <BarChart data={dailyCost} margin={{top:4,right:4,bottom:0,left:0}}>
+                <BarChart data={bucketedCost} margin={{top:4,right:4,bottom:0,left:0}}>
                   <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                  <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={40} tickFormatter={v=>`$${v.toFixed(0)}`}/>
-                  <Tooltip formatter={v=>[`$${Number(v).toFixed(3)}`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
+                  <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v.toFixed(2)}`}/>
+                  <Tooltip formatter={(v)=>[`$${Number(v).toFixed(4)} USD · $${(Number(v)*USD_TO_CAD).toFixed(4)} CAD`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
                   <Bar dataKey="cost" radius={[3,3,0,0]} fill={C.teal}/>
                 </BarChart>
               </ResponsiveContainer>
@@ -2652,18 +2697,19 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
               <input type="number" min="0" value={subscribers} onChange={e=>updateSubscribers(e.target.value)}
                 style={{width:90,background:C.paper,border:`2px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.ink,fontSize:13,outline:"none"}}/>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
               <div>
-                <div style={{fontSize:20,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)}</div>
-                <div style={{fontSize:11,color:C.inkFaint}}>Assumed monthly revenue</div>
+                <div style={{fontSize:18,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)} <span style={{fontSize:11,fontWeight:700,color:C.inkFaint}}>USD</span></div>
+                <div style={{fontSize:11,color:C.inkFaint}}>≈ ${(assumedRevenue*USD_TO_CAD).toFixed(2)} CAD</div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Assumed monthly revenue</div>
               </div>
               <div>
-                <div style={{fontSize:20,fontWeight:800,color:C.ink}}>${costMonth.cost.toFixed(2)}</div>
-                <div style={{fontSize:11,color:C.inkFaint}}>Actual cost, last 30 days</div>
+                <CostFigure usd={costMonth.cost} size={18}/>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Actual cost, last 30 days</div>
               </div>
               <div>
-                <div style={{fontSize:20,fontWeight:800,color:margin>=0?C.tealInk:C.coralInk}}>{margin>=0?"+":"-"}${Math.abs(margin).toFixed(2)}</div>
-                <div style={{fontSize:11,color:C.inkFaint}}>Estimated margin</div>
+                <CostFigure usd={Math.abs(margin)} size={18} color={margin>=0?C.tealInk:C.coralInk}/>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Estimated margin{margin<0?" (loss)":""}</div>
               </div>
             </div>
           </div>
