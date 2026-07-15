@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useContext, createContext } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
+import heic2any from "heic2any";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 const supabase = createClient(
@@ -57,6 +58,8 @@ const GLOBAL_CSS = `
   @keyframes lc-gate-flash {
     0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
   }
+  .lc-gate-car { animation: lc-gate-drive 4s linear infinite; }
+  .lc-gate-window { animation: lc-gate-flash 4s linear infinite; }
 
   /* Live ticker strip */
   .lc-ticker-wrap {
@@ -2848,6 +2851,11 @@ function AdminPanel(){
     if(!confirm(`Mark ${v.year} ${v.make} ${v.model} from ${v.dealer} as SOLD?\n\nCommission due: $${commission.toLocaleString()}`)) return;
     const {error}=await supabase.from("dealer_listings").update({status:"sold"}).eq("id",v.id);
     if(error){ alert("Couldn't update: "+error.message); return; }
+    // Also pull it off the live buyer-facing site -- without this, a sold car
+    // stays visible and contactable on lotcheck.ca even though dealer_listings
+    // itself correctly shows "sold" here in admin.
+    const {error:listingsError}=await supabase.from("listings").update({status:"sold"}).eq("external_id",`dealer-${v.id}`);
+    if(listingsError) console.warn("⚠️ Couldn't remove sold dealer listing from the live site:",listingsError.message);
     const dealerIdx=dealers.findIndex(d=>d.name===v.dealer);
     if(dealerIdx>=0){
       await supabase.from("dealers").update({sold_count:(dealers[dealerIdx].sold_count||0)+1}).eq("id",dealers[dealerIdx].id);
@@ -2857,8 +2865,34 @@ function AdminPanel(){
   }
 
   async function publishDealerListing(id){
+    const v = dealerListings.find(d=>d.id===id);
+    if(!v){ alert("Couldn't find that listing to publish."); return; }
+    const externalId = `dealer-${id}`;
+
+    // Guard against double-publish creating a duplicate row on the live site.
+    // Doesn't rely on a unique constraint on listings.external_id since that
+    // hasn't been confirmed to exist -- checks first instead.
+    const {data:existing}=await supabase.from("listings").select("id").eq("external_id",externalId).limit(1);
+    if(!existing||existing.length===0){
+      const {error:insertError}=await supabase.from("listings").insert({
+        external_id: externalId,
+        name: `${v.year} ${v.make} ${v.model}${v.trim?" "+v.trim:""}`,
+        make: v.make, model: v.model, year: v.year,
+        price: v.price, km: v.km, fuel: v.fuel||"Gas",
+        province: v.province||"AB", city: v.city||"",
+        source: "Dealer",
+        dealer: v.dealer, // dealer name string -- Boolean(r.dealer) in useListings() reads this as true, same normalization the scraper path already relies on
+        listing_url: null,
+        image_url: null,
+        // NOT copying dealer_listings' "live" -- listings uses a different
+        // vocabulary and useListings() only shows status="published".
+        status: "published",
+      });
+      if(insertError){ alert("Couldn't publish to the live site: "+insertError.message); return; }
+    }
+
     const {error}=await supabase.from("dealer_listings").update({status:"live",published_at:new Date().toISOString()}).eq("id",id);
-    if(error){ alert("Couldn't update: "+error.message); return; }
+    if(error){ alert("Published to the live site, but couldn't update dealer_listings' own status: "+error.message); return; }
     fetchDealerListings();
   }
 
@@ -3203,11 +3237,17 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const fileInputRef=useRef(null);
 
-  // Palette pulled directly from the welcome page's CSS custom properties,
-  // so this page reads as the same product rather than a leftover from the
-  // old dark theme. Kept as inline hex (not CSS vars) since this component
-  // renders standalone and doesn't share a stylesheet with the marketing page.
-  const C={
+  // Two palettes, pulled directly from the welcome page's CSS custom
+  // properties (both the :root light values and the html[data-theme="dark"]
+  // overrides) -- not invented separately, so Quote Check's dark mode is
+  // the SAME dark mode as the homepage's, not just "a" dark theme. Brand
+  // accents (teal/coral/butter) don't change between modes on the homepage
+  // either, so they're kept constant here too -- only chrome (ink/paper/
+  // card/line) shifts. tealBg/coralBg/butterBg (translucent tint
+  // backgrounds) aren't homepage CSS vars -- there's no direct source to
+  // match, so these are reasonable extrapolations in the same spirit as
+  // the homepage's own dark-mode overrides, not verified against anything.
+  const QC_LIGHT={
     ink:"#33305A", inkSoft:"#5B5885", inkFaint:"#706D96",
     paper:"#FBF5EC", paper2:"#F5EEE1", card:"#FFFFFF",
     line:"rgba(51,48,90,.12)",
@@ -3215,14 +3255,59 @@ function QuoteCheckPage(){
     coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
     butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
   };
+  const QC_DARK={
+    ink:"#EDEBF7", inkSoft:"#B9B6D6", inkFaint:"#8D89B8",
+    paper:"#15121F", paper2:"#1C1830", card:"#211C34",
+    line:"rgba(237,235,247,.14)",
+    teal:"#2FA79A", tealInk:"#5FD8CB", tealBg:"rgba(47,167,154,.18)",
+    coral:"#F2836B", coralInk:"#FF9E85", coralBg:"rgba(242,131,107,.18)",
+    butter:"#F5C95C", butterInk:"#F5C95C", butterBg:"rgba(245,201,92,.18)",
+  };
+  // Same key and same fallback logic as the homepage's inline head script:
+  // explicit "dark" wins, otherwise fall back to the OS preference -- so a
+  // first-time visitor who lands directly on /quote-check (never having
+  // touched the homepage toggle) still gets a theme that matches their
+  // system, not a hardcoded default.
+  const [qcTheme,setQcTheme]=useState(()=>{
+    try{
+      const saved=localStorage.getItem("lc-theme");
+      if(saved) return saved==="dark"?"dark":"light";
+      return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+    }catch{ return "light"; }
+  });
+  function toggleQcTheme(){
+    const next=qcTheme==="dark"?"light":"dark";
+    setQcTheme(next);
+    try{ localStorage.setItem("lc-theme",next); }catch{}
+  }
+  const C=qcTheme==="dark"?QC_DARK:QC_LIGHT;
 
-  const ACCEPTED_TYPES=["application/pdf","image/jpeg","image/png","image/webp"];
+  // JPEG/PNG/WEBP go straight through -- HEIC/HEIF (the default format for
+  // iPhone camera photos) needs converting first, since neither browsers
+  // nor Claude's vision API can read HEIC directly. Some browsers report an
+  // empty or generic file.type for HEIC picked via a file input, so this
+  // also checks the filename extension as a fallback, not just MIME type.
+  const ACCEPTED_TYPES=["application/pdf","image/jpeg","image/png","image/webp","image/heic","image/heif"];
+  const HEIC_EXTENSIONS=[".heic",".heif"];
+  const MAX_FILE_SIZE_MB=15;
+
+  function isHeic(file){
+    if(file.type==="image/heic"||file.type==="image/heif") return true;
+    const lower=(file.name||"").toLowerCase();
+    return HEIC_EXTENSIONS.some(ext=>lower.endsWith(ext));
+  }
 
   const handleFile=async(file)=>{
     if(!file) return;
-    if(!ACCEPTED_TYPES.includes(file.type)){
+    const heic=isHeic(file);
+    if(!heic&&!ACCEPTED_TYPES.includes(file.type)){
       setStatus("error");
-      setErrorMsg("Please upload a PDF, or a clear photo (JPG, PNG, or WEBP) of the quote.");
+      setErrorMsg("Please upload a PDF, or a clear photo (JPG, PNG, WEBP, or HEIC) of the quote.");
+      return;
+    }
+    if(file.size>MAX_FILE_SIZE_MB*1024*1024){
+      setStatus("error");
+      setErrorMsg(`That file is a bit large (${(file.size/1024/1024).toFixed(1)}MB) — please try a photo under ${MAX_FILE_SIZE_MB}MB. A single clear photo of the quote works better than a scan of every page.`);
       return;
     }
     setFileName(file.name);
@@ -3230,11 +3315,26 @@ function QuoteCheckPage(){
     setErrorMsg("");
 
     try{
+      // Convert HEIC/HEIF to JPEG entirely in the browser before anything
+      // else touches it -- this keeps "sent once, discarded" true, since
+      // conversion never goes through a server.
+      let fileToSend=file;
+      if(heic){
+        try{
+          const converted=await heic2any({blob:file,toType:"image/jpeg",quality:0.9});
+          fileToSend=Array.isArray(converted)?converted[0]:converted;
+        }catch(convErr){
+          setStatus("error");
+          setErrorMsg("Couldn't convert that HEIC photo. Try taking a screenshot of it instead, or switch your camera to JPEG in Settings → Camera → Formats.");
+          return;
+        }
+      }
+
       const base64=await new Promise((resolve,reject)=>{
         const reader=new FileReader();
         reader.onload=()=>resolve(reader.result.split(",")[1]);
         reader.onerror=()=>reject(new Error("Couldn't read that file."));
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(fileToSend);
       });
 
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
@@ -3244,7 +3344,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({fileBase64:base64,mediaType:file.type}),
+        body:JSON.stringify({fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
       });
 
       const data=await res.json();
@@ -3353,10 +3453,14 @@ function QuoteCheckPage(){
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
             <LogoMark size={34}/>
-            <div>
+            <div style={{flex:1}}>
               <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
               <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
             </div>
+            <button onClick={toggleQcTheme} aria-label={qcTheme==="dark"?"Switch to bright mode":"Switch to dark mode"}
+              style={{width:38,height:38,borderRadius:999,border:`2px solid ${C.ink}`,background:"transparent",color:C.ink,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16}}>
+              {qcTheme==="dark"?"☀️":"🌙"}
+            </button>
           </div>
 
           {status==="idle"&&(
@@ -3424,14 +3528,14 @@ function QuoteCheckPage(){
 
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
               <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
-              <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{display:"none"}}
+              <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
 
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
               {[
                 {n:"1",label:"Upload or paste",desc:"Drop a file, click to browse, or paste (Ctrl+V / Cmd+V) a screenshot"},
-                {n:"2",label:"Claude reads it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
+                {n:"2",label:"We read it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
                 {n:"3",label:"See what's real",desc:"True MSRP, flagged add-ons, and any EVAP rebate you qualify for"},
               ].map((s,i)=>(
                 <div key={i} style={{flex:"1 1 160px",minWidth:150}}>
@@ -3554,7 +3658,7 @@ function QuoteCheckPage(){
           )}
 
           <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
-            LotCheck never saves your quote to our own systems. It's sent once to Claude (Anthropic's AI) to read and analyze, then discarded on our end — see how this works.
+            LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.
           </div>
         </div>
       </div>
