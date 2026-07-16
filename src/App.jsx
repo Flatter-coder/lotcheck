@@ -2481,6 +2481,11 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
                 <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.name}</div>
                 <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
                 <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
+                {d.amvic_number&&(
+                  <div style={{fontSize:11,marginTop:4,fontWeight:800,color:d.amvic_verified?C.tealInk:C.butterInk}}>
+                    {d.amvic_verified?"✓":"⚠"} AMVIC {d.amvic_number}{!d.amvic_verified&&" -- unverified"}
+                  </div>
+                )}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
                 <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
@@ -2748,322 +2753,21 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
     </div>
   );
 }
-
-// ── Deals tab (tax tracker) ─────────────────────────────────────────────────
-function DealsTab({deals, dealsLoading, onAdd, onEdit, onTogglePaid, onDelete}){
-  const {C}=useAdminTheme();
-  const years = Array.from(new Set(deals.map(d=>new Date(d.closed_at).getFullYear()))).sort((a,b)=>b-a);
-  const currentYear = new Date().getFullYear();
-  const [taxYear,setTaxYear]=useState(years.includes(currentYear)?currentYear:(years[0]||currentYear));
-  const yearOptions = years.includes(currentYear) ? years : [currentYear, ...years];
-
-  const yearDeals = deals.filter(d=>new Date(d.closed_at).getFullYear()===taxYear);
-  const paidCommission = yearDeals.filter(d=>d.paid).reduce((s,d)=>s+(Number(d.commission)||0),0);
-  const pendingCommission = yearDeals.filter(d=>!d.paid).reduce((s,d)=>s+(Number(d.commission)||0),0);
-  const avgCommission = yearDeals.length ? Math.round(yearDeals.reduce((s,d)=>s+(Number(d.commission)||0),0)/yearDeals.length) : 0;
-
-  const sortedAsc=[...yearDeals].sort((a,b)=>new Date(a.closed_at)-new Date(b.closed_at));
-  let running=0;
-  const cumulative=sortedAsc.map(d=>{
-    running+=Number(d.commission)||0;
-    return { label:new Date(d.closed_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}), cumulative:running };
-  });
-
-  function exportCSV(){
-    const rows=[["Date closed","Dealer","Vehicle","Sale price","Plan","Commission","Paid","Paid date","Reference"]];
-    yearDeals.forEach(d=>{
-      rows.push([
-        d.closed_at, d.dealer, `${d.year||""} ${d.make||""} ${d.model||""}`.trim(),
-        d.price??"", d.plan||"", d.commission||0, d.paid?"Yes":"No", d.paid_date||"", d.id,
-      ]);
-    });
-    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url; a.download=`lotcheck-deals-${taxYear}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>TAX YEAR</div>
-          <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
-            {yearOptions.map(y=>(
-              <button key={y} onClick={()=>setTaxYear(y)}
-                style={{background:taxYear===y?C.tealBg:"transparent",color:taxYear===y?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
-                {y}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={exportCSV} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer"}}>⬇ Export CSV</button>
-          <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Deal</button>
-        </div>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.tealInk,fontFamily:"'JetBrains Mono',monospace"}}>${paidCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Paid commission, {taxYear}</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.butterInk,fontFamily:"'JetBrains Mono',monospace"}}>${pendingCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Owed, not yet paid</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>{yearDeals.length}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Deals closed</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${avgCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Avg. commission / deal</div>
-        </div>
-      </div>
-
-      {yearDeals.length>0 && (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Cumulative commission — {taxYear}</div>
-          <div style={{height:180}}>
-            <ResponsiveContainer>
-              <LineChart data={cumulative} margin={{top:4,right:4,bottom:0,left:0}}>
-                <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v}`}/>
-                <Tooltip formatter={(v)=>[`$${Number(v).toLocaleString()}`,"Cumulative"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
-                <Line type="monotone" dataKey="cumulative" stroke={C.teal} strokeWidth={2.5} dot={{r:3,fill:C.teal}}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-        DEALS · {dealsLoading?"loading…":`${yearDeals.length} in ${taxYear}`}
-      </div>
-      {dealsLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
-      ) : yearDeals.length===0 ? (
-        <AdminEmpty icon="📈">No deals logged for {taxYear} yet — they'll appear here automatically when you mark a dealer submission sold, or add one manually.</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-          {[...yearDeals].sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at)).map(d=>(
-            <div key={d.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-              <div>
-                <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.year} {d.make} {d.model}{d.trim?` ${d.trim}`:""}</div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.dealer} · ${(d.price||0).toLocaleString()} · {new Date(d.closed_at).toLocaleDateString("en-CA")}{d.source==="dealer_listing"?" · auto-logged":""}</div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.tealInk,fontSize:15}}>${(d.commission||0).toLocaleString()}</div>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!d.paid} onChange={e=>onTogglePaid(d.id,e.target.checked)}/> Paid
-                </label>
-                <button onClick={()=>onEdit(d)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(d.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Operating costs tab ─────────────────────────────────────────────────────
-function CostsTab({costs, costsLoading, onAdd, onEdit, onToggleActive, onDelete}){
-  const {C}=useAdminTheme();
-  const active=costs.filter(c=>c.active);
-  const monthlyBurn=active.reduce((s,c)=>{
-    const cad = c.currency==="USD" ? c.amount*USD_TO_CAD : Number(c.amount);
-    if(c.cycle==="monthly") return s+cad;
-    if(c.cycle==="annual") return s+cad/12;
-    return s; // one_time doesn't count toward recurring burn
-  },0);
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
-          OPERATING COSTS · {costsLoading?"loading…":`${active.length} active`}
-        </div>
-        <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Cost</button>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${monthlyBurn.toFixed(2)}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Monthly burn (CAD, recurring)</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${(monthlyBurn*12).toFixed(2)}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Est. annual (CAD, for taxes)</div>
-        </div>
-      </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:14}}>USD costs converted at the same fixed 1 USD = {USD_TO_CAD} CAD rate used on the Revenue tab, not a live rate.</div>
-
-      {costsLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
-      ) : costs.length===0 ? (
-        <AdminEmpty icon="🧾">No costs logged yet — run deals_and_costs_migration.sql, then add your first one.</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-          {costs.map(c=>(
-            <div key={c.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,opacity:c.active?1:0.5}}>
-              <div>
-                <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{c.vendor}</div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{c.category||"—"} · {c.cycle}{c.started_on?` · since ${new Date(c.started_on).toLocaleDateString("en-CA")}`:""}</div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.ink,fontSize:15}}>{c.currency==="USD"?"US$":"$"}{Number(c.amount).toFixed(2)}</div>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!c.active} onChange={e=>onToggleActive(c.id,e.target.checked)}/> Active
-                </label>
-                <button onClick={()=>onEdit(c)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(c.id,c.vendor)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DealModal({deal,onSave,onClose}){
-  const [form,setForm]=useState(deal||{
-    dealer:"",year:"",make:"",model:"",trim:"",price:"",
-    plan:"commission",commission:"",paid:false,paid_date:"",
-    closed_at:new Date().toISOString().slice(0,10),notes:"",source:"manual",
-  });
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const {C}=useAdminTheme();
-  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-        <div style={{fontSize:18,fontWeight:800,marginBottom:18,color:C.ink}}>{deal?"Edit Deal":"Add Deal"}</div>
-        <label style={labelStyle}>Dealer *</label>
-        <input style={inputStyle} value={form.dealer} onChange={e=>set("dealer",e.target.value)} placeholder="Cochrane Toyota"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Year</label>
-            <input style={inputStyle} value={form.year} onChange={e=>set("year",e.target.value)} placeholder="2026"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Make / Model</label>
-            <div style={{display:"flex",gap:6}}>
-              <input style={inputStyle} value={form.make} onChange={e=>set("make",e.target.value)} placeholder="Toyota"/>
-              <input style={inputStyle} value={form.model} onChange={e=>set("model",e.target.value)} placeholder="RAV4"/>
-            </div>
-          </div>
-        </div>
-        <label style={labelStyle}>Trim</label>
-        <input style={inputStyle} value={form.trim} onChange={e=>set("trim",e.target.value)} placeholder="XLE HEV"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Sale price</label>
-            <input style={inputStyle} type="number" value={form.price} onChange={e=>set("price",e.target.value)} placeholder="46200"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Plan</label>
-            <select style={inputStyle} value={form.plan} onChange={e=>set("plan",e.target.value)}>
-              <option value="commission">1% commission</option>
-              <option value="lead">$100/lead</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-        </div>
-        <label style={labelStyle}>Commission ($) *</label>
-        <input style={inputStyle} type="number" value={form.commission} onChange={e=>set("commission",e.target.value)} placeholder="462"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Date closed</label>
-            <input style={inputStyle} type="date" value={form.closed_at} onChange={e=>set("closed_at",e.target.value)}/>
-          </div>
-          <div>
-            <label style={labelStyle}>Paid date</label>
-            <input style={inputStyle} type="date" value={form.paid_date||""} onChange={e=>set("paid_date",e.target.value)} disabled={!form.paid}/>
-          </div>
-        </div>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer",marginBottom:16}}>
-          <input type="checkbox" checked={!!form.paid} onChange={e=>set("paid",e.target.checked)}/> Commission paid
-        </label>
-        <label style={labelStyle}>Notes</label>
-        <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,background:"none",border:`1px solid ${C.line}`,borderRadius:10,padding:11,color:C.inkSoft,fontSize:14,cursor:"pointer"}}>Cancel</button>
-          <button onClick={()=>{ if(!form.dealer.trim()||form.commission===""){alert("Dealer and commission are required");return;} onSave(form); }}
-            style={{flex:1,background:C.teal,border:"none",borderRadius:10,padding:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Save Deal →</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CostModal({cost,onSave,onClose}){
-  const [form,setForm]=useState(cost||{vendor:"",category:"",amount:"",currency:"CAD",cycle:"monthly",active:true,started_on:"",notes:""});
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const {C}=useAdminTheme();
-  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-        <div style={{fontSize:18,fontWeight:800,marginBottom:18,color:C.ink}}>{cost?"Edit Cost":"Add Cost"}</div>
-        <label style={labelStyle}>Vendor *</label>
-        <input style={inputStyle} value={form.vendor} onChange={e=>set("vendor",e.target.value)} placeholder="Nimble"/>
-        <label style={labelStyle}>Category</label>
-        <input style={inputStyle} value={form.category} onChange={e=>set("category",e.target.value)} placeholder="Data / web extraction"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Amount</label>
-            <input style={inputStyle} type="number" step="0.01" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="29.00"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Currency</label>
-            <select style={inputStyle} value={form.currency} onChange={e=>set("currency",e.target.value)}>
-              <option value="CAD">CAD</option>
-              <option value="USD">USD</option>
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Cycle</label>
-            <select style={inputStyle} value={form.cycle} onChange={e=>set("cycle",e.target.value)}>
-              <option value="monthly">Monthly</option>
-              <option value="annual">Annual</option>
-              <option value="one_time">One-time</option>
-            </select>
-          </div>
-        </div>
-        <label style={labelStyle}>Active since</label>
-        <input style={inputStyle} type="date" value={form.started_on||""} onChange={e=>set("started_on",e.target.value)}/>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer",marginBottom:16}}>
-          <input type="checkbox" checked={!!form.active} onChange={e=>set("active",e.target.checked)}/> Active subscription
-        </label>
-        <label style={labelStyle}>Notes</label>
-        <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,background:"none",border:`1px solid ${C.line}`,borderRadius:10,padding:11,color:C.inkSoft,fontSize:14,cursor:"pointer"}}>Cancel</button>
-          <button onClick={()=>{ if(!form.vendor.trim()){alert("Vendor is required");return;} onSave(form); }}
-            style={{flex:1,background:C.teal,border:"none",borderRadius:10,padding:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Save Cost →</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DealerModal({dealer,onSave,onClose}){
-  const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false});
+  const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false,amvic_number:"",amvic_verified:false,amvic_verified_at:null});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const {C}=useAdminTheme();
   const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
   const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
+
+  // Format sanity-check only -- confirmed from 2 real AMVIC business
+  // licence numbers found in an actual public AMVIC document (e.g.
+  // "B1022490": a "B" followed by 7 digits). Not a hard validation gate,
+  // since 2 examples isn't enough to be confident this covers every
+  // licence class AMVIC issues -- an unexpected format shouldn't block
+  // saving, just prompt a second look.
+  const amvicTrimmed=(form.amvic_number||"").trim();
+  const amvicFormatLooksRight=amvicTrimmed==="" || /^B\d{7}$/i.test(amvicTrimmed);
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -3091,6 +2795,38 @@ function DealerModal({dealer,onSave,onClose}){
         </div>
         <label style={labelStyle}>Makes (comma separated)</label>
         <input style={inputStyle} value={form.makes} onChange={e=>set("makes",e.target.value)} placeholder="Toyota, Lexus"/>
+
+        <div style={{background:C.paper,border:`1.5px solid ${C.line}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+          <label style={labelStyle}>AMVIC business licence number</label>
+          <input
+            style={{...inputStyle,marginBottom:6,borderColor:amvicTrimmed&&!amvicFormatLooksRight?C.coral:C.line}}
+            value={form.amvic_number}
+            onChange={e=>set("amvic_number",e.target.value.toUpperCase())}
+            placeholder="B1022490"
+          />
+          {amvicTrimmed&&!amvicFormatLooksRight&&(
+            <div style={{fontSize:11,color:C.coralInk,marginBottom:8,lineHeight:1.4}}>
+              Doesn't match the usual AMVIC format (a "B" followed by 7 digits) -- that's only based on 2 confirmed real examples though, so this isn't a hard block. Worth a second look before saving.
+            </div>
+          )}
+          <div style={{fontSize:11,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+            AMVIC has no public API to auto-verify this against -- a correctly formatted number isn't proof of an active licence. Check it yourself:
+          </div>
+          <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noreferrer"
+            style={{fontSize:12,fontWeight:800,color:C.tealInk,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5,marginBottom:12}}>
+            Verify on AMVIC's public search →
+          </a>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!form.amvic_verified} onChange={e=>set("amvic_verified",e.target.checked)}/>
+            I checked AMVIC's public search and confirmed this licence is active
+          </label>
+          {form.amvic_verified&&form.amvic_verified_at&&(
+            <div style={{fontSize:11,color:C.tealInk,marginTop:6}}>
+              ✓ Verified {new Date(form.amvic_verified_at).toLocaleDateString("en-CA")}
+            </div>
+          )}
+        </div>
+
         <label style={labelStyle}>Notes</label>
         <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Met at Costco"/>
         <div style={{display:"flex",gap:16,marginBottom:16,marginTop:6}}>
@@ -3233,14 +2969,6 @@ function AdminPanel(){
   const [dealerListings,setDealerListings]=useState([]);
   const [dealerListingsLoading,setDealerListingsLoading]=useState(true);
 
-  const [deals,setDeals]=useState([]);
-  const [dealsLoading,setDealsLoading]=useState(true);
-  const [dealModal,setDealModal]=useState(null); // null | "new" | deal object
-
-  const [costs,setCosts]=useState([]);
-  const [costsLoading,setCostsLoading]=useState(true);
-  const [costModal,setCostModal]=useState(null); // null | "new" | cost object
-
   const [reviewListings,setReviewListings]=useState([]);
   const [rejectedListings,setRejectedListings]=useState([]);
   const [reviewLoading,setReviewLoading]=useState(true);
@@ -3326,36 +3054,6 @@ function AdminPanel(){
   }
   useEffect(()=>{ if(session) fetchDealerListings(); else setDealerListings([]); },[session]);
 
-  async function fetchDeals(){
-    setDealsLoading(true);
-    try{
-      const {data,error}=await supabase.from("deals").select("*").order("closed_at",{ascending:false});
-      if(error) throw error;
-      setDeals(data||[]);
-    }catch(err){
-      console.warn("⚠️ deals fetch failed (did you run deals_and_costs_migration.sql?):",err.message);
-      setDeals([]);
-    }finally{
-      setDealsLoading(false);
-    }
-  }
-  useEffect(()=>{ if(session) fetchDeals(); else setDeals([]); },[session]);
-
-  async function fetchCosts(){
-    setCostsLoading(true);
-    try{
-      const {data,error}=await supabase.from("operating_costs").select("*").order("vendor",{ascending:true});
-      if(error) throw error;
-      setCosts(data||[]);
-    }catch(err){
-      console.warn("⚠️ operating_costs fetch failed (did you run deals_and_costs_migration.sql?):",err.message);
-      setCosts([]);
-    }finally{
-      setCostsLoading(false);
-    }
-  }
-  useEffect(()=>{ if(session) fetchCosts(); else setCosts([]); },[session]);
-
   async function fetchReview(){
     setReviewLoading(true);
     try{
@@ -3389,6 +3087,9 @@ function AdminPanel(){
       email:form.email?.trim()||null, city:form.city?.trim()||null, province:form.province||null,
       makes:form.makes?.trim()||null, notes:form.notes?.trim()||null,
       live:!!form.live, featured:!!form.featured,
+      amvic_number:form.amvic_number?.trim()||null,
+      amvic_verified:!!form.amvic_verified,
+      amvic_verified_at:form.amvic_verified?(form.amvic_verified_at||new Date().toISOString()):null,
     };
     if(form.id){
       const {error}=await supabase.from("dealers").update(payload).eq("id",form.id);
@@ -3414,74 +3115,6 @@ function AdminPanel(){
     fetchDealers();
   }
 
-  async function saveDeal(form){
-    const payload={
-      source: form.source||"manual",
-      dealer: form.dealer.trim(),
-      year: form.year?Number(form.year):null, make: form.make?.trim()||null, model: form.model?.trim()||null, trim: form.trim?.trim()||null,
-      price: form.price?Number(form.price):null,
-      plan: form.plan||null,
-      commission: Number(form.commission)||0,
-      paid: !!form.paid,
-      paid_date: form.paid_date||null,
-      closed_at: form.closed_at||new Date().toISOString().slice(0,10),
-      notes: form.notes?.trim()||null,
-    };
-    if(form.id){
-      const {error}=await supabase.from("deals").update(payload).eq("id",form.id);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }else{
-      const {error}=await supabase.from("deals").insert(payload);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }
-    setDealModal(null);
-    fetchDeals();
-  }
-
-  async function toggleDealPaid(id,paid){
-    setDeals(prev=>prev.map(d=>d.id===id?{...d,paid,paid_date:paid?new Date().toISOString().slice(0,10):null}:d));
-    const {error}=await supabase.from("deals").update({paid,paid_date:paid?new Date().toISOString().slice(0,10):null}).eq("id",id);
-    if(error){ alert("Couldn't update: "+error.message); fetchDeals(); }
-  }
-
-  async function deleteDeal(id){
-    if(!confirm("Delete this deal record? This can't be undone.")) return;
-    const {error}=await supabase.from("deals").delete().eq("id",id);
-    if(error){ alert("Couldn't delete: "+error.message); return; }
-    fetchDeals();
-  }
-
-  async function saveCost(form){
-    const payload={
-      vendor: form.vendor.trim(), category: form.category?.trim()||null,
-      amount: Number(form.amount)||0, currency: form.currency||"CAD", cycle: form.cycle||"monthly",
-      active: !!form.active, started_on: form.started_on||null, cancelled_on: form.cancelled_on||null,
-      notes: form.notes?.trim()||null,
-    };
-    if(form.id){
-      const {error}=await supabase.from("operating_costs").update(payload).eq("id",form.id);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }else{
-      const {error}=await supabase.from("operating_costs").insert(payload);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }
-    setCostModal(null);
-    fetchCosts();
-  }
-
-  async function toggleCostActive(id,active){
-    setCosts(prev=>prev.map(c=>c.id===id?{...c,active}:c));
-    const {error}=await supabase.from("operating_costs").update({active}).eq("id",id);
-    if(error){ alert("Couldn't update: "+error.message); fetchCosts(); }
-  }
-
-  async function deleteCost(id,vendor){
-    if(!confirm(`Delete ${vendor}?`)) return;
-    const {error}=await supabase.from("operating_costs").delete().eq("id",id);
-    if(error){ alert("Couldn't delete: "+error.message); return; }
-    fetchCosts();
-  }
-
   async function markSold(v){
     const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
     if(!confirm(`Mark ${v.year} ${v.make} ${v.model} from ${v.dealer} as SOLD?\n\nCommission due: $${commission.toLocaleString()}`)) return;
@@ -3497,18 +3130,6 @@ function AdminPanel(){
       await supabase.from("dealers").update({sold_count:(dealers[dealerIdx].sold_count||0)+1}).eq("id",dealers[dealerIdx].id);
       fetchDealers();
     }
-    // Log the commission into the deals ledger -- this is the one place a
-    // sale's commission gets permanently recorded for tax filing. Before
-    // this, the number above only ever appeared in the confirm() dialog
-    // and was lost the moment it closed.
-    const {error:dealError}=await supabase.from("deals").insert({
-      source:"dealer_listing", dealer_listing_id:v.id,
-      dealer:v.dealer, year:v.year, make:v.make, model:v.model, trim:v.trim||null,
-      price:v.price, plan:v.plan||"lead", commission,
-      closed_at:new Date().toISOString().slice(0,10),
-    });
-    if(dealError) console.warn("⚠️ Couldn't log this sale to the deals tracker:",dealError.message);
-    fetchDeals();
     fetchDealerListings();
   }
 
@@ -3612,20 +3233,6 @@ function AdminPanel(){
           onClose={()=>setDealerModal(null)}
         />
       )}
-      {dealModal && (
-        <DealModal
-          deal={dealModal==="new"?null:dealModal}
-          onSave={saveDeal}
-          onClose={()=>setDealModal(null)}
-        />
-      )}
-      {costModal && (
-        <CostModal
-          cost={costModal==="new"?null:costModal}
-          onSave={saveCost}
-          onClose={()=>setCostModal(null)}
-        />
-      )}
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,maxWidth:1100,margin:"0 auto 20px",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -3636,9 +3243,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
           <AdminTabButton active={tab==="dealers"} onClick={()=>setTab("dealers")}>Dealers</AdminTabButton>
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
-          <AdminTabButton active={tab==="deals"} onClick={()=>setTab("deals")}>Deals</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
-          <AdminTabButton active={tab==="costs"} onClick={()=>setTab("costs")}>Costs</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -3882,23 +3487,7 @@ function AdminPanel(){
           />
         )}
 
-        {tab==="deals" && (
-          <DealsTab
-            deals={deals} dealsLoading={dealsLoading}
-            onAdd={()=>setDealModal("new")} onEdit={d=>setDealModal(d)}
-            onTogglePaid={toggleDealPaid} onDelete={deleteDeal}
-          />
-        )}
-
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
-
-        {tab==="costs" && (
-          <CostsTab
-            costs={costs} costsLoading={costsLoading}
-            onAdd={()=>setCostModal("new")} onEdit={c=>setCostModal(c)}
-            onToggleActive={toggleCostActive} onDelete={deleteCost}
-          />
-        )}
       </div>
     </div>
     </AdminThemeContext.Provider>
