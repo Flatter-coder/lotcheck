@@ -3462,11 +3462,16 @@ function IsoScanVisual({C, speed="idle"}){
         animation:`lc-iso-float ${floatDur}s ease-in-out infinite`,
       }}>
         <div style={{
-          position:"absolute",inset:0,borderRadius:10,background:C.card,
+          // Fixed white, not C.card -- this represents an actual physical
+          // sheet of paper, which doesn't change color with the theme. The
+          // previous C.card reference resolved to a near-black purple in
+          // dark mode, making the "paper" essentially invisible against the
+          // dark page behind it.
+          position:"absolute",inset:0,borderRadius:10,background:"#FFFFFF",
           boxShadow:"10px 12px 0 rgba(51,48,90,.10), 0 1px 0 1px rgba(51,48,90,.08)",
           padding:"16px 14px",
         }}>
-          <div style={{width:"60%",height:6,borderRadius:3,background:C.paper2,marginBottom:10}}/>
+          <div style={{width:"60%",height:6,borderRadius:3,background:"#EDE7D8",marginBottom:10}}/>
           <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
           <div style={{width:"90%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
           <div style={{width:"65%",height:4,borderRadius:2,background:"#EDE7D8",marginBottom:7}}/>
@@ -3854,7 +3859,7 @@ function QuoteCheckPage(){
               </div>
 
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes about 15 seconds to analyze</div>
+              <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes a couple of seconds to analyze</div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
