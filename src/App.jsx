@@ -527,6 +527,80 @@ function formatMsLeft(ms) {
   return `${h}h ${m}m`;
 }
 
+// ── Quote Check access -- real, persisted, honestly limited ────────────────
+// Same stopgap philosophy as the trial system above: no real accounts or
+// billing exist yet, so this is tracked in localStorage per browser, not
+// per person -- clearing browser data or switching devices resets it. That's
+// a real limitation, not abuse-proofing, but it's the same honest trade-off
+// already accepted for the Pro trial, and it beats pretending to gate
+// something with no actual enforcement behind it.
+//
+// Three ways to have access to a quote check, checked in this order:
+//   1. The free first check -- once per browser, ever.
+//   2. An active $9.99 "subscription" window -- 25 quotes within 30 days of
+//      purchase. Framed as a 30-day window, not auto-renewing, since there's
+//      no real recurring charge behind it -- pretending it renews forever
+//      without ever billing again would be actively misleading.
+//   3. Purchased bundle credits (pay-per-use) -- consumed one at a time,
+//      never expire.
+const QC_ACCESS_KEY = "lc_qc_access";
+const QC_SUB_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const QC_SUB_QUOTA = 25;
+
+function loadQcAccess() {
+  try {
+    const raw = window.localStorage.getItem(QC_ACCESS_KEY);
+    if (!raw) return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
+    const parsed = JSON.parse(raw);
+    return {
+      freeUsed: !!parsed.freeUsed,
+      subStart: parsed.subStart || null,
+      subUsed: Number(parsed.subUsed) || 0,
+      bundleCredits: Math.max(0, Number(parsed.bundleCredits) || 0),
+    };
+  } catch (e) {
+    return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
+  }
+}
+function saveQcAccess(a) {
+  try { window.localStorage.setItem(QC_ACCESS_KEY, JSON.stringify(a)); } catch (e) {}
+}
+// Returns whether a quote check is allowed right now, and why -- used both
+// to gate a new analysis and to decide what the paywall should say.
+function getQuoteCheckAccess() {
+  const a = loadQcAccess();
+  if (!a.freeUsed) return { allowed: true, reason: "free" };
+  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
+    return { allowed: true, reason: "subscription", remaining: QC_SUB_QUOTA - a.subUsed };
+  }
+  if (a.bundleCredits > 0) return { allowed: true, reason: "bundle", remaining: a.bundleCredits };
+  return { allowed: false, reason: "none" };
+}
+// Called once a quote check actually succeeds -- consumes whichever credit
+// source was used, in the same priority order as getQuoteCheckAccess above.
+function consumeQuoteCredit() {
+  const a = loadQcAccess();
+  if (!a.freeUsed) { a.freeUsed = true; saveQcAccess(a); return; }
+  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
+    a.subUsed += 1; saveQcAccess(a); return;
+  }
+  if (a.bundleCredits > 0) { a.bundleCredits -= 1; saveQcAccess(a); return; }
+}
+// Grants credit after a simulated purchase. No real payment is processed --
+// see QuotePaywallModal below for the same honest "processing..." stopgap
+// already used by UnlockModal elsewhere in this file.
+function grantBundleCredits(n) {
+  const a = loadQcAccess();
+  a.bundleCredits += n;
+  saveQcAccess(a);
+}
+function activateQcSubscription() {
+  const a = loadQcAccess();
+  a.subStart = Date.now();
+  a.subUsed = 0;
+  saveQcAccess(a);
+}
+
 // ── Anonymous visitor ID — persisted so repeat visits from the same browser
 // count as one unique visitor, not a new one each time. This is LotCheck's
 // real production site running in real browsers, not the Claude sandbox —
@@ -817,7 +891,7 @@ function useListings(){
           .select(`
             id, external_id, name, make, model, year, price, km, fuel,
             province, city, source, dealer, listing_url, image_url,
-            scraped_at, verification_score, is_verified, verified_at
+            scraped_at, verification_score
           `)
           .eq("status", "published")
           .order("scraped_at", {ascending:false})
@@ -832,15 +906,7 @@ function useListings(){
             city: r.city || "Canada",
             source: r.source || "Kijiji",
             dealer: Boolean(r.dealer),
-            is_verified: Boolean(r.is_verified),
           }));
-          // Verified-first sort. Array.prototype.sort is stable, and the
-          // rows arrive already ordered by scraped_at desc — so this floats
-          // paid-verified listings to the top while keeping newest-first
-          // ordering intact inside each group. This ordering is the actual
-          // product dealers pay $35 for, so it lives here (data layer), not
-          // scattered across individual render sites.
-          normalized.sort((a,b)=>(b.is_verified?1:0)-(a.is_verified?1:0));
           setListings(normalized);
           setIsLive(true);
           console.log(`🍁 LotCheck: ${normalized.length} live listings loaded`);
@@ -2031,7 +2097,6 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
     <div style={{padding:"16px"}}>
       <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:8,lineHeight:1.3}}>{listing.name}</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
-        {listing.is_verified&&<span className="badge" style={{background:"rgba(47,167,154,.16)",color:"#3FC2B3",border:"1px solid rgba(47,167,154,.45)"}} title="LotCheck audited this listing: pricing vs. market, fee disclosure, and history report consistency">✓ LotCheck Verified</span>}
         <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         <span className="badge" style={{background:"#1e293b",color:"#64748b"}}>{listing.city}, {listing.province}</span>
         <span className="badge" style={{background:"#1e293b",color:"#94a3b8"}}>
@@ -2180,10 +2245,6 @@ function ListingCard({listing,liveListings,history,onClick,active}){
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
-        {/* Verified renders first — it's the paid trust signal, so it leads
-            the badge row. Teal (#2FA79A family) to match the LotCheck brand
-            mark, distinct from the green score/drop badges. */}
-        {listing.is_verified&&<span className="badge" style={{background:"rgba(47,167,154,.16)",color:"#3FC2B3",border:"1px solid rgba(47,167,154,.45)"}}>✓ Verified</span>}
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
@@ -2471,7 +2532,7 @@ function AdminEmpty({icon,children}){
 }
 
 // ── Dealers tab ────────────────────────────────────────────────────────────
-function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish,onToggleVerificationPaid}){
+function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish}){
   const {C}=useAdminTheme();
   return (
     <div>
@@ -2494,6 +2555,11 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
                 <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.name}</div>
                 <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
                 <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
+                {d.amvic_number&&(
+                  <div style={{fontSize:11,marginTop:4,fontWeight:800,color:d.amvic_verified?C.tealInk:C.butterInk}}>
+                    {d.amvic_verified?"✓":"⚠"} AMVIC {d.amvic_number}{!d.amvic_verified&&" -- unverified"}
+                  </div>
+                )}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
                 <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
@@ -2523,43 +2589,21 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
           {dealerListings.map(v=>{
             const isSold=v.status==="sold", isLive=v.status==="live";
             const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
-            const isVerified=v.verification_status==="verified";
-            const isPaid=!!v.verification_paid;
             return (
               <div key={v.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{v.year} {v.make} {v.model}</div>
                   <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                  {/* Verification pill — three real states, in the palette:
-                      teal = verified (badge is live), butter = fee paid but
-                      audit/publish not done yet, nothing = standard. */}
-                  {isVerified
-                    ? <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>✓ Verified</span>
-                    : isPaid
-                    ? <span style={{background:C.butterBg,color:C.butterInk,border:`1px solid ${C.butter}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>💳 $35 paid</span>
-                    : null}
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{
                     background: isSold?C.paper2:isLive?C.tealBg:C.paper2,
                     color: isSold?C.ink:isLive?C.tealInk:C.inkFaint,
                     border: `1px solid ${isSold?C.line:isLive?C.teal+"55":C.line}`,
                     borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,
                   }}>{isSold?"✓ Sold":isLive?"● Live":"Pending"}</span>
-                  {/* Payment toggle — record the $35 once Stripe confirms it,
-                      or undo a mistaken mark. Hidden once verified+sold since
-                      nothing actionable remains. */}
-                  {!isSold && !isPaid && <button onClick={()=>onToggleVerificationPaid(v)} style={{background:"none",border:`1px solid ${C.butter}`,borderRadius:6,padding:"5px 10px",color:C.butterInk,fontSize:11,cursor:"pointer"}}>Mark $35 Paid</button>}
-                  {!isSold && isPaid && <button onClick={()=>onToggleVerificationPaid(v)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkFaint,fontSize:11,cursor:"pointer"}}>Undo Paid</button>}
                   {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"5px 10px",color:C.tealInk,fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
-                  {/* Two-path publish. Verified is the solid teal action and
-                      only appears once payment is marked — the free path is
-                      always available so unpaid inventory never gets stuck. */}
-                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id,false)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish Standard</button>}
-                  {!isLive && !isSold && isPaid && <button onClick={()=>onPublish(v.id,true)} style={{background:C.teal,border:"none",borderRadius:6,padding:"6px 11px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer"}}>Publish Verified ✓</button>}
-                  {/* Upgrade path: already live as Standard, dealer paid the
-                      $35 afterward — flips the badge on the existing live row. */}
-                  {isLive && !isSold && isPaid && !isVerified && <button onClick={()=>onPublish(v.id,true)} style={{background:C.teal,border:"none",borderRadius:6,padding:"6px 11px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer"}}>Upgrade to Verified ✓</button>}
+                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish</button>}
                 </div>
               </div>
             );
@@ -2784,309 +2828,123 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   );
 }
 
-// ── Deals tab (tax tracker) ─────────────────────────────────────────────────
-function DealsTab({deals, dealsLoading, onAdd, onEdit, onTogglePaid, onDelete}){
+// Real Quote Check pricing tiers -- must stay in sync with QuotePaywallModal's
+// actual prices ($2.99 / $9.99 / $14.99 / $9.99 per month) and with
+// computeCost()'s per-quote cost figure in the edge functions. If either
+// changes, update both places.
+const QC_PRICING_TIERS = [
+  {key:"single", name:"1 check", price:2.99, quotesPerUnit:1},
+  {key:"five", name:"5 checks", price:9.99, quotesPerUnit:5},
+  {key:"ten", name:"10 checks", price:14.99, quotesPerUnit:10},
+  {key:"sub", name:"25 / month", price:9.99, quotesPerUnit:25},
+];
+const QC_COST_PER_QUOTE = 0.0277; // current intro-pricing cost per quote check
+
+function ProfitTrackerTab(){
   const {C}=useAdminTheme();
-  const years = Array.from(new Set(deals.map(d=>new Date(d.closed_at).getFullYear()))).sort((a,b)=>b-a);
-  const currentYear = new Date().getFullYear();
-  const [taxYear,setTaxYear]=useState(years.includes(currentYear)?currentYear:(years[0]||currentYear));
-  const yearOptions = years.includes(currentYear) ? years : [currentYear, ...years];
+  const [period,setPeriod]=useState("month");
 
-  const yearDeals = deals.filter(d=>new Date(d.closed_at).getFullYear()===taxYear);
-  const paidCommission = yearDeals.filter(d=>d.paid).reduce((s,d)=>s+(Number(d.commission)||0),0);
-  const pendingCommission = yearDeals.filter(d=>!d.paid).reduce((s,d)=>s+(Number(d.commission)||0),0);
-  const avgCommission = yearDeals.length ? Math.round(yearDeals.reduce((s,d)=>s+(Number(d.commission)||0),0)/yearDeals.length) : 0;
+  // Sample placeholder counts -- there's no purchase-logging table yet, so
+  // nothing tracks real sales per tier. These exist purely so the layout is
+  // reviewable with realistic-looking numbers; swap this object for a real
+  // query against a purchase-events table once one exists, keyed the same
+  // way (day/week/month/year -> [single,five,ten,sub] counts).
+  const SAMPLE_COUNTS = {
+    day:   [8, 3, 1, 0],
+    week:  [52, 19, 7, 2],
+    month: [210, 76, 28, 9],
+    year:  [1840, 612, 201, 64],
+  };
 
-  const sortedAsc=[...yearDeals].sort((a,b)=>new Date(a.closed_at)-new Date(b.closed_at));
-  let running=0;
-  const cumulative=sortedAsc.map(d=>{
-    running+=Number(d.commission)||0;
-    return { label:new Date(d.closed_at).toLocaleDateString("en-CA",{month:"short",day:"numeric"}), cumulative:running };
+  const round2 = (n) => Math.round(n*100)/100;
+  const fmt = (n) => n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  const counts = SAMPLE_COUNTS[period];
+  // Round each row's USD and CAD figures BEFORE summing for the totals row,
+  // not after -- summing unrounded floats and rounding only the total can
+  // land a cent away from what someone gets manually adding the displayed
+  // rows, in either currency. Verified this stays consistent across all 4
+  // periods and both currencies before shipping this.
+  let totalCount=0, totalRevUsd=0, totalRevCad=0, totalProfitUsd=0, totalProfitCad=0;
+  const rows = QC_PRICING_TIERS.map((tier,i)=>{
+    const count = counts[i];
+    const revenueUsd = round2(tier.price*count);
+    const revenueCad = round2(revenueUsd*USD_TO_CAD);
+    const costUsd = tier.quotesPerUnit*count*QC_COST_PER_QUOTE;
+    const profitUsd = round2(revenueUsd-costUsd);
+    const profitCad = round2(profitUsd*USD_TO_CAD);
+    totalCount+=count; totalRevUsd+=revenueUsd; totalRevCad+=revenueCad;
+    totalProfitUsd+=profitUsd; totalProfitCad+=profitCad;
+    return {...tier,count,revenueUsd,revenueCad,profitUsd,profitCad};
   });
 
-  function exportCSV(){
-    const rows=[["Date closed","Dealer","Vehicle","Sale price","Plan","Commission","Paid","Paid date","Reference"]];
-    yearDeals.forEach(d=>{
-      rows.push([
-        d.closed_at, d.dealer, `${d.year||""} ${d.make||""} ${d.model||""}`.trim(),
-        d.price??"", d.plan||"", d.commission||0, d.paid?"Yes":"No", d.paid_date||"", d.id,
-      ]);
-    });
-    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");
-    a.href=url; a.download=`lotcheck-deals-${taxYear}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-  }
+  const th={textAlign:"right",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"8px 10px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4};
+  const td={textAlign:"right",padding:"12px 10px",borderBottom:`1px solid ${C.line}`};
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>TAX YEAR</div>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>QUOTE CHECK PROFIT</div>
+      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.coralInk,fontWeight:700,marginBottom:16,lineHeight:1.5}}>
+        ⚠ "Checks sold" below are sample placeholders, not real data -- there's no purchase-logging table yet, so nothing tracks actual sales per tier today. The pricing and profit math itself is real and will be correct the moment real counts flow in.
+      </div>
+
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:16,marginBottom:20}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Checks sold & profit</div>
           <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
-            {yearOptions.map(y=>(
-              <button key={y} onClick={()=>setTaxYear(y)}
-                style={{background:taxYear===y?C.tealBg:"transparent",color:taxYear===y?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace"}}>
-                {y}
+            {[["day","Day"],["week","Week"],["month","Month"],["year","Year"]].map(([key,label])=>(
+              <button key={key} onClick={()=>setPeriod(key)}
+                style={{background:period===key?C.tealBg:"transparent",color:period===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                {label}
               </button>
             ))}
           </div>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={exportCSV} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer"}}>⬇ Export CSV</button>
-          <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Deal</button>
-        </div>
-      </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.tealInk,fontFamily:"'JetBrains Mono',monospace"}}>${paidCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Paid commission, {taxYear}</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.butterInk,fontFamily:"'JetBrains Mono',monospace"}}>${pendingCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Owed, not yet paid</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>{yearDeals.length}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Deals closed</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${avgCommission.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Avg. commission / deal</div>
-        </div>
-      </div>
+        <table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead>
+            <tr>
+              <th style={{...th,textAlign:"left"}}>TIER</th>
+              <th style={th}>CHECKS SOLD</th>
+              <th style={th}>REVENUE</th>
+              <th style={th}>PROFIT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r=>(
+              <tr key={r.key}>
+                <td style={{padding:"12px 10px",borderBottom:`1px solid ${C.line}`}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.ink}}>{r.name}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${r.price.toFixed(2)} each</div>
+                </td>
+                <td style={{...td,fontFamily:"monospace",fontSize:14,fontWeight:700,color:C.ink}}>{r.count.toLocaleString()}</td>
+                <td style={td}>
+                  <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.ink}}>${fmt(r.revenueUsd)}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(r.revenueCad)} CAD</div>
+                </td>
+                <td style={td}>
+                  <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.tealInk}}>${fmt(r.profitUsd)}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(r.profitCad)} CAD</div>
+                </td>
+              </tr>
+            ))}
+            <tr style={{background:C.paper2}}>
+              <td style={{padding:"12px 10px",fontWeight:800,color:C.butterInk,fontSize:13}}>Total</td>
+              <td style={{textAlign:"right",padding:"12px 10px",fontFamily:"monospace",fontSize:14,fontWeight:800,color:C.ink}}>{totalCount.toLocaleString()}</td>
+              <td style={{textAlign:"right",padding:"12px 10px"}}>
+                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.ink}}>${fmt(totalRevUsd)}</div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(totalRevCad)} CAD</div>
+              </td>
+              <td style={{textAlign:"right",padding:"12px 10px"}}>
+                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.tealInk}}>${fmt(totalProfitUsd)}</div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(totalProfitCad)} CAD</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-      {yearDeals.length>0 && (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Cumulative commission — {taxYear}</div>
-          <div style={{height:180}}>
-            <ResponsiveContainer>
-              <LineChart data={cumulative} margin={{top:4,right:4,bottom:0,left:0}}>
-                <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v}`}/>
-                <Tooltip formatter={(v)=>[`$${Number(v).toLocaleString()}`,"Cumulative"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
-                <Line type="monotone" dataKey="cumulative" stroke={C.teal} strokeWidth={2.5} dot={{r:3,fill:C.teal}}/>
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-        DEALS · {dealsLoading?"loading…":`${yearDeals.length} in ${taxYear}`}
-      </div>
-      {dealsLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
-      ) : yearDeals.length===0 ? (
-        <AdminEmpty icon="📈">No deals logged for {taxYear} yet — they'll appear here automatically when you mark a dealer submission sold, or add one manually.</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-          {[...yearDeals].sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at)).map(d=>(
-            <div key={d.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-              <div>
-                <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.year} {d.make} {d.model}{d.trim?` ${d.trim}`:""}</div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.dealer} · ${(d.price||0).toLocaleString()} · {new Date(d.closed_at).toLocaleDateString("en-CA")}{d.source==="dealer_listing"?" · auto-logged":""}</div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.tealInk,fontSize:15}}>${(d.commission||0).toLocaleString()}</div>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!d.paid} onChange={e=>onTogglePaid(d.id,e.target.checked)}/> Paid
-                </label>
-                <button onClick={()=>onEdit(d)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(d.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Operating costs tab ─────────────────────────────────────────────────────
-function CostsTab({costs, costsLoading, onAdd, onEdit, onToggleActive, onDelete}){
-  const {C}=useAdminTheme();
-  const active=costs.filter(c=>c.active);
-  const monthlyBurn=active.reduce((s,c)=>{
-    const cad = c.currency==="USD" ? c.amount*USD_TO_CAD : Number(c.amount);
-    if(c.cycle==="monthly") return s+cad;
-    if(c.cycle==="annual") return s+cad/12;
-    return s; // one_time doesn't count toward recurring burn
-  },0);
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
-          OPERATING COSTS · {costsLoading?"loading…":`${active.length} active`}
-        </div>
-        <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Cost</button>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:12}}>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${monthlyBurn.toFixed(2)}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Monthly burn (CAD, recurring)</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:22,fontWeight:800,color:C.ink,fontFamily:"'JetBrains Mono',monospace"}}>${(monthlyBurn*12).toFixed(2)}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Est. annual (CAD, for taxes)</div>
-        </div>
-      </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:14}}>USD costs converted at the same fixed 1 USD = {USD_TO_CAD} CAD rate used on the Revenue tab, not a live rate.</div>
-
-      {costsLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
-      ) : costs.length===0 ? (
-        <AdminEmpty icon="🧾">No costs logged yet — run deals_and_costs_migration.sql, then add your first one.</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-          {costs.map(c=>(
-            <div key={c.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,opacity:c.active?1:0.5}}>
-              <div>
-                <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{c.vendor}</div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{c.category||"—"} · {c.cycle}{c.started_on?` · since ${new Date(c.started_on).toLocaleDateString("en-CA")}`:""}</div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-                <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:C.ink,fontSize:15}}>{c.currency==="USD"?"US$":"$"}{Number(c.amount).toFixed(2)}</div>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
-                  <input type="checkbox" checked={!!c.active} onChange={e=>onToggleActive(c.id,e.target.checked)}/> Active
-                </label>
-                <button onClick={()=>onEdit(c)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(c.id,c.vendor)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DealModal({deal,onSave,onClose}){
-  const [form,setForm]=useState(deal||{
-    dealer:"",year:"",make:"",model:"",trim:"",price:"",
-    plan:"commission",commission:"",paid:false,paid_date:"",
-    closed_at:new Date().toISOString().slice(0,10),notes:"",source:"manual",
-  });
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const {C}=useAdminTheme();
-  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-        <div style={{fontSize:18,fontWeight:800,marginBottom:18,color:C.ink}}>{deal?"Edit Deal":"Add Deal"}</div>
-        <label style={labelStyle}>Dealer *</label>
-        <input style={inputStyle} value={form.dealer} onChange={e=>set("dealer",e.target.value)} placeholder="Cochrane Toyota"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Year</label>
-            <input style={inputStyle} value={form.year} onChange={e=>set("year",e.target.value)} placeholder="2026"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Make / Model</label>
-            <div style={{display:"flex",gap:6}}>
-              <input style={inputStyle} value={form.make} onChange={e=>set("make",e.target.value)} placeholder="Toyota"/>
-              <input style={inputStyle} value={form.model} onChange={e=>set("model",e.target.value)} placeholder="RAV4"/>
-            </div>
-          </div>
-        </div>
-        <label style={labelStyle}>Trim</label>
-        <input style={inputStyle} value={form.trim} onChange={e=>set("trim",e.target.value)} placeholder="XLE HEV"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Sale price</label>
-            <input style={inputStyle} type="number" value={form.price} onChange={e=>set("price",e.target.value)} placeholder="46200"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Plan</label>
-            <select style={inputStyle} value={form.plan} onChange={e=>set("plan",e.target.value)}>
-              <option value="commission">1% commission</option>
-              <option value="lead">$100/lead</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-        </div>
-        <label style={labelStyle}>Commission ($) *</label>
-        <input style={inputStyle} type="number" value={form.commission} onChange={e=>set("commission",e.target.value)} placeholder="462"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Date closed</label>
-            <input style={inputStyle} type="date" value={form.closed_at} onChange={e=>set("closed_at",e.target.value)}/>
-          </div>
-          <div>
-            <label style={labelStyle}>Paid date</label>
-            <input style={inputStyle} type="date" value={form.paid_date||""} onChange={e=>set("paid_date",e.target.value)} disabled={!form.paid}/>
-          </div>
-        </div>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer",marginBottom:16}}>
-          <input type="checkbox" checked={!!form.paid} onChange={e=>set("paid",e.target.checked)}/> Commission paid
-        </label>
-        <label style={labelStyle}>Notes</label>
-        <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,background:"none",border:`1px solid ${C.line}`,borderRadius:10,padding:11,color:C.inkSoft,fontSize:14,cursor:"pointer"}}>Cancel</button>
-          <button onClick={()=>{ if(!form.dealer.trim()||form.commission===""){alert("Dealer and commission are required");return;} onSave(form); }}
-            style={{flex:1,background:C.teal,border:"none",borderRadius:10,padding:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Save Deal →</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CostModal({cost,onSave,onClose}){
-  const [form,setForm]=useState(cost||{vendor:"",category:"",amount:"",currency:"CAD",cycle:"monthly",active:true,started_on:"",notes:""});
-  const set=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const {C}=useAdminTheme();
-  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:28,width:"100%",maxWidth:440,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
-        <div style={{fontSize:18,fontWeight:800,marginBottom:18,color:C.ink}}>{cost?"Edit Cost":"Add Cost"}</div>
-        <label style={labelStyle}>Vendor *</label>
-        <input style={inputStyle} value={form.vendor} onChange={e=>set("vendor",e.target.value)} placeholder="Nimble"/>
-        <label style={labelStyle}>Category</label>
-        <input style={inputStyle} value={form.category} onChange={e=>set("category",e.target.value)} placeholder="Data / web extraction"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-          <div>
-            <label style={labelStyle}>Amount</label>
-            <input style={inputStyle} type="number" step="0.01" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="29.00"/>
-          </div>
-          <div>
-            <label style={labelStyle}>Currency</label>
-            <select style={inputStyle} value={form.currency} onChange={e=>set("currency",e.target.value)}>
-              <option value="CAD">CAD</option>
-              <option value="USD">USD</option>
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Cycle</label>
-            <select style={inputStyle} value={form.cycle} onChange={e=>set("cycle",e.target.value)}>
-              <option value="monthly">Monthly</option>
-              <option value="annual">Annual</option>
-              <option value="one_time">One-time</option>
-            </select>
-          </div>
-        </div>
-        <label style={labelStyle}>Active since</label>
-        <input style={inputStyle} type="date" value={form.started_on||""} onChange={e=>set("started_on",e.target.value)}/>
-        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer",marginBottom:16}}>
-          <input type="checkbox" checked={!!form.active} onChange={e=>set("active",e.target.checked)}/> Active subscription
-        </label>
-        <label style={labelStyle}>Notes</label>
-        <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Optional"/>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,background:"none",border:`1px solid ${C.line}`,borderRadius:10,padding:11,color:C.inkSoft,fontSize:14,cursor:"pointer"}}>Cancel</button>
-          <button onClick={()=>{ if(!form.vendor.trim()){alert("Vendor is required");return;} onSave(form); }}
-            style={{flex:1,background:C.teal,border:"none",borderRadius:10,padding:11,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Save Cost →</button>
+        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.6}}>
+          Profit basis: ${QC_COST_PER_QUOTE} USD cost per quote check (current intro API pricing) × checks actually delivered per tier -- e.g. a "5 checks" bundle costs 5× that per unit sold. CAD figures use the same fixed {USD_TO_CAD} snapshot rate already used above in Cost over time, not a live rate.
         </div>
       </div>
     </div>
@@ -3094,11 +2952,20 @@ function CostModal({cost,onSave,onClose}){
 }
 
 function DealerModal({dealer,onSave,onClose}){
-  const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false});
+  const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false,amvic_number:"",amvic_verified:false,amvic_verified_at:null});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const {C}=useAdminTheme();
   const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
   const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
+
+  // Format sanity-check only -- confirmed from 2 real AMVIC business
+  // licence numbers found in an actual public AMVIC document (e.g.
+  // "B1022490": a "B" followed by 7 digits). Not a hard validation gate,
+  // since 2 examples isn't enough to be confident this covers every
+  // licence class AMVIC issues -- an unexpected format shouldn't block
+  // saving, just prompt a second look.
+  const amvicTrimmed=(form.amvic_number||"").trim();
+  const amvicFormatLooksRight=amvicTrimmed==="" || /^B\d{7}$/i.test(amvicTrimmed);
 
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(51,48,90,.45)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -3126,6 +2993,38 @@ function DealerModal({dealer,onSave,onClose}){
         </div>
         <label style={labelStyle}>Makes (comma separated)</label>
         <input style={inputStyle} value={form.makes} onChange={e=>set("makes",e.target.value)} placeholder="Toyota, Lexus"/>
+
+        <div style={{background:C.paper,border:`1.5px solid ${C.line}`,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+          <label style={labelStyle}>AMVIC business licence number</label>
+          <input
+            style={{...inputStyle,marginBottom:6,borderColor:amvicTrimmed&&!amvicFormatLooksRight?C.coral:C.line}}
+            value={form.amvic_number}
+            onChange={e=>set("amvic_number",e.target.value.toUpperCase())}
+            placeholder="B1022490"
+          />
+          {amvicTrimmed&&!amvicFormatLooksRight&&(
+            <div style={{fontSize:11,color:C.coralInk,marginBottom:8,lineHeight:1.4}}>
+              Doesn't match the usual AMVIC format (a "B" followed by 7 digits) -- that's only based on 2 confirmed real examples though, so this isn't a hard block. Worth a second look before saving.
+            </div>
+          )}
+          <div style={{fontSize:11,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+            AMVIC has no public API to auto-verify this against -- a correctly formatted number isn't proof of an active licence. Check it yourself:
+          </div>
+          <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noreferrer"
+            style={{fontSize:12,fontWeight:800,color:C.tealInk,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5,marginBottom:12}}>
+            Verify on AMVIC's public search →
+          </a>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!form.amvic_verified} onChange={e=>set("amvic_verified",e.target.checked)}/>
+            I checked AMVIC's public search and confirmed this licence is active
+          </label>
+          {form.amvic_verified&&form.amvic_verified_at&&(
+            <div style={{fontSize:11,color:C.tealInk,marginTop:6}}>
+              ✓ Verified {new Date(form.amvic_verified_at).toLocaleDateString("en-CA")}
+            </div>
+          )}
+        </div>
+
         <label style={labelStyle}>Notes</label>
         <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Met at Costco"/>
         <div style={{display:"flex",gap:16,marginBottom:16,marginTop:6}}>
@@ -3268,14 +3167,6 @@ function AdminPanel(){
   const [dealerListings,setDealerListings]=useState([]);
   const [dealerListingsLoading,setDealerListingsLoading]=useState(true);
 
-  const [deals,setDeals]=useState([]);
-  const [dealsLoading,setDealsLoading]=useState(true);
-  const [dealModal,setDealModal]=useState(null); // null | "new" | deal object
-
-  const [costs,setCosts]=useState([]);
-  const [costsLoading,setCostsLoading]=useState(true);
-  const [costModal,setCostModal]=useState(null); // null | "new" | cost object
-
   const [reviewListings,setReviewListings]=useState([]);
   const [rejectedListings,setRejectedListings]=useState([]);
   const [reviewLoading,setReviewLoading]=useState(true);
@@ -3361,36 +3252,6 @@ function AdminPanel(){
   }
   useEffect(()=>{ if(session) fetchDealerListings(); else setDealerListings([]); },[session]);
 
-  async function fetchDeals(){
-    setDealsLoading(true);
-    try{
-      const {data,error}=await supabase.from("deals").select("*").order("closed_at",{ascending:false});
-      if(error) throw error;
-      setDeals(data||[]);
-    }catch(err){
-      console.warn("⚠️ deals fetch failed (did you run deals_and_costs_migration.sql?):",err.message);
-      setDeals([]);
-    }finally{
-      setDealsLoading(false);
-    }
-  }
-  useEffect(()=>{ if(session) fetchDeals(); else setDeals([]); },[session]);
-
-  async function fetchCosts(){
-    setCostsLoading(true);
-    try{
-      const {data,error}=await supabase.from("operating_costs").select("*").order("vendor",{ascending:true});
-      if(error) throw error;
-      setCosts(data||[]);
-    }catch(err){
-      console.warn("⚠️ operating_costs fetch failed (did you run deals_and_costs_migration.sql?):",err.message);
-      setCosts([]);
-    }finally{
-      setCostsLoading(false);
-    }
-  }
-  useEffect(()=>{ if(session) fetchCosts(); else setCosts([]); },[session]);
-
   async function fetchReview(){
     setReviewLoading(true);
     try{
@@ -3424,6 +3285,9 @@ function AdminPanel(){
       email:form.email?.trim()||null, city:form.city?.trim()||null, province:form.province||null,
       makes:form.makes?.trim()||null, notes:form.notes?.trim()||null,
       live:!!form.live, featured:!!form.featured,
+      amvic_number:form.amvic_number?.trim()||null,
+      amvic_verified:!!form.amvic_verified,
+      amvic_verified_at:form.amvic_verified?(form.amvic_verified_at||new Date().toISOString()):null,
     };
     if(form.id){
       const {error}=await supabase.from("dealers").update(payload).eq("id",form.id);
@@ -3449,74 +3313,6 @@ function AdminPanel(){
     fetchDealers();
   }
 
-  async function saveDeal(form){
-    const payload={
-      source: form.source||"manual",
-      dealer: form.dealer.trim(),
-      year: form.year?Number(form.year):null, make: form.make?.trim()||null, model: form.model?.trim()||null, trim: form.trim?.trim()||null,
-      price: form.price?Number(form.price):null,
-      plan: form.plan||null,
-      commission: Number(form.commission)||0,
-      paid: !!form.paid,
-      paid_date: form.paid_date||null,
-      closed_at: form.closed_at||new Date().toISOString().slice(0,10),
-      notes: form.notes?.trim()||null,
-    };
-    if(form.id){
-      const {error}=await supabase.from("deals").update(payload).eq("id",form.id);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }else{
-      const {error}=await supabase.from("deals").insert(payload);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }
-    setDealModal(null);
-    fetchDeals();
-  }
-
-  async function toggleDealPaid(id,paid){
-    setDeals(prev=>prev.map(d=>d.id===id?{...d,paid,paid_date:paid?new Date().toISOString().slice(0,10):null}:d));
-    const {error}=await supabase.from("deals").update({paid,paid_date:paid?new Date().toISOString().slice(0,10):null}).eq("id",id);
-    if(error){ alert("Couldn't update: "+error.message); fetchDeals(); }
-  }
-
-  async function deleteDeal(id){
-    if(!confirm("Delete this deal record? This can't be undone.")) return;
-    const {error}=await supabase.from("deals").delete().eq("id",id);
-    if(error){ alert("Couldn't delete: "+error.message); return; }
-    fetchDeals();
-  }
-
-  async function saveCost(form){
-    const payload={
-      vendor: form.vendor.trim(), category: form.category?.trim()||null,
-      amount: Number(form.amount)||0, currency: form.currency||"CAD", cycle: form.cycle||"monthly",
-      active: !!form.active, started_on: form.started_on||null, cancelled_on: form.cancelled_on||null,
-      notes: form.notes?.trim()||null,
-    };
-    if(form.id){
-      const {error}=await supabase.from("operating_costs").update(payload).eq("id",form.id);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }else{
-      const {error}=await supabase.from("operating_costs").insert(payload);
-      if(error){ alert("Couldn't save: "+error.message); return; }
-    }
-    setCostModal(null);
-    fetchCosts();
-  }
-
-  async function toggleCostActive(id,active){
-    setCosts(prev=>prev.map(c=>c.id===id?{...c,active}:c));
-    const {error}=await supabase.from("operating_costs").update({active}).eq("id",id);
-    if(error){ alert("Couldn't update: "+error.message); fetchCosts(); }
-  }
-
-  async function deleteCost(id,vendor){
-    if(!confirm(`Delete ${vendor}?`)) return;
-    const {error}=await supabase.from("operating_costs").delete().eq("id",id);
-    if(error){ alert("Couldn't delete: "+error.message); return; }
-    fetchCosts();
-  }
-
   async function markSold(v){
     const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
     if(!confirm(`Mark ${v.year} ${v.make} ${v.model} from ${v.dealer} as SOLD?\n\nCommission due: $${commission.toLocaleString()}`)) return;
@@ -3532,47 +3328,18 @@ function AdminPanel(){
       await supabase.from("dealers").update({sold_count:(dealers[dealerIdx].sold_count||0)+1}).eq("id",dealers[dealerIdx].id);
       fetchDealers();
     }
-    // Log the commission into the deals ledger -- this is the one place a
-    // sale's commission gets permanently recorded for tax filing. Before
-    // this, the number above only ever appeared in the confirm() dialog
-    // and was lost the moment it closed.
-    const {error:dealError}=await supabase.from("deals").insert({
-      source:"dealer_listing", dealer_listing_id:v.id,
-      dealer:v.dealer, year:v.year, make:v.make, model:v.model, trim:v.trim||null,
-      price:v.price, plan:v.plan||"lead", commission,
-      closed_at:new Date().toISOString().slice(0,10),
-    });
-    if(dealError) console.warn("⚠️ Couldn't log this sale to the deals tracker:",dealError.message);
-    fetchDeals();
     fetchDealerListings();
   }
 
-  // Two-path publish: Standard (free) or Verified ($35, badge + top sort).
-  // The link between the two tables is external_id = `dealer-${id}` — same
-  // convention markSold() already relies on, so no new linking column needed.
-  async function publishDealerListing(id, verified=false){
+  async function publishDealerListing(id){
     const v = dealerListings.find(d=>d.id===id);
     if(!v){ alert("Couldn't find that listing to publish."); return; }
-
-    // The Verified button is hidden until payment is marked, but this guard
-    // means a stale UI (another tab, old data) can never publish an unpaid
-    // badge. Payment is a hard precondition, not a UI convention — the badge
-    // is the paid product.
-    if(verified && !v.verification_paid){
-      alert("This listing hasn't been marked as paid for verification yet.\n\nUse \u201CMark $35 Paid\u201D first (after the Stripe payment actually lands).");
-      return;
-    }
-    // The badge is only worth what's behind it — this confirm is the
-    // reminder that publishing Verified asserts the audit really happened.
-    if(verified && !confirm(`Publish ${v.year} ${v.make} ${v.model} as VERIFIED?\n\nOnly confirm after completing the audit:\n• Pricing checked against market comps\n• All fees disclosed upfront\n• History report consistent with condition/km`)) return;
-
     const externalId = `dealer-${id}`;
-    const nowIso = new Date().toISOString();
 
     // Guard against double-publish creating a duplicate row on the live site.
     // Doesn't rely on a unique constraint on listings.external_id since that
     // hasn't been confirmed to exist -- checks first instead.
-    const {data:existing}=await supabase.from("listings").select("id,is_verified").eq("external_id",externalId).limit(1);
+    const {data:existing}=await supabase.from("listings").select("id").eq("external_id",externalId).limit(1);
     if(!existing||existing.length===0){
       const {error:insertError}=await supabase.from("listings").insert({
         external_id: externalId,
@@ -3587,44 +3354,12 @@ function AdminPanel(){
         // NOT copying dealer_listings' "live" -- listings uses a different
         // vocabulary and useListings() only shows status="published".
         status: "published",
-        is_verified: verified,
-        verified_at: verified?nowIso:null,
       });
       if(insertError){ alert("Couldn't publish to the live site: "+insertError.message); return; }
-    } else if(verified && !existing[0].is_verified){
-      // Upgrade path: listing already live as Standard, dealer paid the $35
-      // afterward. Flip the badge on the existing row instead of inserting.
-      const {error:upErr}=await supabase.from("listings").update({is_verified:true,verified_at:nowIso}).eq("external_id",externalId);
-      if(upErr){ alert("Couldn't upgrade the live listing to Verified: "+upErr.message); return; }
     }
 
-    const dlUpdate={status:"live",published_at:nowIso};
-    if(verified) dlUpdate.verification_status="verified";
-    const {error}=await supabase.from("dealer_listings").update(dlUpdate).eq("id",id);
+    const {error}=await supabase.from("dealer_listings").update({status:"live",published_at:new Date().toISOString()}).eq("id",id);
     if(error){ alert("Published to the live site, but couldn't update dealer_listings' own status: "+error.message); return; }
-    fetchDealerListings();
-  }
-
-  // Manual payment flag — mirrors the Stripe Payment Link flow: you send the
-  // dealer the $35 link, the payment notification lands in Stripe, and you
-  // record it here. Deliberately manual for now (same philosophy as the
-  // Revenue tab's subscriber count): no billing webhook exists yet, so this
-  // is honestly a hand-recorded fact, not fake automation.
-  async function toggleVerificationPaid(v){
-    const nowPaid = !v.verification_paid;
-    if(!nowPaid && v.verification_status==="verified"){
-      // Un-paying an already-published Verified listing must also pull the
-      // badge off the live site — a badge with no payment behind it is
-      // exactly the kind of integrity gap LotCheck exists to prevent.
-      if(!confirm("This listing is already LIVE with a Verified badge.\n\nUndoing the payment will also remove the badge from lotcheck.ca. Continue?")) return;
-      const {error:badgeErr}=await supabase.from("listings").update({is_verified:false,verified_at:null}).eq("external_id",`dealer-${v.id}`);
-      if(badgeErr){ alert("Couldn't remove the badge from the live site: "+badgeErr.message); return; }
-    }
-    const update = nowPaid
-      ? {verification_paid:true, verification_paid_at:new Date().toISOString(), verification_status:"paid"}
-      : {verification_paid:false, verification_paid_at:null, verification_status:"none"};
-    const {error}=await supabase.from("dealer_listings").update(update).eq("id",v.id);
-    if(error){ alert("Couldn't update: "+error.message); return; }
     fetchDealerListings();
   }
 
@@ -3696,20 +3431,6 @@ function AdminPanel(){
           onClose={()=>setDealerModal(null)}
         />
       )}
-      {dealModal && (
-        <DealModal
-          deal={dealModal==="new"?null:dealModal}
-          onSave={saveDeal}
-          onClose={()=>setDealModal(null)}
-        />
-      )}
-      {costModal && (
-        <CostModal
-          cost={costModal==="new"?null:costModal}
-          onSave={saveCost}
-          onClose={()=>setCostModal(null)}
-        />
-      )}
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,maxWidth:1100,margin:"0 auto 20px",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -3720,9 +3441,8 @@ function AdminPanel(){
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
           <AdminTabButton active={tab==="dealers"} onClick={()=>setTab("dealers")}>Dealers</AdminTabButton>
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
-          <AdminTabButton active={tab==="deals"} onClick={()=>setTab("deals")}>Deals</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
-          <AdminTabButton active={tab==="costs"} onClick={()=>setTab("costs")}>Costs</AdminTabButton>
+          <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -3955,7 +3675,6 @@ function AdminPanel(){
             onToggle={toggleDealerField} onDelete={deleteDealer}
             dealerListings={dealerListings} dealerListingsLoading={dealerListingsLoading}
             onMarkSold={markSold} onPublish={publishDealerListing}
-            onToggleVerificationPaid={toggleVerificationPaid}
           />
         )}
 
@@ -3967,23 +3686,8 @@ function AdminPanel(){
           />
         )}
 
-        {tab==="deals" && (
-          <DealsTab
-            deals={deals} dealsLoading={dealsLoading}
-            onAdd={()=>setDealModal("new")} onEdit={d=>setDealModal(d)}
-            onTogglePaid={toggleDealPaid} onDelete={deleteDeal}
-          />
-        )}
-
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
-
-        {tab==="costs" && (
-          <CostsTab
-            costs={costs} costsLoading={costsLoading}
-            onAdd={()=>setCostModal("new")} onEdit={c=>setCostModal(c)}
-            onToggleActive={toggleCostActive} onDelete={deleteCost}
-          />
-        )}
+        {tab==="profit" && <ProfitTrackerTab/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
@@ -4034,6 +3738,106 @@ function IsoScanVisual({C, speed="idle"}){
   );
 }
 
+// ── Quote Check paywall -- shown once the free first check is used up.
+// Pay-per-use bundles are the default/recommended path (matches how people
+// actually shop for a car: a short, intense burst of checks around one
+// purchase, not an ongoing habit) -- the $9.99/mo option is offered as an
+// alternative for the smaller set of people who genuinely expect to check
+// many quotes over time (family helping multiple relatives shop, etc.),
+// not the default.
+//
+// No real payment is processed -- same honest "simulated processing" stopgap
+// already used by UnlockModal elsewhere in this file. Real Stripe
+// integration is a separate task; this is the UI + local credit-tracking
+// layer that a real checkout would plug into later.
+function QuotePaywallModal({C, onClose, onPurchased}){
+  const [step,setStep]=useState("choose"); // choose | processing | done
+  const [purchased,setPurchased]=useState(null); // {label, detail}
+
+  async function buy(kind, credits, label, detail){
+    setStep("processing");
+    await new Promise(r=>setTimeout(r,1200));
+    if(kind==="bundle") grantBundleCredits(credits);
+    else activateQcSubscription();
+    setPurchased({label, detail});
+    setStep("done");
+  }
+
+  const cardStyle={
+    background:C.card,border:`1.5px solid ${C.line}`,borderRadius:18,
+    padding:"16px 18px",marginBottom:12,
+  };
+  const priceBtn={
+    width:"100%",background:C.ink,border:"none",borderRadius:12,padding:"12px 0",
+    color:C.paper,fontWeight:1000,fontSize:14,cursor:"pointer",
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:C.paper,borderRadius:22,padding:24,width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box"}}>
+        {step==="done"?(
+          <div style={{textAlign:"center",padding:"12px 0"}}>
+            <div style={{fontSize:44,marginBottom:10}}>✓</div>
+            <div style={{fontSize:17,fontWeight:1000,color:C.ink,marginBottom:6}}>{purchased?.label}</div>
+            <div style={{fontSize:13,color:C.inkFaint,marginBottom:20}}>{purchased?.detail}</div>
+            <button onClick={()=>onPurchased()} style={priceBtn}>Continue to your check →</button>
+          </div>
+        ):step==="processing"?(
+          <div style={{textAlign:"center",padding:"32px 0"}}>
+            <IsoScanVisual C={C} speed="active"/>
+            <div style={{color:C.ink,fontWeight:1000,marginTop:4}}>Processing…</div>
+          </div>
+        ):(
+          <>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+              <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>You've used your free check</div>
+              <button onClick={onClose} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+            </div>
+            <div style={{fontSize:13,color:C.inkSoft,marginBottom:18,lineHeight:1.5}}>Pick whichever fits how you're shopping -- most people checking one or two quotes want pay-per-check, not a subscription.</div>
+
+            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`}}>
+              <div style={{fontSize:11,fontWeight:1000,color:C.tealInk,letterSpacing:0.5,marginBottom:4}}>RECOMMENDED · PAY PER CHECK</div>
+              <div style={{fontSize:12,color:C.inkSoft,marginBottom:14}}>No commitment -- credits never expire.</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                <button onClick={()=>buy("bundle",1,"1 check unlocked","Good for a single dealer quote.")} style={{...priceBtn,background:C.card,color:C.ink,border:`2px solid ${C.line}`}}>
+                  <div style={{fontSize:15,fontWeight:1000}}>$2.99</div>
+                  <div style={{fontSize:10,fontWeight:700,color:C.inkFaint}}>1 check</div>
+                </button>
+                <button onClick={()=>buy("bundle",5,"5 checks unlocked","Good for comparing several dealers.")} style={priceBtn}>
+                  <div style={{fontSize:15,fontWeight:1000}}>$9.99</div>
+                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>5 checks</div>
+                </button>
+                <button onClick={()=>buy("bundle",10,"10 checks unlocked","Plenty for a full shopping round.")} style={{...priceBtn,background:C.coral,color:"#3a1409"}}>
+                  <div style={{fontSize:15,fontWeight:1000}}>$14.99</div>
+                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>10 checks</div>
+                </button>
+              </div>
+            </div>
+
+            <div style={{display:"flex",alignItems:"center",gap:12,margin:"16px 0"}}>
+              <div style={{flex:1,height:1,background:C.line}}/>
+              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
+              <div style={{flex:1,height:1,background:C.line}}/>
+            </div>
+
+            <div style={cardStyle}>
+              <div style={{fontSize:11,fontWeight:1000,color:C.inkFaint,letterSpacing:0.5,marginBottom:4}}>SUBSCRIBE</div>
+              <div style={{fontSize:12,color:C.inkSoft,marginBottom:12,lineHeight:1.5}}>Shopping for a while, or checking quotes for family? {QC_SUB_QUOTA} checks over 30 days.</div>
+              <button onClick={()=>buy("sub",0,"Subscription active",`${QC_SUB_QUOTA} checks available for the next 30 days.`)} style={{...priceBtn,background:"transparent",color:C.ink,border:`2px solid ${C.ink}`}}>
+                $9.99 -- {QC_SUB_QUOTA} checks / 30 days
+              </button>
+            </div>
+
+            <div style={{fontSize:10,color:C.inkFaint,marginTop:14,lineHeight:1.5,textAlign:"center"}}>
+              Preview pricing -- no real payment is processed yet. This tracks locally to this browser, not a real account.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
@@ -4055,6 +3859,26 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
   const fileInputRef=useRef(null);
+  // Paywall state -- pendingAction holds whatever the user was trying to do
+  // (upload a file, or analyze a URL) when the gate blocked them, so it can
+  // resume automatically once they've unlocked access, rather than making
+  // them re-select their file or retype the URL after "paying."
+  const [showPaywall,setShowPaywall]=useState(false);
+  const [pendingAction,setPendingAction]=useState(null); // {type:"file",file} | {type:"url",url}
+  // True only for the single attempt that runs immediately after a
+  // purchase. If THAT attempt fails, the person just paid and hit the same
+  // wall they paid to get past -- that's a materially different, worse
+  // moment than an ordinary failed attempt, and needs to say so explicitly
+  // (their credit is untouched -- see consumeQuoteCredit, only called on
+  // real success) and hand them a fallback that doesn't depend on the same
+  // thing that just failed.
+  const [justPurchased,setJustPurchased]=useState(false);
+  // Which method the most recent attempt actually used -- set the moment an
+  // attempt starts, regardless of whether it succeeds, so an error state
+  // always knows precisely what to suggest instead (a failed URL attempt
+  // should point at upload, since that doesn't depend on a third-party site
+  // being scrapable at all -- a failed upload needs different guidance).
+  const [lastAttemptType,setLastAttemptType]=useState(null); // "file" | "url"
 
   // Email-a-copy state -- separate from the main analyze flow so a failed
   // email send never wipes out the report the person can already see on
@@ -4173,7 +3997,13 @@ function QuoteCheckPage(){
       setErrorMsg(`That file is a bit large (${(file.size/1024/1024).toFixed(1)}MB) — please try a photo under ${MAX_FILE_SIZE_MB}MB. A single clear photo of the quote works better than a scan of every page.`);
       return;
     }
+    if(!getQuoteCheckAccess().allowed){
+      setPendingAction({type:"file",file});
+      setShowPaywall(true);
+      return;
+    }
     setFileName(file.name);
+    setLastAttemptType("file");
     setStatus("analyzing");
     setErrorMsg("");
 
@@ -4218,6 +4048,8 @@ function QuoteCheckPage(){
       }
       setAnalysis(data.analysis);
       setAnalysisSource("quote");
+      consumeQuoteCredit();
+      setJustPurchased(false);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4236,7 +4068,13 @@ function QuoteCheckPage(){
       setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
       return;
     }
+    if(!getQuoteCheckAccess().allowed){
+      setPendingAction({type:"url",url});
+      setShowPaywall(true);
+      return;
+    }
     setFileName(new URL(url).hostname);
+    setLastAttemptType("url");
     setStatus("analyzing");
     setErrorMsg("");
 
@@ -4259,6 +4097,8 @@ function QuoteCheckPage(){
       }
       setAnalysis(data.analysis);
       setAnalysisSource("listing");
+      consumeQuoteCredit();
+      setJustPurchased(false);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4273,6 +4113,7 @@ function QuoteCheckPage(){
     setErrorMsg("");
     setFileName("");
     setUrlInput("");
+    setJustPurchased(false);
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -4460,7 +4301,30 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="error"&&(
+          {status==="error"&&justPurchased&&(
+            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`,padding:"28px 24px",textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:10}}>✓</div>
+              <div style={{color:C.tealInk,fontWeight:1000,marginBottom:6}}>Your credit is safe</div>
+              <div style={{fontSize:13,color:C.inkSoft,marginBottom:16,lineHeight:1.6}}>
+                This attempt wasn't charged -- nothing is deducted from your purchase unless a report actually comes back. {errorMsg}
+              </div>
+              {lastAttemptType==="url"?(
+                <>
+                  <div style={{fontSize:12,color:C.inkFaint,marginBottom:14,lineHeight:1.5}}>
+                    Dealer sites occasionally can't be read automatically. Uploading a screenshot of the same page works even when the link doesn't, since it never depends on the dealer's site cooperating.
+                  </div>
+                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
+                  <div>
+                    <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
+                  </div>
+                </>
+              ):(
+                <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try a different photo →</button>
+              )}
+            </div>
+          )}
+
+          {status==="error"&&!justPurchased&&(
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
               <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
               <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
@@ -4634,219 +4498,20 @@ function QuoteCheckPage(){
           </div>
         </div>
       </div>
-    </>
-  );
-}
-
-// ── LotCheck Price Index ──────────────────────────────────────────────────
-// Public page at /price-index. Reads the immutable published snapshots in
-// price_index_monthly first; if nothing has been published yet, falls back
-// to computing a live preview straight from the v_price_index_monthly view
-// and says so — never silently presents unpublished math as the official
-// index. All numbers are matched-pair (same listing vs itself month over
-// month), so composition changes in inventory can't fake a price move.
-const INDEX_MIN_PAIRS = 30; // below this, a segment is flagged as small-sample
-
-function usePriceIndexData(){
-  const [rows,setRows]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [isPublished,setIsPublished]=useState(true);
-  useEffect(()=>{
-    async function fetchIndex(){
-      try{
-        let {data,error}=await supabase.from("price_index_monthly")
-          .select("month,region,segment,index_value,mom_change_pct,pair_count")
-          .order("month",{ascending:true}).limit(2000);
-        if(error) throw error;
-        if(!data||data.length===0){
-          const res=await supabase.from("v_price_index_monthly")
-            .select("month,region,segment,index_value,mom_change_pct,pair_count")
-            .order("month",{ascending:true}).limit(2000);
-          if(res.error) throw res.error;
-          data=res.data||[];
-          setIsPublished(false);
-        }
-        setRows(data);
-      }catch(err){
-        console.warn("⚠️ price index fetch failed:",err.message);
-      }finally{
-        setLoading(false);
-      }
-    }
-    fetchIndex();
-  },[]);
-  return {rows,loading,isPublished};
-}
-
-function PriceIndexPage(){
-  const {rows,loading,isPublished}=usePriceIndexData();
-  const [region,setRegion]=useState("AB");
-  const [segment,setSegment]=useState("All");
-
-  // numeric columns arrive from PostgREST as strings — normalize once
-  const norm=rows.map(r=>({
-    ...r,
-    index_value:Number(r.index_value),
-    mom_change_pct:r.mom_change_pct==null?null:Number(r.mom_change_pct),
-    pair_count:Number(r.pair_count)||0,
-  }));
-  const regions=[...new Set(norm.map(r=>r.region))].sort((a,b)=>a==="CA"?-1:b==="CA"?1:a.localeCompare(b));
-  const activeRegion=regions.includes(region)?region:(regions[0]||"AB");
-  const segList=[...new Set(norm.filter(r=>r.region===activeRegion).map(r=>r.segment))]
-    .sort((a,b)=>a==="All"?-1:b==="All"?1:a.localeCompare(b));
-  const activeSegment=segList.includes(segment)?segment:(segList[0]||"All");
-
-  const series=norm.filter(r=>r.region===activeRegion&&r.segment===activeSegment);
-  const latest=series.length?series[series.length-1]:null;
-  const thinSample=latest&&latest.pair_count<INDEX_MIN_PAIRS;
-
-  // "month" arrives as YYYY-MM-DD; append T00:00:00 so it parses as LOCAL
-  // midnight — a bare date string parses as UTC and renders as the previous
-  // day in Calgary, shifting every label back one month.
-  const fmtMonth=(m)=>new Date(m+"T00:00:00").toLocaleDateString("en-CA",{month:"short",year:"2-digit"});
-  const baseLabel=series.length?(()=>{const d=new Date(series[0].month+"T00:00:00");d.setMonth(d.getMonth()-1);return d.toLocaleDateString("en-CA",{month:"short",year:"2-digit"});})():"";
-  const chartData=series.length
-    ?[{month:baseLabel+" =100",index:100},...series.map(r=>({month:fmtMonth(r.month),index:r.index_value}))]
-    :[];
-  const chartDomain=chartData.length
-    ?[Math.floor(Math.min(...chartData.map(d=>d.index))*0.99),Math.ceil(Math.max(...chartData.map(d=>d.index))*1.01)]
-    :undefined;
-
-  // Latest month's MoM change per segment for this region. Segments under
-  // the sample floor are excluded from the headline chart entirely — the
-  // methodology promise is "we don't publish thin numbers", not "we publish
-  // them smaller".
-  const latestMonth=norm.filter(r=>r.region===activeRegion).reduce((m,r)=>r.month>m?r.month:m,"");
-  const momRows=norm
-    .filter(r=>r.region===activeRegion&&r.month===latestMonth&&r.segment!=="All"&&r.mom_change_pct!=null&&r.pair_count>=INDEX_MIN_PAIRS)
-    .sort((a,b)=>a.mom_change_pct-b.mom_change_pct);
-
-  return(
-    <>
-      <style>{GLOBAL_CSS}</style>
-      <div style={{minHeight:"100dvh",background:"#020617"}}>
-        <div style={{background:"#060d18",borderBottom:"1px solid #1e293b",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,position:"sticky",top:0,zIndex:100}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:8,textDecoration:"none",color:"#e2e8f0",minWidth:0}}>
-            <LogoMark size={30}/>
-            <div style={{minWidth:0}}>
-              <div style={{fontWeight:800,fontSize:15,lineHeight:1}}>LotCheck Price Index</div>
-              <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>What used prices are really doing</div>
-            </div>
-          </a>
-          <a href="/" style={{background:"#1e293b",border:"none",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontWeight:600,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>← Listings</a>
-        </div>
-
-        <div style={{maxWidth:860,margin:"0 auto",padding:"20px 16px 40px"}}>
-          {loading?(
-            <div style={{color:"#60a5fa",fontWeight:600,fontSize:14,padding:"40px 0",textAlign:"center"}}>⏳ Loading the index…</div>
-          ):norm.length===0?(
-            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"36px 24px",textAlign:"center"}}>
-              <div style={{fontSize:30,marginBottom:10}}>📊</div>
-              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>The index is still building</div>
-              <div style={{color:"#64748b",fontSize:13,lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
-                It needs at least two consecutive months of tracked prices for the same listings before the first number can be computed honestly. Price tracking runs daily — the first index publishes automatically once enough history exists.
-              </div>
-            </div>
-          ):(
-            <>
-              {!isPublished&&(
-                <div style={{background:"#1e293b40",border:"1px solid #f59e0b55",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#f59e0b",marginBottom:16}}>
-                  Live preview — computed on the fly from tracked prices. Official monthly numbers publish on the 1st and never change afterward.
-                </div>
-              )}
-
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-                {regions.map(rg=>(
-                  <button key={rg} onClick={()=>setRegion(rg)} style={{background:activeRegion===rg?"#1e293b":"transparent",border:"1px solid #1e293b",borderRadius:8,padding:"7px 13px",color:activeRegion===rg?"#f1f5f9":"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                    {rg==="CA"?"🇨🇦 Canada":rg}
-                  </button>
-                ))}
-              </div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
-                {segList.map(sg=>{
-                  const latestForSeg=norm.filter(r=>r.region===activeRegion&&r.segment===sg).slice(-1)[0];
-                  const thin=latestForSeg&&latestForSeg.pair_count<INDEX_MIN_PAIRS;
-                  return(
-                    <button key={sg} onClick={()=>setSegment(sg)} style={{background:activeSegment===sg?"#0ea5e922":"transparent",border:`1px solid ${activeSegment===sg?"#38bdf8":"#1e293b"}`,borderRadius:8,padding:"7px 13px",color:activeSegment===sg?"#38bdf8":"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                      {sg==="All"?"Composite":sg}{thin?" ⚠":""}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {latest&&(
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
-                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                    <div style={{fontSize:11,color:"#475569"}}>Index · {fmtMonth(latest.month)}</div>
-                    <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{latest.index_value.toFixed(1)}</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>{baseLabel} = 100</div>
-                  </div>
-                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                    <div style={{fontSize:11,color:"#475569"}}>Change this month</div>
-                    <div style={{fontSize:26,fontWeight:800,color:latest.mom_change_pct<=0?"#22c55e":"#ef4444"}}>{latest.mom_change_pct>0?"+":""}{latest.mom_change_pct==null?"—":latest.mom_change_pct.toFixed(1)+"%"}</div>
-                    <div style={{fontSize:11,color:"#64748b"}}>{latest.mom_change_pct<=0?"prices easing — buyer's trend":"prices firming"}</div>
-                  </div>
-                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                    <div style={{fontSize:11,color:"#475569"}}>Matched listings</div>
-                    <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{latest.pair_count.toLocaleString()}</div>
-                    <div style={{fontSize:11,color:thinSample?"#f59e0b":"#64748b"}}>{thinSample?"small sample — read with care":"tracked in consecutive months"}</div>
-                  </div>
-                </div>
-              )}
-
-              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px 12px 6px",marginBottom:20}}>
-                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",margin:"0 6px 10px"}}>{activeRegion==="CA"?"Canada":activeRegion} · {activeSegment==="All"?"all segments":activeSegment} · matched-pair index</div>
-                <div style={{height:220}}>
-                  <ResponsiveContainer>
-                    <LineChart data={chartData} margin={{top:6,right:10,bottom:0,left:0}}>
-                      <XAxis dataKey="month" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false}/>
-                      <YAxis domain={chartDomain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>v.toFixed(0)} tickLine={false} axisLine={false} width={38}/>
-                      <Tooltip formatter={v=>[Number(v).toFixed(1),"Index"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
-                      <ReferenceLine y={100} stroke="#475569" strokeDasharray="4 3" strokeWidth={1}/>
-                      <Line type="monotone" dataKey="index" stroke="#38bdf8" strokeWidth={2} dot={{r:3}}/>
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {momRows.length>0&&(
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px 12px 6px",marginBottom:20}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",margin:"0 6px 10px"}}>Change in {fmtMonth(latestMonth)} by segment · green = falling (good for buyers)</div>
-                  <div style={{height:Math.max(140,momRows.length*44+40)}}>
-                    <ResponsiveContainer>
-                      <BarChart data={momRows.map(r=>({segment:r.segment,change:r.mom_change_pct}))} layout="vertical" margin={{top:4,right:24,bottom:0,left:8}}>
-                        <XAxis type="number" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`${v>0?"+":""}${v.toFixed(1)}%`} tickLine={false} axisLine={false}/>
-                        <YAxis type="category" dataKey="segment" tick={{fontSize:12,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false} width={64}/>
-                        <Tooltip formatter={v=>[`${v>0?"+":""}${Number(v).toFixed(2)}% vs prior month`,"Change"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
-                        <ReferenceLine x={0} stroke="#475569" strokeWidth={1}/>
-                        <Bar dataKey="change" radius={[0,4,4,0]} maxBarSize={22}>
-                          {momRows.map((r,i)=><Cell key={i} fill={r.mom_change_pct<=0?"#22c55e":"#ef4444"}/>)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
-
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>📷 Daily snapshots</div>
-                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Every listing's price is recorded each day it's live on LotCheck. The index is monthly math over that trail — no surveys, no estimates, no scraped third-party data.</div>
-                </div>
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>🔗 Matched pairs only</div>
-                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Each car is compared only to itself month over month. Cheap inventory arriving can't fake a "price drop" — only real repricing moves the index.</div>
-                </div>
-                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>👁 Nothing hidden</div>
-                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Sample sizes are shown with every number. Segments under {INDEX_MIN_PAIRS} matched listings are flagged ⚠ and kept out of headline charts. Published numbers are never revised.</div>
-                </div>
-              </div>
-            </>
-          )}
-          <div style={{textAlign:"center",marginTop:24,fontSize:11,color:"#334155"}}>© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
-        </div>
-      </div>
+      {showPaywall&&(
+        <QuotePaywallModal
+          C={C}
+          onClose={()=>{setShowPaywall(false);setPendingAction(null);}}
+          onPurchased={()=>{
+            setShowPaywall(false);
+            const action=pendingAction;
+            setPendingAction(null);
+            setJustPurchased(true);
+            if(action?.type==="file") handleFile(action.file);
+            else if(action?.type==="url") handleUrlAnalyze();
+          }}
+        />
+      )}
     </>
   );
 }
@@ -4861,7 +4526,6 @@ export default function App(){
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
-        : path.startsWith("/price-index") ? <PriceIndexPage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
@@ -4874,7 +4538,6 @@ function LotCheckApp(){
   const [selected,setSelected]=useState(null);
   const [province,setProvince]=useState("ALL");
   const [fuelFilter,setFuelFilter]=useState("All");
-  const [verifiedOnly,setVerifiedOnly]=useState(false);
   const [search,setSearch]=useState("");
   const [isMobile,setIsMobile]=useState(window.innerWidth<768);
 
@@ -4910,15 +4573,8 @@ function LotCheckApp(){
     const q=search.toLowerCase();
     return(province==="ALL"||l.province===province)
       &&(fuelFilter==="All"||l.fuel===fuelFilter)
-      &&(!verifiedOnly||l.is_verified)
       &&(l.name.toLowerCase().includes(q)||l.city.toLowerCase().includes(q)||l.make.toLowerCase().includes(q));
   });
-
-  // Only offer the Verified filter once at least one verified listing is
-  // actually live — a filter that can only ever produce an empty result
-  // would read as broken, and pre-launch it advertises a tier that doesn't
-  // visibly exist yet.
-  const anyVerified=liveListings.some(l=>l.is_verified);
 
   const handleSelect=(listing)=>{
     setSelected(listing);
@@ -4955,14 +4611,9 @@ function LotCheckApp(){
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
             </div>
           </div>
-          <div className="lc-header-right">
-            <a href="/price-index" style={{background:"transparent",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",color:"#94a3b8",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
-              📊 Index
-            </a>
-            <a href="/quote-check" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
-              📄 Check a quote
-            </a>
-          </div>
+          <a href="/quote-check" className="lc-header-right" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
+            📄 Check a quote
+          </a>
         </header>
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
@@ -4986,17 +4637,6 @@ function LotCheckApp(){
                     {f!=="All"&&<FuelIcon fuel={f} size={12}/>}{f}
                   </button>
                 ))}
-                {/* Verified-only toggle — teal when active (brand color for
-                    the trust tier) instead of the fuel buttons' green, so it
-                    reads as a different kind of filter, not a fuel type. */}
-                {anyVerified&&(
-                  <button className="lc-fuel-btn" onClick={()=>setVerifiedOnly(v=>!v)}
-                    style={verifiedOnly
-                      ?{display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:"#2FA79A",borderColor:"#2FA79A",color:"#fff"}
-                      :{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
-                    ✓ Verified
-                  </button>
-                )}
               </div>
             </div>
             <div className="lc-listings">
