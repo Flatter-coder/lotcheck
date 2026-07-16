@@ -817,7 +817,7 @@ function useListings(){
           .select(`
             id, external_id, name, make, model, year, price, km, fuel,
             province, city, source, dealer, listing_url, image_url,
-            scraped_at, verification_score
+            scraped_at, verification_score, is_verified, verified_at
           `)
           .eq("status", "published")
           .order("scraped_at", {ascending:false})
@@ -832,7 +832,15 @@ function useListings(){
             city: r.city || "Canada",
             source: r.source || "Kijiji",
             dealer: Boolean(r.dealer),
+            is_verified: Boolean(r.is_verified),
           }));
+          // Verified-first sort. Array.prototype.sort is stable, and the
+          // rows arrive already ordered by scraped_at desc — so this floats
+          // paid-verified listings to the top while keeping newest-first
+          // ordering intact inside each group. This ordering is the actual
+          // product dealers pay $35 for, so it lives here (data layer), not
+          // scattered across individual render sites.
+          normalized.sort((a,b)=>(b.is_verified?1:0)-(a.is_verified?1:0));
           setListings(normalized);
           setIsLive(true);
           console.log(`🍁 LotCheck: ${normalized.length} live listings loaded`);
@@ -2023,6 +2031,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
     <div style={{padding:"16px"}}>
       <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:8,lineHeight:1.3}}>{listing.name}</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12}}>
+        {listing.is_verified&&<span className="badge" style={{background:"rgba(47,167,154,.16)",color:"#3FC2B3",border:"1px solid rgba(47,167,154,.45)"}} title="LotCheck audited this listing: pricing vs. market, fee disclosure, and history report consistency">✓ LotCheck Verified</span>}
         <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         <span className="badge" style={{background:"#1e293b",color:"#64748b"}}>{listing.city}, {listing.province}</span>
         <span className="badge" style={{background:"#1e293b",color:"#94a3b8"}}>
@@ -2171,6 +2180,10 @@ function ListingCard({listing,liveListings,history,onClick,active}){
     <div className={`lc-card${active?" active":""}`} onClick={()=>onClick(listing)}>
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
+        {/* Verified renders first — it's the paid trust signal, so it leads
+            the badge row. Teal (#2FA79A family) to match the LotCheck brand
+            mark, distinct from the green score/drop badges. */}
+        {listing.is_verified&&<span className="badge" style={{background:"rgba(47,167,154,.16)",color:"#3FC2B3",border:"1px solid rgba(47,167,154,.45)"}}>✓ Verified</span>}
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
       </div>
@@ -2458,7 +2471,7 @@ function AdminEmpty({icon,children}){
 }
 
 // ── Dealers tab ────────────────────────────────────────────────────────────
-function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish}){
+function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,dealerListings,dealerListingsLoading,onMarkSold,onPublish,onToggleVerificationPaid}){
   const {C}=useAdminTheme();
   return (
     <div>
@@ -2510,21 +2523,43 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
           {dealerListings.map(v=>{
             const isSold=v.status==="sold", isLive=v.status==="live";
             const commission = v.plan==="commission" ? Math.round((v.price||0)*0.01) : 100;
+            const isVerified=v.verification_status==="verified";
+            const isPaid=!!v.verification_paid;
             return (
               <div key={v.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{v.year} {v.make} {v.model}</div>
                   <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  {/* Verification pill — three real states, in the palette:
+                      teal = verified (badge is live), butter = fee paid but
+                      audit/publish not done yet, nothing = standard. */}
+                  {isVerified
+                    ? <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>✓ Verified</span>
+                    : isPaid
+                    ? <span style={{background:C.butterBg,color:C.butterInk,border:`1px solid ${C.butter}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>💳 $35 paid</span>
+                    : null}
                   <span style={{
                     background: isSold?C.paper2:isLive?C.tealBg:C.paper2,
                     color: isSold?C.ink:isLive?C.tealInk:C.inkFaint,
                     border: `1px solid ${isSold?C.line:isLive?C.teal+"55":C.line}`,
                     borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,
                   }}>{isSold?"✓ Sold":isLive?"● Live":"Pending"}</span>
+                  {/* Payment toggle — record the $35 once Stripe confirms it,
+                      or undo a mistaken mark. Hidden once verified+sold since
+                      nothing actionable remains. */}
+                  {!isSold && !isPaid && <button onClick={()=>onToggleVerificationPaid(v)} style={{background:"none",border:`1px solid ${C.butter}`,borderRadius:6,padding:"5px 10px",color:C.butterInk,fontSize:11,cursor:"pointer"}}>Mark $35 Paid</button>}
+                  {!isSold && isPaid && <button onClick={()=>onToggleVerificationPaid(v)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkFaint,fontSize:11,cursor:"pointer"}}>Undo Paid</button>}
                   {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"5px 10px",color:C.tealInk,fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
-                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish</button>}
+                  {/* Two-path publish. Verified is the solid teal action and
+                      only appears once payment is marked — the free path is
+                      always available so unpaid inventory never gets stuck. */}
+                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id,false)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish Standard</button>}
+                  {!isLive && !isSold && isPaid && <button onClick={()=>onPublish(v.id,true)} style={{background:C.teal,border:"none",borderRadius:6,padding:"6px 11px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer"}}>Publish Verified ✓</button>}
+                  {/* Upgrade path: already live as Standard, dealer paid the
+                      $35 afterward — flips the badge on the existing live row. */}
+                  {isLive && !isSold && isPaid && !isVerified && <button onClick={()=>onPublish(v.id,true)} style={{background:C.teal,border:"none",borderRadius:6,padding:"6px 11px",color:"#fff",fontSize:11,fontWeight:800,cursor:"pointer"}}>Upgrade to Verified ✓</button>}
                 </div>
               </div>
             );
@@ -3512,15 +3547,32 @@ function AdminPanel(){
     fetchDealerListings();
   }
 
-  async function publishDealerListing(id){
+  // Two-path publish: Standard (free) or Verified ($35, badge + top sort).
+  // The link between the two tables is external_id = `dealer-${id}` — same
+  // convention markSold() already relies on, so no new linking column needed.
+  async function publishDealerListing(id, verified=false){
     const v = dealerListings.find(d=>d.id===id);
     if(!v){ alert("Couldn't find that listing to publish."); return; }
+
+    // The Verified button is hidden until payment is marked, but this guard
+    // means a stale UI (another tab, old data) can never publish an unpaid
+    // badge. Payment is a hard precondition, not a UI convention — the badge
+    // is the paid product.
+    if(verified && !v.verification_paid){
+      alert("This listing hasn't been marked as paid for verification yet.\n\nUse \u201CMark $35 Paid\u201D first (after the Stripe payment actually lands).");
+      return;
+    }
+    // The badge is only worth what's behind it — this confirm is the
+    // reminder that publishing Verified asserts the audit really happened.
+    if(verified && !confirm(`Publish ${v.year} ${v.make} ${v.model} as VERIFIED?\n\nOnly confirm after completing the audit:\n• Pricing checked against market comps\n• All fees disclosed upfront\n• History report consistent with condition/km`)) return;
+
     const externalId = `dealer-${id}`;
+    const nowIso = new Date().toISOString();
 
     // Guard against double-publish creating a duplicate row on the live site.
     // Doesn't rely on a unique constraint on listings.external_id since that
     // hasn't been confirmed to exist -- checks first instead.
-    const {data:existing}=await supabase.from("listings").select("id").eq("external_id",externalId).limit(1);
+    const {data:existing}=await supabase.from("listings").select("id,is_verified").eq("external_id",externalId).limit(1);
     if(!existing||existing.length===0){
       const {error:insertError}=await supabase.from("listings").insert({
         external_id: externalId,
@@ -3535,12 +3587,44 @@ function AdminPanel(){
         // NOT copying dealer_listings' "live" -- listings uses a different
         // vocabulary and useListings() only shows status="published".
         status: "published",
+        is_verified: verified,
+        verified_at: verified?nowIso:null,
       });
       if(insertError){ alert("Couldn't publish to the live site: "+insertError.message); return; }
+    } else if(verified && !existing[0].is_verified){
+      // Upgrade path: listing already live as Standard, dealer paid the $35
+      // afterward. Flip the badge on the existing row instead of inserting.
+      const {error:upErr}=await supabase.from("listings").update({is_verified:true,verified_at:nowIso}).eq("external_id",externalId);
+      if(upErr){ alert("Couldn't upgrade the live listing to Verified: "+upErr.message); return; }
     }
 
-    const {error}=await supabase.from("dealer_listings").update({status:"live",published_at:new Date().toISOString()}).eq("id",id);
+    const dlUpdate={status:"live",published_at:nowIso};
+    if(verified) dlUpdate.verification_status="verified";
+    const {error}=await supabase.from("dealer_listings").update(dlUpdate).eq("id",id);
     if(error){ alert("Published to the live site, but couldn't update dealer_listings' own status: "+error.message); return; }
+    fetchDealerListings();
+  }
+
+  // Manual payment flag — mirrors the Stripe Payment Link flow: you send the
+  // dealer the $35 link, the payment notification lands in Stripe, and you
+  // record it here. Deliberately manual for now (same philosophy as the
+  // Revenue tab's subscriber count): no billing webhook exists yet, so this
+  // is honestly a hand-recorded fact, not fake automation.
+  async function toggleVerificationPaid(v){
+    const nowPaid = !v.verification_paid;
+    if(!nowPaid && v.verification_status==="verified"){
+      // Un-paying an already-published Verified listing must also pull the
+      // badge off the live site — a badge with no payment behind it is
+      // exactly the kind of integrity gap LotCheck exists to prevent.
+      if(!confirm("This listing is already LIVE with a Verified badge.\n\nUndoing the payment will also remove the badge from lotcheck.ca. Continue?")) return;
+      const {error:badgeErr}=await supabase.from("listings").update({is_verified:false,verified_at:null}).eq("external_id",`dealer-${v.id}`);
+      if(badgeErr){ alert("Couldn't remove the badge from the live site: "+badgeErr.message); return; }
+    }
+    const update = nowPaid
+      ? {verification_paid:true, verification_paid_at:new Date().toISOString(), verification_status:"paid"}
+      : {verification_paid:false, verification_paid_at:null, verification_status:"none"};
+    const {error}=await supabase.from("dealer_listings").update(update).eq("id",v.id);
+    if(error){ alert("Couldn't update: "+error.message); return; }
     fetchDealerListings();
   }
 
@@ -3871,6 +3955,7 @@ function AdminPanel(){
             onToggle={toggleDealerField} onDelete={deleteDealer}
             dealerListings={dealerListings} dealerListingsLoading={dealerListingsLoading}
             onMarkSold={markSold} onPublish={publishDealerListing}
+            onToggleVerificationPaid={toggleVerificationPaid}
           />
         )}
 
@@ -4553,6 +4638,219 @@ function QuoteCheckPage(){
   );
 }
 
+// ── LotCheck Price Index ──────────────────────────────────────────────────
+// Public page at /price-index. Reads the immutable published snapshots in
+// price_index_monthly first; if nothing has been published yet, falls back
+// to computing a live preview straight from the v_price_index_monthly view
+// and says so — never silently presents unpublished math as the official
+// index. All numbers are matched-pair (same listing vs itself month over
+// month), so composition changes in inventory can't fake a price move.
+const INDEX_MIN_PAIRS = 30; // below this, a segment is flagged as small-sample
+
+function usePriceIndexData(){
+  const [rows,setRows]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [isPublished,setIsPublished]=useState(true);
+  useEffect(()=>{
+    async function fetchIndex(){
+      try{
+        let {data,error}=await supabase.from("price_index_monthly")
+          .select("month,region,segment,index_value,mom_change_pct,pair_count")
+          .order("month",{ascending:true}).limit(2000);
+        if(error) throw error;
+        if(!data||data.length===0){
+          const res=await supabase.from("v_price_index_monthly")
+            .select("month,region,segment,index_value,mom_change_pct,pair_count")
+            .order("month",{ascending:true}).limit(2000);
+          if(res.error) throw res.error;
+          data=res.data||[];
+          setIsPublished(false);
+        }
+        setRows(data);
+      }catch(err){
+        console.warn("⚠️ price index fetch failed:",err.message);
+      }finally{
+        setLoading(false);
+      }
+    }
+    fetchIndex();
+  },[]);
+  return {rows,loading,isPublished};
+}
+
+function PriceIndexPage(){
+  const {rows,loading,isPublished}=usePriceIndexData();
+  const [region,setRegion]=useState("AB");
+  const [segment,setSegment]=useState("All");
+
+  // numeric columns arrive from PostgREST as strings — normalize once
+  const norm=rows.map(r=>({
+    ...r,
+    index_value:Number(r.index_value),
+    mom_change_pct:r.mom_change_pct==null?null:Number(r.mom_change_pct),
+    pair_count:Number(r.pair_count)||0,
+  }));
+  const regions=[...new Set(norm.map(r=>r.region))].sort((a,b)=>a==="CA"?-1:b==="CA"?1:a.localeCompare(b));
+  const activeRegion=regions.includes(region)?region:(regions[0]||"AB");
+  const segList=[...new Set(norm.filter(r=>r.region===activeRegion).map(r=>r.segment))]
+    .sort((a,b)=>a==="All"?-1:b==="All"?1:a.localeCompare(b));
+  const activeSegment=segList.includes(segment)?segment:(segList[0]||"All");
+
+  const series=norm.filter(r=>r.region===activeRegion&&r.segment===activeSegment);
+  const latest=series.length?series[series.length-1]:null;
+  const thinSample=latest&&latest.pair_count<INDEX_MIN_PAIRS;
+
+  // "month" arrives as YYYY-MM-DD; append T00:00:00 so it parses as LOCAL
+  // midnight — a bare date string parses as UTC and renders as the previous
+  // day in Calgary, shifting every label back one month.
+  const fmtMonth=(m)=>new Date(m+"T00:00:00").toLocaleDateString("en-CA",{month:"short",year:"2-digit"});
+  const baseLabel=series.length?(()=>{const d=new Date(series[0].month+"T00:00:00");d.setMonth(d.getMonth()-1);return d.toLocaleDateString("en-CA",{month:"short",year:"2-digit"});})():"";
+  const chartData=series.length
+    ?[{month:baseLabel+" =100",index:100},...series.map(r=>({month:fmtMonth(r.month),index:r.index_value}))]
+    :[];
+  const chartDomain=chartData.length
+    ?[Math.floor(Math.min(...chartData.map(d=>d.index))*0.99),Math.ceil(Math.max(...chartData.map(d=>d.index))*1.01)]
+    :undefined;
+
+  // Latest month's MoM change per segment for this region. Segments under
+  // the sample floor are excluded from the headline chart entirely — the
+  // methodology promise is "we don't publish thin numbers", not "we publish
+  // them smaller".
+  const latestMonth=norm.filter(r=>r.region===activeRegion).reduce((m,r)=>r.month>m?r.month:m,"");
+  const momRows=norm
+    .filter(r=>r.region===activeRegion&&r.month===latestMonth&&r.segment!=="All"&&r.mom_change_pct!=null&&r.pair_count>=INDEX_MIN_PAIRS)
+    .sort((a,b)=>a.mom_change_pct-b.mom_change_pct);
+
+  return(
+    <>
+      <style>{GLOBAL_CSS}</style>
+      <div style={{minHeight:"100dvh",background:"#020617"}}>
+        <div style={{background:"#060d18",borderBottom:"1px solid #1e293b",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,position:"sticky",top:0,zIndex:100}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:8,textDecoration:"none",color:"#e2e8f0",minWidth:0}}>
+            <LogoMark size={30}/>
+            <div style={{minWidth:0}}>
+              <div style={{fontWeight:800,fontSize:15,lineHeight:1}}>LotCheck Price Index</div>
+              <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>What used prices are really doing</div>
+            </div>
+          </a>
+          <a href="/" style={{background:"#1e293b",border:"none",borderRadius:8,padding:"8px 14px",color:"#e2e8f0",fontWeight:600,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>← Listings</a>
+        </div>
+
+        <div style={{maxWidth:860,margin:"0 auto",padding:"20px 16px 40px"}}>
+          {loading?(
+            <div style={{color:"#60a5fa",fontWeight:600,fontSize:14,padding:"40px 0",textAlign:"center"}}>⏳ Loading the index…</div>
+          ):norm.length===0?(
+            <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"36px 24px",textAlign:"center"}}>
+              <div style={{fontSize:30,marginBottom:10}}>📊</div>
+              <div style={{color:"#f1f5f9",fontWeight:700,marginBottom:6}}>The index is still building</div>
+              <div style={{color:"#64748b",fontSize:13,lineHeight:1.6,maxWidth:440,margin:"0 auto"}}>
+                It needs at least two consecutive months of tracked prices for the same listings before the first number can be computed honestly. Price tracking runs daily — the first index publishes automatically once enough history exists.
+              </div>
+            </div>
+          ):(
+            <>
+              {!isPublished&&(
+                <div style={{background:"#1e293b40",border:"1px solid #f59e0b55",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#f59e0b",marginBottom:16}}>
+                  Live preview — computed on the fly from tracked prices. Official monthly numbers publish on the 1st and never change afterward.
+                </div>
+              )}
+
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+                {regions.map(rg=>(
+                  <button key={rg} onClick={()=>setRegion(rg)} style={{background:activeRegion===rg?"#1e293b":"transparent",border:"1px solid #1e293b",borderRadius:8,padding:"7px 13px",color:activeRegion===rg?"#f1f5f9":"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    {rg==="CA"?"🇨🇦 Canada":rg}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
+                {segList.map(sg=>{
+                  const latestForSeg=norm.filter(r=>r.region===activeRegion&&r.segment===sg).slice(-1)[0];
+                  const thin=latestForSeg&&latestForSeg.pair_count<INDEX_MIN_PAIRS;
+                  return(
+                    <button key={sg} onClick={()=>setSegment(sg)} style={{background:activeSegment===sg?"#0ea5e922":"transparent",border:`1px solid ${activeSegment===sg?"#38bdf8":"#1e293b"}`,borderRadius:8,padding:"7px 13px",color:activeSegment===sg?"#38bdf8":"#64748b",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                      {sg==="All"?"Composite":sg}{thin?" ⚠":""}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {latest&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:20}}>
+                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                    <div style={{fontSize:11,color:"#475569"}}>Index · {fmtMonth(latest.month)}</div>
+                    <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{latest.index_value.toFixed(1)}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{baseLabel} = 100</div>
+                  </div>
+                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                    <div style={{fontSize:11,color:"#475569"}}>Change this month</div>
+                    <div style={{fontSize:26,fontWeight:800,color:latest.mom_change_pct<=0?"#22c55e":"#ef4444"}}>{latest.mom_change_pct>0?"+":""}{latest.mom_change_pct==null?"—":latest.mom_change_pct.toFixed(1)+"%"}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{latest.mom_change_pct<=0?"prices easing — buyer's trend":"prices firming"}</div>
+                  </div>
+                  <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                    <div style={{fontSize:11,color:"#475569"}}>Matched listings</div>
+                    <div style={{fontSize:26,fontWeight:800,color:"#f1f5f9"}}>{latest.pair_count.toLocaleString()}</div>
+                    <div style={{fontSize:11,color:thinSample?"#f59e0b":"#64748b"}}>{thinSample?"small sample — read with care":"tracked in consecutive months"}</div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px 12px 6px",marginBottom:20}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",margin:"0 6px 10px"}}>{activeRegion==="CA"?"Canada":activeRegion} · {activeSegment==="All"?"all segments":activeSegment} · matched-pair index</div>
+                <div style={{height:220}}>
+                  <ResponsiveContainer>
+                    <LineChart data={chartData} margin={{top:6,right:10,bottom:0,left:0}}>
+                      <XAxis dataKey="month" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false}/>
+                      <YAxis domain={chartDomain} tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>v.toFixed(0)} tickLine={false} axisLine={false} width={38}/>
+                      <Tooltip formatter={v=>[Number(v).toFixed(1),"Index"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
+                      <ReferenceLine y={100} stroke="#475569" strokeDasharray="4 3" strokeWidth={1}/>
+                      <Line type="monotone" dataKey="index" stroke="#38bdf8" strokeWidth={2} dot={{r:3}}/>
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {momRows.length>0&&(
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"16px 12px 6px",marginBottom:20}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#94a3b8",margin:"0 6px 10px"}}>Change in {fmtMonth(latestMonth)} by segment · green = falling (good for buyers)</div>
+                  <div style={{height:Math.max(140,momRows.length*44+40)}}>
+                    <ResponsiveContainer>
+                      <BarChart data={momRows.map(r=>({segment:r.segment,change:r.mom_change_pct}))} layout="vertical" margin={{top:4,right:24,bottom:0,left:8}}>
+                        <XAxis type="number" tick={{fontSize:11,fill:"#94a3b8",fontWeight:600}} tickFormatter={v=>`${v>0?"+":""}${v.toFixed(1)}%`} tickLine={false} axisLine={false}/>
+                        <YAxis type="category" dataKey="segment" tick={{fontSize:12,fill:"#94a3b8",fontWeight:600}} tickLine={false} axisLine={false} width={64}/>
+                        <Tooltip formatter={v=>[`${v>0?"+":""}${Number(v).toFixed(2)}% vs prior month`,"Change"]} contentStyle={{background:"#0d1526",border:"1px solid #334155",borderRadius:8,fontSize:13,fontWeight:600,color:"#f1f5f9"}} labelStyle={{color:"#94a3b8",fontSize:11}}/>
+                        <ReferenceLine x={0} stroke="#475569" strokeWidth={1}/>
+                        <Bar dataKey="change" radius={[0,4,4,0]} maxBarSize={22}>
+                          {momRows.map((r,i)=><Cell key={i} fill={r.mom_change_pct<=0?"#22c55e":"#ef4444"}/>)}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>📷 Daily snapshots</div>
+                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Every listing's price is recorded each day it's live on LotCheck. The index is monthly math over that trail — no surveys, no estimates, no scraped third-party data.</div>
+                </div>
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>🔗 Matched pairs only</div>
+                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Each car is compared only to itself month over month. Cheap inventory arriving can't fake a "price drop" — only real repricing moves the index.</div>
+                </div>
+                <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0",marginBottom:4}}>👁 Nothing hidden</div>
+                  <div style={{fontSize:12,color:"#64748b",lineHeight:1.6}}>Sample sizes are shown with every number. Segments under {INDEX_MIN_PAIRS} matched listings are flagged ⚠ and kept out of headline charts. Published numbers are never revised.</div>
+                </div>
+              </div>
+            </>
+          )}
+          <div style={{textAlign:"center",marginTop:24,fontSize:11,color:"#334155"}}>© 2026 LotCheck · lotcheck.ca · "Did you LotCheck it?" ™</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
 // and quote-check page happens here by choosing which fully separate
@@ -4563,6 +4861,7 @@ export default function App(){
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : path.startsWith("/price-index") ? <PriceIndexPage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
@@ -4575,6 +4874,7 @@ function LotCheckApp(){
   const [selected,setSelected]=useState(null);
   const [province,setProvince]=useState("ALL");
   const [fuelFilter,setFuelFilter]=useState("All");
+  const [verifiedOnly,setVerifiedOnly]=useState(false);
   const [search,setSearch]=useState("");
   const [isMobile,setIsMobile]=useState(window.innerWidth<768);
 
@@ -4610,8 +4910,15 @@ function LotCheckApp(){
     const q=search.toLowerCase();
     return(province==="ALL"||l.province===province)
       &&(fuelFilter==="All"||l.fuel===fuelFilter)
+      &&(!verifiedOnly||l.is_verified)
       &&(l.name.toLowerCase().includes(q)||l.city.toLowerCase().includes(q)||l.make.toLowerCase().includes(q));
   });
+
+  // Only offer the Verified filter once at least one verified listing is
+  // actually live — a filter that can only ever produce an empty result
+  // would read as broken, and pre-launch it advertises a tier that doesn't
+  // visibly exist yet.
+  const anyVerified=liveListings.some(l=>l.is_verified);
 
   const handleSelect=(listing)=>{
     setSelected(listing);
@@ -4648,9 +4955,14 @@ function LotCheckApp(){
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
             </div>
           </div>
-          <a href="/quote-check" className="lc-header-right" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
-            📄 Check a quote
-          </a>
+          <div className="lc-header-right">
+            <a href="/price-index" style={{background:"transparent",border:"1px solid #1e293b",borderRadius:8,padding:"8px 12px",color:"#94a3b8",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
+              📊 Index
+            </a>
+            <a href="/quote-check" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
+              📄 Check a quote
+            </a>
+          </div>
         </header>
 
         <LiveTicker listings={liveListings} onSelect={handleSelect}/>
@@ -4674,6 +4986,17 @@ function LotCheckApp(){
                     {f!=="All"&&<FuelIcon fuel={f} size={12}/>}{f}
                   </button>
                 ))}
+                {/* Verified-only toggle — teal when active (brand color for
+                    the trust tier) instead of the fuel buttons' green, so it
+                    reads as a different kind of filter, not a fuel type. */}
+                {anyVerified&&(
+                  <button className="lc-fuel-btn" onClick={()=>setVerifiedOnly(v=>!v)}
+                    style={verifiedOnly
+                      ?{display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:"#2FA79A",borderColor:"#2FA79A",color:"#fff"}
+                      :{display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>
+                    ✓ Verified
+                  </button>
+                )}
               </div>
             </div>
             <div className="lc-listings">
