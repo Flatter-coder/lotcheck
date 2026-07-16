@@ -147,6 +147,29 @@ h3{font-size:1.25rem;line-height:1.25}
   .rv{opacity:1;transform:none;transition:none}
 }
 
+
+/* ---------- story ---------- */
+.story-stats{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(14px,2vw,24px);
+  margin-bottom:clamp(26px,4vw,40px);
+}
+.story-stat{
+  background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
+  padding:24px 20px;text-align:center;box-shadow:4px 6px 0 rgba(51,48,90,.06);
+  transition:transform .3s var(--ease-pop);
+}
+html[data-theme="dark"] .story-stat{box-shadow:4px 6px 0 rgba(0,0,0,.3)}
+.story-stat:hover{transform:translateY(-4px)}
+.story-stat .n{
+  display:block;font-weight:1000;font-size:clamp(1.7rem,3vw,2.2rem);
+  color:var(--coral-ink);letter-spacing:-.02em;margin-bottom:6px;line-height:1.1;
+}
+.story-stat .l{font-size:.9rem;color:var(--ink-soft);line-height:1.45}
+.story-close{max-width:720px;font-size:1.05rem;color:var(--ink-soft)}
+.story-close strong{color:var(--teal-ink)}
+@media (max-width:820px){ .story-stats{grid-template-columns:repeat(2,1fr)} }
+@media (max-width:480px){ .story-stats{grid-template-columns:1fr} }
+
 /* ---------- nav ---------- */
 .nav{
   position:sticky;top:0;z-index:50;
@@ -569,6 +592,7 @@ footer{padding:34px 0 44px}
       <a href="#pipeline">10-point lane</a>
       <a href="#report">Sample report</a>
       <a href="#portal">Dealer portal</a>
+      <a href="#story">Our story</a>
     </div>
     <div class="nav-cta">
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
@@ -827,6 +851,37 @@ footer{padding:34px 0 44px}
         </div>
       </div>
     </div>
+  </div>
+</section>
+
+
+<!-- ================= STORY ================= -->
+<section class="story" id="story" aria-label="Why LotCheck was created">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <span class="kicker">Where LotCheck started</span>
+      <h2>The overpayment problem is real. We heard it every day.</h2>
+      <p class="lede">Years of honest conversations with gas station customers revealed a consistent truth: the advertised price and the final price are two very different numbers. Buyers were routinely paying thousands more once fees and add-ons stacked up.</p>
+    </div>
+    <div class="story-stats">
+      <div class="story-stat rv" style="--i:0">
+        <span class="n">$4,000+</span>
+        <span class="l">Typical overpayment we heard about</span>
+      </div>
+      <div class="story-stat rv" style="--i:1">
+        <span class="n">$11,000</span>
+        <span class="l">The worst cases &mdash; on a single vehicle</span>
+      </div>
+      <div class="story-stat rv" style="--i:2">
+        <span class="n">1 price</span>
+        <span class="l">Locked on the lot, analyzed line by line</span>
+      </div>
+      <div class="story-stat rv" style="--i:3">
+        <span class="n">0</span>
+        <span class="l">Emotions in our analysis &mdash; verified data only</span>
+      </div>
+    </div>
+    <p class="story-close rv" style="--i:4">LotCheck locks the on-lot price and runs it against MSRP, fees, and add-ons &mdash; turning a confusing purchase into a clear one, and keeping those thousands in your pocket. <strong>Verified data, zero emotion &mdash; that&rsquo;s the whole model.</strong></p>
   </div>
 </section>
 
