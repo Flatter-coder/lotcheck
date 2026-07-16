@@ -340,6 +340,14 @@ const GLOBAL_CSS = `
     0% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
   }
+  @keyframes lc-flagicon-pyramid-spin {
+    0% { transform: rotateY(0deg); }
+    100% { transform: rotateY(360deg); }
+  }
+  @keyframes lc-flagicon-flag-wave {
+    0%, 100% { transform: skewY(-5deg); }
+    50% { transform: skewY(5deg); }
+  }
   .lc-after-rebate { font-size: 12px; color: #22c55e; font-weight: 600; margin-top: 2px; }
   .lc-meta { text-align: right; }
   .lc-city { font-size: 12px; color: #64748b; }
@@ -1058,6 +1066,28 @@ function FuelIcon({fuel,size=14}){
       <path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M17 13h2" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round"/>
       <rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" strokeWidth="1.5"/>
+    </svg>
+  );
+}
+
+function FlagPyramidIcon({size=14}){
+  const s=size;
+  return(
+    <span style={{display:"inline-flex",perspective:"60px",flexShrink:0,verticalAlign:"middle"}}>
+      <svg width={s} height={s} viewBox="0 0 24 24" style={{animation:"lc-flagicon-pyramid-spin 3.2s linear infinite",transformStyle:"preserve-3d"}}>
+        <polygon points="12,3 4,20 12,17" fill="#B85D42"/>
+        <polygon points="12,3 20,20 12,17" fill="#F2836B"/>
+      </svg>
+    </span>
+  );
+}
+
+function FlagWaveIcon({size=14}){
+  const s=size;
+  return(
+    <svg width={s} height={s} viewBox="0 0 24 24" style={{flexShrink:0,verticalAlign:"middle"}}>
+      <line x1="5" y1="2" x2="5" y2="21" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round"/>
+      <polygon points="6,3 20,7 14,11 20,15 6,11" fill="#F2836B" style={{transformOrigin:"6px 7px",animation:"lc-flagicon-flag-wave 1.4s ease-in-out infinite"}}/>
     </svg>
   );
 }
@@ -3461,6 +3491,15 @@ function IsoScanVisual({C, speed="idle"}){
 function QuoteCheckPage(){
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [analysis,setAnalysis]=useState(null);
+  // Tracks which analysis path produced the current `analysis` object --
+  // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
+  // Some copy below (the flagged-items banner especially) means something
+  // different depending on the source: a flagged fee on a formal quote is
+  // money being taken from the buyer, but a flagged condition on a listing
+  // is usually a rebate/discount that might not apply -- money that MIGHT
+  // not come to the buyer, not money being extracted. Same verdict schema,
+  // opposite real-world meaning, so the wording needs to match the source.
+  const [analysisSource,setAnalysisSource]=useState(null); // "quote" | "listing"
   const [errorMsg,setErrorMsg]=useState("");
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
@@ -3628,6 +3667,7 @@ function QuoteCheckPage(){
         return;
       }
       setAnalysis(data.analysis);
+      setAnalysisSource("quote");
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -3668,6 +3708,7 @@ function QuoteCheckPage(){
         return;
       }
       setAnalysis(data.analysis);
+      setAnalysisSource("listing");
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -3678,6 +3719,7 @@ function QuoteCheckPage(){
   const reset=()=>{
     setStatus("idle");
     setAnalysis(null);
+    setAnalysisSource(null);
     setErrorMsg("");
     setFileName("");
     setUrlInput("");
@@ -3944,14 +3986,29 @@ function QuoteCheckPage(){
 
               {analysis.totalFlaggedCost>0&&(
                 <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                  <div style={{fontSize:13,color:C.coralInk,fontWeight:800}}>⚠️ ${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                  {analysisSource==="listing"?(
+                    <>
+                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                        <FlagWaveIcon size={15}/>
+                        <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
+                      </div>
+                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
+                    </>
+                  ):(
+                    <>
+                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                        <FlagWaveIcon size={15}/>
+                        <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
+                      </div>
+                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                    </>
+                  )}
                 </div>
               )}
 
               {analysis.addOns?.length>0&&(
                 <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Add-ons & fees</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>{analysisSource==="listing"?"Discounts & conditions":"Add-ons & fees"}</div>
                   {analysis.addOns.map((a,i)=>{
                     // verdict: "good" (genuine buyer benefit -- a fair/legit
                     // rate, a real discount), "flagged" (worth questioning),
@@ -3959,12 +4016,15 @@ function QuoteCheckPage(){
                     // like tax/registration -- neither a win nor a problem,
                     // shown plainly so it isn't mislabeled as a "positive").
                     const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
-                    const marker=v==="good"?"✓ ":v==="flagged"?"🔻 ":"";
                     const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
                     return (
                       <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
                         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div style={{color:C.ink,fontWeight:700,fontSize:14}}>{marker}{a.name}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
+                            {v==="good"&&<span>✓</span>}
+                            {v==="flagged"&&<FlagPyramidIcon size={13}/>}
+                            <span>{a.name}</span>
+                          </div>
                           <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString()}</div>
                         </div>
                         <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
