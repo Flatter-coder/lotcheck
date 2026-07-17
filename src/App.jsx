@@ -3150,8 +3150,8 @@ function AdminPanel(){
   const [checkingSession,setCheckingSession]=useState(true);
   const [tab,setTab]=useState("overview");
 
-  const [leads,setLeads]=useState([]);
-  const [leadsLoading,setLeadsLoading]=useState(true);
+  const [reportLeads,setReportLeads]=useState([]);
+  const [reportLeadsLoading,setReportLeadsLoading]=useState(true);
   const [pageViews,setPageViews]=useState([]);
   const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
@@ -3183,22 +3183,22 @@ function AdminPanel(){
   },[]);
 
   useEffect(()=>{
-    if(!session){ setLeads([]); return; }
+    if(!session){ setReportLeads([]); return; }
     let cancelled=false;
-    async function fetchLeads(){
-      setLeadsLoading(true);
+    async function fetchReportLeads(){
+      setReportLeadsLoading(true);
       try{
-        const {data,error}=await supabase.from("leads").select("*").order("created_at",{ascending:false}).limit(500);
+        const {data,error}=await supabase.from("quote_report_leads").select("*").order("created_at",{ascending:false}).limit(500);
         if(error) throw error;
-        if(!cancelled) setLeads(data||[]);
+        if(!cancelled) setReportLeads(data||[]);
       }catch(err){
-        console.warn("⚠️ leads fetch failed:",err.message);
-        if(!cancelled) setLeads([]);
+        console.warn("⚠️ report leads fetch failed:",err.message);
+        if(!cancelled) setReportLeads([]);
       }finally{
-        if(!cancelled) setLeadsLoading(false);
+        if(!cancelled) setReportLeadsLoading(false);
       }
     }
-    fetchLeads();
+    fetchReportLeads();
     return()=>{cancelled=true;};
   },[session]);
 
@@ -3274,9 +3274,15 @@ function AdminPanel(){
   }
   useEffect(()=>{ if(session) fetchReview(); else { setReviewListings([]); setRejectedListings([]); } },[session]);
 
-  async function updateLeadStatus(id,status){
-    const {error}=await supabase.from("leads").update({status}).eq("id",id);
-    if(!error) setLeads(prev=>prev.map(l=>l.id===id?{...l,status}:l));
+  function exportReportLeadsCsv(){
+    const rows=[["email","source","created_at"],...reportLeads.map(l=>[l.email,l.source||"",l.created_at])];
+    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=`lotcheck-report-emails-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function saveDealer(form){
@@ -3436,8 +3442,6 @@ function AdminPanel(){
   });
   const avgDaysOnMarket=daysOnMarketValues.length?Math.round(daysOnMarketValues.reduce((a,b)=>a+b,0)/daysOnMarketValues.length):null;
   const bucketedListings=bucketByTime(firstSeenTimestamps,listingsGranularity);
-  const byLeadType={};
-  leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
     <AdminThemeContext.Provider value={themeState}>
@@ -3573,8 +3577,8 @@ function AdminPanel(){
               <div style={{fontSize:12,color:C.inkFaint}}>Provinces covered</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{leads.length}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Total leads received</div>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{reportLeads.length}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Report emails captured</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
@@ -3643,43 +3647,30 @@ function AdminPanel(){
             </div>
           </div>
 
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-            LEADS · {leadsLoading?"loading…":`${leads.length} total`}
-            {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+            <span>REPORT EMAILS · {reportLeadsLoading?"loading…":`${reportLeads.length} total`}</span>
+            {!reportLeadsLoading&&reportLeads.length>0&&(
+              <button onClick={exportReportLeadsCsv}
+                style={{fontSize:11,fontWeight:700,letterSpacing:0,padding:"5px 12px",borderRadius:6,cursor:"pointer",background:"transparent",border:`1px solid ${C.line}`,color:C.inkSoft}}>
+                Export CSV
+              </button>
+            )}
           </div>
-          {leadsLoading?(
-            <div style={{color:C.inkFaint,fontSize:13}}>Loading leads…</div>
-          ):leads.length===0?(
+          {reportLeadsLoading?(
+            <div style={{color:C.inkFaint,fontSize:13}}>Loading report emails…</div>
+          ):reportLeads.length===0?(
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"24px",textAlign:"center",color:C.inkFaint}}>
-              No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
+              No report emails yet. They'll show up here the moment someone uses "Email me this report" on a Quote Check.
             </div>
           ):(
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-              {leads.map(l=>(
-                <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
-                    <div>
-                      <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,marginRight:8}}>{l.lead_type}</span>
-                      <strong style={{color:C.ink}}>{l.name}</strong>
-                    </div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+              {reportLeads.map(l=>(
+                <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <strong style={{color:C.ink}}>{l.email}</strong>
+                    {l.source&&<div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>Re: {l.source}</div>}
                   </div>
-                  <div style={{fontSize:13,color:C.inkSoft,marginBottom:6}}>
-                    {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
-                  </div>
-                  {l.details?.listing_name&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>Re: {l.details.listing_name}</div>}
-                  {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
-                  <div style={{display:"flex",gap:6,marginTop:8}}>
-                    {["new","contacted","closed"].map(s=>(
-                      <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
-                        style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
-                          background:l.status===s?C.teal:"transparent",
-                          border:`1px solid ${l.status===s?C.teal:C.line}`,
-                          color:l.status===s?"#fff":C.inkFaint}}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                  <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
                 </div>
               ))}
             </div>
@@ -3936,6 +3927,14 @@ function QuoteCheckPage(){
         return;
       }
       setEmailStatus("sent");
+      // Fire-and-forget capture -- logs the email for admin follow-up now
+      // that a real send has succeeded. A failed insert here should never
+      // surface as an error to the person; they already have their report
+      // either way, this is purely so it's not lost on Vic's end too.
+      supabase.from("quote_report_leads").insert({
+        email,
+        source: analysisSource==="listing" ? (urlInput.trim()||null) : (fileName||null),
+      }).then(({error})=>{ if(error) console.warn("⚠️ quote_report_leads insert failed:",error.message); });
     }catch(err){
       setEmailStatus("error");
       setEmailErr("Couldn't reach the email service. Check your connection and try again.");
