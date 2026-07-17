@@ -527,79 +527,16 @@ function formatMsLeft(ms) {
   return `${h}h ${m}m`;
 }
 
-// ── Quote Check access -- real, persisted, honestly limited ────────────────
-// Same stopgap philosophy as the trial system above: no real accounts or
-// billing exist yet, so this is tracked in localStorage per browser, not
-// per person -- clearing browser data or switching devices resets it. That's
-// a real limitation, not abuse-proofing, but it's the same honest trade-off
-// already accepted for the Pro trial, and it beats pretending to gate
-// something with no actual enforcement behind it.
-//
-// Three ways to have access to a quote check, checked in this order:
-//   1. The free first check -- once per browser, ever.
-//   2. An active $9.99 "subscription" window -- 25 quotes within 30 days of
-//      purchase. Framed as a 30-day window, not auto-renewing, since there's
-//      no real recurring charge behind it -- pretending it renews forever
-//      without ever billing again would be actively misleading.
-//   3. Purchased bundle credits (pay-per-use) -- consumed one at a time,
-//      never expire.
-const QC_ACCESS_KEY = "lc_qc_access";
-const QC_SUB_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const QC_SUB_QUOTA = 25;
-
-function loadQcAccess() {
-  try {
-    const raw = window.localStorage.getItem(QC_ACCESS_KEY);
-    if (!raw) return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
-    const parsed = JSON.parse(raw);
-    return {
-      freeUsed: !!parsed.freeUsed,
-      subStart: parsed.subStart || null,
-      subUsed: Number(parsed.subUsed) || 0,
-      bundleCredits: Math.max(0, Number(parsed.bundleCredits) || 0),
-    };
-  } catch (e) {
-    return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
-  }
-}
-function saveQcAccess(a) {
-  try { window.localStorage.setItem(QC_ACCESS_KEY, JSON.stringify(a)); } catch (e) {}
-}
-// Returns whether a quote check is allowed right now, and why -- used both
-// to gate a new analysis and to decide what the paywall should say.
+// ── Quote Check access -- free and unlimited for now ────────────────────
+// There's no license yet to operate this as a paid service, so no pricing
+// or paywall should exist until that's resolved. Kept as named functions
+// (not inlined at each call site) so turning pricing back on later, once
+// licensed, is a one-place change instead of hunting through the file.
 function getQuoteCheckAccess() {
-  const a = loadQcAccess();
-  if (!a.freeUsed) return { allowed: true, reason: "free" };
-  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
-    return { allowed: true, reason: "subscription", remaining: QC_SUB_QUOTA - a.subUsed };
-  }
-  if (a.bundleCredits > 0) return { allowed: true, reason: "bundle", remaining: a.bundleCredits };
-  return { allowed: false, reason: "none" };
+  return { allowed: true, reason: "free" };
 }
-// Called once a quote check actually succeeds -- consumes whichever credit
-// source was used, in the same priority order as getQuoteCheckAccess above.
-function consumeQuoteCredit() {
-  const a = loadQcAccess();
-  if (!a.freeUsed) { a.freeUsed = true; saveQcAccess(a); return; }
-  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
-    a.subUsed += 1; saveQcAccess(a); return;
-  }
-  if (a.bundleCredits > 0) { a.bundleCredits -= 1; saveQcAccess(a); return; }
-}
-// Grants credit after a simulated purchase. No real payment is processed --
-// see QuotePaywallModal below for the same honest "processing..." stopgap
-// already used by UnlockModal elsewhere in this file.
-function grantBundleCredits(n) {
-  const a = loadQcAccess();
-  a.bundleCredits += n;
-  saveQcAccess(a);
-}
-function activateQcSubscription() {
-  const a = loadQcAccess();
-  a.subStart = Date.now();
-  a.subUsed = 0;
-  saveQcAccess(a);
-}
+// No-op -- nothing to consume while Quote Check is free and unlimited.
+function consumeQuoteCredit() {}
 
 // ── Anonymous visitor ID — persisted so repeat visits from the same browser
 // count as one unique visitor, not a new one each time. This is LotCheck's
@@ -2828,10 +2765,11 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   );
 }
 
-// Real Quote Check pricing tiers -- must stay in sync with QuotePaywallModal's
-// actual prices ($2.99 / $9.99 / $14.99 / $9.99 per month) and with
-// computeCost()'s per-quote cost figure in the edge functions. If either
-// changes, update both places.
+// Quote Check pricing tiers -- kept for cost/revenue modeling in this tab
+// only. The live paywall that used to charge these prices was removed
+// (no license to operate a paid service yet, see getQuoteCheckAccess),
+// so these figures are hypothetical -- "what this would earn if pricing
+// were live" -- not real revenue right now.
 const QC_PRICING_TIERS = [
   {key:"single", name:"1 check", price:2.99, quotesPerUnit:1},
   {key:"five", name:"5 checks", price:9.99, quotesPerUnit:5},
@@ -3747,105 +3685,9 @@ function IsoScanVisual({C, speed="idle"}){
   );
 }
 
-// ── Quote Check paywall -- shown once the free first check is used up.
-// Pay-per-use bundles are the default/recommended path (matches how people
-// actually shop for a car: a short, intense burst of checks around one
-// purchase, not an ongoing habit) -- the $9.99/mo option is offered as an
-// alternative for the smaller set of people who genuinely expect to check
-// many quotes over time (family helping multiple relatives shop, etc.),
-// not the default.
-//
-// No real payment is processed -- same honest "simulated processing" stopgap
-// already used by UnlockModal elsewhere in this file. Real Stripe
-// integration is a separate task; this is the UI + local credit-tracking
-// layer that a real checkout would plug into later.
-function QuotePaywallModal({C, onClose, onPurchased}){
-  const [step,setStep]=useState("choose"); // choose | processing | done
-  const [purchased,setPurchased]=useState(null); // {label, detail}
-
-  async function buy(kind, credits, label, detail){
-    setStep("processing");
-    await new Promise(r=>setTimeout(r,1200));
-    if(kind==="bundle") grantBundleCredits(credits);
-    else activateQcSubscription();
-    setPurchased({label, detail});
-    setStep("done");
-  }
-
-  const cardStyle={
-    background:C.card,border:`1.5px solid ${C.line}`,borderRadius:18,
-    padding:"16px 18px",marginBottom:12,
-  };
-  const priceBtn={
-    width:"100%",background:C.ink,border:"none",borderRadius:12,padding:"12px 0",
-    color:C.paper,fontWeight:1000,fontSize:14,cursor:"pointer",
-  };
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:C.paper,borderRadius:22,padding:24,width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box"}}>
-        {step==="done"?(
-          <div style={{textAlign:"center",padding:"12px 0"}}>
-            <div style={{fontSize:44,marginBottom:10}}>✓</div>
-            <div style={{fontSize:17,fontWeight:1000,color:C.ink,marginBottom:6}}>{purchased?.label}</div>
-            <div style={{fontSize:13,color:C.inkFaint,marginBottom:20}}>{purchased?.detail}</div>
-            <button onClick={()=>onPurchased()} style={priceBtn}>Continue to your check →</button>
-          </div>
-        ):step==="processing"?(
-          <div style={{textAlign:"center",padding:"32px 0"}}>
-            <IsoScanVisual C={C} speed="active"/>
-            <div style={{color:C.ink,fontWeight:1000,marginTop:4}}>Processing…</div>
-          </div>
-        ):(
-          <>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-              <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>You've used your free check</div>
-              <button onClick={onClose} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-            </div>
-            <div style={{fontSize:13,color:C.inkSoft,marginBottom:18,lineHeight:1.5}}>Pick whichever fits how you're shopping -- most people checking one or two quotes want pay-per-check, not a subscription.</div>
-
-            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`}}>
-              <div style={{fontSize:11,fontWeight:1000,color:C.tealInk,letterSpacing:0.5,marginBottom:4}}>RECOMMENDED · PAY PER CHECK</div>
-              <div style={{fontSize:12,color:C.inkSoft,marginBottom:14}}>No commitment -- credits never expire.</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                <button onClick={()=>buy("bundle",1,"1 check unlocked","Good for a single dealer quote.")} style={{...priceBtn,background:C.card,color:C.ink,border:`2px solid ${C.line}`}}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$2.99</div>
-                  <div style={{fontSize:10,fontWeight:700,color:C.inkFaint}}>1 check</div>
-                </button>
-                <button onClick={()=>buy("bundle",5,"5 checks unlocked","Good for comparing several dealers.")} style={priceBtn}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$9.99</div>
-                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>5 checks</div>
-                </button>
-                <button onClick={()=>buy("bundle",10,"10 checks unlocked","Plenty for a full shopping round.")} style={{...priceBtn,background:C.coral,color:"#3a1409"}}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$14.99</div>
-                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>10 checks</div>
-                </button>
-              </div>
-            </div>
-
-            <div style={{display:"flex",alignItems:"center",gap:12,margin:"16px 0"}}>
-              <div style={{flex:1,height:1,background:C.line}}/>
-              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
-              <div style={{flex:1,height:1,background:C.line}}/>
-            </div>
-
-            <div style={cardStyle}>
-              <div style={{fontSize:11,fontWeight:1000,color:C.inkFaint,letterSpacing:0.5,marginBottom:4}}>SUBSCRIBE</div>
-              <div style={{fontSize:12,color:C.inkSoft,marginBottom:12,lineHeight:1.5}}>Shopping for a while, or checking quotes for family? {QC_SUB_QUOTA} checks over 30 days.</div>
-              <button onClick={()=>buy("sub",0,"Subscription active",`${QC_SUB_QUOTA} checks available for the next 30 days.`)} style={{...priceBtn,background:"transparent",color:C.ink,border:`2px solid ${C.ink}`}}>
-                $9.99 -- {QC_SUB_QUOTA} checks / 30 days
-              </button>
-            </div>
-
-            <div style={{fontSize:10,color:C.inkFaint,marginTop:14,lineHeight:1.5,textAlign:"center"}}>
-              Preview pricing -- no real payment is processed yet. This tracks locally to this browser, not a real account.
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
+// Quote Check paywall removed -- no license yet to operate this as a
+// paid service, so Quote Check stays free and unlimited until that's
+// resolved. getQuoteCheckAccess() above always allows access now.
 
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
@@ -3868,20 +3710,6 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
   const fileInputRef=useRef(null);
-  // Paywall state -- pendingAction holds whatever the user was trying to do
-  // (upload a file, or analyze a URL) when the gate blocked them, so it can
-  // resume automatically once they've unlocked access, rather than making
-  // them re-select their file or retype the URL after "paying."
-  const [showPaywall,setShowPaywall]=useState(false);
-  const [pendingAction,setPendingAction]=useState(null); // {type:"file",file} | {type:"url",url}
-  // True only for the single attempt that runs immediately after a
-  // purchase. If THAT attempt fails, the person just paid and hit the same
-  // wall they paid to get past -- that's a materially different, worse
-  // moment than an ordinary failed attempt, and needs to say so explicitly
-  // (their credit is untouched -- see consumeQuoteCredit, only called on
-  // real success) and hand them a fallback that doesn't depend on the same
-  // thing that just failed.
-  const [justPurchased,setJustPurchased]=useState(false);
   // Which method the most recent attempt actually used -- set the moment an
   // attempt starts, regardless of whether it succeeds, so an error state
   // always knows precisely what to suggest instead (a failed URL attempt
@@ -4014,11 +3842,6 @@ function QuoteCheckPage(){
       setErrorMsg(`That file is a bit large (${(file.size/1024/1024).toFixed(1)}MB) — please try a photo under ${MAX_FILE_SIZE_MB}MB. A single clear photo of the quote works better than a scan of every page.`);
       return;
     }
-    if(!getQuoteCheckAccess().allowed){
-      setPendingAction({type:"file",file});
-      setShowPaywall(true);
-      return;
-    }
     setFileName(file.name);
     setLastAttemptType("file");
     setStatus("analyzing");
@@ -4066,7 +3889,6 @@ function QuoteCheckPage(){
       setAnalysis(data.analysis);
       setAnalysisSource("quote");
       consumeQuoteCredit();
-      setJustPurchased(false);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4083,11 +3905,6 @@ function QuoteCheckPage(){
     if(!isValidUrl(url)){
       setStatus("error");
       setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
-      return;
-    }
-    if(!getQuoteCheckAccess().allowed){
-      setPendingAction({type:"url",url});
-      setShowPaywall(true);
       return;
     }
     setFileName(new URL(url).hostname);
@@ -4115,7 +3932,6 @@ function QuoteCheckPage(){
       setAnalysis(data.analysis);
       setAnalysisSource("listing");
       consumeQuoteCredit();
-      setJustPurchased(false);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4130,7 +3946,6 @@ function QuoteCheckPage(){
     setErrorMsg("");
     setFileName("");
     setUrlInput("");
-    setJustPurchased(false);
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -4318,16 +4133,13 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="error"&&justPurchased&&(
-            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`,padding:"28px 24px",textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:10}}>✓</div>
-              <div style={{color:C.tealInk,fontWeight:1000,marginBottom:6}}>Your credit is safe</div>
-              <div style={{fontSize:13,color:C.inkSoft,marginBottom:16,lineHeight:1.6}}>
-                This attempt wasn't charged -- nothing is deducted from your purchase unless a report actually comes back. {errorMsg}
-              </div>
+          {status==="error"&&(
+            <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+              <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
               {lastAttemptType==="url"?(
                 <>
-                  <div style={{fontSize:12,color:C.inkFaint,marginBottom:14,lineHeight:1.5}}>
+                  <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
                     Dealer sites occasionally can't be read automatically. Uploading a screenshot of the same page works even when the link doesn't, since it never depends on the dealer's site cooperating.
                   </div>
                   <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
@@ -4336,16 +4148,8 @@ function QuoteCheckPage(){
                   </div>
                 </>
               ):(
-                <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try a different photo →</button>
+                <button onClick={reset} style={{marginTop:8,background:C.ink,border:"none",borderRadius:999,padding:"10px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try again</button>
               )}
-            </div>
-          )}
-
-          {status==="error"&&!justPurchased&&(
-            <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
-              <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
-              <button onClick={reset} style={{marginTop:8,background:C.ink,border:"none",borderRadius:999,padding:"10px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try again</button>
             </div>
           )}
 
@@ -4515,20 +4319,6 @@ function QuoteCheckPage(){
           </div>
         </div>
       </div>
-      {showPaywall&&(
-        <QuotePaywallModal
-          C={C}
-          onClose={()=>{setShowPaywall(false);setPendingAction(null);}}
-          onPurchased={()=>{
-            setShowPaywall(false);
-            const action=pendingAction;
-            setPendingAction(null);
-            setJustPurchased(true);
-            if(action?.type==="file") handleFile(action.file);
-            else if(action?.type==="url") handleUrlAnalyze();
-          }}
-        />
-      )}
     </>
   );
 }
