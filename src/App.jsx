@@ -3335,26 +3335,44 @@ function AdminPanel(){
     const v = dealerListings.find(d=>d.id===id);
     if(!v){ alert("Couldn't find that listing to publish."); return; }
     const externalId = `dealer-${id}`;
+    const row = {
+      external_id: externalId,
+      name: `${v.year} ${v.make} ${v.model}${v.trim?" "+v.trim:""}`,
+      make: v.make, model: v.model, year: v.year,
+      price: v.price, km: v.km, fuel: v.fuel||"Gas",
+      province: v.province||"AB", city: v.city||"",
+      source: "Dealer",
+      dealer: v.dealer, // dealer name string -- Boolean(r.dealer) in useListings() reads this as true, same normalization the scraper path already relies on
+      listing_url: null,
+      image_url: null,
+      // useListings() orders by scraped_at desc, and the scraper-populated
+      // listings table may mark scraped_at NOT NULL -- always set it so the
+      // insert isn't rejected and the just-published car sorts to the top.
+      scraped_at: new Date().toISOString(),
+      // listings.is_verified is NOT NULL (DB default false). Nothing in the app
+      // reads or writes it (the UI uses verification_score) -- it's set by the
+      // scraper's verification pipeline, which dealer submissions never run
+      // through. Set explicitly rather than leaning on the default: self-
+      // documenting, and survives a future schema that drops the default.
+      is_verified: false,
+      // NOT copying dealer_listings' "live" -- listings uses a different
+      // vocabulary and useListings() only shows status="published".
+      status: "published",
+    };
 
-    // Guard against double-publish creating a duplicate row on the live site.
-    // Doesn't rely on a unique constraint on listings.external_id since that
-    // hasn't been confirmed to exist -- checks first instead.
-    const {data:existing}=await supabase.from("listings").select("id").eq("external_id",externalId).limit(1);
-    if(!existing||existing.length===0){
-      const {error:insertError}=await supabase.from("listings").insert({
-        external_id: externalId,
-        name: `${v.year} ${v.make} ${v.model}${v.trim?" "+v.trim:""}`,
-        make: v.make, model: v.model, year: v.year,
-        price: v.price, km: v.km, fuel: v.fuel||"Gas",
-        province: v.province||"AB", city: v.city||"",
-        source: "Dealer",
-        dealer: v.dealer, // dealer name string -- Boolean(r.dealer) in useListings() reads this as true, same normalization the scraper path already relies on
-        listing_url: null,
-        image_url: null,
-        // NOT copying dealer_listings' "live" -- listings uses a different
-        // vocabulary and useListings() only shows status="published".
-        status: "published",
-      });
+    // Republish-safe write. markSold leaves a status="sold" row on the same
+    // external_id (it never deletes it), so the old skip-if-exists guard would
+    // silently do nothing on a re-publish: dealer_listings flipped to "live"
+    // but the buyer site kept showing the sold row (or nothing). Update the
+    // existing row to published instead of skipping; only insert when there's
+    // genuinely no row yet -- still no duplicate, and re-publish now works.
+    const {data:existing,error:selError}=await supabase.from("listings").select("id").eq("external_id",externalId).limit(1);
+    if(selError){ alert("Couldn't check the live site before publishing: "+selError.message); return; }
+    if(existing&&existing.length>0){
+      const {error:updateError}=await supabase.from("listings").update(row).eq("external_id",externalId);
+      if(updateError){ alert("Couldn't publish to the live site: "+updateError.message); return; }
+    }else{
+      const {error:insertError}=await supabase.from("listings").insert(row);
       if(insertError){ alert("Couldn't publish to the live site: "+insertError.message); return; }
     }
 
