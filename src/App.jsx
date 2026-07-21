@@ -3709,6 +3709,7 @@ function QuoteCheckPage(){
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
+  const [payFreq,setPayFreq]=useState("weekly"); // weekly | biweekly | monthly -- for the payment breakdown card
   const fileInputRef=useRef(null);
   // Which method the most recent attempt actually used -- set the moment an
   // attempt starts, regardless of whether it succeeds, so an error state
@@ -4025,6 +4026,19 @@ function QuoteCheckPage(){
     border:`1px solid ${C.line}`,boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
   };
 
+  // Whether this report's addOns should be framed as real costs (fees) vs.
+  // discounts/conditions. Prefers each item's own `kind` field, which the
+  // edge function now supplies -- a URL/listing analysis can genuinely
+  // contain real fees (e.g. Honda Safe & Secure on a "payment-first"
+  // listing), so the old assumption of "listing = always discounts" was
+  // wrong and mislabeled a real $749 fee as a "conditional saving" on a
+  // live example. Falls back to the old analysisSource-based guess only
+  // when no item carries `kind` at all (older cached responses, or the
+  // analyze-quote path, which doesn't use this field since its add-ons
+  // are always genuine fees already labeled correctly).
+  const addOnsHaveKind=analysis?.addOns?.some(a=>a.kind==="fee"||a.kind==="discount");
+  const addOnsAreFees=addOnsHaveKind?analysis.addOns.some(a=>a.kind==="fee"):analysisSource!=="listing";
+
   return(
     <>
       <style>{GLOBAL_CSS}</style>
@@ -4156,18 +4170,39 @@ function QuoteCheckPage(){
           {status==="done"&&analysis&&(
             <div>
               <div style={cardStyle}>
-                <div style={{fontSize:13,color:C.inkFaint,marginBottom:4}}>{analysis.vehicle||"Vehicle"}</div>
-                <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-                  <div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>MSRP</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>Quoted price</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
-                  </div>
-                </div>
+                <div style={{fontSize:13,color:C.inkFaint}}>{analysis.vehicle||"Vehicle"}</div>
               </div>
+
+              {/* MSRP on its own -- just the manufacturer's number, nothing
+                  else mixed into this card. The comparison against what the
+                  buyer is actually being asked to pay lives in the Quoted
+                  price card right below, colored against this figure. */}
+              <div style={cardStyle}>
+                <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>MSRP</div>
+                <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
+              </div>
+
+              {/* Quoted price colored against MSRP: teal/green at-or-under
+                  MSRP, coral/red over it. hasMsrpCompare guards against
+                  coloring when either number is missing (e.g. MSRP wasn't
+                  on the quote) -- no color claim without both values. */}
+              {(()=>{
+                const hasMsrpCompare=!!(analysis.msrp&&analysis.quotedPrice);
+                const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
+                const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
+                const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
+                return (
+                  <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:{})}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price</div>
+                    <div style={{fontSize:22,fontWeight:1000,color:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
+                    {hasMsrpCompare&&(
+                      <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
+                        {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Standard/included manufacturer warranty -- NOT an upsell
                   product (that's the separate "warranty" section further
@@ -4221,7 +4256,7 @@ function QuoteCheckPage(){
 
               {analysis.totalFlaggedCost>0&&(
                 <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                  {analysisSource==="listing"?(
+                  {!addOnsAreFees?(
                     <>
                       <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
                         <FlagWaveIcon size={15}/>
@@ -4243,7 +4278,7 @@ function QuoteCheckPage(){
 
               {analysis.addOns?.length>0&&(
                 <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>{analysisSource==="listing"?"Discounts & conditions":"Add-ons & fees"}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
                   {analysis.addOns.map((a,i)=>{
                     // verdict: "good" (genuine buyer benefit -- a fair/legit
                     // rate, a real discount), "flagged" (worth questioning),
@@ -4266,8 +4301,95 @@ function QuoteCheckPage(){
                       </div>
                     );
                   })}
+                  {/* Subtotal -- only for genuine fees, never discounts/
+                      conditions (summing those as a total-added figure
+                      would misrepresent them). When kind data exists,
+                      sums only the fee-kind items, so a mixed report
+                      (some fees, some discounts) doesn't fold a discount
+                      into what should be a pure cost total. */}
+                  {addOnsAreFees&&(()=>{
+                    const feeItems=addOnsHaveKind?analysis.addOns.filter(a=>a.kind==="fee"):analysis.addOns;
+                    if(!feeItems.length) return null;
+                    return (
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
+                        <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
+                        <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString()}</div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
+
+              {/* Payment breakdown: weekly / bi-weekly / monthly equivalents,
+                  plus how much of each payment is interest (finance) or
+                  lease charge (lease) vs principal/depreciation.
+                  Requires analysis.financing from the edge function --
+                  {type, termMonths, totalObligation, totalCostOfCredit} --
+                  which doesn't exist in the schema yet as of this write, so
+                  this renders nothing until that's added. All three
+                  frequencies are derived from the SAME disclosed
+                  totalObligation (re-sliced across a different number of
+                  equal installments), not a re-derived amortization
+                  schedule -- so it always ties back to a real number the
+                  dealer already put on the page, e.g. the 260 weekly
+                  payments in the Calgary Honda Civic example checks out
+                  exactly: $27,952.60 / 260 = $107.51. IMPORTANT for whoever
+                  wires up the edge function: totalObligation and
+                  totalCostOfCredit must be on the SAME tax basis (both
+                  pre-tax, ideally) or this percentage split is comparing
+                  apples to oranges -- capture that explicitly rather than
+                  assuming. */}
+              {analysis.financing?.termMonths&&analysis.financing?.totalObligation&&(()=>{
+                const f=analysis.financing;
+                const termMonths=f.termMonths;
+                const totalObligation=f.totalObligation;
+                const totalInterest=f.totalCostOfCredit||0;
+                const periodsPerYear={weekly:52,biweekly:26,monthly:12};
+                const periodsFor=freq=>termMonths*(periodsPerYear[freq]/12);
+                const paymentFor=freq=>totalObligation/periodsFor(freq);
+                const interestFor=freq=>totalInterest/periodsFor(freq);
+                const freqLabel={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
+                const freqSuffix={weekly:"week",biweekly:"2 weeks",monthly:"month"};
+                const payment=paymentFor(payFreq);
+                const interest=interestFor(payFreq);
+                const principal=Math.max(payment-interest,0);
+                const interestPct=payment>0?Math.round((interest/payment)*100):0;
+                const chargeWord=f.type==="lease"?"lease charge":"interest";
+                return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
+                      Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
+                    </div>
+                    <div style={{display:"flex",gap:6,marginBottom:14}}>
+                      {["weekly","biweekly","monthly"].map(k=>(
+                        <button key={k} onClick={()=>setPayFreq(k)}
+                          style={{background:payFreq===k?C.tealBg:"transparent",color:payFreq===k?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                          {freqLabel[k]}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:10}}>
+                      <div style={{fontSize:26,fontWeight:1000,color:C.ink}}>${payment.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                      <div style={{fontSize:12,color:C.inkFaint}}>/{freqSuffix[payFreq]}</div>
+                    </div>
+                    {totalInterest>0&&(
+                      <>
+                        <div style={{display:"flex",height:10,borderRadius:999,overflow:"hidden",marginBottom:8}}>
+                          <div style={{width:`${100-interestPct}%`,background:C.teal}}/>
+                          <div style={{width:`${interestPct}%`,background:C.coral}}/>
+                        </div>
+                        <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:12,color:C.inkSoft,marginBottom:10}}>
+                          <div><span style={{color:C.tealInk,fontWeight:800}}>${principal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> principal{f.type==="lease"?"/depreciation":""}</div>
+                          <div><span style={{color:C.coralInk,fontWeight:800}}>${interest.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> {chargeWord} ({interestPct}%)</div>
+                        </div>
+                      </>
+                    )}
+                    <div style={{fontSize:12,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:10}}>
+                      {termMonths} months total &middot; ${totalObligation.toLocaleString()} total obligation{f.totalObligationTaxIncluded&&" (tax included)"}{totalInterest>0&&` \u00b7 $${totalInterest.toLocaleString()} total ${chargeWord}`}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {analysis.warranty?.offered&&(
                 <div style={cardStyle}>
