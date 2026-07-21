@@ -3710,6 +3710,34 @@ function QuoteCheckPage(){
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
   const [payFreq,setPayFreq]=useState("weekly"); // weekly | biweekly | monthly -- for the payment breakdown card
+
+  // Fire-and-forget dealer-sentiment lookup, called after EITHER analysis
+  // path (quote upload or listing URL) once analysis.dealerName is known.
+  // Deliberately not awaited at the call site -- the rest of the report
+  // renders immediately via setStatus("done"), and this card just fills
+  // in a moment later once the separate lookup finishes, same pattern as
+  // any other progressive enhancement. Never blocks, never shows an
+  // error -- a buyer should never know this lookup even happened if it
+  // fails; the card just doesn't appear.
+  const fetchDealerSentiment=async(dealerName,dealerCity)=>{
+    if(!dealerName) return;
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/get-dealer-sentiment",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+        },
+        body:JSON.stringify({dealerName,dealerCity}),
+      });
+      const data=await res.json();
+      if(!res.ok||data.error||!data.dealerSentiment) return;
+      setAnalysis(prev=>prev?{...prev,dealerSentiment:data.dealerSentiment}:prev);
+    }catch{
+      // Silent by design -- see comment above.
+    }
+  };
   const fileInputRef=useRef(null);
   // Which method the most recent attempt actually used -- set the moment an
   // attempt starts, regardless of whether it succeeds, so an error state
@@ -3889,6 +3917,7 @@ function QuoteCheckPage(){
       }
       setAnalysis(data.analysis);
       setAnalysisSource("quote");
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
       consumeQuoteCredit();
       setStatus("done");
     }catch(err){
@@ -3932,6 +3961,7 @@ function QuoteCheckPage(){
       }
       setAnalysis(data.analysis);
       setAnalysisSource("listing");
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
       consumeQuoteCredit();
       setStatus("done");
     }catch(err){
@@ -4203,6 +4233,42 @@ function QuoteCheckPage(){
                   </div>
                 );
               })()}
+
+              {/* Dealer sentiment: what public Google reviews say about
+                  THIS dealer, read for the patterns that actually predict
+                  a good/bad buying experience (financing transparency,
+                  communication, service honesty) -- the same signals
+                  real industry review analysis finds drive buyer
+                  satisfaction more than star rating alone. Always free
+                  and buyer-facing per Vic's call -- this is deliberately
+                  NOT a paid dealer product, since a dealer paying LotCheck
+                  for their own reputation summary would undercut the
+                  buyer-first positioning the whole platform is built on.
+                  Requires analysis.dealerSentiment from the edge function
+                  -- {dealerName, rating, reviewCount, themes:[{type,text}],
+                  sourceUrl} -- which doesn't exist in the schema yet as of
+                  this write, so this renders nothing until that's added. */}
+              {analysis.dealerSentiment&&(
+                <div style={cardStyle}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:6}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What customers say about {analysis.dealerSentiment.dealerName}</div>
+                    {!!analysis.dealerSentiment.rating&&(
+                      <div style={{fontSize:12,color:C.inkFaint,whiteSpace:"nowrap"}}>
+                        ★ {analysis.dealerSentiment.rating.toFixed(1)}{analysis.dealerSentiment.reviewCount?` · ${analysis.dealerSentiment.reviewCount.toLocaleString()} reviews`:""}
+                      </div>
+                    )}
+                  </div>
+                  {(analysis.dealerSentiment.themes||[]).map((t,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                      <span style={{color:t.type==="praise"?C.tealInk:C.coralInk,fontWeight:800,fontSize:13,lineHeight:"20px"}}>{t.type==="praise"?"✓":"⚠"}</span>
+                      <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{t.text}</span>
+                    </div>
+                  ))}
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>
+                    Based on public Google reviews{analysis.dealerSentiment.sourceUrl&&(<> — <a href={analysis.dealerSentiment.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>see all reviews</a></>)}
+                  </div>
+                </div>
+              )}
 
               {/* Standard/included manufacturer warranty -- NOT an upsell
                   product (that's the separate "warranty" section further
