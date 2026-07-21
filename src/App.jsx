@@ -4295,7 +4295,7 @@ function QuoteCheckPage(){
                             {v==="flagged"&&<FlagPyramidIcon size={13}/>}
                             <span>{a.name}</span>
                           </div>
-                          <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString()}</div>
+                          <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                         </div>
                         <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
                       </div>
@@ -4313,7 +4313,7 @@ function QuoteCheckPage(){
                     return (
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
                         <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
-                        <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString()}</div>
+                        <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                       </div>
                     );
                   })()}
