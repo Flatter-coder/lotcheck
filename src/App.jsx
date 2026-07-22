@@ -4316,10 +4316,35 @@ function QuoteCheckPage(){
                   function now extracts -- same EVAP logic already used and
                   verified for live listings, not a separate reimplementation.
                   Province is hardcoded to "AB" since LotCheck is Alberta-only
-                  right now; revisit if that ever changes. */}
-              {analysis.vehicleCondition==="new"&&analysis.year&&analysis.make&&analysis.model
-               &&(analysis.fuelType==="BEV"||analysis.fuelType==="PHEV")&&(()=>{
-                const rebate=getRebate("AB",analysis.fuelType,{
+                  right now; revisit if that ever changes.
+
+                  2026-07-22 fix: confirmed live (Gateway Toyota C-HR) that a
+                  dealer page's OWN fuelType label can be wrong even when the
+                  page's detailed technical specs (battery kWh, electric range,
+                  NACS charging) are correct -- that page said "Fuel Type:
+                  Gasoline" on a vehicle Toyota's own official press release
+                  confirms is a genuine 77-kWh BEV, almost certainly a stale
+                  inventory-system default never updated for the new model
+                  year. A prompt-only fix (trust the structured field) made
+                  this WORSE, not better -- it made the extraction confidently
+                  wrong instead of uncertain. The real fix: don't rely purely
+                  on the page's own fuelType read at all when year+make+model
+                  matches the curated EVAP_LIST, which Vic has manually
+                  verified against Transport Canada -- that's a source of
+                  truth the page's own labels aren't. evapListMatch below
+                  checks that FIRST; effectiveFuelType prefers the verified
+                  list entry's fuel over the page extraction whenever there's
+                  a match, and the outer gate now also fires on a list match
+                  alone so a wrong "Gas" read can't hide a real EV rebate. */}
+              {(()=>{
+                const evapListMatch=analysis.year&&analysis.make&&analysis.model
+                  ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
+                  :null;
+                const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
+                const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
+                if(!(analysis.vehicleCondition==="new"&&analysis.year&&analysis.make&&analysis.model
+                     &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"))) return null;
+                const rebate=getRebate("AB",effectiveFuelType,{
                   year:analysis.year,make:analysis.make,model:analysis.model,
                   km:0,price:analysis.quotedPrice||analysis.msrp||0,
                 });
@@ -4328,6 +4353,11 @@ function QuoteCheckPage(){
                     <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
                       {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
                     </div>
+                    {fuelMismatch&&(
+                      <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
+                        This page's own fuel-type label said "{analysis.fuelType}", but our verified records for this exact year/make/model show it's actually a {evapListMatch.fuel} -- using the verified value here.
+                      </div>
+                    )}
                     {rebate.eligible?(
                       <>
                         <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
