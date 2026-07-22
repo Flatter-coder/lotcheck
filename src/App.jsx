@@ -3689,12 +3689,39 @@ function IsoScanVisual({C, speed="idle"}){
 // paid service, so Quote Check stays free and unlimited until that's
 // resolved. getQuoteCheckAccess() above always allows access now.
 
+// Progressive "analyzing" status messages. The edge function doesn't
+// stream progress back, so these are TIME-BASED, not real milestones --
+// they exist to make a genuinely slow scan (a URL scan is ~30-60s, since
+// it live-scrapes the dealer page and, on payment-first listings, also
+// cross-checks the manufacturer's site) FEEL like active work instead of
+// a frozen spinner. The `at` values are seconds of elapsed time, tuned to
+// the real backend phases: dealer-page fetch, first analysis, then the
+// manufacturer-MSRP fallback. Each message just needs to still be true if
+// the scan finishes early -- so they describe the pipeline generically,
+// never claim a specific step "is done." URL and file/photo scans get
+// different sequences because a file scan skips the slow live-scrape and
+// manufacturer steps entirely.
+const URL_SCAN_STAGES = [
+  { at: 0,  text: "Opening the dealer's listing…" },
+  { at: 6,  text: "Reading the pricing and fine print…" },
+  { at: 16, text: "Analyzing MSRP, fees, and financing…" },
+  { at: 30, text: "Cross-checking MSRP with the manufacturer…" },
+  { at: 46, text: "Putting your report together…" },
+];
+const FILE_SCAN_STAGES = [
+  { at: 0,  text: "Reading the document…" },
+  { at: 5,  text: "Pulling out MSRP, price, and add-ons…" },
+  { at: 14, text: "Checking the warranty terms…" },
+  { at: 22, text: "Putting your report together…" },
+];
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
 // browser, sent once to the edge function for analysis, and discarded.
 function QuoteCheckPage(){
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
   // Tracks which analysis path produced the current `analysis` object --
   // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
@@ -3975,6 +4002,25 @@ function QuoteCheckPage(){
     try{ const u=new URL(v.trim()); return u.protocol==="http:"||u.protocol==="https:"; }catch{ return false; }
   }
 
+  // Advance the time-based progress line while a scan runs. The clock
+  // restarts whenever a new scan begins (status -> "analyzing"); the
+  // interval is torn down on status change / unmount so no stray timer
+  // outlives the scan. Purely cosmetic -- it never gates the real result,
+  // which still lands via setStatus("done") from the fetch above.
+  useEffect(()=>{
+    if(status!=="analyzing") return;
+    const stages=lastAttemptType==="url"?URL_SCAN_STAGES:FILE_SCAN_STAGES;
+    setScanMsg(stages[0].text);
+    const t0=Date.now();
+    const id=setInterval(()=>{
+      const elapsed=(Date.now()-t0)/1000;
+      let text=stages[0].text;
+      for(const s of stages){ if(elapsed>=s.at) text=s.text; }
+      setScanMsg(text);
+    },500);
+    return ()=>clearInterval(id);
+  },[status,lastAttemptType]);
+
   const handleUrlAnalyze=async()=>{
     const url=urlInput.trim();
     if(!isValidUrl(url)){
@@ -4133,11 +4179,13 @@ function QuoteCheckPage(){
       <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
-            <LogoMark size={34}/>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
-              <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
-            </div>
+            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:1,minWidth:0}}>
+              <LogoMark size={34}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
+                <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+              </div>
+            </a>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
@@ -4202,7 +4250,7 @@ function QuoteCheckPage(){
 
             <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"16px 18px"}}>
               <div style={{color:C.ink,fontWeight:800,fontSize:14,marginBottom:8}}>Paste a dealer listing link instead</div>
-              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically.</div>
+              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically. Dealer links take up to a minute to read; uploading a photo is faster.</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <input
                   type="url"
@@ -4240,8 +4288,11 @@ function QuoteCheckPage(){
           {status==="analyzing"&&(
             <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
               <IsoScanVisual C={C} speed="active"/>
-              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Reading {fileName}…</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
+              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>{lastAttemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}</div>
+              <div style={{color:C.inkFaint,fontSize:13,transition:"opacity .2s"}}>{scanMsg||"Checking MSRP, add-ons, and warranty terms"}</div>
+              {lastAttemptType==="url"&&(
+                <div style={{color:C.inkFaint,fontSize:11,marginTop:10,opacity:.75}}>Reading a live dealer page can take up to a minute — hang tight.</div>
+              )}
             </div>
           )}
 
@@ -4301,6 +4352,74 @@ function QuoteCheckPage(){
                   </div>
                 );
               })()}
+
+              {/* ── Verification checks (the real 10-point results) rendered
+                  from the edge function's structured output: leverage,
+                  recalls, odometer, VIN, financing math. Each card only
+                  appears when its check ran, and reuses the same teal=good /
+                  coral=concern language as the price cards above. ── */}
+
+              {analysis.leverageScore?.computed&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
+                  <div style={{fontSize:28,fontWeight:1000,color:C.ink,lineHeight:1}}>{analysis.leverageScore.score}<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> /10</span></div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
+                </div>
+              )}
+
+              {analysis.recalls&&(()=>{
+                const r=analysis.recalls;
+                if(!r.checked) return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.5}}>Couldn't reach the recall registry just now — you can check directly at Transport Canada before you sign.</div>
+                  </div>
+                );
+                if(r.count===0) return (
+                  <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:15,fontWeight:800,color:C.tealInk}}>✓ No open recalls found</div>
+                  </div>
+                );
+                const yr=(dt)=>{const y=new Date(dt).getFullYear();return isNaN(y)?"":` · ${y}`;};
+                return (
+                  <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:20,fontWeight:1000,color:C.coralInk}}>{r.count} open recall{r.count>1?"s":""}</div>
+                    {(r.items||[]).slice(0,4).map((it,i)=>(
+                      <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
+                        <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
+                        {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
+                      </div>
+                    ))}
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>Recalls are repaired free of charge — {r.sourceUrl?<a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>confirm the fix status</a>:"confirm the fix status"} with the dealer before you sign.</div>
+                  </div>
+                );
+              })()}
+
+              {analysis.odometerCheck?.checked&&(
+                <div style={{...cardStyle,...(analysis.odometerCheck.flag?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Odometer</div>
+                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?" ⚠":""}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.odometerCheck.note}</div>
+                </div>
+              )}
+
+              {analysis.vinCheck?.present&&(
+                <div style={{...cardStyle,...(analysis.vinCheck.valid?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>VIN check{analysis.vinCheck.vin?` · ${analysis.vinCheck.vin}`:""}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":"⚠ VIN doesn't validate"}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.vinCheck.reason}</div>
+                </div>
+              )}
+
+              {analysis.financingCheck?.checked&&(
+                <div style={{...cardStyle,...(analysis.financingCheck.consistent?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Financing math</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk}}>{analysis.financingCheck.consistent?"✓ Payments reconcile":"⚠ Numbers don't add up"}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+                </div>
+              )}
 
               {/* Dealer sentiment: what public Google reviews say about
                   THIS dealer, read for the patterns that actually predict
