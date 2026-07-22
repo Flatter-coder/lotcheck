@@ -187,6 +187,43 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
   }
 }
 
+// VIN pattern validity check -- a real, deterministic verification with no
+// external data and zero false-positive risk. A North American VIN carries
+// its own ISO 3779 check digit in position 9, computed from the other 16
+// characters; a valid VIN's check digit always reconciles, so a mismatch
+// means a typo/transposition on the listing (or a fabricated VIN). Also
+// enforces the format rules (17 chars, and I/O/Q are never used). Returns a
+// structured result the report can surface as "VIN pattern valid".
+function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: string; reason?: string } {
+  if (typeof vinRaw !== "string" || !vinRaw.trim()) return { present: false };
+  const vin = vinRaw.trim().toUpperCase().replace(/\s+/g, "");
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+    const reason = vin.length !== 17
+      ? `A VIN must be 17 characters; this one is ${vin.length}.`
+      : `This VIN contains a letter (I, O, or Q) that VINs never use -- likely a mis-read.`;
+    return { present: true, valid: false, vin, reason };
+  }
+  const translit: Record<string, number> = {
+    A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+    "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+  };
+  const weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+  let sum = 0;
+  for (let i = 0; i < 17; i++) sum += translit[vin[i]] * weights[i];
+  const rem = sum % 11;
+  const expected = rem === 10 ? "X" : String(rem);
+  const actual = vin[8];
+  const valid = actual === expected;
+  return {
+    present: true,
+    valid,
+    vin,
+    reason: valid
+      ? "VIN check digit validates -- the number is internally consistent."
+      : `VIN check digit doesn't validate (position 9 is "${actual}", should be "${expected}") -- likely a typo or transposed character on the listing. Worth confirming the exact VIN with the dealer.`,
+  };
+}
+
 // Fast, authoritative MSRP path: look the vehicle up in msrp_catalog
 // (year/make/model/trim) BEFORE ever paying for the slow manufacturer-site
 // scrape. When the catalog has the row this is a single ~10ms DB read
@@ -698,6 +735,7 @@ Extract the following as a single JSON object, with EXACTLY these fields and no 
   "make": string | null,
   "model": string | null,
   "trim": string | null,           // just the trim level, e.g. "Sport", "XSE AWD", "Preferred" -- separate from make/model so a manufacturer-site lookup can target the exact trim, not just guess it back out of the combined "vehicle" string above.
+  "vin": string | null,            // the full 17-character VIN if it appears anywhere on the page (usually in a specs/vehicle-details table). Copy it EXACTLY as printed, no spaces. null if not shown.
   "fuelType": "BEV" | "PHEV" | "Hybrid" | "Gas" | "Diesel" | null,  // Confirmed via real testing (2026-07-22, Gateway Toyota C-HR listing) that a dealer page's marketing/description prose can genuinely contradict its own structured spec sheet -- that listing's spec table said "Fuel Type: Gasoline" while ALSO listing an electric motor, 77-kWh battery, NACS charging port, and electric driving range. An earlier version of this note said to trust the structured "Fuel Type:" label in cases like this -- that turned out to be BACKWARDS. Checking Toyota Canada's own official spec pages and press release confirmed the 2026 C-HR genuinely IS a 77-kWh BEV; the "Fuel Type: Gasoline" label was the dealer's own error (almost certainly a stale inventory-system default never updated for a brand-new model-year nameplate change), not the detailed EV specs. The corrected rule: when a single categorical label (a bare "Fuel Type:", "Engine:", or similar field) conflicts with multiple DETAILED, mutually-consistent technical numbers describing an EV or PHEV (battery capacity in kWh, electric driving range in km, charging port type/speed, electric motor power) -- trust the detailed, internally-consistent numbers. A cluster of specific figures that all agree with each other is much harder to end up on a page by accident than one stale category label is. If you do encounter and resolve a genuine contradiction like this, say so plainly in the summary field so the buyer knows to double check with the dealer, the same way you would for any other page inconsistency. Note also that the frontend independently cross-checks year/make/model against a separately-verified EV rebate list, so a wrong read here isn't the only safeguard -- but getting this field right still matters for the report's own accuracy.
   "vehicleCondition": "new" | "used" | null,
   "dealerName": string | null,    // the dealership's business name as it would appear on Google (e.g. "Macleod Trail Toyota", "Calgary Honda") -- usually near the top of the page or in an "Available at..." line. Do NOT include the city/location as part of this field; that's a separate concern.
@@ -946,6 +984,7 @@ Deno.serve(async (req: Request) => {
 
     await applyVerifiedWarranty(analysis);
     await applyVerifiedFuelType(analysis);
+    analysis.vinCheck = validateVin(analysis.vin);
 
     // Manufacturer-site MSRP fallback -- only spend the extra search+
     // extraction cost when the dealer's own page genuinely didn't show
