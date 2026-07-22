@@ -292,6 +292,98 @@ async function lookupRecalls(year: number, make: string, model: string): Promise
   }
 }
 
+// Financing math check: reconcile the dealer's OWN disclosed payment stream
+// against the stated total obligation. Deliberately conservative to avoid
+// false flags -- it only calls a quote "inconsistent" when the gap is bigger
+// than Canadian sales tax could explain (payment is often captured before
+// tax while the total is tax-included, a legitimate ~5-15% gap). No external
+// data. Sets analysis.financingCheck.
+function computeFinancingCheck(analysis: any): void {
+  const f = analysis?.financing;
+  if (!f || typeof f !== "object") return;
+  const pay = Number(f.paymentAmount);
+  const term = Number(f.termMonths);
+  const total = Number(f.totalObligation);
+  const freq = f.paymentFrequency;
+  const perYear = freq === "weekly" ? 52 : freq === "biweekly" ? 26 : freq === "monthly" ? 12 : null;
+  if (!pay || !term || !total || !perYear) return; // not enough disclosed to check
+  const nPayments = Math.round((term / 12) * perYear);
+  const expected = pay * nPayments;
+  if (expected <= 0) return;
+  const ratio = total / expected;
+  let consistent: boolean;
+  let note: string;
+  if (ratio >= 0.98 && ratio <= 1.02) {
+    consistent = true;
+    note = `${nPayments} ${freq} payments of $${pay.toLocaleString()} total about $${Math.round(expected).toLocaleString()}, matching the disclosed total obligation of $${total.toLocaleString()}.`;
+  } else if (ratio > 1.02 && ratio <= 1.16) {
+    consistent = true;
+    note = `${nPayments} payments of $${pay.toLocaleString()} (about $${Math.round(expected).toLocaleString()} before tax) reconcile with the disclosed total of $${total.toLocaleString()} once sales tax is added.`;
+  } else {
+    consistent = false;
+    const dir = ratio < 1 ? "less than" : "more than";
+    note = `The disclosed total obligation ($${total.toLocaleString()}) is ${dir} ${nPayments} payments of $${pay.toLocaleString()} (about $${Math.round(expected).toLocaleString()}) by more than sales tax explains — worth asking the dealer to reconcile these numbers.`;
+  }
+  analysis.financingCheck = {
+    checked: true,
+    consistent,
+    disclosedTotalObligation: total,
+    computedFromPayments: Math.round(expected),
+    paymentsCounted: nPayments,
+    note,
+  };
+}
+
+// Negotiation leverage score (0-10): a transparent, DETERMINISTIC function of
+// the verified findings already on the report -- never an AI guess or a
+// random number (which is exactly what the welcome page promises: "computed
+// from verified findings only"). Starts near zero (a clean deal gives a
+// buyer little to push on) and adds weight for each documented problem:
+// price over MSRP, flagged fees, open recalls, financing that doesn't
+// reconcile. The `basis` array lists precisely what drove the number so it's
+// fully traceable. Must run AFTER msrp/recalls/financing are populated.
+function computeLeverageScore(analysis: any): void {
+  const basis: string[] = [];
+  let score = 2.0; // a clean, fair deal has little documented leverage
+
+  const msrp = Number(analysis.msrp) || null;
+  const quoted = Number(analysis.quotedPrice) || null;
+  if (msrp && quoted) {
+    const deltaPct = (quoted - msrp) / msrp;
+    if (deltaPct > 0.005) {
+      score += Math.min(2.5, deltaPct * 100 * 0.3);
+      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`);
+    } else if (deltaPct < -0.02) {
+      score -= 1.0;
+      basis.push(`already priced below MSRP`);
+    }
+  }
+  const flagged = Number(analysis.totalFlaggedCost) || 0;
+  if (flagged > 0) {
+    score += Math.min(2.0, flagged / 1000);
+    basis.push(`$${flagged.toLocaleString()} in flagged fees`);
+  }
+  const rc = analysis.recalls;
+  if (rc?.checked && rc.count > 0) {
+    score += Math.min(2.0, rc.count * 0.7);
+    basis.push(`${rc.count} open Transport Canada recall${rc.count > 1 ? "s" : ""}`);
+  }
+  if (analysis.financingCheck?.checked && analysis.financingCheck.consistent === false) {
+    score += 1.0;
+    basis.push(`financing numbers that don't reconcile`);
+  }
+
+  score = Math.max(0, Math.min(10, Math.round(score * 10) / 10));
+  analysis.leverageScore = {
+    score,
+    computed: true,
+    basis,
+    note: basis.length
+      ? `Computed only from the verified findings above (${basis.join("; ")}) — not an opinion.`
+      : `No pricing red flags, flagged fees, or open recalls surfaced, so this report alone gives limited documented leverage.`,
+  };
+}
+
 // Fast, authoritative MSRP path: look the vehicle up in msrp_catalog
 // (year/make/model/trim) BEFORE ever paying for the slow manufacturer-site
 // scrape. When the catalog has the row this is a single ~10ms DB read
@@ -1082,6 +1174,11 @@ Deno.serve(async (req: Request) => {
         }
       }
     }
+
+    // Derived verification checks -- run last, after price/recalls are all
+    // populated, since the leverage score is computed from them.
+    computeFinancingCheck(analysis);
+    computeLeverageScore(analysis);
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache
