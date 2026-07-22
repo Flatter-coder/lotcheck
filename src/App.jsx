@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext, createContext } from "react";
+import { useState, useEffect, useRef, useContext, createContext, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
@@ -3745,6 +3745,7 @@ function QuoteCheckPage(){
   // should point at upload, since that doesn't depend on a third-party site
   // being scrapable at all -- a failed upload needs different guidance).
   const [lastAttemptType,setLastAttemptType]=useState(null); // "file" | "url"
+  const [lastFile,setLastFile]=useState(null); // the actual File object from the most recent upload -- needed to re-run a refresh on the file path, since handleFile only ever received it as a function argument before now, not from state
 
   // Email-a-copy state -- separate from the main analyze flow so a failed
   // email send never wipes out the report the person can already see on
@@ -3863,6 +3864,29 @@ function QuoteCheckPage(){
   }
   const C=qcTheme==="dark"?QC_DARK:qcTheme==="outdoor"?QC_OUTDOOR:QC_LIGHT;
 
+  // 5-star reviews green, 3-star amber, 1-star red -- with 4 and 2 filled
+  // in sensibly on the same gradient (existing teal/butter/coral palette,
+  // matching the pattern already used elsewhere for score buckets).
+  function ratingColor(r){
+    if(r>=4) return C.tealInk;
+    if(r===3) return C.butterInk;
+    return C.coralInk;
+  }
+
+  // Backend now returns a bigger pool (6-8) of individual, rating-tagged
+  // review highlights instead of 2-4 fixed thematic bullets -- this picks
+  // a random subset of them to actually display. Re-samples whenever a
+  // NEW dealerSentiment payload arrives (a fresh report, a refresh, or
+  // checking a different vehicle at the same dealer), so the card feels
+  // alive across checks instead of showing the exact same lines every
+  // time, while staying stable while someone's actually reading one.
+  const sampledHighlights=useMemo(()=>{
+    const pool=analysis?.dealerSentiment?.highlights||[];
+    if(pool.length<=4) return pool;
+    const shuffled=[...pool].sort(()=>Math.random()-0.5);
+    return shuffled.slice(0,4);
+  },[analysis?.dealerSentiment]);
+
   // JPEG/PNG/WEBP go straight through -- HEIC/HEIF (the default format for
   // iPhone camera photos) needs converting first, since neither browsers
   // nor Claude's vision API can read HEIC directly. Some browsers report an
@@ -3892,6 +3916,7 @@ function QuoteCheckPage(){
       return;
     }
     setFileName(file.name);
+    setLastFile(file);
     setLastAttemptType("file");
     setStatus("analyzing");
     setErrorMsg("");
@@ -3988,6 +4013,18 @@ function QuoteCheckPage(){
       setStatus("error");
       setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
     }
+  };
+
+  // Re-runs the exact same analysis that was last attempted, whether that
+  // was a file upload or a pasted URL -- lets someone retry in place
+  // (e.g. if MSRP/financing came back empty due to a transient fetch
+  // issue) without needing to re-paste a URL or re-pick a file. Does
+  // nothing if there's no prior attempt to repeat, or one is already in
+  // flight.
+  const handleRefresh=()=>{
+    if(status==="analyzing"||!lastAttemptType) return;
+    if(lastAttemptType==="url") handleUrlAnalyze();
+    else if(lastAttemptType==="file"&&lastFile) handleFile(lastFile);
   };
 
   const reset=()=>{
@@ -4101,6 +4138,13 @@ function QuoteCheckPage(){
               <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
               <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
             </div>
+            {lastAttemptType&&(
+              <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
+                title="Re-run this report from scratch"
+                style={{display:"flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:10,background:C.paper2,border:`1px solid ${C.line}`,color:C.inkSoft,cursor:status==="analyzing"?"default":"pointer",opacity:status==="analyzing"?0.5:1,flexShrink:0,fontSize:15}}>
+                🔄
+              </button>
+            )}
             <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
               {[["dark","🌙 Dark"],["light","🌤️ Light"],["outdoor","☀️ Outdoor"]].map(([k,label])=>(
                 <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
@@ -4269,9 +4313,12 @@ function QuoteCheckPage(){
                   for their own reputation summary would undercut the
                   buyer-first positioning the whole platform is built on.
                   Requires analysis.dealerSentiment from the edge function
-                  -- {dealerName, rating, reviewCount, themes:[{type,text}],
-                  sourceUrl} -- which doesn't exist in the schema yet as of
-                  this write, so this renders nothing until that's added. */}
+                  -- {dealerName, rating, reviewCount,
+                  highlights:[{rating,text}], sourceUrl}. Shows a random
+                  sample of up to 4 from the backend's pool of 6-8 (see
+                  sampledHighlights above) so the card varies across
+                  checks instead of showing identical content every time
+                  someone checks a different vehicle at the same dealer. */}
               {analysis.dealerSentiment&&(
                 <div style={cardStyle}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:6}}>
@@ -4282,10 +4329,10 @@ function QuoteCheckPage(){
                       </div>
                     )}
                   </div>
-                  {(analysis.dealerSentiment.themes||[]).map((t,i)=>(
+                  {sampledHighlights.map((h,i)=>(
                     <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                      <span style={{color:t.type==="praise"?C.tealInk:C.coralInk,fontWeight:800,fontSize:13,lineHeight:"20px"}}>{t.type==="praise"?"✓":"⚠"}</span>
-                      <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{t.text}</span>
+                      <span style={{color:ratingColor(h.rating),fontWeight:800,fontSize:12,lineHeight:"20px",whiteSpace:"nowrap"}}>★{h.rating}</span>
+                      <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{h.text}</span>
                     </div>
                   ))}
                   <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>
