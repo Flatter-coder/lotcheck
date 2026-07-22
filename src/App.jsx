@@ -3689,12 +3689,39 @@ function IsoScanVisual({C, speed="idle"}){
 // paid service, so Quote Check stays free and unlimited until that's
 // resolved. getQuoteCheckAccess() above always allows access now.
 
+// Progressive "analyzing" status messages. The edge function doesn't
+// stream progress back, so these are TIME-BASED, not real milestones --
+// they exist to make a genuinely slow scan (a URL scan is ~30-60s, since
+// it live-scrapes the dealer page and, on payment-first listings, also
+// cross-checks the manufacturer's site) FEEL like active work instead of
+// a frozen spinner. The `at` values are seconds of elapsed time, tuned to
+// the real backend phases: dealer-page fetch, first analysis, then the
+// manufacturer-MSRP fallback. Each message just needs to still be true if
+// the scan finishes early -- so they describe the pipeline generically,
+// never claim a specific step "is done." URL and file/photo scans get
+// different sequences because a file scan skips the slow live-scrape and
+// manufacturer steps entirely.
+const URL_SCAN_STAGES = [
+  { at: 0,  text: "Opening the dealer's listing…" },
+  { at: 6,  text: "Reading the pricing and fine print…" },
+  { at: 16, text: "Analyzing MSRP, fees, and financing…" },
+  { at: 30, text: "Cross-checking MSRP with the manufacturer…" },
+  { at: 46, text: "Putting your report together…" },
+];
+const FILE_SCAN_STAGES = [
+  { at: 0,  text: "Reading the document…" },
+  { at: 5,  text: "Pulling out MSRP, price, and add-ons…" },
+  { at: 14, text: "Checking the warranty terms…" },
+  { at: 22, text: "Putting your report together…" },
+];
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
 // browser, sent once to the edge function for analysis, and discarded.
 function QuoteCheckPage(){
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
   // Tracks which analysis path produced the current `analysis` object --
   // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
@@ -3975,6 +4002,25 @@ function QuoteCheckPage(){
     try{ const u=new URL(v.trim()); return u.protocol==="http:"||u.protocol==="https:"; }catch{ return false; }
   }
 
+  // Advance the time-based progress line while a scan runs. The clock
+  // restarts whenever a new scan begins (status -> "analyzing"); the
+  // interval is torn down on status change / unmount so no stray timer
+  // outlives the scan. Purely cosmetic -- it never gates the real result,
+  // which still lands via setStatus("done") from the fetch above.
+  useEffect(()=>{
+    if(status!=="analyzing") return;
+    const stages=lastAttemptType==="url"?URL_SCAN_STAGES:FILE_SCAN_STAGES;
+    setScanMsg(stages[0].text);
+    const t0=Date.now();
+    const id=setInterval(()=>{
+      const elapsed=(Date.now()-t0)/1000;
+      let text=stages[0].text;
+      for(const s of stages){ if(elapsed>=s.at) text=s.text; }
+      setScanMsg(text);
+    },500);
+    return ()=>clearInterval(id);
+  },[status,lastAttemptType]);
+
   const handleUrlAnalyze=async()=>{
     const url=urlInput.trim();
     if(!isValidUrl(url)){
@@ -4240,8 +4286,11 @@ function QuoteCheckPage(){
           {status==="analyzing"&&(
             <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
               <IsoScanVisual C={C} speed="active"/>
-              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Reading {fileName}…</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
+              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>{lastAttemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}</div>
+              <div style={{color:C.inkFaint,fontSize:13,transition:"opacity .2s"}}>{scanMsg||"Checking MSRP, add-ons, and warranty terms"}</div>
+              {lastAttemptType==="url"&&(
+                <div style={{color:C.inkFaint,fontSize:11,marginTop:10,opacity:.75}}>Reading a live dealer page can take up to a minute — hang tight.</div>
+              )}
             </div>
           )}
 
