@@ -4428,9 +4428,52 @@ function QuoteCheckPage(){
                   totalCostOfCredit must be on the SAME tax basis (both
                   pre-tax, ideally) or this percentage split is comparing
                   apples to oranges -- capture that explicitly rather than
-                  assuming. */}
-              {analysis.financing?.termMonths&&analysis.financing?.totalObligation&&(()=>{
+                  assuming.
+
+                  2026-07-22 fix: confirmed live on a real listing (Toyota
+                  bZ, Macleod Trail Toyota) that this card was rendering
+                  NOTHING even though the dealer's page disclosed a real
+                  payment amount, frequency, and rate -- because that page
+                  uses an interactive finance calculator with no committed
+                  term shown, so termMonths/totalObligation both come back
+                  null while paymentAmount/paymentFrequency/rate are known.
+                  That's a common, legitimate real-world shape (not a
+                  parsing failure), so this now has two paths: full data
+                  gets the original weekly/biweekly/monthly toggle with the
+                  principal/interest bar; partial data (payment+frequency
+                  only) gets a simpler, honest card showing just what's
+                  disclosed, with a clear note about what the dealer hasn't
+                  committed to yet -- never silently hides the card just
+                  because the page only gives a partial picture. */}
+              {analysis.financing?.paymentAmount&&analysis.financing?.paymentFrequency&&(()=>{
                 const f=analysis.financing;
+                const hasFullData=!!(f.termMonths&&f.totalObligation);
+                const freqLabel={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
+                const freqSuffix={weekly:"week",biweekly:"2 weeks",monthly:"month"};
+                const chargeWord=f.type==="lease"?"lease charge":"interest";
+
+                if(!hasFullData){
+                  // Partial data: show exactly what the dealer disclosed,
+                  // in the frequency THEY stated it in -- no conversion,
+                  // since converting to a different frequency requires
+                  // termMonths, which isn't known here.
+                  return (
+                    <div style={cardStyle}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
+                        Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
+                      </div>
+                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+                        <div style={{fontSize:26,fontWeight:1000,color:C.ink}}>${f.paymentAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                        <div style={{fontSize:12,color:C.inkFaint}}>/{freqSuffix[f.paymentFrequency]||f.paymentFrequency}</div>
+                        {!!f.rate&&(<div style={{fontSize:12,color:C.inkFaint,marginLeft:4}}>at {f.rate}% APR</div>)}
+                      </div>
+                      <div style={{fontSize:12,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:10}}>
+                        This is the payment the dealer's page shows, but the loan/lease term and total cost aren't stated here (often because the page uses an interactive calculator with no default term selected) -- ask the dealer to confirm the exact term in writing before relying on this figure.
+                      </div>
+                    </div>
+                  );
+                }
+
                 const termMonths=f.termMonths;
                 const totalObligation=f.totalObligation;
                 const totalInterest=f.totalCostOfCredit||0;
@@ -4438,13 +4481,10 @@ function QuoteCheckPage(){
                 const periodsFor=freq=>termMonths*(periodsPerYear[freq]/12);
                 const paymentFor=freq=>totalObligation/periodsFor(freq);
                 const interestFor=freq=>totalInterest/periodsFor(freq);
-                const freqLabel={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
-                const freqSuffix={weekly:"week",biweekly:"2 weeks",monthly:"month"};
                 const payment=paymentFor(payFreq);
                 const interest=interestFor(payFreq);
                 const principal=Math.max(payment-interest,0);
                 const interestPct=payment>0?Math.round((interest/payment)*100):0;
-                const chargeWord=f.type==="lease"?"lease charge":"interest";
                 return (
                   <div style={cardStyle}>
                     <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
