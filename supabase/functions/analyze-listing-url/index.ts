@@ -55,6 +55,13 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
 const CLAUDE_MODEL = "claude-sonnet-5";
 
+// Per-URL analysis cache TTL. A dealer listing's price/incentives can
+// shift, but not minute-to-minute, so a short cache turns repeat scans of
+// the same link (re-checks, shared links, popular vehicles) into instant
+// responses and avoids re-paying for a Nimble scrape + Claude call. 6h
+// balances freshness against hit rate.
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -177,6 +184,69 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
   } catch (err) {
     console.warn("⚠️ applyVerifiedFuelType threw:", err);
     analysis.fuelTypeVerified = false;
+  }
+}
+
+// Fast, authoritative MSRP path: look the vehicle up in msrp_catalog
+// (year/make/model/trim) BEFORE ever paying for the slow manufacturer-site
+// scrape. When the catalog has the row this is a single ~10ms DB read
+// instead of a ~30s search+extract+Claude round trip -- the same
+// verified-source-over-guessing principle already behind
+// applyVerifiedFuelType. Returns null (never throws) on any miss, so the
+// manufacturer fallback still runs.
+//
+// Trim matching is deliberately conservative: MSRP varies a lot by trim
+// (e.g. CX-5 GX $36,300 vs GT Premium $46,700), so a wrong-trim match is
+// worse than no match. It only accepts an UNAMBIGUOUS hit -- an exact
+// normalized trim match, or a single containment match -- never a guess
+// across trims.
+async function lookupCatalogMsrp(
+  year: number,
+  make: string,
+  model: string,
+  trim: string | null,
+): Promise<number | null> {
+  try {
+    const { data, error } = await supabase
+      .from("msrp_catalog")
+      .select("trim, msrp")
+      .eq("year", year)
+      .ilike("make", make)
+      .ilike("model", model)
+      .not("msrp", "is", null);
+    if (error) {
+      console.warn("⚠️ msrp_catalog MSRP lookup failed:", error.message);
+      return null;
+    }
+    const rows = (data ?? []).filter((r: any) => r.msrp != null && !isNaN(Number(r.msrp)));
+    if (rows.length === 0) return null;
+    const num = (r: any) => Number(r.msrp);
+
+    // Only one row for this year/make/model and no trim to disambiguate --
+    // safe to use it directly.
+    if (rows.length === 1 && !trim) return num(rows[0]);
+
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const want = trim ? norm(trim) : "";
+
+    // 1) exact normalized trim match
+    let hits = want ? rows.filter((r: any) => r.trim && norm(r.trim) === want) : [];
+    // 2) otherwise containment either direction (dealer "GT Premium" vs
+    //    catalog "GT (Premium Package)") -- accepted only if it lands on
+    //    exactly one row, never an ambiguous set.
+    if (hits.length === 0 && want) {
+      hits = rows.filter((r: any) => r.trim && (norm(r.trim).includes(want) || want.includes(norm(r.trim))));
+    }
+    if (hits.length === 1) {
+      const v = num(hits[0]);
+      console.log(`Catalog MSRP hit: ${year} ${make} ${model} ${trim ?? ""} -> ${v}`);
+      return v;
+    }
+    console.log(`Catalog MSRP: ${rows.length} row(s) for ${year} ${make} ${model} but no unambiguous trim match for "${trim ?? ""}" -- deferring to manufacturer fallback.`);
+    return null;
+  } catch (err) {
+    console.warn("lookupCatalogMsrp threw:", err);
+    return null;
   }
 }
 
@@ -701,6 +771,27 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Cache fast-path: a recent analysis of this exact URL is returned
+    // immediately -- no Nimble scrape, no Claude call, near-instant. Best-
+    // effort: any cache error just falls through to a fresh scan.
+    try {
+      const { data: cached } = await supabase
+        .from("listing_analysis_cache")
+        .select("analysis, created_at")
+        .eq("url", url)
+        .maybeSingle();
+      if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
+        const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
+        console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
+        return new Response(
+          JSON.stringify({ analysis: cached.analysis, cached: true }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+    } catch (err) {
+      console.warn("Cache read failed (continuing with fresh scan):", err);
+    }
+
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
       console.error("Nimble extract failed after all attempts:", nimbleResult.errBody);
@@ -864,11 +955,33 @@ Deno.serve(async (req: Request) => {
     // stays null -- the report still shows the dealer's quoted price on
     // its own, without a false "verified" claim, exactly as before.
     if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
-      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
-      if (mfrMsrp) {
-        analysis.msrp = mfrMsrp;
-        analysis.msrpSource = "manufacturer_site";
+      // 1) Fast, authoritative catalog lookup first -- a DB read, no scrape.
+      //    When it hits, the ~30s manufacturer-site scrape is skipped
+      //    entirely.
+      const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+      if (catMsrp) {
+        analysis.msrp = catMsrp;
+        analysis.msrpSource = "catalog";
+      } else {
+        // 2) Only if the catalog doesn't have it, pay for the manufacturer-
+        //    site scrape.
+        const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+        if (mfrMsrp) {
+          analysis.msrp = mfrMsrp;
+          analysis.msrpSource = "manufacturer_site";
+        }
       }
+    }
+
+    // Populate the cache with the finished, enriched analysis so the next
+    // scan of this URL within the TTL is instant. Best-effort -- a cache
+    // write failure must never fail the request.
+    try {
+      await supabase
+        .from("listing_analysis_cache")
+        .upsert({ url, analysis, created_at: new Date().toISOString() }, { onConflict: "url" });
+    } catch (err) {
+      console.warn("Cache write failed:", err);
     }
 
     await logUsage({
