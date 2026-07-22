@@ -330,19 +330,40 @@ async function lookupManufacturerMsrp(
     );
     if (results.length === 0) return null;
 
-    // Actively avoid "build"/"configure" URLs (the proven-unreliable
-    // category) and prefer press/media/newsroom pages or PDFs (the
-    // proven-reliable one). Falls back to whatever's left, and as a last
-    // resort even a build/configure URL, rather than giving up outright
-    // -- still worth trying if nothing better came back.
+    // Pick the result most likely to actually carry this trim's MSRP, and
+    // -- critically -- refuse to spend the expensive vx10 extract on one
+    // that can't. Two categories are worthless here and are dropped:
+    //   * build/configure tools -- documented above as unreliable to scrape
+    //   * the brand's homepage / any bare root URL -- a homepage can never
+    //     contain a specific trim's price, so extracting it is ~30s of pure
+    //     wasted latency. Confirmed live (2026-07-22): a Honda search fell
+    //     back to https://www.honda.ca/ and returned no MSRP after a full
+    //     ~30s extract, on exactly the payment-first listings this fallback
+    //     exists to help.
     const avoidPattern = /\/(build|configure)[a-z-]*\//i;
     const preferPattern = /media|news|press|newsroom|\.pdf/i;
-    const candidates = results.filter((r: any) => !avoidPattern.test(r.url));
+    const isRootUrl = (u: string): boolean => {
+      try { const p = new URL(u).pathname.replace(/\/+$/, ""); return p === "" || p === "/"; }
+      catch { return true; } // unparseable -> unusable, treat as root
+    };
+    const modelWord = model.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ")[0];
+    const candidates = results.filter((r: any) => r.url && !avoidPattern.test(r.url) && !isRootUrl(r.url));
+    // Prefer a press/media/PDF page, then a page whose path names this
+    // model (a model page is far likelier to carry pricing than a generic
+    // section), then any remaining real content page.
     const targetUrl =
       candidates.find((r: any) => preferPattern.test(r.url))?.url ||
+      (modelWord ? candidates.find((r: any) => { try { return new URL(r.url).pathname.toLowerCase().includes(modelWord); } catch { return false; } })?.url : undefined) ||
       candidates[0]?.url ||
-      results[0]?.url;
-    if (!targetUrl) return null;
+      null;
+    // Nothing but homepages/build tools came back -- skip the extract
+    // entirely rather than burn ~30s on a page that cannot contain the
+    // answer. This is the common payment-first case, so the saving is real.
+    if (!targetUrl) {
+      console.log(`Manufacturer MSRP: no viable content URL among ${results.length} result(s) for ${year} ${make} ${model} (only homepage/build pages); skipping extract to save latency.`);
+      return null;
+    }
+    console.log(`Manufacturer MSRP: selected ${targetUrl} from ${candidates.length} viable candidate(s).`);
 
     // Step 2: the real content fetch, using the SAME JS-rendering driver
     // (vx10 + explicit wait) already proven reliable on JS-heavy DEALER
