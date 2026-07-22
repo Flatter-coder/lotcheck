@@ -3811,7 +3811,7 @@ function QuoteCheckPage(){
   const QC_LIGHT={
     ink:"#33305A", inkSoft:"#5B5885", inkFaint:"#706D96",
     paper:"#FBF5EC", paper2:"#F5EEE1", card:"#FFFFFF",
-    line:"rgba(51,48,90,.12)",
+    line:"rgba(51,48,90,.12)", borderWidth:"1px", cardShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
     teal:"#2FA79A", tealInk:"#17756B", tealBg:"#E3F4F1",
     coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
     butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
@@ -3819,29 +3819,49 @@ function QuoteCheckPage(){
   const QC_DARK={
     ink:"#EDEBF7", inkSoft:"#B9B6D6", inkFaint:"#8D89B8",
     paper:"#15121F", paper2:"#1C1830", card:"#211C34",
-    line:"rgba(237,235,247,.14)",
+    line:"rgba(237,235,247,.14)", borderWidth:"1px", cardShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
     teal:"#2FA79A", tealInk:"#5FD8CB", tealBg:"rgba(47,167,154,.18)",
     coral:"#F2836B", coralInk:"#FF9E85", coralBg:"rgba(242,131,107,.18)",
     butter:"#F5C95C", butterInk:"#F5C95C", butterBg:"rgba(245,201,92,.18)",
+  };
+  // Outdoor/bright: for viewing on a phone in direct sunlight, where the
+  // usual cream paper and mid-tone teal/coral wash out badly against
+  // glare. Pure white paper and near-black ink maximize contrast; teal
+  // and coral are darkened and more saturated than the standard palette
+  // so the color-coding (principal vs. interest, verified vs. flagged)
+  // stays legible even when ambient light flattens subtle hue
+  // differences. No soft box-shadow here -- shadows are exactly the kind
+  // of low-contrast cue that disappears in bright glare, so a visibly
+  // bolder border does the job of defining the card edge instead.
+  const QC_OUTDOOR={
+    ink:"#141127", inkSoft:"#3A3660", inkFaint:"#514C82",
+    paper:"#FFFFFF", paper2:"#F1F1EC", card:"#FFFFFF",
+    line:"rgba(20,17,39,.22)", borderWidth:"1.5px", cardShadow:"none",
+    teal:"#0E7A6C", tealInk:"#0A5A50", tealBg:"#D9F0EB",
+    coral:"#C8431F", coralInk:"#8F2E12", coralBg:"#FBE1D6",
+    butter:"#B8860B", butterInk:"#6B4E08", butterBg:"#F5E8C8",
   };
   // Same key and same fallback logic as the homepage's inline head script:
   // explicit "dark" wins, otherwise fall back to the OS preference -- so a
   // first-time visitor who lands directly on /quote-check (never having
   // touched the homepage toggle) still gets a theme that matches their
-  // system, not a hardcoded default.
+  // system, not a hardcoded default. "outdoor" is a third saved value now,
+  // but only ever reached by explicit user choice below -- there's no OS
+  // media feature for "in bright sunlight," so a first-time visitor with
+  // nothing saved still only ever falls back to dark or light.
   const [qcTheme,setQcTheme]=useState(()=>{
     try{
       const saved=localStorage.getItem("lc-theme");
-      if(saved) return saved==="dark"?"dark":"light";
+      if(saved==="dark"||saved==="outdoor") return saved;
+      if(saved==="light") return "light";
       return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
     }catch{ return "light"; }
   });
-  function toggleQcTheme(){
-    const next=qcTheme==="dark"?"light":"dark";
+  function setQcThemeAndPersist(next){
     setQcTheme(next);
     try{ localStorage.setItem("lc-theme",next); }catch{}
   }
-  const C=qcTheme==="dark"?QC_DARK:QC_LIGHT;
+  const C=qcTheme==="dark"?QC_DARK:qcTheme==="outdoor"?QC_OUTDOOR:QC_LIGHT;
 
   // JPEG/PNG/WEBP go straight through -- HEIC/HEIF (the default format for
   // iPhone camera photos) needs converting first, since neither browsers
@@ -4053,7 +4073,7 @@ function QuoteCheckPage(){
 
   const cardStyle={
     background:C.card,borderRadius:26,padding:20,marginBottom:16,
-    border:`1px solid ${C.line}`,boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
+    border:`${C.borderWidth} solid ${C.line}`,boxShadow:C.cardShadow,
   };
 
   // Whether this report's addOns should be framed as real costs (fees) vs.
@@ -4081,10 +4101,14 @@ function QuoteCheckPage(){
               <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
               <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
             </div>
-            <button onClick={toggleQcTheme} aria-label={qcTheme==="dark"?"Switch to bright mode":"Switch to dark mode"}
-              style={{width:38,height:38,borderRadius:999,border:`2px solid ${C.ink}`,background:"transparent",color:C.ink,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16}}>
-              {qcTheme==="dark"?"☀️":"🌙"}
-            </button>
+            <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
+              {[["dark","🌙 Dark"],["light","🌤️ Light"],["outdoor","☀️ Outdoor"]].map(([k,label])=>(
+                <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
+                  style={{background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkFaint,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {status==="idle"&&(
