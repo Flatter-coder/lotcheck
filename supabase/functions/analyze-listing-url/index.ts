@@ -231,7 +231,12 @@ function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: st
 // for this exact year/make/model, (2) fetch each recall's affected system +
 // plain-language summary. Never throws: any error/timeout yields
 // { checked:false } so the report still renders.
-const TC_VRDB_BASE = "https://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
+// HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
+// trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
+// certificate: UnknownIssuer"), so an https fetch fails at connect time. The
+// endpoint serves the same JSON over plain http with no redirect, which
+// avoids the cert problem. Confirmed 2026-07-22.
+const TC_VRDB_BASE = "http://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
 const TC_RECALLS_PAGE = "https://tc.canada.ca/en/road-transportation/defects-recalls-vehicles-tires-child-car-seats";
 
 function tcRecordToObj(record: any[]): Record<string, string> {
@@ -242,15 +247,15 @@ function tcRecordToObj(record: any[]): Record<string, string> {
   return o;
 }
 
-async function tcFetchJson(url: string, timeoutMs: number): Promise<any | null> {
+async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolean; data?: any; error?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    return { ok: true, data: await res.json() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
   } finally {
     clearTimeout(timer);
   }
@@ -260,8 +265,14 @@ async function lookupRecalls(year: number, make: string, model: string): Promise
   try {
     const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
     const listUrl = `${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year}-${year}?format=json`;
-    const listData = await tcFetchJson(listUrl, 8000);
-    const rows: any[] = listData?.ResultSet ?? [];
+    const listRes = await tcFetchJson(listUrl, 12000);
+    // Unreachable registry must NOT masquerade as "no recalls" -- report it
+    // honestly so the UI can say "couldn't verify" instead of a false all-clear.
+    if (!listRes.ok) {
+      console.warn("Recall list fetch failed:", listRes.error, listUrl);
+      return { checked: false, error: listRes.error, source: "Transport Canada VRDB" };
+    }
+    const rows: any[] = listRes.data?.ResultSet ?? [];
     const byNumber = new Map<string, { recallNumber: string; date: string | null }>();
     for (const r of rows) {
       const o = tcRecordToObj(r);
@@ -274,8 +285,8 @@ async function lookupRecalls(year: number, make: string, model: string): Promise
     // Detail (affected system + summary) for up to 8 recalls, in parallel.
     const nums = Array.from(byNumber.keys()).slice(0, 8);
     const items = await Promise.all(nums.map(async (num) => {
-      const detData = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 8000);
-      const o = detData?.ResultSet?.[0] ? tcRecordToObj(detData.ResultSet[0]) : {};
+      const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
+      const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
       const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
       return {
         recallNumber: num,

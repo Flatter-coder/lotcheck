@@ -72,6 +72,7 @@ const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a ph
   "make": string|null,
   "model": string|null,
   "trim": string|null,
+  "vin": string|null,
   "vehicleCondition": "new"|"used"|null,
   "fuelType": "BEV"|"PHEV"|"hybrid"|"gas"|null,
   "dealerName": string|null,
@@ -88,6 +89,17 @@ const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a ph
     }
   ],
   "warranty": { "offered": string|null, "price": number|null, "assessment": string|null },
+  "financing": {
+    "type": "lease"|"finance"|null,
+    "termMonths": number|null,
+    "rate": number|null,
+    "paymentAmount": number|null,
+    "paymentFrequency": "weekly"|"biweekly"|"monthly"|null,
+    "totalObligation": number|null,
+    "totalObligationTaxIncluded": boolean|null,
+    "totalCostOfCredit": number|null,
+    "residualValue": number|null
+  },
   "summary": string
 }
 
@@ -95,6 +107,8 @@ Field notes:
 - "dealerName": the dealership's business name, if shown anywhere on the quote (letterhead, header/footer, contact block). Do not include the city as part of this field -- that's separate.
 - "dealerCity": the city (and province if visible, e.g. "Calgary, AB") of the dealership, if shown. Needed to tell apart dealers that share a common brand name -- there are many different "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
+- "vin": the full 17-character VIN if it appears anywhere on the quote. Copy it EXACTLY as printed, no spaces. null if not shown.
+- "financing": the lease/finance terms if the quote discloses a payment plan (often in a dense fine-print paragraph). "paymentAmount" is the periodic payment BEFORE tax if both are shown; "totalObligation" is the total of all payments as literally disclosed, with "totalObligationTaxIncluded" true if that total includes tax. Use null for the whole object if no financing is disclosed.
 - "standardWarranty": the vehicle's INCLUDED manufacturer warranty (what already comes free) -- separate from any extended plan being sold.
 - "warranty": an extended warranty or protection plan being OFFERED/SOLD on this quote, if any. Use nulls throughout if none is being sold.
 - "addOns": every fee, add-on, or line item beyond the base price -- documentation fees, admin fees, nitrogen tires, fabric protection, etc. "verdict" is your judgment: "good" (a genuine fair-priced benefit), "flagged" (commonly overpriced or questionable, worth negotiating), or "standard" (a mandatory, unremarkable pass-through like tax or registration -- neither good nor bad). "reason" is a one-sentence explanation.
@@ -194,6 +208,12 @@ Deno.serve(async (req: Request) => {
     // ---- Step 3: Assemble the analysis in the exact shape App.jsx renders ----
     const analysis = buildAnalysis(extracted, msrpLookup);
     await applyVerifiedWarranty(analysis);
+    analysis.vinCheck = validateVin(analysis.vin);
+    if (analysis.year && analysis.make && analysis.model) {
+      analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+    }
+    computeFinancingCheck(analysis);
+    computeLeverageScore(analysis);
 
     return new Response(JSON.stringify({ analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -370,6 +390,149 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
   }
 }
 
+// ── Verification checks, shared byte-for-byte with the listing path so an
+// uploaded quote gets the same 10-point treatment as a pasted URL. Each is
+// self-contained and unit-tested on the listing side. ──────────────────────
+
+// VIN pattern validity (ISO 3779 check digit + format rules). Deterministic.
+function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: string; reason?: string } {
+  if (typeof vinRaw !== "string" || !vinRaw.trim()) return { present: false };
+  const vin = vinRaw.trim().toUpperCase().replace(/\s+/g, "");
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+    const reason = vin.length !== 17
+      ? `A VIN must be 17 characters; this one is ${vin.length}.`
+      : `This VIN contains a letter (I, O, or Q) that VINs never use -- likely a mis-read.`;
+    return { present: true, valid: false, vin, reason };
+  }
+  const translit: Record<string, number> = {
+    A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
+    "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
+  };
+  const weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+  let sum = 0;
+  for (let i = 0; i < 17; i++) sum += translit[vin[i]] * weights[i];
+  const rem = sum % 11;
+  const expected = rem === 10 ? "X" : String(rem);
+  const actual = vin[8];
+  const valid = actual === expected;
+  return {
+    present: true, valid, vin,
+    reason: valid
+      ? "VIN check digit validates -- the number is internally consistent."
+      : `VIN check digit doesn't validate (position 9 is "${actual}", should be "${expected}") -- likely a typo or transposed character. Worth confirming the exact VIN with the dealer.`,
+  };
+}
+
+// HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
+// trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
+// certificate: UnknownIssuer"), so an https fetch fails at connect time. The
+// endpoint serves the same JSON over plain http with no redirect, which
+// avoids the cert problem. Confirmed 2026-07-22.
+const TC_VRDB_BASE = "http://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
+const TC_RECALLS_PAGE = "https://tc.canada.ca/en/road-transportation/defects-recalls-vehicles-tires-child-car-seats";
+function tcRecordToObj(record: any[]): Record<string, string> {
+  const o: Record<string, string> = {};
+  for (const f of record || []) { if (f?.Name) o[f.Name] = f?.Value?.Literal ?? ""; }
+  return o;
+}
+async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolean; data?: any; error?: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    return { ok: true, data: await res.json() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+  } finally { clearTimeout(timer); }
+}
+async function lookupRecalls(year: number, make: string, model: string): Promise<any> {
+  try {
+    const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
+    const listUrl = `${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year}-${year}?format=json`;
+    const listRes = await tcFetchJson(listUrl, 12000);
+    // Unreachable registry must NOT masquerade as "no recalls" -- report it
+    // honestly so the UI can say "couldn't verify" instead of a false all-clear.
+    if (!listRes.ok) {
+      console.warn("Recall list fetch failed:", listRes.error, listUrl);
+      return { checked: false, error: listRes.error, source: "Transport Canada VRDB" };
+    }
+    const rows: any[] = listRes.data?.ResultSet ?? [];
+    const byNumber = new Map<string, { recallNumber: string; date: string | null }>();
+    for (const r of rows) {
+      const o = tcRecordToObj(r);
+      const num = o["Recall number"];
+      if (num && !byNumber.has(num)) byNumber.set(num, { recallNumber: num, date: o["Recall date"] || null });
+    }
+    if (byNumber.size === 0) return { checked: true, count: 0, items: [], source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+    const nums = Array.from(byNumber.keys()).slice(0, 8);
+    const items = await Promise.all(nums.map(async (num) => {
+      const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
+      const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
+      const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
+      return {
+        recallNumber: num, date: byNumber.get(num)!.date,
+        system: o["SYSTEM_TYPE_ETXT"] || null,
+        unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null,
+        summary: comment ? comment.slice(0, 400) : null,
+      };
+    }));
+    return { checked: true, count: byNumber.size, items, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+  } catch (err) { console.warn("lookupRecalls threw:", err); return { checked: false }; }
+}
+
+function computeFinancingCheck(analysis: any): void {
+  const f = analysis?.financing;
+  if (!f || typeof f !== "object") return;
+  const pay = Number(f.paymentAmount);
+  const term = Number(f.termMonths);
+  const total = Number(f.totalObligation);
+  const freq = f.paymentFrequency;
+  const perYear = freq === "weekly" ? 52 : freq === "biweekly" ? 26 : freq === "monthly" ? 12 : null;
+  if (!pay || !term || !total || !perYear) return;
+  const nPayments = Math.round((term / 12) * perYear);
+  const expected = pay * nPayments;
+  if (expected <= 0) return;
+  const ratio = total / expected;
+  let consistent: boolean; let note: string;
+  if (ratio >= 0.98 && ratio <= 1.02) {
+    consistent = true;
+    note = `${nPayments} ${freq} payments of $${pay.toLocaleString()} total about $${Math.round(expected).toLocaleString()}, matching the disclosed total obligation of $${total.toLocaleString()}.`;
+  } else if (ratio > 1.02 && ratio <= 1.16) {
+    consistent = true;
+    note = `${nPayments} payments of $${pay.toLocaleString()} (about $${Math.round(expected).toLocaleString()} before tax) reconcile with the disclosed total of $${total.toLocaleString()} once sales tax is added.`;
+  } else {
+    consistent = false;
+    const dir = ratio < 1 ? "less than" : "more than";
+    note = `The disclosed total obligation ($${total.toLocaleString()}) is ${dir} ${nPayments} payments of $${pay.toLocaleString()} (about $${Math.round(expected).toLocaleString()}) by more than sales tax explains — worth asking the dealer to reconcile these numbers.`;
+  }
+  analysis.financingCheck = { checked: true, consistent, disclosedTotalObligation: total, computedFromPayments: Math.round(expected), paymentsCounted: nPayments, note };
+}
+
+function computeLeverageScore(analysis: any): void {
+  const basis: string[] = [];
+  let score = 2.0;
+  const msrp = Number(analysis.msrp) || null;
+  const quoted = Number(analysis.quotedPrice) || null;
+  if (msrp && quoted) {
+    const deltaPct = (quoted - msrp) / msrp;
+    if (deltaPct > 0.005) { score += Math.min(2.5, deltaPct * 100 * 0.3); basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`); }
+    else if (deltaPct < -0.02) { score -= 1.0; basis.push(`already priced below MSRP`); }
+  }
+  const flagged = Number(analysis.totalFlaggedCost) || 0;
+  if (flagged > 0) { score += Math.min(2.0, flagged / 1000); basis.push(`$${flagged.toLocaleString()} in flagged fees`); }
+  const rc = analysis.recalls;
+  if (rc?.checked && rc.count > 0) { score += Math.min(2.0, rc.count * 0.7); basis.push(`${rc.count} open Transport Canada recall${rc.count > 1 ? "s" : ""}`); }
+  if (analysis.financingCheck?.checked && analysis.financingCheck.consistent === false) { score += 1.0; basis.push(`financing numbers that don't reconcile`); }
+  score = Math.max(0, Math.min(10, Math.round(score * 10) / 10));
+  analysis.leverageScore = {
+    score, computed: true, basis,
+    note: basis.length
+      ? `Computed only from the verified findings above (${basis.join("; ")}) — not an opinion.`
+      : `No pricing red flags, flagged fees, or open recalls surfaced, so this report alone gives limited documented leverage.`,
+  };
+}
+
 // Combines Claude's read with the verified MSRP into EXACTLY the shape
 // App.jsx's report card renders today, plus one new (currently unrendered,
 // harmless) field for the future verified/estimated badge.
@@ -415,6 +578,8 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     dealerCity: dealerCity ?? null,
     msrp,
     quotedPrice: quotedPrice ?? null,
+    vin: extracted.vin ?? null,
+    financing: extracted.financing ?? null,
     standardWarranty: extracted.standardWarranty ?? null,
     warranty: extracted.warranty ?? null,
     addOns,
