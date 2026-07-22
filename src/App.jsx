@@ -4179,11 +4179,13 @@ function QuoteCheckPage(){
       <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
-            <LogoMark size={34}/>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
-              <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
-            </div>
+            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:1,minWidth:0}}>
+              <LogoMark size={34}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
+                <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+              </div>
+            </a>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
@@ -4248,7 +4250,7 @@ function QuoteCheckPage(){
 
             <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"16px 18px"}}>
               <div style={{color:C.ink,fontWeight:800,fontSize:14,marginBottom:8}}>Paste a dealer listing link instead</div>
-              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically.</div>
+              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically. Dealer links take up to a minute to read; uploading a photo is faster.</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <input
                   type="url"
