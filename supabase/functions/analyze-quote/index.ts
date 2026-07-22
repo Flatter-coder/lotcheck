@@ -73,6 +73,7 @@ const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a ph
   "model": string|null,
   "trim": string|null,
   "vin": string|null,
+  "odometerKm": number|null,
   "vehicleCondition": "new"|"used"|null,
   "fuelType": "BEV"|"PHEV"|"hybrid"|"gas"|null,
   "dealerName": string|null,
@@ -108,6 +109,7 @@ Field notes:
 - "dealerCity": the city (and province if visible, e.g. "Calgary, AB") of the dealership, if shown. Needed to tell apart dealers that share a common brand name -- there are many different "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
 - "vin": the full 17-character VIN if it appears anywhere on the quote. Copy it EXACTLY as printed, no spaces. null if not shown.
+- "odometerKm": the odometer reading / mileage in kilometres if shown (e.g. "41,220 km" -> 41220). Numbers only, no units or commas. null if not shown.
 - "financing": the lease/finance terms if the quote discloses a payment plan (often in a dense fine-print paragraph). "paymentAmount" is the periodic payment BEFORE tax if both are shown; "totalObligation" is the total of all payments as literally disclosed, with "totalObligationTaxIncluded" true if that total includes tax. Use null for the whole object if no financing is disclosed.
 - "standardWarranty": the vehicle's INCLUDED manufacturer warranty (what already comes free) -- separate from any extended plan being sold.
 - "warranty": an extended warranty or protection plan being OFFERED/SOLD on this quote, if any. Use nulls throughout if none is being sold.
@@ -213,6 +215,7 @@ Deno.serve(async (req: Request) => {
       analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
     }
     computeFinancingCheck(analysis);
+    computeOdometerCheck(analysis);
     computeLeverageScore(analysis);
 
     return new Response(JSON.stringify({ analysis }), {
@@ -509,6 +512,37 @@ function computeFinancingCheck(analysis: any): void {
   analysis.financingCheck = { checked: true, consistent, disclosedTotalObligation: total, computedFromPayments: Math.round(expected), paymentsCounted: nPayments, note };
 }
 
+function computeOdometerCheck(analysis: any): void {
+  const km = Number(analysis.odometerKm);
+  const year = Number(analysis.year);
+  if (!year || !Number.isFinite(km) || km < 0) return;
+  const nowYear = new Date().getUTCFullYear();
+  const age = Math.max(0, nowYear - year);
+  const isNew = analysis.vehicleCondition === "new";
+  let flag = false;
+  let note: string;
+  if (isNew || age <= 0) {
+    if (km <= 500) {
+      note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery/demo distance).`;
+    } else {
+      flag = true;
+      note = `Listed as new but shows ${km.toLocaleString()} km — more than typical delivery distance. Ask whether it was a demo or loaner, which can affect the warranty start date and the price.`;
+    }
+  } else {
+    const typical = age * 20000;
+    const low = age * 10000;
+    if (km < low * 0.6) {
+      flag = true;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+    } else if (km > age * 30000) {
+      note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
+    } else {
+      note = `${km.toLocaleString()} km is in the normal range for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km).`;
+    }
+  }
+  analysis.odometerCheck = { checked: true, km, flag, note };
+}
+
 function computeLeverageScore(analysis: any): void {
   const basis: string[] = [];
   let score = 2.0;
@@ -579,6 +613,7 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     msrp,
     quotedPrice: quotedPrice ?? null,
     vin: extracted.vin ?? null,
+    odometerKm: extracted.odometerKm ?? null,
     financing: extracted.financing ?? null,
     standardWarranty: extracted.standardWarranty ?? null,
     warranty: extracted.warranty ?? null,

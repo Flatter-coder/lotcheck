@@ -345,6 +345,42 @@ function computeFinancingCheck(analysis: any): void {
   };
 }
 
+// Odometer plausibility check: compares the stated mileage against what's
+// typical for the vehicle's age (Canadian average ~20,000 km/year). Its real
+// value is catching the classic odometer-rollback red flag -- mileage that is
+// implausibly LOW for the age -- and flagging a "new" listing that shows more
+// than delivery distance. No external data. Sets analysis.odometerCheck.
+function computeOdometerCheck(analysis: any): void {
+  const km = Number(analysis.odometerKm);
+  const year = Number(analysis.year);
+  if (!year || !Number.isFinite(km) || km < 0) return;
+  const nowYear = new Date().getUTCFullYear();
+  const age = Math.max(0, nowYear - year);
+  const isNew = analysis.vehicleCondition === "new";
+  let flag = false;
+  let note: string;
+  if (isNew || age <= 0) {
+    if (km <= 500) {
+      note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery/demo distance).`;
+    } else {
+      flag = true;
+      note = `Listed as new but shows ${km.toLocaleString()} km — more than typical delivery distance. Ask whether it was a demo or loaner, which can affect the warranty start date and the price.`;
+    }
+  } else {
+    const typical = age * 20000;
+    const low = age * 10000;
+    if (km < low * 0.6) {
+      flag = true;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+    } else if (km > age * 30000) {
+      note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
+    } else {
+      note = `${km.toLocaleString()} km is in the normal range for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km).`;
+    }
+  }
+  analysis.odometerCheck = { checked: true, km, flag, note };
+}
+
 // Negotiation leverage score (0-10): a transparent, DETERMINISTIC function of
 // the verified findings already on the report -- never an AI guess or a
 // random number (which is exactly what the welcome page promises: "computed
@@ -907,6 +943,7 @@ Extract the following as a single JSON object, with EXACTLY these fields and no 
   "model": string | null,
   "trim": string | null,           // just the trim level, e.g. "Sport", "XSE AWD", "Preferred" -- separate from make/model so a manufacturer-site lookup can target the exact trim, not just guess it back out of the combined "vehicle" string above.
   "vin": string | null,            // the full 17-character VIN if it appears anywhere on the page (usually in a specs/vehicle-details table). Copy it EXACTLY as printed, no spaces. null if not shown.
+  "odometerKm": number | null,     // the odometer reading / mileage in kilometres if shown (e.g. "41,220 km" -> 41220, "10 km" -> 10). Numbers only, no units or commas. null if not shown.
   "fuelType": "BEV" | "PHEV" | "Hybrid" | "Gas" | "Diesel" | null,  // Confirmed via real testing (2026-07-22, Gateway Toyota C-HR listing) that a dealer page's marketing/description prose can genuinely contradict its own structured spec sheet -- that listing's spec table said "Fuel Type: Gasoline" while ALSO listing an electric motor, 77-kWh battery, NACS charging port, and electric driving range. An earlier version of this note said to trust the structured "Fuel Type:" label in cases like this -- that turned out to be BACKWARDS. Checking Toyota Canada's own official spec pages and press release confirmed the 2026 C-HR genuinely IS a 77-kWh BEV; the "Fuel Type: Gasoline" label was the dealer's own error (almost certainly a stale inventory-system default never updated for a brand-new model-year nameplate change), not the detailed EV specs. The corrected rule: when a single categorical label (a bare "Fuel Type:", "Engine:", or similar field) conflicts with multiple DETAILED, mutually-consistent technical numbers describing an EV or PHEV (battery capacity in kWh, electric driving range in km, charging port type/speed, electric motor power) -- trust the detailed, internally-consistent numbers. A cluster of specific figures that all agree with each other is much harder to end up on a page by accident than one stale category label is. If you do encounter and resolve a genuine contradiction like this, say so plainly in the summary field so the buyer knows to double check with the dealer, the same way you would for any other page inconsistency. Note also that the frontend independently cross-checks year/make/model against a separately-verified EV rebate list, so a wrong read here isn't the only safeguard -- but getting this field right still matters for the report's own accuracy.
   "vehicleCondition": "new" | "used" | null,
   "dealerName": string | null,    // the dealership's business name as it would appear on Google (e.g. "Macleod Trail Toyota", "Calgary Honda") -- usually near the top of the page or in an "Available at..." line. Do NOT include the city/location as part of this field; that's a separate concern.
@@ -1189,6 +1226,7 @@ Deno.serve(async (req: Request) => {
     // Derived verification checks -- run last, after price/recalls are all
     // populated, since the leverage score is computed from them.
     computeFinancingCheck(analysis);
+    computeOdometerCheck(analysis);
     computeLeverageScore(analysis);
 
     // Populate the cache with the finished, enriched analysis so the next
