@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LotCheck — Every quote, verified. | Isometric Lot</title>
-<meta name="description" content="LotCheck protects Canadian used-car buyers. Upload a dealer quote and watch it roll through a 10-point verification lane — live market comps, open recalls, hidden fees — then get a verified report.">
+<meta name="description" content="LotCheck protects Canadian used-car buyers. Upload a dealer quote and watch it roll through a 10-point verification lane — verified MSRP, open recalls, hidden fees — then get a verified report.">
 <meta name="theme-color" content="#FBF5EC" id="themeColorMeta">
 <script>
 /* Runs before first paint — sets the theme attribute immediately so there's
@@ -612,7 +612,7 @@ footer{padding:34px 0 44px}
     <div class="hero-copy">
       <span class="kicker rv" style="--i:0">LotCheck · quote verification</span>
       <h1 class="rv" style="--i:1">Know the <span class="hl">real story</span> before you buy the car.</h1>
-      <p class="lede rv" style="--i:2">Upload any dealer quote. LotCheck rolls it through a 10-point verification lane — live market comps, open recalls, hidden fees, financing math — and hands you a verified report. No guessing, no fabricated scores.</p>
+      <p class="lede rv" style="--i:2">Upload any dealer quote. LotCheck rolls it through a 10-point verification lane — verified MSRP, open recalls, hidden fees, financing math — and hands you a verified report. No guessing, no fabricated scores.</p>
       <div class="hero-ctas rv" style="--i:3">
         <a class="btn btn-primary" href="/quote-check">
           Analyze my quote
@@ -632,7 +632,7 @@ footer{padding:34px 0 44px}
         </span>
         <span class="chip">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V10M10 19V5M16 19v-8M21 19H3" stroke="#5B5885" stroke-width="2" stroke-linecap="round"/></svg>
-          Real market comps
+          Verified MSRP
         </span>
       </div>
     </div>
@@ -663,7 +663,7 @@ footer{padding:34px 0 44px}
         <span class="step" aria-hidden="true">2</span>
         <div class="how-scene" data-vign="1" aria-hidden="true"></div>
         <h3>10-point verification</h3>
-        <p>The quote drives the verification lane: market comps, odometer consistency, open recalls, fee audit, rebate eligibility and more — all against live data.</p>
+        <p>The quote drives the verification lane: MSRP verification, odometer consistency, open recalls, fee audit, rebate eligibility and more — all against real, sourced data.</p>
       </article>
       <article class="how-card rv" style="--i:2">
         <span class="step" aria-hidden="true">3</span>
@@ -697,7 +697,7 @@ footer{padding:34px 0 44px}
     </div>
   </div>
   <ol class="pipe-fallback">
-    <li>Price fairness vs. live market comps</li>
+    <li>MSRP verification against manufacturer data</li>
     <li>Odometer consistency check</li>
     <li>Open-recall lookup (Transport Canada)</li>
     <li>Fee itemization audit</li>
@@ -705,7 +705,7 @@ footer{padding:34px 0 44px}
     <li>VIN pattern validity check</li>
     <li>Warranty validity</li>
     <li>Financing math check</li>
-    <li>Trade-in fairness</li>
+    <li>Dealer reputation from real reviews</li>
     <li>Negotiation leverage score</li>
   </ol>
 </section>
@@ -733,8 +733,8 @@ footer{padding:34px 0 44px}
           <span class="val">$24,995</span>
         </div>
         <div class="rep-row">
-          <span class="lbl">Verified market value</span>
-          <span class="val">$23,400 <span class="tag tag-flag">$1,595 over market</span></span>
+          <span class="lbl">Verified MSRP</span>
+          <span class="val">$26,300 <span class="tag tag-ok">Matches sticker</span></span>
         </div>
         <div class="rep-row">
           <span class="lbl">Open recalls (Transport Canada)</span>
@@ -821,7 +821,7 @@ footer{padding:34px 0 44px}
     <div class="sec-head rv" style="text-align:center;margin-left:auto;margin-right:auto;">
       <span class="kicker" style="justify-content:center">Our mission</span>
       <h2>Verify every quote before you sign — so the savings are real, not promised.</h2>
-      <p class="lede" style="margin-left:auto;margin-right:auto;">That's why every check on this page runs against real government registries and live market data — never assumptions.</p>
+      <p class="lede" style="margin-left:auto;margin-right:auto;">That's why every check on this page runs against real government registries and manufacturer data — never assumptions.</p>
     </div>
     <div class="trust-strip">
       <div class="trust-item rv" style="--i:0">
@@ -838,8 +838,8 @@ footer{padding:34px 0 44px}
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V10M10 19V5M16 19v-8" stroke="#1E8A7E" stroke-width="2.4" stroke-linecap="round"/><path d="M2.5 21.5h19" stroke="#1E8A7E" stroke-width="2.4" stroke-linecap="round"/></svg>
         </span>
         <div>
-          <h3>Live market comps</h3>
-          <p>Price fairness is measured against current listings for the same trim, year and region.</p>
+          <h3>Manufacturer MSRP</h3>
+          <p>The official MSRP is verified against manufacturer data, so an inflated "MSRP" written on the quote gets flagged.</p>
         </div>
       </div>
       <div class="trust-item rv" style="--i:2">
@@ -1145,8 +1145,8 @@ document.querySelectorAll("[data-vign]").forEach(function(el){
 /* ============================================================
    PIPELINE — sticky scroll camera through 10 gates
    ============================================================ */
-var STN = ["Price fairness","Odometer check","Open recalls","Fee audit","EV rebate check",
-           "VIN pattern","Warranty validity","Financing math","Trade-in fairness","Leverage score"];
+var STN = ["MSRP verified","Odometer check","Open recalls","Fee audit","EV rebate check",
+           "VIN pattern","Warranty validity","Financing math","Dealer reputation","Leverage score"];
 var GATE0 = 260, GATESTEP = 250;
 function buildPipe(){
   var host = document.getElementById("pipeScene");
