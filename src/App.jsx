@@ -4353,6 +4353,74 @@ function QuoteCheckPage(){
                 );
               })()}
 
+              {/* ── Verification checks (the real 10-point results) rendered
+                  from the edge function's structured output: leverage,
+                  recalls, odometer, VIN, financing math. Each card only
+                  appears when its check ran, and reuses the same teal=good /
+                  coral=concern language as the price cards above. ── */}
+
+              {analysis.leverageScore?.computed&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
+                  <div style={{fontSize:28,fontWeight:1000,color:C.ink,lineHeight:1}}>{analysis.leverageScore.score}<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> /10</span></div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
+                </div>
+              )}
+
+              {analysis.recalls&&(()=>{
+                const r=analysis.recalls;
+                if(!r.checked) return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.5}}>Couldn't reach the recall registry just now — you can check directly at Transport Canada before you sign.</div>
+                  </div>
+                );
+                if(r.count===0) return (
+                  <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:15,fontWeight:800,color:C.tealInk}}>✓ No open recalls found</div>
+                  </div>
+                );
+                const yr=(dt)=>{const y=new Date(dt).getFullYear();return isNaN(y)?"":` · ${y}`;};
+                return (
+                  <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:20,fontWeight:1000,color:C.coralInk}}>{r.count} open recall{r.count>1?"s":""}</div>
+                    {(r.items||[]).slice(0,4).map((it,i)=>(
+                      <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
+                        <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
+                        {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
+                      </div>
+                    ))}
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>Recalls are repaired free of charge — {r.sourceUrl?<a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>confirm the fix status</a>:"confirm the fix status"} with the dealer before you sign.</div>
+                  </div>
+                );
+              })()}
+
+              {analysis.odometerCheck?.checked&&(
+                <div style={{...cardStyle,...(analysis.odometerCheck.flag?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Odometer</div>
+                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?" ⚠":""}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.odometerCheck.note}</div>
+                </div>
+              )}
+
+              {analysis.vinCheck?.present&&(
+                <div style={{...cardStyle,...(analysis.vinCheck.valid?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>VIN check{analysis.vinCheck.vin?` · ${analysis.vinCheck.vin}`:""}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":"⚠ VIN doesn't validate"}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.vinCheck.reason}</div>
+                </div>
+              )}
+
+              {analysis.financingCheck?.checked&&(
+                <div style={{...cardStyle,...(analysis.financingCheck.consistent?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Financing math</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk}}>{analysis.financingCheck.consistent?"✓ Payments reconcile":"⚠ Numbers don't add up"}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+                </div>
+              )}
+
               {/* Dealer sentiment: what public Google reviews say about
                   THIS dealer, read for the patterns that actually predict
                   a good/bad buying experience (financing transparency,
