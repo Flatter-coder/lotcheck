@@ -684,10 +684,12 @@ function getRebate(province,fuel,listing){
   if(!listing||fuel==="Gas"||fuel==="Hybrid"||fuel==="Diesel"){
     return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,ineligibleReason:"Gas and standard hybrid vehicles are not eligible for EVAP."};
   }
-  // A vehicle is used if: km > 10,000 OR it's more than 1 model year old
-  // This catches listings where km data is missing/zero but the car is clearly used
+  // A vehicle is used if the caller says so explicitly (listing.condition),
+  // OR km > 10,000, OR it's more than 1 model year old. The explicit flag
+  // matters for nearly-new used EVs (a demo/lease-return current-year car can
+  // have very low km yet still be "used" for EVAP, which is new-only).
   const currentYear = new Date().getFullYear();
-  const isUsed = listing.km > 10000 || (listing.year < currentYear - 1);
+  const isUsed = listing.condition==="used" || listing.km > 10000 || (listing.year < currentYear - 1);
   const overPriceCap = listing.price > 50000;
   if(isUsed){
     const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
@@ -4474,9 +4476,10 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* EVAP rebate check -- only rendered when the quote reads as a new
-                  BEV/PHEV, since telling someone with a regular gas car "not
-                  eligible" is just noise. Reuses getRebate()/getEVAP() directly
+              {/* EVAP rebate check -- rendered for any BEV/PHEV (new OR used),
+                  since for a real EV the rebate status is information a buyer
+                  wants; only regular gas/diesel cars are hidden, where "not
+                  eligible" would just be noise. Reuses getRebate()/getEVAP() directly
                   (defined elsewhere in this same file) against the structured
                   year/make/model/fuelType/vehicleCondition fields the edge
                   function now extracts -- same EVAP logic already used and
@@ -4508,11 +4511,17 @@ function QuoteCheckPage(){
                   :null;
                 const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
                 const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
-                if(!(analysis.vehicleCondition==="new"&&analysis.year&&analysis.make&&analysis.model
+                // Show for ANY BEV/PHEV, new or used -- for an actual EV the
+                // rebate status (eligible, or the specific reason it isn't) is
+                // real information, not noise. Only gas/diesel are hidden (the
+                // fuel gate below). getRebate gets the real condition + price
+                // so it reports "used / over cap / not on the list" correctly.
+                if(!(analysis.year&&analysis.make&&analysis.model
                      &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"))) return null;
                 const rebate=getRebate("AB",effectiveFuelType,{
                   year:analysis.year,make:analysis.make,model:analysis.model,
-                  km:0,price:analysis.quotedPrice||analysis.msrp||0,
+                  condition:analysis.vehicleCondition,
+                  km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
                 });
                 return(
                   <div style={{...cardStyle,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>

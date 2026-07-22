@@ -521,13 +521,17 @@ function computeOdometerCheck(analysis: any): void {
   const isNew = analysis.vehicleCondition === "new";
   let flag = false;
   let note: string;
-  if (isNew || age <= 0) {
+  if (isNew) {
     if (km <= 500) {
-      note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery/demo distance).`;
+      note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery distance).`;
     } else {
       flag = true;
       note = `Listed as new but shows ${km.toLocaleString()} km — more than typical delivery distance. Ask whether it was a demo or loaner, which can affect the warranty start date and the price.`;
     }
+  } else if (age <= 1) {
+    // Used, current or near-current model year -- effectively a demo, loaner,
+    // or short lease return. Low mileage here is normal, NOT a rollback signal.
+    note = `${km.toLocaleString()} km on a nearly-new used vehicle — low mileage is normal here (often a demo, loaner, or short lease return). Confirm the in-service date, since the manufacturer warranty usually starts then, not when you buy it.`;
   } else {
     const typical = age * 20000;
     const low = age * 10000;
