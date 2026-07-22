@@ -4456,19 +4456,30 @@ function QuoteCheckPage(){
                   // Partial data: show exactly what the dealer disclosed,
                   // in the frequency THEY stated it in -- no conversion,
                   // since converting to a different frequency requires
-                  // termMonths, which isn't known here.
+                  // termMonths, which isn't known here. Styled to feel as
+                  // deliberate and complete as the full card -- a confirmed-
+                  // data badge on what IS real, and the disclosure as a
+                  // proper amber callout (same pattern as the EV rebate
+                  // check card) instead of thin gray afterthought text --
+                  // without inventing the missing term/total to fill space.
                   return (
                     <div style={cardStyle}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
-                        Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>
+                          Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
+                        </div>
+                        <div style={{fontSize:11,fontWeight:800,color:C.tealInk,background:C.tealBg,padding:"3px 10px",borderRadius:999}}>rate confirmed</div>
                       </div>
-                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
-                        <div style={{fontSize:26,fontWeight:1000,color:C.ink}}>${f.paymentAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                        <div style={{fontSize:12,color:C.inkFaint}}>/{freqSuffix[f.paymentFrequency]||f.paymentFrequency}</div>
-                        {!!f.rate&&(<div style={{fontSize:12,color:C.inkFaint,marginLeft:4}}>at {f.rate}% APR</div>)}
+                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}>
+                        <div style={{fontSize:32,fontWeight:1000,color:C.ink}}>${f.paymentAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                        <div style={{fontSize:13,color:C.inkFaint}}>/{freqSuffix[f.paymentFrequency]||f.paymentFrequency}</div>
                       </div>
-                      <div style={{fontSize:12,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:10}}>
-                        This is the payment the dealer's page shows, but the loan/lease term and total cost aren't stated here (often because the page uses an interactive calculator with no default term selected) -- ask the dealer to confirm the exact term in writing before relying on this figure.
+                      {!!f.rate&&(<div style={{fontSize:13,color:C.inkSoft,marginBottom:14}}>at <span style={{fontWeight:800,color:C.ink}}>{f.rate}% APR</span></div>)}
+                      <div style={{background:C.butterBg,border:`1px solid ${C.butter}55`,borderRadius:14,padding:"12px 14px"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}>⚡ Term and total cost not shown</div>
+                        <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>
+                          This dealer's page uses an interactive calculator with no default term selected, so only the payment and rate above are confirmed. Ask for the exact term and total cost in writing before relying on this payment figure.
+                        </div>
                       </div>
                     </div>
                   );
