@@ -3,13 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LotCheck — Every quote, verified. | Isometric Lot</title>
-<meta name="description" content="LotCheck protects Canadian used-car buyers. Upload a dealer quote and watch it roll through a 10-point verification lane — verified MSRP, open recalls, hidden fees — then get a verified report.">
+<title>Live price index — LotCheck</title>
+<meta name="description" content="What Alberta buyers are actually being quoted. Markup by city, markup by brand, MSRP changes, fee frequency, financing spread and a free recall lookup.">
 <meta name="theme-color" content="#FBF5EC" id="themeColorMeta">
 <script>
-/* Runs before first paint — sets the theme attribute immediately so there's
-   no flash of the wrong (light/dark) colors on load. Kept tiny and inline
-   on purpose; anything deferred to the main script runs too late. */
 (function(){
   try{
     var saved = localStorage.getItem("lc-theme");
@@ -21,21 +18,20 @@
   }catch(e){}
 })();
 </script>
-<link rel="canonical" href="https://lotcheck.ca/" />
-<meta property="og:title" content="LotCheck — Every quote, verified." />
+<link rel="canonical" href="https://lotcheck.ca/live-price-index" />
+<meta property="og:title" content="LotCheck live price index" />
 <meta property="og:type" content="website" />
-<meta property="og:url" content="https://lotcheck.ca" />
+<meta property="og:url" content="https://lotcheck.ca/live-price-index" />
 <meta property="og:image" content="https://lotcheck.ca/icon-512.png" />
 <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
-<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
 <link rel="icon" type="image/x-icon" href="/favicon.ico" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800;1000&display=swap" rel="stylesheet">
 <style>
 /* ============================================================
-   LotCheck — "Isometric Lot"
-   Pastel isometric SVG world · Nunito · procedural scene engine
+   LotCheck — Live price index
+   Same token system as index.html. Nine modules, all in motion.
    ============================================================ */
 :root{
   --ink:#33305A;
@@ -54,8 +50,8 @@
   --coral-ink:#A63C25;
   --butter:#F5C95C;
   --lilac:#A99BE0;
+  --live:#22C55E;
   --shadow-hard:10px 12px 0 rgba(51,48,90,.08);
-  --shadow-soft:0 18px 40px -18px rgba(51,48,90,.25);
   --r-lg:26px;
   --r-md:18px;
   --r-sm:12px;
@@ -63,11 +59,6 @@
   --ease-out:cubic-bezier(.22,.75,.28,1);
   --maxw:1180px;
 }
-/* ---------- dark mode ----------
-   Overrides the UI-chrome variables only (text, surfaces, borders, shadows).
-   Brand accents (teal/coral/butter/lilac) and the illustrated isometric
-   scenes keep their original hand-picked colors in both modes — they're
-   painted artwork, not themed UI, so they don't need a second palette. */
 html[data-theme="dark"]{
   --ink:#EDEBF7;
   --ink-soft:#B9B6D6;
@@ -80,7 +71,6 @@ html[data-theme="dark"]{
   --teal-ink:#5FD8CB;
   --coral-ink:#FF9E85;
   --shadow-hard:10px 12px 0 rgba(0,0,0,.4);
-  --shadow-soft:0 18px 40px -18px rgba(0,0,0,.6);
 }
 html[data-theme="dark"] ::selection{background:var(--butter);color:#241F0E}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -89,93 +79,39 @@ html{scroll-behavior:smooth}
 body{
   font-family:'Nunito',system-ui,-apple-system,sans-serif;
   color:var(--ink);
-  background:
-    linear-gradient(180deg, var(--sky) 0%, var(--paper) 620px, var(--paper) 100%);
-  font-size:17px;
-  line-height:1.6;
-  overflow-x:hidden;
+  background:linear-gradient(180deg, var(--sky) 0%, var(--paper) 520px, var(--paper) 100%);
+  font-size:17px;line-height:1.6;overflow-x:hidden;
 }
 ::selection{background:var(--butter);color:var(--ink)}
-svg text{font-family:'Nunito',system-ui,sans-serif}
-img{max-width:100%}
 a{color:inherit}
-
-/* ---------- primitives ---------- */
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 clamp(20px,4vw,40px)}
 .kicker{
   display:inline-flex;align-items:center;gap:8px;
-  font-weight:1000;font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--teal-ink);
+  font-weight:1000;font-size:.78rem;letter-spacing:.18em;text-transform:uppercase;color:var(--teal-ink);
 }
 .kicker::before{content:"";width:22px;height:3px;border-radius:2px;background:var(--teal)}
 h1,h2,h3{font-weight:1000;line-height:1.08;letter-spacing:-.015em}
-h1{font-size:clamp(2.5rem,6.2vw,4.4rem)}
-.hl{}
-h2{font-size:clamp(1.9rem,3.8vw,2.9rem)}
-h3{font-size:1.25rem;line-height:1.25}
-.lede{color:var(--ink-soft);font-size:clamp(1.02rem,1.4vw,1.18rem);max-width:56ch}
+h1{font-size:clamp(2.2rem,5.4vw,3.7rem)}
+h2{font-size:clamp(1.7rem,3.4vw,2.5rem)}
+h3{font-size:1.12rem;line-height:1.25}
+.lede{color:var(--ink-soft);font-size:clamp(1.02rem,1.4vw,1.14rem);max-width:58ch}
 .btn{
-  display:inline-flex;align-items:center;gap:10px;
-  font:inherit;font-weight:800;font-size:1rem;
-  padding:15px 26px;border-radius:999px;border:2px solid var(--ink);
-  cursor:pointer;text-decoration:none;
+  display:inline-flex;align-items:center;gap:10px;font:inherit;font-weight:800;font-size:1rem;
+  padding:15px 26px;border-radius:999px;border:2px solid var(--ink);cursor:pointer;text-decoration:none;
   transition:transform .25s var(--ease-pop), box-shadow .25s var(--ease-out), background .2s;
 }
 .btn-primary{background:var(--ink);color:var(--paper);box-shadow:5px 6px 0 rgba(51,48,90,.16)}
 .btn-primary:hover{transform:translate(-2px,-3px);box-shadow:8px 10px 0 rgba(51,48,90,.16)}
-.btn-primary:active{transform:translate(1px,1px);box-shadow:2px 3px 0 rgba(51,48,90,.16)}
-.btn-primary svg{transition:transform .35s var(--ease-pop)}
-.btn-primary:hover svg{transform:translateX(5px)}
 .btn-ghost{background:transparent;color:var(--ink)}
 .btn-ghost:hover{background:rgba(51,48,90,.06);transform:translateY(-2px)}
-.btn:focus-visible,a:focus-visible,button:focus-visible{outline:3px solid var(--teal);outline-offset:3px;border-radius:6px}
+.btn:focus-visible,a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid var(--teal);outline-offset:3px;border-radius:6px}
 .btn:focus-visible{border-radius:999px}
-.chip{
-  display:inline-flex;align-items:center;gap:8px;
-  background:var(--card);border:1.5px solid var(--line);border-radius:999px;
-  padding:8px 15px;font-weight:800;font-size:.85rem;color:var(--ink-soft);
-  box-shadow:3px 4px 0 rgba(51,48,90,.06);
-  transition:transform .3s var(--ease-pop),box-shadow .3s var(--ease-out);
-}
-.chip:hover{transform:translateY(-3px);box-shadow:3px 7px 0 rgba(51,48,90,.08)}
-.chip svg{flex:none}
 
-/* ---------- reveal ---------- */
-.rv{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease-out),transform .7s var(--ease-out);transition-delay:calc(var(--i,0)*90ms)}
-.rv.in{opacity:1;transform:none}
-@media (prefers-reduced-motion: reduce){
-  .rv{opacity:1;transform:none;transition:none}
-}
-
-
-/* ---------- story ---------- */
-.story-stats{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(14px,2vw,24px);
-  margin-bottom:clamp(26px,4vw,40px);
-}
-.story-stat{
-  background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
-  padding:24px 20px;text-align:center;box-shadow:4px 6px 0 rgba(51,48,90,.06);
-  transition:transform .3s var(--ease-pop);
-}
-html[data-theme="dark"] .story-stat{box-shadow:4px 6px 0 rgba(0,0,0,.3)}
-.story-stat:hover{transform:translateY(-4px)}
-.story-stat .n{
-  display:block;font-weight:1000;font-size:clamp(1.7rem,3vw,2.2rem);
-  color:var(--coral-ink);letter-spacing:-.02em;margin-bottom:6px;line-height:1.1;
-}
-.story-stat .l{font-size:.9rem;color:var(--ink-soft);line-height:1.45}
-.story-close{max-width:720px;font-size:1.05rem;color:var(--ink-soft)}
-.story-close strong{color:var(--teal-ink)}
-@media (max-width:820px){ .story-stats{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:480px){ .story-stats{grid-template-columns:1fr} }
-
-/* ---------- nav ---------- */
+/* ---------- nav (matches index.html) ---------- */
 .nav{
-  position:sticky;top:0;z-index:50;
-  background:rgba(251,245,236,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
-  border-bottom:1.5px solid var(--line);
-  transition:background .3s var(--ease-out);
+  position:sticky;top:0;z-index:50;background:rgba(251,245,236,.82);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border-bottom:1.5px solid var(--line);transition:background .3s var(--ease-out);
 }
 html[data-theme="dark"] .nav{background:rgba(21,18,31,.82)}
 .nav-in{max-width:var(--maxw);margin:0 auto;padding:14px clamp(20px,4vw,40px);display:flex;align-items:center;gap:26px}
@@ -183,397 +119,217 @@ html[data-theme="dark"] .nav{background:rgba(21,18,31,.82)}
 .logo svg{display:block;transition:transform .5s var(--ease-pop)}
 .logo:hover svg{transform:rotate(-12deg) scale(1.12)}
 .nav-links{display:flex;gap:24px;margin-left:auto;align-items:center}
-.nav-links a{
-  text-decoration:none;font-weight:800;font-size:.95rem;color:var(--ink-soft);
-  position:relative;padding:4px 0;
-}
+.nav-links a{text-decoration:none;font-weight:800;font-size:.95rem;color:var(--ink-soft);position:relative;padding:4px 0}
 .nav-links a::after{
-  content:"";position:absolute;left:0;bottom:0;height:3px;width:100%;border-radius:2px;
-  background:var(--teal);transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease-out);
+  content:"";position:absolute;left:0;bottom:0;height:3px;width:100%;border-radius:2px;background:var(--teal);
+  transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease-out);
 }
 .nav-links a:hover{color:var(--ink)}
 .nav-links a:hover::after{transform:scaleX(1)}
+.nav-links a.live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
+.nav-links a.live::after{transform:scaleX(1)}
+.live-dot{position:relative;width:9px;height:9px;border-radius:50%;background:var(--live);flex:none}
+.live-dot::before,.live-dot::after{
+  content:"";position:absolute;inset:0;border-radius:50%;border:2px solid var(--live);
+  animation:pulse-ring 1.8s ease-out infinite;
+}
+.live-dot::after{animation-delay:.9s}
+@keyframes pulse-ring{0%{transform:scale(1);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+@media (prefers-reduced-motion: reduce){ .live-dot::before,.live-dot::after{animation:none;opacity:0} }
 .nav-cta{margin-left:0;flex:none;display:flex;align-items:center;gap:10px}
 .nav .btn{padding:10px 20px;font-size:.9rem}
-@media (max-width:820px){
-  .nav-links{display:none}
-  .nav-cta{margin-left:auto}
-}
 .theme-toggle{
-  display:inline-flex;align-items:center;justify-content:center;flex:none;
-  width:38px;height:38px;border-radius:999px;
-  border:2px solid var(--ink);background:transparent;color:var(--ink);
-  cursor:pointer;transition:transform .3s var(--ease-pop), background .2s, color .3s;
+  display:inline-flex;align-items:center;justify-content:center;flex:none;width:38px;height:38px;
+  border-radius:999px;border:2px solid var(--ink);background:transparent;color:var(--ink);cursor:pointer;
+  transition:transform .3s var(--ease-pop), background .2s;
 }
 .theme-toggle:hover{background:rgba(51,48,90,.06);transform:translateY(-2px) rotate(-8deg)}
 html[data-theme="dark"] .theme-toggle:hover{background:rgba(237,235,247,.08)}
 .theme-toggle svg{display:block;width:18px;height:18px}
-.theme-toggle .sun{display:none}
-.theme-toggle .moon{display:block}
+.theme-toggle .sun{display:none}.theme-toggle .moon{display:block}
 html[data-theme="dark"] .theme-toggle .sun{display:block}
 html[data-theme="dark"] .theme-toggle .moon{display:none}
+@media (max-width:980px){ .nav-links{display:none} .nav-cta{margin-left:auto} }
 
-/* ---------- hero ---------- */
-.hero{position:relative;overflow:hidden;padding:clamp(48px,7vw,96px) 0 clamp(30px,4vw,60px)}
-.hero .wrap{position:relative;z-index:1}
-.hero-grid{display:grid;grid-template-columns:minmax(0,44fr) minmax(0,56fr);gap:clamp(24px,4vw,56px);align-items:center}
-.hero-copy .kicker{margin-bottom:18px}
-.hero-copy h1{margin-bottom:20px}
-.hero-copy .lede{margin-bottom:30px}
-.hero-ctas{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:30px}
-.hero-chips{display:flex;gap:10px;flex-wrap:wrap}
-.hero-scene{position:relative}
-.hero-scene svg{width:100%;height:auto;display:block}
-#heroScene svg{transition:transform .6s var(--ease-out);will-change:transform}
-.float-chip{
-  position:absolute;display:inline-flex;align-items:center;gap:8px;
-  background:var(--card);border:2px solid var(--line);border-radius:999px;
-  padding:8px 15px;font-weight:800;font-size:.82rem;color:var(--ink);
-  box-shadow:4px 5px 0 rgba(51,48,90,.08);
-  animation:bob 4.6s ease-in-out infinite alternate;
-  pointer-events:none;
+/* ---------- page head ---------- */
+.idx-hero{padding:clamp(40px,6vw,72px) 0 clamp(20px,3vw,36px)}
+.idx-hero h1{margin:16px 0 16px}
+.sample-note{
+  display:flex;align-items:flex-start;gap:12px;margin-top:26px;max-width:640px;
+  background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
+  padding:14px 18px;font-size:.9rem;font-weight:600;color:var(--ink-soft);
 }
-.float-chip i{width:9px;height:9px;border-radius:50%;flex:none}
-.fc1{top:9%;left:-1%}
-.fc2{bottom:7%;right:2%;animation-delay:-2.4s}
-@keyframes bob{from{transform:translateY(0)}to{transform:translateY(-10px)}}
-@media (prefers-reduced-motion: reduce){ .float-chip{animation:none} }
-@media (max-width:560px){ .float-chip{font-size:.72rem;padding:6px 11px} .fc1{top:2%} }
-.cloud{
-  position:absolute;z-index:0;border-radius:999px;background:rgba(255,255,255,.85);
-  filter:blur(1px);
-}
-.cloud::before,.cloud::after{content:"";position:absolute;background:inherit;border-radius:inherit}
-.cloud::before{width:55%;height:120%;left:12%;top:-58%}
-.cloud::after{width:38%;height:95%;right:14%;top:-40%}
-.c1{width:130px;height:34px;top:6%;left:4%;animation:drift 46s linear infinite}
-.c2{width:90px;height:26px;top:16%;right:8%;animation:drift 62s linear infinite reverse}
-@keyframes drift{
-  0%{transform:translateX(-30px)}
-  50%{transform:translateX(40px)}
-  100%{transform:translateX(-30px)}
-}
-@media (prefers-reduced-motion: reduce){ .c1,.c2{animation:none} }
-@media (max-width:900px){
-  .hero-grid{grid-template-columns:1fr}
-  .hero-scene{order:2;margin:0 -8px}
-}
-/* badges popped by the scanning beam */
-.hbadge .pin{opacity:0;transform:scale(.2) translate(0,8px);transform-box:fill-box;transform-origin:center;
-  transition:transform .5s var(--ease-pop),opacity .25s}
-.hbadge.show .pin{opacity:1;transform:none}
+.sample-note b{color:var(--ink)}
+.sample-note .dot{width:11px;height:11px;border-radius:50%;background:var(--butter);flex:none;margin-top:6px}
 
-/* ---------- section scaffolding ---------- */
-section{padding:clamp(64px,9vw,120px) 0}
-.sec-head{max-width:720px;margin-bottom:clamp(34px,5vw,58px)}
-.sec-head .kicker{margin-bottom:14px}
-.sec-head h2{margin-bottom:16px}
-
-/* ---------- how it works ---------- */
-.how-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(16px,2.4vw,28px)}
-.how-card{
+/* ---------- module grid ---------- */
+.mods{padding:clamp(24px,4vw,44px) 0 clamp(56px,8vw,96px)}
+.mod-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:clamp(14px,2vw,22px)}
+.mod{
   background:var(--card);border:2px solid var(--line);border-radius:var(--r-lg);
-  padding:26px 26px 30px;position:relative;
-  box-shadow:var(--shadow-hard);
+  padding:24px 24px 26px;box-shadow:var(--shadow-hard);position:relative;overflow:hidden;
   transition:transform .35s var(--ease-pop),box-shadow .35s var(--ease-out);
 }
-.how-card:hover{transform:translate(-3px,-6px);box-shadow:14px 18px 0 rgba(51,48,90,.08)}
-.how-card .step{
-  position:absolute;top:20px;right:22px;
-  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
-  background:var(--paper-2);font-weight:1000;font-size:1rem;color:var(--ink-soft);
-}
-.how-scene{height:190px;display:grid;place-items:center;margin-bottom:8px}
-.how-scene svg{width:100%;height:100%;transition:transform .45s var(--ease-pop)}
-.how-card:hover .how-scene svg{transform:translateY(-7px)}
+.mod:hover{transform:translate(-3px,-5px);box-shadow:14px 18px 0 rgba(51,48,90,.08)}
+html[data-theme="dark"] .mod:hover{box-shadow:14px 18px 0 rgba(0,0,0,.4)}
+.mod .kicker{margin-bottom:10px;font-size:.68rem}
+.mod h3{margin-bottom:6px}
+.mod p.sub{font-size:.92rem;color:var(--ink-soft);margin-bottom:18px}
+.n{font-variant-numeric:tabular-nums}
+.c-6{grid-column:span 6}.c-4{grid-column:span 4}.c-8{grid-column:span 8}.c-12{grid-column:span 12}
+@media (max-width:900px){ .c-6,.c-4,.c-8{grid-column:span 12} }
 
-/* ── How-it-works vignette animations -- each one demonstrates the actual
-   function of its step, not just decorative motion ───────────────────── */
+/* the headline module */
+.mod-hero{background:#33305A;border-color:#33305A;color:#FBF5EC}
+.mod-hero .kicker{color:#9FE1CB}
+.mod-hero .kicker::before{background:var(--teal)}
+.mod-hero h3,.mod-hero .big{color:#fff}
+.mod-hero p.sub{color:#B9B6D6}
+.big{font-weight:1000;font-size:clamp(2.6rem,7vw,4.2rem);line-height:1;letter-spacing:-.03em}
+.city-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.city-tab{
+  font:inherit;font-weight:800;font-size:.86rem;padding:8px 16px;border-radius:999px;cursor:pointer;
+  border:2px solid rgba(255,255,255,.22);background:transparent;color:#CFCBE0;transition:all .25s var(--ease-out);
+}
+.city-tab:hover{border-color:rgba(255,255,255,.5);color:#fff}
+.city-tab[aria-selected="true"]{background:var(--butter);border-color:var(--butter);color:#33305A}
+.mod-hero .foot{font-size:.82rem;font-weight:800;color:#B9B6D6;margin-top:14px}
 
-/* Scene 1: document feeds down into the kiosk slot while the upload arrow
-   pulses, then shrinks away as if absorbed. Loops continuously. */
-.lc-upload-doc{ animation: lc-doc-feed 3.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes lc-doc-feed{
-  0%   { transform: translateY(-17px) scale(1);   opacity: 0; }
-  16%  { opacity: 1; }
-  52%  { transform: translateY(0px) scale(1);     opacity: 1; }
-  74%  { transform: translateY(13px) scale(.82);  opacity: 0; }
-  100% { transform: translateY(-17px) scale(1);   opacity: 0; }
-}
-.lc-upload-arrow{ animation: lc-arrow-pulse 1.1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes lc-arrow-pulse{
-  0%,100% { opacity: .5; transform: translateY(2px); }
-  50%     { opacity: 1;  transform: translateY(-2px); }
-}
-
-/* Scene 2: car actually drives through the scan gate (isometric diagonal
-   motion, same technique as the footer's driving car), window flashes
-   brighter right as the car passes through the middle. */
-.lc-gate-car{ animation: lc-gate-drive 4s linear infinite; }
-@keyframes lc-gate-drive{
-  0%   { transform: translate(-95px,-47px); opacity: 0; }
-  10%  { opacity: 1; }
-  50%  { transform: translate(0,0); }
-  90%  { opacity: 1; }
-  100% { transform: translate(95px,47px);   opacity: 0; }
-}
-.lc-gate-window{ animation: lc-gate-flash 4s linear infinite; }
-@keyframes lc-gate-flash{
-  0%,40%   { opacity: .22; }
-  50%      { opacity: .68; }
-  60%,100% { opacity: .22; }
-}
-
-/* Scene 3: report lines fill in one after another, then the checkmark
-   stamps in with a pop -- "data populates, then gets verified." */
-.lc-report-line1{ animation: lc-line-in 4.5s ease-out infinite; }
-.lc-report-line2{ animation: lc-line-in 4.5s ease-out infinite; animation-delay: .18s; }
-.lc-report-line3{ animation: lc-line-in 4.5s ease-out infinite; animation-delay: .36s; }
-@keyframes lc-line-in{
-  0%,4%  { opacity: 0; transform: translateX(-6px); }
-  16%,88%{ opacity: 1; transform: translateX(0); }
-  96%,100%{ opacity: 0; transform: translateX(-6px); }
-}
-.lc-report-check{ animation: lc-check-pop 4.5s ease-out infinite; transform-box: fill-box; }
-@keyframes lc-check-pop{
-  0%,44%   { transform: scale(0);    opacity: 0; }
-  56%      { transform: scale(1.28); opacity: 1; }
-  66%,88%  { transform: scale(1);    opacity: 1; }
-  96%,100% { transform: scale(0);    opacity: 0; }
-}
-
+/* chart shells — vertical columns + fluid spline areas */
+.chart{display:block;width:100%;height:auto;margin-bottom:14px;overflow:visible}
+.chart .axis{stroke:var(--line);stroke-width:2;stroke-linecap:round}
+.chart .tick{font-weight:800;font-size:11.5px;fill:var(--ink-faint)}
+.chart .val{font-weight:1000;font-size:14px}
+.chart .col{transform-origin:bottom;transform:scaleY(0);transition:transform .9s var(--ease-pop)}
+.chart .cap{transform-origin:bottom;transform:scaleY(0);transition:transform .9s var(--ease-pop)}
+.chart.go .col,.chart.go .cap{transform:scaleY(1)}
+.chart .val,.chart .area,.chart .endpt,.chart .tip{opacity:0;transition:opacity .55s var(--ease-out) .35s}
+.chart.go .val,.chart.go .area,.chart.go .endpt,.chart.go .tip{opacity:1}
+.chart .area{opacity:0}
+.chart.go .area{opacity:.17}
+.chart .line{fill:none;stroke-width:3.5;stroke-linecap:round;stroke-linejoin:round;transition:stroke-dashoffset 1.5s var(--ease-out)}
+.chart .line.dashed{stroke-width:3;stroke-dasharray:6 7!important;stroke-dashoffset:0!important;opacity:0;transition:opacity .8s var(--ease-out) .3s}
+.chart.go .line.dashed{opacity:1}
+.chart .tipbox{fill:var(--ink)}
+.chart .tiptxt{font-weight:1000;font-size:12px;fill:var(--paper)}
 @media (prefers-reduced-motion: reduce){
-  .lc-upload-doc, .lc-upload-arrow, .lc-gate-car, .lc-gate-window,
-  .lc-report-line1, .lc-report-line2, .lc-report-line3, .lc-report-check{
-    animation: none !important; opacity: 1 !important; transform: none !important;
-  }
+  .chart .col,.chart .cap{transform:scaleY(1);transition:none}
+  .chart .val,.chart .endpt,.chart .tip,.chart .line.dashed{opacity:1;transition:none}
+  .chart .area{opacity:.17}
+  .chart .line{stroke-dashoffset:0!important;transition:none}
 }
-.how-card h3{margin-bottom:8px}
-.how-card p{color:var(--ink-soft);font-size:.98rem}
-@media (max-width:900px){
-  .how-grid{grid-template-columns:1fr;max-width:480px;margin-inline:auto}
-}
+.legend{display:grid;gap:9px}
+.leg-row{display:flex;justify-content:space-between;align-items:center;gap:12px;font-weight:800;font-size:.92rem}
+.leg-row span{color:var(--ink-soft);display:inline-flex;align-items:center;gap:9px}
+.leg-row i{width:11px;height:11px;border-radius:3px;flex:none}
+.up{color:var(--coral-ink)}.down{color:var(--teal-ink)}
 
-/* ---------- pipeline (sticky scroll camera) ---------- */
-.pipe{height:430vh;position:relative;padding:0}
-.pipe-sticky{
-  position:sticky;top:0;height:100vh;height:100svh;
-  display:flex;flex-direction:column;justify-content:center;gap:18px;
-  padding:clamp(16px,3vh,36px) 0;
-}
-.pipe-head{max-width:var(--maxw);margin:0 auto;width:100%;padding:0 clamp(20px,4vw,40px)}
-.pipe-head .kicker{margin-bottom:10px}
-.pipe-head h2{font-size:clamp(1.6rem,3.2vw,2.5rem)}
-.pipe-stage{
-  position:relative;flex:1;min-height:0;
-  margin:0 clamp(12px,2.5vw,40px);
-  border-radius:var(--r-lg);border:2px solid var(--line);
-  background:linear-gradient(180deg,#E9F3F0, #F6EFE3);
-  overflow:hidden;
-  box-shadow:var(--shadow-hard);
-}
-.pipe-scene,.pipe-scene svg{position:absolute;inset:0;width:100%;height:100%}
-.pipe-hud{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:clamp(14px,2.5vw,26px)}
-.hud-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.hud-chip{
-  background:var(--ink);color:var(--paper);font-weight:1000;font-size:.72rem;
-  letter-spacing:.16em;padding:8px 14px;border-radius:999px;
-}
-.hud-count{
-  background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
-  padding:10px 18px;text-align:right;box-shadow:4px 5px 0 rgba(51,48,90,.08);
-}
-.hud-count b{display:inline-block;font-size:clamp(1.5rem,3vw,2.1rem);font-weight:1000;line-height:1}
-.hud-count b span{color:var(--teal-ink)}
-.hud-count.bump b{animation:bump .45s var(--ease-pop)}
-@keyframes bump{50%{transform:scale(1.16)}}
-.hud-name{display:block;font-weight:800;font-size:.85rem;color:var(--ink-soft)}
-.hud-bar{height:10px;border-radius:99px;background:rgba(51,48,90,.12);overflow:hidden}
-.hud-bar i{display:block;height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--teal),#63C6B9)}
-/* svg station states */
-.stn-label{font-weight:800;font-size:17px;fill:var(--ink);opacity:.32;transition:opacity .4s}
-.station.on .stn-label{opacity:1}
-.station .lamp{transition:fill .3s}
-.station.on .lamp{fill:#2FA79A;animation:lampflash .7s ease-out}
-@keyframes lampflash{0%{opacity:.15}45%{opacity:1}100%{opacity:1}}
-.station .pin{opacity:0;transform:scale(.2) translate(0,10px);transform-box:fill-box;transform-origin:center;
-  transition:transform .5s var(--ease-pop),opacity .25s}
-.station.on .pin{opacity:1;transform:none}
-/* reduced-motion fallback list */
-.pipe-fallback{display:none}
-@media (prefers-reduced-motion: reduce){
-  .pipe{height:auto;padding:clamp(64px,9vw,120px) 0}
-  .pipe-sticky{position:static;height:auto}
-  .pipe-stage,.pipe-hud{display:none}
-  .pipe-fallback{
-    display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;
-    max-width:var(--maxw);margin:26px auto 0;padding:0 clamp(20px,4vw,40px);
-    list-style:none;counter-reset:stn;
-  }
-  .pipe-fallback li{
-    background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
-    padding:16px 18px;font-weight:800;counter-increment:stn;
-  }
-  .pipe-fallback li::before{
-    content:counter(stn,decimal-leading-zero);display:block;
-    color:var(--teal-ink);font-size:.8rem;letter-spacing:.12em;margin-bottom:4px;
-  }
-}
-
-/* ---------- report ---------- */
-.report{background:var(--paper-2);border-top:2px solid var(--line);border-bottom:2px solid var(--line)}
-.report-grid{display:grid;grid-template-columns:minmax(0,52fr) minmax(0,48fr);gap:clamp(28px,5vw,64px);align-items:center}
-.rep-card{
-  background:var(--card);border:2px solid var(--line);border-radius:var(--r-lg);
-  box-shadow:var(--shadow-hard);overflow:hidden;
-}
-.rep-head{
-  display:flex;justify-content:space-between;align-items:center;gap:10px;
-  padding:18px 24px;border-bottom:2px dashed var(--line);
-  background:linear-gradient(180deg,#FDFBF7,#fff);
-}
-.rep-head .rep-brand{display:flex;align-items:center;gap:9px;font-weight:1000;color:#33305A}
-.rep-head .rep-id{font-size:.78rem;font-weight:800;letter-spacing:.12em;color:var(--ink-faint)}
-.rep-vehicle{padding:20px 24px 6px}
-.rep-vehicle .veh{font-weight:1000;font-size:1.3rem}
-.rep-vehicle .vin{font-size:.8rem;color:var(--ink-faint);font-weight:800;letter-spacing:.08em}
-.rep-rows{padding:10px 24px 22px;display:grid;gap:10px}
-.rep-row{
+/* board rows */
+.board{display:grid;gap:2px}
+.board-row{
   display:flex;justify-content:space-between;align-items:center;gap:12px;
-  padding:12px 14px;border:1.5px solid var(--line);border-radius:var(--r-sm);
-  transition:background .2s,transform .25s var(--ease-out);
+  padding:13px 15px;border-radius:var(--r-sm);font-weight:800;
+  background:transparent;transition:background .25s,transform .3s var(--ease-out);
 }
-.rep-row:hover{background:#FBF8F1;transform:translateX(4px)}
-.rep-row .lbl{font-weight:800;color:var(--ink-soft);font-size:.92rem}
-.rep-row .val{font-weight:1000;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;text-align:right}
-.tag{font-size:.74rem;font-weight:1000;letter-spacing:.04em;padding:5px 10px;border-radius:999px;white-space:nowrap}
-.tag-flag{background:#FDE4DC;color:var(--coral-ink)}
-.tag-ok{background:#DCF2EC;color:var(--teal-ink)}
-.rep-score{
-  display:flex;align-items:center;gap:18px;padding:18px 24px 24px;border-top:2px dashed var(--line);
+.board-row:nth-child(odd){background:var(--paper-2)}
+.board-row:hover{transform:translateX(5px)}
+.board-row .rank{color:var(--ink-faint);font-size:.86rem;min-width:20px}
+.board-row .nm{flex:1;color:var(--ink)}
+.board-row .v{font-size:1.02rem}
+.board-row.enter{opacity:0;transform:translateX(-16px)}
+.board-row.enter.in{opacity:1;transform:none;transition:opacity .55s var(--ease-out),transform .55s var(--ease-out)}
+
+/* change log ticker */
+.log{height:196px;overflow:hidden;position:relative;mask-image:linear-gradient(180deg,transparent,#000 12%,#000 86%,transparent)}
+.log-track{display:grid;gap:2px;will-change:transform}
+.log-row{
+  display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:var(--r-sm);font-weight:800;font-size:.92rem;
 }
-.dial{position:relative;width:110px;height:110px;flex:none}
-.dial svg{width:100%;height:100%;transform:rotate(-90deg)}
-.dial .track{fill:none;stroke:rgba(51,48,90,.1);stroke-width:12}
-.dial .arc{fill:none;stroke:var(--teal);stroke-width:12;stroke-linecap:round;
-  stroke-dasharray:276.5;stroke-dashoffset:276.5;transition:stroke-dashoffset 1.4s var(--ease-out) .2s}
-.rep-card.in .dial .arc{stroke-dashoffset:49.8}
-.dial .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:1000;font-size:1.5rem;line-height:1}
-.dial .num small{display:block;font-size:.62rem;color:var(--ink-faint);letter-spacing:.1em;font-weight:800;line-height:1}
-.rep-score p{font-size:.95rem;color:var(--ink-soft)}
-.rep-score p b{color:var(--ink)}
-.report-copy .flag-list{list-style:none;display:grid;gap:14px;margin:26px 0 30px}
-.report-copy .flag-list li{display:flex;gap:14px;align-items:flex-start;font-weight:600;color:var(--ink-soft)}
-.report-copy .flag-list li b{color:var(--ink)}
-.flag-ico{
-  flex:none;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
-  border:2px solid var(--line);background:var(--card);box-shadow:3px 4px 0 rgba(51,48,90,.06);
+.log-row:nth-child(even){background:var(--paper-2)}
+.log-row .ar{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:.7rem;flex:none;color:#fff}
+.log-row .ar.u{background:var(--coral)}.log-row .ar.d{background:var(--teal)}
+.log-row .nm{flex:1;color:var(--ink)}
+
+/* rate spread note */
+.spread-note{
+  display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:.9rem;color:var(--coral-ink);
+  background:rgba(242,131,107,.14);padding:9px 16px;border-radius:999px;
 }
-@media (max-width:900px){
-  .report-grid{grid-template-columns:1fr}
+.spread-note i{width:9px;height:9px;border-radius:50%;background:var(--coral);flex:none;animation:softpulse 2s ease-in-out infinite}
+@keyframes softpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.5}}
+
+/* share card */
+.share-stage{display:grid;place-items:center;padding:8px 0 20px;perspective:900px}
+.share-card{
+  width:min(340px,100%);background:#33305A;border-radius:22px;padding:26px 28px;color:#fff;
+  transform-style:preserve-3d;animation:tilt 7s ease-in-out infinite;
+  box-shadow:0 26px 50px -22px rgba(51,48,90,.5);
+}
+@keyframes tilt{
+  0%,100%{transform:rotateY(-13deg) rotateX(6deg)}
+  50%{transform:rotateY(13deg) rotateX(-4deg)}
+}
+@media (prefers-reduced-motion: reduce){ .share-card{animation:none;transform:none} }
+.share-card .brand{font-weight:1000;font-size:.66rem;letter-spacing:.18em;color:#9FE1CB;margin-bottom:12px}
+.share-card .amt{font-weight:1000;font-size:2.3rem;line-height:1.05;letter-spacing:-.02em;margin-bottom:6px}
+.share-card .veh{font-weight:800;font-size:.92rem;color:#B9B6D6}
+.share-card .rule{height:2px;background:rgba(255,255,255,.16);margin:18px 0 14px;border-radius:2px}
+.share-card .fine{font-weight:800;font-size:.74rem;color:#8F8BC0}
+.share-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+
+/* alerts */
+.alert-form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.field{
+  flex:1;min-width:180px;font:inherit;font-weight:800;font-size:.95rem;color:var(--ink);
+  background:var(--paper-2);border:2px solid var(--line);border-radius:var(--r-sm);padding:13px 16px;
+}
+.field::placeholder{color:var(--ink-faint);font-weight:600}
+.watch{display:grid;gap:9px}
+.watch-row{
+  display:flex;align-items:center;gap:12px;padding:12px 15px;border-radius:var(--r-sm);
+  border:1.5px solid var(--line);font-weight:800;font-size:.92rem;
+}
+.watch-row .bell{width:26px;height:26px;border-radius:50%;background:var(--paper-2);display:grid;place-items:center;flex:none}
+.watch-row .nm{flex:1;color:var(--ink)}
+
+/* recall lookup */
+.recall-form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.scan{
+  position:relative;border-radius:var(--r-md);overflow:hidden;border:2px solid var(--line);
+  background:var(--asphalt);min-height:74px;display:grid;place-items:center;margin-bottom:18px;
+}
+html[data-theme="dark"] .scan{background:#2A2740}
+.scan .beam{position:absolute;top:0;bottom:0;width:4px;background:var(--teal);box-shadow:0 0 22px 5px rgba(47,167,154,.5);left:-10px}
+.scan.run .beam{animation:scanbeam 1.5s var(--ease-out) forwards}
+@keyframes scanbeam{from{left:-10px}to{left:104%}}
+@media (prefers-reduced-motion: reduce){ .scan .beam{display:none} }
+.scan .msg{font-weight:800;font-size:.95rem;color:var(--ink-soft);padding:18px;text-align:center}
+.recall-out{display:grid;gap:10px}
+.recall-hit{
+  display:flex;gap:14px;align-items:flex-start;padding:15px 17px;border-radius:var(--r-md);
+  border:2px solid var(--line);background:var(--paper-2);
+  opacity:0;transform:scale(.9);
+}
+.recall-hit.in{opacity:1;transform:none;transition:opacity .4s var(--ease-out),transform .45s var(--ease-pop)}
+.recall-hit .ic{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;flex:none;background:var(--card);border:2px solid var(--line)}
+.recall-hit h4{font-weight:1000;font-size:.98rem;margin-bottom:3px}
+.recall-hit p{font-size:.86rem;color:var(--ink-soft);font-weight:600}
+.honest{
+  margin-top:16px;font-size:.84rem;font-weight:700;color:var(--ink-faint);line-height:1.55;
+  border-left:3px solid var(--line);padding-left:14px;
 }
 
-/* ---------- dealer portal ---------- */
-.portal-stage{
-  position:relative;border-radius:var(--r-lg);border:2px solid var(--line);
-  background:linear-gradient(180deg,#E7EFF7,#F6EFE3);
-  box-shadow:var(--shadow-hard);overflow:hidden;
-  padding:clamp(8px,1.5vw,18px);
-}
-.portal-stage svg{width:100%;height:auto;display:block}
-.portal-status{
-  display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
-  margin-top:20px;
-}
-.status-pill{
-  display:inline-flex;align-items:center;gap:9px;
-  background:var(--card);border:2px solid var(--line);border-radius:999px;
-  padding:10px 18px;font-weight:800;font-size:.95rem;color:var(--ink-soft);
-  box-shadow:4px 5px 0 rgba(51,48,90,.06);
-}
-.status-dot{width:10px;height:10px;border-radius:50%;background:var(--teal);flex:none}
-.status-dot.pulse{animation:pulse 1.2s ease-in-out infinite}
-@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.5);opacity:.5}}
-@media (prefers-reduced-motion: reduce){ .status-dot.pulse{animation:none} }
-.portal-actions{text-align:center;margin-top:18px}
-#dealerSign .sign-body{transition:fill .3s}
-#dealerSign.lit .sign-body{fill:var(--butter)}
-#houseGlow,#dealerGlow{opacity:0;transition:opacity .4s}
-#houseGlow.on,#dealerGlow.on{opacity:1}
-#packet,#quoteDoc{opacity:0}
-#packet.go,#quoteDoc.go{opacity:1}
-.portal-path{fill:none;stroke:rgba(51,48,90,.18);stroke-width:2.5;stroke-dasharray:3 9;stroke-linecap:round}
-
-/* ---------- trust ---------- */
-.trust{padding-top:0}
-.trust-strip{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(14px,2vw,24px);
-}
-.trust-item{
-  display:flex;gap:16px;align-items:flex-start;
-  background:var(--card);border:2px solid var(--line);border-radius:var(--r-md);
-  padding:20px;box-shadow:4px 6px 0 rgba(51,48,90,.06);
-  transition:transform .3s var(--ease-pop);
-}
-.trust-item:hover{transform:translateY(-4px)}
-.trust-item .t-ico{
-  flex:none;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;
-  background:var(--paper-2);
-}
-.trust-item h3{font-size:1.02rem;margin-bottom:3px}
-.trust-item p{font-size:.9rem;color:var(--ink-soft)}
-@media (max-width:820px){ .trust-strip{grid-template-columns:1fr} }
-
-/* ---------- footer cta + footer ---------- */
-.foot-cta{
-  background:#33305A;color:#FBF5EC;
-  border-radius:var(--r-lg);
-  padding:clamp(40px,6vw,72px) clamp(24px,5vw,64px) 0;
-  overflow:hidden;position:relative;text-align:center;
-}
-.foot-cta h2{color:#fff;max-width:16ch;margin:0 auto 14px}
-.foot-cta p{color:#B9B6D6;max-width:44ch;margin:0 auto 28px}
-.foot-cta .btn-primary{background:var(--butter);color:#33305A;border-color:var(--butter);box-shadow:5px 6px 0 rgba(0,0,0,.25)}
-.foot-cta .btn-primary:hover{box-shadow:8px 10px 0 rgba(0,0,0,.25)}
-.foot-terminal{
-  margin:34px auto 0; max-width:560px; background:#0B1220; border-radius:14px; overflow:hidden;
-  box-shadow:0 30px 60px -20px rgba(0,0,0,.5), 0 0 40px rgba(47,167,154,.18); text-align:left;
-}
-.foot-terminal .term-bar{background:#151E30;padding:11px 15px;display:flex;align-items:center;gap:7px}
-.foot-terminal .term-dot{width:10px;height:10px;border-radius:50%}
-.foot-terminal .term-title{margin-left:8px;color:#6B7280;font-size:.74rem;font-family:monospace}
-.foot-terminal .term-body{padding:18px 20px 22px;font-family:'SF Mono',Menlo,monospace;font-size:.85rem;line-height:1.85;min-height:180px}
-.foot-terminal .tline{color:var(--teal);opacity:0}
-.foot-terminal .ok{color:var(--teal)}
-.foot-terminal .flag{color:var(--coral)}
-.foot-terminal .cursor{display:inline-block;width:7px;height:14px;background:var(--teal);vertical-align:middle;margin-left:2px;animation:footBlink 1s step-end infinite}
-@keyframes footBlink{50%{opacity:0}}
-@keyframes footShow1{0%,3%{opacity:0}6%,88%{opacity:1}94%,100%{opacity:0}}
-@keyframes footShow2{0%,18%{opacity:0}21%,88%{opacity:1}94%,100%{opacity:0}}
-@keyframes footShow3{0%,33%{opacity:0}36%,88%{opacity:1}94%,100%{opacity:0}}
-@keyframes footShow4{0%,48%{opacity:0}51%,88%{opacity:1}94%,100%{opacity:0}}
-@keyframes footShow5{0%,63%{opacity:0}66%,88%{opacity:1}94%,100%{opacity:0}}
-@keyframes footShow6{0%,78%{opacity:0}81%,88%{opacity:1}94%,100%{opacity:0}}
-.foot-terminal .tl1{animation:footShow1 8s ease-in-out infinite}
-.foot-terminal .tl2{animation:footShow2 8s ease-in-out infinite}
-.foot-terminal .tl3{animation:footShow3 8s ease-in-out infinite}
-.foot-terminal .tl4{animation:footShow4 8s ease-in-out infinite}
-.foot-terminal .tl5{animation:footShow5 8s ease-in-out infinite}
-.foot-terminal .tl6{animation:footShow6 8s ease-in-out infinite}
-@media (prefers-reduced-motion: reduce){ .foot-terminal .tline{animation:none;opacity:1} }
-#footCar{animation:footdrive 7s linear infinite}
-@keyframes footdrive{
-  0%{transform:translate(-480px,-240px)}
-  100%{transform:translate(560px,280px)}
-}
-@media (prefers-reduced-motion: reduce){ #footCar{animation:none;transform:translate(0,0)} }
-footer{padding:34px 0 44px}
+/* footer */
+footer{padding:34px 0 46px;border-top:2px solid var(--line)}
 .foot-in{display:flex;flex-wrap:wrap;align-items:center;gap:18px 30px;justify-content:space-between}
 .foot-links{display:flex;gap:22px;flex-wrap:wrap}
 .foot-links a{font-weight:800;font-size:.9rem;color:var(--ink-soft);text-decoration:none}
 .foot-links a:hover{color:var(--teal-ink)}
-.foot-note{width:100%;margin-top:8px;font-size:.82rem;color:var(--ink-faint);font-weight:600}
-.foot-note a{color:var(--teal-ink);font-weight:800}
+
+/* reveal */
+.rv{opacity:0;transform:translateY(26px);transition:opacity .7s var(--ease-out),transform .7s var(--ease-out);transition-delay:calc(var(--i,0)*80ms)}
+.rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion: reduce){ .rv{opacity:1;transform:none;transition:none} }
 </style>
 </head>
 <body>
@@ -583,16 +339,17 @@ footer{padding:34px 0 44px}
   <div class="nav-in">
     <a class="logo" href="/" aria-label="LotCheck home">
       <svg width="46" height="26" viewBox="-145 -44 320 182" aria-hidden="true">
-        <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g class="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
+        <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/>
       </svg>
       LotCheck
     </a>
     <div class="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#pipeline">10-point lane</a>
-      <a href="#report">Sample report</a>
-      <a href="#portal">Dealer portal</a>
-      <a href="#story">Our story</a>
+      <a class="live" href="/live-price-index"><span class="live-dot" aria-hidden="true"></span>Live price index</a>
+      <a href="/#how">How it works</a>
+      <a href="/#pipeline">10-point lane</a>
+      <a href="/#report">Sample report</a>
+      <a href="/#portal">Dealer portal</a>
+      <a href="/#story">Our story</a>
     </div>
     <div class="nav-cta">
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">
@@ -604,332 +361,146 @@ footer{padding:34px 0 44px}
   </div>
 </nav>
 
-<!-- ================= HERO ================= -->
-<header class="hero" id="top">
-  <div class="cloud c1" aria-hidden="true"></div>
-  <div class="cloud c2" aria-hidden="true"></div>
-  <div class="wrap hero-grid">
-    <div class="hero-copy">
-      <span class="kicker rv" style="--i:0">LotCheck · quote verification</span>
-      <h1 class="rv" style="--i:1">Know the <span class="hl">real story</span> before you buy the car.</h1>
-      <p class="lede rv" style="--i:2">Upload any dealer quote. LotCheck rolls it through a 10-point verification lane — verified MSRP, open recalls, hidden fees, financing math — and hands you a verified report. No guessing, no fabricated scores.</p>
-      <div class="hero-ctas rv" style="--i:3">
-        <a class="btn btn-primary" href="/quote-check">
-          Analyze my quote
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </a>
-        <a class="btn btn-ghost" href="#report">See a sample report</a>
-      </div>
-      <p class="rv" style="--i:4;margin:12px 0 0;font-size:13px;font-weight:800;color:#5B5885">Free · No sign-up · Results in about 30 seconds</p>
-      <div class="hero-chips rv" style="--i:5">
-        <span class="chip">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#1E8A7E" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#1E8A7E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          10-point pipeline
-        </span>
-        <span class="chip">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="#C24C33" stroke-width="2"/><path d="M12 7v5l3.5 2.5" stroke="#C24C33" stroke-width="2" stroke-linecap="round"/></svg>
-          Live Transport Canada data
-        </span>
-        <span class="chip">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V10M10 19V5M16 19v-8M21 19H3" stroke="#5B5885" stroke-width="2" stroke-linecap="round"/></svg>
-          Verified MSRP
-        </span>
-      </div>
+<!-- ================= HEAD ================= -->
+<header class="idx-hero">
+  <div class="wrap">
+    <span class="kicker rv">Live price index · Alberta</span>
+    <h1 class="rv" style="--i:1">What buyers are actually being quoted.</h1>
+    <p class="lede rv" style="--i:2">Dealer websites publish the sticker. This page publishes what people pay after fees, markups and financing — updated as reports come in, with the sample size on every number.</p>
+    <div class="sample-note rv" style="--i:3" id="sampleNote">
+      <span class="dot" aria-hidden="true"></span>
+      <span><b>These are sample figures, not live data.</b> The index starts publishing real numbers once enough quotes have been checked to average honestly — at least five per market. Until then this page shows the shape, not the substance.</span>
     </div>
-    <div class="hero-scene rv" style="--i:2">
-      <div id="heroScene"></div>
-      <div class="float-chip fc1" aria-hidden="true"><i style="background:var(--coral)"></i>2 open recalls found</div>
-      <div class="float-chip fc2" aria-hidden="true"><i style="background:var(--teal)"></i>$899 fee flagged</div>
-    </div>
+    <p class="rv" style="--i:4;margin-top:14px;font-size:.82rem;font-weight:800;color:var(--ink-faint)" id="stamp">Not yet publishing live figures</p>
   </div>
 </header>
 
-<!-- ================= HOW IT WORKS ================= -->
-<section id="how">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="kicker">How it works</span>
-      <h2>Three tiny buildings.<br>One honest answer.</h2>
-      <p class="lede">Every quote takes the same trip across the lot: in the door, under the scanner, out as a verified report.</p>
-    </div>
-    <div class="how-grid">
-      <article class="how-card rv" style="--i:0">
-        <span class="step" aria-hidden="true">1</span>
-        <div class="how-scene" data-vign="0" aria-hidden="true"></div>
-        <h3>Upload the quote</h3>
-        <p>PDF, photo, even a crumpled printout. Drop it at the kiosk and LotCheck reads every line item — the price, the fees, the fine print.</p>
-      </article>
-      <article class="how-card rv" style="--i:1">
-        <span class="step" aria-hidden="true">2</span>
-        <div class="how-scene" data-vign="1" aria-hidden="true"></div>
-        <h3>10-point verification</h3>
-        <p>The quote drives the verification lane: MSRP verification, odometer consistency, open recalls, fee audit, rebate eligibility and more — all against real, sourced data.</p>
-      </article>
-      <article class="how-card rv" style="--i:2">
-        <span class="step" aria-hidden="true">3</span>
-        <div class="how-scene" data-vign="2" aria-hidden="true"></div>
-        <h3>Verified report</h3>
-        <p>A polished, professional report grounded in real sources — plus a negotiation leverage score so you know exactly how hard you can push.</p>
-      </article>
-    </div>
-  </div>
-</section>
+<!-- ================= MODULES ================= -->
+<main class="mods">
+  <div class="wrap mod-grid">
 
-<!-- ================= PIPELINE (sticky scroll) ================= -->
-<section class="pipe" id="pipeline" aria-label="10-point verification lane">
-  <div class="pipe-sticky">
-    <div class="pipe-head">
-      <span class="kicker">The verification lane</span>
-      <h2>Scroll to drive the 10-point check.</h2>
-    </div>
-    <div class="pipe-stage" id="pipeStage">
-      <div class="pipe-scene" id="pipeScene" aria-hidden="true"></div>
-      <div class="pipe-hud">
-        <div class="hud-top">
-          <span class="hud-chip">VERIFICATION LANE</span>
-          <div class="hud-count" id="hudCount">
-            <b><span id="hudNum">0</span>/10</b>
-            <span class="hud-name" id="hudName">Entering the lane</span>
-          </div>
-        </div>
-        <div class="hud-bar"><i id="hudBar"></i></div>
-      </div>
-    </div>
-  </div>
-  <ol class="pipe-fallback">
-    <li>MSRP verification against manufacturer data</li>
-    <li>Odometer consistency check</li>
-    <li>Open-recall lookup (Transport Canada)</li>
-    <li>Fee itemization audit</li>
-    <li>EV rebate eligibility</li>
-    <li>VIN pattern validity check</li>
-    <li>Warranty validity</li>
-    <li>Financing math check</li>
-    <li>Dealer reputation from real reviews</li>
-    <li>Negotiation leverage score</li>
-  </ol>
-</section>
+    <!-- 02 · three-city gauge -->
+    <section class="mod c-6 rv" aria-labelledby="m2">
+      <span class="kicker">02 · markup by city</span>
+      <h3 id="m2">Where the markup lands</h3>
+      <p class="sub">Average amount over verified MSRP, by market.</p>
+      <div id="cityChart"></div>
+      <div class="legend" id="cityLegend"></div>
+    </section>
 
-<!-- ================= SAMPLE REPORT ================= -->
-<section class="report" id="report">
-  <div class="wrap report-grid">
-    <div class="rep-card rv" id="repCard">
-      <div class="rep-head">
-        <span class="rep-brand">
-          <svg width="30" height="17" viewBox="-145 -44 320 182" aria-hidden="true">
-            <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g class="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
-          </svg>
-          Verified Report
-        </span>
-        <span class="rep-id">REPORT LC-2417</span>
-      </div>
-      <div class="rep-vehicle">
-        <div class="veh">2022 Honda Civic EX</div>
-        <div class="vin">VIN ····· 8H2K391 · 41,220 km · Calgary, AB</div>
-      </div>
-      <div class="rep-rows">
-        <div class="rep-row">
-          <span class="lbl">Asking price</span>
-          <span class="val">$24,995</span>
-        </div>
-        <div class="rep-row">
-          <span class="lbl">Verified MSRP</span>
-          <span class="val">$26,300 <span class="tag tag-ok">Matches sticker</span></span>
-        </div>
-        <div class="rep-row">
-          <span class="lbl">Open recalls (Transport Canada)</span>
-          <span class="val">2 <span class="tag tag-flag">Action required</span></span>
-        </div>
-        <div class="rep-row">
-          <span class="lbl">"Documentation fee"</span>
-          <span class="val">$899 <span class="tag tag-flag">Typical is $499</span></span>
-        </div>
-        <div class="rep-row">
-          <span class="lbl">Financing math</span>
-          <span class="val"><span class="tag tag-ok">Checks out</span></span>
-        </div>
-      </div>
-      <div class="rep-score">
-        <div class="dial" role="img" aria-label="Negotiation leverage score 8.2 out of 10">
-          <svg viewBox="0 0 100 100" aria-hidden="true">
-            <circle class="track" cx="50" cy="50" r="44"/>
-            <circle class="arc" cx="50" cy="50" r="44"/>
-          </svg>
-          <div class="num">8.2<small>LEVERAGE</small></div>
-        </div>
-        <p><b>Strong position.</b> Two open recalls and a padded doc fee give you real, documented leverage. LotCheck suggests an opening counter of <b>$22,900</b>.</p>
-      </div>
-    </div>
-    <div class="report-copy">
-      <span class="kicker rv">Sample report</span>
-      <h2 class="rv" style="--i:1">The receipt, decoded.</h2>
-      <p class="lede rv" style="--i:2">This is a real report structure with mock data. Every number is traceable to a live source — no invented "deal ratings", no vibes.</p>
-      <ul class="flag-list">
-        <li class="rv" style="--i:3">
-          <span class="flag-ico">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l9 16H3l9-16z" stroke="#C24C33" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 16.8v.4" stroke="#C24C33" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <span><b>$899 "documentation fee" flagged.</b> The provincial typical is $499 — that delta goes straight into your negotiation notes.</span>
-        </li>
-        <li class="rv" style="--i:4">
-          <span class="flag-ico">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="#C24C33" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="#C24C33" stroke-width="2" stroke-linecap="round"/></svg>
-          </span>
-          <span><b>2 open recalls found.</b> Both must be fixed free of charge — schedule matters before you sign, not after.</span>
-        </li>
-        <li class="rv" style="--i:5">
-          <span class="flag-ico">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" stroke="#1E8A7E" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="#1E8A7E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </span>
-          <span><b>Leverage score 8.2/10.</b> Computed from verified findings only — the dealership can't argue with its own paperwork.</span>
-        </li>
-      </ul>
-      <a class="btn btn-primary rv" style="--i:6" href="/quote-check">
-        Get my report
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </a>
-    </div>
-  </div>
-</section>
+    <!-- 03 · brand markup board -->
+    <section class="mod c-6 rv" style="--i:1" aria-labelledby="m3">
+      <span class="kicker">03 · markup by brand</span>
+      <h3 id="m3">Brand markup board</h3>
+      <p class="sub">Ranked by average amount over sticker.</p>
+      <div class="board" id="brandBoard"></div>
+    </section>
 
-<!-- ================= DEALER PORTAL ================= -->
-<section id="portal">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="kicker">Dealer portal · coming soon</span>
-      <h2>Soon, we'll knock on the dealership's door for you.</h2>
-      <p class="lede">Want competing quotes without the back-and-forth? We're building a portal to send your verified report to dealerships and bring every reply back pre-verified. Here's a preview of how it'll work.</p>
-    </div>
-    <div class="portal-stage rv" id="portalStage">
-      <div id="portalScene" aria-hidden="true"></div>
-    </div>
-    <div class="portal-status" aria-live="polite">
-      <span class="status-pill"><span class="status-dot" id="statusDot"></span><span id="statusText">Preview idle — press play to see how it'll work</span></span>
-    </div>
-    <div class="portal-actions">
-      <button class="btn btn-primary" id="sendBtn" type="button">
-        Preview how it'll work
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 11l18-8-8 18-2.5-7.5L3 11z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
-      </button>
-    </div>
-  </div>
-</section>
+    <!-- 05 · MSRP change log -->
+    <section class="mod c-4 rv" aria-labelledby="m5">
+      <span class="kicker">05 · catalog diffs</span>
+      <h3 id="m5">MSRP change log</h3>
+      <p class="sub">Manufacturer price moves, newest first.</p>
+      <div class="log"><div class="log-track" id="logTrack"></div></div>
+    </section>
 
-<!-- ================= TRUST ================= -->
-<section class="trust" aria-label="Data sources">
-  <div class="wrap">
-    <div class="sec-head rv" style="text-align:center;margin-left:auto;margin-right:auto;">
-      <span class="kicker" style="justify-content:center">Our mission</span>
-      <h2>Verify every quote before you sign — so the savings are real, not promised.</h2>
-      <p class="lede" style="margin-left:auto;margin-right:auto;">That's why every check on this page runs against real government registries and manufacturer data — never assumptions.</p>
-    </div>
-    <div class="trust-strip">
-      <div class="trust-item rv" style="--i:0">
-        <span class="t-ico">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2l1.2 4 3.3-1.6-1 3.6 4.5.4-3.2 2.6 3.2 2.6-4.5.4 1 3.6-3.3-1.6L12 22l-1.2-5.6-3.3 1.6 1-3.6-4.5-.4 3.2-2.6L4 8.8l4.5-.4-1-3.6L10.8 6 12 2z" fill="#C24C33"/></svg>
-        </span>
-        <div>
-          <h3>Transport Canada recalls</h3>
-          <p>Open-recall lookups run against the live federal registry at report time.</p>
-        </div>
-      </div>
-      <div class="trust-item rv" style="--i:1">
-        <span class="t-ico">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 19V10M10 19V5M16 19v-8" stroke="#1E8A7E" stroke-width="2.4" stroke-linecap="round"/><path d="M2.5 21.5h19" stroke="#1E8A7E" stroke-width="2.4" stroke-linecap="round"/></svg>
-        </span>
-        <div>
-          <h3>Manufacturer MSRP</h3>
-          <p>The official MSRP is verified against manufacturer data, so an inflated "MSRP" written on the quote gets flagged.</p>
-        </div>
-      </div>
-      <div class="trust-item rv" style="--i:2">
-        <span class="t-ico">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 8l9-5 9 5v8l-9 5-9-5V8z" stroke="#5B5885" stroke-width="2" stroke-linejoin="round"/><path d="M8.5 11.5l2.3 2.3 4.7-4.8" stroke="#5B5885" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </span>
-        <div>
-          <h3>Rebate registries</h3>
-          <p>EV incentive eligibility is checked against federal and provincial programs — the real ones.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+    <!-- 07 · fee frequency -->
+    <section class="mod c-4 rv" style="--i:1" aria-labelledby="m7">
+      <span class="kicker">07 · fee audit</span>
+      <h3 id="m7">Fee frequency index</h3>
+      <p class="sub">How often each add-on shows up on a quote.</p>
+      <div id="feeChart"></div>
+    </section>
 
+    <!-- 08 · rate spread -->
+    <section class="mod c-4 rv" style="--i:2" aria-labelledby="m8">
+      <span class="kicker">08 · financing</span>
+      <h3 id="m8">Rate spread tracker</h3>
+      <p class="sub">Quoted APR against the going prime rate.</p>
+      <div id="spreadChart"></div>
+      <span class="spread-note"><i aria-hidden="true"></i><span id="spreadTxt">—</span></span>
+    </section>
 
-<!-- ================= STORY ================= -->
-<section class="story" id="story" aria-label="Why LotCheck was created">
-  <div class="wrap">
-    <div class="sec-head rv">
-      <span class="kicker">Where LotCheck started</span>
-      <h2>The overpayment problem is real. We heard it every day.</h2>
-      <p class="lede">Years of honest conversations with gas station customers revealed a consistent truth: the advertised price and the final price are two very different numbers. Buyers were routinely paying thousands more once fees and add-ons stacked up.</p>
-    </div>
-    <div class="story-stats">
-      <div class="story-stat rv" style="--i:0">
-        <span class="n">$4,000+</span>
-        <span class="l">Typical overpayment we heard about</span>
-      </div>
-      <div class="story-stat rv" style="--i:1">
-        <span class="n">$11,000</span>
-        <span class="l">The worst cases &mdash; on a single vehicle</span>
-      </div>
-      <div class="story-stat rv" style="--i:2">
-        <span class="n">1 price</span>
-        <span class="l">Locked on the lot, analyzed line by line</span>
-      </div>
-      <div class="story-stat rv" style="--i:3">
-        <span class="n">0</span>
-        <span class="l">Emotions in our analysis &mdash; verified data only</span>
-      </div>
-    </div>
-    <p class="story-close rv" style="--i:4">LotCheck locks the on-lot price and runs it against MSRP, fees, and add-ons &mdash; turning a confusing purchase into a clear one, and keeping those thousands in your pocket. <strong>Verified data, zero emotion &mdash; that&rsquo;s the whole model.</strong></p>
-  </div>
-</section>
+    <!-- 09 · best month -->
+    <section class="mod c-8 rv" aria-labelledby="m9">
+      <span class="kicker">09 · seasonality</span>
+      <h3 id="m9">Best month to buy</h3>
+      <p class="sub">Average markup by month. Hover any column for the figure.</p>
+      <div id="monthChart"></div>
+      <p class="sub" style="margin:0"><b id="bestMo">—</b></p>
+    </section>
 
-<!-- ================= FOOTER CTA ================= -->
-<section id="footer-cta" style="padding-top:0">
-  <div class="wrap">
-    <div class="foot-cta rv">
-      <h2>Trust isn't a negotiation tactic. It's just good business.</h2>
-      <p>Upload a quote and get your verified report — recalls, comps, fees and leverage — in minutes.</p>
-      <a class="btn btn-primary" href="/quote-check">
-        Analyze my quote
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </a>
-      <div class="foot-terminal" aria-hidden="true">
-        <div class="term-bar">
-          <div class="term-dot" style="background:var(--coral)"></div>
-          <div class="term-dot" style="background:var(--butter)"></div>
-          <div class="term-dot" style="background:var(--teal)"></div>
-          <span class="term-title">lotcheck — quote_analysis.log</span>
-        </div>
-        <div class="term-body">
-          <div class="tline tl1">&gt; reading quote: 2026_kia_sportage.pdf</div>
-          <div class="tline tl2">&gt; msrp: $41,900 &nbsp; quoted: <span class="ok">$38,400</span></div>
-          <div class="tline tl3">&gt; doc fee $599 <span class="flag">⚠ flagged — above typical range</span></div>
-          <div class="tline tl4">&gt; evap rebate check... <span class="ok">✓ eligible — $5,000</span></div>
-          <div class="tline tl5">&gt; warranty terms <span class="ok">✓ reviewed</span></div>
-          <div class="tline tl6">&gt; <span class="ok">verified.</span> report ready<span class="cursor"></span></div>
+    <!-- 26 · price alerts -->
+    <section class="mod c-4 rv" style="--i:1" aria-labelledby="m26">
+      <span class="kicker">26 · alerts</span>
+      <h3 id="m26">Watch a model</h3>
+      <p class="sub">Email me when its MSRP moves.</p>
+      <div class="alert-form">
+        <input class="field" id="watchIn" type="text" placeholder="2026 RAV4 XLE" aria-label="Model to watch">
+        <button class="btn btn-primary" id="watchBtn" type="button" style="padding:13px 22px;font-size:.92rem">Watch</button>
+      </div>
+      <div class="watch" id="watchList"></div>
+    </section>
+
+    <!-- 36 · recall lookup -->
+    <section class="mod c-8 rv" aria-labelledby="m36">
+      <span class="kicker">36 · free tool</span>
+      <h3 id="m36">Recall lookup</h3>
+      <p class="sub">Search Transport Canada's recall database by year, make and model.</p>
+      <div class="recall-form">
+        <input class="field" id="recallIn" type="text" placeholder="2022 Honda Civic" aria-label="Year, make and model">
+        <button class="btn btn-primary" id="recallBtn" type="button" style="padding:13px 22px;font-size:.92rem">Check recalls</button>
+      </div>
+      <div class="scan" id="scan">
+        <span class="beam" aria-hidden="true"></span>
+        <span class="msg" id="scanMsg">Enter a year, make and model to search.</span>
+      </div>
+      <div class="recall-out" id="recallOut" aria-live="polite"></div>
+      <p class="honest">Recall records are indexed by year, make and model — not by VIN. A match means this model year has an open recall on record, not that this specific car is unrepaired. Ask the dealer for the VIN's repair status before you sign.</p>
+    </section>
+
+    <!-- 21 · shareable report card -->
+    <section class="mod mod-hero c-12 rv" aria-labelledby="m21">
+      <span class="kicker">21 · shareable</span>
+      <h3 id="m21">Take the number with you</h3>
+      <p class="sub">Every report generates a card built for sharing. This month's, for the city you pick.</p>
+      <div class="city-tabs" role="tablist" aria-label="City">
+        <button class="city-tab" role="tab" data-city="calgary" aria-selected="true">Calgary</button>
+        <button class="city-tab" role="tab" data-city="edmonton" aria-selected="false">Edmonton</button>
+        <button class="city-tab" role="tab" data-city="reddeer" aria-selected="false">Red Deer</button>
+      </div>
+      <div class="share-stage">
+        <div class="share-card">
+          <div class="brand">LOTCHECK.CA</div>
+          <div class="amt n" id="shareAmt">$2,340</div>
+          <div class="veh" id="shareVeh">over MSRP · Calgary · July 2026</div>
+          <div class="rule"></div>
+          <div class="fine n" id="shareN">Based on 47 quotes checked</div>
         </div>
       </div>
-    </div>
+      <div class="share-actions">
+        <button class="btn btn-ghost" id="copyBtn" type="button" style="border-color:rgba(255,255,255,.35);color:#fff">Copy the number</button>
+        <a class="btn btn-primary" href="/quote-check" style="background:var(--butter);border-color:var(--butter);color:#33305A">Check your own quote</a>
+      </div>
+    </section>
+
   </div>
-</section>
+</main>
 
 <!-- ================= FOOTER ================= -->
 <footer>
   <div class="wrap foot-in">
     <a class="logo" href="/" aria-label="LotCheck home">
       <svg width="37" height="21" viewBox="-145 -44 320 182" aria-hidden="true">
-        <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g class="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
+        <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/>
       </svg>
       LotCheck
     </a>
     <div class="foot-links">
-      <a href="#how">How it works</a>
-      <a href="#pipeline">10-point lane</a>
-      <a href="#report">Sample report</a>
-      <a href="#portal">Dealer portal</a>
+      <a href="/#how">How it works</a>
+      <a href="/#pipeline">10-point lane</a>
+      <a href="/#report">Sample report</a>
+      <a href="/#portal">Dealer portal</a>
       <a href="mailto:hello@lotcheck.ca">hello@lotcheck.ca</a>
     </div>
   </div>
@@ -941,505 +512,561 @@ footer{padding:34px 0 44px}
 var RM = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ============================================================
-   Tiny isometric engine — projection, shading, box factory
+   THE ONLY THING TO REPLACE WITH REAL DATA.
+   Every module below reads from this object and nothing else.
+   Swap it for your Supabase query result and the page goes live.
    ============================================================ */
-function px(x,y,z){ z = z||0; return [x - y, (x + y)/2 - z]; }
-function R(n){ return Math.round(n*10)/10; }
-function shade(hex, amt){
-  var n = parseInt(hex.slice(1),16);
-  var r=(n>>16)&255, g=(n>>8)&255, b=n&255;
-  if(amt>=0){ r+=(255-r)*amt; g+=(255-g)*amt; b+=(255-b)*amt; }
-  else { r*=1+amt; g*=1+amt; b*=1+amt; }
-  return "rgb("+(r|0)+","+(g|0)+","+(b|0)+")";
-}
-function pts(a){ return a.map(function(p){ return R(p[0])+","+R(p[1]); }).join(" "); }
-function poly(a, fill, extra){ return '<polygon points="'+pts(a)+'" fill="'+fill+'"'+(extra?' '+extra:'')+'/>'; }
-function box(x,y,z,w,d,h,c,extra){
-  var t=[[x,y,z+h],[x+w,y,z+h],[x+w,y+d,z+h],[x,y+d,z+h]].map(function(p){return px(p[0],p[1],p[2]);});
-  var l=[[x,y+d,z],[x+w,y+d,z],[x+w,y+d,z+h],[x,y+d,z+h]].map(function(p){return px(p[0],p[1],p[2]);});
-  var r=[[x+w,y,z],[x+w,y+d,z],[x+w,y+d,z+h],[x+w,y,z+h]].map(function(p){return px(p[0],p[1],p[2]);});
-  return poly(t,shade(c,.16),extra)+poly(l,shade(c,-.06),extra)+poly(r,shade(c,-.2),extra);
-}
-function face(pList, fill, extra){ return poly(pList.map(function(p){return px(p[0],p[1],p[2]);}), fill, extra); }
-function flat(x,y,w,d,fill,extra){ return face([[x,y,0],[x+w,y,0],[x+w,y+d,0],[x,y+d,0]], fill, extra); }
-function shadowRect(x,y,w,d){ return flat(x-3,y-2,w+7,d+5,"rgba(51,48,90,.10)"); }
-function car(x,y,c){
-  var s = shadowRect(x,y,46,22);
-  s += box(x,y,3,46,22,8,c);
-  s += box(x+10,y+3,11,22,16,8,c);
-  s += face([[x+32,y+3,11],[x+32,y+19,11],[x+32,y+19,18],[x+32,y+3,18]], "#E6F4F6");
-  s += face([[x+13,y+19,12],[x+30,y+19,12],[x+30,y+19,17],[x+13,y+19,17]], "#DDEDF2");
-  s += box(x+6,y+19,0,7,4,5,"#453F6B");
-  s += box(x+32,y+19,0,7,4,5,"#453F6B");
-  s += face([[x+46,y+4,6],[x+46,y+9,6],[x+46,y+9,9],[x+46,y+4,9]], "#FFF3C9");
-  return s;
-}
-function tree(x,y){
-  var s = shadowRect(x,y,18,18);
-  s += box(x+6,y+6,0,6,6,9,"#B08968");
-  s += box(x,y,9,18,18,13,"#8FCF96");
-  s += box(x+3.5,y+3.5,22,11,11,9,"#A5DBA9");
-  return s;
-}
-function lampPost(x,y){
-  var s = shadowRect(x,y,6,6);
-  s += box(x,y,0,5,5,34,"#8D89B8");
-  s += box(x-2,y-2,34,9,9,5,"#F5C95C");
-  return s;
-}
+/* ============================================================
+   Config — point these at your Supabase project.
+   ============================================================ */
+var LC_API  = "https://YOUR-PROJECT-REF.supabase.co/functions/v1";
+var LC_ANON = "YOUR-SUPABASE-ANON-KEY";
 
 /* ============================================================
-   HERO — pastel lot + scanning beam + pop badges
+   Fallback, shown ONLY when the index has nothing publishable.
+   Illustrative figures. The page says so on screen and the live
+   dot stays off, so these can never read as real numbers.
    ============================================================ */
-var heroCars = [];
-function buildHero(){
-  var host = document.getElementById("heroScene");
-  if(!host) return;
-  var g = "";
-  g += box(-70,-70,-18,450,360,18,"#ABD8AB");   // grass island
-  g += box(-12,-12,-6,334,254,6,"#D9DBEF");     // lot slab
-  var rows = [16,96,176];
-  var cols = [16,91,166,241];
-  var colors = ["#F2836B","#F5C95C","#7FCBB0","#A99BE0","#7FB8E0","#EFA0BC"];
-  var k = 0;
-  rows.forEach(function(ry, ri){
-    for(var sx=6; sx<=306; sx+=75){ g += flat(sx, ry-6, 4, 46, "#F1EDE0"); }
-    cols.forEach(function(cx, ci){
-      if(ri===1 && ci===2){
-        g += flat(cx+2, ry, 42, 34, "rgba(47,167,154,.16)");
-        return;
-      }
-      g += car(cx, ry, colors[k % colors.length]);
-      heroCars.push({x:cx+23, y:ry+11});
-      k++;
-    });
-  });
-  g += tree(-52,-48)+tree(340,-56)+tree(-58,240)+tree(338,228);
-  g += lampPost(-40,100)+lampPost(352,96);
-  // scanning beam wall (translated along iso-x by JS)
-  var beam = '<g id="beam">'
-    + face([[0,-16,0],[0,246,0],[0,246,74],[0,-16,74]], "url(#beamGrad)")
-    + face([[0,-16,0],[4,-16,0],[4,246,0],[0,246,0]], "rgba(47,167,154,.65)")
-    + "</g>";
-  // check badges above each car
-  var badges = "";
-  heroCars.forEach(function(c,i){
-    var p = px(c.x, c.y, 52);
-    badges += '<g class="hbadge" id="hb'+i+'" transform="translate('+R(p[0])+','+R(p[1])+')">'
-      + '<g class="pin">'
-      + '<circle r="11" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="1.5"/>'
-      + '<path d="M-4.5 0.2 L-1.5 3.4 L5 -3.4" fill="none" stroke="#1E8A7E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>'
-      + "</g></g>";
-  });
-  host.innerHTML = '<svg viewBox="-395 -170 870 555" role="img" aria-label="Isometric car lot with a teal verification beam sweeping across parked cars">'
-    + '<defs><linearGradient id="beamGrad" x1="0" y1="1" x2="0" y2="0">'
-    + '<stop offset="0" stop-color="rgba(47,167,154,.34)"/>'
-    + '<stop offset="1" stop-color="rgba(47,167,154,0)"/>'
-    + "</linearGradient></defs>"
-    + g + beam + badges + "</svg>";
+var LC_SAMPLE = {
+  period: "July 2026",
+  cities: [
+    { name:"Calgary",  markup:2340, n:47 },
+    { name:"Edmonton", markup:1690, n:31 },
+    { name:"Red Deer", markup:1050, n:12 }
+  ],
+  brands: [
+    { name:"Toyota",  markup:3110 },
+    { name:"Honda",   markup:2480 },
+    { name:"Ford",    markup:1720 },
+    { name:"Mazda",   markup:1180 },
+    { name:"Hyundai", markup:740  }
+  ],
+  changes: [
+    { model:"2026 RAV4 XLE",        delta:700   },
+    { model:"2026 Ioniq 5 Preferred", delta:-1200 },
+    { model:"2026 CX-5 GT",         delta:450   },
+    { model:"2026 Civic Sport",     delta:-300  },
+    { model:"2026 Tucson Hybrid",   delta:610   },
+    { model:"2026 Prius Prime SE",  delta:-850  }
+  ],
+  fees: [
+    { name:"Documentation fee", short:"Doc fee",  pct:91, avg:699 },
+    { name:"Nitrogen fill",     short:"Nitrogen", pct:34, avg:299 },
+    { name:"VIN etch",          short:"Etch",     pct:22, avg:495 },
+    { name:"Paint protection",  short:"Paint",    pct:18, avg:899 }
+  ],
+  /* trends drive the fluid lines; last value is the current figure */
+  rates: {
+    prime:4.95, quoted:8.49,
+    primeTrend:[4.95,4.95,4.95,4.95,4.95,4.95],
+    quotedTrend:[8.15,8.62,8.28,8.71,8.40,8.49]
+  },
+  months: [
+    {m:"Jan",v:2100},{m:"Feb",v:2260},{m:"Mar",v:2480},{m:"Apr",v:2390},
+    {m:"May",v:2510},{m:"Jun",v:2440},{m:"Jul",v:2340},{m:"Aug",v:2180},
+    {m:"Sep",v:1960},{m:"Oct",v:1840},{m:"Nov",v:1620},{m:"Dec",v:1180}
+  ],
+  live: false
+};
+var LC_INDEX = LC_SAMPLE;
+
+/* hide any module the index has nothing real to say about */
+function toggleModule(headingId, ok){
+  var h = document.getElementById(headingId);
+  if(!h) return;
+  var sec = h.closest("section");
+  if(sec) sec.style.display = ok ? "" : "none";
 }
-buildHero();
 
-(function heroLoop(){
-  var beamEl = document.getElementById("beam");
-  if(!beamEl || !heroCars.length) return;
-  var badgeEls = heroCars.map(function(_,i){ return document.getElementById("hb"+i); });
-  if(RM){
-    beamEl.setAttribute("transform","translate(180,90)");
-    heroCars.forEach(function(c,i){ if(c.x + 8 < 188) badgeEls[i].classList.add("show"); });
-    return;
-  }
-  var DUR = 7000, SPAN = 340, START = -14;
-  var raf = null, t0 = performance.now();
-  function frame(now){
-    var t = ((now - t0) % DUR) / DUR;
-    var bx = START + t * SPAN;
-    beamEl.setAttribute("transform","translate("+R(bx)+","+R(bx/2)+")");
-    for(var i=0;i<heroCars.length;i++){
-      badgeEls[i].classList.toggle("show", bx > heroCars[i].x + 8);
-    }
-    raf = requestAnimationFrame(frame);
-  }
-  var io = new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting && raf===null){ raf = requestAnimationFrame(frame); }
-      else if(!e.isIntersecting && raf!==null){ cancelAnimationFrame(raf); raf=null; }
-    });
-  },{threshold:.05});
-  io.observe(document.getElementById("heroScene"));
-})();
-
-/* gentle pointer parallax on the hero scene (fine pointers only) */
-(function heroParallax(){
-  if(RM || !window.matchMedia("(pointer:fine)").matches) return;
-  var hero = document.querySelector(".hero");
-  var svgHost = document.getElementById("heroScene");
-  if(!hero || !svgHost) return;
-  hero.addEventListener("pointermove", function(e){
-    var svg = svgHost.querySelector("svg");
-    if(!svg) return;
-    var dx = (e.clientX / window.innerWidth - .5) * 14;
-    var dy = (e.clientY / window.innerHeight - .5) * 10;
-    svg.style.transform = "translate(" + (-dx).toFixed(1) + "px," + (-dy).toFixed(1) + "px)";
-  }, {passive:true});
-  hero.addEventListener("pointerleave", function(){
-    var svg = svgHost.querySelector("svg");
-    if(svg) svg.style.transform = "";
-  });
-})();
-
-/* ============================================================
-   HOW-IT-WORKS vignettes
-   ============================================================ */
-function vignette(i){
-  var g = "";
-  g += box(-36,-36,-14,170,140,14,"#ABD8AB");
-  if(i===0){
-    // upload kiosk
-    g += shadowRect(18,10,58,42);
-    g += box(18,10,0,54,42,40,"#F5C95C");
-    g += face([[18,52,40],[72,52,40],[78,58,48],[12,58,48]], "#F2836B"); // awning
-    g += face([[72,10,10],[72,44,10],[72,44,30],[72,10,30]], "#FBF5EC"); // window
-    var dp = px(45,30,74);
-    g += '<g transform="translate('+R(dp[0])+','+R(dp[1])+')"><g class="lc-upload-doc">'
-      + '<rect x="-16" y="-22" width="32" height="42" rx="6" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="1.5"/>'
-      + '<rect x="-9" y="-13" width="18" height="4" rx="2" fill="#E4E1F2"/>'
-      + '<rect x="-9" y="-5" width="13" height="4" rx="2" fill="#E4E1F2"/>'
-      + '<path class="lc-upload-arrow" d="M0 14 v-8 M-4 10 l4 -4 4 4" stroke="#2FA79A" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
-      + "</g></g>";
-    return wrapVign(g, "Upload kiosk");
-  }
-  if(i===1){
-    // scan gate + car
-    g += flat(-20,30,150,48,"#D9DBEF");
-    g += box(14,18,0,12,12,42,"#A99BE0");
-    g += box(14,86,0,12,12,42,"#A99BE0");
-    g += box(15,14,42,10,88,11,"#B7ABE8");
-    g += '<g class="lc-gate-window">' + face([[20,14,0],[20,102,0],[20,102,44],[20,14,44]], "rgba(47,167,154,.22)") + "</g>";
-    g += '<g class="lc-gate-car">' + car(30,42,"#F2836B") + "</g>";
-    return wrapVign(g, "Verification gate");
-  }
-  // report board
-  g += shadowRect(30,40,60,16);
-  g += box(34,44,0,9,9,42,"#8D89B8");
-  g += box(74,44,0,9,9,42,"#8D89B8");
-  var bp = px(58,48,66);
-  g += '<g transform="translate('+R(bp[0])+','+R(bp[1])+')">'
-    + '<rect x="-52" y="-34" width="104" height="66" rx="12" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="1.5"/>'
-    + '<g class="lc-report-line1"><rect x="-38" y="-20" width="48" height="6" rx="3" fill="#E4E1F2"/></g>'
-    + '<g class="lc-report-line2"><rect x="-38" y="-8" width="70" height="6" rx="3" fill="#E4E1F2"/></g>'
-    + '<g class="lc-report-line3"><rect x="-38" y="4" width="58" height="6" rx="3" fill="#E4E1F2"/></g>'
-    + '<g class="lc-report-check" style="transform-origin:30px -16px">'
-    + '<circle cx="30" cy="-16" r="11" fill="#2FA79A"/>'
-    + '<path d="M25 -16 l3.4 3.6 6 -7.4" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
-    + "</g></g>";
-  return wrapVign(g, "Verified report board");
-}
-function wrapVign(g, label){
-  return '<svg viewBox="-190 -110 380 270" role="img" aria-label="'+label+'">'+g+"</svg>";
-}
-document.querySelectorAll("[data-vign]").forEach(function(el){
-  el.innerHTML = vignette(parseInt(el.getAttribute("data-vign"),10));
-});
-
-/* ============================================================
-   PIPELINE — sticky scroll camera through 10 gates
-   ============================================================ */
-var STN = ["MSRP verified","Odometer check","Open recalls","Fee audit","EV rebate check",
-           "VIN pattern","Warranty validity","Financing math","Dealer reputation","Leverage score"];
-var GATE0 = 260, GATESTEP = 250;
-function buildPipe(){
-  var host = document.getElementById("pipeScene");
-  if(!host || RM) return;
-  var back = "", front = "";
-  back += box(-160,-40,-18,3140,280,18,"#ABD8AB");
-  back += box(-140,52,-5,3080,96,5,"#D9DBEF");
-  for(var x=-100; x<2880; x+=64){ back += flat(x,97,30,5,"#F1EDE0"); }
-  for(var tx=-60; tx<2950; tx+=210){ back += tree(tx,-16); }
-  var i, gx;
-  for(i=0;i<10;i++){
-    gx = GATE0 + i*GATESTEP;
-    back += '<g class="station" data-stn="'+i+'">'
-      + shadowRect(gx,26,16,16)
-      + box(gx,26,0,16,16,52,"#A99BE0")
-      + "</g>";
-  }
-  // scenery south of road & gates' front halves (drawn over car)
-  for(var ty=60; ty<2950; ty+=260){ front += tree(ty+30,186); }
-  for(var lx=140; lx<2900; lx+=380){ front += lampPost(lx,162); }
-  for(i=0;i<10;i++){
-    gx = GATE0 + i*GATESTEP;
-    var lp = px(gx+8, 92, 122);
-    var cp = px(gx+8, 92, 156);
-    front += '<g class="station" data-stn="'+i+'">'
-      + shadowRect(gx,156,16,16)
-      + box(gx,156,0,16,16,52,"#A99BE0")
-      + box(gx+1,20,52,14,158,13,"#B7ABE8")
-      + face([[gx+3,178,55],[gx+13,178,55],[gx+13,178,61],[gx+3,178,61]], "#8D89B8", 'class="lamp"')
-      + '<text class="stn-label" x="'+R(lp[0])+'" y="'+R(lp[1])+'" text-anchor="middle">'+STN[i]+"</text>"
-      + '<g transform="translate('+R(cp[0])+','+R(cp[1])+')"><g class="pin">'
-      + '<circle r="13" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="1.5"/>'
-      + '<path d="M-5 0 L-1.6 3.8 L6 -4" fill="none" stroke="#1E8A7E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>'
-      + "</g></g></g>";
-  }
-  // finish board
-  var fx = 2760;
-  var fin = shadowRect(fx,60,90,14)
-    + box(fx,60,0,12,12,64,"#8D89B8")
-    + box(fx+72,60,0,12,12,64,"#8D89B8");
-  var bp = px(fx+42,66,100);
-  fin += '<g transform="translate('+R(bp[0])+','+R(bp[1])+')">'
-    + '<rect x="-80" y="-48" width="160" height="96" rx="16" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="2"/>'
-    + '<rect x="-60" y="-28" width="72" height="9" rx="4.5" fill="#E4E1F2"/>'
-    + '<rect x="-60" y="-11" width="110" height="9" rx="4.5" fill="#E4E1F2"/>'
-    + '<rect x="-60" y="6" width="92" height="9" rx="4.5" fill="#E4E1F2"/>'
-    + '<circle cx="46" cy="-26" r="15" fill="#2FA79A"/>'
-    + '<path d="M40 -26 l4 4.4 8 -9.4" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<text x="-60" y="34" font-weight="800" font-size="13" fill="#8B88AE">VERIFIED · LC-2417</text>'
-    + "</g>";
-  var carG = '<g id="pipeCar">'+car(0,0,"#F2836B")+"</g>";
-  host.innerHTML = '<svg id="pipeSvg" viewBox="0 0 1150 620" preserveAspectRatio="xMidYMid slice" aria-hidden="true">'
-    + '<g id="pipeWorld">'+back+carG+front+fin+"</g></svg>";
-}
-buildPipe();
-
-(function pipeScroll(){
-  if(RM) return;
-  var sec = document.getElementById("pipeline");
-  var world = document.getElementById("pipeWorld");
-  var carEl = document.getElementById("pipeCar");
-  var hudNum = document.getElementById("hudNum");
-  var hudName = document.getElementById("hudName");
-  var hudBar = document.getElementById("hudBar");
-  var hudCount = document.getElementById("hudCount");
-  if(!sec || !world || !carEl) return;
-  var stnEls = [];
-  for(var i=0;i<10;i++){
-    stnEls.push(Array.prototype.slice.call(document.querySelectorAll('[data-stn="'+i+'"]')));
-  }
-  var X0 = -60, X1 = 2650;
-  var target = 0, cur = -1, raf = null, lastCount = -1;
-  function setScene(p, now){
-    var cx = X0 + (X1-X0)*p;
-    var bob = Math.sin(now/260)*1.4;
-    var csx = cx + 23 - 88;
-    var csy = (cx + 23 + 88)/2 - 6;
-    var S = window.innerWidth < 720 ? 1.12 : 1.5;
-    world.setAttribute("transform","translate("+R(575 - S*csx)+","+R(335 - S*csy)+") scale("+S+")");
-    carEl.setAttribute("transform","translate("+R(cx-77)+","+R((cx+77)/2 + bob)+")");
-    var count = 0;
-    for(var i=0;i<10;i++){
-      var on = cx + 30 > GATE0 + i*GATESTEP + 8;
-      if(on) count++;
-      stnEls[i].forEach(function(el){ el.classList.toggle("on", on); });
-    }
-    if(count !== lastCount){
-      var wasInit = lastCount === -1;
-      lastCount = count;
-      hudNum.textContent = count;
-      hudName.textContent = count===0 ? "Entering the lane" : (count===10 ? "Report ready" : STN[count-1]);
-      if(!wasInit && hudCount){
-        hudCount.classList.remove("bump");
-        void hudCount.offsetWidth;
-        hudCount.classList.add("bump");
-      }
-    }
-    hudBar.style.width = (p*100).toFixed(1)+"%";
-  }
-  function onScroll(){
-    var r = sec.getBoundingClientRect();
-    var total = r.height - window.innerHeight;
-    if(total <= 0){ target = 0; return; }
-    target = Math.min(1, Math.max(0, -r.top/total));
-  }
-  function frame(now){
-    if(cur < 0) cur = target;
-    cur += (target - cur) * .1;
-    setScene(cur, now);
-    raf = requestAnimationFrame(frame);
-  }
-  window.addEventListener("scroll", onScroll, {passive:true});
-  window.addEventListener("resize", onScroll);
-  onScroll();
-  var io = new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting && raf===null){ raf = requestAnimationFrame(frame); }
-      else if(!e.isIntersecting && raf!==null){ cancelAnimationFrame(raf); raf=null; }
-    });
-  },{threshold:0});
-  io.observe(sec);
-})();
-
-/* ============================================================
-   DEALER PORTAL — request travels to dealership, quote returns
-   ============================================================ */
-function buildPortal(){
-  var host = document.getElementById("portalScene");
-  if(!host) return;
-  var g = "";
-  g += box(-40,-20,-18,660,250,18,"#ABD8AB");
-  g += box(-20,128,-5,620,70,5,"#D9DBEF");
-  for(var x=0; x<560; x+=56){ g += flat(x,160,26,5,"#F1EDE0"); }
-  // buyer house
-  g += shadowRect(10,20,84,74);
-  g += box(10,20,0,84,74,36,"#F6E3C0");
-  g += face([[10,94,36],[94,94,36],[86,57,60],[18,57,60]], "#F2836B");
-  g += face([[94,20,36],[94,94,36],[86,57,60]], "#D96A54");
-  g += face([[40,94,0],[58,94,0],[58,94,24],[40,94,24]], "#7A6FB2");        // door
-  g += face([[66,94,12],[82,94,12],[82,94,26],[66,94,26]], "#DDEDF2");      // window
-  g += flat(38,96,26,30,"#E7E3D4");                                          // driveway
-  g += '<g id="houseGlow">'+face([[34,90,0],[64,90,0],[64,90,30],[34,90,30]], "rgba(245,201,92,.4)")+"</g>";
-  g += tree(-24,60)+tree(120,4);
-  // dealership
-  g += shadowRect(430,10,164,100);
-  g += box(430,10,0,160,96,52,"#CFDCF4");
-  g += face([[470,106,0],[560,106,0],[560,106,34],[470,106,34]], "#BFE6EF"); // glass front
-  g += face([[482,106,0],[486,106,0],[486,106,34],[482,106,34]], "#A8BEDC");
-  g += face([[520,106,0],[524,106,0],[524,106,34],[520,106,34]], "#A8BEDC");
-  g += '<g id="dealerGlow">'+face([[466,102,0],[566,102,0],[566,102,38],[466,102,38]], "rgba(47,167,154,.28)")+"</g>";
-  g += car(440,150,"#7FB8E0");
-  g += tree(608,40);
-  // floating dealership sign (billboard)
-  var sp = px(510,58,86);
-  g += '<g id="dealerSign" transform="translate('+R(sp[0])+','+R(sp[1])+')">'
-    + '<rect class="sign-body" x="-84" y="-24" width="168" height="44" rx="12" fill="#fff" stroke="rgba(51,48,90,.14)" stroke-width="2"/>'
-    + '<text x="0" y="4" text-anchor="middle" font-weight="800" font-size="17" fill="#33305A">MAPLE MOTORS</text>'
-    + "</g>";
-  // courier path (screen coords, hidden dashes)
-  var d = "M -46 74 L -100 101 Q -112 107 -98 114 L 318 322 Q 334 330 348 322 L 392 300";
-  g += '<path id="portalPath" class="portal-path" d="'+d+'"/>';
-  // request packet (teal cube)
-  g += '<g id="packet">'
-    + '<circle r="16" fill="rgba(47,167,154,.18)"/>'
-    + box(-7,-7,2,14,14,12,"#2FA79A")
-    + "</g>";
-  // returning quote (white doc)
-  g += '<g id="quoteDoc">'
-    + '<rect x="-14" y="-19" width="28" height="38" rx="5" fill="#fff" stroke="rgba(51,48,90,.18)" stroke-width="1.5"/>'
-    + '<rect x="-8" y="-11" width="16" height="3.5" rx="1.75" fill="#E4E1F2"/>'
-    + '<rect x="-8" y="-4" width="11" height="3.5" rx="1.75" fill="#E4E1F2"/>'
-    + '<circle cx="5" cy="8" r="6" fill="#2FA79A"/>'
-    + '<path d="M2.4 8 l2 2.2 3.4 -4.2" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
-    + "</g>";
-  host.innerHTML = '<svg viewBox="0 0 1030 560" role="img" aria-label="A quote request travels from a small house to an isometric dealership and a verified quote returns">'
-    + '<g transform="translate(310,86)">'+g+"</g></svg>";
-}
-buildPortal();
-
-(function portalLoop(){
-  var path = document.getElementById("portalPath");
-  var packet = document.getElementById("packet");
-  var doc = document.getElementById("quoteDoc");
-  var sign = document.getElementById("dealerSign");
-  var houseGlow = document.getElementById("houseGlow");
-  var dealerGlow = document.getElementById("dealerGlow");
-  var statusText = document.getElementById("statusText");
-  var statusDot = document.getElementById("statusDot");
-  var btn = document.getElementById("sendBtn");
-  var stage = document.getElementById("portalStage");
-  if(!path || !packet || !doc) return;
-  var LEN = path.getTotalLength();
-  function place(el, t, lift){
-    var p = path.getPointAtLength(t*LEN);
-    el.setAttribute("transform","translate("+R(p.x)+","+R(p.y - (lift||0))+")");
-  }
-  if(RM){
-    place(packet, .5, 8); packet.classList.add("go");
-    place(doc, .15, 26); doc.classList.add("go");
-    sign.classList.add("lit");
-    dealerGlow.classList.add("on");
-    statusText.textContent = "Quote request out, verified quote back — all through the portal.";
-    if(btn){
-      btn.addEventListener("click", function(){
-        statusText.textContent = "Request sent. Replies come back pre-verified — animation paused by your motion settings.";
+/* the live dot and the sample notice always tell the same truth */
+function setLiveState(isLive, data){
+  var dot   = document.querySelector(".nav-links a.live .live-dot");
+  var note  = document.getElementById("sampleNote");
+  var stamp = document.getElementById("stamp");
+  if(dot) dot.style.background = isLive ? "var(--live)" : "var(--ink-faint)";
+  if(note) note.style.display = isLive ? "none" : "";
+  if(stamp){
+    if(isLive && data && data.generated_at){
+      var d = new Date(data.generated_at);
+      stamp.textContent = "Updated " + d.toLocaleString("en-CA", {
+        month:"short", day:"numeric", hour:"numeric", minute:"2-digit"
       });
+    } else {
+      stamp.textContent = "Not yet publishing live figures";
     }
-    return;
   }
-  var ease = function(t){ return t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; };
-  var PH = [
-    {name:"idle",    dur:900},
-    {name:"request", dur:2100, msg:"Request travelling to Maple Motors…"},
-    {name:"dealer",  dur:900,  msg:"Dealership preparing a quote…"},
-    {name:"return",  dur:2100, msg:"Quote coming back for verification…"},
-    {name:"done",    dur:1600, msg:"Quote received — verified and added to your report."}
-  ];
-  var phase = 0, pt0 = 0, raf = null;
-  function step(now){
-    if(!pt0) pt0 = now;
-    var ph = PH[phase];
-    var t = Math.min(1, (now-pt0)/ph.dur);
-    if(ph.name==="request"){
-      packet.classList.add("go"); doc.classList.remove("go");
-      place(packet, ease(t), 8 + Math.sin(now/120)*2);
-      if(t===1){ sign.classList.add("lit"); dealerGlow.classList.add("on"); }
-    } else if(ph.name==="dealer"){
-      place(packet, 1, 8);
-    } else if(ph.name==="return"){
-      packet.classList.remove("go");
-      doc.classList.add("go");
-      place(doc, 1-ease(t), 26 + Math.sin(now/120)*2);
-      if(t===1){ houseGlow.classList.add("on"); }
-    } else if(ph.name==="done"){
-      place(doc, 0, 26);
-    }
-    if(t===1){
-      phase = (phase+1) % PH.length;
-      pt0 = now;
-      if(phase===0){
-        sign.classList.remove("lit"); dealerGlow.classList.remove("on");
-        houseGlow.classList.remove("on");
-        doc.classList.remove("go");
-      }
-      if(PH[phase].msg){ statusText.textContent = PH[phase].msg; }
-      statusDot.classList.toggle("pulse", PH[phase].name==="request" || PH[phase].name==="return");
-    }
-    raf = requestAnimationFrame(step);
-  }
-  var io = new IntersectionObserver(function(es){
+}
+
+function money(n){ return "$" + Math.round(Math.abs(n)).toLocaleString("en-CA"); }
+function signed(n){ return (n < 0 ? "−" : "+") + money(n); }
+
+/* ============================================================
+   Chart kit — vertical columns and fluid spline areas.
+   One accent rule: coral marks the worst number only, so the
+   colour keeps meaning instead of shouting on every series.
+   ============================================================ */
+var PAL = { coral:"#F2836B", coralTop:"#F79F8B", lilac:"#A99BE0", lilacTop:"#BFB4E9",
+            teal:"#2FA79A", tealTop:"#5DCAA5", butter:"#F5C95C", butterTop:"#F8DA8C",
+            slate:"#8D89B8" };
+var W = 320, H = 172, BASE = 134, TOP = 34, PADX = 14;
+
+function esc(s){
+  return String(s).replace(/[&<>]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]; });
+}
+function reveal(host){
+  var svg = host.querySelector("svg");
+  if(!svg) return;
+  if(RM){ svg.classList.add("go"); return; }
+  new IntersectionObserver(function(es,o){
     es.forEach(function(e){
-      if(e.isIntersecting && raf===null){ pt0 = 0; raf = requestAnimationFrame(step); }
-      else if(!e.isIntersecting && raf!==null){ cancelAnimationFrame(raf); raf=null; }
+      if(e.isIntersecting){
+        svg.classList.add("go");
+        svg.querySelectorAll(".line:not(.dashed)").forEach(function(p){ p.style.strokeDashoffset = "0"; });
+        o.disconnect();
+      }
     });
-  },{threshold:.2});
-  io.observe(stage);
-  if(btn){
-    btn.addEventListener("click", function(){
-      phase = 1; pt0 = 0;
-      sign.classList.remove("lit"); dealerGlow.classList.remove("on"); houseGlow.classList.remove("on");
-      statusText.textContent = PH[1].msg;
-      statusDot.classList.add("pulse");
-      if(raf===null){ raf = requestAnimationFrame(step); }
-      stage.scrollIntoView({behavior:"smooth", block:"center"});
+  },{threshold:.25}).observe(host);
+}
+
+/* vertical columns with a lighter top face */
+function columnChart(host, rows, label){
+  if(!host) return;
+  var max = Math.max.apply(null, rows.map(function(r){ return r.value; }));
+  var n = rows.length, step = (W - PADX*2) / n;
+  var cw = Math.min(46, step * 0.56);
+  var body = '<line class="axis" x1="'+PADX+'" y1="'+BASE+'" x2="'+(W-PADX)+'" y2="'+BASE+'"/>';
+  rows.forEach(function(r,i){
+    var h = Math.max(12, (r.value / max) * (BASE - TOP));
+    var cx = PADX + step*i + step/2;
+    var x = cx - cw/2, y = BASE - h;
+    body += '<g class="col" style="transform-box:fill-box;transform-origin:bottom;transition-delay:'+(i*90)+'ms">'
+      + '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+cw.toFixed(1)+'" height="'+h.toFixed(1)+'" rx="7" fill="'+r.color+'"/>'
+      + '<ellipse cx="'+cx.toFixed(1)+'" cy="'+y.toFixed(1)+'" rx="'+(cw/2).toFixed(1)+'" ry="6" fill="'+r.top+'"/>'
+      + "</g>"
+      + '<text class="val" x="'+cx.toFixed(1)+'" y="'+(y-13).toFixed(1)+'" text-anchor="middle" fill="'+r.ink+'" style="transition-delay:'+(i*90+300)+'ms">'+esc(r.display)+"</text>"
+      + '<text class="tick" x="'+cx.toFixed(1)+'" y="'+(BASE+20)+'" text-anchor="middle">'+esc(r.label)+"</text>";
+  });
+  host.innerHTML = '<svg class="chart" viewBox="0 0 '+W+" "+H+'" role="img" aria-label="'+esc(label)+'">'+body+"</svg>";
+  reveal(host);
+}
+
+/* Catmull-Rom through the points, converted to cubic bezier */
+function spline(p){
+  if(p.length < 2) return "";
+  var d = "M"+p[0][0].toFixed(1)+" "+p[0][1].toFixed(1);
+  for(var i=0;i<p.length-1;i++){
+    var p0 = p[i-1] || p[i], p1 = p[i], p2 = p[i+1], p3 = p[i+2] || p2;
+    var c1x = p1[0] + (p2[0]-p0[0])/6, c1y = p1[1] + (p2[1]-p0[1])/6;
+    var c2x = p2[0] - (p3[0]-p1[0])/6, c2y = p2[1] - (p3[1]-p1[1])/6;
+    d += "C"+c1x.toFixed(1)+" "+c1y.toFixed(1)+","+c2x.toFixed(1)+" "+c2y.toFixed(1)+","+p2[0].toFixed(1)+" "+p2[1].toFixed(1);
+  }
+  return d;
+}
+
+/* fluid area chart — one or two series, optional marker and tooltip pill */
+function areaChart(host, cfg){
+  if(!host) return;
+  var all = cfg.series.reduce(function(a,s){ return a.concat(s.values); }, []);
+  var max = Math.max.apply(null, all), min = Math.min.apply(null, all);
+  var span = (max - min) || 1;
+  var pad = span * 0.28;
+  var lo = min - pad, hi = max + pad;
+  function pt(v,i,n){
+    var x = PADX + (i/(n-1)) * (W - PADX*2);
+    var y = BASE - ((v - lo)/(hi - lo)) * (BASE - TOP);
+    return [x,y];
+  }
+  var body = '<line class="axis" x1="'+PADX+'" y1="'+BASE+'" x2="'+(W-PADX)+'" y2="'+BASE+'"/>';
+  var paths = [];
+  cfg.series.forEach(function(s){
+    var pts = s.values.map(function(v,i){ return pt(v,i,s.values.length); });
+    var d = spline(pts);
+    paths.push({ d:d, s:s, last:pts[pts.length-1] });
+    if(s.fill){
+      body += '<path class="area" d="'+d+"L"+(W-PADX)+" "+BASE+"L"+PADX+" "+BASE+'Z" fill="'+s.color+'"/>';
+    }
+  });
+  paths.forEach(function(o){
+    body += '<path class="line'+(o.s.dashed?" dashed":"")+'" d="'+o.d+'" stroke="'+o.s.color+'"/>';
+  });
+  paths.forEach(function(o){
+    body += '<circle class="endpt" cx="'+o.last[0].toFixed(1)+'" cy="'+o.last[1].toFixed(1)+'" r="6.5" fill="'+o.s.color+'" stroke="var(--card)" stroke-width="3"/>';
+  });
+  if(cfg.tip){
+    var tw = cfg.tip.text.length * 6.6 + 20;
+    var tx = Math.min(W - PADX - tw, Math.max(PADX, cfg.tip.x - tw/2));
+    body += '<g class="tip"><rect class="tipbox" x="'+tx.toFixed(1)+'" y="'+cfg.tip.y+'" width="'+tw.toFixed(1)+'" height="23" rx="8"/>'
+      + '<text class="tiptxt" x="'+(tx+tw/2).toFixed(1)+'" y="'+(cfg.tip.y+16)+'" text-anchor="middle">'+esc(cfg.tip.text)+"</text></g>";
+  }
+  (cfg.ticks||[]).forEach(function(t){
+    body += '<text class="tick" x="'+t.x+'" y="'+(BASE+20)+'" text-anchor="'+(t.anchor||"middle")+'">'+esc(t.label)+"</text>";
+  });
+  host.innerHTML = '<svg class="chart" viewBox="0 0 '+W+" "+H+'" role="img" aria-label="'+esc(cfg.label)+'">'+body+"</svg>";
+  host.querySelectorAll(".line:not(.dashed)").forEach(function(p){
+    var len = p.getTotalLength();
+    p.style.strokeDasharray = len;
+    p.style.strokeDashoffset = RM ? 0 : len;
+  });
+  reveal(host);
+}
+
+/* ============================================================
+   Everything below re-runs whenever the index data changes.
+   ============================================================ */
+function renderData(){
+
+toggleModule("m2", (LC_INDEX.cities  || []).length > 0);
+toggleModule("m3", (LC_INDEX.brands  || []).length > 0);
+toggleModule("m5", (LC_INDEX.changes || []).length > 0);
+toggleModule("m7", (LC_INDEX.fees    || []).length > 0);
+toggleModule("m8", !!LC_INDEX.rates && (LC_INDEX.rates.quotedTrend || []).length > 1);
+toggleModule("m9", (LC_INDEX.months  || []).length > 1);
+toggleModule("m21", (LC_INDEX.cities || []).length > 0);
+
+/* ============================================================
+   02 — markup by city, vertical columns
+   ============================================================ */
+(function cityChart(){
+  var host = document.getElementById("cityChart");
+  var leg  = document.getElementById("cityLegend");
+  if(!host) return;
+  var cs = LC_INDEX.cities;
+  var worst = Math.max.apply(null, cs.map(function(c){ return c.markup; }));
+  var ramp = [
+    { color:PAL.lilac, top:PAL.lilacTop, ink:"var(--ink-soft)" },
+    { color:PAL.teal,  top:PAL.tealTop,  ink:"var(--teal-ink)" }
+  ];
+  var rows = cs.map(function(c,i){
+    var isWorst = c.markup === worst;
+    var sk = isWorst ? { color:PAL.coral, top:PAL.coralTop, ink:"var(--coral-ink)" } : ramp[i % 2];
+    return { label:c.name, value:c.markup, display:money(c.markup), color:sk.color, top:sk.top, ink:sk.ink, sk:sk };
+  });
+  columnChart(host, rows, "Columns comparing average markup over MSRP by city");
+  if(leg){
+    leg.innerHTML = rows.map(function(r,i){
+      return '<div class="leg-row"><span><i style="background:'+r.color+'"></i>'+r.label+"</span>"
+        + '<b class="n" style="color:'+r.ink+'">'+r.display
+        + ' <small style="font-weight:800;color:var(--ink-faint)">· n='+cs[i].n+"</small></b></div>";
+    }).join("");
+  }
+})();
+
+/* ============================================================
+   03 — brand board, rows slide in on reveal
+   ============================================================ */
+(function brandBoard(){
+  var host = document.getElementById("brandBoard");
+  if(!host) return;
+  host.innerHTML = LC_INDEX.brands.map(function(b,i){
+    var cls = b.markup > 1500 ? "up" : "down";
+    return '<div class="board-row enter" style="transition-delay:'+(i*70)+'ms">'
+      + '<span class="rank n">'+(i+1)+"</span>"
+      + '<span class="nm">'+b.name+"</span>"
+      + '<span class="v n '+cls+'">'+signed(b.markup)+"</span></div>";
+  }).join("");
+  var rows = host.querySelectorAll(".board-row");
+  if(RM){ rows.forEach(function(r){ r.classList.add("in"); }); return; }
+  new IntersectionObserver(function(es,o){
+    es.forEach(function(e){ if(e.isIntersecting){ rows.forEach(function(r){ r.classList.add("in"); }); o.disconnect(); } });
+  },{threshold:.3}).observe(host);
+})();
+
+/* ============================================================
+   05 — change log, continuous vertical ticker
+   ============================================================ */
+(function changeLog(){
+  var track = document.getElementById("logTrack");
+  if(!track) return;
+  function rowHTML(c){
+    var up = c.delta > 0;
+    return '<div class="log-row"><span class="ar '+(up?"u":"d")+'">'+(up?"▲":"▼")+"</span>"
+      + '<span class="nm">'+c.model+"</span>"
+      + '<b class="n '+(up?"up":"down")+'">'+signed(c.delta)+"</b></div>";
+  }
+  var one = LC_INDEX.changes.map(rowHTML).join("");
+  track.innerHTML = one + one;
+  if(RM) return;
+  var y = 0, raf = null, half = 0;
+  function measure(){ half = track.scrollHeight / 2; }
+  measure();
+  window.addEventListener("resize", measure);
+  function frame(){
+    y -= .28;
+    if(half && -y >= half) y += half;
+    track.style.transform = "translateY("+y.toFixed(1)+"px)";
+    raf = requestAnimationFrame(frame);
+  }
+  new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting && raf===null){ measure(); raf = requestAnimationFrame(frame); }
+      else if(!e.isIntersecting && raf!==null){ cancelAnimationFrame(raf); raf = null; }
+    });
+  },{threshold:0}).observe(track.parentNode);
+})();
+
+/* ============================================================
+   07 — fee frequency bars
+   ============================================================ */
+(function feeIndex(){
+  var host = document.getElementById("feeChart");
+  if(!host) return;
+  var fs = LC_INDEX.fees;
+  var worst = Math.max.apply(null, fs.map(function(f){ return f.pct; }));
+  var ramp = [
+    { color:PAL.lilac,  top:PAL.lilacTop,  ink:"var(--ink-soft)" },
+    { color:PAL.teal,   top:PAL.tealTop,   ink:"var(--teal-ink)" },
+    { color:PAL.butter, top:PAL.butterTop, ink:"var(--ink-soft)" }
+  ];
+  var rows = fs.map(function(f,i){
+    var sk = f.pct === worst
+      ? { color:PAL.coral, top:PAL.coralTop, ink:"var(--coral-ink)" }
+      : ramp[i % ramp.length];
+    return { label:f.short || f.name.split(" ")[0], value:f.pct, display:f.pct+"%",
+             color:sk.color, top:sk.top, ink:sk.ink };
+  });
+  columnChart(host, rows, "Columns showing how often each dealer add-on appears on a quote");
+})();
+
+/* ============================================================
+   08 — rate spread
+   ============================================================ */
+(function rateSpread(){
+  var host = document.getElementById("spreadChart");
+  var txt  = document.getElementById("spreadTxt");
+  if(!host || !LC_INDEX.rates) return;
+  var r = LC_INDEX.rates;
+  var gap = (r.quoted - r.prime).toFixed(2);
+  areaChart(host, {
+    label:"Two fluid lines showing quoted APR running above bank prime, with the gap shaded",
+    series:[
+      { values:r.quotedTrend || [8.2,8.6,8.3,8.7,8.4,8.49], color:PAL.butter, fill:true },
+      { values:r.primeTrend  || [4.95,4.95,4.95,4.95,4.95,4.95], color:PAL.slate, dashed:true }
+    ],
+    tip:{ text:"spread "+gap+" pts", x:W*0.72, y:BASE-26 },
+    ticks:[
+      { x:PADX+6, label:"quoted "+r.quoted.toFixed(2)+"%", anchor:"start" },
+      { x:W-PADX-6, label:"prime "+r.prime.toFixed(2)+"%", anchor:"end" }
+    ]
+  });
+  if(txt) txt.textContent = "Spread " + gap + " points above prime";
+})();
+
+/* ============================================================
+   09 — best month columns
+   ============================================================ */
+(function bestMonth(){
+  var host = document.getElementById("monthChart");
+  var note = document.getElementById("bestMo");
+  if(!host) return;
+  var ms  = LC_INDEX.months;
+  var vals = ms.map(function(o){ return o.v; });
+  var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals);
+  var bi  = vals.indexOf(min), best = ms[bi];
+  areaChart(host, {
+    label:"Fluid area chart of average markup by month, lowest in "+best.m,
+    series:[ { values:vals, color:PAL.lilac, fill:true } ],
+    tip:{ text:best.m+" "+money(min), x:PADX + (bi/(ms.length-1))*(W-PADX*2), y:BASE-46 },
+    ticks:[
+      { x:PADX+4, label:ms[0].m, anchor:"start" },
+      { x:W/2, label:ms[Math.floor(ms.length/2)].m },
+      { x:W-PADX-4, label:ms[ms.length-1].m, anchor:"end" }
+    ]
+  });
+  if(note){
+    note.textContent = best.m + " runs cheapest — " + money(min)
+      + " over MSRP, against " + money(max) + " at the peak.";
+  }
+})();
+
+/* ============================================================
+   21 — shareable card, city switcher
+   ============================================================ */
+(function shareCard(){
+  var amt = document.getElementById("shareAmt");
+  var veh = document.getElementById("shareVeh");
+  var nEl = document.getElementById("shareN");
+  var tabs = document.querySelectorAll(".city-tab");
+  var copy = document.getElementById("copyBtn");
+  if(!amt) return;
+  var KEY = { calgary:0, edmonton:1, reddeer:2 };
+  var cur = LC_INDEX.cities[0];
+  function paint(c){
+    cur = c;
+    amt.textContent = money(c.markup);
+    veh.textContent = "over MSRP · " + c.name + " · " + LC_INDEX.period;
+    nEl.textContent = "Based on " + c.n + " quotes checked";
+  }
+  tabs.forEach(function(t){
+    t.addEventListener("click", function(){
+      tabs.forEach(function(x){ x.setAttribute("aria-selected","false"); });
+      t.setAttribute("aria-selected","true");
+      paint(LC_INDEX.cities[KEY[t.dataset.city]]);
+    });
+  });
+  paint(cur);
+  if(copy){
+    copy.addEventListener("click", function(){
+      var line = cur.name + " buyers were quoted " + money(cur.markup) + " over MSRP in "
+               + LC_INDEX.period + ", based on " + cur.n + " quotes checked. lotcheck.ca";
+      var done = function(){ copy.textContent = "Copied"; setTimeout(function(){ copy.textContent = "Copy the number"; }, 1800); };
+      if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(line).then(done, done); }
+      else { done(); }
     });
   }
 })();
 
 /* ============================================================
-   FOOTER CTA — little road with looping car
+   26 — watch a model
    ============================================================ */
+(function watchList(){
+  var input = document.getElementById("watchIn");
+  var btn   = document.getElementById("watchBtn");
+  var list  = document.getElementById("watchList");
+  if(!list) return;
+  var watched = [{ nm:"2026 RAV4 XLE", d:700 }, { nm:"2026 Ioniq 5", d:-1200 }];
+  function paint(){
+    list.innerHTML = watched.map(function(w){
+      var move = w.d === null
+        ? '<b style="color:var(--ink-faint);font-weight:800">watching</b>'
+        : '<b class="n '+(w.d>0?"up":"down")+'">'+signed(w.d)+"</b>";
+      return '<div class="watch-row"><span class="bell" aria-hidden="true">'
+        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>'
+        + "</span>"
+        + '<span class="nm">'+w.nm+"</span>"+move+"</div>";
+    }).join("");
+  }
+  function add(){
+    var v = (input.value || "").trim();
+    if(!v) { input.focus(); return; }
+    watched.unshift({ nm:v, d:null });
+    input.value = "";
+    paint();
+  }
+  if(btn) btn.addEventListener("click", add);
+  if(input) input.addEventListener("keydown", function(e){ if(e.key === "Enter") add(); });
+  paint();
+})();
+
 /* ============================================================
-   Scroll reveals + report dial
+   36 — recall lookup, scan beam then results pop in
+   ============================================================ */
+} /* end renderData */
+
+/* ============================================================
+   36 — recall lookup, live against search-recalls
+   ============================================================ */
+(function recallLookup(){
+  var input = document.getElementById("recallIn");
+  var btn   = document.getElementById("recallBtn");
+  var scan  = document.getElementById("scan");
+  var msg   = document.getElementById("scanMsg");
+  var out   = document.getElementById("recallOut");
+  if(!scan) return;
+  var busy = false;
+
+  function icon(kind){
+    if(kind === "hit"){
+      return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3l9 16H3l9-16z" stroke="#C24C33" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 16.8v.4" stroke="#C24C33" stroke-width="2" stroke-linecap="round"/></svg>';
+    }
+    return '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12.5l4 4 10-10" stroke="#1E8A7E" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  }
+  function card(title, detail, kind){
+    return '<div class="recall-hit"><span class="ic">'+icon(kind)+"</span>"
+      + "<div><h4>"+esc(title)+"</h4><p>"+esc(detail)+"</p></div></div>";
+  }
+  function paint(html){
+    out.innerHTML = html;
+    out.querySelectorAll(".recall-hit").forEach(function(c,i){
+      setTimeout(function(){ c.classList.add("in"); }, RM ? 0 : i*130);
+    });
+  }
+  function render(data, q){
+    if(!data.count){
+      paint(card("No recalls on record",
+        "Nothing filed for " + q + " in the Transport Canada dataset.", "ok"));
+      return;
+    }
+    var html = "";
+    /* say so when the search had to widen — a near match is not the same
+       as a match, and the buyer should be able to tell the difference */
+    if(data.match_quality === "no_year" || data.match_quality === "model_only"){
+      html += card("Showing wider results",
+        "No exact match for " + q + ". These are recalls on the same model across other years.", "ok");
+    } else if(data.match_quality === "no_make"){
+      html += card("Showing wider results",
+        "No match on that make. These are recalls on the same model and year.", "ok");
+    }
+    html += data.results.map(function(r){
+      return card(r.title, r.vehicle + " · " + r.detail, "hit");
+    }).join("");
+    paint(html);
+  }
+
+  function search(){
+    var q = (input.value || "").trim();
+    if(!q || busy){ if(!q) input.focus(); return; }
+    busy = true;
+    out.innerHTML = "";
+    msg.textContent = "Searching Transport Canada records…";
+    if(!RM){
+      scan.classList.remove("run");
+      void scan.offsetWidth;
+      scan.classList.add("run");
+    }
+    fetch(LC_API + "/search-recalls?q=" + encodeURIComponent(q), {
+      headers: { apikey: LC_ANON, Authorization: "Bearer " + LC_ANON }
+    })
+      .then(function(res){ return res.ok ? res.json() : Promise.reject(res.status); })
+      .then(function(data){
+        msg.textContent = "Results for " + q;
+        render(data, q);
+      })
+      .catch(function(){
+        msg.textContent = "Search unavailable";
+        paint(card("Couldn't reach the recall database",
+          "Try again in a moment. Nothing was checked, so treat this as unknown rather than clear.", "hit"));
+      })
+      .then(function(){ busy = false; });
+  }
+  if(btn) btn.addEventListener("click", search);
+  if(input) input.addEventListener("keydown", function(e){ if(e.key === "Enter") search(); });
+})();
+
+/* ============================================================
+   boot — try the live index, fall back to the labelled sample
+   ============================================================ */
+(function boot(){
+  function useSample(){
+    LC_INDEX = LC_SAMPLE;
+    setLiveState(false, null);
+    renderData();
+  }
+  if(LC_API.indexOf("YOUR-PROJECT-REF") > -1){ useSample(); return; }
+  fetch(LC_API + "/get-price-index", {
+    headers: { apikey: LC_ANON, Authorization: "Bearer " + LC_ANON }
+  })
+    .then(function(res){ return res.ok ? res.json() : Promise.reject(res.status); })
+    .then(function(data){
+      if(!data || !data.live) throw new Error("nothing publishable yet");
+      LC_INDEX = data;
+      setLiveState(true, data);
+      renderData();
+    })
+    .catch(function(){ useSample(); });
+})();
+
+/* ============================================================
+   reveals + theme toggle (same behaviour as index.html)
    ============================================================ */
 (function reveals(){
   var els = document.querySelectorAll(".rv");
-  if(RM){
-    els.forEach(function(el){ el.classList.add("in"); });
-    var rc = document.getElementById("repCard");
-    if(rc) rc.classList.add("in");
-    return;
-  }
+  if(RM){ els.forEach(function(el){ el.classList.add("in"); }); return; }
   var io = new IntersectionObserver(function(es){
-    es.forEach(function(e){
-      if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); }
-    });
-  },{threshold:.18, rootMargin:"0px 0px -40px 0px"});
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
+  },{threshold:.15, rootMargin:"0px 0px -40px 0px"});
   els.forEach(function(el){ io.observe(el); });
 })();
 
-/* ============================================================
-   Theme toggle — dark / bright, persisted per browser
-   ============================================================ */
 (function themeToggle(){
   var btn = document.getElementById("themeToggle");
   var metaColor = document.getElementById("themeColorMeta");
@@ -1451,7 +1078,7 @@ buildPortal();
     btn.setAttribute("aria-label", dark ? "Switch to bright mode" : "Switch to dark mode");
     if(metaColor) metaColor.setAttribute("content", dark ? "#15121F" : "#FBF5EC");
   }
-  sync(); // reflect whatever the early head script already decided
+  sync();
   btn.addEventListener("click", function(){
     var next = isDark() ? "light" : "dark";
     if(next === "dark"){ document.documentElement.setAttribute("data-theme","dark"); }
