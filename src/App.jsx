@@ -3797,6 +3797,18 @@ function QuoteCheckPage(){
     }
     setEmailErr("");
     setEmailStatus("sending");
+    // The on-screen EVAP rebate card is computed client-side, so attach the
+    // computed rebate to the payload so the emailed report includes it too.
+    let emailAnalysis=analysis;
+    try{
+      if(analysis&&analysis.year&&analysis.make&&analysis.model){
+        const evapListMatch=getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0});
+        const eft=evapListMatch?.fuel||analysis.fuelType;
+        if(eft==="BEV"||eft==="PHEV"){
+          emailAnalysis={...analysis,evapRebate:getRebate("AB",eft,{year:analysis.year,make:analysis.make,model:analysis.model,condition:analysis.vehicleCondition,km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0})};
+        }
+      }
+    }catch{}
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
         method:"POST",
@@ -3805,7 +3817,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({email,analysis}),
+        body:JSON.stringify({email,analysis:emailAnalysis}),
       });
       const data=await res.json();
       if(!res.ok||data.error){
