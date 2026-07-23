@@ -4423,47 +4423,74 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* Financing examples -- estimated monthly payment across terms
-                  (36-96 mo) and down payments ($0/$5k/$10k/$15k) at the
-                  resolved rate (the listing's own disclosed rate first, else
-                  the manufacturer rate on file). Clearly labelled an estimate:
-                  one rate is applied across all terms for illustration, and
-                  real rates vary by term/credit. Only shows when we have both
-                  a rate and a price. */}
-              {analysis.financeRate?.apr && (analysis.quotedPrice||analysis.msrp) && (()=>{
+              {/* Financing examples -- TWO comparisons: the manufacturer's
+                  advertised rate (bright teal) vs THIS dealer's disclosed rate
+                  (bright amber), so a marked-up dealer rate is obvious. New-vs-
+                  used matters: a manufacturer promo rate is a NEW-vehicle offer,
+                  so on a used vehicle it's shown only as a labelled reference,
+                  never as this car's applicable rate. */}
+              {(analysis.financeRates?.dealer||analysis.financeRates?.manufacturer) && (analysis.quotedPrice||analysis.msrp) && (()=>{
                 const price=analysis.quotedPrice||analysis.msrp;
-                const apr=Number(analysis.financeRate.apr);
-                const r=apr/1200;
+                const isNew=analysis.vehicleCondition==="new";
                 const terms=[36,48,60,72,84,96];
                 const downs=[0,5000,10000,15000];
-                const pmt=(P,n)=> r>0 ? (P*r)/(1-Math.pow(1+r,-n)) : P/n;
-                const src=analysis.financeRate.source;
+                const dealer=analysis.financeRates.dealer;
+                const mfr=analysis.financeRates.manufacturer;
+                const grid=(apr)=>(
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{borderCollapse:"collapse",fontSize:12,width:"100%",minWidth:300}}>
+                      <thead><tr>
+                        <th style={{textAlign:"left",color:C.inkFaint,fontWeight:700,padding:"3px 6px"}}>Term</th>
+                        {downs.map(d=>(<th key={d} style={{textAlign:"right",color:C.inkFaint,fontWeight:700,padding:"3px 6px",whiteSpace:"nowrap"}}>{d===0?"$0":`$${d/1000}k`} down</th>))}
+                      </tr></thead>
+                      <tbody>
+                        {terms.map(n=>(<tr key={n} style={{borderTop:`1px solid ${C.line}`}}>
+                          <td style={{color:C.ink,fontWeight:800,padding:"5px 6px",whiteSpace:"nowrap"}}>{n} mo</td>
+                          {downs.map(d=>{const P=price-d;return(<td key={d} style={{textAlign:"right",color:P>0?C.ink:C.inkFaint,padding:"5px 6px",whiteSpace:"nowrap"}}>{P>0?`$${Math.round(P*(apr/1200)/(1-Math.pow(1+apr/1200,-n))).toLocaleString()}`:"—"}</td>);})}
+                        </tr>))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+                const block=(title,sub,apr,accent,ref)=>(
+                  <div style={{border:ref?`1px dashed ${C.line}`:`2px solid ${accent}`,background:ref?"transparent":accent+"14",borderRadius:12,padding:"12px 14px",marginTop:10}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:2}}>
+                      <div style={{fontSize:13,fontWeight:900,color:ref?C.inkSoft:accent}}>{title}</div>
+                      <div style={{fontSize:18,fontWeight:1000,color:ref?C.inkSoft:accent}}>{apr}%<span style={{fontSize:11,fontWeight:700}}> APR</span></div>
+                    </div>
+                    <div style={{fontSize:11,color:C.inkSoft,marginBottom:8,lineHeight:1.4}}>{sub}</div>
+                    {grid(apr)}
+                  </div>
+                );
+                const spread=(dealer&&mfr)?(dealer.apr-mfr.apr):null;
                 return (
                   <div style={cardStyle}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Financing examples</div>
-                    <div style={{fontSize:13,color:C.inkSoft,marginBottom:10,lineHeight:1.5}}>
-                      Estimated monthly payment at <b style={{color:C.ink}}>{apr}% APR</b>
-                      {src==="listing"?" (as shown on this listing)":analysis.financeRate.promo?" (promo rate on file)":" (manufacturer rate on file)"} on ${price.toLocaleString()}.
-                    </div>
-                    <div style={{overflowX:"auto"}}>
-                      <table style={{borderCollapse:"collapse",fontSize:12,width:"100%",minWidth:340}}>
-                        <thead><tr>
-                          <th style={{textAlign:"left",color:C.inkFaint,fontWeight:700,padding:"4px 8px"}}>Term</th>
-                          {downs.map(d=>(<th key={d} style={{textAlign:"right",color:C.inkFaint,fontWeight:700,padding:"4px 8px",whiteSpace:"nowrap"}}>{d===0?"$0 down":`$${d/1000}k down`}</th>))}
-                        </tr></thead>
-                        <tbody>
-                          {terms.map(n=>(
-                            <tr key={n} style={{borderTop:`1px solid ${C.line}`}}>
-                              <td style={{color:C.ink,fontWeight:800,padding:"6px 8px",whiteSpace:"nowrap"}}>{n} mo</td>
-                              {downs.map(d=>{const P=price-d;return(<td key={d} style={{textAlign:"right",color:P>0?C.ink:C.inkFaint,padding:"6px 8px",whiteSpace:"nowrap"}}>{P>0?`$${Math.round(pmt(P,n)).toLocaleString()}`:"—"}</td>);})}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
-                      Estimate only, before tax — one rate applied across terms for illustration. Your actual rate depends on the term, any model-year promo, and your credit. {analysis.financeRate.note||"Confirm with the dealer."}
-                    </div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Financing examples · on ${price.toLocaleString()}</div>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:2,lineHeight:1.4}}>Estimated monthly payment; columns are down payments, rows are terms.</div>
+
+                    {mfr&&(isNew
+                      ? block(`${analysis.make} advertised rate`, `The manufacturer's rate on a new ${analysis.make} — this is the number to aim for.`, mfr.apr, C.teal, false)
+                      : block(`${analysis.make}'s new-vehicle rate`, `Reference only: ${analysis.make} advertises this on a NEW ${analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.`, mfr.apr, C.teal, true))}
+
+                    {dealer
+                      ? block("This dealer's rate", "What this listing is actually offering you.", dealer.apr, C.coral, false)
+                      : (<div style={{border:`1px dashed ${C.line}`,borderRadius:12,padding:"12px 14px",marginTop:10}}>
+                          <div style={{fontSize:13,fontWeight:900,color:C.inkSoft,marginBottom:2}}>This dealer's rate — not shown</div>
+                          <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>This {isNew?"listing":"used listing"} didn't publish a financing APR. Ask the dealer for the exact rate before you compare{isNew?" — and hold them to the manufacturer rate above.":", since used-vehicle rates vary widely."}</div>
+                        </div>)}
+
+                    {isNew&&spread!=null&&spread>0.1&&(()=>{
+                      const pd=price*(dealer.apr/1200)/(1-Math.pow(1+dealer.apr/1200,-60));
+                      const pm=price*(mfr.apr/1200)/(1-Math.pow(1+mfr.apr/1200,-60));
+                      const extra=Math.round((pd-pm)*60);
+                      return (
+                        <div style={{marginTop:10,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"12px 14px"}}>
+                          <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+                        </div>
+                      );
+                    })()}
+
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>Estimates only, before tax — one rate applied across terms for illustration; actual rates vary by term, promo, and credit. Confirm with the dealer.</div>
                   </div>
                 );
               })()}
