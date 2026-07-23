@@ -441,39 +441,44 @@ function computeLeverageScore(analysis: any): void {
 // Attaches analysis.financeRate { apr, source, promo, effectiveDate, note }.
 // The frontend applies it across terms as a clearly-labelled ESTIMATE, since
 // real rates vary by term/credit. Never throws.
-async function resolveFinanceRate(analysis: any): Promise<void> {
+// Resolve BOTH finance rates so the report can compare them side by side:
+//  - dealer: the rate THIS listing/quote discloses (what you'd actually pay
+//    here). Marked-up dealer rates are a common hidden cost.
+//  - manufacturer: the OEM's advertised rate from finance_rate_catalog
+//    (toyota.ca etc.). NOTE new-vs-used: manufacturer promo financing is a
+//    NEW-vehicle offer, so the frontend treats it as applicable only when the
+//    vehicle is new, and as a reference (not a real quote) when it's used.
+// Attaches analysis.financeRates { dealer, manufacturer }. Never throws.
+async function resolveFinanceRates(analysis: any): Promise<void> {
+  const out: any = { dealer: null, manufacturer: null };
   const pageRate = Number(analysis?.financing?.rate);
   if (pageRate && pageRate > 0 && pageRate < 30) {
-    analysis.financeRate = { apr: pageRate, source: "listing", promo: false, note: "Rate as shown on this listing." };
-    return;
+    out.dealer = { apr: pageRate };
   }
-  if (!analysis.make) return;
-  try {
-    const { data, error } = await supabase
-      .from("finance_rate_catalog")
-      .select("apr, term_months, promo, effective_date, model")
-      .ilike("make", analysis.make)
-      .order("term_months", { ascending: true })
-      .limit(50);
-    if (error || !data?.length) return;
-    const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-    const modelNorm = norm(analysis.model || "");
-    const byModel = data.filter((r: any) => r.model && norm(r.model) === modelNorm);
-    const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
-    if (!pool.length) return;
-    // Representative rate: prefer a standard (non-promo) 60-month row.
-    const std = pool.filter((r: any) => !r.promo);
-    const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
-    analysis.financeRate = {
-      apr: Number(pick.apr),
-      source: "catalog",
-      promo: !!pick.promo,
-      effectiveDate: pick.effective_date,
-      note: `Manufacturer rate on file (as of ${pick.effective_date}); rates change and vary by term/credit — confirm with the dealer.`,
-    };
-  } catch (err) {
-    console.warn("resolveFinanceRate threw:", err);
+  if (analysis.make) {
+    try {
+      const { data } = await supabase
+        .from("finance_rate_catalog")
+        .select("apr, term_months, promo, effective_date, model")
+        .ilike("make", analysis.make)
+        .order("term_months", { ascending: true })
+        .limit(50);
+      if (data?.length) {
+        const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const modelNorm = norm(analysis.model || "");
+        const byModel = data.filter((r: any) => r.model && norm(r.model) === modelNorm);
+        const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
+        if (pool.length) {
+          const std = pool.filter((r: any) => !r.promo);
+          const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
+          out.manufacturer = { apr: Number(pick.apr), promo: !!pick.promo, effectiveDate: pick.effective_date };
+        }
+      }
+    } catch (err) {
+      console.warn("resolveFinanceRates threw:", err);
+    }
   }
+  analysis.financeRates = out;
 }
 
 // Fast, authoritative MSRP path: look the vehicle up in msrp_catalog
@@ -1272,7 +1277,7 @@ Deno.serve(async (req: Request) => {
     // populated, since the leverage score is computed from them.
     computeFinancingCheck(analysis);
     computeOdometerCheck(analysis);
-    await resolveFinanceRate(analysis);
+    await resolveFinanceRates(analysis);
     computeLeverageScore(analysis);
 
     // Populate the cache with the finished, enriched analysis so the next
