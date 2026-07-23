@@ -4193,6 +4193,17 @@ function QuoteCheckPage(){
       <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
+            {/* Gradient "Home" button -- takes the analyze page back to the
+                welcome page. Style lifted from gradientbuttons.colorion.co
+                ("Sweet Morning", #ED4264 -> #FFEDBC): 200% background that
+                slides right on hover. Fixed colors on purpose -- it reads
+                identically across the dark/light/outdoor themes. */}
+            <a href="/" aria-label="Back to LotCheck welcome page"
+              onMouseEnter={e=>{e.currentTarget.style.backgroundPosition="right center";}}
+              onMouseLeave={e=>{e.currentTarget.style.backgroundPosition="left center";}}
+              style={{display:"inline-block",padding:"9px 16px",borderRadius:10,color:"#fff",fontWeight:800,fontSize:13,textDecoration:"none",whiteSpace:"nowrap",backgroundImage:"linear-gradient(to right,#ED4264 0%,#FFEDBC 51%,#ED4264 100%)",backgroundSize:"200% auto",backgroundPosition:"left center",transition:"background-position .4s",flexShrink:0,textShadow:"0 1px 2px rgba(74,10,25,.45)",boxShadow:"0 3px 10px rgba(237,66,100,.35)"}}>
+              ← Home
+            </a>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:1,minWidth:0}}>
               <LogoMark size={34}/>
               <div style={{flex:1,minWidth:0}}>
