@@ -4193,6 +4193,20 @@ function QuoteCheckPage(){
       <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
+            {/* "Conic Spin" gradient Home button -- takes the analyze page
+                back to the welcome page. Style spec provided by Vic (fx-27:
+                conic-gradient at 200% that shifts position and scales 1.04
+                on hover, mono uppercase label), themed with the Sweet
+                Morning colors (#ED4264 base, #FFEDBC accent; the fx-27
+                color-mix(80% accent, base) stop precomputed as #FBCBAA for
+                browser safety). Fixed colors on purpose -- reads identically
+                across the dark/light/outdoor themes. */}
+            <a href="/" aria-label="Back to LotCheck welcome page"
+              onMouseEnter={e=>{e.currentTarget.style.backgroundPosition="100% 100%";e.currentTarget.style.transform="scale(1.04)";}}
+              onMouseLeave={e=>{e.currentTarget.style.backgroundPosition="0 0";e.currentTarget.style.transform="scale(1)";}}
+              style={{display:"inline-block",padding:"13px 24px",border:"1px solid transparent",borderRadius:8,color:"#FFF7E8",fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",textDecoration:"none",whiteSpace:"nowrap",background:"conic-gradient(from 0deg, #ED4264, #FBCBAA, #ED4264)",backgroundSize:"200% 200%",backgroundPosition:"0 0",transition:"background-position 0.6s ease, transform 0.4s ease",flexShrink:0}}>
+              ← Home
+            </a>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:1,minWidth:0}}>
               <LogoMark size={34}/>
               <div style={{flex:1,minWidth:0}}>
