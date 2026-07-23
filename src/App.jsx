@@ -4452,28 +4452,38 @@ function QuoteCheckPage(){
                     </table>
                   </div>
                 );
-                const block=(title,sub,apr,accent,ref)=>(
-                  <div style={{border:ref?`1px dashed ${C.line}`:`2px solid ${accent}`,background:ref?"transparent":accent+"14",borderRadius:12,padding:"12px 14px",marginTop:10}}>
+                // Color-code the RATE ITSELF by how good it is, not by which
+                // party it's from: green = low/good, amber = average, red =
+                // high. Thresholds tuned to Canadian new/used auto APRs.
+                const aprTier=(apr)=> apr<=4.99?{ac:C.teal,ink:C.tealInk,lab:"low rate"}:apr<=7.99?{ac:C.butter,ink:C.butterInk,lab:"average rate"}:{ac:C.coral,ink:C.coralInk,lab:"high rate"};
+                const block=(title,sub,apr,ref)=>{
+                  const t=aprTier(apr);
+                  return (
+                  <div style={{border:ref?`1px dashed ${C.line}`:`2px solid ${t.ac}`,background:ref?"transparent":t.ac+"14",borderRadius:12,padding:"12px 14px",marginTop:10}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                      <div style={{fontSize:13,fontWeight:900,color:ref?C.inkSoft:accent}}>{title}</div>
-                      <div style={{fontSize:18,fontWeight:1000,color:ref?C.inkSoft:accent}}>{apr}%<span style={{fontSize:11,fontWeight:700}}> APR</span></div>
+                      <div style={{fontSize:13,fontWeight:900,color:ref?C.inkSoft:t.ink}}>{title}</div>
+                      <div style={{fontSize:18,fontWeight:1000,color:t.ink,whiteSpace:"nowrap"}}>{apr}%<span style={{fontSize:11,fontWeight:700}}> APR</span> <span style={{fontSize:10,fontWeight:800,opacity:.9}}>· {t.lab}</span></div>
                     </div>
                     <div style={{fontSize:11,color:C.inkSoft,marginBottom:8,lineHeight:1.4}}>{sub}</div>
                     {grid(apr)}
                   </div>
-                );
+                  );
+                };
                 const spread=(dealer&&mfr)?(dealer.apr-mfr.apr):null;
                 return (
                   <div style={cardStyle}>
                     <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Financing examples · on ${price.toLocaleString()}</div>
-                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:2,lineHeight:1.4}}>Estimated monthly payment; columns are down payments, rows are terms.</div>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:8,lineHeight:1.4}}>Estimated monthly payment; columns are down payments, rows are terms.</div>
+                    <div style={{fontSize:12,color:C.inkSoft,marginBottom:2,lineHeight:1.55,padding:"8px 10px",background:C.paper,border:`1px solid ${C.line}`,borderRadius:10}}>
+                      <b style={{color:C.ink}}>What's APR?</b> The Annual Percentage Rate is the yearly cost of borrowing — the interest charged on top of the vehicle's price. A lower APR means a lower monthly payment and less paid overall. Each rate below is colour-coded: <span style={{color:C.tealInk,fontWeight:900}}>● low</span> · <span style={{color:C.butterInk,fontWeight:900}}>● average</span> · <span style={{color:C.coralInk,fontWeight:900}}>● high</span>.
+                    </div>
 
                     {mfr&&(isNew
-                      ? block(`${analysis.make} advertised rate`, `The manufacturer's rate on a new ${analysis.make} — this is the number to aim for.`, mfr.apr, C.teal, false)
-                      : block(`${analysis.make}'s new-vehicle rate`, `Reference only: ${analysis.make} advertises this on a NEW ${analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.`, mfr.apr, C.teal, true))}
+                      ? block(`${analysis.make} advertised rate`, `The manufacturer's rate on a new ${analysis.make} — this is the number to aim for.`, mfr.apr, false)
+                      : block(`${analysis.make}'s new-vehicle rate`, `Reference only: ${analysis.make} advertises this on a NEW ${analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.`, mfr.apr, true))}
 
                     {dealer
-                      ? block("This dealer's rate", "What this listing is actually offering you.", dealer.apr, C.coral, false)
+                      ? block("This dealer's rate", "What this listing is actually offering you.", dealer.apr, false)
                       : (<div style={{border:`1px dashed ${C.line}`,borderRadius:12,padding:"12px 14px",marginTop:10}}>
                           <div style={{fontSize:13,fontWeight:900,color:C.inkSoft,marginBottom:2}}>This dealer's rate — not shown</div>
                           <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>This {isNew?"listing":"used listing"} didn't publish a financing APR. Ask the dealer for the exact rate before you compare{isNew?" — and hold them to the manufacturer rate above.":", since used-vehicle rates vary widely."}</div>
