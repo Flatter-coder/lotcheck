@@ -216,6 +216,7 @@ Deno.serve(async (req: Request) => {
     }
     computeFinancingCheck(analysis);
     computeOdometerCheck(analysis);
+    await resolveFinanceRate(analysis);
     computeLeverageScore(analysis);
 
     return new Response(JSON.stringify({ analysis }), {
@@ -545,6 +546,40 @@ function computeOdometerCheck(analysis: any): void {
     }
   }
   analysis.odometerCheck = { checked: true, km, flag, note };
+}
+
+async function resolveFinanceRate(analysis: any): Promise<void> {
+  const pageRate = Number(analysis?.financing?.rate);
+  if (pageRate && pageRate > 0 && pageRate < 30) {
+    analysis.financeRate = { apr: pageRate, source: "listing", promo: false, note: "Rate as shown on this quote." };
+    return;
+  }
+  if (!analysis.make) return;
+  try {
+    const { data, error } = await supabase
+      .from("finance_rate_catalog")
+      .select("apr, term_months, promo, effective_date, model")
+      .ilike("make", analysis.make)
+      .order("term_months", { ascending: true })
+      .limit(50);
+    if (error || !data?.length) return;
+    const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const modelNorm = norm(analysis.model || "");
+    const byModel = data.filter((r: any) => r.model && norm(r.model) === modelNorm);
+    const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
+    if (!pool.length) return;
+    const std = pool.filter((r: any) => !r.promo);
+    const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
+    analysis.financeRate = {
+      apr: Number(pick.apr),
+      source: "catalog",
+      promo: !!pick.promo,
+      effectiveDate: pick.effective_date,
+      note: `Manufacturer rate on file (as of ${pick.effective_date}); rates change and vary by term/credit — confirm with the dealer.`,
+    };
+  } catch (err) {
+    console.warn("resolveFinanceRate threw:", err);
+  }
 }
 
 function computeLeverageScore(analysis: any): void {
