@@ -4423,6 +4423,51 @@ function QuoteCheckPage(){
                 </div>
               )}
 
+              {/* Financing examples -- estimated monthly payment across terms
+                  (36-96 mo) and down payments ($0/$5k/$10k/$15k) at the
+                  resolved rate (the listing's own disclosed rate first, else
+                  the manufacturer rate on file). Clearly labelled an estimate:
+                  one rate is applied across all terms for illustration, and
+                  real rates vary by term/credit. Only shows when we have both
+                  a rate and a price. */}
+              {analysis.financeRate?.apr && (analysis.quotedPrice||analysis.msrp) && (()=>{
+                const price=analysis.quotedPrice||analysis.msrp;
+                const apr=Number(analysis.financeRate.apr);
+                const r=apr/1200;
+                const terms=[36,48,60,72,84,96];
+                const downs=[0,5000,10000,15000];
+                const pmt=(P,n)=> r>0 ? (P*r)/(1-Math.pow(1+r,-n)) : P/n;
+                const src=analysis.financeRate.source;
+                return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Financing examples</div>
+                    <div style={{fontSize:13,color:C.inkSoft,marginBottom:10,lineHeight:1.5}}>
+                      Estimated monthly payment at <b style={{color:C.ink}}>{apr}% APR</b>
+                      {src==="listing"?" (as shown on this listing)":analysis.financeRate.promo?" (promo rate on file)":" (manufacturer rate on file)"} on ${price.toLocaleString()}.
+                    </div>
+                    <div style={{overflowX:"auto"}}>
+                      <table style={{borderCollapse:"collapse",fontSize:12,width:"100%",minWidth:340}}>
+                        <thead><tr>
+                          <th style={{textAlign:"left",color:C.inkFaint,fontWeight:700,padding:"4px 8px"}}>Term</th>
+                          {downs.map(d=>(<th key={d} style={{textAlign:"right",color:C.inkFaint,fontWeight:700,padding:"4px 8px",whiteSpace:"nowrap"}}>{d===0?"$0 down":`$${d/1000}k down`}</th>))}
+                        </tr></thead>
+                        <tbody>
+                          {terms.map(n=>(
+                            <tr key={n} style={{borderTop:`1px solid ${C.line}`}}>
+                              <td style={{color:C.ink,fontWeight:800,padding:"6px 8px",whiteSpace:"nowrap"}}>{n} mo</td>
+                              {downs.map(d=>{const P=price-d;return(<td key={d} style={{textAlign:"right",color:P>0?C.ink:C.inkFaint,padding:"6px 8px",whiteSpace:"nowrap"}}>{P>0?`$${Math.round(pmt(P,n)).toLocaleString()}`:"—"}</td>);})}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
+                      Estimate only, before tax — one rate applied across terms for illustration. Your actual rate depends on the term, any model-year promo, and your credit. {analysis.financeRate.note||"Confirm with the dealer."}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Dealer sentiment: what public Google reviews say about
                   THIS dealer, read for the patterns that actually predict
                   a good/bad buying experience (financing transparency,
