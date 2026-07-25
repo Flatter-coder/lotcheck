@@ -30,6 +30,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-lexus.mjs
+      - name: Stellantis (Jeep/Ram/Dodge/Chrysler/Fiat) — MSRP + finance/lease
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-stellantis.mjs
       - name: Summary
         if: success()
         run: echo "✅ Catalog refresh complete — $(date)"
