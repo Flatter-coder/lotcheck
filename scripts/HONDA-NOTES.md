@@ -1,0 +1,40 @@
+# Honda Canada scraper — reconnaissance (not built yet)
+
+Honda.ca is **not** the Toyota/Lexus AEM stack — it's a Sitecore-based React SPA
+(axios), so it needs its own scraper. This is what's mapped so far; a dedicated
+pass should finish it before wiring `make='Honda'` into the catalog tables.
+
+## Entry point
+- Build & Price: `https://www.honda.ca/en/buildyourhonda`
+- Model landing links use a `model_key` scheme, e.g.
+  `/en/buildyourhonda/trims?model_key=civic_sedan&model_year=2026&payment_method=finance&term_and_rate=60&payment_frequency=monthly&down_payment=0`
+- Model keys seen: `civic_sedan`, `civic_sedan_si`, `civic_hatchback`, `prelude`, …
+
+## Known API (Sitecore DMM)
+- Trims: `GET https://www.honda.ca/dmmapi/trimswithtransmissions/model/{MODEL_GUID}/{year}?sc_apikey={KEY}&sc_site=Honda&sc_lang=en`
+  - `sc_apikey` is public, embedded in the SPA JS: `B96772C4-CDA7-4E6F-BD37-7F9A36FF3E18` (re-scrape from the page in case it rotates).
+  - Civic Sedan GUID: `EB3EA79BE74C42079D45B0D6636C81D3`.
+  - Returns a deep Sitecore content tree (~546 KB) with `trimName.value` ("LX"),
+    `financeBonusOffers` / `leaseBonusOffers`, `defaultLeasePaymentTerm`, etc.
+  - **Does NOT contain MSRP or APR numbers** — zero price-like values in the payload.
+
+## Still to find (the crux)
+1. **`model_key` → `MODEL_GUID` map** — almost certainly another `/dmmapi/...`
+   call (a models list). The build landing page (`/en/buildyourhonda`) or the
+   SPA bundle references it.
+2. **The pricing + rate endpoint** — Honda computes MSRP, Selling Price (incl.
+   Freight/PDI/levies/dealer fees) and finance/lease payments client-side, and
+   the page copy says pricing is province-gated (`requestLocation: true`). So
+   there is a separate province-keyed pricing/rates call, triggered on province
+   selection, that was not captured in the initial page loads. Capture it by
+   selecting a trim + province in the browser and watching `/dmmapi/*`.
+3. Sitecore field parsing: every value is wrapped as `{ "value": ... }`.
+
+## Target output (same as Toyota/Lexus, see scripts/lib/tci-stack.mjs)
+- `msrp_catalog`: {year, make:"Honda", model, trim, msrp, fuel_type, fetched_at}
+- `finance_rate_catalog`: {make, model, apr, term_months, promo, effective_date}
+- `lease_rate_catalog`: {make, model, apr, term_months, annual_km, effective_date}
+
+Note Honda's default Selling Price bundles Freight/PDI + fees; capture the
+**MSRP-only** figure (the page exposes an "MSRP-only Price" toggle) so the
+catalog stores true MSRP, not the all-in selling price.
