@@ -1,0 +1,30 @@
+name: Catalog refresh (MSRP + finance rates)
+# Populates msrp_catalog and finance_rate_catalog from manufacturers' own
+# build-&-price data. Toyota is the pilot; add a step per make as scrapers land.
+# Requires repo secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (already used
+# by the daily scrape workflow). Without them the script only dry-runs.
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Mondays 10:00 UTC (~4am Calgary). Rates track monthly promo
+    # periods but can shift mid-month, so refresh weekly to stay current.
+    - cron: "0 10 * * 1"
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Toyota — MSRP + finance rates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-toyota.mjs
+      - name: Summary
+        if: success()
+        run: echo "✅ Catalog refresh complete — $(date)"

@@ -1,0 +1,13 @@
+# Dependencies / build output (never committed — see CLAUDE.md)
+node_modules/
+dist/
+
+# Local tooling
+.claude/worktrees/
+
+# Scraper dry-run output
+scripts/out/
+
+# OS / editor cruft
+.DS_Store
+*.log

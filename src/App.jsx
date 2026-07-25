@@ -3856,6 +3856,209 @@ function QuotePaywallModal({C, onClose, onPurchased}){
   );
 }
 
+// ── Financing breakdown ───────────────────────────────────────────────────
+// Pure amortization off the quoted price. Nothing here is fetched from a
+// catalog or guessed from a model: given a price, an APR the buyer sets, a
+// down payment, a term and a payment frequency, the periodic payment is
+// deterministic and always correct. The only external rate anchors shown are
+// ones that are actually real -- the rate the quote itself disclosed, any
+// manufacturer rate the backend already resolved (finance_rate_catalog), and
+// the Bank of Canada policy rate fetched LIVE from the BoC Valet API (dated,
+// with a source link). No illustrative payment is ever labelled a firm offer.
+const FIN_DOWN = [0, 5000, 10000, 15000, 20000];
+const FIN_TERMS = [24, 36, 48, 60, 72, 84];
+const FIN_FREQS = [
+  { key: "monthly",  label: "Monthly",   per: 12 },
+  { key: "biweekly", label: "Bi-weekly", per: 26 },
+  { key: "weekly",   label: "Weekly",    per: 52 },
+];
+
+// Standard amortized payment. principal in $, annualPct in %, per = periods/yr.
+// i===0 (0% promo) collapses to straight-line principal / n.
+function amortPayment(principal, annualPct, per, termMonths){
+  if(!(principal > 0)) return 0;
+  const n = Math.round((termMonths / 12) * per);
+  if(!n) return 0;
+  const i = (Number(annualPct) || 0) / 100 / per;
+  if(i === 0) return principal / n;
+  return principal * i / (1 - Math.pow(1 + i, -n));
+}
+
+function FinancingBreakdown({ analysis, C, cardStyle }){
+  const price = Number(analysis?.quotedPrice) || 0;
+  const disclosedRate = Number(analysis?.financing?.rate) || null;
+  const mfr = analysis?.financeRates?.manufacturer || null;
+  const mfrRate = mfr?.apr != null ? Number(mfr.apr) : null;
+  const dealerRate = analysis?.financeRates?.dealer?.apr != null
+    ? Number(analysis.financeRates.dealer.apr)
+    : (disclosedRate || null);
+  const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
+  const disclosedFreq = analysis?.financing?.paymentFrequency || null;
+
+  const defaultRate = dealerRate || mfrRate || 6.99;
+  const rateIsReal = dealerRate != null || mfrRate != null;
+  const [aprStr, setApr] = useState(String(defaultRate));
+  const apr = Number(aprStr);
+  const aprValid = Number.isFinite(apr) && apr >= 0 && apr < 40;
+  const [freqKey, setFreqKey] = useState(
+    FIN_FREQS.some(f => f.key === disclosedFreq) ? disclosedFreq : "monthly"
+  );
+  const freq = FIN_FREQS.find(f => f.key === freqKey) || FIN_FREQS[0];
+
+  // Bank of Canada policy rate -- live, dated, real. null=loading,
+  // "error"=fetch failed (fall back to a source link).
+  const [boc, setBoc] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("https://www.bankofcanada.ca/valet/observations/V39079/json?recent=1")
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const o = d?.observations?.[0];
+        const rate = o?.V39079?.v;
+        if(alive && rate) setBoc({ rate: Number(rate), date: o.d });
+        else if(alive) setBoc("error");
+      })
+      .catch(() => { if(alive) setBoc("error"); });
+    return () => { alive = false; };
+  }, []);
+
+  if(!(price > 0)) return null;
+
+  const downs = FIN_DOWN.filter(d => d < price);
+  const money = n => `$${Math.round(n).toLocaleString()}`;
+
+  // Illustrative total interest for the caption: 60-mo (or disclosed) term,
+  // $0 down, at the current rate.
+  const refTerm = FIN_TERMS.includes(disclosedTerm) ? disclosedTerm : 60;
+  const refPer = 12; // express total interest on a monthly basis
+  const refPay = aprValid ? amortPayment(price, apr, refPer, refTerm) : 0;
+  const refInterest = refPay > 0 ? refPay * refTerm - price : 0;
+
+  const chip = { border:`1px solid ${C.line}`, borderRadius:12, padding:"8px 12px", flex:"1 1 120px", minWidth:110 };
+  const th = { padding:"7px 8px", fontSize:11, fontWeight:800, color:C.inkFaint, textAlign:"right", whiteSpace:"nowrap" };
+  const td = { padding:"8px 8px", fontSize:13, color:C.ink, textAlign:"right", fontWeight:700, whiteSpace:"nowrap" };
+
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:4}}>💳 Financing breakdown</div>
+      <div style={{fontSize:12,color:C.inkFaint,marginBottom:14}}>
+        Estimated payments on the {money(price)} price. Enter your real approved rate to make these exact.
+      </div>
+
+      {/* Rate comparison -- only real anchors are shown */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
+        {dealerRate != null && (
+          <div style={{...chip,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+            <div style={{fontSize:11,color:C.coralInk,fontWeight:800}}>On your quote</div>
+            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{dealerRate}%</div>
+            <div style={{fontSize:10,color:C.inkFaint}}>dealer / lender APR</div>
+          </div>
+        )}
+        {mfrRate != null && (
+          <div style={{...chip,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+            <div style={{fontSize:11,color:C.tealInk,fontWeight:800}}>{analysis.make||"Manufacturer"} advertised{mfr?.promo?" · promo":""}</div>
+            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{mfrRate}%</div>
+            <div style={{fontSize:10,color:C.inkFaint}}>{mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"manufacturer rate"}</div>
+          </div>
+        )}
+        <div style={chip}>
+          <div style={{fontSize:11,color:C.inkSoft,fontWeight:800}}>Bank of Canada</div>
+          {boc === null ? (
+            <div style={{fontSize:18,fontWeight:1000,color:C.inkFaint}}>…</div>
+          ) : boc === "error" ? (
+            <a href="https://www.bankofcanada.ca/rates/interest-rates/canadian-interest-rates/" target="_blank" rel="noopener noreferrer"
+               style={{fontSize:13,fontWeight:800,color:C.teal,textDecoration:"none"}}>see current rate →</a>
+          ) : (
+            <>
+              <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{boc.rate}%</div>
+              <div style={{fontSize:10,color:C.inkFaint}}>policy rate · as of {boc.date}</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {!rateIsReal && (
+        <div style={{fontSize:12,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
+          Your quote didn't disclose a financing rate, so the table below uses a rate you can edit.
+          The Bank of Canada rate is the benchmark lenders price off — your car-loan APR sits above it.
+          Ask the dealer for their exact APR.
+        </div>
+      )}
+
+      {/* Controls: rate + frequency */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:11,color:C.inkFaint,fontWeight:800,marginBottom:4}}>Rate to calculate with (APR %)</div>
+          <input
+            type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
+            onChange={e => setApr(e.target.value)}
+            style={{width:110,background:C.paper,border:`2px solid ${aprValid?C.line:C.coral}`,borderRadius:10,padding:"9px 12px",color:C.ink,fontSize:15,fontWeight:800,outline:"none",boxSizing:"border-box"}}
+          />
+        </div>
+        <div style={{display:"inline-flex",gap:4,background:C.paper2,borderRadius:10,padding:4}}>
+          {FIN_FREQS.map(f => (
+            <button key={f.key} onClick={() => setFreqKey(f.key)}
+              style={{background:freqKey===f.key?C.teal:"transparent",color:freqKey===f.key?"#fff":C.inkSoft,border:"none",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Payment matrix: rows = down payment, cols = term */}
+      <div style={{overflowX:"auto",margin:"0 -4px"}}>
+        <table style={{borderCollapse:"collapse",width:"100%",minWidth:340}}>
+          <thead>
+            <tr>
+              <th style={{...th,textAlign:"left"}}>Down ↓ / Term →</th>
+              {FIN_TERMS.map(t => (
+                <th key={t} style={{...th,background:t===disclosedTerm?C.tealBg:"transparent",borderRadius:t===disclosedTerm?"6px 6px 0 0":0}}>{t} mo</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {downs.map((d,ri) => (
+              <tr key={d}>
+                <td style={{padding:"8px 8px",fontSize:12,fontWeight:800,color:C.inkSoft,textAlign:"left",borderTop:`1px solid ${C.line}`,whiteSpace:"nowrap"}}>
+                  {d === 0 ? "$0 (full price)" : `${money(d)} down`}
+                </td>
+                {FIN_TERMS.map(t => {
+                  const pay = aprValid ? amortPayment(price - d, apr, freq.per, t) : 0;
+                  return (
+                    <td key={t} style={{...td,borderTop:`1px solid ${C.line}`,color:t===disclosedTerm?C.tealInk:C.ink,background:t===disclosedTerm?C.tealBg:"transparent"}}>
+                      {aprValid ? money(pay) : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:6}}>Payment shown <b>{freq.label.toLowerCase()}</b>{disclosedTerm?` · your quote's ${disclosedTerm}-mo term is highlighted`:""}.</div>
+
+      {aprValid && refInterest > 0 && (
+        <div style={{fontSize:12,color:C.inkSoft,marginTop:10,lineHeight:1.5}}>
+          At {apr}% over {refTerm} months with $0 down, you'd pay about <b>{money(refInterest)}</b> in interest on top of the {money(price)} price.
+        </div>
+      )}
+
+      {analysis.financingCheck?.checked && analysis.financingCheck.note && (
+        <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
+          <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
+            {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+          </div>
+          <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+        </div>
+      )}
+
+      <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+        Estimate only. Financed amount = price − down payment; excludes tax, fees, trade-in, and any manufacturer promo. Actual payments depend on the APR and term you're approved for.
+      </div>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
@@ -4365,6 +4568,13 @@ function QuoteCheckPage(){
                   </div>
                 </div>
               </div>
+
+              {/* Financing breakdown -- payment matrix (down payment x term x
+                  frequency) computed purely from the quoted price, plus the
+                  real rate anchors (quote / manufacturer catalog / live Bank of
+                  Canada). Directly answers the "finance breakdown was missing"
+                  gap. Renders itself null when there's no quoted price. */}
+              <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               {/* Standard/included manufacturer warranty -- NOT an upsell
                   product (that's the separate "warranty" section further
