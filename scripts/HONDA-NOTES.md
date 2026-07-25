@@ -18,16 +18,22 @@ pass should finish it before wiring `make='Honda'` into the catalog tables.
     `financeBonusOffers` / `leaseBonusOffers`, `defaultLeasePaymentTerm`, etc.
   - **Does NOT contain MSRP or APR numbers** — zero price-like values in the payload.
 
-## Still to find (the crux)
-1. **`model_key` → `MODEL_GUID` map** — almost certainly another `/dmmapi/...`
-   call (a models list). The build landing page (`/en/buildyourhonda`) or the
-   SPA bundle references it.
-2. **The pricing + rate endpoint** — Honda computes MSRP, Selling Price (incl.
-   Freight/PDI/levies/dealer fees) and finance/lease payments client-side, and
-   the page copy says pricing is province-gated (`requestLocation: true`). So
-   there is a separate province-keyed pricing/rates call, triggered on province
-   selection, that was not captured in the initial page loads. Capture it by
-   selecting a trim + province in the browser and watching `/dmmapi/*`.
+## Pricing endpoint — FOUND (in the JS bundle, needs a captured POST body)
+The trims payload has NO prices; Honda computes them via a payment-calculator
+API. Endpoint templates pulled from `npm.honda-canada.*.js`:
+- `POST /mcpe-payment-calculator` — the payment/price calculator engine.
+- `/buildandprice/calculator/summary` and `/hydrateFromCalculator`.
+Response field names present in the bundle: `msrp`, `msrpPrice`, `sellingPrice`
+(incl. Freight/PDI/levies/dealer fees), `sellingPriceWithDiscount`, `msrpMarkup`.
+Next step: in the browser, complete a build to the Summary step (with a province/
+postal set) and capture the `/mcpe-payment-calculator` POST — record its request
+body shape, then replay it per trim+province. That body is the last unknown.
+
+## Still to find
+1. **`model_key` → `MODEL_GUID` map** — a `/dmmapi/...` models list (the build
+   landing `/en/buildyourhonda` references it). Other dmmapi endpoints seen:
+   `/dmmapi/trimandcolors/transmission/{id}`, `/dmmapi/inventory/recommendedvehicles`.
+2. **The `/mcpe-payment-calculator` POST body** (see above).
 3. Sitecore field parsing: every value is wrapped as `{ "value": ... }`.
 
 ## Target output (same as Toyota/Lexus, see scripts/lib/tci-stack.mjs)
