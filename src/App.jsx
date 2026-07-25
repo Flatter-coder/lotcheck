@@ -3892,6 +3892,10 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const dealerRate = analysis?.financeRates?.dealer?.apr != null
     ? Number(analysis.financeRates.dealer.apr)
     : (disclosedRate || null);
+  const lease = analysis?.leaseRates?.manufacturer || null;
+  const leaseRate = lease?.apr != null ? Number(lease.apr) : null;
+  const leaseKm = lease?.annualKm || null;
+  const leaseTerm = lease?.termMonths || null;
   const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
   const disclosedFreq = analysis?.financing?.paymentFrequency || null;
 
@@ -3959,6 +3963,13 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             <div style={{fontSize:11,color:C.tealInk,fontWeight:800}}>{analysis.make||"Manufacturer"} advertised{mfr?.promo?" · promo":""}</div>
             <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{mfrRate}%</div>
             <div style={{fontSize:10,color:C.inkFaint}}>{mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"manufacturer rate"}</div>
+          </div>
+        )}
+        {leaseRate != null && (
+          <div style={{...chip,background:C.butterBg,border:`1px solid ${C.butter}55`}}>
+            <div style={{fontSize:11,color:C.butterInk,fontWeight:800}}>{analysis.make||"Manufacturer"} lease</div>
+            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{leaseRate}%</div>
+            <div style={{fontSize:10,color:C.inkFaint}}>{leaseTerm?`${leaseTerm}mo`:"lease rate"}{leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}</div>
           </div>
         )}
         <div style={chip}>

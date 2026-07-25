@@ -20,11 +20,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Toyota — MSRP + finance rates
+      - name: Toyota — MSRP + finance/lease rates
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-toyota.mjs
+      - name: Lexus — MSRP + finance/lease rates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-lexus.mjs
       - name: Summary
         if: success()
         run: echo "✅ Catalog refresh complete — $(date)"
