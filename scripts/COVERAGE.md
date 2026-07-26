@@ -53,3 +53,10 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - All scrapers dry-run without credentials (write to `scripts/out/`) and delete-then-insert their make's rows when `SUPABASE_SERVICE_ROLE_KEY` is set.
 - Rate values from Hyundai/Mazda are decimals in-source (0.0279) → stored as percent (2.79).
 - `fuel_type` uses conservative name-based inference (`lib/catalog-io.mjs` `inferFuelFromName`); null when unsure rather than guessing "Gas".
+
+## Update (2026-07-26 pm)
+- **MINI** — `scrape-mini.mjs`, FULL MSRP+finance+lease (mini.ca CalculatorAPI/GetMultipleVehicleData, one POST). Shipped.
+- **Mercedes-Benz** — `scrape-mercedes.mjs`, MSRP only (nafta-service.mbusa.com new/models). Rates need the payment-estimator config (browser capture) — see notes.
+- **Porsche** — shipped MSRP-only.
+- **BMW** — NOT built. Global UCP configurator (`prod.ucp.bmw.cloud`, `x-api-key` in settings.json), Node-fetch only (Akamai walls curl). Multi-step: metadata → model-matrix → price-lists; finance/lease is a POST retail-calculation with a configured-vehicle body. HIGH effort — dedicated follow-up.
+- **Audi** — still 503 (down).
