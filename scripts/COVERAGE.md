@@ -25,6 +25,7 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 |---|---|---|
 | Chevrolet, GMC, Buick, Cadillac | `scrape-gm.mjs` | byo-vc `trim-matrix` (MSRP clean; rates behind GM's session-gated IPE). GMC host may be unreachable from some IPs. |
 | Ford, Lincoln | `scrape-ford.mjs` / `scrape-lincoln.mjs` | ModelSlices.json + captured `application-id` header. Node fetch only (Akamai blocks curl); rates in separate estimate-payment app. See `FORD-NOTES.md`. |
+| Porsche | `scrape-porsche.mjs` | models.porsche.com SSR (Next.js). Model-group level, no trim names; Porsche exposes no financing. |
 
 ## 🟡 MSRP-ready, rates blocked (build MSRP-only next; rates need a browser/session)
 
