@@ -28,6 +28,7 @@ export const FCA_BRANDS = {
   dodge:    { host: "https://www.dodge.ca",       make: "Dodge" },
   chrysler: { host: "https://www.chrysler.ca",   make: "Chrysler" },
   fiat:     { host: "https://www.fiatcanada.com", make: "Fiat" },
+  alfaromeo:{ host: "https://www.alfaromeo.ca",   make: "Alfa Romeo" },
 };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
