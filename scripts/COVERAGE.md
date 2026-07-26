@@ -60,3 +60,6 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - **Porsche** — shipped MSRP-only.
 - **BMW** — NOT built. Global UCP configurator (`prod.ucp.bmw.cloud`, `x-api-key` in settings.json), Node-fetch only (Akamai walls curl). Multi-step: metadata → model-matrix → price-lists; finance/lease is a POST retail-calculation with a configured-vehicle body. HIGH effort — dedicated follow-up.
 - **Audi** — still 503 (down).
+- **Subaru** — `scrape-subaru.mjs`, FULL MSRP+finance+lease. MSRP from the homepage `<script id="Cars">` JSON; rates from the WebPage.aspx pricing page XML (`WebSiteID=282`, `<finance>`/`<leasestd>` blocks). 40 trims / 9 models.
+- **Alfa Romeo** — added to `scrape-stellantis.mjs` (FCA), full data.
+- **Mitsubishi** — GraphQL resolver returns empty (backend CMS mapping dead-end); only 4 model-level base prices reachable. Left unbuilt; see MITSUBISHI-NOTES.md.
