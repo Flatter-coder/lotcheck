@@ -52,7 +52,31 @@ Build&Price page HTML (`/en/buildyourhonda`, `/en/buildyouracura`) and parsing t
 embedded Sitecore JSS objects: each `{ id: <32-hex GUID>, detKey: {value: model_key},
 modelName: {value} }`. Convert the 32-hex `id` to a dashed GUID for the trims API.
 
-## mcpe-payment-calculator — method & body (RESOLVED, from the bundle)
+## ✅ SOLVED (browser capture 2026-07-26): the real pricing API is on api.honda.ca
+
+The build flow's Summary step POSTs to **`https://api.honda.ca/financials-worksheets/{H|A}/Live/website/calculator/payment`** (`H`=Honda, `A`=Acura). It returns per-term MSRP + APR for every PaymentOption requested — verified live (Civic Sedan LX: Finance 60mo 4.29%, Lease 60mo 3.39%, **Msrp 28440** = true MSRP, not the $30,915 selling price).
+
+Working request body (PascalCase .NET; validated by iterating on its ModelState 400s):
+```json
+{ "ProvinceKey":"ON", "ModelYear":2026, "ModelKey":"civic_sedan", "TrimKey":"lx_10908",
+  "TransmissionKey":"10956-CVT", "ExteriorColorKey":"nh_932msolar_reflection_silver_metallic",
+  "InteriorColorKey":"bkblack_fabric_^2021_civic_sedan", "IncludeFees":true, "IncludeTaxes":false,
+  "Accessories":[], "Protections":[], "ProtectionAddOns":[], "OwnerPrograms":[], "OfferKeys":[], "WarrantyKey":"",
+  "PaymentOptions":[
+    {"ClientRequestId":"1","PaymentMethod":"Finance","PaymentFrequency":"Monthly","Term":60,"DownPaymentAmount":0,"TradeInValueAmount":0,"TradeInOwingAmount":0,"LeaseAnnualKmAllowance":0,"LeaseAdditionalAnnualKm":0},
+    {"ClientRequestId":"2","PaymentMethod":"Lease","PaymentFrequency":"Monthly","Term":60,"DownPaymentAmount":0,"TradeInValueAmount":0,"TradeInOwingAmount":0,"LeaseAnnualKmAllowance":20000,"LeaseAdditionalAnnualKm":0}
+  ] }
+```
+Response: `PaymentOptions[].{PaymentMethod, Term, Apr, Msrp, FreightAndPdi, LeviesAndFeesTotal, PreferredPaymentAmount}`. Request one PaymentOption per (method × term) to get the whole ladder in one call. No auth key needed on api.honda.ca.
+
+Config keys all come from the dmmapi trims JSON via `detKey.value`:
+- trim → `trims[].detKey.value` ("lx_10908"); transmission → `…transmissions[].detKey.value` ("10956-CVT")
+  with `defaultExteriorColor`; colours → `exteriorColors[]/interiorColors[].detKey.value`.
+Models enumerated from the Build&Price page JSS (`{id GUID, detKey model_key, modelName}`). Acura: same, `/A/Live/`, apikey `4AB8BBA7-4E98-4732-9789-FE5970B415A6`, site `Acura`.
+
+**Buildable now, no browser needed at runtime.** Remaining work is just writing the tree-parser + POST loop.
+
+## mcpe-payment-calculator — method & body (superseded by the api.honda.ca capture above)
 `POST` JSON, header `Accept-Language: en`. URL is built as
 `financials-worksheets/{…}/{…}/website/mcpe-payment-calculator?AcceptLanguage=en`
 (finance branch; lease/cash use `…/website/calculator/payment`). The two `{…}`
