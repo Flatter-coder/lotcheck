@@ -15,8 +15,10 @@ below were confirmed against live responses (2026-07-25).
 | Genesis | `scrape-genesis.mjs` | Sitecore `GenesisShowroom` JSON API |
 | Hyundai | `scrape-hyundai.mjs` | AEM backend REST `trimallpurchaseOptions` (Imperva WAF — needs browser headers) |
 | Mazda | `scrape-mazda.mjs` | AWS API Gateway `/api/Trims/{year}/{carline}/` |
+| Honda | `scrape-honda.mjs` | Sitecore dmmapi trims + `api.honda.ca` calculator/payment POST (shared `lib/honda-stack.mjs`) |
+| Acura | `scrape-acura.mjs` | same as Honda, `/A/Live/` |
 
-That's **10 makes across 5 platforms.**
+That's **12 makes across 6 platforms.**
 
 ## 🟡 MSRP-ready, rates blocked (build MSRP-only next; rates need a browser/session)
 
@@ -31,8 +33,7 @@ That's **10 makes across 5 platforms.**
 
 | Make(s) | State |
 |---|---|
-| Honda, Acura | Sitecore dmmapi + `mcpe-payment-calculator`. Model→GUID map + calculator body documented in `HONDA-NOTES.md`; last step = capture one real calculator POST in a browser. Acura is Honda's identical twin. |
-| Ford, Lincoln | Platform + hosts identified (`api.foundational.ford.com`, `/estimate-payment`, shared Ford/Lincoln). Exact API path needs a browser pass — Akamai tarpits curl. |
+| Ford, Lincoln | Endpoint found (`www.ford.ca/cxservices/products/ModelSlices.json`, `plantype=MSRP\|Finance\|Lease`); blocked by a required `application-id` header. See `FORD-NOTES.md`. |
 | Subaru | MSRP from homepage trim JSON (`msrp`); finance/lease APR in the rendered `WebPage.aspx` pricing page as XML `<data id="apr">` nodes. Medium: HTML/XML scrape, no JSON API. |
 
 ## ⬜ Blocked / not yet queued
