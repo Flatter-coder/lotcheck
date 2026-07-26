@@ -64,3 +64,4 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - **Alfa Romeo** — added to `scrape-stellantis.mjs` (FCA), full data.
 - **Mitsubishi** — GraphQL resolver returns empty (backend CMS mapping dead-end); only 4 model-level base prices reachable. Left unbuilt; see MITSUBISHI-NOTES.md.
 - **Kia** — `scrape-kia.mjs`, MSRP only. Parses the build-and-price page's entity-encoded JSON (string-aware bracket-match + JSON.parse of the `models` arrays) so trim↔price association is structural, not regex. 100 rows / 19 models. Rates not exposed as a clean API.
+- **Nissan / Infiniti** — `scrape-nissan.mjs` / `scrape-infiniti.mjs` (shared `lib/nissan-stack.mjs`), MSRP only. Parsed from the `#individualVehiclePriceJSON` iframe body on each vehicle page (Node fetch; Akamai blocks curl). Rates need the gated GraphQL — see NISSAN-NOTES.md.

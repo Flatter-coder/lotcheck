@@ -1,4 +1,11 @@
-# Nissan / Infiniti scraper — reconnaissance (GraphQL reachable, queries gated)
+# Nissan / Infiniti scraper — MSRP SHIPPED; rates gated
+
+**MSRP solved (2026-07-26):** each vehicle page embeds a hidden #individualVehiclePriceJSON
+iframe whose body is price JSON — Retail.grades[key].gradePrice is the national MSRP.
+`scrape-nissan.mjs` / `scrape-infiniti.mjs` (shared lib/nissan-stack.mjs) parse it via
+Node fetch. Nissan 44 rows/11 models, Infiniti 39/6. Rates still need the GraphQL below.
+
+## (rates) original recon
 
 Nissan & Infiniti share one Next.js + Apollo GraphQL platform. Good news: the
 endpoint is **reachable from Node** (Akamai passes Node's fetch, blocks curl).
