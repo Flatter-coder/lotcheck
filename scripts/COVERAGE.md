@@ -18,7 +18,12 @@ below were confirmed against live responses (2026-07-25).
 | Honda | `scrape-honda.mjs` | Sitecore dmmapi trims + `api.honda.ca` calculator/payment POST (shared `lib/honda-stack.mjs`) |
 | Acura | `scrape-acura.mjs` | same as Honda, `/A/Live/` |
 
-That's **12 makes across 6 platforms.**
+That's **12 makes across 6 platforms** with full MSRP+finance+lease.
+
+### ✅ Shipped, MSRP-only (rates gated at source)
+| Make(s) | Script | Notes |
+|---|---|---|
+| Chevrolet, GMC, Buick, Cadillac | `scrape-gm.mjs` | byo-vc `trim-matrix` (MSRP clean; rates behind GM's session-gated IPE). GMC host may be unreachable from some IPs. |
 
 ## 🟡 MSRP-ready, rates blocked (build MSRP-only next; rates need a browser/session)
 
