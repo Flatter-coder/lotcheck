@@ -24,6 +24,7 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 | Make(s) | Script | Notes |
 |---|---|---|
 | Chevrolet, GMC, Buick, Cadillac | `scrape-gm.mjs` | byo-vc `trim-matrix` (MSRP clean; rates behind GM's session-gated IPE). GMC host may be unreachable from some IPs. |
+| Ford, Lincoln | `scrape-ford.mjs` / `scrape-lincoln.mjs` | ModelSlices.json + captured `application-id` header. Node fetch only (Akamai blocks curl); rates in separate estimate-payment app. See `FORD-NOTES.md`. |
 
 ## 🟡 MSRP-ready, rates blocked (build MSRP-only next; rates need a browser/session)
 
