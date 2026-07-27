@@ -1,0 +1,61 @@
+name: Catalog rates (daily)
+# Refreshes ONLY finance_rate_catalog + lease_rate_catalog for the makes that
+# expose rates. CATALOG_RATES_ONLY=1 makes each scraper skip the msrp_catalog
+# write, so MSRP is left to the weekly full run (catalog-refresh.yml). Rates
+# track monthly promo periods that can shift mid-month, so refresh them daily.
+# MSRP-only makes (GM, Ford, Kia, Nissan, Volvo, Porsche, Mercedes) are omitted
+# here — they produce no rate rows.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 10 * * *"   # daily, 10:00 UTC (~4am Calgary)
+jobs:
+  rates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CATALOG_RATES_ONLY: "1"
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Toyota rates
+        run: node scripts/scrape-toyota.mjs
+      - name: Lexus rates
+        run: node scripts/scrape-lexus.mjs
+      - name: Stellantis rates (Jeep/Ram/Dodge/Chrysler/Fiat/Alfa)
+        run: node scripts/scrape-stellantis.mjs
+      - name: Genesis rates
+        run: node scripts/scrape-genesis.mjs
+      - name: Hyundai rates
+        run: node scripts/scrape-hyundai.mjs
+      - name: Mazda rates
+        run: node scripts/scrape-mazda.mjs
+      - name: Honda rates
+        run: node scripts/scrape-honda.mjs
+      - name: Acura rates
+        run: node scripts/scrape-acura.mjs
+      - name: MINI rates
+        run: node scripts/scrape-mini.mjs
+      - name: Subaru rates
+        run: node scripts/scrape-subaru.mjs
+      - name: Volkswagen rates
+        run: node scripts/scrape-vw.mjs
+      - name: BMW rates
+        run: node scripts/scrape-bmw.mjs
+      - name: Mercedes-Benz rates
+        run: node scripts/scrape-mercedes-rates.mjs
+      - name: Ford rates
+        run: node scripts/scrape-ford-rates.mjs
+      - name: Nissan rates
+        run: node scripts/scrape-nissan-rates.mjs
+      - name: Infiniti rates
+        run: node scripts/scrape-infiniti-rates.mjs
+      - name: GM rates (Chevrolet/GMC/Buick)
+        run: node scripts/scrape-gm-rates.mjs
+      - name: Summary
+        if: success()
+        run: echo "✅ Daily rate refresh complete — $(date)"
