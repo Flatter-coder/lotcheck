@@ -15,6 +15,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dedupeBy } from "./catalog-io.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -161,7 +162,13 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   }
 
   console.log(`[${makeName}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  return { msrpRows, financeRows, leaseRows };
+  // A grade can appear under two modelCodes (same year/model/trim) — collapse to
+  // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
+  return {
+    msrpRows: dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp"),
+    financeRows: dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr"),
+    leaseRows,
+  };
 }
 
 // ── Supabase write (delete-then-insert per make) ───────────────────────────
