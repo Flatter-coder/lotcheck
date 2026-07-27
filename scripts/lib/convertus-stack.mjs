@@ -58,7 +58,25 @@ export async function run(cfg) {
         for (const l of (Array.isArray(v.lease) ? v.lease : [])) {
           const term = Number(l.lease_term), apr = Number(l.lease_rate);
           const k = `${model}|${term}`;
-          if (term && apr > 0 && !leaseSeen.has(k)) { leaseSeen.add(k); leaseRows.push({ make: cfg.make, model, apr, term_months: term, annual_km: Number(l.lease_km_allowance) || null, effective_date: today }); }
+          if (term && apr > 0 && !leaseSeen.has(k)) {
+            leaseSeen.add(k);
+            // Track A: capture the inputs the edge fn needs to COMPUTE the
+            // payment (money-factor formula). Validated 2026-07-27 against a
+            // Denham Ford VDP (2025 Escape 60mo, $0 down): residual base = MSRP,
+            // capCost = selling price (lease_initial_price); computed $476/mo vs
+            // advertised $484/mo (1.65% — within tolerance), so payment_source
+            // = 'computed'. residual is a whole-number % in the feed (e.g. 38).
+            const residualPct = Number(l.lease_residual) > 0 ? Number(l.lease_residual) / 100 : null;
+            const capCost = Number(l.lease_initial_price) || null; // = negotiated selling price
+            const down = Number(l.lease_amount) || null;
+            leaseRows.push({
+              make: cfg.make, model, apr, term_months: term,
+              annual_km: Number(l.lease_km_allowance) || null,
+              residual_pct: residualPct, cap_cost: capCost, down_payment: down,
+              payment_source: residualPct != null ? "computed" : null,
+              effective_date: today,
+            });
+          }
         }
       }
       await sleep(150);

@@ -51,7 +51,25 @@ export async function run(cfg) {
         const fin = v.paymentOptions?.finance?.term;
         if (fin && Number(fin.apr) > 0) { const k = `${model}|${fin.term}`; if (!finSeen.has(k)) { finSeen.add(k); financeRows.push({ make: cfg.make, model, apr: Number(fin.apr), term_months: Number(fin.term), promo: false, effective_date: today }); } }
         const le = v.paymentOptions?.lease?.term;
-        if (le && Number(le.apr) > 0) { const k = `${model}|${le.term}`; if (!leaseSeen.has(k)) { leaseSeen.add(k); leaseRows.push({ make: cfg.make, model, apr: Number(le.apr), term_months: Number(le.term), annual_km: Number(v.paymentOptions?.lease?.kmPerYearPlan) || null, effective_date: today }); } }
+        if (le && Number(le.apr) > 0) {
+          const k = `${model}|${le.term}`;
+          if (!leaseSeen.has(k)) {
+            leaseSeen.add(k);
+            // Track B: surface the dealer's advertised lease payment for this
+            // loaded VIN (SM360 has no residual, so no computed track here).
+            const advPay = Number(le.payment) || null;          // pre-tax
+            const advPayTax = Number(le.totalPayment) || null;   // with tax
+            const sellPrice = Number(v.paymentOptions?.lease?.sellingPrice) || null;
+            leaseRows.push({
+              make: cfg.make, model, apr: Number(le.apr), term_months: Number(le.term),
+              annual_km: Number(v.paymentOptions?.lease?.kmPerYearPlan) || null,
+              advertised_payment: advPay, advertised_payment_tax: advPayTax,
+              selling_price: sellPrice,
+              payment_source: advPay ? "advertised" : null,
+              effective_date: today,
+            });
+          }
+        }
       }
       await sleep(120);
     }
