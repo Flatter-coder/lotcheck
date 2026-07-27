@@ -101,3 +101,12 @@ NEXT STEPS (dealer-feed pattern proven — quick wins):
 Blocked externally: Audi (site 503 down), Mitsubishi (backend dead-end), Jaguar/Land Rover (Algolia keys not in page config), Maserati (bot-walled).
 
 DEPLOY: 33 commits on branch fix/dealer-publish-stale-row-guard, NOT pushed. Go-live = push (Vercel deploys app + GitHub gets workflows) + run supabase/migrations/20260725_lease_rate_catalog.sql + set SUPABASE_SERVICE_ROLE_KEY secret. Two workflows: catalog-refresh.yml (weekly FULL), catalog-rates-daily.yml (daily rates-only).
+
+## UPDATE 2026-07-27b — Infiniti + GM rates via dealer feeds → 24 FULL / 5 MSRP-only
+Chased rate-gated makes with the proven dealer-feed technique:
+- **Infiniti** → SM360 (infinitinorthcalgary.ca + infinitinorthvancouver.ca + 401dixieinfiniti.ca). scrape-infiniti-rates.mjs, ratesOnly. 5 finance / 3 lease.
+- **Chevrolet / GMC / Buick** → ONE SM360 store, City GM (citygm.com), carries all three; scrape-gm-rates.mjs fetches once & buckets by make.name, ratesOnly. Chevrolet 16f/22l, GMC 11f/12l, Buick 4f/4l.
+- Reusable dealer-hunting probe: scripts/probe-dealers.mjs (detects SM360 vs Convertus + extracts Convertus cp).
+NOW FULL (24): + Infiniti, Chevrolet, GMC, Buick.
+STILL MSRP-only (5): Cadillac, Lincoln, Porsche, Kia, Volvo.
+Tried & blocked this round: Lincoln — Waterloo Lincoln Convertus proxy is Cloudflare-403; Pine Tree/MGM/Woodridge/Northstar/Metro/Performance Lincoln all on other platforms (EDealer/DealerInspire), no accessible feed. Cadillac — not stocked at City GM; needs its own Cadillac SM360/Convertus dealer.
