@@ -35,3 +35,16 @@ pricing queries only fire deep in the build flow.
 Alternatively: MSRP may be in the build-flow SSR as `VehiclePrice.retail.value`
 (the individual-vehicle price loads via an `#individualVehiclePriceJSON` iframe —
 find that iframe's src, which may return a clean price JSON directly).
+
+## Rate query — structure cracked (2026-07-26 re-check), one enum short
+The /graphql endpoint is Node-reachable and I reverse-engineered the arg shapes
+by iterating on validation errors:
+- `getDetailedVersion(market: <input>, versionQuery: <input>){ priceList{ retail{ value } } }`
+- `market` is an input object requiring `{ application: <MarketApplication enum>, lang: <enum> }`.
+  The enum VALUES are the only remaining unknown ("NISSAN_CA"/"NISSAN"/"EN" all rejected as
+  invalid MarketApplication members; introspection is off).
+- `versionQuery` takes `{ versionCode, modelCode, year }` (versionCode e.g. "W6BG16" comes
+  from the individualVehiclePriceJSON blob's bestPriceVersionKey; modelCode e.g. "42088").
+To finish: grab the MarketApplication enum value from the pricing iframe's bundle (NOT the
+build-price page chunks — checked, not there) or a captured request, then `getModalPaymentOptions`
+for finance/lease. Everything else is solved.
