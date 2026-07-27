@@ -81,3 +81,23 @@ Remaining (each blocked or a dedicated deep-dig — NOT quick):
 
 Open RATE captures to upgrade MSRP-only → full: GM (IPE), Ford (estimate-payment), Mercedes (payment-estimator), Kia, Nissan/Infiniti (gated GraphQL). Each is a browser capture like Honda/Ford.
 - **BMW** — `scrape-bmw.mjs`, MSRP + finance/lease via the SM360 dealer inventory feed (bmw.ca prices are identity-gated). Calgary BMW; listPrice=MSRP, deduped to starting-price-per-trim; default-term rates. 25 models. See BMW-NOTES.md.
+
+## CURRENT STATUS (2026-07-27) — continuation anchor
+**29 makes: 20 FULL (MSRP+finance+lease), 9 MSRP-only.**
+FULL: Toyota, Lexus, Jeep, Ram, Dodge, Chrysler, Fiat, Alfa Romeo, Genesis, Hyundai, Mazda, Honda, Acura, MINI, Subaru, Volkswagen, BMW, Mercedes-Benz, Ford, Nissan.
+MSRP-only: Chevrolet, GMC, Buick, Cadillac, Lincoln, Porsche, Kia, Infiniti, Volvo.
+
+DEALER-FEED TECHNIQUE (the key unlock — cracked manufacturer rate gates):
+- SM360 dealers → GET {dealer}/en/new-inventory/api/listing?page=N → vehicles[].{listPrice=MSRP, paymentOptions.finance/lease.term.{term,apr}}. Used for BMW (calgarybmw.ca, full) + Mercedes rates (mercedes-benz-countryhills.ca). lib/sm360-stack.mjs.
+- Convertus/AutoSync dealers → GET {dealer}/wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php?endpoint={urlenc vms.prod.convertus.rocks/api/filtering/?cp={cp}&...}&action=vms_data → results[].{msrp, finance[].{finance_term,finance_rate}, lease[].{lease_term,lease_rate}}. cp=inventoryId. Used for Ford (denhamford cp1285) + Nissan (fishcreek cp1377) rates. lib/convertus-stack.mjs. Direct API host 403s — must use dealer proxy.
+- Rates layered rates-only (writeCatalogs opts.ratesOnly / CATALOG_RATES_ONLY=1) so manufacturer MSRP is untouched.
+
+NEXT STEPS (dealer-feed pattern proven — quick wins):
+1. Infiniti rates → an Infiniti Convertus/SM360 dealer (Nissan sister, same feed).
+2. Lincoln rates → a Lincoln Convertus/SM360 dealer (Ford sister).
+3. GM rates (Chevy/GMC/Buick/Cadillac) → a Convertus/SM360 GM dealer not 403'd (sherwoodbuickgmc cp373 proxy 403'd; capitalchev bot-walled).
+4. Kia rates → an EDealer Kia dealer (needs browser capture of its inventory XHR).
+5. Volvo per-trim + rates → gated GraphQL (deferred).
+Blocked externally: Audi (site 503 down), Mitsubishi (backend dead-end), Jaguar/Land Rover (Algolia keys not in page config), Maserati (bot-walled).
+
+DEPLOY: 33 commits on branch fix/dealer-publish-stale-row-guard, NOT pushed. Go-live = push (Vercel deploys app + GitHub gets workflows) + run supabase/migrations/20260725_lease_rate_catalog.sql + set SUPABASE_SERVICE_ROLE_KEY secret. Two workflows: catalog-refresh.yml (weekly FULL), catalog-rates-daily.yml (daily rates-only).
