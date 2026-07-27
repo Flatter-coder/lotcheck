@@ -67,3 +67,16 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - **Nissan / Infiniti** — `scrape-nissan.mjs` / `scrape-infiniti.mjs` (shared `lib/nissan-stack.mjs`), MSRP only. Parsed from the `#individualVehiclePriceJSON` iframe body on each vehicle page (Node fetch; Akamai blocks curl). Rates need the gated GraphQL — see NISSAN-NOTES.md.
 - **Volvo** — `scrape-volvo.mjs`, MSRP only, model-level. Starting MSRP per model from the /en-ca/build/{model} SSR (Node fetch; Akamai). Per-trim (Core/Plus/Ultra) is behind gated GraphQL. 7 models.
 - **Volkswagen** — `scrape-vw.mjs`, FULL MSRP+finance+lease. Public globalapi.vwtools.ca (special-offers + finance, Node fetch). MSRP = advertised price − freight_pdi. Finance incl. 0% promos (flagged promo). 8 models.
+
+## Final coverage (2026-07-26) — 28 makes shipped
+FULL MSRP+finance+lease (16): Toyota, Lexus, Jeep, Ram, Dodge, Chrysler, Fiat, Alfa Romeo, Genesis, Hyundai, Mazda, Honda, Acura, MINI, Subaru, Volkswagen.
+MSRP-only (12): Chevrolet, GMC, Buick, Cadillac, Ford, Lincoln, Porsche, Mercedes-Benz, Kia, Nissan, Infiniti, Volvo.
+
+Remaining (each blocked or a dedicated deep-dig — NOT quick):
+- BMW — UCP configurator, multi-step, per-model vehicleTree unknown. API+key verified. See BMW-NOTES.md.
+- Jaguar / Land Rover — AEM configurator with a separate pricing service; deep dig, low CA volume.
+- Maserati — maserati.com/ca bot-walled (403); not on the FCA modelYears platform; tiny volume.
+- Audi — audi.ca serving a maintenance 503 site-wide (unbuildable until back up); VW's vwtools API ignores brand=audi.
+- Mitsubishi — open GraphQL but the resolver returns empty (backend CMS mapping dead-end). See MITSUBISHI-NOTES.md.
+
+Open RATE captures to upgrade MSRP-only → full: GM (IPE), Ford (estimate-payment), Mercedes (payment-estimator), Kia, Nissan/Infiniti (gated GraphQL). Each is a browser capture like Honda/Ford.
