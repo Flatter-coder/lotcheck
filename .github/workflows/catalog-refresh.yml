@@ -89,6 +89,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-mercedes.mjs
+      - name: Mercedes-Benz rates (SM360 dealer feed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-mercedes-rates.mjs
       - name: Subaru — MSRP + finance/lease rates
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

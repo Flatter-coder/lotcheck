@@ -40,7 +40,7 @@ async function replaceRows(table, rows, make, { fatal = true } = {}) {
   }
 }
 
-export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }) {
+export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }, opts = {}) {
   if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {
     const outDir = join(__dirname, "..", "out"); mkdirSync(outDir, { recursive: true });
     const file = join(outDir, `${make.toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
@@ -50,9 +50,10 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
     return;
   }
   console.log(`\nWriting ${make} to Supabase…`);
-  // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily), leaving
-  // msrp_catalog untouched (MSRP is refreshed on the weekly full run).
-  const ratesOnly = process.env.CATALOG_RATES_ONLY === "1";
+  // Rates-only: skip the msrp_catalog write. Set either globally via
+  // CATALOG_RATES_ONLY=1 (daily job) or per-scraper via opts.ratesOnly (e.g. a
+  // dealer-feed rate source layered on top of another make's MSRP source).
+  const ratesOnly = opts.ratesOnly || process.env.CATALOG_RATES_ONLY === "1";
   if (!ratesOnly) await replaceRows("msrp_catalog", msrpRows, make);
   else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
   await replaceRows("finance_rate_catalog", financeRows, make);
