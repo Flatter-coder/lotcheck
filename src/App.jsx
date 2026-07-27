@@ -3898,6 +3898,11 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const leaseTerm = lease?.termMonths || null;
   const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
   const disclosedFreq = analysis?.financing?.paymentFrequency || null;
+  // Freshness of the manufacturer rate data (finance_rate_catalog /
+  // lease_rate_catalog effective_date). Refreshed daily by the rates job, so
+  // buyers can see how current the advertised rate we're comparing against is.
+  const fmtDate = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||"")); const MO=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return m ? `${MO[+m[2]-1]} ${+m[3]}, ${m[1]}` : s; };
+  const ratesAsOf = [mfr?.effectiveDate, lease?.effectiveDate].filter(Boolean).sort().pop() || null;
 
   const defaultRate = dealerRate || mfrRate || 6.99;
   const rateIsReal = dealerRate != null || mfrRate != null;
@@ -4060,6 +4065,13 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
           </div>
           <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+        </div>
+      )}
+
+      {ratesAsOf && (
+        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,display:"flex",alignItems:"center",gap:6}}>
+          <span>🕑</span>
+          <span>Manufacturer {leaseRate!=null&&mfrRate!=null?"finance & lease ":mfrRate!=null?"finance ":"lease "}rates as of <b>{fmtDate(ratesAsOf)}</b>, from {analysis.make||"the maker"}'s advertised rates — refreshed daily.</span>
         </div>
       )}
 
