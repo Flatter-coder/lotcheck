@@ -217,6 +217,7 @@ Deno.serve(async (req: Request) => {
     computeFinancingCheck(analysis);
     computeOdometerCheck(analysis);
     await resolveFinanceRates(analysis);
+    await resolveLeaseRates(analysis);
     computeLeverageScore(analysis);
 
     return new Response(JSON.stringify({ analysis }), {
@@ -581,6 +582,43 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
     }
   }
   analysis.financeRates = out;
+}
+
+// Manufacturer LEASE rate from lease_rate_catalog (populated by the catalog
+// scrapers). Mirrors resolveFinanceRates: match on make, prefer the exact
+// model, pick a representative term (48mo, the common lease length, else the
+// shortest available). Attaches analysis.leaseRates.manufacturer. Never throws
+// -- if the table doesn't exist yet the lookup just yields null.
+async function resolveLeaseRates(analysis: any): Promise<void> {
+  const out: any = { manufacturer: null };
+  if (analysis.make) {
+    try {
+      const { data } = await supabase
+        .from("lease_rate_catalog")
+        .select("apr, term_months, annual_km, effective_date, model")
+        .ilike("make", analysis.make)
+        .order("term_months", { ascending: true })
+        .limit(50);
+      if (data?.length) {
+        const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const modelNorm = norm(analysis.model || "");
+        const byModel = data.filter((r: any) => r.model && norm(r.model) === modelNorm);
+        const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
+        if (pool.length) {
+          const pick = pool.find((r: any) => r.term_months === 48) || pool[0];
+          out.manufacturer = {
+            apr: Number(pick.apr),
+            termMonths: pick.term_months,
+            annualKm: pick.annual_km ?? null,
+            effectiveDate: pick.effective_date,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("resolveLeaseRates threw:", err);
+    }
+  }
+  analysis.leaseRates = out;
 }
 
 function computeLeverageScore(analysis: any): void {
