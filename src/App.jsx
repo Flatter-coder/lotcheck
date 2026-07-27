@@ -3759,6 +3759,14 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const leaseTerm = lease?.termMonths || null;
   const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
   const disclosedFreq = analysis?.financing?.paymentFrequency || null;
+  // New-vs-used: main keys new/used on analysis.vehicleCondition==="new". A
+  // manufacturer advertised/promo rate is a NEW-vehicle offer, so on a used
+  // vehicle it's a labelled reference, never this car's applicable rate.
+  const isNew = analysis?.vehicleCondition === "new";
+  // How far THIS dealer's disclosed APR sits above the manufacturer's
+  // advertised rate (only meaningful when both exist) -- drives the markup
+  // warning below, same threshold/math as main's "Financing examples" card.
+  const spread = (dealerRate != null && mfrRate != null) ? (dealerRate - mfrRate) : null;
   // Freshness of the manufacturer rate data (finance_rate_catalog /
   // lease_rate_catalog effective_date). Refreshed daily by the rates job, so
   // buyers can see how current the advertised rate we're comparing against is.
@@ -3825,9 +3833,9 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           </div>
         )}
         {mfrRate != null && (
-          <div style={{...chip,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-            <div style={{fontSize:11,color:C.tealInk,fontWeight:800}}>{analysis.make||"Manufacturer"} advertised{mfr?.promo?" · promo":""}</div>
-            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{mfrRate}%</div>
+          <div style={{...chip,background:isNew?C.tealBg:"transparent",border:isNew?`1px solid ${C.teal}55`:`1px dashed ${C.line}`}}>
+            <div style={{fontSize:11,color:isNew?C.tealInk:C.inkSoft,fontWeight:800}}>{analysis.make||"Manufacturer"} {isNew?`advertised${mfr?.promo?" · promo":""}`:"new-car rate · reference only"}</div>
+            <div style={{fontSize:18,fontWeight:1000,color:isNew?C.ink:C.inkSoft}}>{mfrRate}%</div>
             <div style={{fontSize:10,color:C.inkFaint}}>{mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"manufacturer rate"}</div>
           </div>
         )}
@@ -3853,6 +3861,30 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           )}
         </div>
       </div>
+
+      {/* New-vs-used guard: on a USED vehicle the manufacturer's advertised
+          rate is a NEW-car offer, so it's flagged reference-only (main's exact
+          copy) rather than presented as this car's applicable rate. */}
+      {mfrRate != null && !isNew && (
+        <div style={{fontSize:12,color:C.inkSoft,marginBottom:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+          Reference only: {analysis.make} advertises this on a NEW {analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.
+        </div>
+      )}
+
+      {/* Dealer-vs-manufacturer markup warning -- same gate (new vehicle,
+          spread > 0.1%), same extra-cost math (both APRs amortized over the
+          same 60-mo term and price, difference of totals) and copy as main's
+          "Financing examples" card. */}
+      {isNew && spread != null && spread > 0.1 && (()=>{
+        const pd = price*(dealerRate/1200)/(1-Math.pow(1+dealerRate/1200,-60));
+        const pm = price*(mfrRate/1200)/(1-Math.pow(1+mfrRate/1200,-60));
+        const extra = Math.round((pd-pm)*60);
+        return (
+          <div style={{marginBottom:12,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+          </div>
+        );
+      })()}
 
       {!rateIsReal && (
         <div style={{fontSize:12,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
