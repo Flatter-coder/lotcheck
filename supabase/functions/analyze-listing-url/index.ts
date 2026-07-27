@@ -487,16 +487,43 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
 // available). Like manufacturer finance, a lease promo is a NEW-vehicle offer,
 // so the frontend treats it as a reference when the vehicle is used. Attaches
 // analysis.leaseRates.manufacturer. Never throws -- a missing table yields null.
+//
+// Phase 2 (lease payments) is additive: when the catalog row carries payment
+// data we surface it two ways, and the UI decides how to render:
+//   payment_source='advertised' -> manufacturer.payment (a FIXED advertised
+//     example for the scraped dealer's vehicle; shown as a reference, never
+//     recomputed for the user).
+//   payment_source='computed'   -> manufacturer.lease (residual %, apr, term;
+//     the UI computes the payment on the USER's own msrp/price, NOT the
+//     catalog's scraped cap_cost/down_payment/selling_price).
+// cap_cost/down_payment are deliberately NOT read here: those are the scraped
+// dealer's vehicle and must never drive the user's computed payment.
 async function resolveLeaseRates(analysis: any): Promise<void> {
   const out: any = { manufacturer: null };
   if (analysis.make) {
+    const COLS_FULL = "apr, term_months, annual_km, effective_date, model, residual_pct, advertised_payment, advertised_payment_tax, selling_price, payment_source";
+    const COLS_BASE = "apr, term_months, annual_km, effective_date, model";
     try {
-      const { data } = await supabase
+      // Prefer the Phase-2 columns; if they're not live in this DB yet the
+      // select errors, so fall back to APR-only rather than regress lease.
+      let data: any[] | null = null;
+      const full = await supabase
         .from("lease_rate_catalog")
-        .select("apr, term_months, annual_km, effective_date, model")
+        .select(COLS_FULL)
         .ilike("make", analysis.make)
         .order("term_months", { ascending: true })
         .limit(50);
+      if (full.error) {
+        const base = await supabase
+          .from("lease_rate_catalog")
+          .select(COLS_BASE)
+          .ilike("make", analysis.make)
+          .order("term_months", { ascending: true })
+          .limit(50);
+        data = base.data;
+      } else {
+        data = full.data;
+      }
       if (data?.length) {
         const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
         const modelNorm = norm(analysis.model || "");
@@ -504,12 +531,32 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
         const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
         if (pool.length) {
           const pick = pool.find((r: any) => r.term_months === 48) || pool[0];
-          out.manufacturer = {
+          const m: any = {
             apr: Number(pick.apr),
             termMonths: pick.term_months,
             annualKm: pick.annual_km ?? null,
             effectiveDate: pick.effective_date,
           };
+          const src = pick.payment_source;
+          if (src === "advertised" && pick.advertised_payment != null) {
+            m.payment = {
+              source: "advertised",
+              amount: Number(pick.advertised_payment),
+              withTax: pick.advertised_payment_tax != null ? Number(pick.advertised_payment_tax) : null,
+              sellingPrice: pick.selling_price != null ? Number(pick.selling_price) : null,
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          } else if (src === "computed" && pick.residual_pct != null) {
+            m.lease = {
+              source: "computed",
+              residualPct: Number(pick.residual_pct),
+              apr: Number(pick.apr),
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          }
+          out.manufacturer = m;
         }
       }
     } catch (err) {

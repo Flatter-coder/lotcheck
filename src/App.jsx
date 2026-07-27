@@ -3908,6 +3908,34 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const leaseTL = leaseBand ? TL[leaseBand] : null;
   const leaseSpread = leaseTwoSided ? (leaseDealerRate - leaseRate) : null;
 
+  // Phase-2 lease PAYMENT. Two mutually-exclusive catalog shapes:
+  //  - manufacturer.payment (source 'advertised'): a FIXED advertised example
+  //    for the scraped dealer's own vehicle -- shown as a reference, NEVER
+  //    recomputed for the user.
+  //  - manufacturer.lease (source 'computed'): residual %, apr, term -> the
+  //    payment is computed HERE on the USER's own price/msrp.
+  const leaseAdvertised = lease?.payment?.source === "advertised" ? lease.payment : null;
+  const leaseComputed = lease?.lease?.source === "computed" ? lease.lease : null;
+  const userMsrp = Number(analysis?.msrp) || null;
+  // Residual-based monthly lease payment for the USER's vehicle (validated
+  // formula, within ~1.65% of a real advertised payment). residualValue =
+  // residualPct x the USER's msrp; capCost = the USER's price minus the down
+  // ($0-down here, matching the hero, so capCost = price). The catalog's
+  // scraped cap_cost/down_payment/selling_price are deliberately NOT used.
+  // No msrp -> no computed payment (a residual can't be honestly derived).
+  let leaseComputedPayment = null;
+  if (leaseApplicable && leaseComputed && userMsrp) {
+    const lterm = leaseComputed.term || leaseTerm || 48;
+    const residualValue = leaseComputed.residualPct * userMsrp;
+    const capCost = Math.max(0, price - quoteDown);
+    const depreciation = (capCost - residualValue) / lterm;
+    const rent = (capCost + residualValue) * (leaseComputed.apr / 2400);
+    const amount = depreciation + rent;
+    if (amount > 0 && Number.isFinite(amount)) {
+      leaseComputedPayment = { amount, term: lterm, annualKm: leaseComputed.annualKm ?? leaseKm, residualPct: leaseComputed.residualPct, apr: leaseComputed.apr };
+    }
+  }
+
   // Recommendation ("What we'd do") -- tailored bullets, ported from the
   // reference design's logic and wired to the resolved rates.
   const monthlyPay = a => amortPayment(Pq, a, 12, quoteTerm);
@@ -4097,11 +4125,49 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
         {/* LEASE markup warning (forward-compatible): only when a dealer/listing
             lease APR exists alongside the manufacturer lease rate on a new
             vehicle. Mirrors the finance spread treatment, rate-only (no lease
-            payment/extra-cost figure -- that needs residual data we don't
-            capture yet, deferred to Phase 2). */}
+            extra-cost dollar figure). */}
         {leaseTwoSided && isNew && leaseSpread != null && leaseSpread > 0.1 && (
           <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
             <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (COMPUTED track: Ford/Nissan etc). Residual-
+            based estimate on the USER's own price/msrp -- assumptions visible.
+            Only when applicable (never presented as this car's rate on a used
+            vehicle) and only when we have the user's msrp to derive a residual. */}
+        {leaseComputedPayment && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:leaseTL?leaseTL.bg:C.tealBg,border:`1px solid ${leaseTL?leaseTL.bd:C.teal}55`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Estimated lease payment</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseComputedPayment.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              Residual-based on your {money(price)} price at {leaseComputedPayment.apr}% · {(leaseComputedPayment.residualPct*100).toFixed(0)}% residual of {money(userMsrp)} MSRP · {leaseComputedPayment.term} mo{leaseComputedPayment.annualKm?` · ${leaseComputedPayment.annualKm.toLocaleString()} km/yr`:""} · $0 down.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              Estimate from the manufacturer's residual and lease rate applied to your vehicle — excludes tax, fees, and any lease incentives. Confirm the residual and money factor with the dealer.
+            </div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (ADVERTISED track: BMW/Mercedes/Infiniti/GM).
+            A FIXED advertised example for the scraped dealer's vehicle -- shown
+            as a reference, NOT recomputed for the user's price. Suppressed on a
+            used vehicle (new-car advertised promo doesn't apply). */}
+        {leaseAdvertised && leaseAdvertised.amount != null && leaseApplicable && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Dealer's advertised lease example</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseAdvertised.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+              {leaseAdvertised.withTax != null && <span style={{fontSize:12,color:C.inkFaint,fontWeight:600}}> · {money(leaseAdvertised.withTax)}/mo w/ tax</span>}
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              {analysis.make}'s advertised example{leaseAdvertised.sellingPrice!=null?` for a ${money(leaseAdvertised.sellingPrice)} vehicle`:""}{leaseAdvertised.term?` · ${leaseAdvertised.term} mo`:""}{leaseAdvertised.annualKm?` · ${leaseAdvertised.annualKm.toLocaleString()} km/yr`:""}{leaseRate!=null?` · at ${leaseRate}%`:""}.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              A fixed advertised figure — not recomputed for your {money(price)} vehicle. Your payment depends on the negotiated price, down payment, and term.
+            </div>
           </div>
         )}
 
