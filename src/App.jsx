@@ -3762,10 +3762,33 @@ function bandOf(apr, benchmark){
 function heatOf(t){ return t < 0.34 ? "g" : (t < 0.67 ? "a" : "r"); }
 
 function FinancingBreakdown({ analysis, C, cardStyle }){
-  // Price anchor: the quoted price when present, else the listed MSRP so the
-  // card still renders for listing-URL analyses that only resolved an MSRP.
-  const priceIsQuote = Number(analysis?.quotedPrice) > 0;
-  const price = Number(analysis?.quotedPrice) || Number(analysis?.msrp) || 0;
+  // ── Price-verification gate ──────────────────────────────────────────────
+  // The financing math is only as trustworthy as the price it runs on. A
+  // listing whose real price we couldn't extract must NEVER present MSRP-based
+  // payments as if they were the listing's actual payments -- a confidently-
+  // wrong payment number is a trust failure. We therefore track the price's
+  // SOURCE and render differently for each:
+  //   'listing' -> analysis.quotedPrice is a verified listing price. Normal.
+  //   'msrp'    -> only an MSRP is known. ESTIMATE MODE: a loud warning, the
+  //                hero relabelled "from MSRP", never the word "listed", and an
+  //                editable price so the buyer can enter the real number.
+  //   'none'    -> no price at all. Prompt for one; don't render the matrix.
+  // A price the USER types is treated as confirmed ('user'): it recomputes the
+  // whole card and drops the warning, but is deliberately NOT written back to
+  // analysis.quotedPrice, so the verified-only overprice-vs-MSRP flag (which
+  // keys off analysis.quotedPrice) stays off for an unverified number.
+  const quotedPrice = Number(analysis?.quotedPrice) || 0;
+  const msrpVal = Number(analysis?.msrp) || 0;
+  const baseSource = quotedPrice > 0 ? "listing" : msrpVal > 0 ? "msrp" : "none";
+  const [priceStr, setPriceStr] = useState(baseSource === "msrp" ? String(msrpVal) : "");
+  const [priceConfirmed, setPriceConfirmed] = useState(false);
+  const enteredPrice = Number(priceStr) || 0;
+  // Effective price + source that everything below renders from.
+  let priceSource, price;
+  if (baseSource === "listing") { priceSource = "listing"; price = quotedPrice; }
+  else if (priceConfirmed && enteredPrice > 0) { priceSource = "user"; price = enteredPrice; }
+  else if (baseSource === "msrp") { priceSource = "msrp"; price = msrpVal; }
+  else { priceSource = "none"; price = 0; }
   const disclosedRate = Number(analysis?.financing?.rate) || null;
   const mfr = analysis?.financeRates?.manufacturer || null;
   const mfrRate = mfr?.apr != null ? Number(mfr.apr) : null;
@@ -3856,7 +3879,8 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   };
   const clearTilt = () => setTilt("");
 
-  if(!(price > 0)) return null;
+  // No early null-return on a missing price anymore: 'none' mode renders a
+  // price prompt (below) instead of silently disappearing.
 
   const money = n => `$${Math.round(n).toLocaleString("en-CA")}`;
   const downs = FIN_DOWN.filter(d => d < price);
@@ -3984,6 +4008,30 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const vehLine = [analysis?.year, analysis?.make, analysis?.model].filter(Boolean).join(" ");
   const heroReady = mounted || reduceMotion;
 
+  // 'none' mode: no price at all -- never fabricate a payment matrix off
+  // nothing. Prompt for the real price; entering it flips to user-confirmed
+  // ('user' source) and the full breakdown renders on the next pass.
+  if (priceSource === "none") {
+    return (
+      <div style={{...cardStyle}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+        {vehLine && <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>{vehLine}{analysis?.vehicleCondition?` · ${analysis.vehicleCondition}`:""}</div>}
+        <div style={{fontSize:12.5,color:C.inkSoft,marginTop:10,lineHeight:1.55}}>
+          We couldn't find this vehicle's price, so there's nothing to base a payment on yet. Enter the price to see your financing breakdown.
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"8px 12px"}}>
+            <span style={{color:C.inkFaint,fontSize:15}}>$</span>
+            <input type="number" inputMode="numeric" min="0" placeholder="e.g. 32,000" value={priceStr}
+              onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+              style={{width:120,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,outline:"none"}}/>
+          </div>
+          <span style={{fontSize:12,color:C.inkFaint}}>The vehicle's price before tax.</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ perspective: reduceMotion ? undefined : 1400 }} onMouseMove={onTilt} onMouseLeave={clearTilt}>
       <div style={{
@@ -3998,10 +4046,55 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           <div>
             <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
             <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>
-              {vehLine ? `${vehLine} · ` : ""}{priceIsQuote ? "quoted" : "listed"} <b style={{color:C.inkSoft}}>{money(price)}</b>{analysis?.vehicleCondition ? ` · ${analysis.vehicleCondition}` : ""}
+              {vehLine ? `${vehLine} · ` : ""}
+              {priceSource === "msrp"
+                ? <>estimated from the <b style={{color:C.inkSoft}}>{money(price)}</b> MSRP</>
+                : priceSource === "user"
+                ? <>based on the price you entered <b style={{color:C.inkSoft}}>{money(price)}</b></>
+                : <>based on the listed price <b style={{color:C.inkSoft}}>{money(price)}</b></>}
+              {analysis?.vehicleCondition ? ` · ${analysis.vehicleCondition}` : ""}
+              {priceSource === "listing" && analysis?.quotedPriceSource === "sm360_feed" && (
+                <span style={{color:C.tealInk,fontWeight:700}}> · verified from dealer listing</span>
+              )}
             </div>
           </div>
         </div>
+
+        {/* ESTIMATE MODE (source 'msrp'): the listing's real price wasn't
+            confirmed, so everything below is computed off MSRP. Loud, unmissable
+            warning + an editable price. Typing a real price flips the card to
+            user-confirmed and drops this banner. Never call an MSRP "listed". */}
+        {priceSource === "msrp" && (
+          <div style={{marginTop:14,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12.5,color:C.coralInk,fontWeight:800,lineHeight:1.55}}>
+              ⚠ We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:12,fontWeight:700,color:C.coralInk}}>Actual listing price:</span>
+              <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+                <span style={{color:C.inkFaint,fontSize:14}}>$</span>
+                <input type="number" inputMode="numeric" min="0" value={priceStr}
+                  onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                  style={{width:110,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,textAlign:"right",outline:"none"}}/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User-confirmed price (source 'user'): the buyer typed a real price,
+            so the card recomputed off it and the estimate warning is gone. Keep
+            the field visible so they can correct it. */}
+        {priceSource === "user" && (
+          <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,color:C.inkSoft}}>Using the price you entered:</span>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"5px 9px"}}>
+              <span style={{color:C.inkFaint,fontSize:13}}>$</span>
+              <input type="number" inputMode="numeric" min="0" value={priceStr}
+                onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                style={{width:100,background:"transparent",border:0,color:C.ink,fontSize:16,fontWeight:700,textAlign:"right",outline:"none"}}/>
+            </div>
+          </div>
+        )}
 
         {/* HERO: the payment leads, with the editable APR as the hero control.
             Glow + band pill are traffic-light coloured by how the rate compares
@@ -4015,7 +4108,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           transition: reduceMotion ? "none" : "box-shadow .4s ease, border-color .4s ease, background .4s ease",
         }}>
           <div>
-            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your estimated payment</div>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>{priceSource === "msrp" ? "Estimated payment (from MSRP)" : "Your estimated payment"}</div>
             <div style={{fontSize:40,fontWeight:800,letterSpacing:-1.5,lineHeight:1,marginTop:5,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
               {aprValid ? money(shownPay) : "—"}<span style={{fontSize:14,color:C.inkFaint,fontWeight:600,letterSpacing:0}}>{aprValid ? freqSuffix : ""}</span>
             </div>
