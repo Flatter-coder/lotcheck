@@ -69,6 +69,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-ford.mjs
+      - name: Ford rates (Convertus dealer feed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-ford-rates.mjs
       - name: Lincoln — MSRP only
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -109,6 +114,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-nissan.mjs
+      - name: Nissan rates (Convertus dealer feed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-nissan-rates.mjs
       - name: Infiniti — MSRP only
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
