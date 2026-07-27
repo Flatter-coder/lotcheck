@@ -40,7 +40,24 @@ async function replaceRows(table, rows, make, { fatal = true } = {}) {
   }
 }
 
+// Collapse rows that would collide on a table's unique key before inserting.
+// The pre-existing msrp_catalog has UNIQUE(year,make,model,trim), and some
+// source catalogs list a trim twice (two configs resolve to the same grade
+// name); keep the lowest price/apr = the advertised "starting" figure, matching
+// how the dealer-feed scrapers already dedupe per trim.
+export function dedupeBy(rows, keyFn, lowerField) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyFn(r);
+    const prev = m.get(k);
+    if (!prev || (Number(r[lowerField]) || Infinity) < (Number(prev[lowerField]) || Infinity)) m.set(k, r);
+  }
+  return [...m.values()];
+}
+
 export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }, opts = {}) {
+  msrpRows = dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp");
+  financeRows = dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr");
   if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {
     const outDir = join(__dirname, "..", "out"); mkdirSync(outDir, { recursive: true });
     const file = join(outDir, `${make.toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);

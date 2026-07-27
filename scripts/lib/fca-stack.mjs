@@ -16,6 +16,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dedupeBy } from "./catalog-io.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -148,7 +149,7 @@ export async function run() {
   // Group by make so delete-then-insert stays per-make.
   for (const make of [...new Set(all.msrpRows.map(r => r.make))]) {
     // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily run).
-    if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", all.msrpRows.filter(r => r.make === make), make);
+    if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", dedupeBy(all.msrpRows.filter(r => r.make === make), r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp"), make);
     else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
     await replaceRows("finance_rate_catalog", all.financeRows.filter(r => r.make === make), make);
     await replaceRows("lease_rate_catalog", all.leaseRows.filter(r => r.make === make), make, { fatal: false });
