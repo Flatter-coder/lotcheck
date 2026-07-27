@@ -3884,6 +3884,30 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const dealerBand = dealerRate != null ? bandOf(dealerRate, benchmark) : null;
   const dealerTL = dealerBand ? TL[dealerBand] : null;
 
+  // LEASE (Phase 1 -- rates only, no lease payment figures; those need
+  // residual/advertised-payment data we don't yet capture). analysis exposes
+  // only leaseRates.manufacturer (the advertised/manufacturer lease APR) --
+  // there is NO dealer/listing-stated lease APR (no leaseRates.dealer analog
+  // of financeRates.dealer), so the lease view is one-sided. The read below is
+  // forward-compatible: if a leaseRates.dealer ever appears, the two-sided
+  // comparison renders automatically.
+  const leaseDealerRate = analysis?.leaseRates?.dealer?.apr != null ? Number(analysis.leaseRates.dealer.apr) : null;
+  const leaseTwoSided = leaseDealerRate != null && leaseRate != null;
+  // Band benchmark: the manufacturer lease APR when we're banding a *separate*
+  // dealer lease rate against it (two-sided); otherwise BoC+2.5 (same external
+  // benchmark the finance used-vehicle path uses) so a single advertised lease
+  // rate still gets a real green/amber/red reading rather than being compared
+  // to itself. null -> neutral, never fabricated.
+  const leaseBenchmark = leaseTwoSided ? leaseRate : (bocRate != null ? bocRate + 2.5 : null);
+  const leaseRateToBand = leaseTwoSided ? leaseDealerRate : leaseRate;
+  // On a USED vehicle a manufacturer lease is a NEW-car promo -> reference
+  // only, not this car's applicable rate (mirrors the finance guard), so no
+  // applicable band is presented in that case.
+  const leaseApplicable = isNew || leaseTwoSided;
+  const leaseBand = (leaseApplicable && leaseRateToBand != null) ? bandOf(leaseRateToBand, leaseBenchmark) : null;
+  const leaseTL = leaseBand ? TL[leaseBand] : null;
+  const leaseSpread = leaseTwoSided ? (leaseDealerRate - leaseRate) : null;
+
   // Recommendation ("What we'd do") -- tailored bullets, ported from the
   // reference design's logic and wired to the resolved rates.
   const monthlyPay = a => amortPayment(Pq, a, 12, quoteTerm);
@@ -4007,11 +4031,29 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
               <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{isNew?(mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"best available"):"reference only"}</div>
             </div>
           )}
+          {/* LEASE APR (Phase 1: rates only). Two-sided (dealer-lease vs
+              manufacturer-lease, with spread) only if a dealer/listing lease
+              APR is ever present; today analysis has only the advertised
+              manufacturer lease rate, so this renders one clearly-labelled,
+              band-coloured chip. On used, the manufacturer lease is a NEW-car
+              promo -> reference only (dashed, no applicable band). */}
+          {leaseTwoSided && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:leaseTL?leaseTL.bg:C.paper2,border:`1px solid ${leaseTL?leaseTL.bd:C.line}`}}>
+              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Lease · on your quote</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>{leaseDealerRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseBand?bandLabel(leaseBand).toLowerCase():"dealer lease APR"}</div>
+            </div>
+          )}
           {leaseRate != null && (
-            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:C.paper2,border:`1px solid ${C.line}`}}>
-              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{analysis.make||"Manufacturer"} lease</div>
-              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{leaseRate}%</div>
-              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseTerm?`${leaseTerm}mo`:"lease rate"}{leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}</div>
+            <div style={{
+              borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",
+              background: leaseApplicable ? (leaseTL?leaseTL.bg:C.paper2) : "transparent",
+              border: leaseApplicable ? `1px solid ${leaseTL?leaseTL.bd:C.line}` : `1px dashed ${C.line}`,
+              opacity: leaseApplicable ? 1 : .72,
+            }}>
+              <div style={{fontSize:10.5,color:leaseApplicable&&leaseTL?leaseTL.fg:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{leaseTwoSided?`${analysis.make||"Manufacturer"} lease`:`${analysis.make||"Advertised"} ${isNew?"advertised lease":"new-car lease"}`}</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseApplicable?(leaseTL?leaseTL.fg:C.ink):C.inkSoft,fontVariantNumeric:"tabular-nums"}}>{leaseRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseApplicable&&!leaseTwoSided&&leaseBand?`${bandLabel(leaseBand).toLowerCase()} · `:""}{!leaseApplicable?"reference only":`${leaseTerm?`${leaseTerm}mo`:"lease rate"}${leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}`}</div>
             </div>
           )}
           <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:C.paper2,border:`1px solid ${C.line}`}}>
@@ -4051,6 +4093,28 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             </div>
           );
         })()}
+
+        {/* LEASE markup warning (forward-compatible): only when a dealer/listing
+            lease APR exists alongside the manufacturer lease rate on a new
+            vehicle. Mirrors the finance spread treatment, rate-only (no lease
+            payment/extra-cost figure -- that needs residual data we don't
+            capture yet, deferred to Phase 2). */}
+        {leaseTwoSided && isNew && leaseSpread != null && leaseSpread > 0.1 && (
+          <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
+          </div>
+        )}
+
+        {/* One-sided lease note: analysis carries only the advertised lease
+            rate, so there's no dealer-lease rate to compare against. Keep it
+            honest -- say so, and don't invent a second number. */}
+        {leaseRate != null && !leaseTwoSided && (
+          <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+            {isNew
+              ? <>Lease shown is {analysis.make}'s advertised lease APR. A side-by-side lease comparison — your dealer's lease rate vs this — needs a lease rate stated on the listing.</>
+              : <>{analysis.make}'s lease rate is a new-car promo, shown for reference — it doesn't apply to a used vehicle. A side-by-side lease comparison needs a lease rate stated on the listing.</>}
+          </div>
+        )}
 
         {!rateIsReal && (
           <div style={{fontSize:12,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
