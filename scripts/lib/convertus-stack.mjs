@@ -58,7 +58,7 @@ export async function run(cfg) {
         for (const l of (Array.isArray(v.lease) ? v.lease : [])) {
           const term = Number(l.lease_term), apr = Number(l.lease_rate);
           const k = `${model}|${term}`;
-          if (term && apr > 0 && !leaseSeen.has(k)) { leaseSeen.add(k); leaseRows.push({ make: cfg.make, model, apr, term_months: term, annual_km: Number(l.lease_annual_km) || null, effective_date: today }); }
+          if (term && apr > 0 && !leaseSeen.has(k)) { leaseSeen.add(k); leaseRows.push({ make: cfg.make, model, apr, term_months: term, annual_km: Number(l.lease_km_allowance) || null, effective_date: today }); }
         }
       }
       await sleep(150);
