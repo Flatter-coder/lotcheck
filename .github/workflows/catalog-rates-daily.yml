@@ -44,6 +44,8 @@ jobs:
         run: node scripts/scrape-subaru.mjs
       - name: Volkswagen rates
         run: node scripts/scrape-vw.mjs
+      - name: BMW rates
+        run: node scripts/scrape-bmw.mjs
       - name: Summary
         if: success()
         run: echo "✅ Daily rate refresh complete — $(date)"

@@ -80,3 +80,4 @@ Remaining (each blocked or a dedicated deep-dig — NOT quick):
 - Mitsubishi — open GraphQL but the resolver returns empty (backend CMS mapping dead-end). See MITSUBISHI-NOTES.md.
 
 Open RATE captures to upgrade MSRP-only → full: GM (IPE), Ford (estimate-payment), Mercedes (payment-estimator), Kia, Nissan/Infiniti (gated GraphQL). Each is a browser capture like Honda/Ford.
+- **BMW** — `scrape-bmw.mjs`, MSRP + finance/lease via the SM360 dealer inventory feed (bmw.ca prices are identity-gated). Calgary BMW; listPrice=MSRP, deduped to starting-price-per-trim; default-term rates. 25 models. See BMW-NOTES.md.

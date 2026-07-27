@@ -119,6 +119,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-vw.mjs
+      - name: BMW — MSRP + finance/lease (via SM360 dealer feed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/scrape-bmw.mjs
       - name: Summary
         if: success()
         run: echo "✅ Catalog refresh complete — $(date)"

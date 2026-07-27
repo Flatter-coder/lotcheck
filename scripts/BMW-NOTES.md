@@ -1,3 +1,19 @@
+# BMW scraper — SHIPPED (via SM360 dealer feed)
+
+**Solved 2026-07-27.** bmw.ca gates all prices (below), but BMW dealers on the
+SM360 platform (Dilawri) expose a public inventory JSON feed with the real MSRP
+AND advertised finance/lease APR. `scrape-bmw.mjs` reads Calgary BMW:
+  GET https://www.calgarybmw.ca/en/new-inventory/api/listing?page=N
+  -> vehicles[].{ year, make.name, model.name, trim.name, listPrice (=MSRP),
+                  paymentOptions.finance.term.{term,apr}, paymentOptions.lease.term.{term,apr,kmPerYearPlan} }
+listPrice == salePrice for BMW (no discounting) = clean MSRP. We keep the LOWEST
+listPrice per (year,model,trim) as the starting MSRP; rates are the default-term
+advertised APR. Verified: 51 MSRP / 25 finance / 27 lease across 25 models
+(X1-X7, 2/3/4/5/7/8-Series, M-cars, i4/i5/iX, X5 PHEV, Alpina XB7). Add more
+SM360 BMW dealers to DEALERS[] for wider trim coverage.
+
+---
+## (historical) bmw.ca UCP recon — config open, prices identity-gated
 # BMW scraper — API cracked, but prices are auth-gated
 
 Major progress this session: the UCP API, key, model tree, and all pricing
