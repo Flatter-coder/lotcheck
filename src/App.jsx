@@ -3717,6 +3717,562 @@ const FILE_SCAN_STAGES = [
   { at: 22, text: "Putting your report together…" },
 ];
 
+// ── Financing breakdown ───────────────────────────────────────────────────
+// Pure amortization off the quoted price. Nothing here is fetched from a
+// catalog or guessed from a model: given a price, an APR the buyer sets, a
+// down payment, a term and a payment frequency, the periodic payment is
+// deterministic and always correct. The only external rate anchors shown are
+// ones that are actually real -- the rate the quote itself disclosed, any
+// manufacturer rate the backend already resolved (finance_rate_catalog), and
+// the Bank of Canada policy rate fetched LIVE from the BoC Valet API (dated,
+// with a source link). No illustrative payment is ever labelled a firm offer.
+const FIN_DOWN = [0, 5000, 10000, 15000, 20000];
+const FIN_TERMS = [24, 36, 48, 60, 72, 84];
+const FIN_FREQS = [
+  { key: "monthly",  label: "Monthly",   per: 12 },
+  { key: "biweekly", label: "Bi-weekly", per: 26 },
+  { key: "weekly",   label: "Weekly",    per: 52 },
+];
+
+// Standard amortized payment. principal in $, annualPct in %, per = periods/yr.
+// i===0 (0% promo) collapses to straight-line principal / n.
+function amortPayment(principal, annualPct, per, termMonths){
+  if(!(principal > 0)) return 0;
+  const n = Math.round((termMonths / 12) * per);
+  if(!n) return 0;
+  const i = (Number(annualPct) || 0) / 100 / per;
+  if(i === 0) return principal / n;
+  return principal * i / (1 - Math.pow(1 + i, -n));
+}
+
+// Traffic-light banding (ported from financing-examples-15.html):
+//   green  if apr <= benchmark + 0.25
+//   amber  if apr <= benchmark + 2
+//   red    beyond
+// Benchmark is the manufacturer APR (new) or BoC+2.5 (used); when it can't be
+// determined (no manufacturer rate on a new car / BoC not loaded on a used
+// car) we return null = neutral, so no green/amber/red claim is fabricated.
+function bandOf(apr, benchmark){
+  if(benchmark == null || !Number.isFinite(apr)) return null;
+  if(apr <= benchmark + 0.25) return "g";
+  if(apr <= benchmark + 2)    return "a";
+  return "r";
+}
+// Heatmap tertiles over a 0..1 relative-interest position. Greener = cheaper.
+function heatOf(t){ return t < 0.34 ? "g" : (t < 0.67 ? "a" : "r"); }
+
+function FinancingBreakdown({ analysis, C, cardStyle }){
+  // Price anchor: the quoted price when present, else the listed MSRP so the
+  // card still renders for listing-URL analyses that only resolved an MSRP.
+  const priceIsQuote = Number(analysis?.quotedPrice) > 0;
+  const price = Number(analysis?.quotedPrice) || Number(analysis?.msrp) || 0;
+  const disclosedRate = Number(analysis?.financing?.rate) || null;
+  const mfr = analysis?.financeRates?.manufacturer || null;
+  const mfrRate = mfr?.apr != null ? Number(mfr.apr) : null;
+  const dealerRate = analysis?.financeRates?.dealer?.apr != null
+    ? Number(analysis.financeRates.dealer.apr)
+    : (disclosedRate || null);
+  const lease = analysis?.leaseRates?.manufacturer || null;
+  const leaseRate = lease?.apr != null ? Number(lease.apr) : null;
+  const leaseKm = lease?.annualKm || null;
+  const leaseTerm = lease?.termMonths || null;
+  const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
+  const disclosedFreq = analysis?.financing?.paymentFrequency || null;
+  // New-vs-used: main keys new/used on analysis.vehicleCondition==="new". A
+  // manufacturer advertised/promo rate is a NEW-vehicle offer, so on a used
+  // vehicle it's a labelled reference, never this car's applicable rate.
+  const isNew = analysis?.vehicleCondition === "new";
+  // How far THIS dealer's disclosed APR sits above the manufacturer's
+  // advertised rate (only meaningful when both exist) -- drives the markup
+  // warning below, same threshold/math as main's "Financing examples" card.
+  const spread = (dealerRate != null && mfrRate != null) ? (dealerRate - mfrRate) : null;
+  // Freshness of the manufacturer rate data (finance_rate_catalog /
+  // lease_rate_catalog effective_date). Refreshed daily by the rates job.
+  const fmtDate = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||"")); const MO=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return m ? `${MO[+m[2]-1]} ${+m[3]}, ${m[1]}` : s; };
+  const ratesAsOf = [mfr?.effectiveDate, lease?.effectiveDate].filter(Boolean).sort().pop() || null;
+
+  // The quote's term/down anchor the hero payment and the highlighted grid
+  // cell. analysis carries no disclosed down-payment, so the quote row is $0.
+  const quoteTerm = FIN_TERMS.includes(disclosedTerm) ? disclosedTerm : 60;
+  const quoteDown = 0;
+
+  const reduceMotion = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion:reduce)").matches : false;
+
+  const defaultRate = dealerRate || mfrRate || 6.99;
+  const rateIsReal = dealerRate != null || mfrRate != null;
+  const [aprStr, setApr] = useState(String(defaultRate));
+  const apr = Number(aprStr);
+  const aprValid = Number.isFinite(apr) && apr >= 0 && apr < 40;
+  const [freqKey, setFreqKey] = useState(
+    FIN_FREQS.some(f => f.key === disclosedFreq) ? disclosedFreq : "monthly"
+  );
+  const freq = FIN_FREQS.find(f => f.key === freqKey) || FIN_FREQS[0];
+
+  // Bank of Canada policy rate -- live, dated, real. null=loading,
+  // "error"=fetch failed (fall back to a source link).
+  const [boc, setBoc] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("https://www.bankofcanada.ca/valet/observations/V39079/json?recent=1")
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => {
+        const o = d?.observations?.[0];
+        const rate = o?.V39079?.v;
+        if(alive && rate) setBoc({ rate: Number(rate), date: o.d });
+        else if(alive) setBoc("error");
+      })
+      .catch(() => { if(alive) setBoc("error"); });
+    return () => { alive = false; };
+  }, []);
+
+  // Hero payment (quote term/down, current rate & frequency) with a
+  // reduced-motion-safe count-up.
+  const Pq = Math.max(0, price - quoteDown);
+  const heroPay = aprValid ? amortPayment(Pq, apr, freq.per, quoteTerm) : 0;
+  const [shownPay, setShownPay] = useState(heroPay);
+  const prevPayRef = useRef(heroPay);
+  useEffect(() => {
+    if(reduceMotion){ setShownPay(heroPay); prevPayRef.current = heroPay; return; }
+    let raf, t0 = null; const from = prevPayRef.current;
+    const step = ts => {
+      t0 = t0 || ts; const k = Math.min(1, (ts - t0) / 480); const e = 1 - Math.pow(1 - k, 3);
+      setShownPay(from + (heroPay - from) * e);
+      if(k < 1) raf = requestAnimationFrame(step); else prevPayRef.current = heroPay;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [heroPay, reduceMotion]);
+
+  // Card entrance fade-in + subtle pointer tilt (both reduced-motion-safe).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const [tilt, setTilt] = useState("");
+  const onTilt = e => {
+    if(reduceMotion) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+    setTilt(`rotateY(${(px * 2.4).toFixed(2)}deg) rotateX(${(-py * 2.4).toFixed(2)}deg)`);
+  };
+  const clearTilt = () => setTilt("");
+
+  if(!(price > 0)) return null;
+
+  const money = n => `$${Math.round(n).toLocaleString("en-CA")}`;
+  const downs = FIN_DOWN.filter(d => d < price);
+
+  // Traffic-light triad mapped to the theme-aware brand palette so it reads on
+  // the report's light / dark / outdoor themes (green->teal, amber->butter,
+  // red->coral -- the app's established good/caution/bad coding). Blue
+  // (#3b82f6, already used elsewhere in the app) is reserved for interactive
+  // accents only: the active frequency toggle and the quote-cell outline.
+  const TL = {
+    g: { fg:C.tealInk,   bg:C.tealBg,   bd:C.teal   },
+    a: { fg:C.butterInk, bg:C.butterBg, bd:C.butter },
+    r: { fg:C.coralInk,  bg:C.coralBg,  bd:C.coral  },
+  };
+  const BLUE = "#3b82f6";
+  const bandLabel = b => b === "g" ? "Good rate" : b === "a" ? "Average rate" : b === "r" ? "High rate" : "Rate";
+  const freqSuffix = { monthly:"/mo", biweekly:"/2wk", weekly:"/wk" }[freq.key] || "/mo";
+
+  // Benchmark for the dealer/hero band: the manufacturer APR (new) or BoC+2.5
+  // (used). null when it can't be determined -> neutral, never fabricated.
+  const bocRate = (boc && boc !== "error") ? boc.rate : null;
+  const benchmark = isNew ? mfrRate : (bocRate != null ? bocRate + 2.5 : null);
+  const heroBand = aprValid ? bandOf(apr, benchmark) : null;
+  const heroTL = heroBand ? TL[heroBand] : null;
+  const dealerBand = dealerRate != null ? bandOf(dealerRate, benchmark) : null;
+  const dealerTL = dealerBand ? TL[dealerBand] : null;
+
+  // LEASE (Phase 1 -- rates only, no lease payment figures; those need
+  // residual/advertised-payment data we don't yet capture). analysis exposes
+  // only leaseRates.manufacturer (the advertised/manufacturer lease APR) --
+  // there is NO dealer/listing-stated lease APR (no leaseRates.dealer analog
+  // of financeRates.dealer), so the lease view is one-sided. The read below is
+  // forward-compatible: if a leaseRates.dealer ever appears, the two-sided
+  // comparison renders automatically.
+  const leaseDealerRate = analysis?.leaseRates?.dealer?.apr != null ? Number(analysis.leaseRates.dealer.apr) : null;
+  const leaseTwoSided = leaseDealerRate != null && leaseRate != null;
+  // Band benchmark: the manufacturer lease APR when we're banding a *separate*
+  // dealer lease rate against it (two-sided); otherwise BoC+2.5 (same external
+  // benchmark the finance used-vehicle path uses) so a single advertised lease
+  // rate still gets a real green/amber/red reading rather than being compared
+  // to itself. null -> neutral, never fabricated.
+  const leaseBenchmark = leaseTwoSided ? leaseRate : (bocRate != null ? bocRate + 2.5 : null);
+  const leaseRateToBand = leaseTwoSided ? leaseDealerRate : leaseRate;
+  // On a USED vehicle a manufacturer lease is a NEW-car promo -> reference
+  // only, not this car's applicable rate (mirrors the finance guard), so no
+  // applicable band is presented in that case.
+  const leaseApplicable = isNew || leaseTwoSided;
+  const leaseBand = (leaseApplicable && leaseRateToBand != null) ? bandOf(leaseRateToBand, leaseBenchmark) : null;
+  const leaseTL = leaseBand ? TL[leaseBand] : null;
+  const leaseSpread = leaseTwoSided ? (leaseDealerRate - leaseRate) : null;
+
+  // Phase-2 lease PAYMENT. Two mutually-exclusive catalog shapes:
+  //  - manufacturer.payment (source 'advertised'): a FIXED advertised example
+  //    for the scraped dealer's own vehicle -- shown as a reference, NEVER
+  //    recomputed for the user.
+  //  - manufacturer.lease (source 'computed'): residual %, apr, term -> the
+  //    payment is computed HERE on the USER's own price/msrp.
+  const leaseAdvertised = lease?.payment?.source === "advertised" ? lease.payment : null;
+  const leaseComputed = lease?.lease?.source === "computed" ? lease.lease : null;
+  const userMsrp = Number(analysis?.msrp) || null;
+  // Residual-based monthly lease payment for the USER's vehicle (validated
+  // formula, within ~1.65% of a real advertised payment). residualValue =
+  // residualPct x the USER's msrp; capCost = the USER's price minus the down
+  // ($0-down here, matching the hero, so capCost = price). The catalog's
+  // scraped cap_cost/down_payment/selling_price are deliberately NOT used.
+  // No msrp -> no computed payment (a residual can't be honestly derived).
+  let leaseComputedPayment = null;
+  if (leaseApplicable && leaseComputed && userMsrp) {
+    const lterm = leaseComputed.term || leaseTerm || 48;
+    const residualValue = leaseComputed.residualPct * userMsrp;
+    const capCost = Math.max(0, price - quoteDown);
+    const depreciation = (capCost - residualValue) / lterm;
+    const rent = (capCost + residualValue) * (leaseComputed.apr / 2400);
+    const amount = depreciation + rent;
+    if (amount > 0 && Number.isFinite(amount)) {
+      leaseComputedPayment = { amount, term: lterm, annualKm: leaseComputed.annualKm ?? leaseKm, residualPct: leaseComputed.residualPct, apr: leaseComputed.apr };
+    }
+  }
+
+  // Recommendation ("What we'd do") -- tailored bullets, ported from the
+  // reference design's logic and wired to the resolved rates.
+  const monthlyPay = a => amortPayment(Pq, a, 12, quoteTerm);
+  const mpQt = aprValid ? monthlyPay(apr) : 0;
+  const mpShorter = aprValid ? amortPayment(Pq, apr, 12, Math.max(24, quoteTerm > 36 ? quoteTerm - 12 : 24)) : 0;
+  const shorter = quoteTerm > 36 ? quoteTerm - 12 : 24;
+  const intNow = mpQt > 0 ? mpQt * quoteTerm - Pq : 0;
+  const dInt = intNow - (mpShorter * shorter - Pq);
+  const dPayMo = mpShorter - mpQt;
+  const bullets = [];
+  let recHead = "What we'd do";
+  if(aprValid){
+    if(isNew && mfrRate != null && apr - mfrRate > 0.1){
+      const dMfr = (mpQt - monthlyPay(mfrRate)) * quoteTerm;
+      bullets.push(<><b>Ask for {analysis.make}'s {mfrRate}%.</b> The dealer's {apr}% costs ~{money(dMfr)} more over {quoteTerm} months.</>);
+    } else if(isNew && mfrRate != null){
+      recHead = "✓ This one looks fair";
+      bullets.push(<><b>Dealer is offering the advertised rate</b> — no markup to negotiate.</>);
+    } else if(!isNew){
+      if(bocRate != null){
+        const preRate = Math.max(bocRate + 1.5, mfrRate ?? 0);
+        const dPre = (mpQt - monthlyPay(preRate)) * quoteTerm;
+        bullets.push(<><b>Get pre-approved first.</b> {apr}% is {(apr - bocRate).toFixed(1)} pts over the Bank of Canada rate; ~{preRate.toFixed(1)}% would save ~{money(dPre)} over {quoteTerm} months.</>);
+      } else {
+        bullets.push(<><b>Get pre-approved before you sign.</b> Used-car APRs vary widely by lender and credit — a competing pre-approval is your leverage.</>);
+      }
+    }
+    if(dInt > 150) bullets.push(<><b>A shorter term saves interest.</b> {quoteTerm} mo pays {money(intNow)} in interest; {shorter} mo is +{money(dPayMo)}/mo but −{money(dInt)} overall.</>);
+    if(!isNew && mfrRate != null) bullets.push(<><b>{analysis.make}'s rate is a new-car promo</b> — it doesn't apply here; negotiate the number above.</>);
+  }
+  const recColor = heroTL ? heroTL.fg : C.inkSoft;
+
+  // Heatmap grid: shade each cell green->amber->red by its total interest
+  // relative to the min/max across the visible grid. Greener = cheaper.
+  const cellData = downs.map(d => FIN_TERMS.map(t => {
+    const P = price - d;
+    const m = (aprValid && P > 0) ? amortPayment(P, apr, freq.per, t) : 0;
+    const n = (t / 12) * freq.per;
+    const interest = m > 0 ? m * n - P : 0;
+    return { d, t, P, m, interest };
+  }));
+  const allInterest = cellData.flat().filter(c => c.P > 0).map(c => c.interest);
+  const mn = allInterest.length ? Math.min(...allInterest) : 0;
+  const mx = allInterest.length ? Math.max(...allInterest) : 0;
+
+  const vehLine = [analysis?.year, analysis?.make, analysis?.model].filter(Boolean).join(" ");
+  const heroReady = mounted || reduceMotion;
+
+  return (
+    <div style={{ perspective: reduceMotion ? undefined : 1400 }} onMouseMove={onTilt} onMouseLeave={clearTilt}>
+      <div style={{
+        ...cardStyle,
+        transform: tilt || undefined,
+        transformStyle: "preserve-3d",
+        opacity: heroReady ? 1 : 0,
+        translate: heroReady ? "0 0" : "0 16px",
+        transition: reduceMotion ? "none" : "transform .18s cubic-bezier(.16,1,.3,1), opacity .5s ease, translate .5s cubic-bezier(.16,1,.3,1)",
+      }}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+            <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>
+              {vehLine ? `${vehLine} · ` : ""}{priceIsQuote ? "quoted" : "listed"} <b style={{color:C.inkSoft}}>{money(price)}</b>{analysis?.vehicleCondition ? ` · ${analysis.vehicleCondition}` : ""}
+            </div>
+          </div>
+        </div>
+
+        {/* HERO: the payment leads, with the editable APR as the hero control.
+            Glow + band pill are traffic-light coloured by how the rate compares
+            to its benchmark (manufacturer when new, BoC+2.5 when used). */}
+        <div style={{
+          marginTop:14, borderRadius:16, padding:"16px 18px",
+          display:"flex", alignItems:"center", justifyContent:"space-between", gap:16, flexWrap:"wrap",
+          background: heroTL ? heroTL.bg : C.paper2,
+          border: `1px solid ${heroTL ? heroTL.bd : C.line}`,
+          boxShadow: (heroTL && !reduceMotion) ? `0 0 34px -12px ${heroTL.bd}` : "none",
+          transition: reduceMotion ? "none" : "box-shadow .4s ease, border-color .4s ease, background .4s ease",
+        }}>
+          <div>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your estimated payment</div>
+            <div style={{fontSize:40,fontWeight:800,letterSpacing:-1.5,lineHeight:1,marginTop:5,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {aprValid ? money(shownPay) : "—"}<span style={{fontSize:14,color:C.inkFaint,fontWeight:600,letterSpacing:0}}>{aprValid ? freqSuffix : ""}</span>
+            </div>
+            <div style={{fontSize:12,color:C.inkFaint,marginTop:7}}>at {aprValid ? apr : "—"}% · {money(quoteDown)} down · {quoteTerm} months</div>
+            {heroBand && (
+              <div style={{display:"inline-block",fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:20,marginTop:9,background:heroTL.bg,color:heroTL.fg}}>{bandLabel(heroBand)}</div>
+            )}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7,alignItems:"flex-end"}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your rate (edit)</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${aprValid ? C.line : C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+              <input type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
+                onChange={e => setApr(e.target.value)}
+                style={{width:70,background:"transparent",border:0,color:C.ink,fontSize:19,fontWeight:700,textAlign:"right",outline:"none"}}/>
+              <span style={{color:C.inkFaint,fontSize:14}}>%</span>
+            </div>
+            <div style={{display:"inline-flex",gap:4,background:C.paper2,borderRadius:10,padding:3}}>
+              {FIN_FREQS.map(f => (
+                <button key={f.key} onClick={() => setFreqKey(f.key)}
+                  style={{background:freqKey===f.key?BLUE:"transparent",color:freqKey===f.key?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"5px 11px",fontSize:12,fontWeight:800,cursor:"pointer",transition:reduceMotion?"none":"background .18s"}}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Rate anchors -- only real ones; each coloured by its own band */}
+        <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:14}}>
+          {dealerRate != null && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:dealerTL?dealerTL.bg:C.paper2,border:`1px solid ${dealerTL?dealerTL.bd:C.line}`}}>
+              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>On your quote</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:dealerTL?dealerTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>{dealerRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{dealerBand?bandLabel(dealerBand).toLowerCase():"dealer / lender APR"}</div>
+            </div>
+          )}
+          {mfrRate != null && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:isNew?C.tealBg:"transparent",border:isNew?`1px solid ${C.teal}`:`1px dashed ${C.line}`,opacity:isNew?1:.72}}>
+              <div style={{fontSize:10.5,color:isNew?C.tealInk:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{analysis.make||"Manufacturer"} {isNew?`advertised${mfr?.promo?" · promo":""}`:"new-car"}</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:isNew?C.tealInk:C.inkSoft,fontVariantNumeric:"tabular-nums"}}>{mfrRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{isNew?(mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"best available"):"reference only"}</div>
+            </div>
+          )}
+          {/* LEASE APR (Phase 1: rates only). Two-sided (dealer-lease vs
+              manufacturer-lease, with spread) only if a dealer/listing lease
+              APR is ever present; today analysis has only the advertised
+              manufacturer lease rate, so this renders one clearly-labelled,
+              band-coloured chip. On used, the manufacturer lease is a NEW-car
+              promo -> reference only (dashed, no applicable band). */}
+          {leaseTwoSided && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:leaseTL?leaseTL.bg:C.paper2,border:`1px solid ${leaseTL?leaseTL.bd:C.line}`}}>
+              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Lease · on your quote</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>{leaseDealerRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseBand?bandLabel(leaseBand).toLowerCase():"dealer lease APR"}</div>
+            </div>
+          )}
+          {leaseRate != null && (
+            <div style={{
+              borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",
+              background: leaseApplicable ? (leaseTL?leaseTL.bg:C.paper2) : "transparent",
+              border: leaseApplicable ? `1px solid ${leaseTL?leaseTL.bd:C.line}` : `1px dashed ${C.line}`,
+              opacity: leaseApplicable ? 1 : .72,
+            }}>
+              <div style={{fontSize:10.5,color:leaseApplicable&&leaseTL?leaseTL.fg:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{leaseTwoSided?`${analysis.make||"Manufacturer"} lease`:`${analysis.make||"Advertised"} ${isNew?"advertised lease":"new-car lease"}`}</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseApplicable?(leaseTL?leaseTL.fg:C.ink):C.inkSoft,fontVariantNumeric:"tabular-nums"}}>{leaseRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseApplicable&&!leaseTwoSided&&leaseBand?`${bandLabel(leaseBand).toLowerCase()} · `:""}{!leaseApplicable?"reference only":`${leaseTerm?`${leaseTerm}mo`:"lease rate"}${leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}`}</div>
+            </div>
+          )}
+          <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Bank of Canada</div>
+            {boc === null ? (
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:C.inkFaint}}>…</div>
+            ) : boc === "error" ? (
+              <a href="https://www.bankofcanada.ca/rates/interest-rates/canadian-interest-rates/" target="_blank" rel="noopener noreferrer"
+                 style={{fontSize:13,fontWeight:800,color:BLUE,textDecoration:"none"}}>see current rate →</a>
+            ) : (
+              <>
+                <div style={{fontSize:16,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{boc.rate}%</div>
+                <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>policy rate · as of {boc.date}</div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* New-vs-used guard: on a USED vehicle the manufacturer's advertised
+            rate is a NEW-car offer, flagged reference-only (main's exact copy). */}
+        {mfrRate != null && !isNew && (
+          <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+            Reference only: {analysis.make} advertises this on a NEW {analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.
+          </div>
+        )}
+
+        {/* Dealer-vs-manufacturer markup warning -- same gate (new vehicle,
+            spread > 0.1%) and extra-cost math (both APRs amortized over 60 mo
+            on the price, difference of totals) as main's card. */}
+        {isNew && spread != null && spread > 0.1 && (()=>{
+          const pd = price*(dealerRate/1200)/(1-Math.pow(1+dealerRate/1200,-60));
+          const pm = price*(mfrRate/1200)/(1-Math.pow(1+mfrRate/1200,-60));
+          const extra = Math.round((pd-pm)*60);
+          return (
+            <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+            </div>
+          );
+        })()}
+
+        {/* LEASE markup warning (forward-compatible): only when a dealer/listing
+            lease APR exists alongside the manufacturer lease rate on a new
+            vehicle. Mirrors the finance spread treatment, rate-only (no lease
+            extra-cost dollar figure). */}
+        {leaseTwoSided && isNew && leaseSpread != null && leaseSpread > 0.1 && (
+          <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (COMPUTED track: Ford/Nissan etc). Residual-
+            based estimate on the USER's own price/msrp -- assumptions visible.
+            Only when applicable (never presented as this car's rate on a used
+            vehicle) and only when we have the user's msrp to derive a residual. */}
+        {leaseComputedPayment && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:leaseTL?leaseTL.bg:C.tealBg,border:`1px solid ${leaseTL?leaseTL.bd:C.teal}55`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Estimated lease payment</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseComputedPayment.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              Residual-based on your {money(price)} price at {leaseComputedPayment.apr}% · {(leaseComputedPayment.residualPct*100).toFixed(0)}% residual of {money(userMsrp)} MSRP · {leaseComputedPayment.term} mo{leaseComputedPayment.annualKm?` · ${leaseComputedPayment.annualKm.toLocaleString()} km/yr`:""} · $0 down.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              Estimate from the manufacturer's residual and lease rate applied to your vehicle — excludes tax, fees, and any lease incentives. Confirm the residual and money factor with the dealer.
+            </div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (ADVERTISED track: BMW/Mercedes/Infiniti/GM).
+            A FIXED advertised example for the scraped dealer's vehicle -- shown
+            as a reference, NOT recomputed for the user's price. Suppressed on a
+            used vehicle (new-car advertised promo doesn't apply). */}
+        {leaseAdvertised && leaseAdvertised.amount != null && leaseApplicable && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Dealer's advertised lease example</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseAdvertised.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+              {leaseAdvertised.withTax != null && <span style={{fontSize:12,color:C.inkFaint,fontWeight:600}}> · {money(leaseAdvertised.withTax)}/mo w/ tax</span>}
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              {analysis.make}'s advertised example{leaseAdvertised.sellingPrice!=null?` for a ${money(leaseAdvertised.sellingPrice)} vehicle`:""}{leaseAdvertised.term?` · ${leaseAdvertised.term} mo`:""}{leaseAdvertised.annualKm?` · ${leaseAdvertised.annualKm.toLocaleString()} km/yr`:""}{leaseRate!=null?` · at ${leaseRate}%`:""}.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              A fixed advertised figure — not recomputed for your {money(price)} vehicle. Your payment depends on the negotiated price, down payment, and term.
+            </div>
+          </div>
+        )}
+
+        {/* One-sided lease note: analysis carries only the advertised lease
+            rate, so there's no dealer-lease rate to compare against. Keep it
+            honest -- say so, and don't invent a second number. */}
+        {leaseRate != null && !leaseTwoSided && (
+          <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+            {isNew
+              ? <>Lease shown is {analysis.make}'s advertised lease APR. A side-by-side lease comparison — your dealer's lease rate vs this — needs a lease rate stated on the listing.</>
+              : <>{analysis.make}'s lease rate is a new-car promo, shown for reference — it doesn't apply to a used vehicle. A side-by-side lease comparison needs a lease rate stated on the listing.</>}
+          </div>
+        )}
+
+        {!rateIsReal && (
+          <div style={{fontSize:12,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+            Your quote didn't disclose a financing rate, so the numbers use a rate you can edit above.
+            The Bank of Canada rate is the benchmark lenders price off — your car-loan APR sits above it.
+          </div>
+        )}
+
+        {/* Recommendation: what we'd do, bullets coloured by the rate's band */}
+        {bullets.length > 0 && (
+          <div style={{marginTop:14,borderRadius:14,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:12.5,fontWeight:800,color:C.ink}}>{recHead}</div>
+            <ul style={{margin:"8px 0 0",padding:0,listStyle:"none",display:"flex",flexDirection:"column",gap:6}}>
+              {bullets.map((b,i) => (
+                <li key={i} style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,display:"flex",gap:8}}>
+                  <span style={{color:recColor,fontWeight:900}}>→</span>
+                  <span>{b}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Heatmap: down payment x term, shaded by relative total interest */}
+        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:16,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
+        <div style={{overflowX:"auto",margin:"0 -4px"}}>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
+                {FIN_TERMS.map(t => (
+                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cellData.map((row,ri) => (
+                <tr key={downs[ri]}>
+                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
+                  {row.map(cell => {
+                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
+                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
+                    const hTL = h ? TL[h] : null;
+                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
+                    return (
+                      <td key={cell.t} style={{
+                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
+                        background: hTL ? hTL.bg : "transparent",
+                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
+                      }}>
+                        {aprValid && cell.P > 0 ? (
+                          <>
+                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
+                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
+                          </>
+                        ) : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
+          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
+        </div>
+
+        {analysis.financingCheck?.checked && analysis.financingCheck.note && (
+          <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
+            <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
+              {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+            </div>
+            <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+          </div>
+        )}
+
+        {ratesAsOf && (
+          <div style={{fontSize:11,color:C.inkFaint,marginTop:12,display:"flex",alignItems:"center",gap:6}}>
+            <span>🕑</span>
+            <span>Manufacturer {leaseRate!=null&&mfrRate!=null?"finance & lease ":mfrRate!=null?"finance ":"lease "}rates as of <b>{fmtDate(ratesAsOf)}</b>, from {analysis.make||"the maker"}'s advertised rates — refreshed daily.</span>
+          </div>
+        )}
+
+        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+          Estimate only. Financed amount = price − down payment; excludes tax, fees, trade-in, and any manufacturer promo. Actual payments depend on the APR and term you're approved for.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
@@ -4441,95 +4997,14 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {analysis.financingCheck?.checked&&(
-                <div style={{...cardStyle,...(analysis.financingCheck.consistent?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Financing math</div>
-                  <div style={{fontSize:14,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk}}>{analysis.financingCheck.consistent?"✓ Payments reconcile":"⚠ Numbers don't add up"}</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
-                </div>
-              )}
-
-              {/* Financing examples -- TWO comparisons: the manufacturer's
-                  advertised rate (bright teal) vs THIS dealer's disclosed rate
-                  (bright amber), so a marked-up dealer rate is obvious. New-vs-
-                  used matters: a manufacturer promo rate is a NEW-vehicle offer,
-                  so on a used vehicle it's shown only as a labelled reference,
-                  never as this car's applicable rate. */}
-              {(analysis.financeRates?.dealer||analysis.financeRates?.manufacturer) && (analysis.quotedPrice||analysis.msrp) && (()=>{
-                const price=analysis.quotedPrice||analysis.msrp;
-                const isNew=analysis.vehicleCondition==="new";
-                const terms=[36,48,60,72,84,96];
-                const downs=[0,5000,10000,15000];
-                const dealer=analysis.financeRates.dealer;
-                const mfr=analysis.financeRates.manufacturer;
-                const grid=(apr)=>(
-                  <div style={{overflowX:"auto"}}>
-                    <table style={{borderCollapse:"collapse",fontSize:12,width:"100%",minWidth:300}}>
-                      <thead><tr>
-                        <th style={{textAlign:"left",color:C.inkFaint,fontWeight:700,padding:"3px 6px"}}>Term</th>
-                        {downs.map(d=>(<th key={d} style={{textAlign:"right",color:C.inkFaint,fontWeight:700,padding:"3px 6px",whiteSpace:"nowrap"}}>{d===0?"$0":`$${d/1000}k`} down</th>))}
-                      </tr></thead>
-                      <tbody>
-                        {terms.map(n=>(<tr key={n} style={{borderTop:`1px solid ${C.line}`}}>
-                          <td style={{color:C.ink,fontWeight:800,padding:"5px 6px",whiteSpace:"nowrap"}}>{n} mo</td>
-                          {downs.map(d=>{const P=price-d;return(<td key={d} style={{textAlign:"right",color:P>0?C.ink:C.inkFaint,padding:"5px 6px",whiteSpace:"nowrap"}}>{P>0?`$${Math.round(P*(apr/1200)/(1-Math.pow(1+apr/1200,-n))).toLocaleString()}`:"—"}</td>);})}
-                        </tr>))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-                // Color-code the RATE ITSELF by how good it is, not by which
-                // party it's from: green = low/good, amber = average, red =
-                // high. Thresholds tuned to Canadian new/used auto APRs.
-                const aprTier=(apr)=> apr<=4.99?{ac:C.teal,ink:C.tealInk,lab:"low rate"}:apr<=7.99?{ac:C.butter,ink:C.butterInk,lab:"average rate"}:{ac:C.coral,ink:C.coralInk,lab:"high rate"};
-                const block=(title,sub,apr,ref)=>{
-                  const t=aprTier(apr);
-                  return (
-                  <div style={{border:ref?`1px dashed ${C.line}`:`2px solid ${t.ac}`,background:ref?"transparent":t.ac+"14",borderRadius:12,padding:"12px 14px",marginTop:10}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:2}}>
-                      <div style={{fontSize:13,fontWeight:900,color:ref?C.inkSoft:t.ink}}>{title}</div>
-                      <div style={{fontSize:18,fontWeight:1000,color:t.ink,whiteSpace:"nowrap"}}>{apr}%<span style={{fontSize:11,fontWeight:700}}> APR</span> <span style={{fontSize:10,fontWeight:800,opacity:.9}}>· {t.lab}</span></div>
-                    </div>
-                    <div style={{fontSize:11,color:C.inkSoft,marginBottom:8,lineHeight:1.4}}>{sub}</div>
-                    {grid(apr)}
-                  </div>
-                  );
-                };
-                const spread=(dealer&&mfr)?(dealer.apr-mfr.apr):null;
-                return (
-                  <div style={cardStyle}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Financing examples · on ${price.toLocaleString()}</div>
-                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:8,lineHeight:1.4}}>Estimated monthly payment; columns are down payments, rows are terms.</div>
-                    <div style={{fontSize:12,color:C.inkSoft,marginBottom:2,lineHeight:1.55,padding:"8px 10px",background:C.paper,border:`1px solid ${C.line}`,borderRadius:10}}>
-                      <b style={{color:C.ink}}>What's APR?</b> The Annual Percentage Rate is the yearly cost of borrowing — the interest charged on top of the vehicle's price. A lower APR means a lower monthly payment and less paid overall. Each rate below is colour-coded: <span style={{color:C.tealInk,fontWeight:900}}>● low</span> · <span style={{color:C.butterInk,fontWeight:900}}>● average</span> · <span style={{color:C.coralInk,fontWeight:900}}>● high</span>.
-                    </div>
-
-                    {mfr&&(isNew
-                      ? block(`${analysis.make} advertised rate`, `The manufacturer's rate on a new ${analysis.make} — this is the number to aim for.`, mfr.apr, false)
-                      : block(`${analysis.make}'s new-vehicle rate`, `Reference only: ${analysis.make} advertises this on a NEW ${analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.`, mfr.apr, true))}
-
-                    {dealer
-                      ? block("This dealer's rate", "What this listing is actually offering you.", dealer.apr, false)
-                      : (<div style={{border:`1px dashed ${C.line}`,borderRadius:12,padding:"12px 14px",marginTop:10}}>
-                          <div style={{fontSize:13,fontWeight:900,color:C.inkSoft,marginBottom:2}}>This dealer's rate — not shown</div>
-                          <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>This {isNew?"listing":"used listing"} didn't publish a financing APR. Ask the dealer for the exact rate before you compare{isNew?" — and hold them to the manufacturer rate above.":", since used-vehicle rates vary widely."}</div>
-                        </div>)}
-
-                    {isNew&&spread!=null&&spread>0.1&&(()=>{
-                      const pd=price*(dealer.apr/1200)/(1-Math.pow(1+dealer.apr/1200,-60));
-                      const pm=price*(mfr.apr/1200)/(1-Math.pow(1+mfr.apr/1200,-60));
-                      const extra=Math.round((pd-pm)*60);
-                      return (
-                        <div style={{marginTop:10,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"12px 14px"}}>
-                          <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
-                        </div>
-                      );
-                    })()}
-
-                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>Estimates only, before tax — one rate applied across terms for illustration; actual rates vary by term, promo, and credit. Confirm with the dealer.</div>
-                  </div>
-                );
-              })()}
+              {/* Financing breakdown -- payment matrix (down payment x term x
+                  frequency) computed purely from the quoted price, plus the
+                  real rate anchors (quote / manufacturer finance & lease
+                  catalog / live Bank of Canada) and the payment-reconciliation
+                  (financingCheck) note. This is the single financing UI --
+                  replaces the earlier "Financing examples" card. Renders itself
+                  null when there's no quoted price. */}
+              <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               {/* Dealer sentiment: what public Google reviews say about
                   THIS dealer, read for the patterns that actually predict
