@@ -403,7 +403,7 @@ function computeLeverageScore(analysis: any): void {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
-      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`);
+      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} MSRP`);
     } else if (deltaPct < -0.02) {
       score -= 1.0;
       basis.push(`already priced below MSRP`);
@@ -1059,6 +1059,150 @@ async function fetchListingContent(url: string): Promise<{ data: any; driver: st
   return { errBody: result.errBody };
 }
 
+// ── SM360 quoted-price resolver ────────────────────────────────────────────
+// SM360 (the platform behind Dilawri and many other Canadian dealer groups --
+// e.g. tazaparkvw.com) renders its listing price client-side, so the generic
+// Nimble-markdown -> Claude extractor can miss it entirely (confirmed real
+// case: a 2026 VW Atlas Highline demo came back "Quoted price: Not found",
+// which then suppressed the over-MSRP flag AND made the financing card fall
+// back to MSRP instead of the real ~$62.7K price).
+//
+// Every SM360 site exposes the SAME public JSON feed the catalog scrapers
+// already use (scripts/lib/sm360-stack.mjs):
+//   GET {origin}/{locale}/new-inventory/api/listing?page=N
+//   -> { vehicles: [ { vehicleId, year, model:{name}, trim:{name},
+//                      salePrice, listPrice, hasPrice, ... } ],
+//        pagination: { numberOfPages } }
+// The detail-page URL carries the unit's id as an `id<digits>` slug token
+// (e.g. .../2026-volkswagen-atlas-id38137169), and that number equals the
+// feed's top-level `vehicleId` -- CONFIRMED against the live feed, not a guess.
+// That per-VIN match matters: a single trim can have dozens of loaded units at
+// one dealer with DIFFERENT prices (24 Atlas Highline units spanning
+// $61,545-$63,545 on this one lot), so matching by year+model+trim alone would
+// pick an arbitrary, likely-wrong unit. We therefore key on vehicleId and only
+// fall back to year+model+trim when that yields EXACTLY ONE unit -- never guess
+// among several.
+//
+// Best-effort and fully defensive: bounded pagination, a hard timeout, and any
+// failure leaves analysis.quotedPrice untouched (no fabrication). Generic to
+// ANY SM360 host, not hardcoded to tazaparkvw.
+function parseSm360Listing(url: string): { origin: string; locale: string; vehicleId: number } | null {
+  try {
+    const u = new URL(url);
+    if (!/\/new-inventory\//i.test(u.pathname)) return null;
+    // The id token is the unit's vehicleId, as an `id<digits>` slug segment.
+    const m = u.pathname.match(/id(\d{4,})(?![0-9])/i);
+    if (!m) return null;
+    const localeSeg = u.pathname.match(/^\/(en|fr)\//i);
+    const locale = localeSeg ? localeSeg[1].toLowerCase() : "en";
+    return { origin: u.origin, locale, vehicleId: Number(m[1]) };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSm360Page(
+  origin: string,
+  locale: string,
+  page: number,
+  timeoutMs: number,
+): Promise<{ vehicles: any[]; numberOfPages: number } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${origin}/${locale}/new-inventory/api/listing?page=${page}`, {
+      headers: {
+        // Same header set proven against the SM360 feed in sm360-stack.mjs.
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      vehicles: Array.isArray(data?.vehicles) ? data.vehicles : [],
+      numberOfPages: Number(data?.pagination?.numberOfPages) || 1,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Reads salePrice first (the actual advertised selling price), then listPrice,
+// honouring hasPrice. Returns null when neither is a usable positive number.
+function sm360PriceOf(v: any): number | null {
+  if (v?.hasPrice === false) return null;
+  const sale = Number(v?.salePrice);
+  if (Number.isFinite(sale) && sale > 0) return sale;
+  const list = Number(v?.listPrice);
+  if (Number.isFinite(list) && list > 0) return list;
+  return null;
+}
+
+async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void> {
+  const parsed = parseSm360Listing(url);
+  if (!parsed) return;
+  const { origin, locale, vehicleId } = parsed;
+  const PAGE_TIMEOUT_MS = 8_000;
+  const MAX_PAGES = 25; // hard ceiling regardless of what pagination claims
+
+  try {
+    const norm = (s: any) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const wantYear = Number(analysis?.year) || null;
+    const wantModel = norm(analysis?.model);
+    const wantTrim = norm(analysis?.trim);
+    const fallbackMatches: any[] = [];
+
+    let pages = 1;
+    for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      if (!res) {
+        console.warn(`SM360 resolver: page ${page} fetch failed for ${origin}; aborting resolver.`);
+        return;
+      }
+      pages = Math.min(res.numberOfPages, MAX_PAGES);
+      for (const v of res.vehicles) {
+        // Primary path: exact vehicleId match -- the id from the URL slug.
+        if (Number(v?.vehicleId) === vehicleId) {
+          const price = sm360PriceOf(v);
+          if (price != null) {
+            analysis.quotedPrice = price;
+            analysis.quotedPriceSource = "sm360_feed";
+            console.log(`SM360 resolver: matched vehicleId ${vehicleId} on page ${page}, quotedPrice=${price} (salePrice=${v?.salePrice}, listPrice=${v?.listPrice}).`);
+            return;
+          }
+          console.log(`SM360 resolver: matched vehicleId ${vehicleId} but it has no usable price (hasPrice=${v?.hasPrice}).`);
+          return;
+        }
+        // Collect fallback candidates while we scan, in case the id never matches.
+        if (wantYear && wantModel && Number(v?.year) === wantYear && norm(v?.model?.name) === wantModel) {
+          if (!wantTrim || norm(v?.trim?.name) === wantTrim) fallbackMatches.push(v);
+        }
+      }
+    }
+
+    // Fallback: no id match (e.g. the unit sold and rotated out of the feed, or
+    // the slug id scheme differs on some host). Only trust it when it lands on
+    // EXACTLY ONE unit -- multiple same-trim units carry different prices, so
+    // guessing one would be fabrication. Also require a positive price.
+    const priced = fallbackMatches.filter((v) => sm360PriceOf(v) != null);
+    if (priced.length === 1) {
+      const price = sm360PriceOf(priced[0])!;
+      analysis.quotedPrice = price;
+      analysis.quotedPriceSource = "sm360_feed_fallback";
+      console.log(`SM360 resolver: no vehicleId match for ${vehicleId}; single year+model+trim unit matched, quotedPrice=${price}.`);
+    } else {
+      console.log(`SM360 resolver: no confident match for vehicleId ${vehicleId} (${priced.length} priced fallback candidate(s)); leaving quotedPrice as-is.`);
+    }
+  } catch (err) {
+    console.warn("resolveSm360QuotedPrice threw:", err);
+  }
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1324,6 +1468,14 @@ Deno.serve(async (req: Request) => {
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
+
+    // SM360 quoted-price resolver: SM360 dealer sites render the price
+    // client-side, so the markdown extractor above can miss it. When this is
+    // an SM360 listing URL we prefer the platform's own JSON feed as the
+    // authoritative price for THIS exact unit (matched by the id in the URL),
+    // overriding whatever the generic extractor did or didn't find. Best-
+    // effort: on any failure it leaves analysis.quotedPrice untouched.
+    await resolveSm360QuotedPrice(url, analysis);
 
     await applyVerifiedWarranty(analysis);
     await applyVerifiedFuelType(analysis);
