@@ -1,13 +1,12 @@
-name: Catalog refresh (MSRP + finance rates)
-# Populates msrp_catalog and finance_rate_catalog from manufacturers' own
-# build-&-price data. Toyota is the pilot; add a step per make as scrapers land.
-# Requires repo secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (already used
-# by the daily scrape workflow). Without them the script only dry-runs.
+name: Catalog refresh — weekly FULL (MSRP + rates)
+# Full weekly refresh of msrp_catalog + finance_rate_catalog + lease_rate_catalog
+# for ALL makes. MSRP changes ~yearly so weekly is plenty; rates are ALSO kept
+# fresh daily by catalog-rates-daily.yml (rates-only). Requires repo secrets
+# SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Without them the scripts dry-run.
 on:
   workflow_dispatch:
   schedule:
-    # Weekly, Mondays 10:00 UTC (~4am Calgary). Rates track monthly promo
-    # periods but can shift mid-month, so refresh weekly to stay current.
+    # Weekly, Mondays 10:00 UTC (~4am Calgary). Full MSRP + rate rewrite.
     - cron: "0 10 * * 1"
 jobs:
   refresh:

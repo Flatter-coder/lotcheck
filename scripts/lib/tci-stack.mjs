@@ -203,7 +203,9 @@ export async function run(config) {
   }
 
   console.log(`\nWriting ${config.makeName} to Supabase…`);
-  await replaceRows("msrp_catalog", msrpRows, config.makeName);
+  // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily run).
+  if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", msrpRows, config.makeName);
+  else console.log(`  (rates-only: msrp_catalog left unchanged for ${config.makeName})`);
   await replaceRows("finance_rate_catalog", financeRows, config.makeName);
   // lease_rate_catalog is a newer table; don't fail the run if it isn't created yet.
   await replaceRows("lease_rate_catalog", leaseRows, config.makeName, { fatal: false });

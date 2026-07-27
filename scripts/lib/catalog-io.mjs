@@ -50,7 +50,11 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
     return;
   }
   console.log(`\nWriting ${make} to Supabase…`);
-  await replaceRows("msrp_catalog", msrpRows, make);
+  // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily), leaving
+  // msrp_catalog untouched (MSRP is refreshed on the weekly full run).
+  const ratesOnly = process.env.CATALOG_RATES_ONLY === "1";
+  if (!ratesOnly) await replaceRows("msrp_catalog", msrpRows, make);
+  else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
   await replaceRows("finance_rate_catalog", financeRows, make);
   await replaceRows("lease_rate_catalog", leaseRows, make, { fatal: false });
   console.log("Done.");

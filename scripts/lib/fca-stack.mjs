@@ -147,7 +147,9 @@ export async function run() {
   console.log("\nWriting Stellantis to Supabase…");
   // Group by make so delete-then-insert stays per-make.
   for (const make of [...new Set(all.msrpRows.map(r => r.make))]) {
-    await replaceRows("msrp_catalog", all.msrpRows.filter(r => r.make === make), make);
+    // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily run).
+    if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", all.msrpRows.filter(r => r.make === make), make);
+    else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
     await replaceRows("finance_rate_catalog", all.financeRows.filter(r => r.make === make), make);
     await replaceRows("lease_rate_catalog", all.leaseRows.filter(r => r.make === make), make, { fatal: false });
   }
