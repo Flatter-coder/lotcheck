@@ -4060,42 +4060,6 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           </div>
         </div>
 
-        {/* ESTIMATE MODE (source 'msrp'): the listing's real price wasn't
-            confirmed, so everything below is computed off MSRP. Loud, unmissable
-            warning + an editable price. Typing a real price flips the card to
-            user-confirmed and drops this banner. Never call an MSRP "listed". */}
-        {priceSource === "msrp" && (
-          <div style={{marginTop:14,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
-            <div style={{fontSize:12.5,color:C.coralInk,fontWeight:800,lineHeight:1.55}}>
-              ⚠ We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
-              <span style={{fontSize:12,fontWeight:700,color:C.coralInk}}>Actual listing price:</span>
-              <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.coral}`,borderRadius:11,padding:"6px 10px"}}>
-                <span style={{color:C.inkFaint,fontSize:14}}>$</span>
-                <input type="number" inputMode="numeric" min="0" value={priceStr}
-                  onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
-                  style={{width:110,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,textAlign:"right",outline:"none"}}/>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* User-confirmed price (source 'user'): the buyer typed a real price,
-            so the card recomputed off it and the estimate warning is gone. Keep
-            the field visible so they can correct it. */}
-        {priceSource === "user" && (
-          <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:12,color:C.inkSoft}}>Using the price you entered:</span>
-            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"5px 9px"}}>
-              <span style={{color:C.inkFaint,fontSize:13}}>$</span>
-              <input type="number" inputMode="numeric" min="0" value={priceStr}
-                onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
-                style={{width:100,background:"transparent",border:0,color:C.ink,fontSize:16,fontWeight:700,textAlign:"right",outline:"none"}}/>
-            </div>
-          </div>
-        )}
-
         {/* HERO: the payment leads, with the editable APR as the hero control.
             Glow + band pill are traffic-light coloured by how the rate compares
             to its benchmark (manufacturer when new, BoC+2.5 when used). */}
@@ -4134,6 +4098,87 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
               ))}
             </div>
           </div>
+        </div>
+
+        {/* ESTIMATE MODE (source 'msrp'): the listing's real price wasn't
+            confirmed, so everything below is computed off MSRP. Loud, unmissable
+            warning + an editable price. Typing a real price flips the card to
+            user-confirmed and drops this banner. Never call an MSRP "listed". */}
+        {priceSource === "msrp" && (
+          <div style={{marginTop:14,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12.5,color:C.coralInk,fontWeight:800,lineHeight:1.55}}>
+              ⚠ We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:12,fontWeight:700,color:C.coralInk}}>Actual listing price:</span>
+              <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+                <span style={{color:C.inkFaint,fontSize:14}}>$</span>
+                <input type="number" inputMode="numeric" min="0" value={priceStr}
+                  onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                  style={{width:110,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,textAlign:"right",outline:"none"}}/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User-confirmed price (source 'user'): the buyer typed a real price,
+            so the card recomputed off it and the estimate warning is gone. Keep
+            the field visible so they can correct it. */}
+        {priceSource === "user" && (
+          <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,color:C.inkSoft}}>Using the price you entered:</span>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"5px 9px"}}>
+              <span style={{color:C.inkFaint,fontSize:13}}>$</span>
+              <input type="number" inputMode="numeric" min="0" value={priceStr}
+                onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                style={{width:100,background:"transparent",border:0,color:C.ink,fontSize:16,fontWeight:700,textAlign:"right",outline:"none"}}/>
+            </div>
+          </div>
+        )}
+
+        {/* Heatmap: down payment x term, shaded by relative total interest */}
+        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:16,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
+        <div style={{overflowX:"auto",margin:"0 -4px"}}>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
+                {FIN_TERMS.map(t => (
+                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cellData.map((row,ri) => (
+                <tr key={downs[ri]}>
+                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
+                  {row.map(cell => {
+                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
+                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
+                    const hTL = h ? TL[h] : null;
+                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
+                    return (
+                      <td key={cell.t} style={{
+                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
+                        background: hTL ? hTL.bg : "transparent",
+                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
+                      }}>
+                        {aprValid && cell.P > 0 ? (
+                          <>
+                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
+                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
+                          </>
+                        ) : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
+          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
         </div>
 
         {/* Rate anchors -- only real ones; each coloured by its own band */}
@@ -4198,6 +4243,21 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
         {mfrRate != null && !isNew && (
           <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
             Reference only: {analysis.make} advertises this on a NEW {analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.
+          </div>
+        )}
+
+        {/* Recommendation: what we'd do, bullets coloured by the rate's band */}
+        {bullets.length > 0 && (
+          <div style={{marginTop:14,borderRadius:14,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:12.5,fontWeight:800,color:C.ink}}>{recHead}</div>
+            <ul style={{margin:"8px 0 0",padding:0,listStyle:"none",display:"flex",flexDirection:"column",gap:6}}>
+              {bullets.map((b,i) => (
+                <li key={i} style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,display:"flex",gap:8}}>
+                  <span style={{color:recColor,fontWeight:900}}>→</span>
+                  <span>{b}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -4281,66 +4341,6 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             The Bank of Canada rate is the benchmark lenders price off — your car-loan APR sits above it.
           </div>
         )}
-
-        {/* Recommendation: what we'd do, bullets coloured by the rate's band */}
-        {bullets.length > 0 && (
-          <div style={{marginTop:14,borderRadius:14,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
-            <div style={{fontSize:12.5,fontWeight:800,color:C.ink}}>{recHead}</div>
-            <ul style={{margin:"8px 0 0",padding:0,listStyle:"none",display:"flex",flexDirection:"column",gap:6}}>
-              {bullets.map((b,i) => (
-                <li key={i} style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,display:"flex",gap:8}}>
-                  <span style={{color:recColor,fontWeight:900}}>→</span>
-                  <span>{b}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Heatmap: down payment x term, shaded by relative total interest */}
-        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:16,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
-        <div style={{overflowX:"auto",margin:"0 -4px"}}>
-          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
-            <thead>
-              <tr>
-                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
-                {FIN_TERMS.map(t => (
-                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {cellData.map((row,ri) => (
-                <tr key={downs[ri]}>
-                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
-                  {row.map(cell => {
-                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
-                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
-                    const hTL = h ? TL[h] : null;
-                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
-                    return (
-                      <td key={cell.t} style={{
-                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
-                        background: hTL ? hTL.bg : "transparent",
-                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
-                      }}>
-                        {aprValid && cell.P > 0 ? (
-                          <>
-                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
-                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
-                          </>
-                        ) : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
-          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
-        </div>
 
         {analysis.financingCheck?.checked && analysis.financingCheck.note && (
           <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
