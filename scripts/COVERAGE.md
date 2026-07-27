@@ -110,3 +110,9 @@ Chased rate-gated makes with the proven dealer-feed technique:
 NOW FULL (24): + Infiniti, Chevrolet, GMC, Buick.
 STILL MSRP-only (5): Cadillac, Lincoln, Porsche, Kia, Volvo.
 Tried & blocked this round: Lincoln — Waterloo Lincoln Convertus proxy is Cloudflare-403; Pine Tree/MGM/Woodridge/Northstar/Metro/Performance Lincoln all on other platforms (EDealer/DealerInspire), no accessible feed. Cadillac — not stocked at City GM; needs its own Cadillac SM360/Convertus dealer.
+
+## UPDATE 2026-07-27c — Lincoln/Kia rate dead-end confirmed (EDealer + Cloudflare)
+Checked two more Lincoln dealers (user-supplied). Neither yields a CI-durable rate source:
+- Universal Lincoln = **EDealer** platform. Inventory embeds as JSON but the per-vehicle object is PRICE-ONLY (vin/model/year/trim/display_price/make/fueltype — NO apr/finance_rate/lease_rate/term). EDealer computes payments per-VDP via a province/credit-gated calculator, not in the feed. ⇒ **Kia (also EDealer) is gated the same way** — its rates aren't in the listing feed either.
+- Waterloo Lincoln = Convertus cp=1151 (right feed shape) BUT the ajax proxy is **Cloudflare-walled** (403 challenge to Node/datacenter IPs). Denham Ford / Fish Creek Nissan Convertus proxies lack Cloudflare, which is why those work; a headless GitHub Actions runner would 403 here every run.
+CONCLUSION: Lincoln stays MSRP-only. To ever get Lincoln/Kia rates would need per-VDP EDealer payment-calculator scraping (heavier, province/credit-gated) — not attempted. Coverage unchanged: 24 FULL / 5 MSRP-only.
