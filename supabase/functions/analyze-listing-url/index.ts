@@ -1203,6 +1203,179 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
   }
 }
 
+// Maps an SM360 feed vehicle's fuel descriptor to the report's fuelType enum
+// ("BEV" | "PHEV" | "Hybrid" | "Gas" | "Diesel" | null). Conservative: only
+// returns a value it can defend from the feed's own fields; leaves null on
+// anything ambiguous (applyVerifiedFuelType may still override from the
+// catalog). Never fabricates -- an unknown fuel stays null.
+function sm360FuelType(v: any): string | null {
+  const slug = String(v?.fuel?.slug ?? v?.fuel?.name ?? "").toLowerCase();
+  const batt = Number(v?.batteryCapacity) || 0;
+  const range = Number(v?.batteryRange) || 0;
+  if (/plug|phev/.test(slug)) return "PHEV";
+  if (/hybrid/.test(slug)) return "Hybrid";
+  if (/electric|\bev\b|bev/.test(slug)) return "BEV";
+  if (/diesel/.test(slug)) return "Diesel";
+  if (/gas|petrol/.test(slug)) return "Gas";
+  // No usable fuel slug; only call it a BEV if the feed carries real battery
+  // specs, never on a bare zero.
+  if (batt > 0 && range > 0) return "BEV";
+  return null;
+}
+
+// ── SM360 feed FALLBACK builder ─────────────────────────────────────────────
+// When the dealer PAGE scrape fails/bot-blocks on an SM360 listing, the price
+// and core vehicle data for that exact unit are still available in the SM360
+// JSON feed (which does NOT depend on the page rendering). Rather than hard-
+// fail, this builds a real (possibly partial) analysis object from the feed's
+// own fields for the unit whose vehicleId is in the URL slug, so the report is
+// as rich as the feed allows.
+//
+// Matches on vehicleId only: unlike resolveSm360QuotedPrice's secondary
+// year+model+trim path, the page never loaded here, so there is no extracted
+// year/model/trim to match against -- vehicleId (from the URL) is the only key.
+// If the id isn't in the feed, returns null and the caller falls back to the
+// original "couldn't load / try screenshot" error. Never fabricates: any field
+// the feed doesn't provide is left unset. Fully defensive: bounded pagination,
+// per-page timeout, and any throw yields null.
+async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
+  const parsed = parseSm360Listing(url);
+  if (!parsed) return null;
+  const { origin, locale, vehicleId } = parsed;
+  const PAGE_TIMEOUT_MS = 8_000;
+  const MAX_PAGES = 25;
+
+  try {
+    let pages = 1;
+    let match: any = null;
+    for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      if (!res) {
+        console.warn(`SM360 fallback: page ${page} fetch failed for ${origin}; aborting fallback.`);
+        return null;
+      }
+      pages = Math.min(res.numberOfPages, MAX_PAGES);
+      match = res.vehicles.find((v: any) => Number(v?.vehicleId) === vehicleId) ?? null;
+      if (match) break;
+    }
+    if (!match) {
+      console.log(`SM360 fallback: vehicleId ${vehicleId} not found in feed for ${origin}; cannot build fallback.`);
+      return null;
+    }
+
+    const price = sm360PriceOf(match);
+    const year = Number(match?.year) || null;
+    const make = typeof match?.make?.name === "string" ? match.make.name : null;
+    const model = typeof match?.model?.name === "string" ? match.model.name : null;
+    const trim = typeof match?.trim?.name === "string" ? match.trim.name : null;
+
+    // VIN: the feed exposes it as `serialNo`. Only carry it if it at least
+    // looks like a 17-char VIN; validateVin re-checks the check digit
+    // downstream. Never invent one.
+    const vinRaw = typeof match?.serialNo === "string" ? match.serialNo.trim().toUpperCase() : "";
+    const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : null;
+
+    const odoNum = Number(match?.odometer);
+    const odometerKm = Number.isFinite(odoNum) && odoNum >= 0 ? odoNum : null;
+
+    const condition = match?.newVehicle === true
+      ? "new"
+      : match?.newVehicle === false
+        ? "used"
+        : (typeof match?.paymentOptions?.vehicleCondition === "string" ? match.paymentOptions.vehicleCondition : null);
+
+    const org = match?.primaryOrganizationUnit;
+    const dealerName = typeof org?.name === "string" ? org.name : null;
+    const dealerCity = typeof org?.city === "string"
+      ? (org?.province?.provinceCode ? `${org.city}, ${org.province.provinceCode}` : org.city)
+      : null;
+
+    const vehicleStr = [year, make, model, trim].filter(Boolean).join(" ") || null;
+
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year,
+      make,
+      model,
+      trim,
+      vin,
+      odometerKm,
+      fuelType: sm360FuelType(match),
+      vehicleCondition: condition,
+      dealerName,
+      dealerCity,
+      // MSRP is NOT in the feed as a standalone figure (salePrice/listPrice are
+      // the selling price). Leave null so the downstream catalog/manufacturer
+      // MSRP lookup fills it if it can -- same as the normal path.
+      msrp: null,
+      quotedPrice: price,
+      quotedPriceSource: price != null ? "sm360_feed" : null,
+      // The feed carries no itemized fees, no page financing disclosure, and no
+      // standalone warranty terms. Leave these empty/null rather than invent
+      // them; applyVerifiedWarranty still fills a NEW vehicle's real warranty
+      // from LotCheck's own verified table during enrichment.
+      standardWarranty: null,
+      addOns: [],
+      totalFlaggedCost: 0,
+      warranty: null,
+      financing: null,
+      // Honesty flags the UI can surface: the page itself could not be read,
+      // and this report was built from the dealer's own inventory feed.
+      source: "sm360_feed_fallback",
+      sourceNote: "The dealer's listing page couldn't be loaded (its site was blocking automated access), so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page couldn't be read and aren't included here.",
+      summary: `${vehicleStr ?? "This vehicle"}${price != null ? ` is listed at $${price.toLocaleString()}` : ""}. The dealer's listing page couldn't be loaded, so this report is based on the dealer's inventory feed rather than the full page -- itemized fees and the page's financing terms aren't included. Confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+    };
+
+    console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildSm360FallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
+// Shared downstream enrichment, run identically by BOTH the normal page-scrape
+// path and the SM360 feed fallback so a fallback report is as rich as its
+// (partial) data allows: verified warranty + fuel type, VIN pattern/check-digit
+// validation, Transport Canada recall lookup, the catalog->manufacturer MSRP
+// fallback, the financing/odometer plausibility checks, dealer/manufacturer
+// finance + lease rates, and finally the deterministic leverage score (which
+// must run last, after msrp/recalls/financing are populated). Every step is
+// individually defensive and skips itself when its inputs are absent, so a
+// partial fallback analysis (e.g. no financing, no MSRP) simply gets fewer
+// checks rather than erroring.
+async function enrichAnalysis(analysis: any): Promise<void> {
+  await applyVerifiedWarranty(analysis);
+  await applyVerifiedFuelType(analysis);
+  analysis.vinCheck = validateVin(analysis.vin);
+  if (analysis.year && analysis.make && analysis.model) {
+    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+  }
+
+  // Manufacturer-site MSRP fallback -- only spend the extra search+extraction
+  // cost when the vehicle doesn't already carry an MSRP. Catalog (a fast DB
+  // read) is tried first; only on a miss does the ~30s manufacturer scrape run.
+  if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
+    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+    if (catMsrp) {
+      analysis.msrp = catMsrp;
+      analysis.msrpSource = "catalog";
+    } else {
+      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+      if (mfrMsrp) {
+        analysis.msrp = mfrMsrp;
+        analysis.msrpSource = "manufacturer_site";
+      }
+    }
+  }
+
+  computeFinancingCheck(analysis);
+  computeOdometerCheck(analysis);
+  await resolveFinanceRates(analysis);
+  await resolveLeaseRates(analysis);
+  computeLeverageScore(analysis);
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1320,6 +1493,35 @@ Deno.serve(async (req: Request) => {
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
       console.error("Nimble extract failed after all attempts:", nimbleResult.errBody);
+
+      // Page load genuinely failed. Before hard-failing, if this is an SM360
+      // dealer listing, fall back to the platform's own JSON feed -- the price
+      // and core vehicle data for this exact unit live there and do NOT depend
+      // on the page rendering. This turns a "site is blocking us" dead end into
+      // a real (clearly-labelled, possibly partial) report. Only fires for
+      // SM360 URLs, and only here -- after the normal page path has already
+      // failed -- so pages that DO load are completely unaffected.
+      const fallback = await buildSm360FallbackAnalysis(url);
+      if (fallback) {
+        await enrichAnalysis(fallback);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: fallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (SM360 fallback):", err);
+        }
+        // Logged as a success: we returned a usable report, just via the feed.
+        await logUsage({ success: true, errorMessage: `page-load failed, served SM360 feed fallback` });
+        console.log(`Served SM360 feed fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        return new Response(
+          JSON.stringify({ analysis: fallback, source: "sm360_feed_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Not an SM360 listing (or its feed was also unreachable / the unit isn't
+      // in the feed): keep today's behaviour exactly.
       await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody}` });
       return new Response(
         JSON.stringify({ error: "Couldn't load that page after a few tries. This dealer site may be blocking automated access right now -- try again in a moment, or use the upload/screenshot option instead." }),
@@ -1477,46 +1679,11 @@ Deno.serve(async (req: Request) => {
     // effort: on any failure it leaves analysis.quotedPrice untouched.
     await resolveSm360QuotedPrice(url, analysis);
 
-    await applyVerifiedWarranty(analysis);
-    await applyVerifiedFuelType(analysis);
-    analysis.vinCheck = validateVin(analysis.vin);
-    if (analysis.year && analysis.make && analysis.model) {
-      analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
-    }
-
-    // Manufacturer-site MSRP fallback -- only spend the extra search+
-    // extraction cost when the dealer's own page genuinely didn't show
-    // an MSRP at all (real case: Calgary Honda Civic, "MSRP: Not shown
-    // on quote"). If this also comes up empty (manufacturer not yet in
-    // MANUFACTURER_DOMAINS, or genuinely not found), analysis.msrp just
-    // stays null -- the report still shows the dealer's quoted price on
-    // its own, without a false "verified" claim, exactly as before.
-    if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
-      // 1) Fast, authoritative catalog lookup first -- a DB read, no scrape.
-      //    When it hits, the ~30s manufacturer-site scrape is skipped
-      //    entirely.
-      const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
-      if (catMsrp) {
-        analysis.msrp = catMsrp;
-        analysis.msrpSource = "catalog";
-      } else {
-        // 2) Only if the catalog doesn't have it, pay for the manufacturer-
-        //    site scrape.
-        const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
-        if (mfrMsrp) {
-          analysis.msrp = mfrMsrp;
-          analysis.msrpSource = "manufacturer_site";
-        }
-      }
-    }
-
-    // Derived verification checks -- run last, after price/recalls are all
-    // populated, since the leverage score is computed from them.
-    computeFinancingCheck(analysis);
-    computeOdometerCheck(analysis);
-    await resolveFinanceRates(analysis);
-    await resolveLeaseRates(analysis);
-    computeLeverageScore(analysis);
+    // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
+    // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
+    // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
+    // runs, so the two paths never drift apart.
+    await enrichAnalysis(analysis);
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache

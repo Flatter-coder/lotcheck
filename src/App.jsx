@@ -4999,6 +4999,17 @@ function QuoteCheckPage(){
                 <div style={{fontSize:13,color:C.inkFaint}}>{analysis.vehicle||"Vehicle"}</div>
               </div>
 
+              {/* Feed-fallback notice: the dealer page itself couldn't be read,
+                  so this report was built from the dealer's SM360 inventory
+                  feed. Surface that honestly so the buyer knows fees/financing
+                  from the page aren't included here. */}
+              {analysis.source==="sm360_feed_fallback"&&(
+                <div style={{...cardStyle,background:C.butterBg,border:`1px solid ${C.butter}55`,boxShadow:"none"}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}>Built from the dealer's inventory feed</div>
+                  <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.sourceNote||"The dealer's listing page couldn't be loaded, so this report was built from the dealer's own inventory feed. Itemized fees and the page's financing terms aren't included -- confirm them with the dealer."}</div>
+                </div>
+              )}
+
               {/* MSRP on its own -- just the manufacturer's number, nothing
                   else mixed into this card. The comparison against what the
                   buyer is actually being asked to pay lives in the Quoted
