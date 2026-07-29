@@ -65,6 +65,78 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
+// A personal credit is deducted ONLY after an accurate result is delivered,
+// and ONLY for signed-in requests. Anonymous requests (no/invalid JWT — which
+// includes the anon key the frontend sends today) resolve to no user and take
+// the existing flow byte-for-byte unchanged: every helper below is a no-op
+// when there is no hold. The fn_* RPCs were REVOKED from public, so they are
+// called here with the service-role `supabase` client above.
+
+// Resolve the signed-in caller from the Authorization: Bearer <jwt> header.
+// Returns null for anonymous / unresolvable tokens (the back-compat path).
+// Never throws — a transient auth failure falls back to the anonymous path.
+async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(jwt);
+    if (error || !data?.user) return null;
+    return data.user;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Place a credit hold before any expensive work. null result → out of credits.
+async function authorizeCredit(
+  userId: string,
+): Promise<{ ok: true; holdId: string } | { ok: false; kind: "out_of_credits" | "error" }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_authorize_quote", { p_user: userId });
+    if (error) {
+      console.error("fn_authorize_quote failed:", error.message);
+      return { ok: false, kind: "error" };
+    }
+    if (!data) return { ok: false, kind: "out_of_credits" };
+    return { ok: true, holdId: data as string };
+  } catch (e) {
+    console.error("fn_authorize_quote threw:", e);
+    return { ok: false, kind: "error" };
+  }
+}
+
+// Finalize a hold as −1 after a delivered accurate result. Returns the new
+// personal balance for the response, or null if capture couldn't be recorded
+// (in which case the response simply omits `credits` — `analysis` is unchanged).
+async function captureCredit(hold: string | null): Promise<{ personal: number } | null> {
+  if (!hold) return null;
+  try {
+    const { data, error } = await supabase.rpc("fn_capture_quote", { p_hold: hold, p_quote: null });
+    if (error) {
+      console.error("fn_capture_quote failed:", error.message);
+      return null;
+    }
+    if (data == null) return null;
+    return { personal: Number(data) };
+  } catch (e) {
+    console.error("fn_capture_quote threw:", e);
+    return null;
+  }
+}
+
+// Drop an uncaptured hold on any failure after authorize → no charge.
+async function releaseCredit(hold: string | null): Promise<void> {
+  if (!hold) return;
+  try {
+    const { error } = await supabase.rpc("fn_release_quote", { p_hold: hold });
+    if (error) console.error("fn_release_quote failed:", error.message);
+  } catch (e) {
+    console.error("fn_release_quote threw:", e);
+  }
+}
+
 const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a photo of a paper quote). Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
 
 {
@@ -122,6 +194,10 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { headers: CORS_HEADERS });
   }
 
+  // Anonymous by default: null user → existing flow, no credit logic at all.
+  const creditUser = await resolveCreditUser(req);
+  let holdId: string | null = null;
+
   try {
     const { fileBase64, mediaType } = await req.json();
 
@@ -139,6 +215,26 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
+    }
+
+    // Authorize a credit hold before any expensive work (signed-in only).
+    // Anonymous callers skip this entirely. The 400s above run before this,
+    // so a rejected request never places a hold.
+    if (creditUser) {
+      const authz = await authorizeCredit(creditUser.id);
+      if (!authz.ok) {
+        if (authz.kind === "out_of_credits") {
+          return new Response(JSON.stringify({ error: "out_of_credits" }), {
+            status: 402,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Something went wrong processing that file." }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+      holdId = authz.holdId;
     }
 
     const isPdf = mediaType === "application/pdf";
@@ -173,6 +269,8 @@ Deno.serve(async (req: Request) => {
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errText);
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "The analysis service returned an error. Please try again." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -197,6 +295,8 @@ Deno.serve(async (req: Request) => {
         `Failed to parse Claude's JSON output. stop_reason=${data.stop_reason}, output_tokens=${data.usage?.output_tokens}, rawText.length=${rawText.length}:`,
         rawText,
       );
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that quote clearly. Try a clearer scan or a different file." }),
         { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -220,11 +320,19 @@ Deno.serve(async (req: Request) => {
     await resolveLeaseRates(analysis);
     computeLeverageScore(analysis);
 
-    return new Response(JSON.stringify({ analysis }), {
+    // Delivered an accurate result -> capture the hold (signed-in only) and
+    // include the new balance. Null holdId out first so a later throw can't
+    // release a hold we've decided to charge. `analysis` is unchanged either way.
+    const credits = await captureCredit(holdId);
+    holdId = null;
+    return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("analyze-quote error:", err);
+    // Any throw after a hold was placed must not charge the user.
+    await releaseCredit(holdId);
+    holdId = null;
     return new Response(JSON.stringify({ error: "Something went wrong processing that file." }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },

@@ -5,10 +5,40 @@ import { Analytics } from "@vercel/analytics/react";
 import heic2any from "heic2any";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
+// Public anon key. Named once so the credit-aware fetches below can send it as
+// the `apikey` header (and as the Bearer fallback for anonymous requests) without
+// re-pasting the literal.
+const SB_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
 const supabase = createClient(
   "https://debigtyjhjamipooajhk.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A"
+  SB_ANON_KEY
+  // No custom auth options -> supabase-js defaults apply: persistSession:true
+  // and detectSessionInUrl:true, so a magic-link return (…/quote-check#access_token=…)
+  // establishes the session automatically on load and survives reloads.
 );
+
+// ── User auth (magic link) ────────────────────────────────────────────────────
+// Single source of truth for the current Supabase auth user in the *public*
+// app. Reads the existing session once on mount, then keeps it live via one
+// onAuthStateChange subscription (cleaned up on unmount). The admin dashboard
+// (AdminPanel) manages its own session on the /admin route; that component and
+// the public pages are never mounted at the same time (App routes to exactly
+// one page by pathname), so these subscriptions never coexist or conflict.
+// The same magic-link OTP and password (admin) flows share this one client.
+function useSupabaseUser(){
+  const [user,setUser]=useState(null);
+  useEffect(()=>{
+    let active=true;
+    supabase.auth.getSession().then(({data})=>{
+      if(active) setUser(data.session?.user||null);
+    });
+    const {data:sub}=supabase.auth.onAuthStateChange((_event,session)=>{
+      setUser(session?.user||null);
+    });
+    return()=>{ active=false; sub.subscription.unsubscribe(); };
+  },[]);
+  return user;
+}
 
 // ── Global responsive styles injected once ────────────────────────────────────
 const GLOBAL_CSS = `
@@ -527,16 +557,20 @@ function formatMsLeft(ms) {
   return `${h}h ${m}m`;
 }
 
-// ── Quote Check access -- free and unlimited for now ────────────────────
-// There's no license yet to operate this as a paid service, so no pricing
-// or paywall should exist until that's resolved. Kept as named functions
-// (not inlined at each call site) so turning pricing back on later, once
-// licensed, is a one-place change instead of hunting through the file.
-function getQuoteCheckAccess() {
-  return { allowed: true, reason: "free" };
+// ── Quote Check credits ─────────────────────────────────────────────────
+// The old client-side subscription/bundle stopgap is gone. Credits are now
+// server-authoritative (Phase 3 edge functions + fn_my_credits RPC): the
+// frontend only DISPLAYS balances the server reports and never grants or
+// deducts locally. The one thing still tracked client-side is the single
+// anonymous free check, gated by a per-device localStorage flag.
+const LC_FREE_USED_KEY = "lc_free_used";
+function isFreeCheckUsed() {
+  try { return window.localStorage.getItem(LC_FREE_USED_KEY) === "1"; }
+  catch { return false; } // localStorage unavailable (private browsing etc.)
 }
-// No-op -- nothing to consume while Quote Check is free and unlimited.
-function consumeQuoteCredit() {}
+function markFreeCheckUsed() {
+  try { window.localStorage.setItem(LC_FREE_USED_KEY, "1"); } catch {}
+}
 
 // ── Anonymous visitor ID — persisted so repeat visits from the same browser
 // count as one unique visitor, not a new one each time. This is LotCheck's
@@ -2768,9 +2802,7 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
 }
 
 // Quote Check pricing tiers -- kept for cost/revenue modeling in this tab
-// only. The live paywall that used to charge these prices was removed
-// (no license to operate a paid service yet, see getQuoteCheckAccess),
-// so these figures are hypothetical -- "what this would earn if pricing
+// only. These figures are hypothetical -- "what this would earn if pricing
 // were live" -- not real revenue right now.
 const QC_PRICING_TIERS = [
   {key:"single", name:"1 check", price:2.99, quotesPerUnit:1},
@@ -3687,9 +3719,9 @@ function IsoScanVisual({C, speed="idle"}){
   );
 }
 
-// Quote Check paywall removed -- no license yet to operate this as a
-// paid service, so Quote Check stays free and unlimited until that's
-// resolved. getQuoteCheckAccess() above always allows access now.
+// Quote Check credits are enforced server-side (Phase 3): 1 anonymous free
+// check per device, then sign-in; signed-in checks draw on server-authoritative
+// personal credits, with an HTTP 402 {error:"out_of_credits"} opening the paywall.
 
 // Progressive "analyzing" status messages. The edge function doesn't
 // stream progress back, so these are TIME-BASED, not real milestones --
@@ -4366,11 +4398,176 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   );
 }
 
+// ── Magic-link sign-in modal ──────────────────────────────────────────────────
+// Passwordless (OTP) sign-in for the public app. Sends a one-time sign-in link
+// to the entered email via supabase.auth.signInWithOtp; the link returns the
+// user to /quote-check, where detectSessionInUrl establishes the session. Themed
+// with the QuoteCheckPage palette (C) so it matches whatever mode the page is in
+// (dark/light/outdoor), reusing the app's .lc-modal-overlay backdrop. This only
+// requests the link -- session creation happens on the redirect back.
+function SignInModal({C, cardStyle, onClose}){
+  const [email,setEmail]=useState("");
+  const [phase,setPhase]=useState("form"); // form | sending | sent | error
+  const [errMsg,setErrMsg]=useState("");
+
+  function validEmail(v){
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v||"").trim());
+  }
+
+  async function sendLink(){
+    const addr=email.trim();
+    if(!validEmail(addr)){
+      setPhase("error");
+      setErrMsg("That doesn't look like a valid email address.");
+      return;
+    }
+    setErrMsg("");
+    setPhase("sending");
+    try{
+      const {error}=await supabase.auth.signInWithOtp({
+        email:addr,
+        options:{emailRedirectTo:window.location.origin+"/quote-check"},
+      });
+      if(error){
+        setPhase("error");
+        setErrMsg(error.message||"Couldn't send the sign-in link. Please try again.");
+        return;
+      }
+      setPhase("sent");
+    }catch(err){
+      setPhase("error");
+      setErrMsg("Couldn't reach the sign-in service. Check your connection and try again.");
+    }
+  }
+
+  const inputStyle={
+    width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,
+    padding:"12px 14px",color:C.ink,fontSize:15,outline:"none",boxSizing:"border-box",
+  };
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{...cardStyle,width:"100%",maxWidth:420,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>🔑 Sign in to LotCheck</div>
+          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+
+        {phase==="sent"?(
+          <div style={{textAlign:"center",padding:"8px 0"}}>
+            <div style={{fontSize:44,marginBottom:10}}>📨</div>
+            <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>Check your inbox</div>
+            <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
+              We sent a sign-in link to <span style={{fontWeight:800,color:C.ink}}>{email.trim()}</span>. Open it on this device to finish signing in.
+            </div>
+            <button onClick={onClose} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,fontSize:14,cursor:"pointer"}}>Got it</button>
+          </div>
+        ):(
+          <>
+            <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:14}}>
+              Enter your email and we'll send you a one-time sign-in link. No password needed.
+            </div>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="you@email.com"
+              value={email}
+              onChange={e=>{setEmail(e.target.value);if(phase==="error")setPhase("form");}}
+              onKeyDown={e=>{if(e.key==="Enter"&&phase!=="sending")sendLink();}}
+              style={inputStyle}
+            />
+            {phase==="error"&&(
+              <div style={{fontSize:12,color:C.coralInk,marginTop:8,fontWeight:700}}>{errMsg}</div>
+            )}
+            <button
+              onClick={sendLink}
+              disabled={phase==="sending"}
+              style={{width:"100%",marginTop:14,background:phase==="sending"?C.inkFaint:C.teal,border:"none",borderRadius:12,padding:"14px 0",color:"#fff",fontSize:15,fontWeight:800,cursor:phase==="sending"?"default":"pointer",opacity:phase==="sending"?0.8:1}}>
+              {phase==="sending"?"Sending…":"Email me a sign-in link →"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Quote Check paywall ─────────────────────────────────────────────────
+// Opened when a signed-in user is out of credits (the edge function returns
+// HTTP 402 {error:"out_of_credits"}). Shows the three packs. Real Stripe
+// checkout is a later phase, so every Buy button is disabled / "Coming soon" --
+// this is display-only, it never grants credits client-side. Styled to match
+// SignInModal (same lc-modal-overlay + cardStyle + QC theme colours).
+function QuotePaywallModal({C, cardStyle, onClose}){
+  const packs=[
+    {name:"Free",       price:"$0",     checks:"1 check",   share:"+1 to share", note:"Your current plan", best:false},
+    {name:"5 checks",   price:"$9.99",  checks:"5 checks",  share:"+1 to share", note:null,               best:false},
+    {name:"10 checks",  price:"$14.99", checks:"10 checks", share:"+2 to share", note:null,               best:true},
+  ];
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{...cardStyle,width:"100%",maxWidth:460,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>🔒 You're out of checks</div>
+          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
+          Top up to keep checking quotes. Every pack includes a couple of shareable checks to send a friend.
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {packs.map((p,i)=>(
+            <div key={i} style={{
+              position:"relative",display:"flex",alignItems:"center",gap:12,
+              background:p.best?C.tealBg:C.paper2,
+              border:`${p.best?"2px":"1px"} solid ${p.best?C.teal:C.line}`,
+              borderRadius:14,padding:"14px 16px",
+            }}>
+              {p.best&&(
+                <div style={{position:"absolute",top:-10,right:14,background:C.teal,color:"#fff",fontSize:10,fontWeight:800,letterSpacing:.4,padding:"3px 8px",borderRadius:999}}>BEST VALUE</div>
+              )}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:15,fontWeight:900,color:C.ink}}>{p.checks}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.tealInk}}>{p.share}</span>
+                </div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.note||`${p.price} one-time`}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:18,fontWeight:900,color:C.ink,marginBottom:6}}>{p.price}</div>
+                <button disabled aria-disabled="true"
+                  style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:10,padding:"7px 14px",color:C.inkFaint,fontSize:12,fontWeight:800,cursor:"not-allowed",whiteSpace:"nowrap"}}>
+                  {p.name==="Free"?"Current plan":"Coming soon"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:C.inkFaint,textAlign:"center",marginTop:14,lineHeight:1.5}}>
+          Paid packs aren't live yet — checkout is coming soon.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
 // browser, sent once to the edge function for analysis, and discarded.
 function QuoteCheckPage(){
+  // Current signed-in user (magic-link). Single source of truth via the shared
+  // hook; null when logged out. Drives the header entry point and the
+  // result-first sign-in prompt below. No gating/enforcement here (Phase 2).
+  const user=useSupabaseUser();
+  const [showSignIn,setShowSignIn]=useState(false);
+  // Phase 4 credits. Balance is server-authoritative -- read from fn_my_credits
+  // on load / auth change and refreshed from each check's `credits.personal`;
+  // never computed client-side. `freeUsed` gates the single anonymous free
+  // check via a per-device localStorage flag. `showPaywall` opens on HTTP 402.
+  const [balance,setBalance]=useState(null); // {personal, shareable} | null (signed-out or not yet loaded)
+  const [freeUsed,setFreeUsed]=useState(isFreeCheckUsed);
+  const [showPaywall,setShowPaywall]=useState(false);
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
@@ -4592,8 +4789,64 @@ function QuoteCheckPage(){
     return HEIC_EXTENSIONS.some(ext=>lower.endsWith(ext));
   }
 
+  // Load the server-authoritative balance whenever auth changes. Signed-out ->
+  // no balance (the header chip falls back to the free-check state). Signed-in ->
+  // call fn_my_credits (RLS-scoped to the caller). Handles both a single-object
+  // and a single-row-array return shape defensively.
+  useEffect(()=>{
+    let active=true;
+    if(!user){ setBalance(null); return; }
+    supabase.rpc("fn_my_credits").then(({data,error})=>{
+      if(!active||error||!data) return;
+      const row=Array.isArray(data)?data[0]:data;
+      if(!row) return;
+      setBalance({personal:Number(row.personal)||0,shareable:Number(row.shareable)||0});
+    });
+    return ()=>{ active=false; };
+  },[user]);
+
+  // Builds the fetch headers for the two analyze edge functions. `apikey` is
+  // always the anon key. The Bearer is the signed-in user's access token when a
+  // session exists (so the edge function runs its credit path), otherwise the
+  // anon key (the free/anonymous path -- behaves exactly as before Phase 4).
+  const buildAnalyzeHeaders=async()=>{
+    let bearer=SB_ANON_KEY;
+    if(user){
+      try{
+        const {data}=await supabase.auth.getSession();
+        if(data.session?.access_token) bearer=data.session.access_token;
+      }catch{}
+    }
+    return {
+      "Content-Type":"application/json",
+      "apikey":SB_ANON_KEY,
+      "Authorization":`Bearer ${bearer}`,
+    };
+  };
+
+  // Applies the outcome of a successful check: refresh the displayed balance
+  // from the server's `credits.personal` (signed-in), or burn the anonymous
+  // free check (signed-out). Server stays the source of truth either way.
+  const applyCheckSuccess=(data)=>{
+    if(data&&data.credits&&typeof data.credits.personal==="number"){
+      setBalance(prev=>({personal:data.credits.personal,shareable:prev?.shareable??0}));
+    }
+    if(!user){ markFreeCheckUsed(); setFreeUsed(true); }
+  };
+
+  // Gate an analyze attempt before any work runs. Signed-in -> always proceed
+  // (the server enforces via 402). Anonymous -> proceed only if the free check
+  // hasn't been used; otherwise open the sign-in modal instead of running.
+  // Returns true if the caller may proceed.
+  const gateAttempt=()=>{
+    if(user) return true;
+    if(isFreeCheckUsed()){ setShowSignIn(true); return false; }
+    return true;
+  };
+
   const handleFile=async(file)=>{
     if(!file) return;
+    if(!gateAttempt()) return;
     const heic=isHeic(file);
     if(!heic&&!ACCEPTED_TYPES.includes(file.type)){
       setStatus("error");
@@ -4636,14 +4889,16 @@ function QuoteCheckPage(){
 
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
         method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-        },
+        headers:await buildAnalyzeHeaders(),
         body:JSON.stringify({fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
       });
 
+      // Out of credits -> not an analysis failure. Return to idle and open the
+      // paywall instead of the error card.
+      if(res.status===402){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
+      }
       const data=await res.json();
       if(!res.ok||data.error){
         setStatus("error");
@@ -4653,7 +4908,7 @@ function QuoteCheckPage(){
       setAnalysis(data.analysis);
       setAnalysisSource("quote");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
-      consumeQuoteCredit();
+      applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4691,6 +4946,7 @@ function QuoteCheckPage(){
       setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
       return;
     }
+    if(!gateAttempt()) return;
     setFileName(new URL(url).hostname);
     setLastAttemptType("url");
     setStatus("analyzing");
@@ -4699,14 +4955,16 @@ function QuoteCheckPage(){
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
         method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-        },
+        headers:await buildAnalyzeHeaders(),
         body:JSON.stringify({url}),
       });
 
+      // Out of credits -> not an analysis failure. Return to idle and open the
+      // paywall instead of the error card.
+      if(res.status===402){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
+      }
       const data=await res.json();
       if(!res.ok||data.error){
         setStatus("error");
@@ -4716,7 +4974,7 @@ function QuoteCheckPage(){
       setAnalysis(data.analysis);
       setAnalysisSource("listing");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
-      consumeQuoteCredit();
+      applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
       setStatus("error");
@@ -4878,6 +5136,54 @@ function QuoteCheckPage(){
                 </button>
               ))}
             </div>
+
+            {/* Credits chip (Phase 4). Signed-in -> server balance ("{n} quotes
+                left", amber when low). Signed-out -> the one free check, or a
+                subtle nudge to sign in once it's spent. Display-only. */}
+            {(()=>{
+              if(user){
+                if(balance===null) return null; // balance not loaded yet -> show nothing rather than a wrong number
+                const low=balance.personal<=2;
+                return(
+                  <span title={`${balance.personal} personal quote${balance.personal===1?"":"s"} left${balance.shareable?` · ${balance.shareable} to share`:""}`}
+                    style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",
+                      color:low?C.butterInk:C.inkSoft,background:low?C.butterBg:C.paper2,border:`1px solid ${low?C.butter+"55":C.line}`}}>
+                    {balance.personal} quote{balance.personal===1?"":"s"} left
+                  </span>
+                );
+              }
+              if(!freeUsed) return(
+                <span style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  1 free check
+                </span>
+              );
+              return(
+                <button onClick={()=>setShowSignIn(true)}
+                  style={{fontSize:12,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.inkFaint,background:"transparent",border:`1px solid ${C.line}`,cursor:"pointer"}}>
+                  Sign in for more
+                </button>
+              );
+            })()}
+
+            {/* Auth entry point. Logged out -> a "Sign in" button that opens the
+                magic-link modal. Logged in -> an email chip + Sign out. Phase 2:
+                no gating anywhere, this is purely account presence. */}
+            {user?(
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                <span title={user.email} style={{maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12,fontWeight:800,color:C.ink,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"6px 12px"}}>
+                  {user.email}
+                </span>
+                <button onClick={()=>supabase.auth.signOut()} aria-label="Sign out"
+                  style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Sign out
+                </button>
+              </div>
+            ):(
+              <button onClick={()=>setShowSignIn(true)}
+                style={{background:C.teal,border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                Sign in
+              </button>
+            )}
           </div>
 
           {status==="idle"&&(
@@ -4995,6 +5301,24 @@ function QuoteCheckPage(){
 
           {status==="done"&&analysis&&(
             <div>
+              {/* Result-first sign-in invitation. Non-blocking: the full report
+                  renders below regardless. Only shown to logged-out visitors --
+                  once signed in it disappears. No paywall, no enforcement
+                  (Phase 2 is auth primitives only). */}
+              {!user&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,boxShadow:"none",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  <div style={{fontSize:26,flexShrink:0}}>🔖</div>
+                  <div style={{flex:"1 1 200px",minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:800,color:C.ink,marginBottom:2}}>Sign in to save this report and run more checks</div>
+                    <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>Keep a copy in your account and pick up where you left off — takes a few seconds, no password.</div>
+                  </div>
+                  <button onClick={()=>setShowSignIn(true)}
+                    style={{background:C.teal,border:"none",borderRadius:10,padding:"10px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                    Sign in →
+                  </button>
+                </div>
+              )}
+
               <div style={cardStyle}>
                 <div style={{fontSize:13,color:C.inkFaint}}>{analysis.vehicle||"Vehicle"}</div>
               </div>
@@ -5474,6 +5798,8 @@ function QuoteCheckPage(){
           </div>
         </div>
       </div>
+      {showSignIn&&<SignInModal C={C} cardStyle={cardStyle} onClose={()=>setShowSignIn(false)}/>}
+      {showPaywall&&<QuotePaywallModal C={C} cardStyle={cardStyle} onClose={()=>setShowPaywall(false)}/>}
     </>
   );
 }

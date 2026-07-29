@@ -67,6 +67,78 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
 
+// ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
+// A personal credit is deducted ONLY after an accurate result is delivered,
+// and ONLY for signed-in requests. Anonymous requests (no/invalid JWT — which
+// includes the anon key the frontend sends today) resolve to no user and take
+// the existing flow byte-for-byte unchanged: every helper below is a no-op
+// when there is no hold. The fn_* RPCs were REVOKED from public, so they are
+// called with the service-role `supabase` client above.
+
+// Resolve the signed-in caller from the Authorization: Bearer <jwt> header.
+// Returns null for anonymous / unresolvable tokens (the back-compat path).
+// Never throws — a transient auth failure falls back to the anonymous path.
+async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(jwt);
+    if (error || !data?.user) return null;
+    return data.user;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// Place a credit hold before any expensive work. null result → out of credits.
+async function authorizeCredit(
+  userId: string,
+): Promise<{ ok: true; holdId: string } | { ok: false; kind: "out_of_credits" | "error" }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_authorize_quote", { p_user: userId });
+    if (error) {
+      console.error("fn_authorize_quote failed:", error.message);
+      return { ok: false, kind: "error" };
+    }
+    if (!data) return { ok: false, kind: "out_of_credits" };
+    return { ok: true, holdId: data as string };
+  } catch (e) {
+    console.error("fn_authorize_quote threw:", e);
+    return { ok: false, kind: "error" };
+  }
+}
+
+// Finalize a hold as −1 after a delivered accurate result. Returns the new
+// personal balance for the response, or null if capture couldn't be recorded
+// (in which case the response simply omits `credits` — `analysis` is unchanged).
+async function captureCredit(hold: string | null): Promise<{ personal: number } | null> {
+  if (!hold) return null;
+  try {
+    const { data, error } = await supabase.rpc("fn_capture_quote", { p_hold: hold, p_quote: null });
+    if (error) {
+      console.error("fn_capture_quote failed:", error.message);
+      return null;
+    }
+    if (data == null) return null;
+    return { personal: Number(data) };
+  } catch (e) {
+    console.error("fn_capture_quote threw:", e);
+    return null;
+  }
+}
+
+// Drop an uncaptured hold on any failure after authorize → no charge.
+async function releaseCredit(hold: string | null): Promise<void> {
+  if (!hold) return;
+  try {
+    const { error } = await supabase.rpc("fn_release_quote", { p_hold: hold });
+    if (error) console.error("fn_release_quote failed:", error.message);
+  } catch (e) {
+    console.error("fn_release_quote threw:", e);
+  }
+}
+
 const PRICING_CHANGE_DATE = new Date("2026-09-01T00:00:00Z");
 function computeCost(inputTokens: number, outputTokens: number): number {
   const now = new Date();
@@ -1460,6 +1532,10 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  // Anonymous by default: null user → existing flow, no credit logic at all.
+  const creditUser = await resolveCreditUser(req);
+  let holdId: string | null = null;
+
   try {
     const { url } = await req.json();
     if (!url || typeof url !== "string") {
@@ -1467,6 +1543,27 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "No listing URL received." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
+    }
+
+    // Authorize a credit hold before any expensive work — and before the cache
+    // fast-path, since a cache hit is still a delivered accurate result that
+    // must capture. Signed-in only; anonymous callers skip this entirely. The
+    // 400 above runs before this, so a rejected request never places a hold.
+    if (creditUser) {
+      const authz = await authorizeCredit(creditUser.id);
+      if (!authz.ok) {
+        if (authz.kind === "out_of_credits") {
+          return new Response(
+            JSON.stringify({ error: "out_of_credits" }),
+            { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ error: "Something went wrong analyzing that listing." }),
+          { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+      holdId = authz.holdId;
     }
 
     // Cache fast-path: a recent analysis of this exact URL is returned
@@ -1481,8 +1578,13 @@ Deno.serve(async (req: Request) => {
       if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
         const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
         console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
+        // A cached delivery is still a delivered accurate result -> capture.
+        const credits = await captureCredit(holdId);
+        holdId = null;
         return new Response(
-          JSON.stringify({ analysis: cached.analysis, cached: true }),
+          JSON.stringify(credits
+            ? { analysis: cached.analysis, cached: true, credits }
+            : { analysis: cached.analysis, cached: true }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -1514,8 +1616,13 @@ Deno.serve(async (req: Request) => {
         // Logged as a success: we returned a usable report, just via the feed.
         await logUsage({ success: true, errorMessage: `page-load failed, served SM360 feed fallback` });
         console.log(`Served SM360 feed fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        // A usable report was delivered (via the feed) -> capture.
+        const credits = await captureCredit(holdId);
+        holdId = null;
         return new Response(
-          JSON.stringify({ analysis: fallback, source: "sm360_feed_fallback" }),
+          JSON.stringify(credits
+            ? { analysis: fallback, source: "sm360_feed_fallback", credits }
+            : { analysis: fallback, source: "sm360_feed_fallback" }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -1523,6 +1630,8 @@ Deno.serve(async (req: Request) => {
       // Not an SM360 listing (or its feed was also unreachable / the unit isn't
       // in the feed): keep today's behaviour exactly.
       await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody}` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't load that page after a few tries. This dealer site may be blocking automated access right now -- try again in a moment, or use the upload/screenshot option instead." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1559,6 +1668,8 @@ Deno.serve(async (req: Request) => {
     if (!pageContent) {
       console.error("No usable content in Nimble response. Top-level keys:", Object.keys(nimbleData||{}), "data keys:", Object.keys(nimbleData?.data||{}));
       await logUsage({ success: false, errorMessage: `No content in Nimble response (status=${nimbleData?.status}, status_code=${nimbleData?.status_code})` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that page's content. Try a different listing." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1616,6 +1727,8 @@ Deno.serve(async (req: Request) => {
       const errBody = await claudeRes.text();
       console.error("Claude API call failed:", claudeRes.status, errBody);
       await logUsage({ success: false, errorMessage: `Claude HTTP ${claudeRes.status}` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't analyze that listing. Please try again in a moment." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1637,6 +1750,8 @@ Deno.serve(async (req: Request) => {
         outputTokens: usage?.output_tokens,
         errorMessage: "No text block in response",
       });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read a response from the analysis. Please try again." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1665,6 +1780,8 @@ Deno.serve(async (req: Request) => {
         outputTokens: usage?.output_tokens,
         errorMessage: `JSON parse failure (stop_reason=${stopReason}, output_tokens=${usage?.output_tokens})`,
       });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that listing clearly. Try a different page." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1702,13 +1819,21 @@ Deno.serve(async (req: Request) => {
       outputTokens: usage?.output_tokens,
     });
 
+    // Delivered an accurate result -> capture the hold (signed-in only) and
+    // include the new balance. Null holdId out first so a later throw can't
+    // release a hold we've decided to charge. `analysis` is unchanged either way.
+    const credits = await captureCredit(holdId);
+    holdId = null;
     return new Response(
-      JSON.stringify({ analysis }),
+      JSON.stringify(credits ? { analysis, credits } : { analysis }),
       { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
   } catch (err) {
     console.error("analyze-listing-url error:", err);
     await logUsage({ success: false, errorMessage: String(err) });
+    // Any throw after a hold was placed must not charge the user.
+    await releaseCredit(holdId);
+    holdId = null;
     return new Response(
       JSON.stringify({ error: "Something went wrong analyzing that listing." }),
       { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
