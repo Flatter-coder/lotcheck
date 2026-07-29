@@ -385,7 +385,7 @@
   .sn-logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:1.02rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none;flex:none}
   .sn-logo svg{display:block}
   .sn-links{display:flex;gap:22px;margin-left:auto;align-items:center}
-  .sn-links a{position:relative;font-size:.9rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
+  .sn-links a{position:relative;font-size:.99rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
   .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left;transition:transform .2s}
   .sn-links a:hover{color:var(--ink)}
   .sn-links a:hover::after{transform:scaleX(1)}
@@ -397,15 +397,6 @@
   .sn-analyze:hover{transform:translateY(-1px);opacity:.92}
   @media(max-width:880px){.sn-links{display:none}.sitenav-in{gap:10px;padding:10px 14px}.sn-cta{margin-left:auto;gap:8px}.sn-analyze{padding:8px 13px;font-size:.8rem}}
   @media (prefers-reduced-motion:reduce){.sn-dot{animation:none}.sn-links a::after,.sn-analyze{transition:none}}
-  /* National | By city view tabs */
-  .viewtabs{max-width:1120px;margin:0 auto 2px;padding:0 clamp(16px,3vw,28px);display:flex;gap:8px}
-  .vt{font:inherit;font-size:.9rem;font-weight:600;color:var(--dim);background:var(--panel-2);border:1px solid var(--hair);border-radius:999px;padding:8px 18px;cursor:pointer;transition:color .2s,border-color .2s,background .2s;display:inline-flex;align-items:center;gap:8px}
-  .vt:hover{color:var(--ink);border-color:var(--hair-strong)}
-  .vt.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
-  .bycity{max-width:1120px;margin:0 auto;padding:8px clamp(16px,3vw,28px) 0}
-  .bycity iframe{width:100%;height:min(84vh,860px);min-height:520px;border:1px solid var(--hair);border-radius:16px;background:var(--panel);display:block}
-  .bycity .bc-note{font-size:12px;line-height:1.5;color:var(--dim);margin-top:10px}
-  @media (prefers-reduced-motion:reduce){.vt{transition:none}}
 </style>
 </head>
 <body>
@@ -417,6 +408,7 @@
     </a>
     <div class="sn-links">
       <a class="sn-live" href="/live-price-index" aria-current="page"><span class="sn-dot" aria-hidden="true"></span>MSRP Price Index</a>
+      <a href="/alberta">Alberta Dealers Map</a>
       <a href="/#how">How it works</a>
       <a href="/#pipeline">10-point lane</a>
       <a href="/#report">Sample report</a>
@@ -479,11 +471,7 @@
 </header>
 
 <div class="wrap">
-  <div class="viewtabs" role="tablist" aria-label="Index view">
-    <button class="vt on" id="tabNational" role="tab" aria-selected="true" data-view="national">National</button>
-    <button class="vt" id="tabBycity" role="tab" aria-selected="false" data-view="bycity">By city · Alberta</button>
-  </div>
-  <article class="report" id="viewNational">
+  <article class="report">
     <!-- HEADLINE -->
     <div class="report-head">
       <div class="kicker">LotCheck MSRP Index · base 100</div>
@@ -563,10 +551,6 @@
       </div>
     </section>
   </article>
-  <div class="bycity" id="viewBycity" hidden>
-    <iframe id="bycityFrame" title="Alberta MSRP index — by city map" loading="lazy" allow="fullscreen"></iframe>
-    <div class="bc-note">◆ Demo — city positions are real coordinates; dealer counts and price-vs-MSRP figures are sample data for design preview. Current weather is live (Open-Meteo).</div>
-  </div>
 </div>
 
 <!-- drill-down drawer -->
@@ -585,7 +569,7 @@
   </div>
 </div>
 
-<div class="foot" id="nationalFoot">
+<div class="foot">
   ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>pricing-mention rate</b> is genuine AI analysis of review text ("fees", "pricing"). The <b>Reviews vs MSRP</b> is drawn from the same real inputs — each dealer's <b>Google review score &amp; count</b> from <span class="mono">get-dealer-sentiment</span> plotted against its <b>scraped-listing markup vs <span class="mono">msrp_catalog</span></b>; only the drifting motion is a simulated review stream for this preview. None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
 </div>
 
@@ -1293,29 +1277,6 @@
   }else{
     updateTimer();
   }
-})();
-</script>
-<script>
-/* National | By city view toggle — lazy-loads the Alberta map (/alberta) in an isolated iframe */
-(function(){
-  var tN=document.getElementById('tabNational'), tB=document.getElementById('tabBycity');
-  var vN=document.getElementById('viewNational'), vB=document.getElementById('viewBycity');
-  var foot=document.getElementById('nationalFoot'), frame=document.getElementById('bycityFrame');
-  if(!tN||!tB) return;
-  var loaded=false;
-  function show(view){
-    var bycity=(view==='bycity');
-    vN.hidden=bycity; vB.hidden=!bycity;
-    if(foot) foot.hidden=bycity;
-    tN.classList.toggle('on',!bycity); tB.classList.toggle('on',bycity);
-    tN.setAttribute('aria-selected',(!bycity).toString());
-    tB.setAttribute('aria-selected',bycity.toString());
-    if(bycity && !loaded){ frame.src='/alberta'; loaded=true; }
-    try{ history.replaceState(null,'', bycity?'#by-city':location.pathname+location.search); }catch(e){}
-  }
-  tN.addEventListener('click',function(){show('national');});
-  tB.addEventListener('click',function(){show('bycity');});
-  if(location.hash==='#by-city') show('bycity');
 })();
 </script>
 </body>
