@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/", "destination": "/index.html" },
     { "source": "/live-price-index", "destination": "/live-price-index.html" },
+    { "source": "/alberta", "destination": "/alberta.html" },
     { "source": "/((?!api/).*)", "destination": "/app.html" }
   ],
   "headers": [
