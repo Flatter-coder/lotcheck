@@ -1,0 +1,1215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Live MSRP Price Index</title>
+<style>
+  /* ================= THEME TOKENS =================
+     Restraint palette: ONE hero accent (cyan). Everything else neutral ink/grey.
+     Green/red are reserved strictly for meaning (up / down).
+     Purple (--gate) is reserved for the brand verification-gate motif only. */
+  :root{
+    /* DARK (default) */
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);       /* hairline border */
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;                      /* the single hero accent */
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;                        /* meaning only */
+    --down:#f0688a;                      /* meaning only */
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;                       /* primary text */
+    --dim:#8b95a6;                       /* secondary text */
+    --dimmer:#586172;                    /* tertiary text */
+    --grid:rgba(255,255,255,.05);
+    --frust:#c98aa0;                     /* muted, secondary line */
+    --gate:#8b7bff;                      /* brand verification-gate purple (logo motif only) */
+    --blur:14px;
+    --scrim:rgba(4,6,10,.6);
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --frust:#b07a8e;
+    --gate:#6f57e6;
+    --blur:16px;
+    --scrim:rgba(120,138,162,.4);
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  /* Flat, calm background — no competing radial glows. */
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:64px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+  .up{color:var(--up)} .down{color:var(--down)}
+
+  /* ---------------- ticker ---------------- */
+  .ticker{position:sticky;top:0;z-index:5;display:flex;align-items:center;height:38px;
+    background:var(--panel-solid);backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);overflow:hidden}
+  .ticker .tag{flex:none;display:flex;align-items:center;gap:8px;padding:0 16px;height:100%;
+    font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--dim);border-right:1px solid var(--hair);text-transform:uppercase}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--up);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .track{display:flex;gap:34px;white-space:nowrap;animation:scroll 46s linear infinite;padding-left:26px}
+  .ticker:hover .track{animation-play-state:paused}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .ti{display:inline-flex;align-items:center;gap:8px;font-size:12.5px}
+  .ti b{color:var(--dim);font-weight:500;letter-spacing:.3px}
+  .ti .v{color:var(--ink);font-weight:600}
+
+  /* ---------------- header ---------------- */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1220px;margin:0 auto;padding:30px 30px 8px}
+  .brand{display:flex;align-items:center;gap:14px}
+
+  /* ---------------- brand logo: REAL LotCheck mark (isometric gate + car) ----------------
+     Ported verbatim from src/App.jsx `LogoMark` (the live homepage logo): an
+     isometric verification gate the coral car drives through, with the gate's
+     window flashing as it passes. SVG polygons + keyframes are the originals. */
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  /* original homepage keyframes (src/App.jsx lines 55-62) */
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
+  }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .pill.live{display:flex;align-items:center;gap:7px}
+  .pill.demo{color:var(--dim)}
+  .clock{font-size:12px;color:var(--dimmer)}
+  /* neutral theme toggle — no gradient knob, no glow */
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  /* ---------------- layout: v04 editorial single-column report ---------------- */
+  .scene{perspective:1600px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;backdrop-filter:blur(var(--blur));
+    position:relative;transition:transform .25s cubic-bezier(.16,1,.3,1),border-color .3s;
+    opacity:0;translate:0 18px}
+  .card.in{opacity:1;translate:0 0;transition:opacity .55s ease,translate .55s cubic-bezier(.16,1,.3,1)}
+
+  .wrap{max-width:820px;margin:0 auto;padding:26px 28px 0}
+  .report{display:flex;flex-direction:column;gap:44px}
+  /* headline block */
+  .report-head .kicker{font-size:11px;color:var(--cyan);letter-spacing:2.4px;text-transform:uppercase}
+  .report-head .idx{font-size:84px;margin-top:14px}
+  @media(max-width:560px){.report-head .idx{font-size:60px}}
+  .report-head .chg{margin-top:16px}
+  .lede{font-size:17px;line-height:1.65;color:var(--dim);margin-top:22px;max-width:62ch}
+  .lede b{color:var(--ink);font-weight:600}
+  /* section headings with a hairline rule, magazine style */
+  .report h2{font-size:13px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);
+    font-weight:600;padding-bottom:12px;border-bottom:1px solid var(--hair-strong);margin-bottom:20px;
+    display:flex;justify-content:space-between;align-items:baseline}
+  .report h2 .n{color:var(--dimmer);font-weight:500}
+  .report .ctrls{justify-content:flex-start;margin-bottom:12px}
+  .report .chartwrap{height:320px;margin-top:0}
+  .report .pt-grid{margin-top:18px}
+  .note-rule{font-size:13px;line-height:1.7;color:var(--dim);max-width:64ch}
+  .note-rule b{color:var(--ink)}
+
+  /* ---------------- HERO: main index panel ---------------- */
+  .main{padding:26px 28px}
+  .main .top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .scope-lbl{font-size:11px;color:var(--cyan);letter-spacing:.8px;margin-top:6px;min-height:14px;opacity:0;transition:opacity .3s}
+  .scope-lbl.show{opacity:1}
+  /* the ONE permitted glow: a soft halo on the hero number only */
+  .idx{font-size:56px;font-weight:700;line-height:1;margin-top:10px;letter-spacing:-1px;
+    text-shadow:0 0 26px var(--cyan-dim)}
+  .chg{display:inline-flex;align-items:center;gap:6px;font-size:14px;font-weight:600;margin-top:12px;padding:4px 10px;border-radius:8px}
+  .chg.up{color:var(--up);background:var(--up-soft)} .chg.down{color:var(--down);background:var(--down-soft)}
+  .ctrls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .rng{display:flex;gap:6px}
+  .rng button,.matrix-btn{font:inherit;font-size:11px;color:var(--dim);background:transparent;border:1px solid var(--hair);
+    border-radius:8px;padding:6px 12px;cursor:pointer;transition:.15s}
+  .rng button:hover,.matrix-btn:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .rng button.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+  .matrix-btn{display:inline-flex;align-items:center;gap:7px}
+  .matrix-btn.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+  .matrix-btn .sq{width:7px;height:7px;border-radius:2px;background:currentColor}
+  .legend{display:flex;gap:16px;margin-top:14px;font-size:10.5px;color:var(--dim);letter-spacing:.3px;transition:opacity .3s}
+  .legend .lg{display:inline-flex;align-items:center;gap:7px;background:none;border:none;font:inherit;color:var(--dim);cursor:default;padding:0}
+  .legend button.lg{cursor:pointer}
+  .legend button.lg:hover{color:var(--ink)}
+  .legend i{width:15px;height:2px;border-radius:2px;display:inline-block;background:currentColor;opacity:.9}
+  .legend .lg.lmi i{background:var(--cyan)}
+  .legend .lg.frust i{background:var(--frust)}
+  .legend button.lg.off{opacity:.5}
+  .legend button.lg.off i{opacity:.35}
+  .chartwrap{margin-top:12px;position:relative;height:236px}
+  svg.chart{width:100%;height:100%;display:block;overflow:visible}
+  .mx-cap{position:absolute;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;pointer-events:none;opacity:0;transition:opacity .5s}
+  .mx-cap.show{opacity:.85}
+  .mx-axis{position:absolute;font-size:9.5px;color:var(--dimmer);letter-spacing:.4px;pointer-events:none;opacity:0;transition:opacity .5s}
+  .mx-axis.show{opacity:.85}
+
+  /* ---------------- side stat stack (quieter, smaller) ---------------- */
+  .side{display:flex;flex-direction:column;gap:14px}
+  .stat{padding:17px 19px}
+  .stat .lbl{display:flex;justify-content:space-between;align-items:center}
+  .stat .val{font-size:24px;font-weight:700;margin-top:8px;letter-spacing:-.4px}
+  .stat .row{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:11.5px;color:var(--dim)}
+  .stat .chgn{font-size:11.5px;font-weight:600}
+  .stat.clickable{cursor:pointer}
+  .stat .hint{font-size:9.5px;color:var(--cyan);letter-spacing:.5px;text-transform:uppercase;margin-top:6px;opacity:.9}
+  /* markup vs reputation leaderboard */
+  .lb{max-height:0;overflow:hidden;transition:max-height .5s cubic-bezier(.16,1,.3,1),margin-top .5s,opacity .4s;opacity:0;margin-top:0}
+  .stat.open .lb{max-height:360px;margin-top:16px;opacity:1}
+  .lb-head{font-size:9.5px;color:var(--dim);letter-spacing:.8px;text-transform:uppercase;display:flex;justify-content:space-between;padding:0 2px 9px;border-bottom:1px solid var(--hair)}
+  .lb-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px;border-radius:9px;margin-top:6px;
+    border:1px solid transparent;background:var(--panel-2);transition:.2s}
+  .lb-row .dn{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+  .lb-row .mk{font-size:12.5px;font-weight:700}
+  .lb-row.tense .mk{color:var(--down)} .lb-row.fair .mk{color:var(--up)} .lb-row .mk{color:var(--dim)}
+  .lb-row .rt{font-size:12px;display:inline-flex;align-items:center;gap:4px;color:var(--ink)}
+  .lb-note{font-size:10px;color:var(--dimmer);margin-top:12px;line-height:1.55}
+  .lb-note b{color:var(--dim)}
+
+  /* ---------------- powertrain filter row (restrained chips) ---------------- */
+  .pt-section-lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase;margin-bottom:2px}
+  .pt-chips{display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
+  .chip{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:12.5px;color:var(--dim);
+    background:transparent;border:1px solid var(--hair);border-radius:10px;padding:8px 14px;cursor:pointer;transition:.18s}
+  .chip:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .chip svg{width:16px;height:16px;flex:none;color:var(--dimmer);transition:color .18s}
+  .chip:hover svg{color:var(--dim)}
+  .chip.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+  .chip.on svg{color:var(--cyan)}
+
+  /* ---------------- powertrain breakdown tiles (neutral, quiet) ---------------- */
+  .pt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:14px}
+  .pt{padding:16px 18px;cursor:pointer}
+  .pt .name{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dim);letter-spacing:.6px}
+  .pt .name svg{width:17px;height:17px;color:var(--dimmer);flex:none}
+  .pt .price{font-size:23px;font-weight:700;margin-top:11px;letter-spacing:-.4px}
+  .pt .meta{display:flex;justify-content:space-between;align-items:center;margin-top:7px;font-size:11.5px}
+  .pt .meta .sub{color:var(--dimmer)}
+  .pt .bar{height:2px;border-radius:2px;background:var(--hair);margin-top:13px;overflow:hidden}
+  .pt .bar i{display:block;height:100%;border-radius:2px;background:var(--dim)}
+  .pt .drill{font-size:9px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase;margin-top:11px;opacity:.75}
+  .pt.dim{opacity:.4}
+  .pt.active{border-color:var(--cyan-dim)}
+  .pt.active .name svg{color:var(--cyan)}
+
+  /* ---------------- continuously-animated powertrain icons ----------------
+     REAL app icons, ported verbatim from src/App.jsx `FuelIcon` + its
+     keyframes (lines 41-54): BEV battery-with-bolt (charge pulse), PHEV plug
+     (charge pulse), Hybrid circular-arrows (spin), Gas pump (pump bob). The
+     animation is applied to the whole <svg> exactly as in the app. */
+  @keyframes lc-charge{
+    0%,100%{opacity:0.5;transform:scale(0.85);}
+    50%    {opacity:1;  transform:scale(1.2);}
+  }
+  @keyframes lc-pump{
+    0%,100%{transform:translateY(0);}
+    30%    {transform:translateY(-3px);}
+    60%    {transform:translateY(0);}
+    80%    {transform:translateY(-1px);}
+  }
+  @keyframes lc-spin{
+    0%  {transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
+  .fuel-ico{overflow:visible}
+
+  /* ---------------- drill-down drawer ---------------- */
+  .scrim{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .35s;z-index:40}
+  .scrim.show{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(420px,92vw);z-index:41;
+    background:var(--panel-solid);backdrop-filter:blur(20px);border-left:1px solid var(--hair);
+    transform:translateX(100%);transition:transform .42s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column;
+    box-shadow:-30px 0 70px -44px rgba(0,0,0,.55)}
+  .drawer.show{transform:translateX(0)}
+  .drawer-head{padding:24px 24px 18px;border-bottom:1px solid var(--hair);position:relative}
+  .drawer-head .seglbl{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--cyan);letter-spacing:1.6px;text-transform:uppercase}
+  .drawer-head .seglbl svg{width:15px;height:15px}
+  .drawer-head h2{font-size:22px;font-weight:700;margin-top:8px}
+  .drawer-head .loc{font-size:12px;color:var(--dim);margin-top:5px}
+  .drawer-close{position:absolute;top:22px;right:22px;width:32px;height:32px;border-radius:9px;border:1px solid var(--hair);
+    background:var(--panel-2);color:var(--dim);cursor:pointer;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;transition:.2s}
+  .drawer-close:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .drawer-body{padding:20px 24px;overflow-y:auto;flex:1}
+  .drawer-body .sect{font-size:10.5px;color:var(--dim);letter-spacing:1.4px;text-transform:uppercase;margin-bottom:14px}
+  .dealer{border:1px solid var(--hair);border-radius:13px;padding:15px 16px;margin-bottom:12px;background:var(--panel);
+    opacity:0;transform:translateX(14px);transition:opacity .4s ease,transform .4s cubic-bezier(.16,1,.3,1)}
+  .dealer.in{opacity:1;transform:translateX(0)}
+  .dealer .dh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .dealer .dn{font-size:14px;font-weight:600}
+  .dealer .rank{font-size:10px;color:var(--dimmer);letter-spacing:.8px;margin-top:3px}
+  .dealer .rating{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;white-space:nowrap}
+  .dealer .revct{font-size:11px;color:var(--dim);font-weight:400}
+  .dealer .snip{font-size:12px;color:var(--dim);line-height:1.55;margin-top:11px;font-style:italic;
+    padding-left:12px;border-left:2px solid var(--hair-strong)}
+  .dealer .snip b{color:var(--ink);font-style:normal;font-weight:600}
+  .star{color:var(--star)}
+
+  .foot{max-width:1220px;margin:26px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  /* ================================================================
+     REVIEWS VS MSRP — namespaced (tm-*) so nothing collides with
+     the MSRP report above. Ported from trust-editorial-live.html; the
+     theme TOKENS are shared (this section just references --up/--down/
+     --cyan/etc, so the single toggle re-themes it automatically).
+     ================================================================ */
+  @keyframes tm-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .tm-ldot{width:6px;height:6px;border-radius:50%;background:var(--up);animation:tm-pulse 2.4s ease-in-out infinite;flex:none;display:inline-block}
+  .tm-matrix-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;
+    backdrop-filter:blur(var(--blur));padding:22px 22px 16px;position:relative}
+  .tm-matrix-lede{font-size:14px;color:var(--dim);line-height:1.55;margin-bottom:14px;max-width:58ch}
+  .tm-matrix-lede b{color:var(--ink);font-weight:600}
+  /* simulation control bar */
+  .tm-simbar{display:flex;align-items:center;gap:12px;margin:2px 0 4px;flex-wrap:wrap}
+  .tm-simnote{font-size:10.5px;color:var(--dimmer);letter-spacing:.3px;display:inline-flex;align-items:center;gap:7px}
+  .tm-toggle-sim{font:inherit;font-size:11px;color:var(--dim);background:transparent;border:1px solid var(--hair);
+    border-radius:8px;padding:6px 13px;cursor:pointer;transition:.15s}
+  .tm-toggle-sim:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .tm-toggle-sim.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+  .tm-toggle-sim:disabled{cursor:default}
+  .tm-feed{font-size:11px;color:var(--dim);margin-left:auto;min-height:16px;transition:opacity .3s;opacity:0;text-align:right}
+  .tm-feed.show{opacity:1}
+  .tm-feed b{color:var(--ink);font-weight:600}
+  /* chart canvas — aspect-locked so the tooltip math anchors exactly to the plot */
+  .tm-chartwrap{position:relative;width:100%;aspect-ratio:800/440;margin-top:12px}
+  svg.tm-chart{width:100%;height:100%;display:block;overflow:visible}
+  .tm-mxdot{transition:fill-opacity .2s,stroke-width .2s;cursor:pointer}
+  .tm-mxdot.faded{opacity:.28;transition:opacity .2s}
+  .tm-mxdot.active{fill-opacity:.34;stroke-width:2.4}
+  .tm-mx-cap{position:absolute;font-size:10px;letter-spacing:.4px;text-transform:uppercase;pointer-events:none;font-weight:600}
+  .tm-mx-cap.tm-br{right:14px;bottom:44px;color:var(--up)}
+  .tm-mx-cap.tm-tl{left:64px;top:6px;color:var(--down)}
+  /* frosted hover card — anchored INSIDE the matrix container, edge-flips, never clipped by the column */
+  .tm-tip{position:absolute;z-index:20;width:236px;max-width:calc(100% - 8px);pointer-events:none;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);border-radius:13px;
+    padding:14px 15px;backdrop-filter:blur(20px);box-shadow:0 24px 50px -30px rgba(0,0,0,.6);
+    opacity:0;transform:translateY(6px) scale(.98);transition:opacity .16s ease,transform .16s cubic-bezier(.16,1,.3,1)}
+  .tm-tip.show{opacity:1;transform:translateY(0) scale(1)}
+  .tm-tip .th{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .tm-tip .tn{font-size:14px;font-weight:700;line-height:1.25}
+  .tm-tip .rating{display:inline-flex;align-items:center;gap:4px;font-size:13px;font-weight:700;white-space:nowrap}
+  .tm-tip .revct{font-size:11px;color:var(--dim);font-weight:500;margin-top:2px}
+  .tm-tip .row{display:flex;justify-content:space-between;align-items:center;margin-top:11px;font-size:12px}
+  .tm-tip .row .k{color:var(--dim)}
+  .tm-tip .row .v{font-weight:700}
+  .tm-tip .v.up{color:var(--up)} .tm-tip .v.down{color:var(--down)}
+  .tm-tip .snip{font-size:11.5px;color:var(--dim);line-height:1.5;margin-top:11px;font-style:italic;padding-left:10px;border-left:2px solid var(--hair-strong)}
+  .tm-tip .snip b{color:var(--ink);font-style:normal;font-weight:600}
+  .tm-tip .badge{display:inline-block;margin-top:11px;font-size:9px;letter-spacing:.6px;text-transform:uppercase;font-weight:700;padding:3px 8px;border-radius:20px}
+  .tm-tip .badge.green{color:var(--up);background:var(--up-soft)}
+  .tm-tip .badge.red{color:var(--down);background:var(--down-soft)}
+  .tm-tip .badge.neutral{color:var(--dim);background:var(--panel-2)}
+  .tm-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--dim);letter-spacing:.3px;
+    align-items:center;margin-top:14px;padding-top:14px;border-top:1px solid var(--hair)}
+  .tm-legend .lg{display:inline-flex;align-items:center;gap:7px}
+  .tm-legend .sw{width:10px;height:10px;border-radius:50%}
+  .tm-legend .sw.good{background:var(--up)} .tm-legend .sw.bad{background:var(--down)} .tm-legend .sw.neutral{background:var(--dim);opacity:.6}
+  .tm-legend .sw.size{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dim);background:transparent}
+
+  @media (prefers-reduced-motion:reduce){
+    .track{animation:none} .dealer{transition:none} .card{transition:none} .dot{animation:none}
+    /* freeze the brand-logo motif — car rests mid-gate, window lit */
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    /* freeze the powertrain icons — static, legible */
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+    /* Reviews vs MSRP: freeze the drift pulse, keep hover cards */
+    .tm-ldot{animation:none!important}
+    .tm-tip{transition:opacity .12s}
+  }
+</style>
+</head>
+<body>
+<div class="ticker">
+  <div class="tag"><span class="dot"></span> LMI</div>
+  <div class="track" id="track"></div>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <!-- REAL LotCheck mark, ported verbatim from src/App.jsx LogoMark (viewBox -95 -45 145 130) -->
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Live MSRP Price Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill demo">Demo data</span>
+    <span class="pill live"><span class="dot"></span> Live</span>
+    <span class="clock mono" id="clock">--:--:--</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <article class="report">
+    <!-- HEADLINE -->
+    <div class="report-head">
+      <div class="kicker">LotCheck MSRP Index · base 100</div>
+      <div class="idx mono" id="lmi">0.00</div>
+      <div class="chg up" id="lmiChg">&nbsp;</div>
+      <div class="scope-lbl" id="scopeLbl"></div>
+      <p class="lede">Where Canadian new-vehicle sticker prices sit today, tracked across
+        <b>29 makes</b>. The index reads dealer listings against verified MSRP — so a rising line
+        means the market is pushing <b>above</b> manufacturer pricing.</p>
+    </div>
+
+    <!-- CHART -->
+    <section>
+      <h2>The index <span class="n">1M view</span></h2>
+      <div class="ctrls">
+        <div class="rng" id="rng"></div>
+        <button class="matrix-btn" id="matrixBtn"><span class="sq"></span>Reviews vs MSRP</button>
+      </div>
+      <div class="legend" id="legend">
+        <span class="lg lmi"><i></i>LMI</span>
+        <button class="lg frust off" id="frustToggle" type="button"><i></i>Pricing-mention rate</button>
+      </div>
+      <div class="chartwrap" id="chartwrap">
+        <svg class="chart" id="chart" viewBox="0 0 720 236" preserveAspectRatio="none"></svg>
+        <div class="mx-cap" id="capBR" style="right:10px;bottom:16px;color:var(--up)">Below MSRP · higher-rated ▾</div>
+        <div class="mx-cap" id="capTL" style="left:10px;top:8px;color:var(--down)">Above MSRP · lower-rated ▴</div>
+        <div class="mx-axis" id="axX" style="right:8px;bottom:-2px">Google review score →</div>
+        <div class="mx-axis" id="axY" style="left:2px;top:2px">↑ Above MSRP</div>
+        <div class="mx-axis" id="axY2" style="left:2px;bottom:16px">↓ Below MSRP</div>
+      </div>
+    </section>
+
+    <!-- POWERTRAIN -->
+    <section>
+      <h2>By powertrain <span class="n">avg MSRP · today</span></h2>
+      <div class="pt-chips" id="ptChips"></div>
+      <div class="scene"><div class="pt-grid" id="ptGrid"></div></div>
+    </section>
+
+    <!-- INSIGHTS -->
+    <section>
+      <h2>Market insights <span class="n">data &amp; markup</span></h2>
+      <div class="side" id="side"></div>
+    </section>
+
+    <!-- ============ REVIEWS VS MSRP (live) ============ -->
+    <section>
+      <h2>Local reviews vs MSRP <span class="n">reputation × price · live</span></h2>
+      <p class="note-rule" style="margin-bottom:18px">The index says where prices sit; it doesn't say who to trust.
+        <b>Which local dealers are both the cheapest and the highest-rated?</b> Every dealership is plotted by its
+        Google review score against how far its listings sit above or below MSRP — the bottom-right is below MSRP and higher-rated.</p>
+      <div class="tm-matrix-card">
+        <div class="tm-matrix-lede">Each dot is a dealership: <b>Google review score</b> left→right (1.0–5.0★),
+          <b>above / below MSRP</b> top→bottom, dot size ≈ inventory. <b>Hover any dot</b> for the full card; between
+          hovers the dots <b>drift</b> as fresh ratings land — motion that's simulated for this preview.</div>
+
+        <div class="tm-simbar">
+          <button class="tm-toggle-sim on" id="tm-simBtn"><span aria-hidden="true">⏸</span> Pause simulation</button>
+          <span class="tm-simnote"><span class="tm-ldot"></span>Simulated review stream — no real data changing</span>
+          <span class="tm-feed" id="tm-feed"></span>
+        </div>
+
+        <div class="tm-chartwrap" id="tm-chartwrap">
+          <svg class="tm-chart" id="tm-chart" viewBox="0 0 800 440" preserveAspectRatio="xMidYMid meet"
+               role="img" aria-label="Live reviews vs MSRP scatter plot of dealer Google review score against MSRP deviation"></svg>
+          <div class="tm-mx-cap tm-br">Below MSRP · higher-rated ▾</div>
+          <div class="tm-mx-cap tm-tl">▴ Above MSRP · lower-rated</div>
+          <div class="tm-tip" id="tm-tip"></div>
+        </div>
+
+        <div class="tm-legend">
+          <span class="lg"><span class="sw good"></span>below MSRP · higher-rated</span>
+          <span class="lg"><span class="sw bad"></span>above MSRP · lower-rated</span>
+          <span class="lg"><span class="sw neutral"></span>middle of the pack</span>
+          <span class="lg"><span class="sw size"></span>dot size ≈ inventory</span>
+        </div>
+      </div>
+    </section>
+  </article>
+</div>
+
+<!-- drill-down drawer -->
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Powertrain detail">
+  <div class="drawer-head">
+    <div class="seglbl" id="dwSeg">POWERTRAIN</div>
+    <h2 id="dwTitle">—</h2>
+    <div class="loc" id="dwLoc">◎ near Calgary, AB</div>
+    <button class="drawer-close" id="dwClose" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="sect">Top 3 nearest dealerships</div>
+    <div id="dwList"></div>
+    <div class="lb-note" style="margin-top:16px">Ratings, review counts and quoted snippets are <b>illustrative sample data</b>. In production these come from LotCheck's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>) — never invented.</div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>pricing-mention rate</b> is genuine AI analysis of review text ("fees", "pricing"). The <b>Reviews vs MSRP</b> is drawn from the same real inputs — each dealer's <b>Google review score &amp; count</b> from <span class="mono">get-dealer-sentiment</span> plotted against its <b>scraped-listing markup vs <span class="mono">msrp_catalog</span></b>; only the drifting motion is a simulated review stream for this preview. None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=x=>"$"+Math.round(x).toLocaleString("en-CA");
+  var pct=x=>(x>=0?"+":"")+x.toFixed(2)+"%";
+  var pct1=x=>(x>=0?"+":"")+x.toFixed(1)+"%";
+  var rnd=(seed=>()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;})(20260728);
+
+  /* ================= REAL powertrain icons =================
+     Ported verbatim from src/App.jsx `FuelIcon` (lines 1108-1145): the exact
+     SVG geometry, per-fuel brand colours, stroke widths and the animation the
+     app applies to each whole <svg> (BEV/PHEV = lc-charge pulse, Hybrid =
+     lc-spin, Gas = lc-pump). Only the width/height attrs are dropped so the
+     chip/tile CSS controls sizing, and class="fuel-ico" is added for the
+     reduced-motion freeze. */
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="#94a3b8" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="#f59e0b" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="#22c55e" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  /* ================= THEME TOGGLE ================= */
+  var root=document.documentElement;
+  var prefLight=window.matchMedia("(prefers-color-scheme:light)").matches;
+  var theme= prefLight ? "light" : "dark";
+  function applyTheme(){
+    root.setAttribute("data-theme", theme);
+    document.getElementById("themeIco").textContent = theme==="light" ? "☀" : "☾";
+  }
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme = theme==="light" ? "dark" : "light"; applyTheme();
+    if(matrixOn) drawMatrix(false); else drawChart(false);
+  });
+
+  // ---- data model (demo) ----
+  var lmi={val:148.72, day:+0.34};
+
+  // POWERTRAIN taxonomy (the app's real 4-type classification) — all four present incl. PHEV
+  var powertrains=[
+    {key:"Gas",    label:"Gas",              price:42500, chg:+0.14, factor:0.985},
+    {key:"Hybrid", label:"Hybrid",           price:41200, chg:+0.24, factor:0.998},
+    {key:"PHEV",   label:"Plug-in Hybrid",   price:52800, chg:-0.31, factor:1.022},
+    {key:"BEV",    label:"BEV",              price:61340, chg:-1.12, factor:1.058}
+  ];
+
+  var side=[
+    {name:"Avg new MSRP", val:47180, kind:"$", sub:"across 29 makes", chg:+0.21, id:"avg"},
+    {name:"Widest markup", val:8.2, kind:"%", sub:"dealer vs mfr, 90d", chg:+0.4, id:"markup"},
+    {name:"Makes tracked", val:29, kind:"n", sub:"auto-refresh daily", chg:0, id:"makes"}
+  ];
+
+  // ---- fictional dealers (illustrative sample) ----
+  var dealers=[
+    {name:"Riverside Ram",     markup:8.2, rating:2.3, rev:141, inv:88, dev:+7.4, pt:["Gas"]},
+    {name:"Stampede Dodge",    markup:7.6, rating:2.8, rev:96,  inv:64, dev:+6.1, pt:["Gas","Hybrid"]},
+    {name:"Crestline GMC",     markup:6.9, rating:3.4, rev:207, inv:120,dev:+4.9, pt:["Gas","PHEV"]},
+    {name:"Beacon VW",         markup:6.2, rating:3.1, rev:158, inv:74, dev:+3.8, pt:["BEV","PHEV"]},
+    {name:"Summit Chevrolet",  markup:5.1, rating:4.7, rev:412, inv:150,dev:+2.2, pt:["Gas","BEV"]},
+    {name:"Northgate Ford",    markup:4.4, rating:4.4, rev:312, inv:132,dev:+0.4, pt:["Gas","PHEV"]},
+    {name:"Meridian Toyota",   markup:3.6, rating:4.6, rev:498, inv:141,dev:-0.6, pt:["Hybrid","PHEV"]},
+    {name:"Foothills Honda",   markup:3.1, rating:4.5, rev:377, inv:118,dev:-1.1, pt:["Hybrid","Gas"]},
+    {name:"Redstone Hyundai",  markup:2.7, rating:4.2, rev:224, inv:92, dev:-1.9, pt:["BEV","PHEV"]},
+    {name:"Chinook Kia",       markup:2.4, rating:3.9, rev:186, inv:80, dev:-2.4, pt:["BEV","Hybrid"]},
+    {name:"Glenmore Mazda",    markup:1.9, rating:4.8, rev:263, inv:70, dev:-3.0, pt:["Gas","Hybrid"]},
+    {name:"Bowview Subaru",    markup:1.5, rating:4.7, rev:341, inv:98, dev:-3.6, pt:["Hybrid","Gas"]},
+    {name:"Prairie Nissan",    markup:1.1, rating:3.6, rev:129, inv:60, dev:-4.2, pt:["BEV","Gas"]},
+    {name:"Elbow River Audi",  markup:0.6, rating:4.3, rev:171, inv:54, dev:-5.1, pt:["BEV","PHEV"]}
+  ];
+  // snippets per powertrain (mention price/markup/MSRP) — clearly illustrative
+  var snippets={
+    "Gas":["“<b>Paid exactly MSRP</b>, no hidden fees on my new truck.”","“Sticker had a <b>$4k added fee</b> at signing.”","“Fair price, but note the <b>doc fees</b> at signing.”"],
+    "Hybrid":["“<b>Exactly MSRP</b> on the hybrid, quick and clean.”","“Slight markup, they <b>explained the demand</b>.”","“<b>Best price</b> in the city, no add-ons.”"],
+    "PHEV":["“<b>MSRP honored</b> and the plug-in rebate applied up front.”","“<b>Added fee</b> on the PHEV at signing.”","“Small markup but they <b>disclosed everything</b>.”"],
+    "BEV":["“<b>Below MSRP</b> once the EV rebate stacked, great.”","“<b>Added fee</b> on every EV at signing.”","“MSRP honored and <b>rebate applied</b> at signing.”"]
+  };
+  function dealersForPt(key){
+    var pool=dealers.filter(d=>d.pt.indexOf(key)>=0);
+    if(pool.length<3) pool=dealers.slice();
+    pool=pool.slice().sort((a,b)=> (b.rating-b.markup*0.35) - (a.rating-a.markup*0.35));
+    var snips=snippets[key]||snippets["Gas"];
+    return pool.slice(0,3).map((d,i)=>({d:d,snip:snips[i%snips.length]}));
+  }
+
+  // ---- chart series ----
+  var N=48, series=[], frust=[]; var base=142;
+  for(var i=0;i<N;i++){ base+= (rnd()-0.46)*1.2; series.push(Math.max(120, base)); }
+  series[N-1]=lmi.val;
+  function rebuildFrust(){
+    frust=[];
+    for(var i=0;i<N;i++){
+      var slope = i>2 ? (series[i]-series[i-3]) : 0;
+      var f = 42 + slope*9 + (rnd()-0.5)*8;
+      frust.push(Math.max(6, Math.min(96, f)));
+    }
+  }
+  rebuildFrust();
+
+  var W=720,H=236;
+  var scope=null;         // active powertrain key, or null = All
+  var frustOn=false;      // pricing-mention line off by default (reduce noise)
+  var matrixOn=false;
+
+  function scopeFactor(){ if(!scope) return 1; var p=powertrains.find(x=>x.key===scope); return p?p.factor:1; }
+  function scopedSeries(){ var f=scopeFactor(); return f===1 ? series : series.map(v=>v*f); }
+
+  // ---- helpers ----
+  function pathFor(data, w, h, close, pad){
+    pad=pad||{t:16,b:26};
+    var min=Math.min.apply(null,data), max=Math.max.apply(null,data), rg=(max-min)||1;
+    var pts=data.map((v,i)=>[ i/(data.length-1)*w, h-pad.b - ((v-min)/rg)*(h-pad.t-pad.b) ]);
+    var d=pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+    if(close) d+=" L"+w+" "+h+" L0 "+h+" Z";
+    return d;
+  }
+  function frustPath(data,w,h){
+    var pts=data.map((v,i)=>[ i/(data.length-1)*w, h-26 - (v/100)*(h-42) ]);
+    return pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+  }
+
+  function drawChart(animate){
+    var svg=document.getElementById("chart");
+    var s=scopedSeries();
+    var line=pathFor(s,W,H,false), area=pathFor(s,W,H,true);
+    var fp=frustPath(frust,W,H);
+    // single, restrained soft glow on the hero line only (small blur)
+    svg.innerHTML=
+      '<defs>'+
+      '<linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">'+
+        '<stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.24"/>'+
+        '<stop offset="60%" stop-color="var(--cyan)" stop-opacity="0.05"/>'+
+        '<stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/>'+
+      '</linearGradient>'+
+      '<filter id="glow" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="1.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'+
+      '</defs>'+
+      // pricing-mention (behind, faint, toggleable)
+      '<path d="'+fp+'" fill="none" stroke="var(--frust)" stroke-width="1.3" stroke-opacity="'+(frustOn?0.42:0)+'" class="frust"/>'+
+      // LMI hero
+      '<path d="'+area+'" fill="url(#ag)" class="area" style="opacity:'+(animate&&!reduce?0:1)+'"/>'+
+      '<path d="'+line+'" fill="none" stroke="var(--cyan)" stroke-width="2.1" filter="url(#glow)" class="line"/>';
+    if(animate && !reduce){
+      var lp=svg.querySelector(".line"), ar=svg.querySelector(".area"), fr=svg.querySelector(".frust");
+      var len=lp.getTotalLength();
+      lp.style.strokeDasharray=len; lp.style.strokeDashoffset=len;
+      lp.animate([{strokeDashoffset:len},{strokeDashoffset:0}],{duration:1400,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+      ar.animate([{opacity:0},{opacity:1}],{duration:1300,delay:300,fill:"forwards"});
+      if(frustOn){
+        var fl=fr.getTotalLength(); fr.style.strokeDasharray=fl; fr.style.strokeDashoffset=fl;
+        fr.animate([{strokeDashoffset:fl},{strokeDashoffset:0}],{duration:1600,delay:200,easing:"ease",fill:"forwards"});
+      }
+    }
+  }
+  function updateChart(){
+    if(matrixOn) return;
+    var svg=document.getElementById("chart");
+    var s=scopedSeries();
+    var ln=svg.querySelector(".line"), ar=svg.querySelector(".area"), fr=svg.querySelector(".frust");
+    if(ln) ln.setAttribute("d",pathFor(s,W,H,false));
+    if(ar) ar.setAttribute("d",pathFor(s,W,H,true));
+    if(fr) fr.setAttribute("d",frustPath(frust,W,H));
+  }
+
+  // ---- REVIEWS VS MSRP scatter (color = meaning only, muted) ----
+  function matrixCoords(d){
+    var x = ((d.rating-1)/4)*(W-60)+40;
+    var y = (H/2) - (d.dev/8)*(H/2-24);
+    return [x,y];
+  }
+  function drawMatrix(animate){
+    var svg=document.getElementById("chart");
+    var midY=H/2, midX=(W-60)*0.5+40;
+    var html='<defs>'+
+      '<radialGradient id="gGreen" cx="80%" cy="80%" r="70%"><stop offset="0%" stop-color="var(--up)" stop-opacity="0.1"/><stop offset="100%" stop-color="var(--up)" stop-opacity="0"/></radialGradient>'+
+      '<radialGradient id="gRed" cx="18%" cy="18%" r="70%"><stop offset="0%" stop-color="var(--down)" stop-opacity="0.09"/><stop offset="100%" stop-color="var(--down)" stop-opacity="0"/></radialGradient>'+
+      '</defs>';
+    html+='<rect x="'+midX+'" y="'+midY+'" width="'+(W-midX)+'" height="'+(H-midY)+'" fill="url(#gGreen)"/>';
+    html+='<rect x="0" y="0" width="'+midX+'" height="'+midY+'" fill="url(#gRed)"/>';
+    html+='<line x1="0" y1="'+midY+'" x2="'+W+'" y2="'+midY+'" stroke="var(--grid)" stroke-width="1"/>';
+    html+='<line x1="'+midX+'" y1="0" x2="'+midX+'" y2="'+H+'" stroke="var(--grid)" stroke-width="1"/>';
+    [1,2,3,4,5].forEach(function(r){var x=((r-1)/4)*(W-60)+40;
+      html+='<line x1="'+x+'" y1="0" x2="'+x+'" y2="'+H+'" stroke="var(--grid)" stroke-width="0.6" stroke-dasharray="2 5"/>';
+      html+='<text x="'+x+'" y="'+(H-6)+'" fill="var(--dimmer)" font-size="9" text-anchor="middle" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    dealers.forEach(function(d,i){
+      var c=matrixCoords(d), r=6+d.inv/30;
+      var tension = d.dev>0 && d.rating<3.6;
+      var value   = d.dev<0 && d.rating>=4.2;
+      var col = tension ? "var(--down)" : value ? "var(--up)" : "var(--dim)";
+      var cx = animate&&!reduce ? midX : c[0];
+      var cy = animate&&!reduce ? midY : c[1];
+      html+='<circle class="mxdot" data-i="'+i+'" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+r.toFixed(1)+'" '+
+            'fill="'+col+'" fill-opacity="0.16" stroke="'+col+'" stroke-width="1.3"/>';
+    });
+    svg.innerHTML=html;
+    if(animate && !reduce){
+      svg.querySelectorAll(".mxdot").forEach(function(el){
+        var i=+el.dataset.i, c=matrixCoords(dealers[i]);
+        el.animate([{cx:midX,cy:midY,opacity:0.2},{cx:c[0],cy:c[1],opacity:1}],
+          {duration:650,delay:i*30,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+        setTimeout(function(){el.setAttribute("cx",c[0].toFixed(1));el.setAttribute("cy",c[1].toFixed(1));}, 650+i*30);
+      });
+    }
+  }
+  function updateMatrix(){
+    var svg=document.getElementById("chart");
+    dealers.forEach(function(d,i){
+      d.dev = Math.max(-7.8, Math.min(7.8, d.dev+(rnd()-0.5)*0.5));
+      var el=svg.querySelector('.mxdot[data-i="'+i+'"]'); if(!el) return;
+      var c=matrixCoords(d);
+      el.animate([{cx:el.getAttribute("cx"),cy:el.getAttribute("cy")},{cx:c[0],cy:c[1]}],{duration:600,fill:"forwards"});
+      setTimeout(function(){el.setAttribute("cx",c[0].toFixed(1));el.setAttribute("cy",c[1].toFixed(1));},600);
+    });
+  }
+
+  function setMatrixCaptions(on){
+    ["capBR","capTL"].forEach(id=>document.getElementById(id).classList.toggle("show",on));
+    ["axX","axY","axY2"].forEach(id=>document.getElementById(id).classList.toggle("show",on));
+    document.getElementById("legend").style.opacity = on ? "0" : "1";
+  }
+
+  document.getElementById("matrixBtn").addEventListener("click",function(){
+    matrixOn=!matrixOn;
+    this.classList.toggle("on",matrixOn);
+    setMatrixCaptions(matrixOn);
+    if(matrixOn) drawMatrix(true); else drawChart(true);
+  });
+
+  // pricing-mention toggle (default off)
+  document.getElementById("frustToggle").addEventListener("click",function(){
+    frustOn=!frustOn;
+    this.classList.toggle("off",!frustOn);
+    if(!matrixOn) drawChart(true);
+  });
+
+  function countUp(el, target, kind){
+    if(reduce){ el.textContent=fmt(target,kind); return; }
+    var t0=null, dur=850, from=0;
+    function step(ts){t0=t0||ts; var k=Math.min(1,(ts-t0)/dur), e=1-Math.pow(1-k,3);
+      el.textContent=fmt(from+(target-from)*e, kind); if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+  function fmt(v,kind){ return kind==="$"?money(v):kind==="%"?v.toFixed(1)+"%":kind==="n"?Math.round(v):v.toFixed(2); }
+  // gentle tint flash — eases back to neutral over .8s (no saturated blink)
+  function flash(el, up){
+    el.style.transition="none"; el.style.color=up?"var(--up)":"var(--down)";
+    requestAnimationFrame(function(){ el.style.transition="color .8s ease"; el.style.color=""; });
+  }
+
+  // ---- ticker ----
+  var tItems=[["GAS",142.4,.14],["HYBRID",144.6,.24],["PHEV",156.9,-.31],["BEV",168.9,-1.12],
+    ["PICKUP",156.2,.42],["SUV",149.8,-.18],["SEDAN",131.4,.11],["COMPACT",122.7,-.05],["LUXURY",172.3,.29],["MINIVAN",139.2,.07]];
+  function renderTicker(){
+    var html=tItems.map(t=>{var cl=t[2]>=0?"up":"down";return '<span class="ti"><b>'+t[0]+'</b> <span class="v mono">'+t[1].toFixed(1)+'</span> <span class="'+cl+' mono">'+pct(t[2])+'</span></span>';}).join("");
+    document.getElementById("track").innerHTML=html+html;
+  }
+
+  function starColor(r){ return r>=4.2?"var(--up)":r>=3.5?"var(--star)":"var(--down)"; }
+
+  // ---- side stats (with markup leaderboard) ----
+  function renderSide(){
+    var host=document.getElementById("side"); host.innerHTML="";
+    side.forEach((s)=>{
+      var el=document.createElement("div"); el.className="scene";
+      var extra="", cls="card stat";
+      if(s.id==="markup"){
+        cls+=" clickable";
+        var lb=dealers.slice().sort((a,b)=>b.markup-a.markup).slice(0,6);
+        var rows=lb.map(function(d){
+          var tense = d.rating<3.6;
+          var fair  = d.rating>=4.3;
+          var rc = tense?"tense":fair?"fair":"";
+          return '<div class="lb-row '+rc+'">'+
+            '<span class="dn" title="'+d.name+'">'+d.name+'</span>'+
+            '<span class="mk mono">'+pct1(d.markup)+'</span>'+
+            '<span class="rt mono"><span class="star" style="color:'+starColor(d.rating)+'">★</span>'+d.rating.toFixed(1)+'</span>'+
+          '</div>';
+        }).join("");
+        extra='<div class="hint">▾ tap: markup vs. reputation</div>'+
+          '<div class="lb">'+
+            '<div class="lb-head"><span>Dealer</span><span>Markup&nbsp;·&nbsp;Rating</span></div>'+
+            rows+
+            '<div class="lb-note">Red = high markup with low review scores. Green = high markup with high review scores. Sample data — production joins scraped listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
+          '</div>';
+      }
+      var chgHtml = s.chg ? '<span class="chgn '+(s.chg>=0?"up":"down")+'">'+pct(s.chg)+'</span>' : '';
+      el.innerHTML='<div class="'+cls+'" data-id="'+s.id+'"><div class="lbl"><span>'+s.name+'</span>'+chgHtml+'</div>'+
+        '<div class="val mono" data-t="'+s.val+'" data-k="'+s.kind+'">0</div>'+
+        '<div class="row"><span>'+s.sub+'</span></div>'+extra+'</div>';
+      host.appendChild(el);
+    });
+    var mk=host.querySelector('.stat[data-id="markup"]');
+    if(mk) mk.addEventListener("click",function(){ this.classList.toggle("open"); });
+  }
+
+  // ---- powertrain filter chips ----
+  function renderChips(){
+    var host=document.getElementById("ptChips"); host.innerHTML="";
+    // "All" chip
+    var all=document.createElement("button"); all.type="button"; all.className="chip on"; all.dataset.key="";
+    all.innerHTML='All powertrains'; host.appendChild(all);
+    powertrains.forEach(function(p){
+      var b=document.createElement("button"); b.type="button"; b.className="chip"; b.dataset.key=p.key;
+      b.innerHTML=ICON[p.key]+'<span>'+p.label+'</span>';
+      host.appendChild(b);
+    });
+    host.querySelectorAll(".chip").forEach(function(b){
+      b.addEventListener("click",function(){ setScope(this.dataset.key||null); });
+    });
+  }
+
+  function setScope(key){
+    scope=key;
+    // chip active state
+    document.querySelectorAll("#ptChips .chip").forEach(function(b){
+      b.classList.toggle("on",(b.dataset.key||"")===(key||""));
+    });
+    // breakdown tile emphasis
+    document.querySelectorAll("#ptGrid .pt").forEach(function(t){
+      var on = key && t.dataset.pt===key;
+      t.classList.toggle("active", !!on);
+      t.classList.toggle("dim", !!(key && t.dataset.pt!==key));
+    });
+    // hero re-scope
+    var lmiEl=document.getElementById("lmi");
+    var chgEl=document.getElementById("lmiChg");
+    var scopeLbl=document.getElementById("scopeLbl");
+    if(key){
+      var p=powertrains.find(x=>x.key===key);
+      countUp(lmiEl, lmi.val*p.factor, "2");
+      chgEl.className="chg "+(p.chg>=0?"up":"down");
+      chgEl.innerHTML=(p.chg>=0?"▲ ":"▼ ")+pct(p.chg)+" today";
+      scopeLbl.textContent="Scoped to "+p.label;
+      scopeLbl.classList.add("show");
+    }else{
+      countUp(lmiEl, lmi.val, "2");
+      chgEl.className="chg "+(lmi.day>=0?"up":"down");
+      chgEl.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+      scopeLbl.classList.remove("show"); scopeLbl.textContent="";
+    }
+    if(!matrixOn) drawChart(true);
+  }
+
+  // ---- powertrain breakdown tiles (clickable -> drawer) ----
+  function renderPt(){
+    var host=document.getElementById("ptGrid"); host.innerHTML="";
+    powertrains.forEach((p)=>{
+      var el=document.createElement("div"); el.className="card pt"; el.dataset.pt=p.key;
+      var up=p.chg>=0;
+      el.innerHTML='<div class="name">'+ICON[p.key]+'<span>'+p.label+'</span></div>'+
+        '<div class="price mono" data-t="'+p.price+'" data-k="$">$0</div>'+
+        '<div class="meta"><span class="'+(up?"up":"down")+' mono" data-chg>'+pct(p.chg)+'</span><span class="sub">avg MSRP</span></div>'+
+        '<div class="bar"><i style="width:'+(38+Math.abs(p.chg)*22)+'%"></i></div>'+
+        '<div class="drill">◎ nearest dealers near Calgary →</div>';
+      el.addEventListener("click",()=>openDrawer(p.key));
+      host.appendChild(el);
+    });
+  }
+
+  // ---- drawer ----
+  var drawer=document.getElementById("drawer"), scrim=document.getElementById("scrim");
+  function openDrawer(key){
+    var p=powertrains.find(x=>x.key===key);
+    document.getElementById("dwSeg").innerHTML=ICON[key]+'<span>'+p.label.toUpperCase()+' · MSRP DRILL-DOWN</span>';
+    document.getElementById("dwTitle").textContent=p.label;
+    var list=dealersForPt(key);
+    var host=document.getElementById("dwList"); host.innerHTML="";
+    list.forEach(function(o,i){
+      var d=o.d;
+      var div=document.createElement("div"); div.className="dealer";
+      div.innerHTML=
+        '<div class="dh"><div><div class="dn">'+d.name+'</div><div class="rank">#'+(i+1)+' nearest · '+d.inv+' in stock</div></div>'+
+        '<div class="rating"><span class="star" style="color:'+starColor(d.rating)+'">★</span>'+d.rating.toFixed(1)+' <span class="revct">('+d.rev+')</span></div></div>'+
+        '<div class="snip">'+o.snip+'</div>';
+      host.appendChild(div);
+      setTimeout(()=>div.classList.add("in"), reduce?0:110+i*100);
+    });
+    scrim.classList.add("show"); drawer.classList.add("show");
+  }
+  function closeDrawer(){ scrim.classList.remove("show"); drawer.classList.remove("show"); }
+  document.getElementById("dwClose").addEventListener("click",closeDrawer);
+  scrim.addEventListener("click",closeDrawer);
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
+
+  // ---- range buttons ----
+  ["1D","1W","1M","1Y"].forEach((r,i)=>{var b=document.createElement("button");b.textContent=r;if(i===2)b.className="on";
+    b.onclick=function(){document.querySelectorAll("#rng button").forEach(x=>x.className="");b.className="on";};document.getElementById("rng").appendChild(b);});
+
+  // ---- init ----
+  renderTicker(); renderSide(); renderChips(); renderPt(); drawChart(true);
+  var lmiEl=document.getElementById("lmi");
+  countUp(lmiEl, lmi.val, "2");
+  document.getElementById("lmiChg").className="chg "+(lmi.day>=0?"up":"down");
+  document.getElementById("lmiChg").innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+  document.querySelectorAll(".val[data-t]").forEach(el=>countUp(el, +el.dataset.t, el.dataset.k));
+  document.querySelectorAll(".price[data-t]").forEach(el=>countUp(el, +el.dataset.t, "$"));
+
+  // entrance stagger
+  document.querySelectorAll(".card").forEach((c,i)=>setTimeout(()=>c.classList.add("in"), reduce?0:i*60));
+
+  // subtle 3D tilt (max ~3deg) — hero card + interactive tiles only, no glow shadow
+  if(!reduce){
+    document.querySelectorAll(".scene").forEach(sc=>{
+      sc.addEventListener("pointermove",e=>{
+        var cards=sc.querySelectorAll(".card"); if(!cards.length)return;
+        cards.forEach(function(c){
+          if(c.classList.contains("open"))return;
+          var r=c.getBoundingClientRect();
+          if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom){c.style.transform="";return;}
+          var px=(e.clientX-r.left)/r.width-.5, py=(e.clientY-r.top)/r.height-.5;
+          c.style.transform="rotateY("+(px*3).toFixed(2)+"deg) rotateX("+(-py*3).toFixed(2)+"deg)";
+        });
+      });
+      sc.addEventListener("pointerleave",()=>{sc.querySelectorAll(".card").forEach(c=>{c.style.transform="";});});
+    });
+  }
+
+  // clock
+  function tick(){var d=new Date(); document.getElementById("clock").textContent=d.toLocaleTimeString("en-CA",{hour12:false})+" ET";}
+  setInterval(tick,1000); tick();
+
+  // ---- simulated live updates (calm cadence ~4s) ----
+  if(!reduce) setInterval(function(){
+    var d=(rnd()-0.48)*0.25; lmi.val=Math.max(120, lmi.val+d); lmi.day+= d*0.4;
+    series.push(lmi.val); series.shift();
+    var slope = series[N-1]-series[N-4];
+    var nf = 42 + slope*9 + (rnd()-0.5)*10;
+    frust.push(Math.max(6,Math.min(96,nf))); frust.shift();
+    updateChart();
+    if(matrixOn) updateMatrix();
+    // hero number reflects current scope
+    var f=scopeFactor();
+    lmiEl.textContent=(lmi.val*f).toFixed(2); flash(lmiEl, d>=0);
+    if(!scope){
+      var chg=document.getElementById("lmiChg"); chg.className="chg "+(lmi.day>=0?"up":"down");
+      chg.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+    }
+    // ticker jitter
+    tItems.forEach(t=>{t[2]=Math.max(-2.5,Math.min(2.5,t[2]+(rnd()-0.5)*0.14)); t[1]=Math.max(100,t[1]+(rnd()-0.5)*0.2);}); renderTicker();
+    // powertrain tiles
+    document.querySelectorAll("#ptGrid .pt").forEach((el,i)=>{
+      var p=powertrains[i]; var dd=(rnd()-0.5)*80; p.price=Math.max(20000,p.price+dd); p.chg=Math.max(-2.5,Math.min(2.5,p.chg+(rnd()-0.5)*0.1));
+      var pv=el.querySelector(".price"); pv.textContent=money(p.price); flash(pv, dd>=0);
+      var cv=el.querySelector("[data-chg]"); cv.textContent=pct(p.chg); cv.className=(p.chg>=0?"up":"down")+" mono";
+    });
+  }, 4000);
+})();
+</script>
+
+<!-- ================= REVIEWS VS MSRP (own IIFE, tm-* namespace) =================
+     Self-contained: shares the page's theme TOKENS + the single #themeToggle button,
+     but every id/class/var below is tm-prefixed so it can never clobber the MSRP
+     report's own #chart / .mxdot / .legend / drawChart / matrixOn logic above. -->
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  /* seeded RNG so the simulated drift is deterministic */
+  var rnd = (function(seed){return function(){seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;};})(20260728);
+
+  /* ---- fictional dealers (illustrative sample, with review snippets) ---- */
+  var dealers = [
+    {name:"Riverside Ram",        rating:2.3, rev:141, dev:+7.4, inv:88,  snip:"Sticker had a <b>$4,500 added fee</b> at signing."},
+    {name:"Stampede Dodge",       rating:2.8, rev:96,  dev:+6.1, inv:64,  snip:"They tacked on a <b>demand fee</b> — walked out twice before a fair deal."},
+    {name:"Marda Loop Mitsubishi",rating:3.2, rev:88,  dev:+5.5, inv:46,  snip:"<b>Added fee</b> on the plug-in at signing."},
+    {name:"Crestline GMC",        rating:3.4, rev:207, dev:+4.9, inv:120, snip:"Priced <b>above MSRP</b> but they moved a little on the trade."},
+    {name:"Beacon VW",            rating:3.1, rev:158, dev:+3.8, inv:74,  snip:"<b>Small markup</b> on the plug-in; at least they disclosed it."},
+    {name:"Summit Chevrolet",     rating:4.7, rev:412, dev:+2.2, inv:150, snip:"Slightly <b>over MSRP</b> but the service reputation is worth it."},
+    {name:"Northgate Ford",       rating:4.4, rev:312, dev:+0.4, inv:132, snip:"Basically <b>MSRP</b>, no surprise add-ons at signing."},
+    {name:"Meridian Toyota",      rating:4.6, rev:498, dev:-0.6, inv:141, snip:"<b>Paid MSRP</b>, quick and clean, no doc-fee games."},
+    {name:"Foothills Honda",      rating:4.5, rev:377, dev:-1.1, inv:118, snip:"A hair <b>under MSRP</b> once the loyalty credit applied."},
+    {name:"Redstone Hyundai",     rating:4.2, rev:224, dev:-1.9, inv:92,  snip:"<b>Below MSRP</b> after the EV rebate stacked."},
+    {name:"Chinook Kia",          rating:3.9, rev:186, dev:-2.4, inv:80,  snip:"<b>Fair price</b> on the EV, but the financing pitch was pushy."},
+    {name:"Sarcee Lexus",         rating:4.9, rev:402, dev:-2.8, inv:110, snip:"<b>Under MSRP</b> with rebate; a premium experience."},
+    {name:"Glenmore Mazda",       rating:4.8, rev:263, dev:-3.0, inv:70,  snip:"<b>Best price</b> in the city, honored MSRP to the dollar."},
+    {name:"Bowview Subaru",       rating:4.7, rev:341, dev:-3.6, inv:98,  snip:"<b>Under MSRP</b> and no forced accessories."},
+    {name:"Prairie Nissan",       rating:3.6, rev:129, dev:-4.2, inv:60,  snip:"Good <b>discount off sticker</b>, mixed on the follow-up."},
+    {name:"Elbow River Audi",     rating:4.3, rev:171, dev:-5.1, inv:54,  snip:"Well <b>under MSRP</b> on a demo — great deal."}
+  ];
+
+  /* ---- geometry (matches the live matrix viewBox 800x440) ---- */
+  var PW=800, PH=440, padL=60, padR=28, padT=28, padB=46;
+  function xFor(r){ return padL + ((r-1)/4) * (PW-padL-padR); }
+  function yFor(d){ var t=(d+8)/16; return padT + (1-t) * (PH-padT-padB); }
+  function rFor(inv){ return 7 + inv/22; }
+  function kindFor(d){
+    if(d.dev<0 && d.rating>=4.2) return "green";
+    if(d.dev>0 && d.rating<3.6)  return "red";
+    return "neutral";
+  }
+  function isBest(d){ return kindFor(d)==="green"; }
+  function colorFor(d){ var k=kindFor(d); return k==="green"?"var(--up)":k==="red"?"var(--down)":"var(--dim)"; }
+  function starColor(r){ return r>=4.2?"var(--up)":r>=3.5?"var(--star)":"var(--down)"; }
+
+  function scaffold(){
+    var midY=yFor(0), midX=xFor(3), h='';
+    h+='<defs>'+
+      '<radialGradient id="tm-gGreen" cx="80%" cy="80%" r="72%"><stop offset="0%" stop-color="var(--up)" stop-opacity="0.10"/><stop offset="100%" stop-color="var(--up)" stop-opacity="0"/></radialGradient>'+
+      '<radialGradient id="tm-gRed" cx="15%" cy="15%" r="72%"><stop offset="0%" stop-color="var(--down)" stop-opacity="0.09"/><stop offset="100%" stop-color="var(--down)" stop-opacity="0"/></radialGradient>'+
+      '</defs>';
+    h+='<rect x="'+midX+'" y="'+midY+'" width="'+(PW-padR-midX)+'" height="'+(PH-padB-midY)+'" fill="url(#tm-gGreen)"/>';
+    h+='<rect x="'+padL+'" y="'+padT+'" width="'+(midX-padL)+'" height="'+(midY-padT)+'" fill="url(#tm-gRed)"/>';
+    h+='<rect x="'+padL+'" y="'+padT+'" width="'+(PW-padL-padR)+'" height="'+(PH-padT-padB)+'" fill="none" stroke="var(--hair)" rx="8"/>';
+    [1,2,3,4,5].forEach(function(r){var x=xFor(r);
+      h+='<line x1="'+x+'" y1="'+padT+'" x2="'+x+'" y2="'+(PH-padB)+'" stroke="var(--grid)" stroke-width="0.7" stroke-dasharray="2 5"/>';
+      h+='<text x="'+x+'" y="'+(PH-padB+18)+'" fill="var(--dimmer)" font-size="10" text-anchor="middle" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    [8,4,0,-4,-8].forEach(function(dv){
+      var y=yFor(dv);
+      h+='<line x1="'+padL+'" y1="'+y+'" x2="'+(PW-padR)+'" y2="'+y+'" stroke="'+(dv===0?"var(--hair-strong)":"var(--grid)")+'" stroke-width="'+(dv===0?1:0.6)+'" stroke-dasharray="'+(dv===0?"1 4":"2 5")+'"/>';
+      var lab = dv===0 ? "MSRP" : (dv>0?"+"+dv:dv)+"%";
+      h+='<text x="'+(padL-8)+'" y="'+(y+3)+'" fill="var(--dimmer)" font-size="10" text-anchor="end" font-family="monospace">'+lab+'</text>';
+    });
+    h+='<line x1="'+midX+'" y1="'+padT+'" x2="'+midX+'" y2="'+(PH-padB)+'" stroke="var(--hair-strong)" stroke-width="1" stroke-dasharray="1 4"/>';
+    h+='<text x="'+(padL-8)+'" y="'+(padT+10)+'" fill="var(--dimmer)" font-size="10" text-anchor="end">↑ above</text>';
+    h+='<text x="'+(padL-8)+'" y="'+(PH-padB-2)+'" fill="var(--dimmer)" font-size="10" text-anchor="end">↓ below</text>';
+    h+='<text x="'+(PW-padR)+'" y="'+(PH-padB+32)+'" fill="var(--dim)" font-size="10" text-anchor="end">Google review score →</text>';
+    return h;
+  }
+
+  var svg=document.getElementById("tm-chart");
+  function draw(){
+    var h=scaffold();
+    dealers.forEach(function(d,i){
+      var col=colorFor(d);
+      h+='<circle class="tm-mxdot" data-i="'+i+'" cx="'+xFor(d.rating).toFixed(1)+'" cy="'+yFor(d.dev).toFixed(1)+'" r="'+rFor(d.inv).toFixed(1)+'" fill="'+col+'" fill-opacity="0.16" stroke="'+col+'" stroke-width="1.4"/>';
+    });
+    svg.innerHTML=h;
+  }
+  draw();
+
+  var chartwrap=document.getElementById("tm-chartwrap");
+  var tip=document.getElementById("tm-tip");
+  var feed=document.getElementById("tm-feed");
+  var activeIdx=-1;
+  var hovering=false;   // a card is open / cursor is on a dot
+  var running=true;     // pause/resume button state
+
+  /* ---------- hover cards ---------- */
+  function setActive(idx){
+    if(idx===activeIdx) return;
+    activeIdx=idx;
+    svg.querySelectorAll(".tm-mxdot").forEach(function(el){
+      var i=+el.dataset.i;
+      el.classList.toggle("active",i===idx);
+      el.classList.toggle("faded",idx>=0 && i!==idx);
+    });
+  }
+  function showTip(idx){
+    var d=dealers[idx], k=kindFor(d);
+    var badge=k==="green"?'<span class="badge green">Below MSRP · higher-rated</span>'
+            :k==="red"?'<span class="badge red">Above MSRP · lower-rated</span>'
+            :'<span class="badge neutral">Mixed signal</span>';
+    tip.innerHTML=
+      '<div class="th"><div class="tn">'+d.name+'</div>'+
+        '<div class="rating"><span class="star" style="color:'+starColor(d.rating)+'">★</span>'+d.rating.toFixed(1)+'</div></div>'+
+      '<div class="revct">'+d.rev+' Google reviews</div>'+
+      '<div class="row"><span class="k">Price vs MSRP</span><span class="v '+(d.dev>=0?"down":"up")+' mono">'+(d.dev>=0?"+":"")+d.dev.toFixed(1)+'%</span></div>'+
+      '<div class="row"><span class="k">Inventory</span><span class="v mono">'+d.inv+' in stock</span></div>'+
+      '<div class="snip">'+d.snip+'</div>'+badge;
+    var cw=chartwrap.clientWidth, ch=chartwrap.clientHeight;
+    var px=xFor(d.rating)/PW*cw, py=yFor(d.dev)/PH*ch;
+    var tw=tip.offsetWidth || 236;
+    var left=px+18;
+    if(left+tw>cw-4) left=px-tw-18;   // edge-flip to the left of the dot
+    if(left<4) left=4;
+    tip.style.left=left+"px";
+    tip.style.top=Math.max(4, py-10)+"px";
+    tip.classList.add("show");
+    requestAnimationFrame(function(){
+      var th=tip.offsetHeight;
+      var t2=Math.max(4, Math.min(py-th/2, ch-th-4));
+      tip.style.top=t2+"px";
+    });
+  }
+  function hideTip(){ tip.classList.remove("show"); setActive(-1); }
+
+  function nearest(mx,my){
+    var best=-1,bd=1e9;
+    dealers.forEach(function(d,i){
+      var dx=mx-xFor(d.rating), dy=my-yFor(d.dev), dist=dx*dx+dy*dy;
+      if(dist<bd){bd=dist;best=i;}
+    });
+    return {i:best,d:Math.sqrt(bd)};
+  }
+
+  /* ---------- live drift ---------- */
+  function snapAll(){
+    svg.querySelectorAll(".tm-mxdot").forEach(function(el){
+      var i=+el.dataset.i, d=dealers[i];
+      if(el.getAnimations) el.getAnimations().forEach(function(a){a.cancel();});
+      el.setAttribute("cx",xFor(d.rating).toFixed(1));
+      el.setAttribute("cy",yFor(d.dev).toFixed(1));
+      el.setAttribute("fill",colorFor(d));
+      el.setAttribute("stroke",colorFor(d));
+    });
+  }
+
+  var feedTimer=null;
+  function announce(name){
+    feed.innerHTML='<b>'+name+'</b> just crossed into below MSRP · higher-rated ✦';
+    feed.classList.add("show");
+    clearTimeout(feedTimer);
+    feedTimer=setTimeout(function(){feed.classList.remove("show");},2600);
+  }
+  function flashDot(el){
+    if(reduce)return;
+    el.animate([
+      {strokeWidth:1.4,fillOpacity:.16},
+      {strokeWidth:4,fillOpacity:.5,offset:.3},
+      {strokeWidth:1.4,fillOpacity:.16}
+    ],{duration:1100,easing:"ease-out"});
+  }
+
+  function step(){
+    dealers.forEach(function(d,i){
+      var wasBest=isBest(d);
+      d.rating=Math.max(1,Math.min(5, d.rating+(rnd()-0.5)*0.14));
+      d.dev=Math.max(-7.6,Math.min(7.6, d.dev+(rnd()-0.5)*0.5));
+      var el=svg.querySelector('.tm-mxdot[data-i="'+i+'"]'); if(!el)return;
+      var cx=xFor(d.rating), cy=yFor(d.dev), col=colorFor(d);
+      var nowBest=isBest(d);
+      if(reduce){
+        el.setAttribute("cx",cx.toFixed(1));el.setAttribute("cy",cy.toFixed(1));
+      }else{
+        el.animate([{cx:el.getAttribute("cx"),cy:el.getAttribute("cy")},{cx:cx,cy:cy}],{duration:1600,easing:"ease-in-out",fill:"forwards"});
+        (function(el,cx,cy){setTimeout(function(){el.setAttribute("cx",cx.toFixed(1));el.setAttribute("cy",cy.toFixed(1));},1600);})(el,cx,cy);
+      }
+      el.setAttribute("fill",col); el.setAttribute("stroke",col);
+      if(nowBest && !wasBest){ flashDot(el); announce(d.name); }
+    });
+  }
+
+  var timer=null;
+  function updateTimer(){
+    var shouldRun = running && !hovering && !reduce;
+    if(shouldRun){ if(!timer) timer=setInterval(step,2600); }
+    else{ if(timer){clearInterval(timer);timer=null;} }
+  }
+
+  var simBtn=document.getElementById("tm-simBtn");
+  simBtn.addEventListener("click",function(){
+    running=!running;
+    simBtn.classList.toggle("on",running);
+    simBtn.innerHTML=running?'<span aria-hidden="true">⏸</span> Pause simulation':'<span aria-hidden="true">▶</span> Resume simulation';
+    updateTimer();
+  });
+
+  /* ---------- pointer wiring: hover pauses drift, freezes hovered dot ---------- */
+  chartwrap.addEventListener("pointermove",function(e){
+    var rect=svg.getBoundingClientRect();
+    var mx=(e.clientX-rect.left)/rect.width*PW;
+    var my=(e.clientY-rect.top)/rect.height*PH;
+    if(mx<padL-20||mx>PW-padR+20||my<padT-20||my>PH-padB+20){leaveHover();return;}
+    var n=nearest(mx,my);
+    if(n.d>90){leaveHover();return;}
+    enterHover();
+    setActive(n.i); showTip(n.i);
+  });
+  chartwrap.addEventListener("pointerleave",leaveHover);
+
+  function enterHover(){
+    if(!hovering){
+      hovering=true;
+      updateTimer();   // freeze drift while a card is open
+      snapAll();       // pin dots to their live positions so the card anchors exactly
+    }
+  }
+  function leaveHover(){
+    if(hovering){
+      hovering=false;
+      updateTimer();   // resume drift if the sim is running
+    }
+    hideTip();
+  }
+
+  /* ---- shared theme toggle: the MSRP report's own handler flips data-theme;
+         we only piggy-back to re-render the matrix cleanly + reset hover state.
+         We do NOT touch the theme variable, so the single toggle stays authoritative. ---- */
+  var tgl=document.getElementById("themeToggle");
+  if(tgl) tgl.addEventListener("click", function(){
+    hovering=false;
+    activeIdx=-1;
+    draw();
+    tip.classList.remove("show");
+    updateTimer();
+  });
+
+  /* ---------- reduced motion: freeze drift, keep hover cards ---------- */
+  if(reduce){
+    running=false; simBtn.classList.remove("on");
+    simBtn.innerHTML='<span aria-hidden="true">▶</span> Motion disabled';
+    simBtn.disabled=true; simBtn.style.opacity=".55";
+  }else{
+    updateTimer();
+  }
+})();
+</script>
+</body>
+</html>
