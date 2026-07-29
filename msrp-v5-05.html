@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Live MSRP Price Index · Wall</title>
+<style>
+  /* ================= THEME TOKENS (verbatim from v5) ================= */
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;
+    --down:#f0688a;
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --grid:rgba(255,255,255,.05);
+    --frust:#c98aa0;
+    --gate:#8b7bff;
+    --blur:14px;
+    --scrim:rgba(4,6,10,.6);
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --frust:#b07a8e;
+    --gate:#6f57e6;
+    --blur:16px;
+    --scrim:rgba(120,138,162,.4);
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:40px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+  .up{color:var(--up)} .down{color:var(--down)}
+
+  /* ---------------- ticker (verbatim structure) ---------------- */
+  .ticker{position:sticky;top:0;z-index:5;display:flex;align-items:center;height:34px;
+    background:var(--panel-solid);backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);overflow:hidden}
+  .ticker .tag{flex:none;display:flex;align-items:center;gap:8px;padding:0 14px;height:100%;
+    font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--dim);border-right:1px solid var(--hair);text-transform:uppercase}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--up);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .track{display:flex;gap:30px;white-space:nowrap;animation:scroll 46s linear infinite;padding-left:24px}
+  .ticker:hover .track{animation-play-state:paused}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .ti{display:inline-flex;align-items:center;gap:7px;font-size:12px}
+  .ti b{color:var(--dim);font-weight:500;letter-spacing:.3px}
+  .ti .v{color:var(--ink);font-weight:600}
+
+  /* ---------------- header ---------------- */
+  header{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
+    max-width:1500px;margin:0 auto;padding:14px 18px 6px}
+  .brand{display:flex;align-items:center;gap:12px}
+  /* ---------------- brand logo: REAL LotCheck mark (verbatim) ---------------- */
+  .logo{display:flex;align-items:center;justify-content:center;width:46px;height:40px;
+    border-radius:10px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:38px;height:38px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
+  }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:16px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:2px}
+  .badges{display:flex;align-items:center;gap:9px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .pill.live{display:flex;align-items:center;gap:7px}
+  .pill.demo{color:var(--dim)}
+  .clock{font-size:12px;color:var(--dimmer)}
+  .theme-toggle{position:relative;width:54px;height:27px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:21px;height:21px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:11px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(27px)}
+
+  /* ---------------- powertrain icon keyframes (verbatim) ---------------- */
+  @keyframes lc-charge{
+    0%,100%{opacity:0.5;transform:scale(0.85);}
+    50%    {opacity:1;  transform:scale(1.2);}
+  }
+  @keyframes lc-pump{
+    0%,100%{transform:translateY(0);}
+    30%    {transform:translateY(-3px);}
+    60%    {transform:translateY(0);}
+    80%    {transform:translateY(-1px);}
+  }
+  @keyframes lc-spin{
+    0%  {transform:rotate(0deg);}
+    100%{transform:rotate(360deg);}
+  }
+  .fuel-ico{overflow:visible}
+
+  /* ================= WALL LAYOUT (dense) ================= */
+  .wall{max-width:1500px;margin:0 auto;padding:10px 18px 0;
+    display:grid;grid-template-columns:repeat(12,1fr);gap:10px;grid-auto-flow:dense}
+  .panel{background:var(--panel);border:1px solid var(--hair);border-radius:10px;padding:11px 13px;
+    backdrop-filter:blur(var(--blur));min-width:0;opacity:0;translate:0 12px;transition:opacity .5s ease,translate .5s cubic-bezier(.16,1,.3,1)}
+  .panel.in{opacity:1;translate:0 0}
+  .p-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+  .p-title{font-size:9.5px;color:var(--dim);letter-spacing:1.3px;text-transform:uppercase}
+  .p-tag{font-size:9px;color:var(--dimmer);letter-spacing:.4px}
+  /* spans */
+  .c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}
+  .c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
+  @media(max-width:1100px){.c3,.c4,.c5{grid-column:span 6}.c7,.c8{grid-column:span 12}}
+  @media(max-width:720px){.c3,.c4,.c5,.c6,.c7,.c8{grid-column:span 12}}
+
+  /* hero panel */
+  .hero .idx{font-size:44px;font-weight:700;line-height:1;letter-spacing:-1px;text-shadow:0 0 22px var(--cyan-dim)}
+  .hero .chg{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;margin-top:8px;padding:3px 8px;border-radius:7px}
+  .hero .chg.up{color:var(--up);background:var(--up-soft)} .hero .chg.down{color:var(--down);background:var(--down-soft)}
+  .heroChart{width:100%;height:96px;margin-top:8px;display:block;overflow:visible}
+
+  /* mini spark cards */
+  .sparks{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .spark{border:1px solid var(--hair);border-radius:8px;padding:9px 10px;background:var(--panel-2)}
+  .spark .sh{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--dim)}
+  .spark .sh svg{width:15px;height:15px;flex:none;color:var(--dimmer)}
+  .spark .sv{font-size:16px;font-weight:700;margin-top:5px;letter-spacing:-.3px}
+  .spark svg.sp{width:100%;height:26px;display:block;margin-top:5px;overflow:visible}
+  .spark .sc{font-size:10.5px;font-weight:600;margin-top:2px}
+
+  /* data tables */
+  table.grid{width:100%;border-collapse:collapse;font-size:11px}
+  table.grid th{font-size:9px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);text-align:right;
+    padding:4px 6px;border-bottom:1px solid var(--hair);font-weight:600}
+  table.grid th:first-child{text-align:left}
+  table.grid td{padding:5px 6px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+  table.grid td:first-child{text-align:left;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;max-width:0;width:44%}
+  table.grid tr:last-child td{border-bottom:none}
+  .star{color:var(--star)}
+
+  /* stat mini tiles */
+  .stat3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px}
+  .st{border:1px solid var(--hair);border-radius:8px;padding:9px 10px;background:var(--panel-2)}
+  .st .l{font-size:9px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase}
+  .st .v{font-size:19px;font-weight:700;margin-top:5px;letter-spacing:-.4px}
+  .st .c{font-size:10px;font-weight:600;margin-top:2px}
+
+  /* gauge */
+  .gauge{display:flex;align-items:center;gap:12px}
+  .gauge .num{font-size:30px;font-weight:700;letter-spacing:-1px}
+  .gauge .bars{flex:1;display:flex;flex-direction:column;gap:5px}
+  .gbar{height:5px;border-radius:3px;background:var(--hair);overflow:hidden}
+  .gbar i{display:block;height:100%;border-radius:3px;background:var(--frust)}
+  .gnote{font-size:10px;color:var(--dimmer);margin-top:8px;line-height:1.5}
+
+  .foot{max-width:1500px;margin:16px auto 0;padding:0 18px;font-size:10.5px;color:var(--dimmer);line-height:1.65}
+  .foot b{color:var(--dim)} .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .track{animation:none} .panel{transition:none} .dot{animation:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="ticker">
+  <div class="tag"><span class="dot"></span> LMI</div>
+  <div class="track" id="track"></div>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <!-- REAL LotCheck mark, ported verbatim from src/App.jsx LogoMark (viewBox -95 -45 145 130) -->
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Live MSRP Price Index</h1><div class="sub">LotCheck · Market Wall</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill demo">Demo data</span>
+    <span class="pill live"><span class="dot"></span> Live</span>
+    <span class="clock mono" id="clock">--:--:--</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wall" id="wall">
+  <!-- HERO -->
+  <div class="panel c4 hero" id="p-hero">
+    <div class="p-head"><span class="p-title">LMI · base 100</span><span class="p-tag">29 makes</span></div>
+    <div class="idx mono" id="lmi">0.00</div>
+    <div class="chg up" id="lmiChg">&nbsp;</div>
+    <svg class="heroChart" id="heroChart" viewBox="0 0 320 96" preserveAspectRatio="none"></svg>
+  </div>
+
+  <!-- POWERTRAIN SPARKS -->
+  <div class="panel c5" id="p-sparks">
+    <div class="p-head"><span class="p-title">By powertrain · avg MSRP</span><span class="p-tag">daily</span></div>
+    <div class="sparks" id="sparks"></div>
+  </div>
+
+  <!-- STAT TILES -->
+  <div class="panel c3" id="p-stats">
+    <div class="p-head"><span class="p-title">Market snapshot</span></div>
+    <div class="stat3" id="stat3"></div>
+    <div class="gnote" style="margin-top:9px">Auto-refresh on <span class="mono">msrp_catalog</span>'s real daily cadence.</div>
+  </div>
+
+  <!-- SECTOR TABLE -->
+  <div class="panel c4" id="p-sector">
+    <div class="p-head"><span class="p-title">Segment indices</span><span class="p-tag">base 100</span></div>
+    <table class="grid" id="sectorTbl"></table>
+  </div>
+
+  <!-- MARKUP LEADERBOARD -->
+  <div class="panel c5" id="p-lb">
+    <div class="p-head"><span class="p-title">Dealer markup vs. reputation</span><span class="p-tag">sample · fictional names</span></div>
+    <table class="grid" id="lbTbl"></table>
+  </div>
+
+  <!-- PRICING-MENTION GAUGE -->
+  <div class="panel c3" id="p-frust">
+    <div class="p-head"><span class="p-title">Pricing-mention rate</span><span class="p-tag">AI · reviews</span></div>
+    <div class="gauge">
+      <div class="num mono" id="frustNum">0</div>
+      <div class="bars" id="frustBars"></div>
+    </div>
+    <div class="gnote">Genuine AI analysis of review text ("pricing", "fees", "MSRP") in production.</div>
+  </div>
+
+  <!-- INVENTORY BREADTH TABLE -->
+  <div class="panel c12" id="p-inv">
+    <div class="p-head"><span class="p-title">Dealer board · nearest Calgary, AB</span><span class="p-tag">markup · rating · in-stock · MSRP dev</span></div>
+    <table class="grid" id="invTbl"></table>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>Pricing-mention rate</b> is genuine AI analysis of review text ("pricing", "fees", "MSRP"). None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=x=>"$"+Math.round(x).toLocaleString("en-CA");
+  var pct=x=>(x>=0?"+":"")+x.toFixed(2)+"%";
+  var pct1=x=>(x>=0?"+":"")+x.toFixed(1)+"%";
+  var rnd=(seed=>()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;})(20260728);
+
+  /* ================= REAL powertrain icons (verbatim from src/App.jsx FuelIcon) ================= */
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="#94a3b8" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="#f59e0b" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="#22c55e" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  /* ================= THEME TOGGLE ================= */
+  var root=document.documentElement;
+  var prefLight=window.matchMedia("(prefers-color-scheme:light)").matches;
+  var theme= prefLight ? "light" : "dark";
+  function applyTheme(){
+    root.setAttribute("data-theme", theme);
+    document.getElementById("themeIco").textContent = theme==="light" ? "☀" : "☾";
+  }
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme = theme==="light" ? "dark" : "light"; applyTheme(); drawHero();
+  });
+
+  // ---- data ----
+  var lmi={val:148.72, day:+0.34};
+  var powertrains=[
+    {key:"Gas",    label:"Gas",            price:42500, chg:+0.14, factor:0.985},
+    {key:"Hybrid", label:"Hybrid",         price:41200, chg:+0.24, factor:0.998},
+    {key:"PHEV",   label:"Plug-in Hybrid", price:52800, chg:-0.31, factor:1.022},
+    {key:"BEV",    label:"BEV",            price:61340, chg:-1.12, factor:1.058}
+  ];
+  var segments=[["Pickup",156.2,.42],["SUV",149.8,-.18],["Sedan",131.4,.11],["Compact",122.7,-.05],["Luxury",172.3,.29],["Minivan",139.2,.07]];
+  var dealers=[
+    {name:"Riverside Ram",    markup:8.2, rating:2.3, rev:141, inv:88, dev:+7.4},
+    {name:"Stampede Dodge",   markup:7.6, rating:2.8, rev:96,  inv:64, dev:+6.1},
+    {name:"Crestline GMC",    markup:6.9, rating:3.4, rev:207, inv:120,dev:+4.9},
+    {name:"Beacon VW",        markup:6.2, rating:3.1, rev:158, inv:74, dev:+3.8},
+    {name:"Summit Chevrolet", markup:5.1, rating:4.7, rev:412, inv:150,dev:+2.2},
+    {name:"Northgate Ford",   markup:4.4, rating:4.4, rev:312, inv:132,dev:+0.4},
+    {name:"Meridian Toyota",  markup:3.6, rating:4.6, rev:498, inv:141,dev:-0.6},
+    {name:"Foothills Honda",  markup:3.1, rating:4.5, rev:377, inv:118,dev:-1.1},
+    {name:"Redstone Hyundai", markup:2.7, rating:4.2, rev:224, inv:92, dev:-1.9},
+    {name:"Chinook Kia",      markup:2.4, rating:3.9, rev:186, inv:80, dev:-2.4},
+    {name:"Glenmore Mazda",   markup:1.9, rating:4.8, rev:263, inv:70, dev:-3.0},
+    {name:"Bowview Subaru",   markup:1.5, rating:4.7, rev:341, inv:98, dev:-3.6}
+  ];
+
+  // ---- series ----
+  var N=48, series=[]; var base=142;
+  for(var i=0;i<N;i++){ base+=(rnd()-0.46)*1.2; series.push(Math.max(120,base)); }
+  series[N-1]=lmi.val;
+  function sparkSeries(factor,pts){ var a=[],b=138; for(var i=0;i<pts;i++){ b+=(rnd()-0.47)*1.3; a.push(b*factor); } return a; }
+
+  function starColor(r){ return r>=4.2?"var(--up)":r>=3.5?"var(--star)":"var(--down)"; }
+  function linePath(data,w,h,pad){ pad=pad||{t:6,b:6};
+    var mn=Math.min.apply(null,data),mx=Math.max.apply(null,data),rg=(mx-mn)||1;
+    return data.map((v,i)=>{var x=i/(data.length-1)*w;var y=h-pad.b-((v-mn)/rg)*(h-pad.t-pad.b);return (i?"L":"M")+x.toFixed(1)+" "+y.toFixed(1);}).join(" ");
+  }
+
+  // ---- hero chart ----
+  function drawHero(){
+    var svg=document.getElementById("heroChart"); var W=320,H=96;
+    var line=linePath(series,W,H,{t:10,b:12});
+    var area=line+" L"+W+" "+H+" L0 "+H+" Z";
+    svg.innerHTML='<defs><linearGradient id="ag5" x1="0" y1="0" x2="0" y2="1">'+
+      '<stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.24"/>'+
+      '<stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/></linearGradient>'+
+      '<filter id="glow5" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="1.3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+
+      '<path d="'+area+'" fill="url(#ag5)"/>'+
+      '<path d="'+line+'" fill="none" stroke="var(--cyan)" stroke-width="2" filter="url(#glow5)"/>';
+  }
+
+  // ---- ticker ----
+  var tItems=[["GAS",142.4,.14],["HYBRID",144.6,.24],["PHEV",156.9,-.31],["BEV",168.9,-1.12],
+    ["PICKUP",156.2,.42],["SUV",149.8,-.18],["SEDAN",131.4,.11],["COMPACT",122.7,-.05],["LUXURY",172.3,.29],["MINIVAN",139.2,.07]];
+  function renderTicker(){
+    var html=tItems.map(t=>{var cl=t[2]>=0?"up":"down";return '<span class="ti"><b>'+t[0]+'</b> <span class="v mono">'+t[1].toFixed(1)+'</span> <span class="'+cl+' mono">'+pct(t[2])+'</span></span>';}).join("");
+    document.getElementById("track").innerHTML=html+html;
+  }
+
+  // ---- sparks ----
+  function renderSparks(){
+    var host=document.getElementById("sparks"); host.innerHTML="";
+    powertrains.forEach(function(p){
+      var data=sparkSeries(p.factor,20); var up=p.chg>=0;
+      var d=document.createElement("div"); d.className="spark";
+      d.innerHTML='<div class="sh">'+ICON[p.key]+'<span>'+p.label+'</span></div>'+
+        '<div class="sv mono" data-t="'+p.price+'">$0</div>'+
+        '<svg class="sp" viewBox="0 0 120 26" preserveAspectRatio="none"><path d="'+linePath(data,120,26)+'" fill="none" stroke="'+(up?"var(--up)":"var(--down)")+'" stroke-width="1.4"/></svg>'+
+        '<div class="sc '+(up?"up":"down")+' mono">'+pct(p.chg)+'</div>';
+      host.appendChild(d);
+    });
+  }
+
+  // ---- stat tiles ----
+  function renderStats(){
+    var host=document.getElementById("stat3");
+    var s=[["Avg MSRP","$47,180","+0.21%","up"],["Widest markup","8.2%","+0.4%","up"],["Makes","29","daily",""]];
+    host.innerHTML=s.map(x=>'<div class="st"><div class="l">'+x[0]+'</div><div class="v mono">'+x[1]+'</div><div class="c '+x[3]+' mono">'+x[2]+'</div></div>').join("");
+  }
+
+  // ---- sector table ----
+  function renderSector(){
+    var t=document.getElementById("sectorTbl");
+    t.innerHTML='<tr><th>Segment</th><th>Index</th><th>Δ 1D</th></tr>'+
+      segments.map(s=>{var cl=s[2]>=0?"up":"down";return '<tr><td>'+s[0]+'</td><td class="mono">'+s[1].toFixed(1)+'</td><td class="'+cl+' mono">'+pct(s[2])+'</td></tr>';}).join("");
+  }
+
+  // ---- markup leaderboard table ----
+  function renderLb(){
+    var t=document.getElementById("lbTbl");
+    var lb=dealers.slice().sort((a,b)=>b.markup-a.markup).slice(0,7);
+    t.innerHTML='<tr><th>Dealer</th><th>Markup</th><th>Rating</th></tr>'+
+      lb.map(d=>'<tr><td title="'+d.name+'">'+d.name+'</td><td class="mono">'+pct1(d.markup)+'</td>'+
+        '<td class="mono"><span class="star" style="color:'+starColor(d.rating)+'">★</span> '+d.rating.toFixed(1)+'</td></tr>').join("");
+  }
+
+  // ---- inventory board ----
+  function renderInv(){
+    var t=document.getElementById("invTbl");
+    t.innerHTML='<tr><th>Dealer</th><th>Markup</th><th>Rating</th><th>Reviews</th><th>In-stock</th><th>MSRP dev</th></tr>'+
+      dealers.map(d=>{var dcl=d.dev>=0?"down":"up";return '<tr><td title="'+d.name+'">'+d.name+'</td>'+
+        '<td class="mono">'+pct1(d.markup)+'</td>'+
+        '<td class="mono"><span class="star" style="color:'+starColor(d.rating)+'">★</span> '+d.rating.toFixed(1)+'</td>'+
+        '<td class="mono">'+d.rev+'</td><td class="mono">'+d.inv+'</td>'+
+        '<td class="'+dcl+' mono">'+pct1(d.dev)+'</td></tr>';}).join("");
+  }
+
+  // ---- pricing-mention ----
+  var frustVal=51;
+  function renderFrust(){
+    document.getElementById("frustNum").textContent=Math.round(frustVal);
+    var host=document.getElementById("frustBars"); var vals=[frustVal,frustVal*0.7,frustVal*1.15,frustVal*0.55];
+    host.innerHTML=vals.map(v=>'<div class="gbar"><i style="width:'+Math.max(6,Math.min(98,v))+'%"></i></div>').join("");
+  }
+
+  // ---- count up ----
+  function countUp(el,target,kind){
+    if(reduce){ el.textContent=fmt(target,kind); return; }
+    var t0=null,dur=850,from=0;
+    function step(ts){t0=t0||ts;var k=Math.min(1,(ts-t0)/dur),e=1-Math.pow(1-k,3);el.textContent=fmt(from+(target-from)*e,kind);if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+  function fmt(v,kind){ return kind==="$"?money(v):kind==="2"?v.toFixed(2):Math.round(v); }
+  function flash(el,up){ el.style.transition="none";el.style.color=up?"var(--up)":"var(--down)";requestAnimationFrame(function(){el.style.transition="color .8s ease";el.style.color="";}); }
+
+  // ---- init ----
+  renderTicker(); renderSparks(); renderStats(); renderSector(); renderLb(); renderInv(); renderFrust(); drawHero();
+  var lmiEl=document.getElementById("lmi");
+  countUp(lmiEl, lmi.val, "2");
+  document.getElementById("lmiChg").className="chg "+(lmi.day>=0?"up":"down");
+  document.getElementById("lmiChg").innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+  document.querySelectorAll("[data-t]").forEach(el=>countUp(el, +el.dataset.t, "$"));
+
+  document.querySelectorAll(".panel").forEach((c,i)=>setTimeout(()=>c.classList.add("in"), reduce?0:i*55));
+
+  function tick(){var d=new Date(); document.getElementById("clock").textContent=d.toLocaleTimeString("en-CA",{hour12:false})+" ET";}
+  setInterval(tick,1000); tick();
+
+  if(!reduce) setInterval(function(){
+    var d=(rnd()-0.48)*0.25; lmi.val=Math.max(120,lmi.val+d); lmi.day+=d*0.4;
+    series.push(lmi.val); series.shift();
+    drawHero();
+    lmiEl.textContent=lmi.val.toFixed(2); flash(lmiEl,d>=0);
+    var chg=document.getElementById("lmiChg"); chg.className="chg "+(lmi.day>=0?"up":"down");
+    chg.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+    tItems.forEach(t=>{t[2]=Math.max(-2.5,Math.min(2.5,t[2]+(rnd()-0.5)*0.14)); t[1]=Math.max(100,t[1]+(rnd()-0.5)*0.2);}); renderTicker();
+    frustVal=Math.max(10,Math.min(92,frustVal+(rnd()-0.5)*4)); renderFrust();
+  }, 4000);
+})();
+</script>
+</body>
+</html>

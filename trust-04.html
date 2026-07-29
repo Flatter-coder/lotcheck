@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Reviews vs MSRP (Targets)</title>
+<style>
+  :root{
+    --bg:#0b0d11;--panel:rgba(255,255,255,.028);--panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);--hair:rgba(255,255,255,.09);--hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;--cyan-soft:rgba(78,200,224,.14);--cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;--down:#f0688a;--up-soft:rgba(62,207,142,.12);--down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;--dim:#8b95a6;--dimmer:#586172;--grid:rgba(255,255,255,.05);
+    --gate:#8b7bff;--blur:14px;--star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;--panel:rgba(255,255,255,.7);--panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);--hair:rgba(22,32,52,.1);--hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;--cyan-soft:rgba(13,143,176,.1);--cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;--down:#d63a5f;--up-soft:rgba(10,143,86,.1);--down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;--dim:#5a6577;--dimmer:#93a0b2;--grid:rgba(22,32,52,.07);
+    --gate:#6f57e6;--blur:16px;--star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:56px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1080px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{ 0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;} }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:20px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  .wrap{padding:16px 30px 0;max-width:1080px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:18px;backdrop-filter:blur(var(--blur));
+    position:relative;padding:24px 26px 20px}
+  .card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .card-head .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .card-head .desc{font-size:13px;color:var(--dim);margin-top:7px;line-height:1.5;max-width:520px}
+  .legends{display:flex;flex-direction:column;gap:11px;align-items:flex-end}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);align-items:center;justify-content:flex-end}
+  .legend .lg{display:inline-flex;align-items:center;gap:7px}
+  .legend .sw{width:10px;height:10px;border-radius:50%}
+  .legend .sw.good{background:var(--up)} .legend .sw.bad{background:var(--down)} .legend .sw.neutral{background:var(--dim)}
+  .ringleg{display:flex;gap:16px;font-size:10.5px;color:var(--dim);align-items:center}
+  .ringleg .u{display:inline-flex;align-items:center;gap:6px}
+
+  .chartwrap{margin-top:10px;position:relative}
+  svg.chart{width:100%;height:auto;display:block;overflow:visible}
+  .dot{opacity:0;transition:opacity .6s ease,transform .6s cubic-bezier(.16,1,.3,1);
+    transform-box:fill-box;transform-origin:center;transform:scale(.4) rotate(-25deg)}
+  .dot.in{opacity:1;transform:scale(1) rotate(0)}
+
+  .prodnote{margin-top:16px;font-size:11.5px;color:var(--dim);line-height:1.6;border-top:1px solid var(--hair);padding-top:14px}
+  .prodnote b{color:var(--ink);font-weight:600}
+  .prodnote .mono{color:var(--dim)}
+  .foot{max-width:1080px;margin:22px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .dot{transition:none;opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Reviews vs MSRP</h1><div class="sub">LotCheck · dealer reputation × price</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <div class="lbl">Reviews vs MSRP · target rings</div>
+        <div class="desc"><b>Google review score</b> against <b>MSRP deviation</b>. Each dealer is a target — more
+          concentric rings means a higher rating tier. Colour marks the value/trust quadrant.</div>
+      </div>
+      <div class="legends">
+        <div class="legend">
+          <span class="lg"><span class="sw good"></span>below MSRP · higher-rated</span>
+          <span class="lg"><span class="sw bad"></span>above MSRP · lower-rated</span>
+          <span class="lg"><span class="sw neutral"></span>mid-pack</span>
+        </div>
+        <div class="ringleg">
+          <span class="u"><svg width="26" height="16" viewBox="0 0 26 16" aria-hidden="true"><circle cx="13" cy="8" r="6.5" fill="none" stroke="var(--dim)" stroke-width="1.2"/><circle cx="13" cy="8" r="4" fill="none" stroke="var(--dim)" stroke-width="1.2"/><circle cx="13" cy="8" r="1.6" fill="var(--dim)"/></svg>4.5★+ (3 rings)</span>
+          <span class="u"><svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><circle cx="10" cy="8" r="5" fill="none" stroke="var(--dim)" stroke-width="1.2"/><circle cx="10" cy="8" r="1.6" fill="var(--dim)"/></svg>4.0–4.4 (2)</span>
+          <span class="u"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="1.8" fill="var(--dim)"/></svg>&lt;4.0 (1)</span>
+        </div>
+      </div>
+    </div>
+    <div class="chartwrap"><svg class="chart" id="chart" viewBox="0 0 760 470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Reviews vs MSRP target rings"></svg></div>
+    <div class="prodnote">
+      <b>Sample / demo data.</b> In production, dealer ratings come from LotCheck's
+      <span class="mono">get-dealer-sentiment</span> Google-reviews pipeline, and MSRP deviation from scraped live
+      listings versus the verified <span class="mono">msrp_catalog</span>. Dealer names here are fictional
+      placeholders, never real businesses with invented ratings.
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> Fictional dealer names only.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);
+    document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();draw(false);});
+
+  var dealers=[
+    {name:"Riverside Ram",    rating:2.3, dev:+7.4, inv:88},
+    {name:"Stampede Dodge",   rating:2.8, dev:+6.1, inv:64},
+    {name:"Crestline GMC",    rating:3.4, dev:+4.9, inv:120},
+    {name:"Beacon VW",        rating:3.1, dev:+3.8, inv:74},
+    {name:"Summit Chevrolet", rating:4.7, dev:+2.2, inv:150},
+    {name:"Northgate Ford",   rating:4.4, dev:+0.4, inv:132},
+    {name:"Meridian Toyota",  rating:4.6, dev:-0.6, inv:141},
+    {name:"Foothills Honda",  rating:4.5, dev:-1.1, inv:118},
+    {name:"Redstone Hyundai", rating:4.2, dev:-1.9, inv:92},
+    {name:"Chinook Kia",      rating:3.9, dev:-2.4, inv:80},
+    {name:"Glenmore Mazda",   rating:4.8, dev:-3.0, inv:70},
+    {name:"Bowview Subaru",   rating:4.7, dev:-3.6, inv:98},
+    {name:"Prairie Nissan",   rating:3.6, dev:-4.2, inv:60},
+    {name:"Elbow River Audi", rating:4.3, dev:-5.1, inv:54}
+  ];
+
+  var VB_W=760,VB_H=470,M={l:60,r:32,t:30,b:52};
+  var pw=VB_W-M.l-M.r, ph=VB_H-M.t-M.b, DEV=8;
+  function X(r){return M.l+((r-1)/4)*pw;}
+  function Y(d){return M.t+((DEV-d)/(2*DEV))*ph;}
+  var midX=X(3), midY=Y(0), pR=M.l+pw, pB=M.t+ph;
+  function tier(d){ if(d.dev>0&&d.rating<3.6)return"bad"; if(d.dev<0&&d.rating>=4.2)return"good"; return"neutral"; }
+  function col(t){ return t==="good"?"var(--up)":t==="bad"?"var(--down)":"var(--dim)"; }
+  function ringCount(r){ return r>=4.5?3:r>=4.0?2:1; }
+
+  function axes(){
+    var s='<defs>'+
+      '<radialGradient id="gGood" cx="88%" cy="86%" r="80%"><stop offset="0%" stop-color="var(--up)" stop-opacity=".11"/><stop offset="70%" stop-color="var(--up)" stop-opacity="0"/></radialGradient>'+
+      '<radialGradient id="gBad" cx="12%" cy="14%" r="80%"><stop offset="0%" stop-color="var(--down)" stop-opacity=".10"/><stop offset="70%" stop-color="var(--down)" stop-opacity="0"/></radialGradient>'+
+      '</defs>';
+    s+='<rect x="'+midX+'" y="'+midY+'" width="'+(pR-midX)+'" height="'+(pB-midY)+'" fill="url(#gGood)"/>';
+    s+='<rect x="'+M.l+'" y="'+M.t+'" width="'+(midX-M.l)+'" height="'+(midY-M.t)+'" fill="url(#gBad)"/>';
+    [1,2,3,4,5].forEach(function(r){var x=X(r);
+      s+='<line x1="'+x+'" y1="'+M.t+'" x2="'+x+'" y2="'+pB+'" stroke="var(--grid)" stroke-width="'+(r===3?1:0.6)+'" '+(r===3?'':'stroke-dasharray="2 5"')+'/>';
+      s+='<text x="'+x+'" y="'+(pB+20)+'" fill="var(--dimmer)" font-size="10" text-anchor="middle" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    [8,4,0,-4,-8].forEach(function(d){var y=Y(d);
+      s+='<line x1="'+M.l+'" y1="'+y+'" x2="'+pR+'" y2="'+y+'" stroke="var(--grid)" stroke-width="'+(d===0?1:0.6)+'" '+(d===0?'':'stroke-dasharray="2 5"')+'/>';
+      var lab=(d>0?"+"+d:d)+"%";
+      s+='<text x="'+(M.l-10)+'" y="'+(y+3.5)+'" fill="var(--dimmer)" font-size="10" text-anchor="end" font-family="monospace">'+(d===0?"MSRP":lab)+'</text>';
+    });
+    s+='<text x="'+(M.l+pw/2)+'" y="'+(VB_H-6)+'" fill="var(--dim)" font-size="11" text-anchor="middle" letter-spacing=".5">Google review score →</text>';
+    s+='<text x="'+(M.l-46)+'" y="'+(M.t+14)+'" fill="var(--dim)" font-size="10" text-anchor="start">↑ above MSRP</text>';
+    s+='<text x="'+(M.l-46)+'" y="'+(pB-4)+'" fill="var(--dim)" font-size="10" text-anchor="start">↓ below MSRP</text>';
+    s+='<text x="'+(pR-8)+'" y="'+(pB-10)+'" fill="var(--up)" font-size="11" font-weight="600" text-anchor="end" opacity=".85">Below MSRP · higher-rated ▾</text>';
+    s+='<text x="'+(M.l+8)+'" y="'+(M.t+16)+'" fill="var(--down)" font-size="11" font-weight="600" text-anchor="start" opacity=".85">▴ Above MSRP · lower-rated</text>';
+    return s;
+  }
+
+  function dots(){
+    return dealers.map(function(d,i){
+      var t=tier(d),c=col(t),x=X(d.rating),y=Y(d.dev),n=ringCount(d.rating);
+      var g='<g class="dot" data-i="'+i+'" transform="translate('+x.toFixed(1)+','+y.toFixed(1)+')">'+
+        '<title>'+d.name+' — '+d.rating.toFixed(1)+'★, '+(d.dev>0?"+":"")+d.dev.toFixed(1)+'% vs MSRP</title>';
+      /* concentric rings: outer radii 11 / 7.5 / center */
+      var radii=[11,7.5];
+      for(var k=0;k<n-1;k++){
+        g+='<circle r="'+radii[k]+'" fill="none" stroke="'+c+'" stroke-width="1.3" stroke-opacity="'+(0.4+0.12*(n-1-k))+'"/>';
+      }
+      g+='<circle r="3" fill="'+c+'" fill-opacity="'+(t==="neutral"?".6":".9")+'"/>';
+      g+='</g>';
+      return g;
+    }).join("");
+  }
+
+  function draw(animate){
+    var svg=document.getElementById("chart");
+    svg.innerHTML=axes()+dots();
+    var els=svg.querySelectorAll(".dot");
+    if(reduce||!animate){els.forEach(function(e){e.classList.add("in");});return;}
+    els.forEach(function(e,i){setTimeout(function(){e.classList.add("in");}, 80+i*50);});
+  }
+  draw(true);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Reviews vs MSRP · Beeswarm</title>
+<style>
+  /* ================= THEME TOKENS (verbatim from msrp-index-preview-v5) =================
+     ONE hero accent (cyan). Green/red reserved strictly for meaning (below / above MSRP).
+     Purple (--gate) reserved for the brand verification-gate logo motif only. */
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;        /* below MSRP — meaning only */
+    --down:#f0688a;      /* above MSRP — meaning only */
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --grid:rgba(255,255,255,.05);
+    --gate:#8b7bff;
+    --blur:14px;
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --gate:#6f57e6;
+    --blur:16px;
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:56px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  /* ---------------- header ---------------- */
+  header{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1120px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  /* brand logo — REAL LotCheck mark, ported verbatim from src/App.jsx LogoMark */
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
+  }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  /* ---------------- layout ---------------- */
+  .wrap{padding:16px 30px 0;max-width:1120px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;backdrop-filter:blur(var(--blur));
+    position:relative;opacity:0;translate:0 18px;transition:opacity .55s ease,translate .55s cubic-bezier(.16,1,.3,1)}
+  .card.in{opacity:1;translate:0 0}
+  .panel-hd{padding:24px 28px 4px}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .panel-hd h2{font-size:21px;font-weight:700;margin-top:9px;letter-spacing:-.2px}
+  .panel-hd p{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.6;max-width:640px}
+  .legend{display:flex;gap:20px;flex-wrap:wrap;padding:14px 28px 2px;font-size:11.5px;color:var(--dim)}
+  .legend .lg{display:inline-flex;align-items:center;gap:8px}
+  .legend .sw{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .legend .sw.up{background:var(--up)} .legend .sw.down{background:var(--down)}
+  .legend .sz{display:inline-flex;align-items:center;gap:5px;color:var(--dimmer)}
+  .legend .sz i{border-radius:50%;background:var(--dimmer);display:inline-block}
+
+  .chartwrap{padding:6px 20px 22px;position:relative}
+  svg.chart{width:100%;height:auto;display:block;overflow:visible}
+  .dot{cursor:default;transition:filter .2s}
+  .swtip{position:absolute;pointer-events:none;background:var(--panel-solid);border:1px solid var(--hair-strong);
+    border-radius:10px;padding:9px 12px;font-size:12px;color:var(--ink);opacity:0;transition:opacity .15s;
+    box-shadow:0 12px 34px -18px rgba(0,0,0,.6);z-index:6;backdrop-filter:blur(10px);white-space:nowrap}
+  .swtip b{font-weight:600}
+  .swtip .rt{color:var(--dim);font-size:11px;margin-top:3px;display:block}
+  .swtip .dv{font-weight:600}
+
+  .foot{max-width:1120px;margin:22px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .card{transition:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <!-- REAL LotCheck mark, ported verbatim from src/App.jsx LogoMark (viewBox -95 -45 145 130) -->
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Reviews vs MSRP</h1><div class="sub">LotCheck · trust vs. price</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="panel-hd">
+      <div class="lbl">Beeswarm · dealers by review score</div>
+      <h2>Who earns their price</h2>
+      <p>Every nearby dealer placed along its <b>Google review score</b>. Dealers charging <b>below MSRP</b> settle to the calm lower band; those <b>above MSRP</b> rise to the upper band. The lowest price + highest rating sits far right, low. Circle size = review volume.</p>
+    </div>
+    <div class="legend">
+      <span class="lg"><span class="sw up"></span>Below MSRP (good deal)</span>
+      <span class="lg"><span class="sw down"></span>Above MSRP (markup)</span>
+      <span class="lg sz"><i style="width:7px;height:7px"></i><i style="width:11px;height:11px"></i><i style="width:15px;height:15px"></i>&nbsp;more reviews</span>
+    </div>
+    <div class="chartwrap">
+      <svg class="chart" id="chart" viewBox="0 0 760 340"></svg>
+      <div class="swtip" id="tip"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production, dealer <b>review scores</b> come from LotCheck's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>), and <b>price deviation</b> is real scraped dealer listings compared against verified <b>msrp_catalog</b>. Nothing is fabricated at runtime. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  /* ---- theme toggle ---- */
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);
+    document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();draw();
+  });
+
+  /* ---- fictional dealers (illustrative sample) ----
+     rating = Google review score (1-5); dev = % vs MSRP (neg = below MSRP) */
+  var dealers=[
+    {name:"Riverside Ram",        rating:2.3, dev:+7.4, rev:141},
+    {name:"Stampede Dodge",       rating:2.8, dev:+6.1, rev:96},
+    {name:"Crestline GMC",        rating:3.4, dev:+4.9, rev:207},
+    {name:"Beacon VW",            rating:3.1, dev:+3.8, rev:158},
+    {name:"Kensington Jeep",      rating:3.7, dev:+2.6, rev:118},
+    {name:"Summit Chevrolet",     rating:4.7, dev:+1.9, rev:412},
+    {name:"Northgate Ford",       rating:4.4, dev:+0.4, rev:312},
+    {name:"Meridian Toyota",      rating:4.6, dev:-0.6, rev:498},
+    {name:"Foothills Honda",      rating:4.5, dev:-1.1, rev:377},
+    {name:"Redstone Hyundai",     rating:4.2, dev:-1.9, rev:224},
+    {name:"Chinook Kia",          rating:3.9, dev:-2.4, rev:186},
+    {name:"Nose Hill Mitsubishi", rating:4.0, dev:-2.8, rev:112},
+    {name:"Glenmore Mazda",       rating:4.8, dev:-3.0, rev:263},
+    {name:"Bowview Subaru",       rating:4.7, dev:-3.6, rev:341},
+    {name:"Prairie Nissan",       rating:3.6, dev:-4.2, rev:129},
+    {name:"Fish Creek Volvo",     rating:4.6, dev:-4.7, rev:198},
+    {name:"Elbow River Audi",     rating:4.3, dev:-5.1, rev:171}
+  ];
+
+  var W=760,H=340;
+  var padL=54,padR=26,padT=20,padB=44;
+  var midY=(padT+ (H-padB))/2;
+  function xOf(r){ return padL + ((r-1)/4)*(W-padL-padR); }
+  function rOf(rev){ return 5 + Math.sqrt(rev)/4.2; }
+
+  /* classic beeswarm packing: symmetric vertical offsets around a baseline */
+  function swarm(items){
+    var pts=items.map(function(d){return {d:d,x:xOf(d.rating),r:rOf(d.rev),yOff:0};});
+    pts.sort(function(a,b){return a.x-b.x;});
+    var placed=[];
+    pts.forEach(function(p){
+      var cands=[0];
+      placed.forEach(function(q){
+        var dx=p.x-q.x, rr=(p.r+q.r)+1.5;
+        if(Math.abs(dx)<rr){ var dy=Math.sqrt(Math.max(0,rr*rr-dx*dx)); cands.push(q.yOff+dy,q.yOff-dy); }
+      });
+      cands.sort(function(a,b){return Math.abs(a)-Math.abs(b);});
+      for(var i=0;i<cands.length;i++){
+        var c=cands[i],ok=true;
+        for(var j=0;j<placed.length;j++){
+          var q=placed[j],dx=p.x-q.x,dy=c-q.yOff,rr=(p.r+q.r)+1.5;
+          if(dx*dx+dy*dy<rr*rr-0.5){ok=false;break;}
+        }
+        if(ok){p.yOff=c;break;}
+      }
+      placed.push(p);
+    });
+    return pts;
+  }
+
+  function draw(){
+    var svg=document.getElementById("chart");
+    var above=dealers.filter(function(d){return d.dev>0;});
+    var below=dealers.filter(function(d){return d.dev<=0;});
+    var topBase=midY-46, botBase=midY+46;
+    var aPts=swarm(above).map(function(p){p.y=topBase - Math.abs(p.yOff)*0.62 - 4; return p;});
+    var bPts=swarm(below).map(function(p){p.y=botBase + Math.abs(p.yOff)*0.62 + 4; return p;});
+
+    var h='';
+    // review-score axis
+    h+='<line x1="'+padL+'" y1="'+midY+'" x2="'+(W-padR)+'" y2="'+midY+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+    [1,2,3,4,5].forEach(function(r){
+      var x=xOf(r);
+      h+='<line x1="'+x+'" y1="'+(padT)+'" x2="'+x+'" y2="'+(H-padB)+'" stroke="var(--grid)" stroke-width="0.7" stroke-dasharray="2 6"/>';
+      h+='<text x="'+x+'" y="'+(H-padB+20)+'" fill="var(--dimmer)" font-size="10.5" text-anchor="middle" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    h+='<text x="'+(W-padR)+'" y="'+(H-8)+'" fill="var(--dim)" font-size="11" text-anchor="end">Google review score →</text>';
+    // band labels
+    h+='<text x="'+padL+'" y="'+(padT+6)+'" fill="var(--down)" font-size="10.5" letter-spacing="0.4">▲ ABOVE MSRP</text>';
+    h+='<text x="'+padL+'" y="'+(H-padB-4)+'" fill="var(--up)" font-size="10.5" letter-spacing="0.4">▼ BELOW MSRP</text>';
+
+    function dotEl(p,col,idx){
+      var cy = (reduce? p.y : midY);
+      return '<circle class="dot" data-i="'+idx+'" cx="'+p.x.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+p.r.toFixed(1)+'" '+
+        'fill="'+col+'" fill-opacity="0.16" stroke="'+col+'" stroke-width="1.5" data-y="'+p.y.toFixed(1)+'"/>';
+    }
+    // stash for tooltip
+    window.__pts=[];
+    aPts.forEach(function(p){ p.col="var(--down)"; window.__pts.push(p); });
+    bPts.forEach(function(p){ p.col="var(--up)"; window.__pts.push(p); });
+    window.__pts.forEach(function(p,i){ h+=dotEl(p,p.col,i); });
+
+    svg.innerHTML=h;
+
+    if(!reduce){
+      svg.querySelectorAll(".dot").forEach(function(el,i){
+        var ty=+el.getAttribute("data-y");
+        el.animate([{cy:midY,opacity:0.2},{cy:ty,opacity:1}],
+          {duration:640,delay:120+i*34,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+        setTimeout(function(){el.setAttribute("cy",ty);},640+120+i*34);
+      });
+    }
+    wireTips(svg);
+  }
+
+  var tip=document.getElementById("tip");
+  function wireTips(svg){
+    svg.querySelectorAll(".dot").forEach(function(el){
+      el.addEventListener("mouseenter",function(){
+        var p=window.__pts[+el.getAttribute("data-i")]; if(!p)return;
+        el.style.filter="brightness(1.15)";
+        var dv=p.d.dev, sign=dv>0?"+":"";
+        tip.innerHTML='<b>'+p.d.name+'</b><span class="rt">★ '+p.d.rating.toFixed(1)+' · '+p.d.rev+' reviews</span>'+
+          '<span class="dv" style="color:'+(dv>0?"var(--down)":"var(--up)")+'">'+sign+dv.toFixed(1)+'% vs MSRP</span>';
+        var wrap=svg.parentElement.getBoundingClientRect();
+        var b=el.getBoundingClientRect();
+        tip.style.left=(b.left-wrap.left+b.width/2)+"px";
+        tip.style.top=(b.top-wrap.top-tip.offsetHeight-10)+"px";
+        tip.style.transform="translateX(-50%)";
+        tip.style.opacity="1";
+      });
+      el.addEventListener("mouseleave",function(){ el.style.filter=""; tip.style.opacity="0"; });
+    });
+  }
+
+  draw();
+  setTimeout(function(){document.getElementById("card").classList.add("in");}, 30);
+})();
+</script>
+</body>
+</html>

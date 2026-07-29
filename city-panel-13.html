@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — City panel · Price-vs-MSRP index gauge</title>
+<style>
+  /* ===== THEME TOKENS — verbatim from LotCheck msrp-index preview =====
+     ONE hero accent (cyan). Neutral ink/grey elsewhere.
+     Green/red reserved for meaning only (below / above MSRP).
+     Purple (--gate) reserved for the brand verification-gate motif. */
+  :root{
+    --bg:#0b0d11;--panel:rgba(255,255,255,.028);--panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);--hair:rgba(255,255,255,.09);--hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;--cyan-soft:rgba(78,200,224,.14);--cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;--down:#f0688a;--up-soft:rgba(62,207,142,.12);--down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;--dim:#8b95a6;--dimmer:#586172;--grid:rgba(255,255,255,.05);
+    --gate:#8b7bff;--blur:14px;--star:#c9a24a;
+    --f-gas:#94a3b8;--f-hybrid:#8b5cf6;--f-phev:#f59e0b;--f-bev:#22c55e;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;--panel:rgba(255,255,255,.7);--panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);--hair:rgba(22,32,52,.1);--hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;--cyan-soft:rgba(13,143,176,.1);--cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;--down:#d63a5f;--up-soft:rgba(10,143,86,.1);--down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;--dim:#5a6577;--dimmer:#93a0b2;--grid:rgba(22,32,52,.07);
+    --gate:#6f57e6;--blur:16px;--star:#b8860b;
+    --f-gas:#64748b;--f-hybrid:#7c4ddb;--f-phev:#d98a08;--f-bev:#16a34a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:30px 18px 46px;
+    overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+  .stage{width:100%;max-width:540px;display:flex;flex-direction:column;gap:14px}
+
+  .logo{display:flex;align-items:center;justify-content:center;width:44px;height:40px;border-radius:10px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:38px;height:38px;display:block}
+  @keyframes lc-gate-drive{0%{transform:translate(-95px,-47px);opacity:0;}10%{opacity:1;}50%{transform:translate(0,0);}90%{opacity:1;}100%{transform:translate(95px,47px);opacity:0;}}
+  @keyframes lc-gate-flash{0%,40%{opacity:.22;}50%{opacity:.68;}60%,100%{opacity:.22;}}
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+
+  .panel{background:var(--panel);border:1px solid var(--hair);border-radius:18px;backdrop-filter:blur(var(--blur));padding:19px 21px 21px;display:flex;flex-direction:column;gap:17px;opacity:0;translate:0 14px}
+  .panel.in{opacity:1;translate:0 0;transition:opacity .5s ease,translate .5s cubic-bezier(.16,1,.3,1)}
+
+  .p-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .brand{display:flex;align-items:center;gap:11px}
+  .brand h1{font-size:14.5px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:9px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase;margin-top:2px}
+  .badges{display:flex;align-items:center;gap:9px}
+  .pill{font-size:9.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 10px;border-radius:20px;border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:52px;height:27px;border-radius:20px;border:1px solid var(--hair);background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:21px;height:21px;border-radius:50%;background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);display:flex;align-items:center;justify-content:center;font-size:11px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(25px)}
+
+  .switcher{display:flex;gap:7px;flex-wrap:wrap}
+  .sw-btn{font:inherit;font-size:12px;color:var(--dim);background:transparent;border:1px solid var(--hair);border-radius:9px;padding:7px 12px;cursor:pointer;transition:.15s}
+  .sw-btn:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .sw-btn.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+
+  .p-city .cn{font-size:23px;font-weight:700;letter-spacing:-.4px}
+  .p-city .cc{font-size:12px;color:var(--dim);margin-top:3px}
+
+  .snap{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .snap .cell{border:1px solid var(--hair);border-radius:11px;background:var(--panel-2);padding:11px 13px}
+  .snap .k{font-size:9.5px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase}
+  .snap .v{font-size:19px;font-weight:700;margin-top:5px;letter-spacing:-.3px}
+  .snap .v.idx{text-shadow:0 0 18px var(--cyan-dim)}
+
+  .pt-block,.xc{border:1px solid var(--hair);border-radius:12px;background:var(--panel-2);padding:13px 15px}
+  .ph{font-size:9.5px;color:var(--dim);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:11px}
+  .pt-line{display:grid;grid-template-columns:19px 62px 1fr 38px;align-items:center;gap:9px;margin-bottom:9px}
+  .pt-line:last-child{margin-bottom:0}
+  .pt-line svg{width:16px;height:16px;flex:none}
+  .pt-line .pl{font-size:12px;color:var(--ink)}
+  .pt-line .track{height:6px;border-radius:4px;background:var(--hair);overflow:hidden}
+  .pt-line .track i{display:block;height:100%;border-radius:4px;transition:width .6s cubic-bezier(.16,1,.3,1)}
+  .pt-line .pv{font-size:11.5px;color:var(--dim);text-align:right}
+
+  .sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+  .sec-head .st{font-size:12px;font-weight:600;color:var(--ink)}
+  .sec-head .sc{font-size:10px;color:var(--dim)}
+
+  /* gauge + tiny list */
+  .gauge-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:center}
+  @media(max-width:440px){.gauge-grid{grid-template-columns:1fr}}
+  .gaugewrap{position:relative}
+  svg.gauge{width:100%;height:auto;display:block;overflow:visible}
+  .g-center{position:absolute;left:0;right:0;bottom:6px;text-align:center;pointer-events:none}
+  .g-center .gv{font-size:26px;font-weight:700;letter-spacing:-.6px;text-shadow:0 0 18px var(--cyan-dim)}
+  .g-center .gl{font-size:10px;color:var(--dim);margin-top:2px}
+  .mini-list{display:flex;flex-direction:column;gap:5px}
+  .ml-head{font-size:9px;color:var(--dimmer);letter-spacing:.8px;text-transform:uppercase;margin-bottom:2px}
+  .ml-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;background:var(--panel);border:1px solid var(--hair)}
+  .ml-row .mn{font-size:11px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ml-row .mr{font-size:10.5px;color:var(--dim);display:inline-flex;align-items:center;gap:3px}
+  .ml-row .mr .star{color:var(--star)}
+  .ml-row .md{font-size:10.5px;text-align:right;min-width:44px}
+
+  /* cross-city */
+  .xc{display:flex;flex-direction:column;gap:9px}
+  .xc-row{display:grid;grid-template-columns:98px 1fr 52px;align-items:center;gap:10px}
+  .xc-row .xn{font-size:12px;color:var(--dim)}
+  .xc-row.sel .xn{color:var(--cyan);font-weight:600}
+  .xc-row .xtrack{height:8px;border-radius:5px;background:var(--hair);overflow:hidden}
+  .xc-row .xtrack i{display:block;height:100%;border-radius:5px;background:var(--dimmer);transition:width .6s cubic-bezier(.16,1,.3,1)}
+  .xc-row.sel .xtrack i{background:var(--cyan)}
+  .xc-row .xv{font-size:11.5px;color:var(--dim);text-align:right}
+  .xc-row.sel .xv{color:var(--ink)}
+  .xc-note{font-size:11px;color:var(--dim);line-height:1.6;margin-top:2px}
+  .xc-note b{color:var(--ink);font-weight:600}
+
+  .foot{width:100%;max-width:540px;font-size:10.5px;color:var(--dimmer);line-height:1.65}
+  .foot b{color:var(--dim)}.foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .panel{transition:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+    .pt-line .track i,.xc-row .xtrack i,.g-needle,.g-arc{transition:none!important}
+  }
+  .fuel-ico{overflow:visible}
+  .g-needle{transition:transform .8s cubic-bezier(.16,1,.3,1)}
+  .g-arc{transition:stroke-dashoffset .9s cubic-bezier(.16,1,.3,1)}
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="panel" id="panel">
+    <div class="p-top">
+      <div class="brand">
+        <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+          <!-- REAL LotCheck mark, VERBATIM from src/App.jsx LogoMark -->
+          <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+            <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+            <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+            <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+            <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+            <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+            <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+            <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+            <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+            <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+            <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+            <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+            <g class="lc-gate-car">
+              <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+              <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+              <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+              <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+              <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+              <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+              <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+              <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+              <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+              <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+              <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+              <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+            </g>
+          </svg>
+        </div>
+        <div><h1>City price panel</h1><div class="sub">LotCheck · Alberta</div></div>
+      </div>
+      <div class="badges">
+        <span class="pill">Demo data</span>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme"><span class="knob"><span id="themeIco">☾</span></span></button>
+      </div>
+    </div>
+
+    <div class="switcher" id="switcher"></div>
+
+    <div class="p-city">
+      <div class="cn" id="cCity">—</div>
+      <div class="cc" id="cCount">—</div>
+    </div>
+
+    <div class="snap">
+      <div class="cell"><div class="k">Avg new MSRP</div><div class="v mono" id="cAvg">$0</div></div>
+      <div class="cell"><div class="k">MSRP index · base 100</div><div class="v idx mono" id="cIdx">0.0</div></div>
+    </div>
+
+    <div class="pt-block">
+      <div class="ph">Inventory mix by powertrain</div>
+      <div id="ptLines"></div>
+    </div>
+
+    <div>
+      <div class="sec-head"><span class="st">Local dealers — city price vs MSRP</span><span class="sc" id="vizCount"></span></div>
+      <div class="gauge-grid">
+        <div class="gaugewrap">
+          <svg class="gauge" id="gauge" viewBox="0 0 260 156"></svg>
+          <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
+        </div>
+        <div class="mini-list" id="miniList"></div>
+      </div>
+    </div>
+
+    <div class="xc">
+      <div class="ph">Cross-city — avg dealer price vs MSRP</div>
+      <div id="xcRows"></div>
+      <div class="xc-note" id="xcNote"></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    ◆ <b>Demo data — sample values for design preview.</b> In production the city's local dealers and their Google ratings come from LotCheck's real reviews pipeline (<span class="mono">get-dealer-sentiment</span>); each dealer's price-vs-MSRP is computed from scraped listings measured against <span class="mono">msrp_catalog</span>; and the MSRP index is derived from <span class="mono">msrp_catalog</span>. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+  </div>
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=x=>"$"+Math.round(x).toLocaleString("en-CA");
+  var signMoney=x=>(x>=0?"+$":"−$")+Math.abs(Math.round(x)).toLocaleString("en-CA");
+  var pctS=x=>(x>=0?"+":"−")+Math.abs(x).toFixed(1)+"%";
+  function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="var(--f-gas)" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="var(--f-gas)" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="var(--f-phev)" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="var(--f-phev)" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="var(--f-bev)" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="var(--f-bev)" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="var(--f-bev)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  var FUELVAR={Gas:"--f-gas",Hybrid:"--f-hybrid",PHEV:"--f-phev",BEV:"--f-bev"};
+  var kf=document.createElement("style");
+  kf.textContent="@keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}"+
+    "@keyframes lc-pump{0%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}60%{transform:translateY(0)}80%{transform:translateY(-1px)}}"+
+    "@keyframes lc-spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}";
+  document.head.appendChild(kf);
+
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){theme=theme==="light"?"dark":"light";applyTheme();if(current)drawViz(current,false);});
+
+  var CITIES=[
+    {name:"Edmonton",     dealers:129, avgMsrp:47180, index:148.2, premium:1180, mix:{Gas:71,Hybrid:14,PHEV:5,BEV:10}, seed:5310},
+    {name:"Calgary",      dealers:138, avgMsrp:48200, index:150.4, premium:980,  mix:{Gas:69,Hybrid:15,PHEV:6,BEV:10}, seed:1147},
+    {name:"Fort McMurray",dealers:15,  avgMsrp:52600, index:161.3, premium:2420, mix:{Gas:82,Hybrid:8, PHEV:3,BEV:7},  seed:8820},
+    {name:"Red Deer",     dealers:34,  avgMsrp:45900, index:145.1, premium:1540, mix:{Gas:76,Hybrid:11,PHEV:4,BEV:9},  seed:2733}
+  ];
+  var NAME_PRE=["Parkland","Northgate","Riverbend","Summit","Crossroads","Gateway","Prairie","Highland","Maple","Cedar","Aspen","Ridgeview","Lakeside","Boreal","Frontier","Meridian","Horizon","Foothills","Grandview"];
+  var NAME_SUF=["Motors","Auto Group","Automotive","Auto Sales","Motor Co.","Auto Centre","Autohaus","Auto Mall"];
+  var cache={};
+  function dealersFor(city){
+    if(cache[city.name])return cache[city.name];
+    var rng=mulberry(city.seed), n=Math.min(9,city.dealers), arr=[], sum=0;
+    var target=city.premium/city.avgMsrp*100;
+    for(var k=0;k<n;k++){
+      var low=rng()<0.28;
+      var rating=low?(2.7+rng()*0.9):(3.7+rng()*1.2); rating=Math.min(4.9,Math.max(2.5,rating));
+      var dev=target+(rng()-0.5)*5.2;
+      var inv=18+Math.round(rng()*130);
+      var pre=NAME_PRE[(city.name.length*3+k*7)%NAME_PRE.length];
+      var suf=NAME_SUF[(city.name.length*2+k*3)%NAME_SUF.length];
+      arr.push({name:pre+" "+suf,rating:rating,dev:dev,inv:inv}); sum+=dev;
+    }
+    var shift=target-sum/n; arr.forEach(function(d){d.dev+=shift;});
+    cache[city.name]=arr; return arr;
+  }
+
+  function countUp(el,target,dec){
+    if(reduce||document.hidden){el.textContent=target.toFixed(dec);return;}
+    var t0=null,dur=600,from=parseFloat(el.textContent)||0;
+    function step(ts){t0=t0||ts;var k=Math.min(1,(ts-t0)/dur),e=1-Math.pow(1-k,3);el.textContent=(from+(target-from)*e).toFixed(dec);if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+
+  var current=null;
+  var sw=document.getElementById("switcher");
+  sw.innerHTML=CITIES.map(function(c,i){return '<button class="sw-btn" data-i="'+i+'">'+c.name+'</button>';}).join("");
+  sw.querySelectorAll(".sw-btn").forEach(function(b){b.addEventListener("click",function(){selectCity(+b.dataset.i);});});
+
+  // ===== GAUGE viz =====  domain 0%..6% price-vs-MSRP, 180deg arc
+  var GMIN=0, GMAX=6, CX=130, CY=128, R=98, ir=Math.PI/180;
+  function polar(v){ // value% -> point on arc
+    var frac=Math.min(1,Math.max(0,(v-GMIN)/(GMAX-GMIN)));
+    var ang=180-frac*180; // deg
+    return {x:CX+R*Math.cos(ang*ir), y:CY-R*Math.sin(ang*ir), ang:ang};
+  }
+  function arcPath(v0,v1,r){
+    var a=polarR(v0,r), b=polarR(v1,r);
+    return "M"+a.x.toFixed(1)+" "+a.y.toFixed(1)+" A"+r+" "+r+" 0 0 1 "+b.x.toFixed(1)+" "+b.y.toFixed(1);
+  }
+  function polarR(v,r){var frac=Math.min(1,Math.max(0,(v-GMIN)/(GMAX-GMIN)));var ang=180-frac*180;return {x:CX+r*Math.cos(ang*ir),y:CY-r*Math.sin(ang*ir)};}
+  function drawViz(city,animate){
+    var mean=city.premium/city.avgMsrp*100;
+    var svg=document.getElementById("gauge");
+    var html='';
+    // background track (full semicircle)
+    html+='<path d="'+arcPath(GMIN,GMAX,R)+'" fill="none" stroke="var(--hair)" stroke-width="13" stroke-linecap="round"/>';
+    // ticks
+    [0,1.5,3,4.5,6].forEach(function(t){
+      var o=polarR(t,R+9), o2=polarR(t,R-9);
+      html+='<line x1="'+o2.x.toFixed(1)+'" y1="'+o2.y.toFixed(1)+'" x2="'+o.x.toFixed(1)+'" y2="'+o.y.toFixed(1)+'" stroke="var(--grid)" stroke-width="1"/>';
+      var lp=polarR(t,R+20);
+      html+='<text x="'+lp.x.toFixed(1)+'" y="'+(lp.y+3).toFixed(1)+'" fill="var(--dimmer)" font-size="8.5" text-anchor="middle" font-family="monospace">+'+t+'%</text>';
+    });
+    // value arc (cyan) 0..mean
+    var arc=arcPath(GMIN,mean,R);
+    html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="var(--cyan)" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
+    // needle (rests at the value; the coloured arc sweeps up to it)
+    var p=polar(mean);
+    html+='<g class="g-needle">';
+    html+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x.toFixed(1)+'" y2="'+p.y.toFixed(1)+'" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>';
+    html+='<circle cx="'+CX+'" cy="'+CY+'" r="5" fill="var(--panel-solid)" stroke="var(--ink)" stroke-width="2"/></g>';
+    svg.innerHTML=html;
+    if(animate&&!reduce){
+      var arcEl=svg.querySelector(".g-arc");
+      requestAnimationFrame(function(){requestAnimationFrame(function(){arcEl.style.strokeDashoffset="0";});});
+    }
+    document.getElementById("gVal").textContent=pctS(mean);
+    document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
+    // tiny dealer list (top 5 by rating)
+    var list=dealersFor(city).slice().sort(function(a,b){return b.rating-a.rating;}).slice(0,5);
+    document.getElementById("miniList").innerHTML='<div class="ml-head">Sample local dealers</div>'+list.map(function(d){
+      return '<div class="ml-row"><span class="mn" title="'+d.name+'">'+d.name+'</span>'+
+        '<span class="mr"><span class="star">★</span>'+d.rating.toFixed(1)+'</span>'+
+        '<span class="md mono">'+pctS(d.dev)+'</span></div>';
+    }).join("");
+  }
+
+  function renderCrossCity(sel){
+    var maxP=Math.max.apply(null,CITIES.map(function(c){return c.premium;}));
+    var rows=CITIES.slice().sort(function(a,b){return a.premium-b.premium;});
+    document.getElementById("xcRows").innerHTML=rows.map(function(c){
+      var on=c.name===sel.name;
+      return '<div class="xc-row'+(on?' sel':'')+'"><span class="xn">'+c.name+'</span>'+
+        '<span class="xtrack"><i style="width:'+(c.premium/maxP*100).toFixed(0)+'%"></i></span>'+
+        '<span class="xv mono">'+signMoney(c.premium)+'</span></div>';
+    }).join("");
+    var others=CITIES.filter(function(c){return c.name!==sel.name;});
+    var parts=others.map(function(c){
+      var diff=c.premium-sel.premium;
+      return '≈ $'+Math.abs(diff).toLocaleString("en-CA")+' '+(diff>0?'closer to':'farther from')+' MSRP than '+c.name;
+    });
+    document.getElementById("xcNote").innerHTML='<b>'+sel.name+'</b>’s local dealers price '+parts.join(' · ')+'.';
+  }
+
+  function selectCity(i){
+    current=CITIES[i];
+    document.getElementById("cCity").textContent=current.name+", AB";
+    var shown=Math.min(9,current.dealers);
+    document.getElementById("cCount").textContent=current.dealers+" dealerships · "+shown+" local dealers sampled";
+    countUp(document.getElementById("cIdx"),current.index,1);
+    document.getElementById("cAvg").textContent=money(current.avgMsrp);
+    var order=["Gas","Hybrid","PHEV","BEV"], labels={Gas:"Gas",Hybrid:"Hybrid",PHEV:"Plug-in",BEV:"BEV"};
+    document.getElementById("ptLines").innerHTML=order.map(function(k){var s=current.mix[k];
+      return '<div class="pt-line">'+ICON[k]+'<span class="pl">'+labels[k]+'</span>'+
+        '<span class="track"><i style="width:'+s+'%;background:var('+FUELVAR[k]+')"></i></span>'+
+        '<span class="pv mono">'+s+'%</span></div>';}).join("");
+    document.getElementById("vizCount").textContent="avg of "+shown+" dealers";
+    drawViz(current,true);
+    renderCrossCity(current);
+    sw.querySelectorAll(".sw-btn").forEach(function(b){b.classList.toggle("on",+b.dataset.i===i);});
+  }
+
+  selectCity(0);
+  setTimeout(function(){document.getElementById("panel").classList.add("in");},reduce?0:60);
+})();
+</script>
+</body>
+</html>

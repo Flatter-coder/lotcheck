@@ -1,0 +1,1198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Alberta map (3D) · animated live weather + price gauge</title>
+<style>
+  /* ================= THEME TOKENS (calm — verbatim palette from msrp-map-alberta) ================= */
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --gate:#8b7bff;
+    --grid:rgba(255,255,255,.05);
+    --blur:14px;
+    /* terrain / relief — NATURAL dusk palette (dark) */
+    --plains-a:#3f4a34;      /* west foothill green */
+    --plains-b:#4c4430;      /* east prairie tan */
+    --foot:#45503a;          /* foothill transition */
+    --land-stroke:rgba(228,236,244,.20);
+    --mtn-fill-a:#726d63;    /* lit NW rock face */
+    --mtn-fill-b:#2b2a27;    /* shadowed SE rock */
+    --ridge-hi:#c6cedb;      /* crest highlight */
+    --ridge-lo:#15161a;      /* crest / valley shadow */
+    --snow:#d9e0ea;          /* snowcap */
+    --snow-sh:#8f9cb0;       /* snowcap shadow side */
+    --contour:rgba(210,220,205,.05);
+    --pin-col:#8b95a6;
+    --shadow:rgba(0,0,0,.55);
+    /* weather glyph accents (calm, meaning-neutral) */
+    --wx-sun:#e6b667;
+    --wx-cloud:#9aa6ba;
+    --wx-rain:#6fb7d8;
+    --wx-snow:#bcd3e6;
+    --wx-bolt:#d8b45a;
+    /* day / night sky (weather-driven, independent of UI theme) */
+    --sky-day:linear-gradient(180deg, rgba(96,170,214,.34) 0%, rgba(150,196,222,.13) 48%, rgba(150,196,222,0) 80%);
+    --sky-night:linear-gradient(180deg, rgba(9,12,26,.86) 0%, rgba(18,24,46,.52) 55%, rgba(18,24,46,.06) 92%);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef2f7;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.96);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --gate:#6f57e6;
+    --grid:rgba(22,32,52,.07);
+    --blur:16px;
+    /* terrain / relief — NATURAL daytime palette (light) */
+    --plains-a:#bcd196;      /* west foothill green */
+    --plains-b:#e8ddb6;      /* east prairie tan */
+    --foot:#cdd79f;          /* foothill transition */
+    --land-stroke:rgba(60,66,54,.30);
+    --mtn-fill-a:#cabfad;    /* lit NW rock face */
+    --mtn-fill-b:#7c7264;    /* shadowed SE rock */
+    --ridge-hi:#fdfeff;      /* crest highlight */
+    --ridge-lo:#5c5347;      /* crest / valley shadow */
+    --snow:#ffffff;          /* snowcap */
+    --snow-sh:#c6d0de;       /* snowcap shadow side */
+    --contour:rgba(92,84,60,.10);
+    --pin-col:#6b7688;
+    --shadow:rgba(30,42,66,.30);
+    --wx-sun:#c98a2b;
+    --wx-cloud:#6b7688;
+    --wx-rain:#2f8fbd;
+    --wx-snow:#5a86a6;
+    --wx-bolt:#b8860b;
+    --sky-day:linear-gradient(180deg, rgba(120,186,224,.42) 0%, rgba(176,208,230,.18) 50%, rgba(176,208,230,0) 82%);
+    --sky-night:linear-gradient(180deg, rgba(24,32,58,.72) 0%, rgba(36,46,78,.42) 55%, rgba(36,46,78,.05) 92%);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:40px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  /* ---------------- header ---------------- */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1080px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  /* real LotCheck mark + original keyframes — VERBATIM from src/App.jsx LogoMark */
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
+  }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+
+  .brand h1{font-size:clamp(17px,.5vw + 15px,27px);font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .pill.live{color:var(--cyan);border-color:var(--cyan-dim);display:inline-flex;align-items:center;gap:6px}
+  .pill.live .dotc{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan-dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  /* ---------------- layout ---------------- */
+  .wrap{max-width:1080px;margin:0 auto;padding:14px 30px 0}
+  @media(min-width:1500px){header,.wrap,.foot{max-width:1340px}}
+  @media(min-width:1900px){header,.wrap,.foot{max-width:1600px}}
+  @media(max-width:520px){header{padding:22px 18px 6px}.wrap{padding:12px 18px 0}.foot{padding:0 18px}}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase;margin-bottom:2px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:18px;backdrop-filter:blur(var(--blur));
+    position:relative;padding:16px 18px 18px;overflow:hidden}
+
+  /* ---------------- 3D scene (responsive: phone → TV) ---------------- */
+  .scene{position:relative;height:clamp(400px,54vw,820px);
+    perspective:clamp(1300px,140vw,2200px);perspective-origin:50% 34%;
+    display:flex;align-items:center;justify-content:center;margin-top:6px;--pk:1}
+  @media(max-width:480px){.scene{height:clamp(380px,112vw,470px);--pk:.88}}
+  @media(min-width:1500px){.scene{--pk:1.22}}
+  @media(min-width:1900px){.scene{--pk:1.42}}
+  .world{position:relative;transform-style:preserve-3d;transition:transform .35s ease-out,filter .6s ease;will-change:transform}
+  .scene.night .world{filter:brightness(.7) saturate(.9)}
+  .plane{position:relative;width:clamp(230px,40vw,560px);aspect-ratio:380/620;
+    transform-style:preserve-3d;transform:rotateX(56deg) rotateZ(-7deg) translateZ(-40px);
+    transition:transform 1.15s cubic-bezier(.16,1,.3,1)}
+  .scene.ready .plane{transform:rotateX(36deg) rotateZ(-7deg)}
+  .relief{position:absolute;inset:0;width:100%;height:100%;display:block;
+    filter:drop-shadow(0 26px 30px var(--shadow))}
+  .pins{position:absolute;inset:0;transform-style:preserve-3d}
+
+  /* ---------------- day / night sky ---------------- */
+  .sky{position:absolute;inset:0;z-index:0;border-radius:14px;overflow:hidden;pointer-events:none;
+    background:var(--sky-day);transition:background .6s ease}
+  .scene.night .sky{background:var(--sky-night)}
+  .sky .sun{position:absolute;left:27%;top:15%;width:118px;height:118px;border-radius:50%;
+    background:radial-gradient(circle at 50% 50%, rgba(246,205,120,.92), rgba(246,205,120,.26) 42%, rgba(246,205,120,0) 70%);
+    opacity:1;transform:scale(1);transition:opacity .6s ease,transform .6s ease}
+  .sky .moon{position:absolute;right:25%;top:14%;width:58px;height:58px;border-radius:50%;
+    background:radial-gradient(circle at 40% 38%, #f2f6fc, #ccd6e6 62%, #a7b2c8 100%);
+    box-shadow:0 0 24px 6px rgba(190,206,236,.36);opacity:0;transition:opacity .6s ease}
+  .sky .stars{position:absolute;inset:0;opacity:0;transition:opacity .6s ease}
+  .sky .stars i{position:absolute;border-radius:50%;background:#e2e9f6;
+    box-shadow:0 0 4px rgba(226,233,246,.8)}
+  .scene.night .sky .sun{opacity:0;transform:scale(.65)}
+  .scene.night .sky .moon{opacity:1}
+  .scene.night .sky .stars{opacity:1}
+
+  /* ---------------- precipitation canvas ---------------- */
+  .wx-canvas{position:absolute;inset:0;z-index:4;pointer-events:none}
+
+  /* ---------------- DEPTH CLOUDS (layered 3D-parallax planes) ---------------- */
+  /* Sits inside .world's preserve-3d space; each layer has its own translateZ so
+     the pointer parallax shifts near vs far layers by different amounts = real depth.
+     Ambient + subtle; blurred soft shapes; day/night tinted. Never blocks the gauge
+     (separate card) and stays faint enough to keep pins + overlays legible. */
+  .clouds{position:absolute;inset:0;transform-style:preserve-3d;pointer-events:none;
+    --cloud-rgb:236,240,248}                 /* DAY: soft white / light grey */
+  .scene.night .clouds{--cloud-rgb:44,58,88} /* NIGHT: dark blue-grey */
+  .cloud-layer{position:absolute;left:0;top:0;width:100%;height:34%;
+    transform-style:preserve-3d;transform:translateZ(var(--cz,0px))}
+  .cloud-drift{position:absolute;left:0;top:0;width:200%;height:100%;
+    animation:cloud-drift var(--cdur,60s) linear infinite;will-change:transform}
+  .puff{position:absolute;border-radius:50%;filter:blur(var(--cblur,15px));
+    transform:translateZ(0);
+    background:radial-gradient(closest-side,
+      rgba(var(--cloud-rgb),var(--ca,.16)),
+      rgba(var(--cloud-rgb),calc(var(--ca,.16)*.4)) 52%,
+      rgba(var(--cloud-rgb),0) 78%)}
+  @keyframes cloud-drift{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
+
+  /* ---------------- FUN: occasional plane flying across, at cloud depth ---------------- */
+  /* Lives inside .world's preserve-3d space with a translateZ near the cloud layers, so it
+     parallaxes WITH the scene and sits among/above the clouds. Confined to the upper sky
+     band + subtle, so it never obscures pins / readout / gauge. Pure CSS = no JS, zero
+     console risk on either weather path. */
+  .aircraft{position:absolute;left:0;top:0;width:100%;height:42%;pointer-events:none;
+    transform-style:preserve-3d;transform:translateZ(48px)}
+  .aircraft-track{position:absolute;inset:0;
+    animation:aircraft-cross 21s linear infinite;will-change:transform,opacity}
+  .aircraft-plane{position:absolute;left:50%;top:20%;width:clamp(34px,5vw,60px);
+    transform:translate(-50%,-50%) rotate(7deg);
+    color:rgba(34,44,60,.62)}                 /* DAY: dark body tint (currentColor) */
+  .scene.night .aircraft-plane{color:rgba(168,182,208,.76)} /* NIGHT: lighter body tint */
+  /* slight bank/roll — a gentle 3D tilt so it reads dimensional, not a flat cutout */
+  .aircraft-plane svg{display:block;width:100%;height:auto;
+    transform:perspective(360px) rotateX(24deg) rotateZ(-4deg);transform-origin:50% 46%;
+    filter:drop-shadow(0 3px 4px rgba(0,0,0,.26))}
+  .aircraft-plane .body{fill:currentColor}          /* base tint follows day/night */
+  .aircraft-plane .hi{fill:#f4f8ff}                 /* top-surface highlight (over any tint) */
+  .aircraft-plane .sh{fill:#0a1220}                 /* underside shadow (over any tint) */
+  .aircraft-plane .fin{fill:currentColor}           /* vertical stabilizer face */
+  .contrail{position:absolute;right:58%;top:50%;transform:translateY(-50%);
+    width:150%;height:3px;border-radius:4px;pointer-events:none;filter:blur(1.4px);
+    background:linear-gradient(90deg,
+      rgba(232,240,252,0) 0%, rgba(232,240,252,.10) 42%,
+      rgba(232,240,252,.30) 82%, rgba(232,240,252,.44) 100%)}
+  .scene.night .contrail{background:linear-gradient(90deg,
+      rgba(202,216,240,0) 0%, rgba(202,216,240,.08) 42%,
+      rgba(202,216,240,.22) 82%, rgba(202,216,240,.34) 100%)}
+  .aircraft-plane .nav-light{opacity:0}      /* off by day */
+  .scene.night .aircraft-plane .nav-light{animation:nav-blink 1.6s steps(1,end) infinite}
+  @keyframes nav-blink{0%,46%{opacity:0}50%,60%{opacity:1}66%,100%{opacity:0}}
+  /* one crossing (~6s) then parked off-screen right for the rest of the 21s loop */
+  @keyframes aircraft-cross{
+    0%  {transform:translateX(-58%) translateY(-7px);opacity:0}
+    3%  {opacity:.95}
+    24% {opacity:.95}
+    28% {transform:translateX(58%) translateY(11px);opacity:0}
+    100%{transform:translateX(58%) translateY(11px);opacity:0}
+  }
+
+  .pin{position:absolute;width:0;height:0;transform-style:preserve-3d;pointer-events:none}
+  .pin-shadow{position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+    width:calc(var(--head) * 1.7 * var(--pk,1));height:calc(var(--head) * 1.7 * var(--pk,1));border-radius:50%;
+    background:radial-gradient(closest-side, var(--shadow), transparent);opacity:.7;pointer-events:none}
+  .pin-stand{position:absolute;left:0;bottom:0;transform-origin:bottom center;transform-style:preserve-3d;
+    display:flex;flex-direction:column;align-items:center;pointer-events:auto;cursor:pointer;
+    transform:translateX(-50%) rotateZ(7deg) rotateX(-36deg) scaleY(0);
+    transition:transform .7s cubic-bezier(.16,1,.3,1)}
+  .scene.ready .pin-stand{transform:translateX(-50%) rotateZ(7deg) rotateX(-36deg) scaleY(1)}
+  .pin-head{width:calc(var(--head)*var(--pk,1));height:calc(var(--head)*var(--pk,1));border-radius:50% 50% 50% 50%;
+    background:radial-gradient(circle at 38% 32%, var(--panel-solid), color-mix(in srgb, var(--pin-col) 40%, var(--panel-solid)));
+    border:1.6px solid var(--pin-col);position:relative;
+    box-shadow:0 2px 6px -1px var(--shadow);transition:border-color .2s,background .2s,box-shadow .2s;pointer-events:auto}
+  .pin-head::after{content:"";position:absolute;left:50%;top:50%;width:34%;height:34%;
+    transform:translate(-50%,-50%);border-radius:50%;background:var(--pin-col);opacity:.85;transition:background .2s}
+  .pin-stem{width:2px;height:calc(var(--stem)*var(--pk,1));
+    background:linear-gradient(to bottom, var(--pin-col), color-mix(in srgb, var(--pin-col) 10%, transparent));
+    pointer-events:auto}
+  .pin-label{position:absolute;left:calc(var(--head)*var(--pk,1)/2 + 5px);
+    top:calc((-1 * var(--head) - var(--stem)) * var(--pk,1) + 2px + var(--ldy,0px));
+    white-space:nowrap;font-size:clamp(10px,.35vw + 8px,15px);font-weight:600;color:var(--ink);
+    text-shadow:0 1px 3px var(--shadow),0 0 2px var(--bg);pointer-events:none;letter-spacing:.1px}
+  /* left-anchored label variant — used for pins near the right frame / to de-cluster */
+  .pin-label.left{left:auto;right:calc(var(--head)*var(--pk,1)/2 + 5px);text-align:right}
+  .pin-temp{color:var(--dim);font-weight:500;margin-left:5px}
+  .pin-temp svg{width:11px;height:11px;vertical-align:-1.5px;margin-right:1px}
+  /* hot (hover) + selected states */
+  .pin.hot{--pin-col:var(--cyan)}
+  .pin.sel{--pin-col:var(--cyan)}
+  .pin.hot .pin-head,.pin.sel .pin-head{box-shadow:0 0 0 4px var(--cyan-soft),0 3px 8px -1px var(--shadow)}
+  .pin.sel .pin-head{border-width:2.2px}
+
+  /* ---------------- overlays ---------------- */
+  .readout{position:absolute;left:16px;top:14px;z-index:5;display:flex;align-items:center;gap:11px;
+    padding:9px 13px;border-radius:12px;background:var(--panel-solid);border:1px solid var(--hair-strong);
+    box-shadow:0 12px 30px -18px rgba(0,0,0,.6);max-width:calc(100% - 32px)}
+  .readout .dotc{width:9px;height:9px;border-radius:50%;background:var(--cyan);flex:none;
+    box-shadow:0 0 8px var(--cyan-dim)}
+  .readout .rn{font-size:clamp(13px,.4vw + 11px,18px);font-weight:700;letter-spacing:-.2px;display:block}
+  .readout .rc{font-size:11.5px;color:var(--dim)}
+  .readout .rc b{color:var(--ink);font-weight:600}
+  .rw{display:inline-flex;align-items:center;gap:7px;padding-left:11px;border-left:1px solid var(--hair-strong);
+    min-height:26px}
+  .rw.empty{display:none}
+  .rw .wx-ico{display:inline-flex;width:22px;height:22px;flex:none}
+  .rw .wx-ico svg{width:22px;height:22px;display:block}
+  .rw .wx-t{font-size:15px;font-weight:700;letter-spacing:-.3px}
+  .rw .wx-day{font-size:12.5px;vertical-align:1px;margin-left:2px}
+  .rw .wx-c{font-size:11px;color:var(--dim);line-height:1.2}
+  .rw .wx-c .smp{color:var(--dimmer)}
+  /* cartographic compass rose — top-right empty map space; themed dark + light */
+  .compass{position:absolute;right:15px;top:13px;z-index:5;width:clamp(52px,7vw,68px);height:clamp(52px,7vw,68px);
+    border-radius:50%;border:1px solid var(--hair-strong);background:var(--panel-solid);
+    box-shadow:0 10px 24px -16px rgba(0,0,0,.6);pointer-events:none}
+  .compass svg{width:100%;height:100%;display:block}
+  .compass .rose{transition:transform .25s ease-out;transform-origin:32px 32px}
+  @media(max-width:480px){.compass{right:12px;top:11px}}
+  .legend{position:absolute;left:16px;bottom:14px;z-index:5;display:flex;flex-direction:column;gap:7px;
+    padding:10px 13px;border-radius:12px;background:var(--panel-solid);border:1px solid var(--hair);
+    font-size:10.5px;color:var(--dim);letter-spacing:.3px}
+  .legend .lg{display:inline-flex;align-items:center;gap:8px}
+  .legend .sw{width:22px;height:9px;border-radius:3px;flex:none}
+  .legend .pinico{display:inline-flex;align-items:flex-end;gap:4px}
+  .legend .pinico i{display:block;width:7px;border-radius:50%;background:var(--pin-col);opacity:.8}
+  .wx-status{position:absolute;right:16px;bottom:14px;z-index:5;display:inline-flex;align-items:center;gap:7px;
+    padding:8px 12px;border-radius:11px;background:var(--panel-solid);border:1px solid var(--hair);
+    font-size:10.5px;color:var(--dim);letter-spacing:.2px;max-width:calc(100% - 32px)}
+  .wx-status .wdot{width:7px;height:7px;border-radius:50%;background:var(--dimmer);flex:none;transition:background .3s}
+  .wx-status.live .wdot{background:var(--cyan);box-shadow:0 0 8px var(--cyan-dim)}
+  .wx-status b{color:var(--ink);font-weight:600}
+
+  /* ---------------- gauge section (from city-panel-13, adapted, compact) ---------------- */
+  .gauge-card{margin-top:16px}
+  .gauge-row{display:grid;grid-template-columns:minmax(0,300px) 1fr;gap:20px;align-items:center;margin-top:8px}
+  @media(max-width:560px){.gauge-row{grid-template-columns:1fr}}
+  @media(min-width:1500px){.gauge-row{grid-template-columns:minmax(0,400px) 1fr;gap:34px}}
+  .gaugewrap{position:relative}
+  svg.gauge{width:100%;height:auto;display:block;overflow:visible}
+  .g-center{position:absolute;left:0;right:0;bottom:8px;text-align:center;pointer-events:none}
+  .g-center .gv{font-size:clamp(24px,1.4vw + 16px,40px);font-weight:700;letter-spacing:-.6px;text-shadow:0 0 18px var(--cyan-dim)}
+  .g-center .gl{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .g-needle{transition:transform .8s cubic-bezier(.16,1,.3,1)}
+  .g-arc{transition:stroke-dashoffset .9s cubic-bezier(.16,1,.3,1)}
+  .gauge-side{display:flex;flex-direction:column;gap:14px}
+  .gcity{font-size:clamp(20px,1vw + 14px,32px);font-weight:700;letter-spacing:-.4px}
+  .gcity span{font-size:12px;color:var(--dim);font-weight:500;margin-left:2px}
+  .gmsrp{display:flex;flex-direction:column;gap:4px;border:1px solid var(--hair);border-radius:12px;
+    background:var(--panel-2);padding:12px 14px;align-self:flex-start;min-width:180px}
+  .gmsrp .k{font-size:9.5px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase}
+  .gmsrp .v{font-size:22px;font-weight:700;letter-spacing:-.3px}
+  .gnote{font-size:12px;color:var(--dim);line-height:1.6;max-width:340px}
+  .gnote b{color:var(--ink);font-weight:600}
+
+  .foot{max-width:1080px;margin:20px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .world,.plane,.pin-stand,.pin-head,.pin-head::after,.theme-toggle .knob{transition:none!important}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .g-needle,.g-arc{transition:none!important}
+    .sky,.sky .sun,.sky .moon,.sky .stars{transition:none!important}
+    .cloud-drift{animation:none!important}
+    /* park the plane static off-screen; no motion, no blinking */
+    .aircraft-track{animation:none!important;transform:translateX(-58%)!important;opacity:0!important}
+    .scene.night .aircraft-plane .nav-light{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <!-- REAL LotCheck mark, VERBATIM from src/App.jsx LogoMark (viewBox -95 -45 145 130) -->
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Alberta — dealer network map</h1><div class="sub">LotCheck · 3D terrain view</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <span class="pill live" id="wxPill" title="Weather is live from Open-Meteo"><span class="dotc"></span>Live weather</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="lbl">Dealer coverage · relief view (tilt with your cursor)</div>
+    <div class="scene" id="scene">
+      <div class="readout" id="readout">
+        <span class="dotc"></span>
+        <span>
+          <span class="rn" id="rName">Hover a city</span>
+          <span class="rc" id="rCount">33 Alberta markets · pin size = dealer count</span>
+        </span>
+        <span class="rw empty" id="rWeather" aria-live="polite"></span>
+      </div>
+      <div class="compass" id="compass" title="Map orientation · North up" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" fill="none" stroke="var(--hair-strong)" stroke-width="1"/>
+          <circle cx="32" cy="32" r="23.5" fill="none" stroke="var(--hair)" stroke-width="1"/>
+          <!-- fixed bezel letters -->
+          <text x="32" y="10.5" text-anchor="middle" dominant-baseline="middle" font-size="8.5" font-weight="700" font-family="inherit" fill="var(--cyan)">N</text>
+          <text x="53.3" y="32" text-anchor="middle" dominant-baseline="middle" font-size="7.5" font-weight="600" font-family="inherit" fill="var(--dim)">E</text>
+          <text x="32" y="53.6" text-anchor="middle" dominant-baseline="middle" font-size="7.5" font-weight="600" font-family="inherit" fill="var(--dim)">S</text>
+          <text x="10.7" y="32" text-anchor="middle" dominant-baseline="middle" font-size="7.5" font-weight="600" font-family="inherit" fill="var(--dim)">W</text>
+          <!-- rotating rose: 8-point star + diagonal ticks (subtly reacts to parallax) -->
+          <g class="rose">
+            <g stroke="var(--hair-strong)" stroke-width="1" stroke-linecap="round">
+              <line x1="44.7" y1="19.3" x2="48.6" y2="15.4"/>
+              <line x1="44.7" y1="44.7" x2="48.6" y2="48.6"/>
+              <line x1="19.3" y1="44.7" x2="15.4" y2="48.6"/>
+              <line x1="19.3" y1="19.3" x2="15.4" y2="15.4"/>
+            </g>
+            <!-- minor diagonal points -->
+            <g fill="var(--dim)" fill-opacity="0.30">
+              <polygon points="32,32 40.5,23.5 36.7,29.3"/>
+              <polygon points="32,32 40.5,40.5 36.7,34.7"/>
+              <polygon points="32,32 23.5,40.5 27.3,34.7"/>
+              <polygon points="32,32 23.5,23.5 27.3,29.3"/>
+            </g>
+            <!-- cardinal points, two-tone (North accent) -->
+            <polygon points="32,14 27.5,29 32,32" fill="var(--cyan)"/>
+            <polygon points="32,14 36.5,29 32,32" fill="var(--cyan-dim)"/>
+            <polygon points="50,32 35,27.5 32,32" fill="var(--ink)" fill-opacity="0.60"/>
+            <polygon points="50,32 35,36.5 32,32" fill="var(--dim)" fill-opacity="0.50"/>
+            <polygon points="32,50 27.5,35 32,32" fill="var(--ink)" fill-opacity="0.60"/>
+            <polygon points="32,50 36.5,35 32,32" fill="var(--dim)" fill-opacity="0.50"/>
+            <polygon points="14,32 29,27.5 32,32" fill="var(--ink)" fill-opacity="0.60"/>
+            <polygon points="14,32 29,36.5 32,32" fill="var(--dim)" fill-opacity="0.50"/>
+            <circle cx="32" cy="32" r="2.4" fill="var(--panel-2)" stroke="var(--hair-strong)" stroke-width="1"/>
+          </g>
+        </svg>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span class="lg"><span class="sw" style="background:linear-gradient(90deg,var(--mtn-fill-b),var(--mtn-fill-a))"></span> Rockies relief (SW)</span>
+        <span class="lg"><span class="sw" style="background:linear-gradient(90deg,var(--plains-a),var(--plains-b))"></span> plains (E)</span>
+        <span class="lg"><span class="pinico"><i style="height:6px"></i><i style="height:11px"></i><i style="height:16px"></i></span> few → many dealers</span>
+      </div>
+      <div class="wx-status" id="wxStatus" aria-live="polite"><span class="wdot"></span><span id="wxStatusText">Loading live weather…</span></div>
+      <div class="world" id="world">
+        <div class="clouds" id="clouds" aria-hidden="true"></div>
+        <div class="aircraft" aria-hidden="true">
+          <div class="aircraft-track">
+            <div class="aircraft-plane">
+              <div class="contrail"></div>
+              <!-- refined ORIGINAL generic airliner (top view, nosing right): fuselage,
+                   swept wings, swept tailplanes, vertical fin, top-highlight + underside-shadow -->
+              <svg viewBox="0 0 120 92" xmlns="http://www.w3.org/2000/svg">
+                <g class="body">
+                  <!-- swept main wings -->
+                  <path d="M78 42 L40 12 L33 14 L58 43.5 Z"/>
+                  <path d="M78 50 L40 80 L33 78 L58 48.5 Z"/>
+                  <!-- swept horizontal stabilizers -->
+                  <path d="M27 43 L13 30 L9.5 31.5 L20.5 44 Z"/>
+                  <path d="M27 49 L13 62 L9.5 60.5 L20.5 48 Z"/>
+                  <!-- vertical stabilizer (fin) -->
+                  <polygon class="fin" points="30,45.5 16,45.5 8,40"/>
+                  <!-- fuselage on top -->
+                  <path d="M112 46 C104 39.5 90 38.5 72 38.7 L44 39.6 C28 40.2 19 41.6 15 46 C19 50.4 28 51.8 44 52.4 L72 53.3 C90 53.5 104 52.5 112 46 Z"/>
+                </g>
+                <!-- underside shadow (darker) -->
+                <path class="sh" fill-opacity="0.34" d="M110 46 C104 47 96 47.6 84 47.9 L52 48 C36 48 24 47.4 17 46.4 C21 50.4 29 51.8 44 52.4 L72 53.3 C90 53.5 104 52.5 110 46 Z"/>
+                <path class="sh" fill-opacity="0.30" d="M78 50 L40 80 L33 78 L58 48.5 Z"/>
+                <path class="sh" fill-opacity="0.26" d="M27 49 L13 62 L9.5 60.5 L20.5 48 Z"/>
+                <!-- top-surface highlight (lighter) -->
+                <path class="hi" fill-opacity="0.42" d="M110 46 C102 41.5 90 40.8 72 41 L44 41.8 C30 42.2 21 43.2 17 45.6 C24 44.6 36 44.1 52 44.1 L84 44.1 C96 44.2 104 44.6 110 46 Z"/>
+                <path class="hi" fill-opacity="0.30" d="M78 42 L40 12 L33 14 L58 43.5 Z"/>
+                <path class="hi" fill-opacity="0.26" d="M27 43 L13 30 L9.5 31.5 L20.5 44 Z"/>
+                <ellipse class="hi" fill-opacity="0.50" cx="96" cy="44.6" rx="7" ry="2.1"/>
+                <!-- night beacon -->
+                <circle class="nav-light" cx="10" cy="39" r="1.9" fill="#ff5a5a"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+        <div class="plane" id="plane">
+          <svg class="relief" id="relief" viewBox="0 0 460 760" xmlns="http://www.w3.org/2000/svg"
+               role="img" aria-label="Shaded-relief map of Alberta: jagged Rocky Mountains along the south-west, flat plains to the east"></svg>
+          <div class="pins" id="pins"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Radial gauge BELOW the map — selected city's dealer price vs MSRP ===== -->
+  <div class="card gauge-card">
+    <div class="lbl">Selected city · dealer price vs MSRP</div>
+    <div class="gauge-row">
+      <div class="gaugewrap">
+        <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
+        <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
+      </div>
+      <div class="gauge-side">
+        <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
+        <div class="gmsrp"><span class="k">Avg new MSRP</span><span class="v mono" id="gAvg">$0</span></div>
+        <div class="gnote" id="gNote"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — city positions are real geographic coordinates; dealer counts and price-vs-MSRP figures are sample data for design preview.</b>
+  Current weather (temperature, condition and day/night) is <b>live from Open-Meteo</b> (free, no key) and labelled with its fetch time; if the request fails it falls back to clearly-marked sample weather.
+  In production each pin is a real dealership geocoded from LotCheck's locations pipeline (<span class="mono">get-dealer-sentiment</span>); each city's price-vs-MSRP is
+  computed from scraped listings measured against <span class="mono">msrp_catalog</span>; and weather is read live from <span class="mono">Open-Meteo</span>. Terrain shading is stylized, not survey elevation.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=function(x){return "$"+Math.round(x).toLocaleString("en-CA");};
+  var signMoney=function(x){return (x>=0?"+$":"−$")+Math.abs(Math.round(x)).toLocaleString("en-CA");};
+  var pctS=function(x){return (x>=0?"+":"−")+Math.abs(x).toFixed(1)+"%";};
+
+  // ---- theme ----
+  var root=document.documentElement;
+  var theme= window.matchMedia("(prefers-color-scheme:light)").matches ? "light" : "dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();
+    PAL=wxColors();                       // refresh canvas palette for the new theme
+    if(reduce) drawFrame();               // repaint static frame (reduced-motion has no loop)
+    if(selected) drawGauge(selected,false);
+  });
+
+  // ---- cities (name, lat, lon, approx dealership count) — VERBATIM from msrp-map-alberta ----
+  var CITIES=[
+    ["Calgary",51.05,-114.07,138],["Edmonton",53.55,-113.49,129],["Red Deer",52.27,-113.81,34],
+    ["Lethbridge",49.69,-112.84,27],["Medicine Hat",50.04,-110.68,19],["Grande Prairie",55.17,-118.80,24],
+    ["Fort McMurray",56.73,-111.38,15],["Airdrie",51.29,-114.01,17],["Spruce Grove",53.54,-113.91,11],
+    ["Sherwood Park",53.54,-113.30,14],["St. Albert",53.63,-113.63,12],["Leduc",53.26,-113.55,9],
+    ["Camrose",53.02,-112.83,6],["Lloydminster",53.28,-110.00,8],["Cochrane",51.19,-114.47,7],
+    ["Okotoks",50.72,-113.98,6],["Wetaskiwin",52.97,-113.37,5],["Brooks",50.56,-111.90,3],
+    ["Cold Lake",54.46,-110.18,3],["Canmore",51.09,-115.36,3],["Hinton",53.40,-117.57,2],
+    ["Whitecourt",54.14,-115.69,3],["Peace River",56.23,-117.29,3],["High River",50.58,-113.87,3],
+    ["Fort Saskatchewan",53.71,-113.21,5],["Lacombe",52.47,-113.74,4],["Sylvan Lake",52.31,-114.10,3],
+    ["Drumheller",51.46,-112.72,2],["Taber",49.79,-112.15,2],["Bonnyville",54.27,-110.74,3],
+    ["Slave Lake",55.28,-114.77,2],["Rocky Mountain House",52.37,-114.92,2],["Strathmore",51.04,-113.40,3]
+  ].map(function(c,i){return {i:i,name:c[0],lat:c[1],lon:c[2],dealers:c[3]};});
+
+  // deterministic PRNG (mulberry32)
+  function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  // ---- per-city SAMPLE price-vs-MSRP (deterministic; a few anchored, rest generated) ----
+  var PRICE_OVERRIDE={
+    "Edmonton":{avgMsrp:47180,pct:1.6},"Calgary":{avgMsrp:48200,pct:1.1},
+    "Red Deer":{avgMsrp:45900,pct:2.3},"Fort McMurray":{avgMsrp:52600,pct:3.4},
+    "Lethbridge":{avgMsrp:44100,pct:1.9},"Medicine Hat":{avgMsrp:43200,pct:2.1},
+    "Grande Prairie":{avgMsrp:49800,pct:2.8}
+  };
+  CITIES.forEach(function(c){
+    var o=PRICE_OVERRIDE[c.name];
+    if(o){ c.avgMsrp=o.avgMsrp; c.pricePct=o.pct; }
+    else {
+      var rng=mulberry(9001+c.i*131);
+      c.avgMsrp=42000+Math.round(rng()*13000);          // $42k .. $55k
+      c.pricePct=+(0.4+rng()*3.4).toFixed(1);           // +0.4% .. +3.8%
+    }
+    c.premium=Math.round(c.avgMsrp*c.pricePct/100);      // dollar premium vs MSRP
+  });
+
+  // ---- projection: lon -120..-110 -> x, lat 60..49 -> y ----
+  // Longitude degrees are compressed at Alberta's latitudes, so the drawn width is
+  // scaled by cos(mid-lat) relative to the vertical scale. This makes the province
+  // read taller-than-wide (its true shape) instead of squat, and the narrower band
+  // is centered horizontally within the same PW×PH viewBox.
+  var PW=460, PH=760, PAD=63;   // inner margin band — even margins all round (balanced framing, keeps pins off the edge)
+  var LAT_SPAN=11, LON_SPAN=10, MID_LAT=54.5;
+  var kLat=(PH-2*PAD)/LAT_SPAN;                       // px per degree latitude
+  var kLon=kLat*Math.cos(MID_LAT*Math.PI/180);        // px per degree longitude (compressed ~0.58×)
+  var LON_X0=(PW-LON_SPAN*kLon)/2;                     // left offset that centers the province
+  function projX(lon){return LON_X0 + (lon+120)*kLon;}
+  function projY(lat){return PAD + ((60-lat)/LAT_SPAN)*(PH-2*PAD);}
+
+  // ---- Continental Divide / Rockies border (VERBATIM) ----
+  var SW=[projX(-114.03),projY(49)];
+  var DIV=[projX(-120),projY(53.8)];
+  function buildRockies(seed,amp,pull){
+    var rng=mulberry(seed);
+    var dx=DIV[0]-SW[0], dy=DIV[1]-SW[1], len=Math.hypot(dx,dy);
+    var ux=dx/len, uy=dy/len;
+    var px=-uy, py=ux;
+    var N=34, pts=[];
+    for(var k=0;k<=N;k++){
+      var t=k/N;
+      var bx=SW[0]+dx*t, by=SW[1]+dy*t;
+      var env=Math.sin(Math.PI*t);
+      var n=(rng()-0.5)*2 + (rng()-0.5)*1.1 + Math.sin(t*Math.PI*7+seed)*0.5;
+      var off=n*amp*env + pull*env;
+      pts.push([bx+px*off, by+py*off]);
+    }
+    return pts;
+  }
+  var border=buildRockies(7, 15, 0);
+  function poly(pts){return pts.map(function(p){return p[0].toFixed(1)+" "+p[1].toFixed(1);}).join(" L ");}
+
+  // ---- build the relief SVG — NATURAL terrain: prairie → foothills → snow-capped Rockies ----
+  // Light comes from the NW: crests get a light stroke, the SE face of each ridge is
+  // filled with a shadow band → shaded relief. A rock base band underlies layered
+  // ridgelines; the two western-most (Continental Divide) ridges carry snowcaps; three
+  // fainter foothill ridges step east into the plains.
+  function renderRelief(){
+    var nw=[projX(-120),projY(60)], ne=[projX(-110),projY(60)],
+        se=[projX(-110),projY(49)];
+    var d="M "+nw[0].toFixed(1)+" "+nw[1].toFixed(1)+
+          " L "+ne[0].toFixed(1)+" "+ne[1].toFixed(1)+
+          " L "+se[0].toFixed(1)+" "+se[1].toFixed(1)+
+          " L "+border[0][0].toFixed(1)+" "+border[0][1].toFixed(1)+
+          " L "+poly(border)+
+          " L "+nw[0].toFixed(1)+" "+nw[1].toFixed(1)+" Z";
+
+    // eastern edge of the rock band (the range is wider now → foothills reach into plains)
+    var inner=buildRockies(7, 12, 58).slice().reverse();
+    var bandD="M "+poly(border)+" L "+poly(inner)+" Z";
+
+    var svg=[];
+    svg.push('<defs>');
+    svg.push('<clipPath id="ab"><path d="'+d+'"/></clipPath>');
+    // plains: foothill green (west) → transition → prairie tan (east)
+    svg.push('<linearGradient id="gPlains" x1="0" y1="0" x2="1" y2="0.3"><stop offset="0" stop-color="var(--plains-a)"/><stop offset="0.5" stop-color="var(--foot)"/><stop offset="1" stop-color="var(--plains-b)"/></linearGradient>');
+    // rock band: lit NW (top-left) → shadowed SE (bottom-right)
+    svg.push('<linearGradient id="gMtn" x1="0" y1="0" x2="0.75" y2="1"><stop offset="0" stop-color="var(--mtn-fill-a)"/><stop offset="0.55" stop-color="var(--mtn-fill-b)"/><stop offset="1" stop-color="var(--mtn-fill-b)"/></linearGradient>');
+    svg.push('</defs>');
+
+    svg.push('<g clip-path="url(#ab)">');
+    // 1 · prairie base
+    svg.push('<path d="'+d+'" fill="url(#gPlains)"/>');
+
+    // 2 · faint prairie section lines (subtle field texture, natural tone)
+    for(var c=0;c<7;c++){
+      var yy=projY(58-c*1.35);
+      var wob=(c%2? -8:8);
+      svg.push('<path d="M '+projX(-114.5)+' '+yy.toFixed(1)+
+        ' Q '+projX(-113)+' '+(yy+wob).toFixed(1)+' '+projX(-110)+' '+(yy-wob*0.5).toFixed(1)+
+        '" fill="none" stroke="var(--contour)" stroke-width="1"/>');
+    }
+
+    // 3 · foothills stepping east into the plains (drawn first, behind the range)
+    for(var f=2;f>=0;f--){
+      var fh=buildRockies(41+f*17, 6+f*2.2, 60+f*12);
+      svg.push('<path d="M '+poly(fh)+'" fill="none" stroke="var(--ridge-lo)" stroke-width="'+(1.1+f*0.25).toFixed(1)+'" stroke-opacity="'+(0.15+f*0.045).toFixed(2)+'" stroke-linecap="round" stroke-linejoin="round"/>');
+    }
+
+    // 4 · rock band base fill (hillshade gradient)
+    svg.push('<path d="'+bandD+'" fill="url(#gMtn)"/>');
+
+    // 5 · layered, hillshaded ridgelines — draw east(front) → west(Divide, on top)
+    for(var r=5;r>=0;r--){
+      var pull=r*9;
+      var amp=13-r*1.3;
+      var ridge=buildRockies(7+r*13, amp, pull);
+      var fwd=poly(ridge);
+      // shadowed SE face: crest + crest offset down-right, filled dark
+      var back=ridge.slice().reverse().map(function(p){return (p[0]+3.4).toFixed(1)+" "+(p[1]+5.4).toFixed(1);}).join(" L ");
+      svg.push('<path d="M '+fwd+' L '+back+' Z" fill="var(--ridge-lo)" fill-opacity="'+(0.36-r*0.035).toFixed(2)+'"/>');
+      // lit NW crest highlight
+      svg.push('<path d="M '+fwd+'" fill="none" stroke="var(--ridge-hi)" stroke-width="'+(2.0-r*0.16).toFixed(1)+'" stroke-opacity="'+(0.74-r*0.075).toFixed(2)+'" stroke-linecap="round" stroke-linejoin="round"/>');
+    }
+
+    // 6 · snowcaps along the two western-most (Divide) crests
+    for(var sr=0;sr<2;sr++){
+      var screst=buildRockies(7+sr*13, 13-sr*1.3, sr*9);
+      var s0=(sr===0?4.4:3.4);
+      for(var k=2;k<screst.length-2;k+=4){
+        var p=screst[k];
+        var jitter=((k*7+sr*3)%5)*0.28;              // slight size variation → less uniform
+        var s=s0+jitter;
+        // lit cap (points NW/up)
+        svg.push('<path d="M '+(p[0]-s).toFixed(1)+' '+(p[1]+s*0.72).toFixed(1)+
+          ' L '+p[0].toFixed(1)+' '+(p[1]-s).toFixed(1)+
+          ' L '+(p[0]+s).toFixed(1)+' '+(p[1]+s*0.72).toFixed(1)+' Z" fill="var(--snow)" fill-opacity="0.92"/>');
+        // shadowed SE face of the cap
+        svg.push('<path d="M '+p[0].toFixed(1)+' '+(p[1]-s).toFixed(1)+
+          ' L '+(p[0]+s).toFixed(1)+' '+(p[1]+s*0.72).toFixed(1)+
+          ' L '+(p[0]+s*0.12).toFixed(1)+' '+(p[1]+s*0.5).toFixed(1)+' Z" fill="var(--snow-sh)" fill-opacity="0.85"/>');
+      }
+    }
+    svg.push('</g>');
+
+    // land outline
+    svg.push('<path d="'+d+'" fill="none" stroke="var(--land-stroke)" stroke-width="1.6" stroke-linejoin="round"/>');
+
+    svg.push('<text x="'+((nw[0]+ne[0])/2).toFixed(0)+'" y="'+(nw[1]-8).toFixed(0)+'" fill="var(--dimmer)" font-size="10" text-anchor="middle" font-family="monospace" opacity="0.7">60°N</text>');
+    // (south-edge label removed — no US-side lettering along Alberta's Montana border)
+    svg.push('<text x="'+(ne[0]+6).toFixed(0)+'" y="'+((ne[1]+se[1])/2).toFixed(0)+'" fill="var(--dimmer)" font-size="10" text-anchor="start" font-family="monospace" opacity="0.6" transform="rotate(90 '+(ne[0]+6).toFixed(0)+' '+((ne[1]+se[1])/2).toFixed(0)+')">110°W</text>');
+
+    document.getElementById("relief").innerHTML=svg.join("");
+  }
+
+  // ---- build pins (adds temp slot on labelled pins) ----
+  var pinsHost=document.getElementById("pins");
+  function renderPins(){
+    var rank={};
+    CITIES.slice().sort(function(a,b){return b.dealers-a.dealers;}).forEach(function(c,idx){rank[c.i]=idx;});
+
+    // ---- label placement: keep labels off the right frame + de-cluster near neighbours ----
+    // Labelled pins (dealers>=15) default to a right-anchored label; pins near the right
+    // edge flip left, and any two same-side labels that would collide push the smaller apart.
+    var labeled=CITIES.filter(function(c){return c.dealers>=15;}).map(function(c){
+      return {i:c.i,d:c.dealers,x:projX(c.lon)/PW*100,y:projY(c.lat)/PH*100,side:'right'};
+    });
+    labeled.forEach(function(o){ if(o.x>66) o.side='left'; });
+    for(var a=0;a<labeled.length;a++){ for(var b=a+1;b<labeled.length;b++){
+      var A=labeled[a], B=labeled[b];
+      if(A.side===B.side && Math.abs(A.x-B.x)<10 && Math.abs(A.y-B.y)<8){
+        var lo=(A.d<B.d)?A:B; lo.side=(lo.side==='right')?'left':'right';
+      }
+    }}
+    var lmap={}; labeled.forEach(function(o){lmap[o.i]=o;});
+
+    var frag=document.createDocumentFragment();
+    CITIES.forEach(function(c){
+      var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
+      var head=Math.min(30, 9+Math.sqrt(c.dealers)*1.9);
+      var stem=Math.round(head*1.35+10);
+      var label=c.dealers>=15;
+      var lc=lmap[c.i];
+      var lblCls='pin-label'+(lc&&lc.side==='left'?' left':'');
+      var el=document.createElement("div");
+      el.className="pin";
+      el.dataset.i=c.i;
+      el.style.left=x.toFixed(3)+"%";
+      el.style.top=y.toFixed(3)+"%";
+      el.style.setProperty("--head",head.toFixed(1)+"px");
+      el.style.setProperty("--stem",stem+"px");
+      var st=el.appendChild(document.createElement("div")); st.className="pin-stand";
+      st.style.transitionDelay=(reduce?0:(rank[c.i]*34+120))+"ms";
+      st.innerHTML='<div class="pin-head"></div><div class="pin-stem"></div>'+
+        (label?'<div class="'+lblCls+'">'+c.name+'<span class="pin-temp" data-ti="'+c.i+'"></span></div>':'');
+      var sh=el.appendChild(document.createElement("div")); sh.className="pin-shadow";
+      frag.appendChild(el);
+    });
+    pinsHost.innerHTML="";
+    pinsHost.appendChild(frag);
+  }
+
+  // ================= WEATHER (Open-Meteo, the ONLY external call) =================
+  // WMO weather_code -> icon key + label
+  function codeInfo(code){
+    if(code===0) return {k:"clear",  l:"Clear"};
+    if(code===1||code===2) return {k:"partly", l:"Partly cloudy"};
+    if(code===3) return {k:"cloud",  l:"Cloudy"};
+    if(code===45||code===48) return {k:"fog", l:"Fog"};
+    if(code>=51&&code<=57) return {k:"rain", l:"Drizzle"};
+    if(code>=61&&code<=67) return {k:"rain", l:"Rain"};
+    if(code>=71&&code<=77) return {k:"snow", l:"Snow"};
+    if(code>=80&&code<=82) return {k:"rain", l:"Showers"};
+    if(code===85||code===86) return {k:"snow", l:"Snow showers"};
+    if(code>=95) return {k:"thunder", l:"Thunderstorm"};
+    return {k:"cloud", l:"Cloudy"};
+  }
+  var WX_ICON={
+    clear:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4.4" fill="none" stroke="var(--wx-sun)" stroke-width="1.8"/><g stroke="var(--wx-sun)" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.6"/><path d="M12 18.9v2.6"/><path d="M2.5 12h2.6"/><path d="M18.9 12h2.6"/><path d="M5.2 5.2l1.85 1.85"/><path d="M16.95 16.95l1.85 1.85"/><path d="M18.8 5.2l-1.85 1.85"/><path d="M7.05 16.95L5.2 18.8"/></g></svg>',
+    partly:'<svg viewBox="0 0 24 24" fill="none"><g stroke="var(--wx-sun)" stroke-width="1.6" stroke-linecap="round"><circle cx="8.5" cy="8" r="3.1" fill="none"/><path d="M8.5 1.9v1.7"/><path d="M2.4 8h1.7"/><path d="M4 3.6l1.2 1.2"/><path d="M13 3.6l-1.2 1.2"/></g><path d="M8.6 20h8.9a3.4 3.4 0 000-6.8 4.4 4.4 0 00-8.5-.6 3.2 3.2 0 00-.4 7.4z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+    cloud:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 19h10.4a3.7 3.7 0 000-7.4 4.9 4.9 0 00-9.4-.7A3.6 3.6 0 007 19z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+    fog:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 14h10.4a3.7 3.7 0 000-7.4 4.9 4.9 0 00-9.4-.7A3.6 3.6 0 007 14z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linejoin="round"/><g stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linecap="round"><path d="M5 18h11"/><path d="M8 21h9"/></g></svg>',
+    rain:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 14h10.4a3.7 3.7 0 000-7.4 4.9 4.9 0 00-9.4-.7A3.6 3.6 0 007 14z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linejoin="round"/><g stroke="var(--wx-rain)" stroke-width="1.8" stroke-linecap="round"><path d="M8.5 17l-1 3"/><path d="M13 17l-1 3"/><path d="M17.5 17l-1 3"/></g></svg>',
+    snow:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 13h10.4a3.7 3.7 0 000-7.4 4.9 4.9 0 00-9.4-.7A3.6 3.6 0 007 13z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linejoin="round"/><g stroke="var(--wx-snow)" stroke-width="1.7" stroke-linecap="round"><path d="M9 17.5v3M7.7 18.2l2.6 1.6M10.3 18.2l-2.6 1.6"/><path d="M15 17.5v3M13.7 18.2l2.6 1.6M16.3 18.2l-2.6 1.6"/></g></svg>',
+    thunder:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 13h10.4a3.7 3.7 0 000-7.4 4.9 4.9 0 00-9.4-.7A3.6 3.6 0 007 13z" fill="none" stroke="var(--wx-cloud)" stroke-width="1.7" stroke-linejoin="round"/><path d="M12.5 15l-2.5 3.6h2.2L11.4 22l3.1-4h-2.3l1-3z" fill="var(--wx-bolt)" stroke="var(--wx-bolt)" stroke-width="0.8" stroke-linejoin="round"/></svg>'
+  };
+  function iconSmall(k){ // 11px variant reuses the same markup, sized via CSS
+    return WX_ICON[k]||WX_ICON.cloud;
+  }
+
+  // sample weather (plausible AB summer) — deterministic, clearly flagged.
+  // Carries is_day + a WMO code so day/night + precipitation still animate on the fallback path.
+  function sampleWeather(c){
+    var rng=mulberry(4400+c.i*97);
+    var codes=[0,0,1,2,2,3,3,45,61,63,80,95];
+    var code=codes[Math.floor(rng()*codes.length)];
+    var t=Math.round(15+rng()*15);   // 15..30 C
+    var isDay=rng()>0.35?1:0;         // mostly day, some night — so fallback shows both scenes
+    return {t:t, code:code, is_day:isDay, sample:true};
+  }
+
+  var weatherLive=false, weatherTime=null;
+
+  function loadWeather(){
+    // build one request with comma-separated coordinate lists -> array response
+    var lats=CITIES.map(function(c){return c.lat;}).join(",");
+    var lons=CITIES.map(function(c){return c.lon;}).join(",");
+    var url="https://api.open-meteo.com/v1/forecast?latitude="+lats+"&longitude="+lons+
+            "&current=temperature_2m,weather_code,is_day&timezone=America%2FEdmonton";
+
+    var ctrl, timer;
+    try { ctrl=new AbortController(); } catch(e){ ctrl=null; }
+    var opts=ctrl?{signal:ctrl.signal}:{};
+    if(ctrl){ timer=setTimeout(function(){ try{ctrl.abort();}catch(e){} }, 6000); }
+
+    return fetch(url,opts).then(function(res){
+      if(timer) clearTimeout(timer);
+      if(!res.ok) throw new Error("bad status");
+      return res.json();
+    }).then(function(data){
+      var arr=Array.isArray(data)?data:[data];
+      var any=false;
+      CITIES.forEach(function(c,i){
+        var d=arr[i];
+        if(d&&d.current&&typeof d.current.temperature_2m==="number"){
+          c.weather={t:Math.round(d.current.temperature_2m), code:d.current.weather_code,
+                     is_day:(d.current.is_day===0?0:1), sample:false};
+          any=true;
+          if(!weatherTime && d.current.time) weatherTime=d.current.time;
+        } else {
+          c.weather=sampleWeather(c);
+        }
+      });
+      weatherLive=any;
+    }).catch(function(){
+      // GRACEFUL FALLBACK — offline / CORS / sandbox / timeout. No throw, no console noise.
+      if(timer) clearTimeout(timer);
+      CITIES.forEach(function(c){ if(!c.weather) c.weather=sampleWeather(c); });
+      weatherLive=false;
+    }).then(function(){
+      // ensure every city has weather no matter what
+      CITIES.forEach(function(c){ if(!c.weather) c.weather=sampleWeather(c); });
+      updateWeatherUI();
+    });
+  }
+
+  function fmtTime(ts){
+    var d;
+    try { d = ts ? new Date(ts) : new Date(); if(isNaN(d.getTime())) d=new Date(); }
+    catch(e){ d=new Date(); }
+    return d.toLocaleTimeString("en-CA",{hour:"numeric",minute:"2-digit"});
+  }
+
+  function updateWeatherUI(){
+    // status line + header pill
+    var st=document.getElementById("wxStatus"), stt=document.getElementById("wxStatusText");
+    var pill=document.getElementById("wxPill");
+    if(weatherLive){
+      st.classList.add("live");
+      stt.innerHTML='<b>Live weather</b> · Open-Meteo · '+fmtTime(weatherTime);
+      pill.style.display="";
+      pill.title="Weather is live from Open-Meteo, fetched "+fmtTime(weatherTime);
+    } else {
+      st.classList.remove("live");
+      stt.innerHTML='Weather <b>(sample)</b> · Open-Meteo unavailable';
+      pill.style.display="none";
+    }
+    // temp chips on the labelled (bigger) pins
+    CITIES.forEach(function(c){
+      var slot=pinsHost.querySelector('.pin-temp[data-ti="'+c.i+'"]');
+      if(slot && c.weather){
+        var ci=codeInfo(c.weather.code);
+        slot.innerHTML=iconSmall(ci.k)+c.weather.t+"°";
+      }
+    });
+    // refresh the current readout weather + drive the selected city's day/night + precipitation
+    if(selected){ setReadout(selected,true); applyScene(selected); }
+  }
+
+  function weatherHTML(c){
+    if(!c || !c.weather) return "";
+    var w=c.weather, ci=codeInfo(w.code);
+    var dg=(w.is_day===0)?'🌙':'☀';
+    return '<span class="wx-ico">'+(WX_ICON[ci.k]||WX_ICON.cloud)+'</span>'+
+           '<span><span class="wx-t mono">'+w.t+'°C</span>'+
+           '<span class="wx-day" title="'+(w.is_day===0?'Night':'Day')+'">'+dg+'</span><br>'+
+           '<span class="wx-c">'+ci.l+(w.sample?' <span class="smp">(sample)</span>':'')+'</span></span>';
+  }
+
+  // ================= DAY / NIGHT SKY + ANIMATED PRECIPITATION =================
+  var sceneEl=document.getElementById("scene");
+
+  // --- build sky (sun / moon / stars) behind the world ---
+  var sky=document.createElement("div"); sky.className="sky"; sky.setAttribute("aria-hidden","true");
+  var sun=document.createElement("div"); sun.className="sun";
+  var moon=document.createElement("div"); moon.className="moon";
+  var stars=document.createElement("div"); stars.className="stars";
+  (function(){
+    var rng=mulberry(20260728), h="";
+    for(var i=0;i<20;i++){
+      var sx=(rng()*100).toFixed(2), sy=(6+rng()*46).toFixed(2), sz=(1+rng()*1.7).toFixed(2);
+      h+='<i style="left:'+sx+'%;top:'+sy+'%;width:'+sz+'px;height:'+sz+'px"></i>';
+    }
+    stars.innerHTML=h;
+  })();
+  sky.appendChild(sun); sky.appendChild(moon); sky.appendChild(stars);
+  sceneEl.insertBefore(sky, sceneEl.firstChild);
+
+  // --- precipitation canvas overlay (single canvas, capped particles, rAF) ---
+  var wxCanvas=document.createElement("canvas"); wxCanvas.className="wx-canvas"; wxCanvas.setAttribute("aria-hidden","true");
+  sceneEl.appendChild(wxCanvas);
+  var wctx=null; try{ wctx=wxCanvas.getContext("2d"); }catch(e){ wctx=null; }
+
+  var W=0, H=0, DPR=1, particles=[], wxMode="clear", animRAF=null, flash=0, flashCool=0;
+
+  function wxColors(){
+    var cs=getComputedStyle(document.documentElement);
+    function pv(n,f){ var v=(cs.getPropertyValue(n)||"").trim(); return v||f; }
+    return { rain:pv('--wx-rain','#6fb7d8'), snow:pv('--wx-snow','#bcd3e6'), cloud:pv('--wx-cloud','#9aa6ba') };
+  }
+  var PAL=wxColors();
+
+  function hexA(hex,a){
+    hex=(hex||"").replace("#","");
+    if(hex.length===3){hex=hex.charAt(0)+hex.charAt(0)+hex.charAt(1)+hex.charAt(1)+hex.charAt(2)+hex.charAt(2);}
+    var n=parseInt(hex,16);
+    if(isNaN(n)) return "rgba(150,166,190,"+a+")";
+    return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";
+  }
+  function rnd(a,b){return a+Math.random()*(b-a);}
+
+  function sizeCanvas(){
+    var r=sceneEl.getBoundingClientRect();
+    if(!r.width || !r.height) return;
+    W=r.width; H=r.height; DPR=Math.min(window.devicePixelRatio||1,2);
+    wxCanvas.width=Math.round(W*DPR); wxCanvas.height=Math.round(H*DPR);
+    wxCanvas.style.width=W+"px"; wxCanvas.style.height=H+"px";
+    if(wctx) wctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+
+  // ---- DEPTH CLOUDS: build 3–5 layered planes at different translateZ depths ----
+  // Nearer layers (higher --cz) = bigger + faster (shorter --cdur) + more opaque;
+  // farther = smaller + slower + fainter. Pointer parallax rotates .world, so each
+  // layer's translateZ makes it shift by a different screen amount -> genuine depth.
+  var cloudsHost=document.getElementById("clouds");
+  var LAYER_SPECS=[
+    // cz(px), opacity, blur(px), drift-seconds, top%, height%, [wMinFrac,wMaxFrac], [hMinFrac,hMaxFrac], puffs, tier
+    {cz:-190,ca:0.10,blur:19,dur:96,top:5, h:26,wf:[0.11,0.17],hf:[0.045,0.075],n:2,tier:1},
+    {cz:-105,ca:0.13,blur:17,dur:78,top:11,h:28,wf:[0.14,0.21],hf:[0.055,0.090],n:2,tier:1},
+    {cz:-20, ca:0.155,blur:15,dur:60,top:16,h:30,wf:[0.17,0.25],hf:[0.065,0.105],n:3,tier:2},
+    {cz:60,  ca:0.185,blur:14,dur:44,top:7, h:32,wf:[0.20,0.29],hf:[0.075,0.120],n:3,tier:2},
+    {cz:115, ca:0.215,blur:13,dur:33,top:13,h:30,wf:[0.23,0.33],hf:[0.085,0.130],n:2,tier:3}
+  ];
+  function buildClouds(){
+    if(!cloudsHost) return;
+    var r=sceneEl.getBoundingClientRect();
+    var w=(W||r.width||1000), h=(H||r.height||600);
+    var maxTier = w<480 ? 1 : (w<900 ? 2 : 3);   // small screens: fewer layers
+    var rng=mulberry(13337), html="";
+    for(var li=0; li<LAYER_SPECS.length; li++){
+      var L=LAYER_SPECS[li];
+      if(L.tier>maxTier) continue;
+      var nn = (w<480 ? Math.max(1,L.n-1) : L.n); // small screens: fewer puffs
+      html+='<div class="cloud-layer" style="--cz:'+L.cz+'px;top:'+L.top+'%;height:'+L.h+'%">'+
+            '<div class="cloud-drift" style="--cdur:'+L.dur+'s">';
+      for(var i=0;i<nn;i++){
+        var pw=Math.round((L.wf[0]+rng()*(L.wf[1]-L.wf[0]))*w);
+        var ph=Math.round((L.hf[0]+rng()*(L.hf[1]-L.hf[0]))*h);
+        var px=(rng()*46), py=(rng()*52);
+        var style='--ca:'+L.ca+';--cblur:'+L.blur+'px;top:'+py.toFixed(1)+'%;width:'+pw+'px;height:'+ph+'px;';
+        // one puff + its +50% duplicate -> seamless -50% drift loop
+        html+='<i class="puff" style="'+style+'left:'+px.toFixed(1)+'%"></i>';
+        html+='<i class="puff" style="'+style+'left:'+(px+50).toFixed(1)+'%"></i>';
+      }
+      html+='</div></div>';
+    }
+    cloudsHost.innerHTML=html;
+  }
+
+  function makeRain(init){
+    var d=Math.random();
+    return {x:rnd(-40,W+40), y:init?rnd(-H,H):rnd(-40,-4), d:d, len:9+d*17, spd:3.2+d*4.6, vx:-(0.9+d*1.3)};
+  }
+  function makeSnow(init){
+    var d=Math.random();
+    return {x:rnd(0,W), y:init?rnd(0,H):rnd(-14,-4), d:d, r:1+d*2.3, spd:0.4+d*0.9,
+            sway:rnd(0,Math.PI*2), swAmp:6+d*10, vx:-(0.15+d*0.4)};
+  }
+  function makeCloud(init){
+    var d=Math.random();
+    return {x:init?rnd(-60,W+60):(-rnd(120,200)), y:rnd(H*0.05,H*0.42), d:d,
+            w:64+d*118, h:22+d*30, spd:0.14+d*0.4, a:0.05+d*0.12};
+  }
+  function makeFog(init){
+    var d=Math.random();
+    return {x:init?rnd(-100,W):(-rnd(80,260)), y:rnd(H*0.3,H*0.84), d:d,
+            w:150+d*220, h:36+d*44, spd:0.2+d*0.5, a:0.05+d*0.075};
+  }
+
+  // responsive particle density: fewer on phones, richer on TV
+  function densK(){
+    var w=W||window.innerWidth||1000;
+    if(w<480) return 0.5;
+    if(w<768) return 0.72;
+    if(w>1600) return 1.35;
+    return 1;
+  }
+  function initParticles(mode){
+    particles=[]; var n=0, mk=null;
+    if(mode==="rain"){n=110;mk=makeRain;}
+    else if(mode==="storm"){n=120;mk=makeRain;}
+    else if(mode==="snow"){n=95;mk=makeSnow;}
+    else if(mode==="clouds"){n=7;mk=makeCloud;}
+    else if(mode==="fog"){n=6;mk=makeFog;}
+    n=Math.max(1,Math.round(n*densK()));
+    for(var i=0;i<n;i++) particles.push(mk(true));
+  }
+
+  function drawFrame(){
+    if(!wctx) return;
+    wctx.clearRect(0,0,W,H);
+    var m=wxMode, i, p;
+    if(m==="clouds" || m==="fog"){
+      for(i=0;i<particles.length;i++){
+        p=particles[i];
+        if(!reduce) p.x+=p.spd;
+        if(p.x - p.w > W+80){ particles[i]=(m==="fog")?makeFog(false):makeCloud(false); continue; }
+        var rad=Math.max(p.w,p.h);
+        var g=wctx.createRadialGradient(p.x,p.y,0,p.x,p.y,rad);
+        g.addColorStop(0,hexA(PAL.cloud,p.a));
+        g.addColorStop(1,hexA(PAL.cloud,0));
+        wctx.fillStyle=g;
+        wctx.beginPath(); wctx.ellipse(p.x,p.y,p.w,p.h,0,0,Math.PI*2); wctx.fill();
+      }
+    } else if(m==="rain" || m==="storm"){
+      wctx.lineCap="round";
+      for(i=0;i<particles.length;i++){
+        p=particles[i];
+        var fall=p.spd*2.7;
+        if(!reduce){ p.y+=fall; p.x+=p.vx; }
+        if(p.y>H+20 || p.x<-60){ particles[i]=makeRain(false); continue; }
+        var dx=p.vx/fall*p.len;                 // streak leans along the fall direction (tilted plane)
+        wctx.strokeStyle=hexA(PAL.rain, 0.16+p.d*0.5);
+        wctx.lineWidth=0.8+p.d*1.1;
+        wctx.beginPath(); wctx.moveTo(p.x,p.y); wctx.lineTo(p.x-dx, p.y-p.len); wctx.stroke();
+      }
+      if(m==="storm"){
+        if(!reduce){
+          if(flashCool>0) flashCool--;
+          if(flashCool===0 && Math.random()<0.012){ flash=rnd(0.32,0.55); flashCool=45+Math.floor(Math.random()*70); }
+          if(flash>0){ wctx.fillStyle="rgba(228,233,255,"+flash.toFixed(3)+")"; wctx.fillRect(0,0,W,H); flash-=0.045; if(flash<0)flash=0; }
+        }
+      }
+    } else if(m==="snow"){
+      for(i=0;i<particles.length;i++){
+        p=particles[i];
+        if(!reduce){ p.y+=p.spd*1.7; p.sway+=0.03; p.x+=p.vx; }
+        if(p.y>H+8 || p.x<-20){ particles[i]=makeSnow(false); continue; }
+        var sx=p.x+Math.sin(p.sway)*(p.swAmp*0.12);
+        wctx.fillStyle=hexA(PAL.snow, 0.35+p.d*0.5);
+        wctx.beginPath(); wctx.arc(sx,p.y,p.r,0,Math.PI*2); wctx.fill();
+      }
+    }
+    // m==="clear" -> canvas cleared, nothing drawn (subtle sun/clear sky handles it)
+  }
+
+  function tick(){
+    drawFrame();
+    if(!reduce && wxMode!=="clear") animRAF=requestAnimationFrame(tick);
+    else animRAF=null;
+  }
+  function ensureAnim(){
+    if(reduce){ drawFrame(); return; }           // static single frame, no loop
+    if(wxMode==="clear"){
+      if(animRAF){ cancelAnimationFrame(animRAF); animRAF=null; }
+      if(wctx) wctx.clearRect(0,0,W,H);
+      return;
+    }
+    if(!animRAF) animRAF=requestAnimationFrame(tick);
+  }
+
+  function applyScene(c){
+    if(!c || !c.weather) return;
+    var day = c.weather.is_day!==0;
+    sceneEl.classList.toggle("night", !day);
+    var k=codeInfo(c.weather.code).k;
+    var mode = (k==="clear")   ? "clear"  :
+               (k==="partly")  ? "clouds" :
+               (k==="cloud")   ? "clouds" :
+               (k==="fog")     ? "fog"    :
+               (k==="rain")    ? "rain"   :
+               (k==="snow")    ? "snow"   :
+               (k==="thunder") ? "storm"  : "clouds";
+    if(mode!==wxMode){ wxMode=mode; flash=0; flashCool=0; initParticles(mode); }
+    ensureAnim();
+  }
+
+  // resize -> resize canvas, reseed particles for the new dimensions
+  var rzT=null;
+  window.addEventListener("resize",function(){
+    if(rzT) clearTimeout(rzT);
+    rzT=setTimeout(function(){ sizeCanvas(); buildClouds(); initParticles(wxMode); if(reduce||wxMode==="clear") drawFrame(); },160);
+  });
+
+  // ================= GAUGE (from city-panel-13, adapted) =================
+  // domain 0%..6% price-vs-MSRP, 180deg arc
+  var GMIN=0, GMAX=6, CX=130, CY=128, R=98, ir=Math.PI/180;
+  function polar(v){
+    var frac=Math.min(1,Math.max(0,(v-GMIN)/(GMAX-GMIN)));
+    var ang=180-frac*180;
+    return {x:CX+R*Math.cos(ang*ir), y:CY-R*Math.sin(ang*ir), ang:ang};
+  }
+  function polarR(v,r){var frac=Math.min(1,Math.max(0,(v-GMIN)/(GMAX-GMIN)));var ang=180-frac*180;return {x:CX+r*Math.cos(ang*ir),y:CY-r*Math.sin(ang*ir)};}
+  function arcPath(v0,v1,r){
+    var a=polarR(v0,r), b=polarR(v1,r);
+    return "M"+a.x.toFixed(1)+" "+a.y.toFixed(1)+" A"+r+" "+r+" 0 0 1 "+b.x.toFixed(1)+" "+b.y.toFixed(1);
+  }
+  function drawGauge(city,animate){
+    var mean=city.premium/city.avgMsrp*100;
+    var svg=document.getElementById("gauge");
+    var html='';
+    html+='<path d="'+arcPath(GMIN,GMAX,R)+'" fill="none" stroke="var(--hair)" stroke-width="13" stroke-linecap="round"/>';
+    [0,1.5,3,4.5,6].forEach(function(t){
+      var o=polarR(t,R+9), o2=polarR(t,R-9);
+      html+='<line x1="'+o2.x.toFixed(1)+'" y1="'+o2.y.toFixed(1)+'" x2="'+o.x.toFixed(1)+'" y2="'+o.y.toFixed(1)+'" stroke="var(--grid)" stroke-width="1"/>';
+      var lp=polarR(t,R+20);
+      html+='<text x="'+lp.x.toFixed(1)+'" y="'+(lp.y+3).toFixed(1)+'" fill="var(--dimmer)" font-size="8.5" text-anchor="middle" font-family="monospace">+'+t+'%</text>';
+    });
+    var arc=arcPath(GMIN,mean,R);
+    html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="var(--cyan)" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
+    var p=polar(mean);
+    html+='<g class="g-needle">';
+    html+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x.toFixed(1)+'" y2="'+p.y.toFixed(1)+'" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>';
+    html+='<circle cx="'+CX+'" cy="'+CY+'" r="5" fill="var(--panel-solid)" stroke="var(--ink)" stroke-width="2"/></g>';
+    svg.innerHTML=html;
+    if(animate&&!reduce){
+      var arcEl=svg.querySelector(".g-arc");
+      requestAnimationFrame(function(){requestAnimationFrame(function(){arcEl.style.strokeDashoffset="0";});});
+    }
+    document.getElementById("gVal").textContent=pctS(mean);
+    document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
+    document.getElementById("gCity").innerHTML=city.name+'<span>, AB</span>';
+    document.getElementById("gAvg").textContent=money(city.avgMsrp);
+    document.getElementById("gNote").innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
+      signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle.';
+  }
+
+  // ---- interaction: hover readout + click selection ----
+  var rName=document.getElementById("rName"), rCount=document.getElementById("rCount"), rWeather=document.getElementById("rWeather");
+  var selected=null;
+  function setReadout(c,isSel){
+    if(!c){
+      rName.textContent="Hover a city";
+      rCount.textContent="33 Alberta markets · pin size = dealer count";
+      rWeather.className="rw empty"; rWeather.innerHTML="";
+      return;
+    }
+    rName.textContent=c.name+", AB";
+    rCount.innerHTML='<b>'+c.dealers+'</b> dealership'+(c.dealers===1?'':'s')+(isSel?' · selected':'');
+    var wh=weatherHTML(c);
+    if(wh){ rWeather.className="rw"; rWeather.innerHTML=wh; }
+    else { rWeather.className="rw empty"; rWeather.innerHTML=""; }
+  }
+  function hotClass(pinEl,on){pinEl.classList.toggle("hot",on);}
+  function select(i){
+    var c=CITIES[i];
+    pinsHost.querySelectorAll(".pin").forEach(function(p){p.classList.toggle("sel",+p.dataset.i===i);});
+    selected=c;
+    setReadout(c,true);
+    drawGauge(c,true);
+    applyScene(c);              // drive day/night + precipitation from the selected city
+  }
+  pinsHost.addEventListener("mouseover",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    hotClass(p,true); setReadout(CITIES[+p.dataset.i], +p.dataset.i===(selected&&selected.i));
+  });
+  pinsHost.addEventListener("mouseout",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    hotClass(p,false);
+    if(selected) setReadout(selected,true); else setReadout(null);
+  });
+  pinsHost.addEventListener("click",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    select(+p.dataset.i);
+  });
+
+  // ---- pointer parallax (VERBATIM) + subtle compass reaction ----
+  var scene=document.getElementById("scene"), world=document.getElementById("world");
+  var compassRose=(function(){var c=document.getElementById("compass");return c?c.querySelector(".rose"):null;})();
+  if(!reduce){
+    var tx=0,ty=0,cx=0,cy=0,raf=null;
+    scene.addEventListener("pointermove",function(e){
+      var r=scene.getBoundingClientRect();
+      tx=((e.clientX-r.left)/r.width-0.5);
+      ty=((e.clientY-r.top)/r.height-0.5);
+      if(!raf)raf=requestAnimationFrame(loop);
+    });
+    scene.addEventListener("pointerleave",function(){tx=0;ty=0;if(!raf)raf=requestAnimationFrame(loop);});
+    function loop(){
+      cx+=(tx-cx)*0.12; cy+=(ty-cy)*0.12;
+      world.style.transform="rotateX("+(-cy*7).toFixed(2)+"deg) rotateY("+(cx*9).toFixed(2)+"deg)";
+      // compass rose leans a few degrees with the tilt — stays legible (N ~ up)
+      if(compassRose) compassRose.style.transform="rotate("+(cx*4).toFixed(2)+"deg)";
+      if(Math.abs(tx-cx)>0.001||Math.abs(ty-cy)>0.001){raf=requestAnimationFrame(loop);}else{raf=null;}
+    }
+  }
+
+  // ---- init ----
+  var EDM=1; // Edmonton index in CITIES — default selection
+  renderRelief();
+  renderPins();
+  sizeCanvas();                // size precipitation canvas before first paint
+  buildClouds();               // build the layered depth-cloud planes
+  select(EDM);                 // default: Edmonton (readout + gauge + scene)
+  loadWeather();               // live fetch (single allowed external call); updates UI + scene when done
+  requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Live MSRP Price Index</title>
+<style>
+  /* ================= THEME TOKENS ================= */
+  :root{
+    /* DARK (default) */
+    --bg:#07090d;
+    --glow1:rgba(34,227,255,.10); --glow2:rgba(255,45,120,.07);
+    --panel:rgba(255,255,255,.035); --panel2:rgba(255,255,255,.05);
+    --border:rgba(0,229,255,.16); --border2:rgba(255,255,255,.07);
+    --cyan:#22e3ff; --cyan-dim:rgba(34,227,255,.5); --up:#22ffa0; --down:#ff2d78;
+    --white:#eaf3ff; --dim:#7d8aa0; --dimmer:#4d576b; --amber:#ffcf5c;
+    --frust:#ff5a72; --frust-dim:rgba(255,90,114,.42);
+    --glass-blur:16px; --panel-solid:rgba(12,16,22,.92);
+    --scrim:rgba(3,5,9,.62);
+    --tile-hi:rgba(34,255,160,.10); --tile-lo:rgba(255,45,120,.11);
+    --star:#ffcf5c;
+    --grid:rgba(255,255,255,.05);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef2f8;
+    --glow1:rgba(0,150,190,.14); --glow2:rgba(210,40,95,.08);
+    --panel:rgba(255,255,255,.62); --panel2:rgba(255,255,255,.78);
+    --border:rgba(3,140,170,.28); --border2:rgba(20,40,70,.10);
+    --cyan:#0596b8; --cyan-dim:rgba(5,150,184,.42); --up:#0a9a5c; --down:#d6265f;
+    --white:#0d1b2a; --dim:#5a6b82; --dimmer:#8ea0b6; --amber:#c98a12;
+    --frust:#d6265f; --frust-dim:rgba(214,38,95,.4);
+    --glass-blur:18px; --panel-solid:rgba(252,254,255,.94);
+    --scrim:rgba(120,140,165,.42);
+    --tile-hi:rgba(10,154,92,.12); --tile-lo:rgba(214,38,95,.12);
+    --star:#e0a112;
+    --grid:rgba(20,40,70,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:
+      radial-gradient(1100px 600px at 78% -8%, var(--glow1), transparent 60%),
+      radial-gradient(900px 500px at 10% 110%, var(--glow2), transparent 60%),
+      var(--bg);
+    color:var(--white); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh; padding-bottom:60px; overflow-x:hidden;}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace; font-variant-numeric:tabular-nums; letter-spacing:-.3px}
+  /* ticker */
+  .ticker{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:0;height:38px;
+    background:var(--panel-solid);backdrop-filter:blur(14px);border-bottom:1px solid var(--border2);overflow:hidden}
+  .ticker .tag{flex:none;display:flex;align-items:center;gap:7px;padding:0 14px;height:100%;
+    font-size:11px;font-weight:600;letter-spacing:1.5px;color:var(--cyan);border-right:1px solid var(--border2);text-transform:uppercase}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--up);box-shadow:0 0 10px var(--up);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .track{display:flex;gap:32px;white-space:nowrap;animation:scroll 38s linear infinite;padding-left:24px}
+  .ticker:hover .track{animation-play-state:paused}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .ti{display:inline-flex;align-items:center;gap:8px;font-size:12.5px}
+  .ti b{color:var(--dim);font-weight:500;letter-spacing:.4px}
+  .ti .v{color:var(--white);font-weight:600}
+  .up{color:var(--up)} .down{color:var(--down)}
+  /* header */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:26px 30px 6px}
+  .brand{display:flex;align-items:center;gap:13px}
+  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,rgba(34,227,255,.25),rgba(34,227,255,.05));
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--cyan);font-size:18px;box-shadow:0 0 24px -6px var(--cyan-dim)}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.2px}
+  .brand .sub{font-size:11.5px;color:var(--dim);letter-spacing:2.5px;text-transform:uppercase;margin-top:2px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;border:1px solid var(--border2)}
+  .pill.live{color:var(--up);border-color:rgba(34,255,160,.3);display:flex;align-items:center;gap:7px;background:rgba(34,255,160,.06)}
+  .pill.demo{color:var(--amber);border-color:rgba(255,207,92,.3);background:rgba(255,207,92,.06)}
+  .clock{font-size:12px;color:var(--dim)}
+  /* theme toggle */
+  .theme-toggle{position:relative;width:60px;height:30px;border-radius:20px;border:1px solid var(--border2);
+    background:var(--panel2);cursor:pointer;flex:none;transition:.35s;overflow:hidden}
+  .theme-toggle:hover{border-color:var(--border)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:24px;height:24px;border-radius:50%;
+    background:linear-gradient(135deg,var(--cyan),var(--amber));display:flex;align-items:center;justify-content:center;
+    font-size:13px;transition:transform .4s cubic-bezier(.16,1,.3,1),background .4s;box-shadow:0 0 12px -2px var(--cyan-dim)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(30px)}
+  .theme-toggle .ico{line-height:1}
+  /* layout */
+  .wrap{padding:16px 30px 0;display:grid;grid-template-columns:1fr;gap:18px;max-width:1280px;margin:0 auto}
+  .scene{perspective:1500px}
+  .card{background:var(--panel);border:1px solid var(--border2);border-radius:18px;backdrop-filter:blur(var(--glass-blur));
+    transition:transform .2s cubic-bezier(.16,1,.3,1),box-shadow .4s,border-color .4s;position:relative;overflow:hidden;
+    opacity:0;translate:0 22px}
+  .card.in{opacity:1;translate:0 0;transition:opacity .6s ease,translate .6s cubic-bezier(.16,1,.3,1)}
+  .card::before{content:"";position:absolute;inset:0;border-radius:18px;padding:1px;pointer-events:none;
+    background:linear-gradient(135deg,var(--border),transparent 40%);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.7}
+  .hero-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:18px}
+  @media(max-width:820px){.hero-grid{grid-template-columns:1fr}}
+  /* main index panel */
+  .main{padding:22px 24px}
+  .main .top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .lbl{font-size:11px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .idx{font-size:52px;font-weight:700;line-height:1;margin-top:8px;text-shadow:0 0 30px var(--cyan-dim)}
+  .chg{display:inline-flex;align-items:center;gap:6px;font-size:15px;font-weight:600;margin-top:10px;padding:4px 10px;border-radius:8px}
+  .chg.up{color:var(--up);background:rgba(34,255,160,.08)} .chg.down{color:var(--down);background:rgba(255,45,120,.08)}
+  .ctrls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+  .rng{display:flex;gap:6px}
+  .rng button,.matrix-btn{font:inherit;font-size:11px;color:var(--dim);background:transparent;border:1px solid var(--border2);border-radius:8px;padding:5px 12px;cursor:pointer;transition:.15s}
+  .rng button.on{color:var(--cyan);border-color:var(--border);background:rgba(34,227,255,.07)}
+  .matrix-btn{display:inline-flex;align-items:center;gap:6px;color:var(--dim)}
+  .matrix-btn.on{color:var(--cyan);border-color:var(--border);background:rgba(34,227,255,.10);box-shadow:0 0 14px -6px var(--cyan-dim)}
+  .matrix-btn .sq{width:8px;height:8px;border-radius:2px;background:currentColor;box-shadow:0 0 6px currentColor}
+  .legend{display:flex;gap:14px;margin-top:10px;font-size:10.5px;color:var(--dim);letter-spacing:.4px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:2.5px;border-radius:2px;display:inline-block}
+  .chartwrap{margin-top:6px;position:relative;height:230px}
+  svg.chart{width:100%;height:100%;display:block;overflow:visible}
+  .flashv{transition:color .1s}
+  .mx-cap{position:absolute;font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;pointer-events:none;opacity:0;transition:opacity .5s}
+  .mx-cap.show{opacity:1}
+  .mx-axis{position:absolute;font-size:9.5px;color:var(--dimmer);letter-spacing:.5px;pointer-events:none;opacity:0;transition:opacity .5s}
+  .mx-axis.show{opacity:.9}
+  /* side stat stack */
+  .side{display:flex;flex-direction:column;gap:14px}
+  .stat{padding:16px 18px}
+  .stat .lbl{display:flex;justify-content:space-between;align-items:center}
+  .stat .val{font-size:26px;font-weight:700;margin-top:7px}
+  .stat .row{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px;font-size:12px;color:var(--dim)}
+  .stat.clickable{cursor:pointer}
+  .stat .hint{font-size:9.5px;color:var(--cyan);letter-spacing:.6px;text-transform:uppercase;margin-top:2px;opacity:.85}
+  /* markup vs reputation leaderboard */
+  .lb{max-height:0;overflow:hidden;transition:max-height .5s cubic-bezier(.16,1,.3,1),margin-top .5s,opacity .4s;opacity:0;margin-top:0}
+  .stat.open .lb{max-height:340px;margin-top:14px;opacity:1}
+  .lb-head{font-size:9.5px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;display:flex;justify-content:space-between;padding:0 2px 8px;border-bottom:1px solid var(--border2)}
+  .lb-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:8px 8px;border-radius:9px;margin-top:6px;
+    border:1px solid transparent;transition:.2s}
+  .lb-row.tense{background:var(--tile-lo);border-color:rgba(255,45,120,.22)}
+  .lb-row.fair{background:var(--tile-hi);border-color:rgba(34,255,160,.20)}
+  .lb-row .dn{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lb-row .mk{font-size:12.5px;font-weight:700}
+  .lb-row.tense .mk{color:var(--down)} .lb-row.fair .mk{color:var(--up)}
+  .lb-row .rt{font-size:12px;display:inline-flex;align-items:center;gap:4px;color:var(--white)}
+  .lb-note{font-size:10px;color:var(--dimmer);margin-top:10px;line-height:1.5}
+  /* segment cards */
+  .seg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px}
+  .seg{padding:16px 18px;cursor:pointer}
+  .seg .name{font-size:12px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+  .seg .price{font-size:24px;font-weight:700;margin-top:8px}
+  .seg .meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:12px}
+  .seg .bar{height:3px;border-radius:2px;background:rgba(128,128,128,.14);margin-top:12px;overflow:hidden}
+  .seg .bar i{display:block;height:100%;border-radius:2px}
+  .seg .drill{font-size:9px;color:var(--cyan);letter-spacing:.8px;text-transform:uppercase;margin-top:10px;opacity:.8;display:flex;align-items:center;gap:5px}
+  /* drill-down slide panel */
+  .scrim{position:fixed;inset:0;background:var(--scrim);backdrop-filter:blur(3px);opacity:0;pointer-events:none;transition:opacity .35s;z-index:40}
+  .scrim.show{opacity:1;pointer-events:auto}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(420px,92vw);z-index:41;
+    background:var(--panel-solid);backdrop-filter:blur(22px);border-left:1px solid var(--border);
+    transform:translateX(100%);transition:transform .45s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column;
+    box-shadow:-30px 0 80px -40px rgba(0,0,0,.7)}
+  .drawer.show{transform:translateX(0)}
+  .drawer-head{padding:22px 22px 16px;border-bottom:1px solid var(--border2);position:relative}
+  .drawer-head .seglbl{font-size:11px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
+  .drawer-head h2{font-size:22px;font-weight:700;margin-top:6px}
+  .drawer-head .loc{font-size:12px;color:var(--dim);margin-top:4px;display:flex;align-items:center;gap:6px}
+  .drawer-close{position:absolute;top:20px;right:20px;width:32px;height:32px;border-radius:9px;border:1px solid var(--border2);
+    background:var(--panel2);color:var(--white);cursor:pointer;font-size:16px;line-height:1;display:flex;align-items:center;justify-content:center;transition:.2s}
+  .drawer-close:hover{border-color:var(--down);color:var(--down)}
+  .drawer-body{padding:18px 22px;overflow-y:auto;flex:1}
+  .drawer-body .sect{font-size:10.5px;color:var(--dim);letter-spacing:1.4px;text-transform:uppercase;margin-bottom:12px}
+  .dealer{border:1px solid var(--border2);border-radius:14px;padding:14px 15px;margin-bottom:12px;background:var(--panel);
+    opacity:0;transform:translateX(18px);transition:opacity .4s ease,transform .4s cubic-bezier(.16,1,.3,1)}
+  .dealer.in{opacity:1;transform:translateX(0)}
+  .dealer .dh{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .dealer .dn{font-size:14px;font-weight:600}
+  .dealer .rank{font-size:10px;color:var(--dimmer);letter-spacing:1px;margin-top:2px}
+  .dealer .rating{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;white-space:nowrap}
+  .dealer .revct{font-size:11px;color:var(--dim);font-weight:400}
+  .dealer .snip{font-size:12px;color:var(--dim);line-height:1.55;margin-top:10px;font-style:italic;
+    padding-left:11px;border-left:2px solid var(--border)}
+  .dealer .snip b{color:var(--white);font-style:normal;font-weight:600}
+  .star{color:var(--star)}
+  .foot{max-width:1280px;margin:22px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.65}
+  .foot b{color:var(--dim)}
+  @media (prefers-reduced-motion:reduce){
+    .track{animation:none} .dealer{transition:none} .card{transition:none}
+  }
+</style>
+</head>
+<body>
+<div class="ticker">
+  <div class="tag"><span class="dot"></span> LMI</div>
+  <div class="track" id="track"></div>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="logo">◆</div>
+    <div><h1>Live MSRP Price Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill demo">Demo data</span>
+    <span class="pill live"><span class="dot"></span> Live</span>
+    <span class="clock mono" id="clock">--:--:--</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span class="ico" id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero-grid">
+    <div class="scene"><div class="card main" id="mainCard">
+      <div class="top">
+        <div>
+          <div class="lbl">LotCheck MSRP Index (LMI · base 100)</div>
+          <div class="idx mono" id="lmi">0.00</div>
+          <div class="chg up" id="lmiChg" > </div>
+        </div>
+        <div class="ctrls">
+          <div class="rng" id="rng"></div>
+          <button class="matrix-btn" id="matrixBtn"><span class="sq"></span>Reviews vs MSRP</button>
+        </div>
+      </div>
+      <div class="legend" id="legend">
+        <span><i style="background:var(--cyan)"></i>LMI</span>
+        <span><i style="background:var(--frust)"></i>Pricing-mention rate</span>
+      </div>
+      <div class="chartwrap" id="chartwrap">
+        <svg class="chart" id="chart" viewBox="0 0 720 230" preserveAspectRatio="none"></svg>
+        <!-- matrix captions / axes (positioned absolutely) -->
+        <div class="mx-cap" id="capBR" style="right:10px;bottom:14px;color:var(--up)">Below MSRP · higher-rated ▾</div>
+        <div class="mx-cap" id="capTL" style="left:10px;top:8px;color:var(--down)">Above MSRP · lower-rated ▴</div>
+        <div class="mx-axis" id="axX" style="right:8px;bottom:-2px">Google review score →</div>
+        <div class="mx-axis" id="axY" style="left:2px;top:2px;transform:rotate(0)">↑ Above MSRP</div>
+        <div class="mx-axis" id="axY2" style="left:2px;bottom:14px">↓ Below MSRP</div>
+      </div>
+    </div></div>
+
+    <div class="side" id="side"></div>
+  </div>
+
+  <div class="scene"><div class="seg-grid" id="segs"></div></div>
+</div>
+
+<!-- drill-down drawer -->
+<div class="scrim" id="scrim"></div>
+<div class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Segment detail">
+  <div class="drawer-head">
+    <div class="seglbl" id="dwSeg">SEGMENT</div>
+    <h2 id="dwTitle">—</h2>
+    <div class="loc" id="dwLoc">◎ near Calgary, AB</div>
+    <button class="drawer-close" id="dwClose" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="sect">Top 3 nearest dealerships</div>
+    <div id="dwList"></div>
+    <div class="lb-note" style="margin-top:14px">Ratings, review counts and quoted snippets are <b>illustrative sample data</b>. In production these come from LotCheck's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>) — never invented.</div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>Pricing-mention rate / sentiment index</b> is genuine AI analysis of review text ("fees", "pricing", "MSRP"). None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=x=>"$"+Math.round(x).toLocaleString("en-CA");
+  var pct=x=>(x>=0?"+":"")+x.toFixed(2)+"%";
+  var pct1=x=>(x>=0?"+":"")+x.toFixed(1)+"%";
+  var rnd=(seed=>()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;})(20260728);
+
+  /* ================= THEME TOGGLE ================= */
+  var root=document.documentElement;
+  var prefLight=window.matchMedia("(prefers-color-scheme:light)").matches;
+  var theme= prefLight ? "light" : "dark";
+  function applyTheme(){
+    root.setAttribute("data-theme", theme);
+    document.getElementById("themeIco").textContent = theme==="light" ? "☀" : "☾";
+  }
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme = theme==="light" ? "dark" : "light"; applyTheme();
+    // repaint chart in current mode so gradient stops pick up new vars
+    if(matrixOn) drawMatrix(false); else drawChart(false);
+  });
+
+  // ---- data model (demo) ----
+  var lmi={val:148.72, day:+0.34};
+  var segs=[
+    {name:"Pickups", price:58240, chg:+0.42, color:"var(--cyan)"},
+    {name:"SUVs", price:44980, chg:-0.18, color:"#8b7bff"},
+    {name:"Sedans", price:32110, chg:+0.11, color:"var(--up)"},
+    {name:"EVs", price:61340, chg:-1.12, color:"var(--down)"},
+    {name:"Luxury", price:78560, chg:+0.29, color:"var(--amber)"},
+    {name:"Hybrids", price:41220, chg:+0.24, color:"#3ad1ff"}
+  ];
+  var side=[
+    {name:"Avg new MSRP", val:47180, kind:"$", sub:"across 29 makes", chg:+0.21, id:"avg"},
+    {name:"Widest markup", val:8.2, kind:"%", sub:"dealer vs mfr, 90d", chg:+0.4, id:"markup"},
+    {name:"Makes tracked", val:29, kind:"n", sub:"auto-refresh daily", chg:0, id:"makes"}
+  ];
+
+  // ---- fictional dealers (illustrative sample) ----
+  // markup = dealer price vs MSRP; rating = Google stars; rev = review count; inv = inventory; dev = MSRP deviation for matrix
+  var dealers=[
+    {name:"Riverside Ram",     markup:8.2, rating:2.3, rev:141, inv:88, dev:+7.4, seg:["Pickups"]},
+    {name:"Stampede Dodge",    markup:7.6, rating:2.8, rev:96,  inv:64, dev:+6.1, seg:["Pickups","SUVs"]},
+    {name:"Crestline GMC",     markup:6.9, rating:3.4, rev:207, inv:120,dev:+4.9, seg:["Pickups","SUVs"]},
+    {name:"Beacon VW",         markup:6.2, rating:3.1, rev:158, inv:74, dev:+3.8, seg:["EVs","Sedans"]},
+    {name:"Summit Chevrolet",  markup:5.1, rating:4.7, rev:412, inv:150,dev:+2.2, seg:["Pickups","EVs"]},
+    {name:"Northgate Ford",    markup:4.4, rating:4.4, rev:312, inv:132,dev:+0.4, seg:["Pickups","SUVs"]},
+    {name:"Meridian Toyota",   markup:3.6, rating:4.6, rev:498, inv:141,dev:-0.6, seg:["Hybrids","SUVs"]},
+    {name:"Foothills Honda",   markup:3.1, rating:4.5, rev:377, inv:118,dev:-1.1, seg:["Sedans","SUVs"]},
+    {name:"Redstone Hyundai",  markup:2.7, rating:4.2, rev:224, inv:92, dev:-1.9, seg:["EVs","Sedans"]},
+    {name:"Chinook Kia",       markup:2.4, rating:3.9, rev:186, inv:80, dev:-2.4, seg:["EVs","Hybrids"]},
+    {name:"Glenmore Mazda",    markup:1.9, rating:4.8, rev:263, inv:70, dev:-3.0, seg:["Sedans","SUVs"]},
+    {name:"Bowview Subaru",    markup:1.5, rating:4.7, rev:341, inv:98, dev:-3.6, seg:["SUVs","Hybrids"]},
+    {name:"Prairie Nissan",    markup:1.1, rating:3.6, rev:129, inv:60, dev:-4.2, seg:["Sedans","EVs"]},
+    {name:"Elbow River Audi",  markup:0.6, rating:4.3, rev:171, inv:54, dev:-5.1, seg:["Luxury","EVs"]}
+  ];
+  // snippets per segment (mention price/markup/MSRP) — clearly illustrative
+  var snippets={
+    "Pickups":["“<b>Paid exactly MSRP</b>, no hidden fees on my new half-ton.”","“Sticker listed a <b>$4k markup</b> over MSRP.”","“Fair price, but watch the <b>doc fees</b> at signing.”"],
+    "SUVs":["“Priced <b>right at MSRP</b>, painless paperwork.”","“Quoted one number, <b>added packages</b> at the desk.”","“Beat the <b>manufacturer price</b> by a bit, honest crew.”"],
+    "Sedans":["“No games — <b>invoice price</b>, out the door.”","“Advertised lease terms differed from the final offer.”","“Small markup but they <b>disclosed everything</b>.”"],
+    "EVs":["“<b>Below MSRP</b> once the rebate stacked, great.”","“<b>Markup over MSRP</b> on every EV.”","“MSRP honored and <b>rebate applied</b> up front.”"],
+    "Luxury":["“Premium price but <b>no surprise fees</b>.”","“Bought <b>under MSRP</b>, very transparent.”","“<b>Hidden fees</b> appeared in finance office.”"],
+    "Hybrids":["“<b>Exactly MSRP</b>, quick and clean.”","“Slight markup, they <b>explained the demand</b>.”","“<b>Best price</b> in the city, no add-ons.”"]
+  };
+  function dealersForSeg(seg){
+    var pool=dealers.filter(d=>d.seg.indexOf(seg)>=0);
+    if(pool.length<3) pool=dealers.slice();
+    // sort: lowest price first (high rating, low markup)
+    pool=pool.slice().sort((a,b)=> (b.rating-b.markup*0.35) - (a.rating-a.markup*0.35));
+    var snips=snippets[seg]||snippets["SUVs"];
+    return pool.slice(0,3).map((d,i)=>({d:d,snip:snips[i%snips.length]}));
+  }
+
+  // ---- chart series ----
+  var N=48, series=[], frust=[]; var base=142;
+  for(var i=0;i<N;i++){ base+= (rnd()-0.46)*1.2; series.push(Math.max(120, base)); }
+  series[N-1]=lmi.val;
+  // pricing-mention: lagged, correlates with LMI rises (rate of change) + noise, scaled 0..100
+  function rebuildFrust(){
+    frust=[];
+    for(var i=0;i<N;i++){
+      var slope = i>2 ? (series[i]-series[i-3]) : 0;   // recent rise
+      var f = 42 + slope*9 + (rnd()-0.5)*8;
+      frust.push(Math.max(6, Math.min(96, f)));
+    }
+  }
+  rebuildFrust();
+
+  var W=720,H=230;
+
+  // ---- helpers ----
+  function pathFor(data, w, h, close, pad){
+    pad=pad||{t:14,b:24};
+    var min=Math.min.apply(null,data), max=Math.max.apply(null,data), rg=(max-min)||1;
+    var pts=data.map((v,i)=>[ i/(data.length-1)*w, h-pad.b - ((v-min)/rg)*(h-pad.t-pad.b) ]);
+    var d=pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+    if(close) d+=" L"+w+" "+h+" L0 "+h+" Z";
+    return d;
+  }
+  // pricing-mention path uses fixed 0..100 domain so it reads as an independent scale
+  function frustPath(data,w,h){
+    var pts=data.map((v,i)=>[ i/(data.length-1)*w, h-24 - (v/100)*(h-40) ]);
+    return pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+  }
+
+  var matrixOn=false;
+
+  function drawChart(animate){
+    var svg=document.getElementById("chart");
+    var line=pathFor(series,W,H,false), area=pathFor(series,W,H,true);
+    var fp=frustPath(frust,W,H);
+    svg.innerHTML=
+      '<defs>'+
+      '<linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">'+
+        '<stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.38"/>'+
+        '<stop offset="60%" stop-color="var(--cyan)" stop-opacity="0.08"/>'+
+        '<stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/>'+
+      '</linearGradient>'+
+      '<filter id="glow"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'+
+      '</defs>'+
+      // pricing-mention (behind, faint)
+      '<path d="'+fp+'" fill="none" stroke="var(--frust)" stroke-width="1.5" stroke-opacity="0.5" stroke-dasharray="1 0" class="frust"/>'+
+      // LMI hero
+      '<path d="'+area+'" fill="url(#ag)" class="area" style="opacity:'+(animate&&!reduce?0:1)+'"/>'+
+      '<path d="'+line+'" fill="none" stroke="var(--cyan)" stroke-width="2.2" filter="url(#glow)" class="line"/>';
+    if(animate && !reduce){
+      var lp=svg.querySelector(".line"), ar=svg.querySelector(".area"), fr=svg.querySelector(".frust");
+      var len=lp.getTotalLength();
+      lp.style.strokeDasharray=len; lp.style.strokeDashoffset=len;
+      lp.animate([{strokeDashoffset:len},{strokeDashoffset:0}],{duration:1500,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+      ar.animate([{opacity:0},{opacity:1}],{duration:1400,delay:300,fill:"forwards"});
+      var fl=fr.getTotalLength(); fr.style.strokeDasharray=fl; fr.style.strokeDashoffset=fl;
+      fr.animate([{strokeDashoffset:fl},{strokeDashoffset:0}],{duration:1700,delay:200,easing:"ease",fill:"forwards"});
+    }
+  }
+  function updateChart(){ // live redraw (no draw-in)
+    if(matrixOn) return;
+    var svg=document.getElementById("chart");
+    svg.querySelector(".line").setAttribute("d",pathFor(series,W,H,false));
+    svg.querySelector(".area").setAttribute("d",pathFor(series,W,H,true));
+    svg.querySelector(".frust").setAttribute("d",frustPath(frust,W,H));
+  }
+
+  // ---- REVIEWS VS MSRP scatter ----
+  function matrixCoords(d){
+    // x: rating 1..5 -> plot; y: dev -8..+8 -> above at top
+    var x = ((d.rating-1)/4)*(W-60)+40;
+    var y = (H/2) - (d.dev/8)*(H/2-20);
+    return [x,y];
+  }
+  function drawMatrix(animate){
+    var svg=document.getElementById("chart");
+    var midY=H/2, midX=(W-60)*0.5+40; // rating 3.0-ish center
+    // grid + quadrant shading
+    var html='<defs>'+
+      '<radialGradient id="gGreen" cx="80%" cy="80%" r="70%"><stop offset="0%" stop-color="var(--up)" stop-opacity="0.16"/><stop offset="100%" stop-color="var(--up)" stop-opacity="0"/></radialGradient>'+
+      '<radialGradient id="gRed" cx="18%" cy="18%" r="70%"><stop offset="0%" stop-color="var(--down)" stop-opacity="0.13"/><stop offset="100%" stop-color="var(--down)" stop-opacity="0"/></radialGradient>'+
+      '<filter id="dglow"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'+
+      '</defs>';
+    // quadrant fills
+    html+='<rect x="'+midX+'" y="'+midY+'" width="'+(W-midX)+'" height="'+(H-midY)+'" fill="url(#gGreen)"/>';
+    html+='<rect x="0" y="0" width="'+midX+'" height="'+midY+'" fill="url(#gRed)"/>';
+    // axes
+    html+='<line x1="0" y1="'+midY+'" x2="'+W+'" y2="'+midY+'" stroke="var(--grid)" stroke-width="1"/>';
+    html+='<line x1="'+midX+'" y1="0" x2="'+midX+'" y2="'+H+'" stroke="var(--grid)" stroke-width="1"/>';
+    // vertical rating gridlines
+    [1,2,3,4,5].forEach(function(r){var x=((r-1)/4)*(W-60)+40;
+      html+='<line x1="'+x+'" y1="0" x2="'+x+'" y2="'+H+'" stroke="var(--grid)" stroke-width="0.6" stroke-dasharray="2 5"/>';
+      html+='<text x="'+x+'" y="'+(H-6)+'" fill="var(--dimmer)" font-size="9" text-anchor="middle" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    // dots
+    dealers.forEach(function(d,i){
+      var c=matrixCoords(d), r=6+d.inv/28;
+      var tension = d.dev>0 && d.rating<3.6;        // above msrp + lower rating
+      var value   = d.dev<0 && d.rating>=4.2;        // below msrp + higher rating
+      var col = tension ? "var(--down)" : value ? "var(--up)" : "var(--cyan)";
+      var cx = animate&&!reduce ? midX : c[0];
+      var cy = animate&&!reduce ? midY : c[1];
+      html+='<circle class="mxdot" data-i="'+i+'" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" r="'+r.toFixed(1)+'" '+
+            'fill="'+col+'" fill-opacity="0.22" stroke="'+col+'" stroke-width="1.4" filter="url(#dglow)"/>';
+    });
+    svg.innerHTML=html;
+    if(animate && !reduce){
+      svg.querySelectorAll(".mxdot").forEach(function(el){
+        var i=+el.dataset.i, c=matrixCoords(dealers[i]);
+        el.animate([{cx:midX,cy:midY,opacity:0.2},{cx:c[0],cy:c[1],opacity:1}],
+          {duration:700,delay:i*35,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+        // settle attributes after
+        setTimeout(function(){el.setAttribute("cx",c[0].toFixed(1));el.setAttribute("cy",c[1].toFixed(1));}, 700+i*35);
+      });
+    }
+  }
+  function updateMatrix(){
+    // jitter dev + rating slightly, move dots
+    var svg=document.getElementById("chart");
+    dealers.forEach(function(d,i){
+      d.dev = Math.max(-7.8, Math.min(7.8, d.dev+(rnd()-0.5)*0.5));
+      var el=svg.querySelector('.mxdot[data-i="'+i+'"]'); if(!el) return;
+      var c=matrixCoords(d);
+      el.animate([{cx:el.getAttribute("cx"),cy:el.getAttribute("cy")},{cx:c[0],cy:c[1]}],{duration:600,fill:"forwards"});
+      setTimeout(function(){el.setAttribute("cx",c[0].toFixed(1));el.setAttribute("cy",c[1].toFixed(1));},600);
+    });
+  }
+
+  function setMatrixCaptions(on){
+    ["capBR","capTL"].forEach(id=>document.getElementById(id).classList.toggle("show",on));
+    ["axX","axY","axY2"].forEach(id=>document.getElementById(id).classList.toggle("show",on));
+    document.getElementById("legend").style.opacity = on ? "0" : "1";
+    document.getElementById("legend").style.transition="opacity .3s";
+  }
+
+  document.getElementById("matrixBtn").addEventListener("click",function(){
+    matrixOn=!matrixOn;
+    this.classList.toggle("on",matrixOn);
+    setMatrixCaptions(matrixOn);
+    if(matrixOn) drawMatrix(true); else drawChart(true);
+  });
+
+  function countUp(el, target, kind){
+    if(reduce){ el.textContent=fmt(target,kind); return; }
+    var t0=null, dur=900, from=0;
+    function step(ts){t0=t0||ts; var k=Math.min(1,(ts-t0)/dur), e=1-Math.pow(1-k,3);
+      el.textContent=fmt(from+(target-from)*e, kind); if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+  function fmt(v,kind){ return kind==="$"?money(v):kind==="%"?v.toFixed(1)+"%":kind==="n"?Math.round(v):v.toFixed(2); }
+  function flash(el, up){ el.style.color=up?"var(--up)":"var(--down)"; setTimeout(()=>{el.style.color="";},420); }
+
+  // ---- ticker ----
+  var tItems=[["PICKUP",156.2,.42],["SUV",149.8,-.18],["SEDAN",131.4,.11],["EV",168.9,-1.12],["LUXURY",172.3,.29],
+    ["HYBRID",144.6,.24],["COMPACT",122.7,-.05],["TRUCK-HD",181.0,.33],["MINIVAN",139.2,.07],["SPORT",165.5,-.44]];
+  function renderTicker(){
+    var html=tItems.map(t=>{var cl=t[2]>=0?"up":"down";return '<span class="ti"><b>'+t[0]+'</b> <span class="v mono">'+t[1].toFixed(1)+'</span> <span class="'+cl+' mono">'+pct(t[2])+'</span></span>';}).join("");
+    document.getElementById("track").innerHTML=html+html;
+  }
+
+  // ---- star rating markup ----
+  function starColor(r){ return r>=4.2?"var(--up)":r>=3.5?"var(--amber)":"var(--down)"; }
+
+  // ---- side stats (with markup leaderboard) ----
+  function renderSide(){
+    var host=document.getElementById("side"); host.innerHTML="";
+    side.forEach((s)=>{
+      var el=document.createElement("div"); el.className="scene";
+      var extra="", cls="card stat";
+      if(s.id==="markup"){
+        cls+=" clickable";
+        // build leaderboard from dealers sorted by markup desc, top 6
+        var lb=dealers.slice().sort((a,b)=>b.markup-a.markup).slice(0,6);
+        var rows=lb.map(function(d){
+          var tense = d.rating<3.6;   // high markup + low rating = tension
+          var fair  = d.rating>=4.3;  // high markup but still highly rated
+          var rc = tense?"tense":fair?"fair":"";
+          return '<div class="lb-row '+rc+'">'+
+            '<span class="dn" title="'+d.name+'">'+d.name+'</span>'+
+            '<span class="mk mono">'+pct1(d.markup)+'</span>'+
+            '<span class="rt mono"><span class="star" style="color:'+starColor(d.rating)+'">★</span>'+d.rating.toFixed(1)+'</span>'+
+          '</div>';
+        }).join("");
+        extra='<div class="hint">▾ tap: markup vs. reputation</div>'+
+          '<div class="lb">'+
+            '<div class="lb-head"><span>Dealer</span><span>Markup&nbsp;·&nbsp;Rating</span></div>'+
+            rows+
+            '<div class="lb-note">Red = higher markup with lower review scores. Green = higher markup with higher review scores. Sample data — production joins scraped listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
+          '</div>';
+      }
+      el.innerHTML='<div class="'+cls+'" data-id="'+s.id+'"><div class="lbl"><span>'+s.name+'</span>'+(s.chg?'<span class="'+(s.chg>=0?"up":"down")+'" style="font-size:12px">'+pct(s.chg)+'</span>':'')+'</div>'+
+        '<div class="val mono" data-t="'+s.val+'" data-k="'+s.kind+'">0</div>'+
+        '<div class="row"><span>'+s.sub+'</span></div>'+extra+'</div>';
+      host.appendChild(el);
+    });
+    // wire markup expand
+    var mk=host.querySelector('.stat[data-id="markup"]');
+    if(mk) mk.addEventListener("click",function(){ this.classList.toggle("open"); });
+  }
+
+  // ---- segment cards (clickable -> drawer) ----
+  function renderSegs(){
+    var host=document.getElementById("segs"); host.innerHTML="";
+    segs.forEach((s,i)=>{
+      var el=document.createElement("div"); el.className="card seg"; el.dataset.seg=s.name;
+      var up=s.chg>=0;
+      el.innerHTML='<div class="name"><span style="width:8px;height:8px;border-radius:50%;background:'+s.color+';box-shadow:0 0 8px '+s.color+'"></span>'+s.name+'</div>'+
+        '<div class="price mono" data-t="'+s.price+'" data-k="$">$0</div>'+
+        '<div class="meta"><span class="'+(up?"up":"down")+' mono" data-chg>'+pct(s.chg)+'</span><span style="color:var(--dimmer)">avg MSRP</span></div>'+
+        '<div class="bar"><i style="width:'+(40+Math.abs(s.chg)*22)+'%;background:'+s.color+'"></i></div>'+
+        '<div class="drill">◎ nearest dealers near Calgary →</div>';
+      el.addEventListener("click",()=>openDrawer(s.name));
+      host.appendChild(el);
+    });
+  }
+
+  // ---- drawer ----
+  var drawer=document.getElementById("drawer"), scrim=document.getElementById("scrim");
+  function openDrawer(seg){
+    document.getElementById("dwSeg").textContent=seg.toUpperCase()+" · MSRP DRILL-DOWN";
+    document.getElementById("dwTitle").textContent=seg;
+    var list=dealersForSeg(seg);
+    var host=document.getElementById("dwList"); host.innerHTML="";
+    list.forEach(function(o,i){
+      var d=o.d;
+      var div=document.createElement("div"); div.className="dealer";
+      div.innerHTML=
+        '<div class="dh"><div><div class="dn">'+d.name+'</div><div class="rank">#'+(i+1)+' nearest · '+d.inv+' in stock</div></div>'+
+        '<div class="rating"><span class="star" style="color:'+starColor(d.rating)+'">★</span>'+d.rating.toFixed(1)+' <span class="revct">('+d.rev+')</span></div></div>'+
+        '<div class="snip">'+o.snip+'</div>';
+      host.appendChild(div);
+      setTimeout(()=>div.classList.add("in"), reduce?0:120+i*110);
+    });
+    scrim.classList.add("show"); drawer.classList.add("show");
+  }
+  function closeDrawer(){ scrim.classList.remove("show"); drawer.classList.remove("show"); }
+  document.getElementById("dwClose").addEventListener("click",closeDrawer);
+  scrim.addEventListener("click",closeDrawer);
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
+
+  // ---- range buttons ----
+  ["1D","1W","1M","1Y"].forEach((r,i)=>{var b=document.createElement("button");b.textContent=r;if(i===2)b.className="on";
+    b.onclick=function(){document.querySelectorAll("#rng button").forEach(x=>x.className="");b.className="on";};document.getElementById("rng").appendChild(b);});
+
+  // ---- init ----
+  renderTicker(); renderSide(); renderSegs(); drawChart(true);
+  var lmiEl=document.getElementById("lmi");
+  countUp(lmiEl, lmi.val, "2");
+  document.getElementById("lmiChg").className="chg "+(lmi.day>=0?"up":"down");
+  document.getElementById("lmiChg").innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+  document.querySelectorAll(".val[data-t]").forEach(el=>countUp(el, +el.dataset.t, el.dataset.k));
+  document.querySelectorAll(".price[data-t]").forEach(el=>countUp(el, +el.dataset.t, "$"));
+
+  // entrance stagger
+  document.querySelectorAll(".card").forEach((c,i)=>setTimeout(()=>c.classList.add("in"), reduce?0:i*70));
+
+  // 3D tilt (skip when drawer/leaderboard interactions matter — still fine)
+  if(!reduce){
+    document.querySelectorAll(".scene").forEach(sc=>{
+      sc.addEventListener("pointermove",e=>{var c=sc.querySelector(".card");if(!c)return;
+        if(c.classList.contains("open"))return; // don't tilt expanded leaderboard
+        var r=c.getBoundingClientRect();
+        var px=(e.clientX-r.left)/r.width-.5, py=(e.clientY-r.top)/r.height-.5;
+        c.style.transform="rotateY("+(px*5).toFixed(2)+"deg) rotateX("+(-py*5).toFixed(2)+"deg) translateZ(6px)";
+        c.style.boxShadow="0 30px 60px -30px rgba(34,227,255,.35)";});
+      sc.addEventListener("pointerleave",()=>{var c=sc.querySelector(".card");if(c){c.style.transform="";c.style.boxShadow="";}});
+    });
+  }
+
+  // clock
+  function tick(){var d=new Date(); document.getElementById("clock").textContent=d.toLocaleTimeString("en-CA",{hour12:false})+" ET";}
+  setInterval(tick,1000); tick();
+
+  // ---- simulated live updates (2.4s) ----
+  if(!reduce) setInterval(function(){
+    // main index
+    var d=(rnd()-0.48)*0.25; lmi.val=Math.max(120, lmi.val+d); lmi.day+= d*0.4;
+    series.push(lmi.val); series.shift();
+    // pricing-mention ticks up shortly after LMI rises
+    var slope = series[N-1]-series[N-4];
+    var nf = 42 + slope*9 + (rnd()-0.5)*10;
+    frust.push(Math.max(6,Math.min(96,nf))); frust.shift();
+    updateChart();
+    if(matrixOn) updateMatrix();
+    lmiEl.textContent=lmi.val.toFixed(2); flash(lmiEl, d>=0);
+    var chg=document.getElementById("lmiChg"); chg.className="chg "+(lmi.day>=0?"up":"down"); chg.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+    // ticker jitter
+    tItems.forEach(t=>{t[2]=Math.max(-2.5,Math.min(2.5,t[2]+(rnd()-0.5)*0.14)); t[1]=Math.max(100,t[1]+(rnd()-0.5)*0.2);}); renderTicker();
+    // segment cards
+    document.querySelectorAll("#segs .seg").forEach((el,i)=>{
+      var s=segs[i]; var dd=(rnd()-0.5)*90; s.price=Math.max(15000,s.price+dd); s.chg=Math.max(-2.5,Math.min(2.5,s.chg+(rnd()-0.5)*0.12));
+      var pv=el.querySelector(".price"); pv.textContent=money(s.price); flash(pv, dd>=0);
+      var cv=el.querySelector("[data-chg]"); cv.textContent=pct(s.chg); cv.className=(s.chg>=0?"up":"down")+" mono";
+    });
+  }, 2400);
+})();
+</script>
+</body>
+</html>

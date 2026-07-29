@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Reviews vs MSRP · Slope</title>
+<style>
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;
+    --down:#f0688a;
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --grid:rgba(255,255,255,.05);
+    --gate:#8b7bff;
+    --blur:14px;
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --gate:#6f57e6;
+    --blur:16px;
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:56px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1120px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{ 0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;} }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  .wrap{padding:16px 30px 0;max-width:1120px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;backdrop-filter:blur(var(--blur));
+    position:relative;opacity:0;translate:0 18px;transition:opacity .55s ease,translate .55s cubic-bezier(.16,1,.3,1)}
+  .card.in{opacity:1;translate:0 0}
+  .panel-hd{padding:24px 28px 4px}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .panel-hd h2{font-size:21px;font-weight:700;margin-top:9px;letter-spacing:-.2px}
+  .panel-hd p{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.6;max-width:660px}
+  .panel-hd p b{color:var(--ink);font-weight:600}
+
+  .legend{display:flex;gap:20px;flex-wrap:wrap;padding:14px 28px 2px;font-size:11.5px;color:var(--dim)}
+  .legend .lg{display:inline-flex;align-items:center;gap:8px}
+  .legend .sw{width:15px;height:2.5px;border-radius:2px;display:inline-block}
+  .legend .sw.up{background:var(--up)} .legend .sw.down{background:var(--down)}
+
+  .chartwrap{padding:8px 20px 22px;position:relative}
+  svg.chart{width:100%;height:auto;display:block;overflow:visible}
+  .slope{cursor:default;transition:stroke-opacity .2s}
+  .sltip{position:absolute;pointer-events:none;background:var(--panel-solid);border:1px solid var(--hair-strong);
+    border-radius:10px;padding:9px 12px;font-size:12px;color:var(--ink);opacity:0;transition:opacity .15s;
+    box-shadow:0 12px 34px -18px rgba(0,0,0,.6);z-index:6;backdrop-filter:blur(10px);white-space:nowrap}
+  .sltip .rt{color:var(--dim);font-size:11px;margin-top:3px;display:block}
+
+  .foot{max-width:1120px;margin:22px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .card{transition:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Reviews vs MSRP</h1><div class="sub">LotCheck · trust vs. price</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="panel-hd">
+      <div class="lbl">Connected slope · reputation → price</div>
+      <h2>Does trust follow through on price?</h2>
+      <p>Left rail ranks every dealer by <b>Google review score</b>; right rail ranks the same dealers by <b>price position vs MSRP</b>. Each line ties a dealer's reputation to what they actually charge. A line that stays <b>high on both ends</b> — flat across the top — is the honest sweet spot. Lines that <b>plunge</b> are well-liked but pricey, or cheap but poorly rated.</p>
+    </div>
+    <div class="legend">
+      <span class="lg"><span class="sw up"></span>Below MSRP (good deal)</span>
+      <span class="lg"><span class="sw down"></span>Above MSRP (markup)</span>
+      <span class="lg" style="color:var(--dimmer)">Hover a line to isolate it</span>
+    </div>
+    <div class="chartwrap">
+      <svg class="chart" id="chart" viewBox="0 0 760 430"></svg>
+      <div class="sltip" id="tip"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production, each dealer's <b>review score</b> comes from LotCheck's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>) and its <b>price position</b> from real scraped listings compared against verified <b>msrp_catalog</b>. Nothing is fabricated at runtime. Dealer names shown here are fictional placeholders, not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);
+    document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();draw();
+  });
+
+  /* fictional dealers (illustrative sample) */
+  var dealers=[
+    {name:"Riverside Ram",        rating:2.3, dev:+7.4},
+    {name:"Stampede Dodge",       rating:2.8, dev:+6.1},
+    {name:"Crestline GMC",        rating:3.4, dev:+4.9},
+    {name:"Beacon VW",            rating:3.1, dev:+3.8},
+    {name:"Kensington Jeep",      rating:3.7, dev:+2.6},
+    {name:"Summit Chevrolet",     rating:4.7, dev:+1.9},
+    {name:"Northgate Ford",       rating:4.4, dev:+0.4},
+    {name:"Meridian Toyota",      rating:4.6, dev:-0.6},
+    {name:"Foothills Honda",      rating:4.5, dev:-1.1},
+    {name:"Redstone Hyundai",     rating:4.2, dev:-1.9},
+    {name:"Chinook Kia",          rating:3.9, dev:-2.4},
+    {name:"Nose Hill Mitsubishi", rating:4.0, dev:-2.8},
+    {name:"Glenmore Mazda",       rating:4.8, dev:-3.0},
+    {name:"Bowview Subaru",       rating:4.7, dev:-3.6},
+    {name:"Prairie Nissan",       rating:3.6, dev:-4.2},
+    {name:"Fish Creek Volvo",     rating:4.6, dev:-4.7},
+    {name:"Elbow River Audi",     rating:4.3, dev:-5.1}
+  ];
+
+  var W=760,H=430;
+  var leftX=210, rightX=W-210;
+  var topY=30, botY=H-42;
+  // left value = rating (5 top, 1 bottom); right value = dev (-6 top best, +8 bottom)
+  function yRating(r){ return botY - ((r-1)/4)*(botY-topY); }
+  function yDev(dev){ return topY + ((dev+6)/14)*(botY-topY); }
+
+  var tip=document.getElementById("tip");
+
+  function draw(){
+    var svg=document.getElementById("chart");
+    var h='';
+    // axis rails
+    h+='<line x1="'+leftX+'" y1="'+(topY-6)+'" x2="'+leftX+'" y2="'+(botY+6)+'" stroke="var(--hair-strong)" stroke-width="1.4"/>';
+    h+='<line x1="'+rightX+'" y1="'+(topY-6)+'" x2="'+rightX+'" y2="'+(botY+6)+'" stroke="var(--hair-strong)" stroke-width="1.4"/>';
+    // rail titles
+    h+='<text x="'+leftX+'" y="'+(topY-14)+'" fill="var(--dim)" font-size="11.5" text-anchor="middle" letter-spacing="0.5">GOOGLE RATING</text>';
+    h+='<text x="'+rightX+'" y="'+(topY-14)+'" fill="var(--dim)" font-size="11.5" text-anchor="middle" letter-spacing="0.5">PRICE vs MSRP</text>';
+    // left ticks
+    [1,2,3,4,5].forEach(function(r){ var y=yRating(r);
+      h+='<line x1="'+(leftX-5)+'" y1="'+y+'" x2="'+(leftX+5)+'" y2="'+y+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+      h+='<text x="'+(leftX-12)+'" y="'+(y+3.5)+'" fill="var(--dimmer)" font-size="10" text-anchor="end" font-family="monospace">'+r.toFixed(1)+'★</text>';
+    });
+    // right ticks
+    [-6,-3,0,3,6,8].forEach(function(dv){ var y=yDev(dv);
+      h+='<line x1="'+(rightX-5)+'" y1="'+y+'" x2="'+(rightX+5)+'" y2="'+y+'" stroke="var(--hair-strong)" stroke-width="1"/>';
+      h+='<text x="'+(rightX+12)+'" y="'+(y+3.5)+'" fill="var(--dimmer)" font-size="10" text-anchor="start" font-family="monospace">'+(dv>0?"+":"")+dv+'%</text>';
+    });
+    // right rail meaning tags
+    h+='<text x="'+(rightX+40)+'" y="'+(topY+4)+'" fill="var(--up)" font-size="10">lowest price</text>';
+    h+='<text x="'+(rightX+40)+'" y="'+(botY+2)+'" fill="var(--down)" font-size="10">most markup</text>';
+    // "sweet spot" band — top of both rails
+    h+='<path d="M'+leftX+' '+yRating(5)+' L'+rightX+' '+yDev(-6)+' L'+rightX+' '+yDev(-2)+' L'+leftX+' '+yRating(4.3)+' Z" fill="var(--up)" fill-opacity="0.05"/>';
+
+    // slope lines
+    dealers.forEach(function(d,i){
+      var y1=yRating(d.rating), y2=yDev(d.dev);
+      var col=d.dev<=0?"var(--up)":"var(--down)";
+      var good=d.dev<=0 && d.rating>=4.3;
+      var op=good?0.92:0.5;
+      h+='<g class="slope" data-i="'+i+'">';
+      h+='<line class="ln" x1="'+leftX+'" y1="'+y1.toFixed(1)+'" x2="'+rightX+'" y2="'+y2.toFixed(1)+'" '+
+         'stroke="'+col+'" stroke-width="'+(good?2.4:1.5)+'" stroke-opacity="'+op+'"/>';
+      h+='<circle cx="'+leftX+'" cy="'+y1.toFixed(1)+'" r="3.4" fill="'+col+'"/>';
+      h+='<circle cx="'+rightX+'" cy="'+y2.toFixed(1)+'" r="3.4" fill="'+col+'"/>';
+      h+='</g>';
+    });
+
+    svg.innerHTML=h;
+
+    if(!reduce){
+      svg.querySelectorAll(".slope .ln").forEach(function(el,i){
+        var len=el.getTotalLength();
+        el.style.strokeDasharray=len; el.style.strokeDashoffset=len;
+        el.animate([{strokeDashoffset:len},{strokeDashoffset:0}],{duration:900,delay:120+i*45,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+        setTimeout(function(){el.style.strokeDashoffset=0;},900+120+i*45);
+      });
+    }
+
+    // hover isolate
+    var groups=svg.querySelectorAll(".slope");
+    groups.forEach(function(g){
+      g.addEventListener("mouseenter",function(){
+        var d=dealers[+g.getAttribute("data-i")];
+        groups.forEach(function(o){ o.style.opacity = o===g ? "1" : "0.14"; });
+        g.querySelector(".ln").setAttribute("stroke-width","3");
+        tip.innerHTML='<b>'+d.name+'</b><span class="rt">★ '+d.rating.toFixed(1)+' rating · '+(d.dev>0?"+":"")+d.dev.toFixed(1)+'% vs MSRP</span>';
+        var wrap=svg.parentElement.getBoundingClientRect(), b=g.getBoundingClientRect();
+        tip.style.left=(b.left-wrap.left+b.width/2)+"px";
+        tip.style.top=(b.top-wrap.top-tip.offsetHeight-6)+"px";
+        tip.style.transform="translateX(-50%)"; tip.style.opacity="1";
+      });
+      g.addEventListener("mouseleave",function(){
+        groups.forEach(function(o){ o.style.opacity="1"; });
+        tip.style.opacity="0";
+      });
+    });
+  }
+
+  draw();
+  setTimeout(function(){document.getElementById("card").classList.add("in");}, 30);
+})();
+</script>
+</body>
+</html>

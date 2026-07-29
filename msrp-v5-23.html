@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Live MSRP Price Index (TV / Kiosk)</title>
+<style>
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;
+    --down:#f0688a;
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --grid:rgba(255,255,255,.05);
+    --frust:#c98aa0;
+    --gate:#8b7bff;
+    --blur:14px;
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --frust:#b07a8e;
+    --gate:#6f57e6;
+    --blur:16px;
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    height:100vh;overflow:hidden;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+  .up{color:var(--up)} .down{color:var(--down)}
+
+  /* ---- ticker (big) ---- */
+  .ticker{flex:none;display:flex;align-items:center;height:56px;
+    background:var(--panel-solid);backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);overflow:hidden}
+  .ticker .tag{flex:none;display:flex;align-items:center;gap:11px;padding:0 30px;height:100%;
+    font-size:16px;font-weight:600;letter-spacing:2px;color:var(--dim);border-right:1px solid var(--hair);text-transform:uppercase}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--up);animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .track{display:flex;gap:56px;white-space:nowrap;animation:scroll 55s linear infinite;padding-left:46px}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .ti{display:inline-flex;align-items:center;gap:11px;font-size:19px}
+  .ti b{color:var(--dim);font-weight:500;letter-spacing:.5px}
+  .ti .v{color:var(--ink);font-weight:600}
+
+  /* ---- top bar ---- */
+  header{flex:none;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:22px 40px 10px}
+  .brand{display:flex;align-items:center;gap:20px}
+  .logo{display:flex;align-items:center;justify-content:center;width:76px;height:66px;
+    border-radius:16px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:64px;height:64px;display:block}
+  @keyframes lc-gate-drive{0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);} 90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}}
+  @keyframes lc-gate-flash{0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}}
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:30px;font-weight:700;letter-spacing:.2px}
+  .brand .sub{font-size:15px;color:var(--dim);letter-spacing:3px;text-transform:uppercase;margin-top:5px}
+  .badges{display:flex;align-items:center;gap:16px}
+  .pill{font-size:14px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;padding:9px 18px;border-radius:22px;border:1px solid var(--hair);color:var(--dim)}
+  .pill.live{display:flex;align-items:center;gap:10px}
+  .clock{font-size:20px;color:var(--dim)}
+  .theme-toggle{position:relative;width:76px;height:38px;border-radius:22px;border:1px solid var(--hair);background:var(--panel-2);cursor:pointer;flex:none}
+  .theme-toggle .knob{position:absolute;top:3px;left:3px;width:30px;height:30px;border-radius:50%;background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);display:flex;align-items:center;justify-content:center;font-size:16px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(38px)}
+
+  /* ---- main glanceable grid ---- */
+  .stage{flex:1;display:grid;grid-template-columns:1.35fr 1fr;grid-template-rows:1fr auto;gap:24px;padding:14px 40px 30px;min-height:0;
+    grid-template-areas:"hero powertrain" "stats powertrain"}
+  @media(max-width:1200px){.stage{grid-template-columns:1fr;grid-template-rows:auto auto auto;grid-template-areas:"hero" "powertrain" "stats"}}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:22px;backdrop-filter:blur(var(--blur));position:relative}
+
+  /* HERO: enormous LMI */
+  .hero{grid-area:hero;padding:34px 40px;display:flex;flex-direction:column;justify-content:center}
+  .hero .lbl{font-size:17px;color:var(--dim);letter-spacing:2.5px;text-transform:uppercase}
+  .hero .idx{font-size:150px;font-weight:800;line-height:.92;margin-top:8px;letter-spacing:-4px;text-shadow:0 0 60px var(--cyan-dim)}
+  .hero .chg{display:inline-flex;align-items:center;gap:10px;font-size:32px;font-weight:700;margin-top:14px;padding:8px 20px;border-radius:14px;align-self:flex-start}
+  .hero .chg.up{color:var(--up);background:var(--up-soft)} .hero .chg.down{color:var(--down);background:var(--down-soft)}
+  .hero .spark{margin-top:auto;height:120px}
+  svg.chart{width:100%;height:100%;display:block;overflow:visible}
+
+  /* STATS ribbon */
+  .stats{grid-area:stats;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  .stat{padding:24px 28px;display:flex;flex-direction:column;justify-content:center}
+  .stat .lbl{font-size:15px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
+  .stat .val{font-size:52px;font-weight:800;margin-top:8px;letter-spacing:-1.5px}
+  .stat .row{margin-top:6px;font-size:16px;color:var(--dimmer)}
+  .stat .chgn{font-size:20px;font-weight:700;margin-left:10px}
+
+  /* POWERTRAIN big tiles */
+  .ptwrap{grid-area:powertrain;display:flex;flex-direction:column;min-height:0}
+  .ptwrap .head{font-size:16px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;padding:26px 30px 4px}
+  .pt-grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:20px;padding:16px 30px 30px;min-height:0}
+  .pt{padding:24px 26px;display:flex;flex-direction:column;justify-content:space-between;background:var(--panel-2);border:1px solid var(--hair);border-radius:18px}
+  .pt .name{display:flex;align-items:center;gap:14px;font-size:20px;font-weight:600;color:var(--ink);letter-spacing:.4px}
+  .pt .name svg{width:38px;height:38px;color:var(--dimmer);flex:none}
+  .pt .price{font-size:44px;font-weight:800;margin-top:10px;letter-spacing:-1.5px}
+  .pt .meta{display:flex;align-items:baseline;gap:12px;margin-top:8px}
+  .pt .meta .c{font-size:24px;font-weight:700}
+  .pt .meta .sub{font-size:15px;color:var(--dimmer)}
+  .pt .bar{height:5px;border-radius:3px;background:var(--hair);margin-top:16px;overflow:hidden}
+  .pt .bar i{display:block;height:100%;border-radius:3px;background:var(--dim)}
+
+  @keyframes lc-charge{0%,100%{opacity:0.5;transform:scale(0.85);}50%{opacity:1;transform:scale(1.2);}}
+  @keyframes lc-pump{0%,100%{transform:translateY(0);}30%{transform:translateY(-3px);}60%{transform:translateY(0);}80%{transform:translateY(-1px);}}
+  @keyframes lc-spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+  .fuel-ico{overflow:visible}
+
+  .foot{flex:none;padding:0 40px 14px;font-size:13px;color:var(--dimmer);line-height:1.5;text-align:center}
+  .foot b{color:var(--dim)} .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .track,.dot{animation:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="ticker">
+  <div class="tag"><span class="dot"></span> LMI</div>
+  <div class="track" id="track"></div>
+</div>
+
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Live MSRP Price Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill demo">Demo data</span>
+    <span class="pill live"><span class="dot"></span> Live</span>
+    <span class="clock mono" id="clock">--:--:--</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="card hero">
+    <div class="lbl">LotCheck MSRP Index · LMI (base 100)</div>
+    <div class="idx mono" id="lmi">0.00</div>
+    <div class="chg up" id="lmiChg">&nbsp;</div>
+    <div class="spark"><svg class="chart" id="chart" viewBox="0 0 640 120" preserveAspectRatio="none"></svg></div>
+  </div>
+
+  <div class="card ptwrap">
+    <div class="head">Average MSRP by powertrain</div>
+    <div class="pt-grid" id="ptGrid"></div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> Production sources: verified <b>msrp_catalog</b> (29 makes), scraped-listing markup, the Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>) and AI pricing-mention rate. Dealer names elsewhere in LotCheck are fictional placeholders.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=x=>"$"+Math.round(x).toLocaleString("en-CA");
+  var pct=x=>(x>=0?"+":"")+x.toFixed(2)+"%";
+  var rnd=(seed=>()=>{seed=(seed*1103515245+12345)&0x7fffffff;return seed/0x7fffffff;})(20260728);
+
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="#94a3b8" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="#f59e0b" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="#22c55e" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  var root=document.documentElement;
+  var prefLight=window.matchMedia("(prefers-color-scheme:light)").matches;
+  var theme= prefLight ? "light" : "dark";
+  function applyTheme(){ root.setAttribute("data-theme", theme); document.getElementById("themeIco").textContent = theme==="light" ? "☀" : "☾"; }
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){ theme = theme==="light" ? "dark" : "light"; applyTheme(); drawChart(false); });
+
+  var lmi={val:148.72, day:+0.34};
+  var powertrains=[
+    {key:"Gas",    label:"Gas",              price:42500, chg:+0.14},
+    {key:"Hybrid", label:"Hybrid",           price:41200, chg:+0.24},
+    {key:"PHEV",   label:"Plug-in Hybrid",   price:52800, chg:-0.31},
+    {key:"BEV",    label:"BEV",              price:61340, chg:-1.12}
+  ];
+  var stats=[
+    {name:"Avg new MSRP", val:47180, kind:"$", sub:"across 29 makes", chg:+0.21},
+    {name:"Widest markup", val:8.2, kind:"%", sub:"dealer vs mfr, 90d", chg:+0.4},
+    {name:"Makes tracked", val:29, kind:"n", sub:"auto-refresh daily", chg:0}
+  ];
+
+  var N=48, series=[]; var base=142;
+  for(var i=0;i<N;i++){ base+= (rnd()-0.46)*1.2; series.push(Math.max(120, base)); }
+  series[N-1]=lmi.val;
+
+  var W=640,H=120;
+  function pathFor(data, w, h, close, pad){
+    pad=pad||{t:12,b:12};
+    var min=Math.min.apply(null,data), max=Math.max.apply(null,data), rg=(max-min)||1;
+    var pts=data.map((v,i)=>[ i/(data.length-1)*w, h-pad.b - ((v-min)/rg)*(h-pad.t-pad.b) ]);
+    var d=pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
+    if(close) d+=" L"+w+" "+h+" L0 "+h+" Z";
+    return d;
+  }
+  function drawChart(animate){
+    var svg=document.getElementById("chart");
+    var line=pathFor(series,W,H,false), area=pathFor(series,W,H,true);
+    svg.innerHTML=
+      '<defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">'+
+        '<stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.30"/>'+
+        '<stop offset="70%" stop-color="var(--cyan)" stop-opacity="0.04"/>'+
+        '<stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/></linearGradient>'+
+      '<filter id="glow" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>'+
+      '<path d="'+area+'" fill="url(#ag)" class="area" style="opacity:'+(animate&&!reduce?0:1)+'"/>'+
+      '<path d="'+line+'" fill="none" stroke="var(--cyan)" stroke-width="3.2" filter="url(#glow)" class="line"/>';
+    if(animate && !reduce){
+      var lp=svg.querySelector(".line"), ar=svg.querySelector(".area");
+      var len=lp.getTotalLength();
+      lp.style.strokeDasharray=len; lp.style.strokeDashoffset=len;
+      lp.animate([{strokeDashoffset:len},{strokeDashoffset:0}],{duration:1500,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+      ar.animate([{opacity:0},{opacity:1}],{duration:1400,delay:300,fill:"forwards"});
+    }
+  }
+  function updateChart(){
+    var svg=document.getElementById("chart");
+    var ln=svg.querySelector(".line"), ar=svg.querySelector(".area");
+    if(ln) ln.setAttribute("d",pathFor(series,W,H,false));
+    if(ar) ar.setAttribute("d",pathFor(series,W,H,true));
+  }
+
+  function countUp(el, target, kind){
+    if(reduce){ el.textContent=fmt(target,kind); return; }
+    var t0=null, dur=1000, from=0;
+    function step(ts){t0=t0||ts; var k=Math.min(1,(ts-t0)/dur), e=1-Math.pow(1-k,3); el.textContent=fmt(from+(target-from)*e, kind); if(k<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  }
+  function fmt(v,kind){ return kind==="$"?money(v):kind==="%"?v.toFixed(1)+"%":kind==="n"?Math.round(v):v.toFixed(2); }
+  function flash(el, up){ el.style.transition="none"; el.style.color=up?"var(--up)":"var(--down)"; requestAnimationFrame(function(){ el.style.transition="color .8s ease"; el.style.color=""; }); }
+
+  var tItems=[["GAS",142.4,.14],["HYBRID",144.6,.24],["PHEV",156.9,-.31],["BEV",168.9,-1.12],
+    ["PICKUP",156.2,.42],["SUV",149.8,-.18],["SEDAN",131.4,.11],["COMPACT",122.7,-.05],["LUXURY",172.3,.29],["MINIVAN",139.2,.07]];
+  function renderTicker(){
+    var html=tItems.map(t=>{var cl=t[2]>=0?"up":"down";return '<span class="ti"><b>'+t[0]+'</b> <span class="v mono">'+t[1].toFixed(1)+'</span> <span class="'+cl+' mono">'+pct(t[2])+'</span></span>';}).join("");
+    document.getElementById("track").innerHTML=html+html;
+  }
+
+  function renderStats(){
+    var host=document.getElementById("stats"); host.innerHTML="";
+    stats.forEach(function(s){
+      var chgHtml = s.chg ? '<span class="chgn mono '+(s.chg>=0?"up":"down")+'">'+pct(s.chg)+'</span>' : '';
+      var el=document.createElement("div"); el.className="card stat";
+      el.innerHTML='<div class="lbl">'+s.name+'</div><div style="display:flex;align-items:baseline"><span class="val mono" data-t="'+s.val+'" data-k="'+s.kind+'">0</span>'+chgHtml+'</div><div class="row">'+s.sub+'</div>';
+      host.appendChild(el);
+    });
+  }
+
+  function renderPt(){
+    var host=document.getElementById("ptGrid"); host.innerHTML="";
+    powertrains.forEach((p)=>{
+      var el=document.createElement("div"); el.className="pt"; el.dataset.pt=p.key;
+      var up=p.chg>=0;
+      el.innerHTML='<div class="name">'+ICON[p.key]+'<span>'+p.label+'</span></div><div><div class="price mono" data-t="'+p.price+'" data-k="$">$0</div><div class="meta"><span class="c mono '+(up?"up":"down")+'" data-chg>'+pct(p.chg)+'</span><span class="sub">avg MSRP today</span></div></div><div class="bar"><i style="width:'+(38+Math.abs(p.chg)*22)+'%"></i></div>';
+      host.appendChild(el);
+    });
+  }
+
+  renderTicker(); renderStats(); renderPt(); drawChart(true);
+  var lmiEl=document.getElementById("lmi");
+  countUp(lmiEl, lmi.val, "2");
+  document.getElementById("lmiChg").className="chg "+(lmi.day>=0?"up":"down");
+  document.getElementById("lmiChg").innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+  document.querySelectorAll(".val[data-t]").forEach(el=>countUp(el, +el.dataset.t, el.dataset.k));
+  document.querySelectorAll(".price[data-t]").forEach(el=>countUp(el, +el.dataset.t, "$"));
+
+  function tick(){var d=new Date(); document.getElementById("clock").textContent=d.toLocaleTimeString("en-CA",{hour12:false})+" ET";}
+  setInterval(tick,1000); tick();
+
+  if(!reduce) setInterval(function(){
+    var d=(rnd()-0.48)*0.25; lmi.val=Math.max(120, lmi.val+d); lmi.day+= d*0.4;
+    series.push(lmi.val); series.shift();
+    updateChart();
+    lmiEl.textContent=lmi.val.toFixed(2); flash(lmiEl, d>=0);
+    var chg=document.getElementById("lmiChg"); chg.className="chg "+(lmi.day>=0?"up":"down"); chg.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+    tItems.forEach(t=>{t[2]=Math.max(-2.5,Math.min(2.5,t[2]+(rnd()-0.5)*0.14)); t[1]=Math.max(100,t[1]+(rnd()-0.5)*0.2);}); renderTicker();
+    document.querySelectorAll("#ptGrid .pt").forEach((el,i)=>{
+      var p=powertrains[i]; var dd=(rnd()-0.5)*80; p.price=Math.max(20000,p.price+dd); p.chg=Math.max(-2.5,Math.min(2.5,p.chg+(rnd()-0.5)*0.1));
+      var pv=el.querySelector(".price"); pv.textContent=money(p.price); flash(pv, dd>=0);
+      var cv=el.querySelector("[data-chg]"); cv.textContent=pct(p.chg); cv.className="c mono "+(p.chg>=0?"up":"down");
+    });
+  }, 4000);
+})();
+</script>
+</body>
+</html>

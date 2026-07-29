@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Reviews vs MSRP · Radial</title>
+<style>
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --up:#3ecf8e;
+    --down:#f0688a;
+    --up-soft:rgba(62,207,142,.12);
+    --down-soft:rgba(240,104,138,.12);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --grid:rgba(255,255,255,.05);
+    --gate:#8b7bff;
+    --blur:14px;
+    --star:#c9a24a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --up:#0a8f56;
+    --down:#d63a5f;
+    --up-soft:rgba(10,143,86,.1);
+    --down-soft:rgba(214,58,95,.1);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --grid:rgba(22,32,52,.07);
+    --gate:#6f57e6;
+    --blur:16px;
+    --star:#b8860b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:56px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1120px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{ 0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;} }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  .wrap{padding:16px 30px 0;max-width:1120px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;backdrop-filter:blur(var(--blur));
+    position:relative;opacity:0;translate:0 18px;transition:opacity .55s ease,translate .55s cubic-bezier(.16,1,.3,1)}
+  .card.in{opacity:1;translate:0 0}
+  .panel-hd{padding:24px 28px 4px}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase}
+  .panel-hd h2{font-size:21px;font-weight:700;margin-top:9px;letter-spacing:-.2px}
+  .panel-hd p{font-size:12.5px;color:var(--dim);margin-top:7px;line-height:1.6;max-width:660px}
+  .panel-hd p b{color:var(--ink);font-weight:600}
+
+  .legend{display:flex;gap:20px;flex-wrap:wrap;padding:14px 28px 2px;font-size:11.5px;color:var(--dim)}
+  .legend .lg{display:inline-flex;align-items:center;gap:8px}
+  .legend .sw{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .legend .sw.up{background:var(--up)} .legend .sw.down{background:var(--down)}
+  .legend .sw.ss{background:var(--up);opacity:.16;border:1px solid var(--up)}
+
+  .chartwrap{padding:2px 20px 20px;position:relative}
+  svg.chart{width:100%;height:auto;display:block;overflow:visible}
+  .pdot{cursor:default;transition:filter .2s}
+  .rtip{position:absolute;pointer-events:none;background:var(--panel-solid);border:1px solid var(--hair-strong);
+    border-radius:10px;padding:9px 12px;font-size:12px;color:var(--ink);opacity:0;transition:opacity .15s;
+    box-shadow:0 12px 34px -18px rgba(0,0,0,.6);z-index:6;backdrop-filter:blur(10px);white-space:nowrap}
+  .rtip .rt{color:var(--dim);font-size:11px;margin-top:3px;display:block}
+
+  .foot{max-width:1120px;margin:22px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .card{transition:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Reviews vs MSRP</h1><div class="sub">LotCheck · trust vs. price</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="panel-hd">
+      <div class="lbl">Radial target · lock onto the deal</div>
+      <h2>Aim for the outer-right arc</h2>
+      <p>A dealer's <b>angle</b> is its Google review score — sweeping from poorly-rated at left to top-rated at right. Its <b>distance from centre</b> is value: the further out, the deeper <b>below MSRP</b>. The shaded arc is the target — <b>higher-rated and under sticker</b>. Anything pulled toward the centre is listing above MSRP.</p>
+    </div>
+    <div class="legend">
+      <span class="lg"><span class="sw up"></span>Below MSRP (good deal)</span>
+      <span class="lg"><span class="sw down"></span>Above MSRP (markup)</span>
+      <span class="lg"><span class="sw ss"></span>Target · higher-rated &amp; under MSRP</span>
+    </div>
+    <div class="chartwrap">
+      <svg class="chart" id="chart" viewBox="0 0 760 420"></svg>
+      <div class="rtip" id="tip"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production, each dealer's <b>review score</b> comes from LotCheck's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>) and its <b>price deviation</b> from real scraped listings compared against verified <b>msrp_catalog</b>. Nothing is fabricated at runtime. Dealer names shown here are fictional placeholders, not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);
+    document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();draw();
+  });
+
+  /* fictional dealers (illustrative sample) */
+  var dealers=[
+    {name:"Riverside Ram",        rating:2.3, dev:+7.4, rev:141},
+    {name:"Stampede Dodge",       rating:2.8, dev:+6.1, rev:96},
+    {name:"Crestline GMC",        rating:3.4, dev:+4.9, rev:207},
+    {name:"Beacon VW",            rating:3.1, dev:+3.8, rev:158},
+    {name:"Kensington Jeep",      rating:3.7, dev:+2.6, rev:118},
+    {name:"Summit Chevrolet",     rating:4.7, dev:+1.9, rev:412},
+    {name:"Northgate Ford",       rating:4.4, dev:+0.4, rev:312},
+    {name:"Meridian Toyota",      rating:4.6, dev:-0.6, rev:498},
+    {name:"Foothills Honda",      rating:4.5, dev:-1.1, rev:377},
+    {name:"Redstone Hyundai",     rating:4.2, dev:-1.9, rev:224},
+    {name:"Chinook Kia",          rating:3.9, dev:-2.4, rev:186},
+    {name:"Nose Hill Mitsubishi", rating:4.0, dev:-2.8, rev:112},
+    {name:"Glenmore Mazda",       rating:4.8, dev:-3.0, rev:263},
+    {name:"Bowview Subaru",       rating:4.7, dev:-3.6, rev:341},
+    {name:"Prairie Nissan",       rating:3.6, dev:-4.2, rev:129},
+    {name:"Fish Creek Volvo",     rating:4.6, dev:-4.7, rev:198},
+    {name:"Elbow River Audi",     rating:4.3, dev:-5.1, rev:171}
+  ];
+
+  var W=760,H=420;
+  var cx=W/2, cy=H-46;
+  var rMin=52, rMax=Math.min(cx-60, cy-24); // ~326 wide but bounded by height
+  rMax=Math.min(rMax, cy-20);
+  // angle: rating 1 -> 176deg (left), rating 5 -> 4deg (right), measured over the top
+  function angOf(r){ return (176 - ((r-1)/4)*172) * Math.PI/180; }
+  // radius: dev +8 -> rMin (above MSRP, near centre), dev -6 -> rMax (below MSRP, far out)
+  function radOf(dev){ return rMin + ((8-dev)/14)*(rMax-rMin); }
+  function px(r,dev){ return cx + radOf(dev)*Math.cos(angOf(r)); }
+  function py(r,dev){ return cy - radOf(dev)*Math.sin(angOf(r)); }
+  // polar point from explicit angle(rad)+radius
+  function pt(ang,rad){ return [cx+rad*Math.cos(ang), cy-rad*Math.sin(ang)]; }
+  function arcPath(rad,a0,a1){
+    var p0=pt(a0,rad), p1=pt(a1,rad);
+    var large=Math.abs(a1-a0)>Math.PI?1:0;
+    // sweep: going from a0(large angle) to a1(small angle) i.e. clockwise in screen => sweep flag 1
+    return "M"+p0[0].toFixed(1)+" "+p0[1].toFixed(1)+" A"+rad+" "+rad+" 0 "+large+" 1 "+p1[0].toFixed(1)+" "+p1[1].toFixed(1);
+  }
+
+  var tip=document.getElementById("tip");
+
+  function draw(){
+    var svg=document.getElementById("chart");
+    var aFull0=angOf(1), aFull1=angOf(5);
+    var h='';
+
+    // target sweet-spot wedge: rating>=4.2, dev<=-1  (outer-right band)
+    var ssA0=angOf(4.2), ssA1=angOf(5);
+    var ssR0=radOf(-1), ssR1=rMax+6;
+    var w0=pt(ssA0,ssR0), w1=pt(ssA1,ssR0), w2=pt(ssA1,ssR1), w3=pt(ssA0,ssR1);
+    h+='<path d="M'+w0[0].toFixed(1)+' '+w0[1].toFixed(1)+
+        ' A'+ssR0+' '+ssR0+' 0 0 1 '+w1[0].toFixed(1)+' '+w1[1].toFixed(1)+
+        ' L'+w2[0].toFixed(1)+' '+w2[1].toFixed(1)+
+        ' A'+ssR1+' '+ssR1+' 0 0 0 '+w3[0].toFixed(1)+' '+w3[1].toFixed(1)+
+        ' Z" fill="var(--up)" fill-opacity="0.09" stroke="var(--up)" stroke-opacity="0.28" stroke-width="1" stroke-dasharray="3 4"/>';
+
+    // concentric value rings at dev = +6,+3,0,-3,-6
+    [6,3,0,-3,-6].forEach(function(dv){
+      var rad=radOf(dv);
+      h+='<path d="'+arcPath(rad,aFull0,aFull1)+'" fill="none" stroke="var(--grid)" stroke-width="'+(dv===0?1.1:0.7)+'" '+(dv===0?'stroke-dasharray="none"':'stroke-dasharray="2 6"')+'/>';
+      var lp=pt(angOf(3),rad);
+      h+='<text x="'+lp[0].toFixed(1)+'" y="'+(lp[1]-4).toFixed(1)+'" fill="var(--dimmer)" font-size="9.5" text-anchor="middle" font-family="monospace">'+(dv>0?"+":"")+dv+'%</text>';
+    });
+    // "at MSRP" ring emphasis label
+    var mlab=pt(aFull1,radOf(0));
+    h+='<text x="'+(mlab[0]+8).toFixed(1)+'" y="'+mlab[1].toFixed(1)+'" fill="var(--dim)" font-size="9.5" text-anchor="start">at MSRP</text>';
+
+    // rating spokes at 1..5
+    [1,2,3,4,5].forEach(function(r){
+      var a=angOf(r); var i0=pt(a,rMin-6), i1=pt(a,rMax+10);
+      h+='<line x1="'+i0[0].toFixed(1)+'" y1="'+i0[1].toFixed(1)+'" x2="'+i1[0].toFixed(1)+'" y2="'+i1[1].toFixed(1)+'" stroke="var(--grid)" stroke-width="0.7"/>';
+      var lab=pt(a,rMax+22);
+      h+='<text x="'+lab[0].toFixed(1)+'" y="'+lab[1].toFixed(1)+'" fill="var(--dimmer)" font-size="10.5" text-anchor="middle" font-family="monospace" dominant-baseline="middle">'+r.toFixed(1)+'★</text>';
+    });
+    // centre + axis captions
+    h+='<circle cx="'+cx+'" cy="'+cy+'" r="3" fill="var(--dimmer)"/>';
+    h+='<text x="'+cx+'" y="'+(cy+22)+'" fill="var(--dim)" font-size="10.5" text-anchor="middle">◀ lower rated&nbsp;&nbsp;·&nbsp;&nbsp;higher rated ▶</text>';
+    h+='<text x="'+cx+'" y="'+(cy-6)+'" fill="var(--dimmer)" font-size="9.5" text-anchor="middle">centre = above MSRP · outer = below MSRP</text>';
+
+    // dealer dots
+    dealers.forEach(function(d,i){
+      var x=px(d.rating,d.dev), y=py(d.rating,d.dev);
+      var col=d.dev<=0?"var(--up)":"var(--down)";
+      var rr=4.2+Math.sqrt(d.rev)/16;
+      var cxs=reduce?x:cx, cys=reduce?y:cy;
+      h+='<circle class="pdot" data-i="'+i+'" data-x="'+x.toFixed(1)+'" data-y="'+y.toFixed(1)+'" '+
+         'cx="'+cxs.toFixed(1)+'" cy="'+cys.toFixed(1)+'" r="'+rr.toFixed(1)+'" '+
+         'fill="'+col+'" fill-opacity="0.18" stroke="'+col+'" stroke-width="1.5"/>';
+    });
+
+    svg.innerHTML=h;
+
+    if(!reduce){
+      svg.querySelectorAll(".pdot").forEach(function(el,i){
+        var tx=+el.getAttribute("data-x"), ty=+el.getAttribute("data-y");
+        el.animate([{cx:cx,cy:cy,opacity:0.2},{cx:tx,cy:ty,opacity:1}],
+          {duration:720,delay:140+i*34,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+        setTimeout(function(){el.setAttribute("cx",tx);el.setAttribute("cy",ty);},720+140+i*34);
+      });
+    }
+
+    svg.querySelectorAll(".pdot").forEach(function(el){
+      el.addEventListener("mouseenter",function(){
+        var d=dealers[+el.getAttribute("data-i")];
+        el.style.filter="brightness(1.15)";
+        tip.innerHTML='<b>'+d.name+'</b><span class="rt" style="color:'+(d.dev<=0?"var(--up)":"var(--down)")+'">'+
+          '★ '+d.rating.toFixed(1)+' · '+(d.dev>0?"+":"")+d.dev.toFixed(1)+'% vs MSRP</span>';
+        var wrap=svg.parentElement.getBoundingClientRect(), b=el.getBoundingClientRect();
+        tip.style.left=(b.left-wrap.left+b.width/2)+"px";
+        tip.style.top=(b.top-wrap.top-tip.offsetHeight-10)+"px";
+        tip.style.transform="translateX(-50%)"; tip.style.opacity="1";
+      });
+      el.addEventListener("mouseleave",function(){ el.style.filter=""; tip.style.opacity="0"; });
+    });
+  }
+
+  draw();
+  setTimeout(function(){document.getElementById("card").classList.add("in");}, 30);
+})();
+</script>
+</body>
+</html>

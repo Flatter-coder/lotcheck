@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — city price detail (clean light)</title>
+<style>
+  /* ONE hero accent per file. Colour = meaning only (green/red = below/above MSRP);
+     fuel colours kept verbatim from the app FuelIcon. No glow. */
+
+  :root{
+    --bg:#141310; --panel:rgba(255,255,255,.03); --panel-2:rgba(255,255,255,.05); --panel-solid:rgba(26,24,20,.95);
+    --hair:rgba(255,246,230,.09); --hair-strong:rgba(255,246,230,.15);
+    --ink:#efece6; --dim:#9b968c; --dimmer:#6a655c;
+    --accent:#37b6cf; --accent-soft:rgba(55,182,207,.14); --accent-dim:rgba(55,182,207,.4); --accent-ink:#37b6cf;
+    --up:#3ecf8e; --down:#f0688a; --star:#d0a94e; --blur:14px;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f3ec; --panel:rgba(255,255,255,.66); --panel-2:rgba(255,255,255,.9); --panel-solid:rgba(255,253,249,.96);
+    --hair:rgba(60,48,30,.12); --hair-strong:rgba(60,48,30,.2);
+    --ink:#221c14; --dim:#6b6154; --dimmer:#9a9082;
+    --accent:#0a6f88; --accent-soft:rgba(10,111,136,.1); --accent-dim:rgba(10,111,136,.34); --accent-ink:#0a6f88;
+    --up:#0a8f56; --down:#c23a55; --star:#b0851f; --blur:16px;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:48px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    max-width:660px;margin:0 auto;padding:30px 24px 8px}
+  .brand{display:flex;align-items:center;gap:14px}
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{ 0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;} }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+  .brand h1{font-size:18px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  .wrap{max-width:660px;margin:0 auto;padding:18px 24px 0}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;backdrop-filter:blur(var(--blur));
+    position:relative;opacity:0;translate:0 16px}
+  .card.in{opacity:1;translate:0 0;transition:opacity .5s ease,translate .5s cubic-bezier(.16,1,.3,1)}
+  .panel{padding:20px 20px 18px;display:flex;flex-direction:column;gap:18px}
+
+  .switch{display:flex;gap:6px;background:var(--panel-2);border:1px solid var(--hair);border-radius:12px;padding:5px}
+  .seg{flex:1;font:inherit;font-size:12px;font-weight:500;color:var(--dim);background:transparent;border:1px solid transparent;
+    border-radius:8px;padding:8px 4px;cursor:pointer;transition:.16s;text-align:center;white-space:nowrap}
+  .seg:hover{color:var(--ink)}
+  .seg.on{color:var(--accent-ink);background:var(--accent-soft);border-color:var(--accent-dim)}
+
+  .city-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+  .c-name{font-size:24px;font-weight:700;letter-spacing:-.4px}
+  .c-sub{font-size:12px;color:var(--dim);margin-top:4px}
+  .c-head-r{text-align:right}
+  .c-above{font-size:22px;font-weight:700;letter-spacing:-.4px}
+  .c-above-l{font-size:9.5px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-top:4px}
+
+  .snap{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .snap-cell{border:1px solid var(--hair);border-radius:12px;background:var(--panel-2);padding:13px 15px}
+  .snap-cell .k{font-size:10px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase}
+  .snap-cell .v{font-size:20px;font-weight:700;letter-spacing:-.4px;margin-top:7px}
+
+  .block{border:1px solid var(--hair);border-radius:12px;background:var(--panel-2);padding:15px 16px}
+  .block-h{font-size:10px;color:var(--dim);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:13px}
+  .block-h-sub{color:var(--dimmer);letter-spacing:.4px;text-transform:none;font-size:10px}
+
+  .pt-line{display:grid;grid-template-columns:20px 58px 1fr 34px;align-items:center;gap:10px;margin-bottom:11px}
+  .pt-line:last-child{margin-bottom:0}
+  .pt-line svg{width:17px;height:17px;flex:none}
+  .pt-line .pl{font-size:12px;color:var(--ink)}
+  .pt-line .track{height:6px;border-radius:4px;background:var(--hair);overflow:hidden}
+  .pt-line .track i{display:block;height:100%;border-radius:4px;width:0;transition:width .7s cubic-bezier(.16,1,.3,1)}
+  .pt-line .pv{font-size:12px;color:var(--dim);text-align:right}
+
+  .cmp-cap{display:flex;justify-content:flex-end;font-size:9.5px;color:var(--dimmer);letter-spacing:.4px;
+    text-transform:uppercase;margin:-4px 0 10px}
+  .cmp-row{display:grid;grid-template-columns:92px 1fr 74px;align-items:center;gap:12px;margin-bottom:10px}
+  .cmp-row:last-child{margin-bottom:0}
+  .cmp-row .cl{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cmp-row.sel .cl{color:var(--ink);font-weight:600}
+  .cmp-row .ctrack{height:8px;border-radius:5px;background:var(--hair);overflow:hidden}
+  .cmp-row .ctrack i{display:block;height:100%;border-radius:5px;width:0;background:var(--dimmer);transition:width .7s cubic-bezier(.16,1,.3,1)}
+  .cmp-row.sel .ctrack i{background:var(--accent)}
+  .cmp-row .cv{font-size:12px;color:var(--dim);text-align:right}
+  .cmp-row.sel .cv{color:var(--ink);font-weight:600}
+  .cmp-note{font-size:11.5px;color:var(--dim);line-height:1.6;margin-top:13px;padding-top:13px;border-top:1px solid var(--hair)}
+  .cmp-note b{color:var(--ink);font-weight:600}
+
+  .dealer{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--hair);
+    opacity:0;transform:translateX(8px);transition:opacity .4s ease,transform .4s cubic-bezier(.16,1,.3,1)}
+  .dealer:first-child{padding-top:0}
+  .dealer:last-child{border-bottom:none;padding-bottom:0}
+  .dealer.in{opacity:1;transform:none}
+  .dealer .dn{font-size:13px;color:var(--ink);font-weight:500}
+  .dealer .dmeta{font-size:11px;color:var(--dim);margin-top:3px;display:flex;align-items:center;gap:6px}
+  .dealer .star{color:var(--star)}
+  .dealer .dev{font-size:12.5px;font-weight:600;white-space:nowrap;text-align:right}
+  .dealer .dev .devl{display:block;font-size:9px;color:var(--dimmer);font-weight:400;letter-spacing:.4px;text-transform:uppercase;margin-top:2px}
+  .dev.below{color:var(--up)} .dev.above{color:var(--down)}
+
+  .foot{max-width:660px;margin:22px auto 0;padding:0 24px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)} .foot .mono{color:var(--dim)}
+
+  .fuel-ico{overflow:visible}
+  @media (prefers-reduced-motion:reduce){
+    .card,.dealer{transition:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+    .pt-line .track i,.cmp-row .ctrack i{transition:none}
+  }
+
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>City price detail</h1><div class="sub">LotCheck · Alberta dealer pricing</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card panel" id="panel">
+    <div class="switch" id="switch" role="group" aria-label="Choose city"></div>
+
+    <div class="city-head">
+      <div>
+        <div class="c-name" id="cName">—</div>
+        <div class="c-sub" id="cSub">—</div>
+      </div>
+      <div class="c-head-r">
+        <div class="c-above mono" id="cAbove">—</div>
+        <div class="c-above-l">avg local price vs MSRP</div>
+      </div>
+    </div>
+
+    <div class="snap">
+      <div class="snap-cell"><div class="k">Average new MSRP</div><div class="v mono" id="cMsrp">$0</div></div>
+      <div class="snap-cell"><div class="k">Dealerships</div><div class="v mono" id="cDealers">0</div></div>
+    </div>
+
+    <div class="block">
+      <div class="block-h">Inventory mix by powertrain</div>
+      <div id="ptLines"></div>
+    </div>
+
+    <div class="block">
+      <div class="block-h">Local dealer pricing vs MSRP — by city</div>
+      <div class="cmp-cap">avg $ above MSRP</div>
+      <div id="cmpBars"></div>
+      <div class="cmp-note" id="cmpNote"></div>
+    </div>
+
+    <div class="block">
+      <div class="block-h">Nearest local dealers <span class="block-h-sub" id="dealerCount"></span></div>
+      <div id="dealerList"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — all values are sample data for design preview.</b> In production, each city's local dealers come from
+  LotCheck's real Google reviews &amp; locations pipeline (<span class="mono">get-dealer-sentiment</span>); each dealer's price-vs-MSRP is computed from scraped
+  listings measured against <span class="mono">msrp_catalog</span>; and the per-city figures are aggregated from those same sources. Dealer names shown here are
+  fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  var money=function(x){return "$"+Math.round(x).toLocaleString("en-CA");};
+  var money0=function(x){return "$"+Math.abs(Math.round(x)).toLocaleString("en-CA");};
+
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="#94a3b8" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="#94a3b8" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="#f59e0b" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="#22c55e" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  var FUELCOL={Gas:"#94a3b8",Hybrid:"#8b5cf6",PHEV:"#f59e0b",BEV:"#22c55e"};
+
+  // fuel-icon keyframes (verbatim from app)
+  var kf=document.createElement("style");
+  kf.textContent="@keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}"+
+    "@keyframes lc-pump{0%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}60%{transform:translateY(0)}80%{transform:translateY(-1px)}}"+
+    "@keyframes lc-spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}";
+  document.head.appendChild(kf);
+
+  // ---- theme ----
+  var FORCE_THEME="light";
+  var root=document.documentElement;
+  var theme=FORCE_THEME || (window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark");
+  function applyTheme(){root.setAttribute("data-theme",theme);document.getElementById("themeIco").textContent=theme==="light"?"\u2600":"\u263e";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){theme=theme==="light"?"dark":"light";applyTheme();});
+
+  // ---- city data (fictional dealers; figures are labelled sample data) ----
+  var CITIES=[
+    {key:"edmonton",name:"Edmonton",dealers:129,avgMsrp:46800,above:1180,
+      shares:{Gas:68,Hybrid:16,PHEV:6,BEV:10},
+      list:[
+        {name:"Northgate Motors",rating:4.6,rev:388,dev:-0.4},
+        {name:"Riverbend Auto Group",rating:4.3,rev:215,dev:1.9},
+        {name:"Summit Automotive",rating:3.9,rev:142,dev:3.4},
+        {name:"Aspen Auto Centre",rating:4.7,rev:306,dev:0.7}
+      ]},
+    {key:"calgary",name:"Calgary",dealers:138,avgMsrp:47400,above:980,
+      shares:{Gas:65,Hybrid:17,PHEV:7,BEV:11},
+      list:[
+        {name:"Bowview Motors",rating:4.5,rev:421,dev:-0.9},
+        {name:"Crossroads Auto Group",rating:4.1,rev:268,dev:1.2},
+        {name:"Elbow River Automotive",rating:3.8,rev:176,dev:2.8},
+        {name:"Glenmore Auto Sales",rating:4.6,rev:352,dev:0.3}
+      ]},
+    {key:"fortmac",name:"Fort McMurray",dealers:15,avgMsrp:48900,above:2420,
+      shares:{Gas:79,Hybrid:11,PHEV:4,BEV:6},
+      list:[
+        {name:"Boreal Motors",rating:3.9,rev:88,dev:3.4},
+        {name:"Frontier Auto Group",rating:3.6,rev:64,dev:5.1},
+        {name:"Clearwater Automotive",rating:4.1,rev:112,dev:2.2},
+        {name:"Timberline Auto Sales",rating:3.8,rev:73,dev:4.0}
+      ]},
+    {key:"reddeer",name:"Red Deer",dealers:34,avgMsrp:45200,above:1640,
+      shares:{Gas:74,Hybrid:13,PHEV:5,BEV:8},
+      list:[
+        {name:"Parkland Motors",rating:4.2,rev:198,dev:1.4},
+        {name:"Gasoline Alley Auto Group",rating:3.7,rev:121,dev:3.1},
+        {name:"Highland Automotive",rating:4.4,rev:164,dev:0.6},
+        {name:"Sylvan Auto Centre",rating:4.0,rev:97,dev:2.0}
+      ]}
+  ];
+  var maxCity=CITIES.reduce(function(a,b){return b.above>a.above?b:a;});
+  var minCity=CITIES.reduce(function(a,b){return b.above<a.above?b:a;});
+  var maxAbove=maxCity.above;
+  var byKey={}; CITIES.forEach(function(c){byKey[c.key]=c;});
+
+  var ORDER=["Gas","Hybrid","PHEV","BEV"], LABELS={Gas:"Gas",Hybrid:"Hybrid",PHEV:"Plug-in",BEV:"BEV"};
+
+  // ---- switcher ----
+  var current=null;
+  var swHost=document.getElementById("switch");
+  swHost.innerHTML=CITIES.map(function(c){
+    return '<button class="seg" data-key="'+c.key+'">'+c.name+'</button>';
+  }).join("");
+  swHost.querySelectorAll(".seg").forEach(function(b){
+    b.addEventListener("click",function(){selectCity(b.dataset.key);});
+  });
+
+  function cmpSentence(c){
+    if(c.key===maxCity.key){
+      return "Among these four cities, local dealers here sit <b>furthest from MSRP</b> \u2014 about <b>"+money0(c.above-minCity.above)+"</b> further than "+minCity.name+".";
+    }
+    if(c.key===minCity.key){
+      return "Among these four cities, local dealers here sit <b>closest to MSRP</b> \u2014 about <b>"+money0(maxCity.above-c.above)+"</b> closer than "+maxCity.name+".";
+    }
+    return "Local dealers here sit about <b>"+money0(maxCity.above-c.above)+" closer to MSRP</b> than "+maxCity.name+", and about <b>"+money0(c.above-minCity.above)+" further</b> than "+minCity.name+".";
+  }
+
+  function selectCity(key){
+    var c=byKey[key]; current=c;
+    swHost.querySelectorAll(".seg").forEach(function(b){b.classList.toggle("on",b.dataset.key===key);});
+
+    document.getElementById("cName").textContent=c.name+", AB";
+    document.getElementById("cSub").textContent=c.dealers+" dealership"+(c.dealers===1?"":"s")+" \u00b7 Alberta";
+    document.getElementById("cAbove").textContent="+"+money0(c.above);
+    document.getElementById("cMsrp").textContent=money(c.avgMsrp);
+    document.getElementById("cDealers").textContent=c.dealers.toLocaleString("en-CA");
+
+    // powertrain mix
+    document.getElementById("ptLines").innerHTML=ORDER.map(function(k){
+      var s=c.shares[k];
+      return '<div class="pt-line">'+ICON[k]+'<span class="pl">'+LABELS[k]+'</span>'+
+        '<span class="track"><i data-w="'+s+'" style="background:'+FUELCOL[k]+'"></i></span>'+
+        '<span class="pv mono">'+s+'%</span></div>';
+    }).join("");
+
+    // cross-city comparison
+    document.getElementById("cmpBars").innerHTML=CITIES.map(function(ci){
+      var w=Math.round(ci.above/maxAbove*100);
+      return '<div class="cmp-row'+(ci.key===c.key?" sel":"")+'"><span class="cl">'+ci.name+'</span>'+
+        '<span class="ctrack"><i data-w="'+w+'"></i></span>'+
+        '<span class="cv mono">+'+money0(ci.above)+'</span></div>';
+    }).join("");
+    document.getElementById("cmpNote").innerHTML=cmpSentence(c);
+
+    // dealers
+    document.getElementById("dealerCount").textContent="\u00b7 sample of "+c.list.length+" near "+c.name;
+    var dHost=document.getElementById("dealerList");
+    dHost.innerHTML=c.list.map(function(d){
+      var below=d.dev<0;
+      var devTxt=(d.dev>=0?"+":"\u2212")+Math.abs(d.dev).toFixed(1)+"%";
+      return '<div class="dealer"><div><div class="dn">'+d.name+'</div>'+
+        '<div class="dmeta"><span class="star">\u2605</span> '+d.rating.toFixed(1)+' <span>\u00b7</span> '+d.rev+' reviews</div></div>'+
+        '<div class="dev '+(below?"below":"above")+'">'+devTxt+'<span class="devl">vs MSRP</span></div></div>';
+    }).join("");
+
+    // animate bars + stagger dealers
+    requestAnimationFrame(function(){
+      document.querySelectorAll("#ptLines .track i").forEach(function(i){i.style.width=i.dataset.w+"%";});
+      document.querySelectorAll("#cmpBars .ctrack i").forEach(function(i){i.style.width=i.dataset.w+"%";});
+    });
+    dHost.querySelectorAll(".dealer").forEach(function(r,i){setTimeout(function(){r.classList.add("in");},reduce?0:60+i*70);});
+  }
+
+  selectCity("edmonton");
+  document.querySelectorAll(".card").forEach(function(c,i){setTimeout(function(){c.classList.add("in");},reduce?0:i*70);});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Alberta dealer network map (3D)</title>
+<style>
+  /* ================= THEME TOKENS (calm — verbatim palette from msrp-map-alberta) ================= */
+  :root{
+    --bg:#0b0d11;
+    --panel:rgba(255,255,255,.028);
+    --panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);
+    --hair:rgba(255,255,255,.09);
+    --hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;
+    --cyan-soft:rgba(78,200,224,.14);
+    --cyan-dim:rgba(78,200,224,.42);
+    --ink:#e7ecf3;
+    --dim:#8b95a6;
+    --dimmer:#586172;
+    --gate:#8b7bff;
+    --blur:14px;
+    /* terrain / relief */
+    --plains-a:rgba(78,200,224,.05);
+    --plains-b:rgba(78,200,224,.015);
+    --land-stroke:rgba(255,255,255,.14);
+    --mtn-fill-a:rgba(150,166,190,.24);
+    --mtn-fill-b:rgba(28,36,54,.60);
+    --ridge-hi:rgba(226,236,248,.55);
+    --ridge-lo:rgba(6,9,15,.60);
+    --contour:rgba(255,255,255,.045);
+    --pin-col:#7d8798;
+    --shadow:rgba(0,0,0,.55);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef2f7;
+    --panel:rgba(255,255,255,.7);
+    --panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.96);
+    --hair:rgba(22,32,52,.1);
+    --hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;
+    --cyan-soft:rgba(13,143,176,.1);
+    --cyan-dim:rgba(13,143,176,.34);
+    --ink:#141c28;
+    --dim:#5a6577;
+    --dimmer:#93a0b2;
+    --gate:#6f57e6;
+    --blur:16px;
+    --plains-a:rgba(13,143,176,.08);
+    --plains-b:rgba(13,143,176,.02);
+    --land-stroke:rgba(22,32,52,.22);
+    --mtn-fill-a:rgba(120,138,166,.34);
+    --mtn-fill-b:rgba(96,110,134,.55);
+    --ridge-hi:rgba(255,255,255,.75);
+    --ridge-lo:rgba(70,82,104,.42);
+    --contour:rgba(22,32,52,.06);
+    --pin-col:#6b7688;
+    --shadow:rgba(30,42,66,.30);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;padding-bottom:40px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  /* ---------------- header ---------------- */
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    max-width:1080px;margin:0 auto;padding:30px 30px 6px}
+  .brand{display:flex;align-items:center;gap:14px}
+  /* real LotCheck mark + original keyframes — VERBATIM from src/App.jsx LogoMark */
+  .logo{display:flex;align-items:center;justify-content:center;width:50px;height:44px;
+    border-radius:11px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden}
+  .logo svg{width:42px;height:42px;display:block}
+  @keyframes lc-gate-drive{
+    0%{transform:translate(-95px,-47px);opacity:0;} 10%{opacity:1;} 50%{transform:translate(0,0);}
+    90%{opacity:1;} 100%{transform:translate(95px,47px);opacity:0;}
+  }
+  @keyframes lc-gate-flash{
+    0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}
+  }
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+
+  .brand h1{font-size:19px;font-weight:600;letter-spacing:.1px}
+  .brand .sub{font-size:11px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-top:3px}
+  .badges{display:flex;align-items:center;gap:10px}
+  .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
+    border:1px solid var(--hair);color:var(--dim)}
+  .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
+    background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
+  .theme-toggle:hover{border-color:var(--hair-strong)}
+  .theme-toggle .knob{position:absolute;top:2.5px;left:2.5px;width:23px;height:23px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
+
+  /* ---------------- layout ---------------- */
+  .wrap{max-width:1080px;margin:0 auto;padding:14px 30px 0}
+  .lbl{font-size:10.5px;color:var(--dim);letter-spacing:1.6px;text-transform:uppercase;margin-bottom:2px}
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:18px;backdrop-filter:blur(var(--blur));
+    position:relative;padding:16px 18px 18px;overflow:hidden}
+
+  /* ---------------- 3D scene ---------------- */
+  .scene{position:relative;height:600px;perspective:1500px;perspective-origin:50% 34%;
+    display:flex;align-items:center;justify-content:center;margin-top:6px}
+  @media(max-width:640px){.scene{height:480px}}
+  .world{position:relative;transform-style:preserve-3d;transition:transform .35s ease-out;will-change:transform}
+  .plane{position:relative;width:380px;height:620px;transform-style:preserve-3d;
+    transform:rotateX(78deg) rotateZ(-7deg) translateZ(-40px);
+    transition:transform 1.15s cubic-bezier(.16,1,.3,1)}
+  @media(max-width:640px){.plane{width:300px;height:490px}}
+  .scene.ready .plane{transform:rotateX(55deg) rotateZ(-7deg)}
+  .relief{position:absolute;inset:0;width:100%;height:100%;display:block;
+    filter:drop-shadow(0 26px 30px var(--shadow))}
+  .pins{position:absolute;inset:0;transform-style:preserve-3d}
+
+  .pin{position:absolute;width:0;height:0;transform-style:preserve-3d;pointer-events:none}
+  .pin-shadow{position:absolute;left:0;top:0;transform:translate(-50%,-50%);
+    width:calc(var(--head) * 1.7);height:calc(var(--head) * 1.7);border-radius:50%;
+    background:radial-gradient(closest-side, var(--shadow), transparent);opacity:.7;pointer-events:none}
+  .pin-stand{position:absolute;left:0;bottom:0;transform-origin:bottom center;transform-style:preserve-3d;
+    display:flex;flex-direction:column;align-items:center;pointer-events:auto;cursor:pointer;
+    transform:translateX(-50%) rotateZ(7deg) rotateX(-55deg) scaleY(0);
+    transition:transform .7s cubic-bezier(.16,1,.3,1)}
+  .scene.ready .pin-stand{transform:translateX(-50%) rotateZ(7deg) rotateX(-55deg) scaleY(1)}
+  .pin-head{width:var(--head);height:var(--head);border-radius:50% 50% 50% 50%;
+    background:radial-gradient(circle at 38% 32%, var(--panel-solid), color-mix(in srgb, var(--pin-col) 40%, var(--panel-solid)));
+    border:1.6px solid var(--pin-col);position:relative;
+    box-shadow:0 2px 6px -1px var(--shadow);transition:border-color .2s,background .2s,box-shadow .2s;pointer-events:auto}
+  .pin-head::after{content:"";position:absolute;left:50%;top:50%;width:34%;height:34%;
+    transform:translate(-50%,-50%);border-radius:50%;background:var(--pin-col);opacity:.85;transition:background .2s}
+  .pin-stem{width:2px;height:var(--stem);
+    background:linear-gradient(to bottom, var(--pin-col), color-mix(in srgb, var(--pin-col) 10%, transparent));
+    pointer-events:auto}
+  .pin-label{position:absolute;left:calc(var(--head)/2 + 5px);top:calc(-1 * var(--head) - var(--stem) + 2px);
+    white-space:nowrap;font-size:11px;font-weight:600;color:var(--ink);
+    text-shadow:0 1px 3px var(--shadow),0 0 2px var(--bg);pointer-events:none;letter-spacing:.1px}
+  /* hot (hover) + selected states */
+  .pin.hot{--pin-col:var(--cyan)}
+  .pin.sel{--pin-col:var(--cyan)}
+  .pin.hot .pin-head,.pin.sel .pin-head{box-shadow:0 0 0 4px var(--cyan-soft),0 3px 8px -1px var(--shadow)}
+  .pin.sel .pin-head{border-width:2.2px}
+
+  /* ---------------- overlays ---------------- */
+  .readout{position:absolute;left:16px;top:14px;z-index:5;display:flex;align-items:center;gap:10px;
+    padding:9px 13px;border-radius:12px;background:var(--panel-solid);border:1px solid var(--hair-strong);
+    box-shadow:0 12px 30px -18px rgba(0,0,0,.6);max-width:calc(100% - 32px)}
+  .readout .dotc{width:9px;height:9px;border-radius:50%;background:var(--cyan);flex:none;
+    box-shadow:0 0 8px var(--cyan-dim)}
+  .readout .rn{font-size:14px;font-weight:700;letter-spacing:-.2px}
+  .readout .rc{font-size:11.5px;color:var(--dim)}
+  .readout .rc b{color:var(--ink);font-weight:600}
+  .compass{position:absolute;right:16px;top:14px;z-index:5;width:44px;height:44px;border-radius:50%;
+    border:1px solid var(--hair-strong);background:var(--panel-solid);display:flex;align-items:center;justify-content:center;
+    font-size:9px;color:var(--dim);letter-spacing:.5px}
+  .compass b{color:var(--cyan);font-size:11px}
+  .legend{position:absolute;left:16px;bottom:14px;z-index:5;display:flex;flex-direction:column;gap:7px;
+    padding:10px 13px;border-radius:12px;background:var(--panel-solid);border:1px solid var(--hair);
+    font-size:10.5px;color:var(--dim);letter-spacing:.3px}
+  .legend .lg{display:inline-flex;align-items:center;gap:8px}
+  .legend .sw{width:22px;height:9px;border-radius:3px;flex:none}
+  .legend .pinico{display:inline-flex;align-items:flex-end;gap:4px}
+  .legend .pinico i{display:block;width:7px;border-radius:50%;background:var(--pin-col);opacity:.8}
+
+  .foot{max-width:1080px;margin:20px auto 0;padding:0 30px;font-size:11px;color:var(--dimmer);line-height:1.7}
+  .foot b{color:var(--dim)}
+  .foot .mono{color:var(--dim)}
+
+  @media (prefers-reduced-motion:reduce){
+    .world,.plane,.pin-stand,.pin-head,.pin-head::after,.theme-toggle .knob{transition:none!important}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
+      <!-- REAL LotCheck mark, VERBATIM from src/App.jsx LogoMark (viewBox -95 -45 145 130) -->
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <div><h1>Alberta — dealer network map</h1><div class="sub">LotCheck · 3D terrain view</div></div>
+  </div>
+  <div class="badges">
+    <span class="pill">Demo data</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="lbl">Dealer coverage · relief view (tilt with your cursor)</div>
+    <div class="scene" id="scene">
+      <div class="readout" id="readout">
+        <span class="dotc"></span>
+        <span>
+          <span class="rn" id="rName">Hover a city</span>
+          <span class="rc" id="rCount">33 Alberta markets · pin size = dealer count</span>
+        </span>
+      </div>
+      <div class="compass" title="North is up"><span>N<br><b>▲</b></span></div>
+      <div class="legend" aria-hidden="true">
+        <span class="lg"><span class="sw" style="background:linear-gradient(90deg,var(--mtn-fill-b),var(--mtn-fill-a))"></span> Rockies relief (SW)</span>
+        <span class="lg"><span class="sw" style="background:linear-gradient(90deg,var(--plains-a),var(--plains-b))"></span> plains (E)</span>
+        <span class="lg"><span class="pinico"><i style="height:6px"></i><i style="height:11px"></i><i style="height:16px"></i></span> few → many dealers</span>
+      </div>
+      <div class="world" id="world">
+        <div class="plane" id="plane">
+          <svg class="relief" id="relief" viewBox="0 0 460 760" xmlns="http://www.w3.org/2000/svg"
+               role="img" aria-label="Shaded-relief map of Alberta: jagged Rocky Mountains along the south-west, flat plains to the east"></svg>
+          <div class="pins" id="pins"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  ◆ <b>Demo visualization — city positions are the real geographic coordinates, but dealer counts are sample data for design preview.</b>
+  The provincial border is drawn to scale from geography (straight south at 49°N, east at 110°W, north at 60°N; the west side runs straight down 120°W then follows a
+  jagged Continental-Divide / Rockies line to the south-west corner near 49°N, 114°W). In production each pin is a real dealership geocoded from LotCheck's locations pipeline
+  (<span class="mono">get-dealer-sentiment</span>); terrain shading is stylized, not survey elevation.
+</div>
+
+<script>
+(function(){
+  var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  // ---- theme ----
+  var root=document.documentElement;
+  var theme= window.matchMedia("(prefers-color-scheme:light)").matches ? "light" : "dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);document.getElementById("themeIco").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("themeToggle").addEventListener("click",function(){
+    theme=theme==="light"?"dark":"light";applyTheme();
+  });
+
+  // ---- cities (name, lat, lon, approx dealership count) — VERBATIM from msrp-map-alberta ----
+  var CITIES=[
+    ["Calgary",51.05,-114.07,138],["Edmonton",53.55,-113.49,129],["Red Deer",52.27,-113.81,34],
+    ["Lethbridge",49.69,-112.84,27],["Medicine Hat",50.04,-110.68,19],["Grande Prairie",55.17,-118.80,24],
+    ["Fort McMurray",56.73,-111.38,15],["Airdrie",51.29,-114.01,17],["Spruce Grove",53.54,-113.91,11],
+    ["Sherwood Park",53.54,-113.30,14],["St. Albert",53.63,-113.63,12],["Leduc",53.26,-113.55,9],
+    ["Camrose",53.02,-112.83,6],["Lloydminster",53.28,-110.00,8],["Cochrane",51.19,-114.47,7],
+    ["Okotoks",50.72,-113.98,6],["Wetaskiwin",52.97,-113.37,5],["Brooks",50.56,-111.90,3],
+    ["Cold Lake",54.46,-110.18,3],["Canmore",51.09,-115.36,3],["Hinton",53.40,-117.57,2],
+    ["Whitecourt",54.14,-115.69,3],["Peace River",56.23,-117.29,3],["High River",50.58,-113.87,3],
+    ["Fort Saskatchewan",53.71,-113.21,5],["Lacombe",52.47,-113.74,4],["Sylvan Lake",52.31,-114.10,3],
+    ["Drumheller",51.46,-112.72,2],["Taber",49.79,-112.15,2],["Bonnyville",54.27,-110.74,3],
+    ["Slave Lake",55.28,-114.77,2],["Rocky Mountain House",52.37,-114.92,2],["Strathmore",51.04,-113.40,3]
+  ].map(function(c,i){return {i:i,name:c[0],lat:c[1],lon:c[2],dealers:c[3]};});
+
+  // ---- projection: lon -120..-110 -> x, lat 60..49 -> y ----
+  var PW=460, PH=760, PAD=26;
+  function projX(lon){return PAD + ((lon+120)/10)*(PW-2*PAD);}
+  function projY(lat){return PAD + ((60-lat)/11)*(PH-2*PAD);}
+
+  // deterministic PRNG (mulberry32) so the jagged Rockies border is stable
+  function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+  // ---- Continental Divide / Rockies: jagged line from SW corner (49N,114.03W) up to where the
+  //      straight 120W border begins (~53.8N,120W). Perpendicular jitter, zeroed at both ends. ----
+  var SW=[projX(-114.03),projY(49)];         // south-west corner (on 49N)
+  var DIV=[projX(-120),projY(53.8)];         // divide meets 120W
+  function buildRockies(seed,amp,pull){
+    var rng=mulberry(seed);
+    var dx=DIV[0]-SW[0], dy=DIV[1]-SW[1], len=Math.hypot(dx,dy);
+    var ux=dx/len, uy=dy/len;                // along
+    var px=-uy, py=ux;                        // perpendicular (points toward the plains/east side)
+    var N=34, pts=[];
+    for(var k=0;k<=N;k++){
+      var t=k/N;
+      var bx=SW[0]+dx*t, by=SW[1]+dy*t;
+      var env=Math.sin(Math.PI*t);            // 0 at the two corners, 1 mid
+      // layered noise -> ridged peaks
+      var n=(rng()-0.5)*2 + (rng()-0.5)*1.1 + Math.sin(t*Math.PI*7+seed)*0.5;
+      var off=n*amp*env + pull*env;           // pull shifts a ridge inward (east)
+      pts.push([bx+px*off, by+py*off]);
+    }
+    return pts;
+  }
+  var border=buildRockies(7, 15, 0);          // the actual provincial border line
+
+  function poly(pts){return pts.map(function(p){return p[0].toFixed(1)+" "+p[1].toFixed(1);}).join(" L ");}
+
+  // ---- build the relief SVG ----
+  function renderRelief(){
+    var nw=[projX(-120),projY(60)], ne=[projX(-110),projY(60)],
+        se=[projX(-110),projY(49)];
+    // province outline: NW -> NE -> SE -> SW corner -> jagged Rockies up to DIV -> straight up 120W -> close
+    var d="M "+nw[0].toFixed(1)+" "+nw[1].toFixed(1)+
+          " L "+ne[0].toFixed(1)+" "+ne[1].toFixed(1)+
+          " L "+se[0].toFixed(1)+" "+se[1].toFixed(1)+
+          " L "+border[0][0].toFixed(1)+" "+border[0][1].toFixed(1)+
+          " L "+poly(border)+
+          " L "+nw[0].toFixed(1)+" "+nw[1].toFixed(1)+" Z";
+
+    // mountain band = border line + an inner edge pulled east, as a filled ribbon
+    var inner=buildRockies(7, 12, 46).slice().reverse();   // pulled ~46px into the plains
+    var bandD="M "+poly(border)+" L "+poly(inner)+" Z";
+
+    var svg=[];
+    svg.push('<defs>');
+    svg.push('<clipPath id="ab"><path d="'+d+'"/></clipPath>');
+    // plains gradient (east lighter/flatter) — light comes from NW
+    svg.push('<linearGradient id="gPlains" x1="0" y1="0" x2="1" y2="0.35"><stop offset="0" stop-color="var(--plains-a)"/><stop offset="1" stop-color="var(--plains-b)"/></linearGradient>');
+    // mountain fill: shadow (SE) -> highlight (NW)
+    svg.push('<linearGradient id="gMtn" x1="1" y1="1" x2="0" y2="0"><stop offset="0" stop-color="var(--mtn-fill-a)"/><stop offset="0.55" stop-color="var(--mtn-fill-b)"/><stop offset="1" stop-color="var(--mtn-fill-b)"/></linearGradient>');
+    svg.push('</defs>');
+
+    // group clipped to the province
+    svg.push('<g clip-path="url(#ab)">');
+    // base land
+    svg.push('<path d="'+d+'" fill="url(#gPlains)"/>');
+
+    // faint plains contour lines (terrain feel to the east)
+    for(var c=0;c<7;c++){
+      var yy=projY(58-c*1.35);
+      var wob=(c%2? -8:8);
+      svg.push('<path d="M '+projX(-116)+' '+yy.toFixed(1)+
+        ' Q '+projX(-113)+' '+(yy+wob).toFixed(1)+' '+projX(-110)+' '+(yy-wob*0.5).toFixed(1)+
+        '" fill="none" stroke="var(--contour)" stroke-width="1"/>');
+    }
+
+    // mountain ribbon fill
+    svg.push('<path d="'+bandD+'" fill="url(#gMtn)"/>');
+
+    // ridge lines: several parallel jagged crests, pulled progressively east, alternating hi/lo
+    for(var r=0;r<7;r++){
+      var ridge=buildRockies(7+r*13, 12-r*0.7, r*7.5);
+      var rd="M "+poly(ridge);
+      var op=(0.62-r*0.07).toFixed(2);
+      // shadow line (offset SE = down/right a touch)
+      var shadow=ridge.map(function(p){return (p[0]+2.2).toFixed(1)+" "+(p[1]+2.6).toFixed(1);}).join(" L ");
+      svg.push('<path d="M '+shadow+'" fill="none" stroke="var(--ridge-lo)" stroke-width="'+(2.2-r*0.15).toFixed(1)+'" stroke-opacity="'+op+'" stroke-linecap="round" stroke-linejoin="round"/>');
+      // highlight crest (NW-facing)
+      svg.push('<path d="'+rd+'" fill="none" stroke="var(--ridge-hi)" stroke-width="'+(1.7-r*0.12).toFixed(1)+'" stroke-opacity="'+op+'" stroke-linecap="round" stroke-linejoin="round"/>');
+    }
+
+    // little snowcap highlights on the highest crest vertices (local minima in y = highest on screen)
+    for(var v=2;v<border.length-2;v+=3){
+      var p0=border[v-1], p1=border[v], p2=border[v+1];
+      if(p1[1]<p0[1] && p1[1]<p2[1]){
+        svg.push('<circle cx="'+p1[0].toFixed(1)+'" cy="'+p1[1].toFixed(1)+'" r="1.9" fill="var(--ridge-hi)" fill-opacity="0.8"/>');
+      }
+    }
+    svg.push('</g>');
+
+    // crisp province edge on top (unclipped)
+    svg.push('<path d="'+d+'" fill="none" stroke="var(--land-stroke)" stroke-width="1.6" stroke-linejoin="round"/>');
+
+    // corner / border annotations
+    svg.push('<text x="'+((nw[0]+ne[0])/2).toFixed(0)+'" y="'+(nw[1]-8).toFixed(0)+'" fill="var(--dimmer)" font-size="10" text-anchor="middle" font-family="monospace" opacity="0.7">60°N</text>');
+    svg.push('<text x="'+((border[0][0]+se[0])/2).toFixed(0)+'" y="'+(se[1]+16).toFixed(0)+'" fill="var(--dimmer)" font-size="10" text-anchor="middle" font-family="monospace" opacity="0.7">49°N · U.S. border</text>');
+    svg.push('<text x="'+(ne[0]+6).toFixed(0)+'" y="'+((ne[1]+se[1])/2).toFixed(0)+'" fill="var(--dimmer)" font-size="10" text-anchor="start" font-family="monospace" opacity="0.6" transform="rotate(90 '+(ne[0]+6).toFixed(0)+' '+((ne[1]+se[1])/2).toFixed(0)+')">110°W</text>');
+
+    document.getElementById("relief").innerHTML=svg.join("");
+  }
+
+  // ---- build pins ----
+  var pinsHost=document.getElementById("pins");
+  function renderPins(){
+    // stagger order: biggest cities pop first
+    var rank={};
+    CITIES.slice().sort(function(a,b){return b.dealers-a.dealers;}).forEach(function(c,idx){rank[c.i]=idx;});
+    var frag=document.createDocumentFragment();
+    CITIES.forEach(function(c){
+      var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
+      var head=Math.min(30, 9+Math.sqrt(c.dealers)*1.9);
+      var stem=Math.round(head*1.35+10);
+      var label=c.dealers>=15;
+      var el=document.createElement("div");
+      el.className="pin";
+      el.dataset.i=c.i;
+      el.style.left=x.toFixed(3)+"%";
+      el.style.top=y.toFixed(3)+"%";
+      el.style.setProperty("--head",head.toFixed(1)+"px");
+      el.style.setProperty("--stem",stem+"px");
+      var st=el.appendChild(document.createElement("div")); st.className="pin-stand";
+      st.style.transitionDelay=(reduce?0:(rank[c.i]*34+120))+"ms";
+      st.innerHTML='<div class="pin-head"></div><div class="pin-stem"></div>'+
+        (label?'<div class="pin-label">'+c.name+'</div>':'');
+      var sh=el.appendChild(document.createElement("div")); sh.className="pin-shadow";
+      frag.appendChild(el);
+    });
+    pinsHost.innerHTML="";
+    pinsHost.appendChild(frag);
+  }
+
+  // ---- interaction: hover readout + click selection ----
+  var rName=document.getElementById("rName"), rCount=document.getElementById("rCount");
+  var selected=null;
+  function setReadout(c,isSel){
+    if(!c){rName.textContent="Hover a city";rCount.textContent="33 Alberta markets · pin size = dealer count";return;}
+    rName.textContent=c.name+", AB";
+    rCount.innerHTML='<b>'+c.dealers+'</b> dealership'+(c.dealers===1?'':'s')+(isSel?' · selected':'');
+  }
+  function hotClass(pinEl,on){pinEl.classList.toggle("hot",on);}
+  function select(i){
+    var c=CITIES[i];
+    pinsHost.querySelectorAll(".pin").forEach(function(p){p.classList.toggle("sel",+p.dataset.i===i);});
+    selected=c; setReadout(c,true);
+  }
+  pinsHost.addEventListener("mouseover",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    hotClass(p,true); setReadout(CITIES[+p.dataset.i], +p.dataset.i===(selected&&selected.i));
+  });
+  pinsHost.addEventListener("mouseout",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    hotClass(p,false);
+    if(selected) setReadout(selected,true); else setReadout(null);
+  });
+  pinsHost.addEventListener("click",function(e){
+    var p=e.target.closest(".pin"); if(!p)return;
+    select(+p.dataset.i);
+  });
+
+  // ---- pointer parallax: tilt the world a few degrees toward the cursor ----
+  var scene=document.getElementById("scene"), world=document.getElementById("world");
+  if(!reduce){
+    var tx=0,ty=0,cx=0,cy=0,raf=null;
+    scene.addEventListener("pointermove",function(e){
+      var r=scene.getBoundingClientRect();
+      tx=((e.clientX-r.left)/r.width-0.5);
+      ty=((e.clientY-r.top)/r.height-0.5);
+      if(!raf)raf=requestAnimationFrame(loop);
+    });
+    scene.addEventListener("pointerleave",function(){tx=0;ty=0;if(!raf)raf=requestAnimationFrame(loop);});
+    function loop(){
+      cx+=(tx-cx)*0.12; cy+=(ty-cy)*0.12;
+      world.style.transform="rotateX("+(-cy*7).toFixed(2)+"deg) rotateY("+(cx*9).toFixed(2)+"deg)";
+      if(Math.abs(tx-cx)>0.001||Math.abs(ty-cy)>0.001){raf=requestAnimationFrame(loop);}else{raf=null;}
+    }
+  }
+
+  // ---- init ----
+  renderRelief();
+  renderPins();
+  setReadout(null);
+  // trigger the tilt-in + pin-rise animation
+  requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
+})();
+</script>
+</body>
+</html>

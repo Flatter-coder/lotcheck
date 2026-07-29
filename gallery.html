@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — MSRP Index · 25 designs</title>
+<style>
+  :root{--bg:#07090d;--panel:#0f131b;--hair:rgba(255,255,255,.09);--cyan:#22e3ff;--white:#eaf3ff;--dim:#8794aa;--dimmer:#525d72;--accent:#22e3ff}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--white);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;height:100vh;display:grid;grid-template-columns:288px 1fr;overflow:hidden}
+  aside{border-right:1px solid var(--hair);background:var(--panel);height:100vh;overflow-y:auto;padding:16px 0}
+  .brand{padding:4px 18px 14px;border-bottom:1px solid var(--hair);margin-bottom:8px}
+  .brand h1{font-size:14px;font-weight:600;letter-spacing:.3px}
+  .brand p{font-size:11.5px;color:var(--dim);margin-top:3px}
+  .grp{font-size:10.5px;color:var(--dimmer);text-transform:uppercase;letter-spacing:1.4px;padding:12px 18px 5px;font-weight:600}
+  a.item{display:flex;gap:10px;align-items:baseline;padding:8px 18px;cursor:pointer;text-decoration:none;color:var(--white);border-left:2px solid transparent;transition:.12s}
+  a.item:hover{background:rgba(255,255,255,.03)}
+  a.item.on{background:rgba(34,227,255,.09);border-left-color:var(--cyan)}
+  a.item .n{font-size:11px;color:var(--dimmer);min-width:20px;font-variant-numeric:tabular-nums}
+  a.item.on .n{color:var(--cyan)}
+  a.item .t{font-size:12.5px;line-height:1.35}
+  a.item .t small{display:block;color:var(--dim);font-size:11px}
+  main{display:flex;flex-direction:column;height:100vh}
+  .bar{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--hair)}
+  .bar .now{font-size:13px;font-weight:600}
+  .bar .now small{color:var(--dim);font-weight:400;margin-left:8px}
+  .bar .sp{flex:1}
+  .bar button,.bar a.open{font:inherit;font-size:12px;color:var(--white);background:transparent;border:1px solid var(--hair);border-radius:8px;padding:6px 12px;cursor:pointer;text-decoration:none;transition:.12s}
+  .bar button:hover,.bar a.open:hover{border-color:var(--cyan);color:var(--cyan)}
+  .frame{flex:1;background:#000}
+  iframe{width:100%;height:100%;border:0;display:block;background:#07090d}
+  .count{font-size:11px;color:var(--dimmer)}
+</style>
+</head>
+<body>
+<aside id="side"></aside>
+<main>
+  <div class="bar">
+    <div class="now" id="now">—</div>
+    <div class="sp"></div>
+    <span class="count" id="count"></span>
+    <button id="prev">← Prev</button>
+    <button id="next">Next →</button>
+    <a class="open" id="open" target="_blank">Open full ↗</a>
+  </div>
+  <div class="frame"><iframe id="view" title="preview"></iframe></div>
+</main>
+<script>
+  var ITEMS=[
+    {g:"Flagship",n:"★",f:"msrp-index-preview-v5.html",t:"v5 — your real logo + powertrain",d:"The approved calm base"},
+    {g:"Layouts",n:"01",f:"msrp-v5-01.html",t:"Full-bleed HUD",d:"Chart backdrop + floating panels"},
+    {g:"Layouts",n:"02",f:"msrp-v5-02.html",t:"50/50 split",d:"Chart left, data right"},
+    {g:"Layouts",n:"03",f:"msrp-v5-03.html",t:"Watchlist rail",d:"Left leaderboard + chart"},
+    {g:"Layouts",n:"04",f:"msrp-v5-04.html",t:"Editorial",d:"Single-column report"},
+    {g:"Density",n:"05",f:"msrp-v5-05.html",t:"Bloomberg wall",d:"Dense tiled panels"},
+    {g:"Density",n:"06",f:"msrp-v5-06.html",t:"Ticker terminal",d:"Scrolling rows + grid"},
+    {g:"Density",n:"07",f:"msrp-v5-07.html",t:"⌘K HUD",d:"Command-palette style"},
+    {g:"Density",n:"08",f:"msrp-v5-08.html",t:"Minimalist",d:"Single-focus, spacious"},
+    {g:"Chart types",n:"09",f:"msrp-v5-09.html",t:"Candlestick",d:"Daily OHLC ranges"},
+    {g:"Chart types",n:"10",f:"msrp-v5-10.html",t:"Multi-line",d:"One line per powertrain"},
+    {g:"Chart types",n:"11",f:"msrp-v5-11.html",t:"Radial gauges",d:"Donut ring cluster"},
+    {g:"Chart types",n:"12",f:"msrp-v5-12.html",t:"Sparkline grid",d:"Mini-charts + bars"},
+    {g:"Dark palettes",n:"13",f:"msrp-v5-13.html",t:"Amber CRT",d:"Warm terminal"},
+    {g:"Dark palettes",n:"14",f:"msrp-v5-14.html",t:"Green phosphor",d:"Classic terminal"},
+    {g:"Dark palettes",n:"15",f:"msrp-v5-15.html",t:"Violet",d:"Calm synthwave"},
+    {g:"Dark palettes",n:"16",f:"msrp-v5-16.html",t:"Ice-blue mono",d:"Minimal premium"},
+    {g:"Light palettes",n:"17",f:"msrp-v5-17.html",t:"Warm white",d:"Deep-cyan accent"},
+    {g:"Light palettes",n:"18",f:"msrp-v5-18.html",t:"Cool editorial",d:"Navy on blue-grey"},
+    {g:"Light palettes",n:"19",f:"msrp-v5-19.html",t:"High-contrast mono",d:"Crisp black/white"},
+    {g:"Light palettes",n:"20",f:"msrp-v5-20.html",t:"Paper sepia",d:"Warm premium"},
+    {g:"Formats",n:"21",f:"msrp-v5-21.html",t:"Mobile",d:"Phone portrait"},
+    {g:"Formats",n:"22",f:"msrp-v5-22.html",t:"Ultrawide",d:"Command center"},
+    {g:"Formats",n:"23",f:"msrp-v5-23.html",t:"TV / kiosk",d:"Glanceable big numbers"},
+    {g:"Formats",n:"24",f:"msrp-v5-24.html",t:"Embeddable widget",d:"Partner-site card"}
+  ];
+  var cur=0, side=document.getElementById("side"), view=document.getElementById("view");
+  document.getElementById("count").textContent=ITEMS.length+" designs";
+  var html='<div class="brand"><h1>MSRP Index — 25 designs</h1><p>Same real logo + powertrain in every one</p></div>';
+  var lastG=null;
+  ITEMS.forEach(function(it,i){ if(it.g!==lastG){html+='<div class="grp">'+it.g+'</div>';lastG=it.g;}
+    html+='<a class="item" data-i="'+i+'"><span class="n">'+it.n+'</span><span class="t">'+it.t+'<small>'+it.d+'</small></span></a>';});
+  side.innerHTML=html;
+  function show(i){cur=(i+ITEMS.length)%ITEMS.length; var it=ITEMS[cur];
+    view.src=it.f; document.getElementById("now").innerHTML=it.t+' <small>'+it.g+' · '+it.d+'</small>';
+    document.getElementById("open").href=it.f;
+    document.querySelectorAll("a.item").forEach(function(a){a.classList.toggle("on", +a.dataset.i===cur);});
+    var on=document.querySelector("a.item.on"); if(on)on.scrollIntoView({block:"nearest"});}
+  side.addEventListener("click",function(e){var a=e.target.closest("a.item"); if(a)show(+a.dataset.i);});
+  document.getElementById("prev").onclick=function(){show(cur-1);};
+  document.getElementById("next").onclick=function(){show(cur+1);};
+  document.addEventListener("keydown",function(e){if(e.key==="ArrowRight")show(cur+1);if(e.key==="ArrowLeft")show(cur-1);});
+  show(0);
+</script>
+</body>
+</html>

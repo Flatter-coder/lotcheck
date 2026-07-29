@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — City panel (dashboard tile)</title>
+<style>
+  :root{
+    --bg:#0b0d11;--panel:rgba(255,255,255,.028);--panel-2:rgba(255,255,255,.045);
+    --panel-solid:rgba(16,19,24,.94);--hair:rgba(255,255,255,.09);--hair-strong:rgba(255,255,255,.14);
+    --cyan:#4ec8e0;--cyan-soft:rgba(78,200,224,.14);--cyan-dim:rgba(78,200,224,.42);
+    --ink:#e7ecf3;--dim:#8b95a6;--dimmer:#586172;--star:#c9a24a;--blur:14px;
+    --f-gas:#94a3b8;--f-hybrid:#8b5cf6;--f-phev:#f59e0b;--f-bev:#22c55e;
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f7fa;--panel:rgba(255,255,255,.7);--panel-2:rgba(255,255,255,.9);
+    --panel-solid:rgba(253,254,255,.95);--hair:rgba(22,32,52,.1);--hair-strong:rgba(22,32,52,.16);
+    --cyan:#0d8fb0;--cyan-soft:rgba(13,143,176,.1);--cyan-dim:rgba(13,143,176,.34);
+    --ink:#141c28;--dim:#5a6577;--dimmer:#93a0b2;--star:#b8860b;--blur:16px;
+    --f-gas:#64748b;--f-hybrid:#7c4ddb;--f-phev:#d98a08;--f-bev:#16a34a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{transition:background .5s ease,color .5s ease}
+  body{background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    -webkit-font-smoothing:antialiased}
+  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
+
+  .tile{width:360px;height:300px;background:var(--panel);border:1px solid var(--hair);
+    border-radius:16px;backdrop-filter:blur(var(--blur));padding:12px 15px 11px;position:relative;
+    display:flex;flex-direction:column;overflow:hidden}
+
+  .th{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .logo{display:flex;align-items:center;justify-content:center;width:26px;height:23px;
+    border-radius:7px;background:var(--panel-2);border:1px solid var(--hair);overflow:hidden;flex:none}
+  .logo svg{width:22px;height:22px;display:block}
+  .wm{font-size:10px;font-weight:600;letter-spacing:.3px}
+  .chip{margin-left:auto;font-size:7.5px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;
+    padding:3px 7px;border-radius:20px;border:1px solid var(--hair);color:var(--dim)}
+  .tg{width:32px;height:18px;border-radius:20px;border:1px solid var(--hair);background:var(--panel-2);
+    cursor:pointer;flex:none;position:relative;transition:border-color .3s}
+  .tg .knob{position:absolute;top:1.5px;left:1.5px;width:13px;height:13px;border-radius:50%;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;font-size:7px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
+  :root[data-theme="light"] .tg .knob{transform:translateX(14px)}
+
+  .row1{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+  .city{font-size:20px;font-weight:700;letter-spacing:-.4px;line-height:1}
+  .dealers{font-size:10px;color:var(--dim);margin-top:4px}
+  .avg{text-align:right}
+  .avg .v{font-size:15px;font-weight:700;letter-spacing:-.3px}
+  .avg .l{font-size:8px;color:var(--dim);letter-spacing:.5px;text-transform:uppercase;margin-top:2px}
+
+  .compare{margin-top:7px;border:1px solid var(--cyan-dim);background:var(--cyan-soft);border-radius:11px;padding:8px 12px}
+  .compare .amt{font-size:18px;font-weight:800;letter-spacing:-.5px;color:var(--cyan);line-height:1}
+  .compare .txt{font-size:10.5px;color:var(--ink);line-height:1.35;margin-top:4px}
+  .compare .txt b{font-weight:600}
+
+  .mix{display:flex;justify-content:space-between;gap:6px;margin-top:7px}
+  .mx{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+    border:1px solid var(--hair);border-radius:9px;background:var(--panel-2);padding:6px 4px}
+  .mx svg{width:15px;height:15px}
+  .mx .p{font-size:11px;font-weight:600}
+  .mx .l{font-size:7.5px;color:var(--dimmer);letter-spacing:.2px}
+
+  .topd{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:10.5px}
+  .topd .lbl{color:var(--dimmer);letter-spacing:.4px;text-transform:uppercase;font-size:8px;margin-right:5px}
+  .topd .dn{color:var(--ink);font-weight:500}
+  .topd .dr{color:var(--dim);white-space:nowrap}
+  .topd .dr .star{color:var(--star)}
+
+  .switch{display:flex;gap:4px;margin-top:auto;padding-top:7px}
+  .switch button{flex:1;font:inherit;font-size:9px;color:var(--dim);background:transparent;
+    border:1px solid var(--hair);border-radius:7px;padding:5px 2px;cursor:pointer;transition:.15s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .switch button:hover{border-color:var(--hair-strong);color:var(--ink)}
+  .switch button.on{color:var(--cyan);border-color:var(--cyan-dim);background:var(--cyan-soft)}
+
+  .foot{font-size:7.5px;color:var(--dimmer);line-height:1.4;margin-top:7px}
+  .foot .mono{color:var(--dim)}
+
+  .fuel-ico{overflow:visible}
+  @keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}
+  @keyframes lc-pump{0%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}60%{transform:translateY(0)}80%{transform:translateY(-1px)}}
+  @keyframes lc-spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}
+  @keyframes lc-gate-drive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
+  @keyframes lc-gate-flash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
+  .lc-gate-car{animation:lc-gate-drive 4s linear infinite}
+  .lc-gate-window{animation:lc-gate-flash 4s linear infinite}
+  @media (prefers-reduced-motion:reduce){
+    .fuel-ico{animation:none!important;opacity:1;transform:none}
+    .lc-gate-car,.lc-gate-window{animation:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="tile">
+  <div class="th">
+    <div class="logo" aria-hidden="true" title="LotCheck">
+      <svg viewBox="-95 -45 145 130" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
+        <g class="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+    <span class="wm">LotCheck · City</span>
+    <span class="chip">Demo</span>
+    <button class="tg" id="tg" aria-label="Toggle theme" title="Toggle theme"><span class="knob"><span id="ti">☾</span></span></button>
+  </div>
+
+  <div class="row1">
+    <div>
+      <div class="city" id="city">Edmonton</div>
+      <div class="dealers" id="dealers">—</div>
+    </div>
+    <div class="avg"><div class="v mono" id="avg">$0</div><div class="l">Avg MSRP</div></div>
+  </div>
+
+  <div class="compare">
+    <div class="amt mono" id="cmpAmt">$0</div>
+    <div class="txt" id="cmpTxt">—</div>
+  </div>
+
+  <div class="mix" id="mix"></div>
+
+  <div class="topd">
+    <div><span class="lbl">Top dealer</span><span class="dn" id="topName">—</span></div>
+    <div class="dr" id="topRate">—</div>
+  </div>
+
+  <div class="switch" id="switch"></div>
+
+  <div class="foot">
+    Sample data · reviews via <span class="mono">get-dealer-sentiment</span>, price-vs-MSRP scraped vs <span class="mono">msrp_catalog</span> · fictional dealers.
+  </div>
+</div>
+
+<script>
+(function(){
+  var money=function(x){return "$"+Math.round(x).toLocaleString("en-CA");};
+
+  var ICON={
+    Gas:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-pump 2.2s ease-in-out infinite"><path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke="var(--f-gas)" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke="var(--f-gas)" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke="var(--f-gas)" stroke-width="1.5"/></svg>',
+    Hybrid:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-spin 4s linear infinite"><path d="M12 2a10 10 0 0110 10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke="var(--f-hybrid)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    PHEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 2s ease-in-out infinite"><path d="M7 2v4M11 2v4" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke="var(--f-phev)" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke="var(--f-phev)" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke="var(--f-phev)" stroke-width="1.8"/></svg>',
+    BEV:'<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" style="animation:lc-charge 1.6s ease-in-out infinite"><rect x="2" y="6" width="18" height="13" rx="2" stroke="var(--f-bev)" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke="var(--f-bev)" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke="var(--f-bev)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  var CITIES={
+    "Edmonton":{name:"Edmonton",dealers:129,avg:46800,dev:2.1,mix:{Gas:68,Hybrid:16,PHEV:6,BEV:10},top:{n:"Northgate Auto Group",r:4.6}},
+    "Calgary":{name:"Calgary",dealers:138,avg:47600,dev:2.6,mix:{Gas:66,Hybrid:17,PHEV:6,BEV:11},top:{n:"Bowview Motors",r:4.7}},
+    "Fort McMurray":{name:"Fort McMurray",dealers:15,avg:49200,dev:4.6,mix:{Gas:80,Hybrid:11,PHEV:3,BEV:6},top:{n:"Boreal Motor Co.",r:4.1}},
+    "Red Deer":{name:"Red Deer",dealers:34,avg:45300,dev:3.1,mix:{Gas:74,Hybrid:14,PHEV:5,BEV:7},top:{n:"Parkland Auto Centre",r:4.4}}
+  };
+  var ORDER=["Edmonton","Calgary","Fort McMurray","Red Deer"];
+  var SHORT={"Edmonton":"Edm","Calgary":"Calg","Fort McMurray":"Ft McM","Red Deer":"Red Deer"};
+  function gap(k){return Math.round(CITIES[k].avg*CITIES[k].dev/100);}
+  function comparison(k){
+    var peers=ORDER.filter(function(p){return p!==k;});
+    peers.sort(function(a,b){return Math.abs(gap(b)-gap(k))-Math.abs(gap(a)-gap(k));});
+    var ref=peers[0], delta=gap(ref)-gap(k);
+    return {amt:money(Math.abs(delta)), closer:delta>=0, peer:ref};
+  }
+
+  var root=document.documentElement;
+  var theme=window.matchMedia("(prefers-color-scheme:light)").matches?"light":"dark";
+  function applyTheme(){root.setAttribute("data-theme",theme);document.getElementById("ti").textContent=theme==="light"?"☀":"☾";}
+  applyTheme();
+  document.getElementById("tg").addEventListener("click",function(){theme=theme==="light"?"dark":"light";applyTheme();});
+
+  var order=["Gas","Hybrid","PHEV","BEV"];
+  function render(k){
+    var c=CITIES[k];
+    document.getElementById("city").textContent=c.name;
+    document.getElementById("dealers").textContent=c.dealers+" dealerships, AB";
+    document.getElementById("avg").textContent=money(c.avg);
+    var cmp=comparison(k);
+    document.getElementById("cmpAmt").textContent=cmp.amt;
+    document.getElementById("cmpTxt").innerHTML='local pricing <b>'+(cmp.closer?"closer to":"further from")+' MSRP</b> than '+cmp.peer+'';
+    document.getElementById("mix").innerHTML=order.map(function(f){
+      return '<div class="mx">'+ICON[f]+'<span class="p mono">'+c.mix[f]+'%</span><span class="l">'+f+'</span></div>';
+    }).join("");
+    document.getElementById("topName").textContent=c.top.n;
+    document.getElementById("topRate").innerHTML='<span class="star">★</span> '+c.top.r.toFixed(1);
+    document.querySelectorAll("#switch button").forEach(function(b){b.classList.toggle("on",b.dataset.k===k);});
+  }
+
+  var sw=document.getElementById("switch");
+  sw.innerHTML=ORDER.map(function(k){return '<button data-k="'+k+'" title="'+k+'">'+SHORT[k]+'</button>';}).join("");
+  sw.querySelectorAll("button").forEach(function(b){b.addEventListener("click",function(){render(b.dataset.k);});});
+
+  render("Edmonton");
+})();
+</script>
+</body>
+</html>
