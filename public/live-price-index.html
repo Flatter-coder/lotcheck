@@ -379,9 +379,50 @@
   .back-btn svg{width:17px;height:17px;transition:transform .2s}
   .back-btn:hover svg{transform:translateX(-3px)}
   @media (prefers-reduced-motion:reduce){.back-btn,.back-btn svg{transition:none}}
+  /* persistent site nav (matches the welcome page) — themed with page vars */
+  .sitenav{position:sticky;top:0;z-index:300;background:var(--panel-solid);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
+  .sitenav-in{max-width:1120px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:24px}
+  .sn-logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:1.02rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none;flex:none}
+  .sn-logo svg{display:block}
+  .sn-links{display:flex;gap:22px;margin-left:auto;align-items:center}
+  .sn-links a{position:relative;font-size:.9rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
+  .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left;transition:transform .2s}
+  .sn-links a:hover{color:var(--ink)}
+  .sn-links a:hover::after{transform:scaleX(1)}
+  .sn-links a.sn-live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
+  .sn-links a.sn-live::after{transform:scaleX(1)}
+  .sn-dot{width:8px;height:8px;border-radius:50%;background:var(--up);flex:none;animation:pulse 2.4s ease-in-out infinite}
+  .sn-cta{flex:none;display:flex;align-items:center;gap:12px}
+  .sn-analyze{padding:9px 18px;border-radius:999px;background:var(--ink);color:var(--bg);font-weight:700;font-size:.86rem;text-decoration:none;white-space:nowrap;transition:transform .2s,opacity .2s}
+  .sn-analyze:hover{transform:translateY(-1px);opacity:.92}
+  @media(max-width:880px){.sn-links{display:none}.sitenav-in{gap:10px;padding:10px 14px}.sn-cta{margin-left:auto;gap:8px}.sn-analyze{padding:8px 13px;font-size:.8rem}}
+  @media (prefers-reduced-motion:reduce){.sn-dot{animation:none}.sn-links a::after,.sn-analyze{transition:none}}
 </style>
 </head>
 <body>
+<nav class="sitenav" aria-label="Main">
+  <div class="sitenav-in">
+    <a class="sn-logo" href="/" aria-label="LotCheck home">
+      <svg width="42" height="24" viewBox="-145 -44 320 182" aria-hidden="true"><polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g class="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g></svg>
+      LotCheck
+    </a>
+    <div class="sn-links">
+      <a class="sn-live" href="/live-price-index" aria-current="page"><span class="sn-dot" aria-hidden="true"></span>MSRP Price Index</a>
+      <a href="/#how">How it works</a>
+      <a href="/#pipeline">10-point lane</a>
+      <a href="/#report">Sample report</a>
+      <a href="/#portal">Dealer portal</a>
+      <a href="/#story">Our story</a>
+    </div>
+    <div class="sn-cta">
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+        <span class="knob"><span id="themeIco">☾</span></span>
+      </button>
+      <a class="sn-analyze" href="/quote-check">Analyze my quote</a>
+    </div>
+  </div>
+</nav>
+
 <div class="ticker">
   <div class="tag"><span class="dot"></span> LMI</div>
   <div class="track" id="track"></div>
@@ -425,18 +466,8 @@
     <span class="pill demo">Demo data</span>
     <span class="pill live"><span class="dot"></span> Live</span>
     <span class="clock mono" id="clock">--:--:--</span>
-    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
-      <span class="knob"><span id="themeIco">☾</span></span>
-    </button>
   </div>
 </header>
-
-<div class="backbar">
-  <a class="back-btn" href="/" aria-label="Back to welcome page">
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    Back to welcome
-  </a>
-</div>
 
 <div class="wrap">
   <article class="report">
