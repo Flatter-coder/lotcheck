@@ -5099,7 +5099,7 @@ function QuoteCheckPage(){
       <style>{QC_CSS}</style>
       <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
+          <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:28}}>
             {/* "Conic Spin" gradient Home button -- takes the analyze page
                 back to the welcome page. Style spec provided by Vic (fx-27:
                 conic-gradient at 200% that shifts position and scales 1.04
@@ -5114,13 +5114,14 @@ function QuoteCheckPage(){
               style={{display:"inline-block",padding:"13px 24px",border:"1px solid transparent",borderRadius:8,color:"#FFF7E8",fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",textDecoration:"none",whiteSpace:"nowrap",background:"conic-gradient(from 0deg, #ED4264, #FBCBAA, #ED4264)",backgroundSize:"200% 200%",backgroundPosition:"0 0",transition:"background-position 0.6s ease, transform 0.4s ease",flexShrink:0}}>
               ← Home
             </a>
-            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:1,minWidth:0}}>
+            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:"1 1 220px",minWidth:180}}>
               <LogoMark size={34}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
                 <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
               </div>
             </a>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",marginLeft:"auto"}}>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
@@ -5184,6 +5185,7 @@ function QuoteCheckPage(){
                 Sign in
               </button>
             )}
+            </div>
           </div>
 
           {status==="idle"&&(
