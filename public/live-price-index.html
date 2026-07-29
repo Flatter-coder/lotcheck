@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>LotCheck — Live MSRP Price Index</title>
+<title>LotCheck — MSRP Live Index</title>
 <style>
   /* ================= THEME TOKENS =================
      Restraint palette: ONE hero accent (cyan). Everything else neutral ink/grey.
@@ -357,6 +357,16 @@
     .tm-ldot{animation:none!important}
     .tm-tip{transition:opacity .12s}
   }
+  /* back buttons (top + bottom of page) — themed for light & dark */
+  .backbar{max-width:1180px;margin:0 auto;padding:16px clamp(16px,3vw,28px) 0}
+  .backbar.bottom{padding:6px clamp(16px,3vw,28px) 40px;display:flex;justify-content:center}
+  .back-btn{display:inline-flex;align-items:center;gap:9px;padding:10px 18px;font:inherit;font-size:.92rem;font-weight:600;
+    color:var(--ink);background:var(--panel-2);border:1px solid var(--hair);border-radius:11px;cursor:pointer;
+    text-decoration:none;transition:border-color .2s,color .2s,transform .2s}
+  .back-btn:hover{border-color:var(--cyan-dim);color:var(--cyan);transform:translateY(-1px)}
+  .back-btn svg{width:17px;height:17px;transition:transform .2s}
+  .back-btn:hover svg{transform:translateX(-3px)}
+  @media (prefers-reduced-motion:reduce){.back-btn,.back-btn svg{transition:none}}
 </style>
 </head>
 <body>
@@ -397,7 +407,7 @@
         </g>
       </svg>
     </div>
-    <div><h1>Live MSRP Price Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
+    <div><h1>MSRP Live Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
   </div>
   <div class="badges">
     <span class="pill demo">Demo data</span>
@@ -408,6 +418,13 @@
     </button>
   </div>
 </header>
+
+<div class="backbar">
+  <a class="back-btn" href="/" aria-label="Back to welcome page">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Back to welcome
+  </a>
+</div>
 
 <div class="wrap">
   <article class="report">
@@ -510,6 +527,13 @@
 
 <div class="foot">
   ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>pricing-mention rate</b> is genuine AI analysis of review text ("fees", "pricing"). The <b>Reviews vs MSRP</b> is drawn from the same real inputs — each dealer's <b>Google review score &amp; count</b> from <span class="mono">get-dealer-sentiment</span> plotted against its <b>scraped-listing markup vs <span class="mono">msrp_catalog</span></b>; only the drifting motion is a simulated review stream for this preview. None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+</div>
+
+<div class="backbar bottom">
+  <a class="back-btn" href="/" aria-label="Back to welcome page">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Back to welcome
+  </a>
 </div>
 
 <script>
