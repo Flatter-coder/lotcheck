@@ -5000,8 +5000,35 @@ function QuotePaywallModal({C, cardStyle, onClose}){
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style={{...cardStyle,width:"100%",maxWidth:460,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>🔒 You're out of checks</div>
+        <style>{`
+          .fx-barcode{
+            position:relative; display:inline-block;
+            font-family:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+            font-weight:700; font-size:22px; line-height:1.1; letter-spacing:.1em;
+            color:transparent;
+            background:repeating-linear-gradient(90deg,
+              var(--ink) 0 2px, transparent 2px 4px,
+              var(--ink) 4px 5px, transparent 5px 8px,
+              var(--ink) 8px 11px, transparent 11px 13px);
+            -webkit-background-clip:text; background-clip:text;
+          }
+          .fx-barcode::before{
+            content:"9 780316 668111";
+            position:absolute; top:100%; left:0; margin-top:4px;
+            font-size:.32em; letter-spacing:.32em; white-space:nowrap;
+            color:color-mix(in srgb, var(--ink) 55%, transparent);
+          }
+          .fx-barcode::after{
+            content:""; position:absolute; top:-14%; bottom:-14%; left:-3%; width:2px;
+            background:var(--fx-beam);
+            box-shadow:0 0 10px var(--fx-beam), 0 0 22px color-mix(in srgb, var(--fx-beam) 55%, transparent);
+            animation:fx-barcode-scan 1.9s ease-in-out infinite alternate;
+          }
+          @keyframes fx-barcode-scan{ 0%{left:-3%} 100%{left:101%} }
+          @media (prefers-reduced-motion:reduce){ .fx-barcode::after{ animation:none; opacity:.5 } }
+        `}</style>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
+          <div className="fx-barcode" style={{"--ink":C.ink,"--fx-beam":C.teal||"#4fd8c4"}}>You're out of checks</div>
           <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
         <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
