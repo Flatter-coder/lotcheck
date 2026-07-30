@@ -422,7 +422,11 @@
   .mal-visual{position:relative;padding:22px 20px;border-right:1px solid var(--hair);
     min-height:300px;overflow:hidden}
   @media(max-width:720px){.mal-visual{border-right:0;border-bottom:1px solid var(--hair);min-height:250px}}
-  .mal-vhead{position:relative;z-index:3}
+  /* Reserve room on the right for the floating "Price hit MSRP" card so the
+     heading/description never run underneath it. Dropped on stacked mobile. */
+  .mal-vhead{position:relative;z-index:3;padding-right:184px}
+  @media(max-width:860px){.mal-vhead{padding-right:150px}}
+  @media(max-width:720px){.mal-vhead{padding-right:0}}
   .mal-vhead .mal-kick{font-size:10.5px;letter-spacing:2.2px;text-transform:uppercase;color:var(--cyan);font-weight:800}
   .mal-vhead h3{font-size:18px;letter-spacing:-.01em;margin-top:7px;font-weight:700;color:var(--ink)}
   .mal-vhead p{font-size:12.5px;color:var(--dim);margin-top:6px;max-width:32ch;line-height:1.5}
@@ -434,7 +438,7 @@
     -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%);mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%)}
   .mal-msrpline{position:absolute;left:50%;top:52%;width:200px;height:4px;margin:-2px 0 0 -100px;border-radius:3px;
     background:linear-gradient(90deg,transparent,var(--up),transparent);box-shadow:0 0 16px var(--up-soft)}
-  .mal-msrptag{position:absolute;left:50%;top:52%;transform:translate3d(120px,0,10px) rotateX(-56deg);
+  .mal-msrptag{position:absolute;left:50%;top:52%;transform:translate3d(150px,26px,10px) rotateX(-56deg);
     font-size:10.5px;font-weight:800;color:var(--up);white-space:nowrap;font-variant-numeric:tabular-nums}
   .mal-ptok{position:absolute;left:50%;top:52%;transform-style:preserve-3d;will-change:transform}
   .mal-ptok .mal-face{position:absolute;width:96px;height:44px;margin:-22px 0 0 -48px;border-radius:12px;transform:rotateX(-56deg);
@@ -447,6 +451,7 @@
   .mal-alertcard{position:absolute;right:18px;top:16px;z-index:4;background:var(--up-soft);border:1px solid var(--up);
     border-radius:11px;padding:9px 11px;max-width:170px;opacity:0;transform:translateY(-6px);transition:.4s}
   .mal-alertcard.mal-show{opacity:1;transform:none}
+  @media(max-width:720px){.mal-alertcard{display:none}}
   .mal-alertcard .mal-t{font-size:11px;font-weight:800;color:var(--up)}
   .mal-alertcard .mal-b{font-size:11px;color:var(--ink);margin-top:2px}
 
@@ -459,6 +464,9 @@
     color:var(--ink);font:inherit;font-size:13.5px;padding:10px 12px;outline:none;transition:border-color .2s}
   .mal-form input:focus,.mal-form select:focus{border-color:var(--cyan)}
   .mal-form input::placeholder{color:var(--dimmer)}
+  /* Native dropdown list items: force theme colors so options aren't
+     white-on-white (or invisible) when the OS renders the popup. */
+  .mal-form select option{background:var(--panel-2);color:var(--ink)}
   .mal-form select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
     background-position:calc(100% - 15px) 17px,calc(100% - 10px) 17px;background-size:5px 5px;background-repeat:no-repeat}
   .mal-seg{display:flex;background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;padding:3px;gap:2px}
@@ -669,9 +677,14 @@
           <div class="mal-field"><label>Vehicle</label>
             <div class="mal-row">
               <select id="malMake" aria-label="Make">
-                <option>Toyota</option><option>Honda</option><option>Ford</option><option>Hyundai</option>
-                <option>Volkswagen</option><option>Chevrolet</option><option>Nissan</option><option>Mazda</option>
-                <option>Kia</option><option>Subaru</option><option>Other</option>
+                <option>Acura</option><option>Audi</option><option>BMW</option><option>Buick</option>
+                <option>Cadillac</option><option>Chevrolet</option><option>Chrysler</option><option>Dodge</option>
+                <option>Ford</option><option>Genesis</option><option>GMC</option><option>Honda</option>
+                <option>Hyundai</option><option>Infiniti</option><option>Jeep</option><option>Kia</option>
+                <option>Land Rover</option><option>Lexus</option><option>Lincoln</option><option>Mazda</option>
+                <option>Mercedes-Benz</option><option>MINI</option><option>Mitsubishi</option><option>Nissan</option>
+                <option>Porsche</option><option>Ram</option><option>Subaru</option><option>Tesla</option>
+                <option>Toyota</option><option>Volkswagen</option><option>Volvo</option><option>Other</option>
               </select>
               <input id="malModel" placeholder="Model &mdash; e.g. RAV4" aria-label="Model"/>
             </div>
