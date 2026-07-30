@@ -5229,6 +5229,24 @@ function QuotePaywallModal({C, cardStyle, onClose}){
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
 // browser, sent once to the edge function for analysis, and discarded.
+// Collapsible "show details" wrapper: the caller renders the section's
+// headline/summary (always visible); this tucks the long detail behind a tap so
+// a thorough report stays short by default. Owns its state -> safe to reuse many
+// times on one report (recall detail, fee line items, review highlights).
+function DetailToggle({C, moreLabel, lessLabel, children, defaultOpen=false}){
+  const [open,setOpen]=useState(defaultOpen);
+  return (
+    <div>
+      <button onClick={()=>setOpen(o=>!o)} aria-expanded={open}
+        style={{marginTop:10,background:"transparent",border:`1px solid ${C.line}`,borderRadius:9,padding:"7px 13px",color:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:7}}>
+        {open?(lessLabel||"Hide details"):(moreLabel||"Show details")}
+        <span style={{fontSize:9,display:"inline-block",transform:open?"rotate(180deg)":"none",transition:"transform .15s"}}>▼</span>
+      </button>
+      {open&&<div style={{marginTop:4}}>{children}</div>}
+    </div>
+  );
+}
+
 function QuoteCheckPage(){
   // Current signed-in user (magic-link). Single source of truth via the shared
   // hook; null when logged out. Drives the header entry point and the
@@ -6347,12 +6365,14 @@ function QuoteCheckPage(){
                         These are open safety-recall campaigns <b>Transport Canada</b> has published for this vehicle's <b>year, make and model</b> — read live from the official federal <b>Vehicle Recall Database</b>. This is public government data, not LotCheck's opinion. Recalls are issued per model, so the dealer can confirm by <b>VIN</b> whether this exact vehicle is affected or has already had the free remedy done — ask them to show the VIN's recall status in writing before you sign.
                       </div>
                     </div>
-                    {(r.items||[]).slice(0,4).map((it,i)=>(
-                      <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
-                        <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
-                        {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
-                      </div>
-                    ))}
+                    <DetailToggle C={C} moreLabel={`Show ${r.count} recall detail${r.count>1?"s":""}`} lessLabel="Hide recall details">
+                      {(r.items||[]).slice(0,4).map((it,i)=>(
+                        <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
+                          <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
+                          {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
+                        </div>
+                      ))}
+                    </DetailToggle>
                     <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>Recalls are repaired free of charge — {r.sourceUrl?<a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>confirm the fix status</a>:"confirm the fix status"} with the dealer before you sign.</div>
                   </div>
                 );
@@ -6401,12 +6421,14 @@ function QuoteCheckPage(){
                       </div>
                     )}
                   </div>
-                  {sampledHighlights.map((h,i)=>(
-                    <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                      <span style={{color:ratingColor(h.rating),fontWeight:800,fontSize:12,lineHeight:"20px",whiteSpace:"nowrap"}}>★{h.rating}</span>
-                      <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{h.text}</span>
-                    </div>
-                  ))}
+                  <DetailToggle C={C} moreLabel={`Show ${sampledHighlights.length} review highlight${sampledHighlights.length>1?"s":""}`} lessLabel="Hide highlights">
+                    {sampledHighlights.map((h,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                        <span style={{color:ratingColor(h.rating),fontWeight:800,fontSize:12,lineHeight:"20px",whiteSpace:"nowrap"}}>★{h.rating}</span>
+                        <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{h.text}</span>
+                      </div>
+                    ))}
+                  </DetailToggle>
                   <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>
                     Based on public Google reviews{analysis.dealerSentiment.sourceUrl&&(<> — <a href={analysis.dealerSentiment.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>see all reviews</a></>)}
                   </div>
@@ -6496,6 +6518,7 @@ function QuoteCheckPage(){
                   {analysis.addOns?.length>0&&(
                     <div>
                       <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
+                      <DetailToggle C={C} moreLabel={`Show all ${analysis.addOns.length} line item${analysis.addOns.length>1?"s":""}`} lessLabel="Hide line items">
                       {analysis.addOns.map((a,i)=>{
                         // verdict: "good" (genuine buyer benefit), "flagged"
                         // (worth questioning), or "standard" (a mandatory,
@@ -6516,6 +6539,7 @@ function QuoteCheckPage(){
                           </div>
                         );
                       })}
+                      </DetailToggle>
                       {/* Subtotal -- only for genuine fees, never discounts/
                           conditions. When kind data exists, sums only the
                           fee-kind items so a mixed report doesn't fold a
