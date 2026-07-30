@@ -3393,6 +3393,159 @@ function VisitorMap({pageViews}){
   );
 }
 
+// ── Give a check tab ──────────────────────────────────────────────────────
+// Owner tool: mint single-use, tap-to-redeem free-check links to hand a
+// friend/family (…/quote-check?gift=CODE). Daily-capped (admin_daily_share_cap,
+// default 10, editable here). All server-authoritative via admin-gated RPCs
+// (fn_admin_create_gift / _list_gifts / _revoke_gift / _set_share_cap) from
+// 20260731_admin_share_gifts.sql. No PII shown — status + timestamps only.
+function GiveCheckTab(){
+  const {C}=useAdminTheme();
+  const [data,setData]=useState(null);   // {cap, used_today, remaining_today, codes:[]}
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [minting,setMinting]=useState(false);
+  const [copied,setCopied]=useState(null); // code just copied
+  const [capInput,setCapInput]=useState("");
+  const [savingCap,setSavingCap]=useState(false);
+
+  const origin = (typeof window!=="undefined" && window.location?.origin) || "https://lotcheck.ca";
+  const linkFor = (code)=>`${origin}/quote-check?gift=${code}`;
+
+  async function load(){
+    setLoading(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_list_gifts",{p_limit:30});
+      if(error) throw error;
+      setData(d||null);
+      if(d&&d.cap!=null) setCapInput(String(d.cap));
+    }catch(e){
+      console.warn("⚠️ fn_admin_list_gifts failed (run 20260731_admin_share_gifts.sql, and confirm your login is in admin_config.admin_emails):",e.message);
+      setErr(e.message||"Couldn't load your gift links."); setData(null);
+    }finally{ setLoading(false); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function mint(){
+    setMinting(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_create_gift");
+      if(error) throw error;
+      await load();
+      if(d&&d.code){ // auto-copy the fresh link so it's ready to paste into a text
+        try{ await navigator.clipboard.writeText(linkFor(d.code)); setCopied(d.code); setTimeout(()=>setCopied(null),2200); }catch{}
+      }
+    }catch(e){
+      setErr(e.message||"Couldn't create a link.");
+    }finally{ setMinting(false); }
+  }
+
+  async function copyLink(code){
+    try{ await navigator.clipboard.writeText(linkFor(code)); setCopied(code); setTimeout(()=>setCopied(null),2200); }
+    catch{ setErr("Couldn't copy — select the link and copy manually."); }
+  }
+
+  async function revoke(code){
+    setErr(null);
+    const {error}=await supabase.rpc("fn_admin_revoke_gift",{p_code:code});
+    if(error){ setErr(error.message||"Couldn't cancel that link."); return; }
+    load();
+  }
+
+  async function saveCap(){
+    setSavingCap(true); setErr(null);
+    const {error}=await supabase.rpc("fn_admin_set_share_cap",{p_value:Math.round(Number(capInput)||0)});
+    if(error){ setErr("Couldn't update the daily cap: "+error.message); setSavingCap(false); return; }
+    await load(); setSavingCap(false);
+  }
+
+  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  const remaining=Number(data?.remaining_today||0);
+  const cap=Number(data?.cap||0);
+  const used=Number(data?.used_today||0);
+  const canMint=remaining>0 && !minting;
+  const codes=data?.codes||[];
+  const statusStyle=(s)=> s==="redeemed"
+      ? {color:C.tealInk,bg:C.tealBg,label:"Redeemed"}
+    : s==="revoked"
+      ? {color:C.inkFaint,bg:C.paper2,label:"Cancelled"}
+      : {color:C.butterInk,bg:C.butter+"55",label:"Active"};
+
+  if(loading) return <AdminEmpty>Loading your gift links…</AdminEmpty>;
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>GIVE A FREE CHECK</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Mint a single-use link to hand a friend or family a free Quote Check. Text them the link — they tap it, sign in, and the check lands on their account. A leaked or forwarded link can't be reused. Capped per day (editable below).
+      </div>
+
+      {err&&(
+        <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.coralInk,marginBottom:14,lineHeight:1.5}}>{err}</div>
+      )}
+
+      {/* Mint control + today's allowance */}
+      <div style={{...card,marginBottom:14,display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Left to give today</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+            <span style={{fontSize:32,fontWeight:900,color:remaining>0?C.ink:C.coralInk,fontFamily:"monospace"}}>{remaining}</span>
+            <span style={{fontSize:15,color:C.inkFaint}}>/ {cap}</span>
+          </div>
+        </div>
+        <button onClick={mint} disabled={!canMint}
+          style={{background:canMint?C.teal:C.inkFaint,border:"none",borderRadius:12,padding:"13px 22px",color:"#fff",fontSize:14,fontWeight:800,cursor:canMint?"pointer":"default"}}>
+          {minting?"Creating…":"Create free-check link"}
+        </button>
+        {remaining<=0&&<div style={{fontSize:12,color:C.coralInk,fontWeight:700}}>Daily limit reached — resets tomorrow, or raise the cap below.</div>}
+        {copied&&<div style={{fontSize:12,color:C.tealInk,fontWeight:800}}>Link copied — paste it into a text</div>}
+      </div>
+
+      {/* Links list */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:16}}>
+        {codes.length===0?(
+          <div style={{padding:"22px 18px",fontSize:13,color:C.inkFaint,textAlign:"center"}}>No links yet — create one above.</div>
+        ):codes.map((c)=>{
+          const st=statusStyle(c.status);
+          const active=c.status==="active";
+          return (
+            <div key={c.code} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"12px 16px",borderBottom:`1px solid ${C.line}`}}>
+              <span style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:C.ink,letterSpacing:1}}>{c.code}</span>
+              <span style={{fontSize:11,fontWeight:800,color:st.color,background:st.bg,borderRadius:5,padding:"2px 8px"}}>{st.label}</span>
+              <span style={{flex:"1 1 120px",fontSize:11,color:C.inkFaint,fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{linkFor(c.code)}</span>
+              {active&&(
+                <>
+                  <button onClick={()=>copyLink(c.code)} style={{background:copied===c.code?C.tealBg:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:copied===c.code?C.tealInk:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{copied===c.code?"Copied":"Copy link"}</button>
+                  <button onClick={()=>revoke(c.code)} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.inkFaint,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Cancel</button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Editable daily cap */}
+      <div style={{...card,display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Free checks I can give per day</div>
+          <input type="number" min="0" step="1" value={capInput} onChange={e=>setCapInput(e.target.value)}
+            style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
+        </div>
+        <button onClick={saveCap} disabled={savingCap||capInput===String(cap)}
+          style={{background:(savingCap||capInput===String(cap))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(cap))?"default":"pointer"}}>
+          {savingCap?"Saving…":"Save cap"}
+        </button>
+        <div style={{fontSize:11,color:C.inkFaint,maxWidth:320,lineHeight:1.5}}>
+          Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.admin_daily_share_cap</code>. Cancelling an unredeemed link frees its slot back.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -3744,6 +3897,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
+          <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -3977,6 +4131,7 @@ function AdminPanel(){
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
         {tab==="profit" && <ProfitTrackerTab/>}
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
+        {tab==="gifts" && <GiveCheckTab/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
@@ -5090,6 +5245,53 @@ function QuoteCheckPage(){
   const [balance,setBalance]=useState(null); // {personal, shareable} | null (signed-out or not yet loaded)
   const [freeUsed,setFreeUsed]=useState(isFreeCheckUsed);
   const [showPaywall,setShowPaywall]=useState(false);
+  // Gift-link redemption (…/quote-check?gift=CODE). The code is stashed in
+  // localStorage on arrival so it survives the magic-link sign-in round-trip
+  // (which returns to /quote-check WITHOUT the query param), then redeemed the
+  // moment a session exists. giftClaim drives the banner: pending -> waiting for
+  // sign-in; success/already/error -> outcome message.
+  const [giftPending,setGiftPending]=useState(null); // the code, or null
+  const [giftClaim,setGiftClaim]=useState(null);     // {status:"success"|"already"|"error", msg} | null
+  useEffect(()=>{
+    try{
+      const url=new URL(window.location.href);
+      const g=url.searchParams.get("gift");
+      if(g){
+        localStorage.setItem("lc_pending_gift", g.trim().toUpperCase());
+        url.searchParams.delete("gift");
+        window.history.replaceState({}, "", url.pathname+url.search+url.hash);
+      }
+      const stashed=localStorage.getItem("lc_pending_gift");
+      if(stashed) setGiftPending(stashed);
+    }catch{}
+  },[]);
+  // Redeem as soon as we have both a signed-in user and a pending code.
+  useEffect(()=>{
+    if(!user||!giftPending) return;
+    let active=true;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_redeem_gift",{p_code:giftPending});
+        if(!active) return;
+        if(error){
+          const m=/already used/i.test(error.message)?"This link was already used."
+                 :/not valid/i.test(error.message)?"This link isn't valid."
+                 :/cancelled/i.test(error.message)?"This link was cancelled."
+                 :"Couldn't claim this free check.";
+          setGiftClaim({status:"error",msg:m});
+        }else{
+          if(data&&typeof data.personal==="number") setBalance(prev=>({personal:data.personal,shareable:prev?.shareable??0}));
+          setGiftClaim({status:data?.already?"already":"success",msg:data?.already?"You've already claimed this check.":"Free check added to your account."});
+        }
+      }catch(e){
+        if(active) setGiftClaim({status:"error",msg:"Couldn't claim this free check."});
+      }finally{
+        try{ localStorage.removeItem("lc_pending_gift"); }catch{}
+        if(active) setGiftPending(null);
+      }
+    })();
+    return ()=>{ active=false; };
+  },[user,giftPending]);
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
@@ -5787,6 +5989,33 @@ function QuoteCheckPage(){
             )}
             </div>
           </div>
+
+          {/* Gift-link claim banner: someone arrived via …/quote-check?gift=CODE */}
+          {(giftPending&&!user)&&(
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:C.tealBg,border:`1px solid ${C.teal}66`,borderRadius:16,padding:"14px 18px",marginBottom:18}}>
+              <div style={{flex:"1 1 240px",minWidth:0}}>
+                <div style={{fontWeight:900,color:C.tealInk,fontSize:15}}>A free Quote Check is waiting for you</div>
+                <div style={{fontSize:12.5,color:C.inkSoft,marginTop:3,lineHeight:1.5}}>Sign in to claim it — one tap, no card needed. It lands on your account instantly.</div>
+              </div>
+              <button onClick={()=>setShowSignIn(true)}
+                style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                Sign in to claim
+              </button>
+            </div>
+          )}
+          {giftClaim&&(
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",
+                background:giftClaim.status==="error"?C.coralBg:C.tealBg,
+                border:`1px solid ${(giftClaim.status==="error"?C.coral:C.teal)}66`,
+                borderRadius:16,padding:"14px 18px",marginBottom:18}}>
+              <div style={{flex:"1 1 240px",minWidth:0,fontWeight:800,fontSize:14,
+                color:giftClaim.status==="error"?C.coralInk:C.tealInk}}>
+                {giftClaim.status==="success"&&"You're all set — "}{giftClaim.msg}
+              </div>
+              <button onClick={()=>setGiftClaim(null)} aria-label="Dismiss"
+                style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"7px 14px",color:C.inkSoft,fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>Got it</button>
+            </div>
+          )}
 
           {status==="idle"&&(
             <>
