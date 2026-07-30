@@ -3408,6 +3408,24 @@ function GiveCheckTab(){
   const [copied,setCopied]=useState(null); // code just copied
   const [capInput,setCapInput]=useState("");
   const [savingCap,setSavingCap]=useState(false);
+  const [grantEmail,setGrantEmail]=useState("");
+  const [grantCount,setGrantCount]=useState("10");
+  const [granting,setGranting]=useState(false);
+  const [grantMsg,setGrantMsg]=useState(null); // {ok:boolean, text}
+  async function grantCredits(){
+    const email=(grantEmail||"").trim(), n=Math.round(Number(grantCount)||0);
+    if(!email||n<1){ setGrantMsg({ok:false,text:"Enter an email and a number of checks."}); return; }
+    setGranting(true); setGrantMsg(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_grant_credits",{p_email:email,p_count:n});
+      if(error) throw error;
+      const c=d?.credits||n;
+      const where=d?.target==="account"?`added to ${email}${d.balance!=null?` (balance now ${d.balance})`:""}`:`held for ${email} — lands the moment they sign in`;
+      setGrantMsg({ok:true,text:`${c} free check${c===1?"":"s"} ${where}.`});
+      setGrantEmail("");
+    }catch(e){ setGrantMsg({ok:false,text:e.message||"Couldn't grant those checks."}); }
+    finally{ setGranting(false); }
+  }
 
   const origin = (typeof window!=="undefined" && window.location?.origin) || "https://lotcheck.ca";
   const linkFor = (code)=>`${origin}/quote-check?gift=${code}`;
@@ -3541,6 +3559,23 @@ function GiveCheckTab(){
         <div style={{fontSize:11,color:C.inkFaint,maxWidth:320,lineHeight:1.5}}>
           Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.admin_daily_share_cap</code>. Cancelling an unredeemed link frees its slot back.
         </div>
+      </div>
+
+      {/* Grant free checks directly to an email (comp a customer / tester) */}
+      <div style={{...card,marginTop:10}}>
+        <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>Grant free checks to an email</div>
+        <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>Adds free Quote Checks straight to an account. If they already have one, it's credited now; if not, it waits and lands the moment they sign in with that email.</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input type="email" placeholder="person@email.com" value={grantEmail} onChange={e=>{setGrantEmail(e.target.value);if(grantMsg)setGrantMsg(null);}}
+            style={{flex:"1 1 220px",minWidth:180,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:14,outline:"none"}}/>
+          <input type="number" min="1" max="100" step="1" value={grantCount} onChange={e=>setGrantCount(e.target.value)} aria-label="Number of checks"
+            style={{width:84,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:14,fontWeight:700,outline:"none"}}/>
+          <button onClick={grantCredits} disabled={granting}
+            style={{background:granting?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:granting?"default":"pointer",whiteSpace:"nowrap"}}>
+            {granting?"Granting…":"Grant"}
+          </button>
+        </div>
+        {grantMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:700,color:grantMsg.ok?C.tealInk:C.coralInk}}>{grantMsg.text}</div>}
       </div>
     </div>
   );
