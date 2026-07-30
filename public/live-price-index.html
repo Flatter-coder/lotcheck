@@ -403,6 +403,12 @@
      exist). Uses page theme tokens so it flips light/dark automatically.
      Cyan = hero accent; --up (green) = the "hit MSRP / on the list" state. */
   .mal-section{grid-column:1 / -1}
+  /* Per Vic: remove the Reviews-vs-MSRP scatter (and its toggle button) and the
+     alerts widget from the FULL index page. The alerts widget still appears on
+     the MSRP Notifier route (?view=alerts / html.alerts-only) below. */
+  .tm-reviews, #matrixBtn{display:none!important}
+  .report > section.mal-section{display:none}
+  html.alerts-only .report > section.mal-section{display:block!important}
   /* Focused "MSRP Notifier" mode (?view=alerts): show ONLY the nav + the
      Get-MSRP-alerts widget so the notifier isn't buried in the full index
      page. Class is set on <html> before first paint by a script in <head>. */
@@ -418,42 +424,64 @@
     border:1px solid var(--hair);border-radius:16px;overflow:hidden;margin-top:4px}
   @media(max-width:720px){.mal-widget{grid-template-columns:1fr}}
 
-  /* ---- 3D visual side ---- */
+  /* ---- 3D visual side · "#6 Teal Sweep" ----
+     The visual half is a fixed dark "terminal" panel (dark in BOTH page themes
+     so the neon grid/glass/sweep read correctly on a white page), scoped teal. */
   .mal-visual{position:relative;padding:22px 20px;border-right:1px solid var(--hair);
-    min-height:300px;overflow:hidden}
+    min-height:300px;overflow:hidden;--acc:#2dd4bf;
+    background:radial-gradient(120% 90% at 50% 8%,#0b1018 0%,#05060a 60%,#030407 100%)}
   @media(max-width:720px){.mal-visual{border-right:0;border-bottom:1px solid var(--hair);min-height:250px}}
   /* Reserve room on the right for the floating "Price hit MSRP" card so the
      heading/description never run underneath it. Dropped on stacked mobile. */
   .mal-vhead{position:relative;z-index:3;padding-right:184px}
   @media(max-width:860px){.mal-vhead{padding-right:150px}}
   @media(max-width:720px){.mal-vhead{padding-right:0}}
-  .mal-vhead .mal-kick{font-size:10.5px;letter-spacing:2.2px;text-transform:uppercase;color:var(--cyan);font-weight:800}
-  .mal-vhead h3{font-size:18px;letter-spacing:-.01em;margin-top:7px;font-weight:700;color:var(--ink)}
-  .mal-vhead p{font-size:12.5px;color:var(--dim);margin-top:6px;max-width:32ch;line-height:1.5}
+  .mal-vhead .mal-kick{font-size:10.5px;letter-spacing:2.2px;text-transform:uppercase;color:var(--acc);font-weight:800}
+  .mal-vhead h3{font-size:18px;letter-spacing:-.01em;margin-top:7px;font-weight:700;color:#eef4f2}
+  .mal-vhead p{font-size:12.5px;color:#9fb0ad;margin-top:6px;max-width:32ch;line-height:1.5}
   .mal-scene{position:absolute;left:0;right:0;bottom:-10px;height:220px;perspective:900px;perspective-origin:50% 46%}
   .mal-world{position:absolute;inset:0;transform-style:preserve-3d;transform:translateY(30px) rotateX(56deg)}
   .mal-floor{position:absolute;left:50%;top:52%;width:360px;height:260px;margin:-130px 0 0 -180px;
-    background:linear-gradient(var(--cyan-soft) 1px,transparent 1px) 0 0/34px 34px,
-              linear-gradient(90deg,var(--cyan-soft) 1px,transparent 1px) 0 0/34px 34px;
+    background:linear-gradient(color-mix(in srgb,var(--acc) 50%,transparent) 1px,transparent 1px) 0 0/34px 34px,
+              linear-gradient(90deg,color-mix(in srgb,var(--acc) 50%,transparent) 1px,transparent 1px) 0 0/34px 34px;
     -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%);mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%)}
   .mal-msrpline{position:absolute;left:50%;top:52%;width:200px;height:4px;margin:-2px 0 0 -100px;border-radius:3px;
-    background:linear-gradient(90deg,transparent,var(--up),transparent);box-shadow:0 0 16px var(--up-soft)}
+    background:linear-gradient(90deg,transparent,var(--acc),transparent);box-shadow:0 0 16px color-mix(in srgb,var(--acc) 45%,transparent)}
   .mal-msrptag{position:absolute;left:50%;top:52%;transform:translate3d(150px,26px,10px) rotateX(-56deg);
-    font-size:10.5px;font-weight:800;color:var(--up);white-space:nowrap;font-variant-numeric:tabular-nums}
+    font-size:10.5px;font-weight:800;color:var(--acc);white-space:nowrap;font-variant-numeric:tabular-nums}
   .mal-ptok{position:absolute;left:50%;top:52%;transform-style:preserve-3d;will-change:transform}
-  .mal-ptok .mal-face{position:absolute;width:96px;height:44px;margin:-22px 0 0 -48px;border-radius:12px;transform:rotateX(-56deg);
-    display:grid;place-items:center;font-weight:800;font-size:16px;color:#06222a;font-variant-numeric:tabular-nums;
-    background:linear-gradient(150deg,var(--cyan),#2f9fb8);box-shadow:0 14px 30px -8px var(--cyan-dim),inset 0 1px 0 rgba(255,255,255,.35);transition:background .4s,box-shadow .4s}
-  .mal-ptok.mal-hit .mal-face{background:linear-gradient(150deg,var(--up),#2ba46a);color:#042417;box-shadow:0 14px 30px -8px var(--up-soft)}
-  .mal-pulse{position:absolute;left:50%;top:52%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;border:2px solid var(--up);opacity:0}
+  /* glassmorphism price card: frosted, teal neon border + glow */
+  .mal-ptok .mal-face{position:absolute;width:106px;height:46px;margin:-23px 0 0 -53px;border-radius:13px;transform:rotateX(-56deg);
+    display:grid;place-items:center;font-weight:800;font-size:16px;color:#eafffb;font-variant-numeric:tabular-nums;letter-spacing:.4px;
+    background:color-mix(in srgb,var(--acc) 16%,rgba(10,16,22,.55));
+    border:1px solid color-mix(in srgb,var(--acc) 70%,transparent);
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--acc) 20%,transparent) inset,0 16px 40px -12px color-mix(in srgb,var(--acc) 60%,transparent),0 0 28px -6px color-mix(in srgb,var(--acc) 55%,transparent);
+    backdrop-filter:blur(7px) saturate(1.3);-webkit-backdrop-filter:blur(7px) saturate(1.3);transition:background .4s,box-shadow .4s,color .4s}
+  .mal-ptok.mal-hit .mal-face{color:#ffffff;background:color-mix(in srgb,var(--acc) 26%,rgba(10,16,22,.5));
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--acc) 34%,transparent) inset,0 18px 50px -10px color-mix(in srgb,var(--acc) 85%,transparent),0 0 46px -4px var(--acc)}
+  .mal-pulse{position:absolute;left:50%;top:52%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;border:2px solid var(--acc);opacity:0}
   .mal-pulse.mal-go{animation:malRing 1.1s ease-out}
   @keyframes malRing{0%{opacity:.9;transform:scale(.3)}100%{opacity:0;transform:scale(3.4)}}
-  .mal-alertcard{position:absolute;right:18px;top:16px;z-index:4;background:var(--up-soft);border:1px solid var(--up);
+  /* continuous "live monitor" sweep scanning up the grid (the #6 signature) */
+  .mal-sweep{position:absolute;left:0;right:0;bottom:0;height:60%;overflow:hidden;pointer-events:none;z-index:1}
+  .mal-sweep::before{content:"";position:absolute;left:-12%;right:-12%;bottom:0;height:34%;
+    background:linear-gradient(0deg,color-mix(in srgb,var(--acc) 38%,transparent),transparent);
+    animation:malSweep 2.8s ease-in-out infinite}
+  @keyframes malSweep{0%{transform:translateY(60%);opacity:0}30%{opacity:.85}100%{transform:translateY(-150%);opacity:0}}
+  /* Graceful degrade: drop the heavy backdrop-blur on phones (perf), keep an
+     opaque dark-glass look so text stays crisp. */
+  @media(max-width:720px){.mal-ptok .mal-face,.mal-alertcard{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;background:rgba(9,15,22,.92)!important}}
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.mal-ptok .mal-face,.mal-alertcard{background:rgba(9,15,22,.92)}}
+  .mal-alertcard{position:absolute;right:18px;top:16px;z-index:4;
+    background:color-mix(in srgb,var(--acc) 12%,rgba(8,12,18,.62));
+    border:1px solid color-mix(in srgb,var(--acc) 55%,transparent);
+    box-shadow:0 10px 30px -12px color-mix(in srgb,var(--acc) 55%,transparent);
+    backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
     border-radius:11px;padding:9px 11px;max-width:170px;opacity:0;transform:translateY(-6px);transition:.4s}
   .mal-alertcard.mal-show{opacity:1;transform:none}
   @media(max-width:720px){.mal-alertcard{display:none}}
-  .mal-alertcard .mal-t{font-size:11px;font-weight:800;color:var(--up)}
-  .mal-alertcard .mal-b{font-size:11px;color:var(--ink);margin-top:2px}
+  .mal-alertcard .mal-t{font-size:11px;font-weight:800;color:var(--acc)}
+  .mal-alertcard .mal-b{font-size:11px;color:#c3ccdb;margin-top:2px}
 
   /* ---- form side ---- */
   .mal-form{padding:22px 20px;display:flex;flex-direction:column;gap:12px}
@@ -614,8 +642,8 @@
       <div class="side" id="side"></div>
     </section>
 
-    <!-- ============ REVIEWS VS MSRP (live) ============ -->
-    <section>
+    <!-- ============ REVIEWS VS MSRP (live) — removed from the index per Vic ============ -->
+    <section class="tm-reviews">
       <h2>Local reviews vs MSRP <span class="n">reputation × price · live</span></h2>
       <p class="note-rule" style="margin-bottom:18px">The index says where prices sit; it doesn't say who to trust.
         <b>Which local dealers are both the cheapest and the highest-rated?</b> Every dealership is plotted by its
@@ -668,6 +696,7 @@
               <div class="mal-pulse" id="malPulse"></div>
               <div class="mal-ptok" id="malPtok"><div class="mal-face" id="malFace">$43,100</div></div>
             </div>
+            <div class="mal-sweep"></div>
           </div>
         </div>
 
