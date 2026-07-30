@@ -3546,6 +3546,119 @@ function GiveCheckTab(){
   );
 }
 
+// ── MSRP Alerts tab ───────────────────────────────────────────────────────
+// The demand "folders": every waitlist signup grouped by make (with a city
+// breakdown), drill-down to the buyer list. This is the Dealer Bridge's
+// inventory ([[alerts-are-bridge-inventory]]) — owner-only. Reads the RLS-locked
+// msrp_alert_subscription via the admin-gated fn_admin_alert_folders RPC.
+function AlertFoldersTab(){
+  const {C}=useAdminTheme();
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [openMake,setOpenMake]=useState(null);
+
+  async function load(){
+    setLoading(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_alert_folders",{p_limit:2000});
+      if(error) throw error;
+      setData(d||null);
+    }catch(e){
+      console.warn("⚠️ fn_admin_alert_folders failed (run 20260731_admin_alert_folders.sql; confirm your login is in admin_config.admin_emails):",e.message);
+      setErr(e.message||"Couldn't load the alert folders."); setData(null);
+    }finally{ setLoading(false); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  const thLabel=(t,pct)=> t==="at_msrp"?"At MSRP":t==="below_msrp"?"Below MSRP":t==="pct_below"?`${pct||5}%+ under`:t||"—";
+  const fmtDate=(s)=>{ try{ return new Date(s).toISOString().slice(0,10); }catch{ return ""; } };
+
+  // Group rows client-side into make folders (+ per-city counts + the list).
+  const folders=(()=>{
+    const rows=data?.rows||[]; const m=new Map();
+    for(const r of rows){
+      const mk=r.make||"—";
+      if(!m.has(mk)) m.set(mk,{make:mk,list:[],cities:new Map()});
+      const f=m.get(mk); f.list.push(r);
+      const c=r.city||"—"; f.cities.set(c,(f.cities.get(c)||0)+1);
+    }
+    return [...m.values()].map(f=>({...f,cities:[...f.cities.entries()].sort((a,b)=>b[1]-a[1])}))
+      .sort((a,b)=>b.list.length-a.list.length);
+  })();
+
+  function exportCsv(f){
+    const rows=[["email","make","model","year","city","province","alert_when","status","signed_up"],
+      ...f.list.map(r=>[r.email,r.make,r.model,r.year,r.city,r.province,thLabel(r.threshold,r.pct),r.status,fmtDate(r.created_at)])];
+    const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+    const a=document.createElement("a"); a.href=url; a.download=`msrp-alerts-${f.make.toLowerCase().replace(/[^a-z0-9]+/g,"-")}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
+
+  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  if(loading) return <AdminEmpty>Loading MSRP alert folders…</AdminEmpty>;
+  if(err) return (
+    <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+      <div style={{fontWeight:800,marginBottom:6}}>Couldn't load the alert folders.</div><div>{err}</div>
+      <div style={{marginTop:8,color:C.inkFaint}}>Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260731_admin_alert_folders.sql</code> is applied.</div>
+      <button onClick={load} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>MSRP ALERT FOLDERS</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Every waitlist signup, filed by make — the Dealer Bridge's demand inventory. <b style={{color:C.inkSoft}}>{data?.total||0}</b> total signup{(data?.total||0)===1?"":"s"}. Owner-only; buyers are never handed to a dealer without a separate, explicit consent.
+      </div>
+
+      {folders.length===0?(
+        <AdminEmpty icon="📭">No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {folders.map(f=>{
+            const open=openMake===f.make;
+            return (
+              <div key={f.make} style={card}>
+                <div onClick={()=>setOpenMake(open?null:f.make)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",flexWrap:"wrap"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.ink,minWidth:120}}>{f.make}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"3px 11px"}}>{f.list.length} buyer{f.list.length===1?"":"s"}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
+                    {f.cities.slice(0,4).map(([c,n])=><span key={c} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:6,padding:"2px 8px"}}>{c} · {n}</span>)}
+                  </div>
+                  <button onClick={(e)=>{e.stopPropagation();exportCsv(f);}} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 11px",color:C.inkSoft,fontSize:11.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>Export CSV</button>
+                  <span style={{fontSize:11,color:C.inkFaint}}>{open?"▲":"▼"}</span>
+                </div>
+                {open&&(
+                  <div style={{marginTop:12,borderTop:`1px solid ${C.line}`,overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:12.5}}>
+                      <thead><tr>{["Email","Model","Year","City","Alert when","Signed up"].map(h=>(
+                        <th key={h} style={{textAlign:"left",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
+                      <tbody>{f.list.map((r,i)=>(
+                        <tr key={i}>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink,fontWeight:700,fontFamily:"monospace",fontSize:12}}>{r.email}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink}}>{r.model||"—"}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.year||"—"}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.city||"—"}{r.province?`, ${r.province}`:""}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:11,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:11}}>{fmtDate(r.created_at)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -3898,6 +4011,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
+          <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -4132,6 +4246,7 @@ function AdminPanel(){
         {tab==="profit" && <ProfitTrackerTab/>}
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
+        {tab==="alerts" && <AlertFoldersTab/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
