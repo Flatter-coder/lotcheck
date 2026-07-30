@@ -53,7 +53,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
-const CLAUDE_MODEL = "claude-sonnet-5";
+// Single source of truth for the model, shared with analyze-quote: both
+// functions read ANTHROPIC_MODEL and default to the SAME model so the two
+// quote-analysis paths never silently diverge. Override via the ANTHROPIC_MODEL
+// secret to pin/rollback without a code change.
+const CLAUDE_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 
 // Per-URL analysis cache TTL. A dealer listing's price/incentives can
 // shift, but not minute-to-minute, so a short cache turns repeat scans of
@@ -137,6 +141,93 @@ async function releaseCredit(hold: string | null): Promise<void> {
   } catch (e) {
     console.error("fn_release_quote threw:", e);
   }
+}
+
+// ── Resilient fetch (P0 hardening) ──────────────────────────────────────────
+// Wraps an outbound fetch with a per-attempt AbortController timeout plus
+// bounded retries on transient failures (HTTP 429/529/5xx, network errors, and
+// abort/timeouts). Real 4xx (400/401/…) are NOT retried. Backoff is exponential
+// with jitter and respects a Retry-After header when present. A hard maxAttempts
+// cap AND a total time budget keep the whole sequence under Supabase's ~150s
+// function ceiling — the budget stops a retry that couldn't finish in time
+// rather than risk a platform kill (which would strand the reserved credit by
+// skipping the release path).
+//
+// Behaviour contract used by callers below:
+//   • Returns the final Response — including a non-ok one after the retry
+//     budget is spent on a retryable status — so existing `if (!res.ok)`
+//     branches (which release the credit / log usage) still fire.
+//   • Throws only when retries are exhausted on a network/timeout error with no
+//     Response to return; the caller's surrounding try/catch releases the hold.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Retry-After may be a delay in seconds or an HTTP date. null when absent/invalid.
+function parseRetryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+// Exponential backoff with full-ish jitter: attempt 1 ≈ base, then ×2 each
+// attempt, half fixed + half random so retries don't thundering-herd.
+function backoffDelayMs(attempt: number, baseMs = 600): number {
+  const exp = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(exp / 2 + Math.random() * (exp / 2));
+}
+
+interface RetryOpts {
+  timeoutMs: number; // per-attempt abort timeout
+  maxAttempts: number; // hard cap on attempts
+  budgetMs: number; // total wall-clock budget for the whole sequence
+  baseBackoffMs?: number;
+  label?: string;
+}
+
+async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts): Promise<Response> {
+  const deadline = Date.now() + opts.budgetMs;
+  const base = opts.baseBackoffMs ?? 600;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const attemptTimeout = Math.min(opts.timeoutMs, remaining);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), attemptTimeout);
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      // Success or a real (non-retryable) error like 4xx → return immediately.
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
+      // Retryable status. Out of attempts → hand the non-ok Response back so the
+      // caller's !ok branch runs (and releases the credit).
+      if (attempt >= opts.maxAttempts) return res;
+      const ra = parseRetryAfterMs(res);
+      const delay = ra != null ? ra : backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) return res; // no budget left to wait+retry
+      try { await res.text(); } catch { /* drain body, ignore */ }
+      await sleep(delay);
+      continue;
+    } catch (err) {
+      // Network error or our own abort/timeout — retry if budget/attempts allow.
+      lastErr = err;
+      if (attempt >= opts.maxAttempts) throw err;
+      const delay = backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) throw err;
+      await sleep(delay);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
 }
 
 const PRICING_CHANGE_DATE = new Date("2026-09-01T00:00:00Z");
@@ -789,6 +880,7 @@ async function lookupManufacturerMsrp(
   make: string,
   model: string,
   trim: string | null,
+  deadline?: number,
 ): Promise<number | null> {
   const domain = MANUFACTURER_DOMAINS[make.toLowerCase()];
   if (!domain || !NIMBLE_API_KEY || !ANTHROPIC_API_KEY) {
@@ -797,6 +889,17 @@ async function lookupManufacturerMsrp(
         `domain=${domain ?? "none (not in MANUFACTURER_DOMAINS)"}, ` +
         `NIMBLE_API_KEY=${NIMBLE_API_KEY ? "set" : "MISSING"}, ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY ? "set" : "MISSING"}`,
     );
+    return null;
+  }
+
+  // This best-effort fallback runs AFTER the main Claude call, so on the rare
+  // slow-Nimble path the request clock may already be well advanced. It needs a
+  // ~40s worst case (search + ~30s vx10 extract + Claude). If the caller's
+  // request deadline can't accommodate that, skip rather than risk pushing the
+  // whole request past Supabase's ~150s kill (which would strand the credit).
+  const MFR_MIN_BUDGET_MS = 40_000;
+  if (deadline != null && deadline - Date.now() < MFR_MIN_BUDGET_MS) {
+    console.log(`Manufacturer MSRP lookup skipped for ${year} ${make} ${model}: only ${Math.max(0, deadline - Date.now())}ms left in the request budget (needs ~${MFR_MIN_BUDGET_MS}ms).`);
     return null;
   }
 
@@ -822,7 +925,7 @@ async function lookupManufacturerMsrp(
     // regardless of brand, while static announcement pages and spec PDFs
     // are not. Query steers toward the latter accordingly.
     const query = `${year} ${make} ${model} ${trim ?? ""} pricing announcement press release MSRP Canada`.trim();
-    const searchRes = await fetch("https://sdk.nimbleway.com/v1/search", {
+    const searchRes = await fetchWithRetry("https://sdk.nimbleway.com/v1/search", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${NIMBLE_API_KEY}`,
@@ -836,7 +939,7 @@ async function lookupManufacturerMsrp(
         country: "CA",
         locale: "en",
       }),
-    });
+    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: 20_000, label: "nimble-search" });
 
     if (!searchRes.ok) {
       console.warn("Manufacturer MSRP search failed:", searchRes.status, await searchRes.text());
@@ -903,7 +1006,7 @@ async function lookupManufacturerMsrp(
       return null;
     }
 
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    const claudeRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -917,7 +1020,7 @@ async function lookupManufacturerMsrp(
           `You are looking for the manufacturer's suggested retail price (MSRP) for one specific vehicle trim on its own official Canadian manufacturer website. Find the MSRP for exactly: ${year} ${make} ${model}${trim ? " " + trim : ""}. Only use a price you can clearly attribute to this exact trim -- if the content shows multiple trims, pick the matching one, don't average or guess across trims. Return ONLY this JSON object, nothing else, no markdown fence: {"msrp": number or null}`,
         messages: [{ role: "user", content: pageContent }],
       }),
-    });
+    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: 30_000, label: "anthropic-mfr-msrp" });
 
     if (!claudeRes.ok) {
       console.warn("Manufacturer MSRP extraction call failed:", claudeRes.status, await claudeRes.text());
@@ -965,54 +1068,100 @@ async function nimbleExtract(
   waitMs?: number,
   externalSignal?: AbortSignal,
 ): Promise<NimbleResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const onExternalAbort = () => controller.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) controller.abort();
-    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-  }
-  try {
-    const body: Record<string, unknown> = { url, driver, formats: ["markdown"] };
-    if (waitMs) body.wait = waitMs;
-    const res = await fetch("https://sdk.nimbleway.com/v1/extract", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${NIMBLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      // formats: ["markdown"] asks Nimble for clean, LLM-ready text rather
-      // than raw HTML -- cheaper and faster to feed to Claude. "render" is
-      // omitted -- confirmed via a real response warning that it's ignored
-      // once "driver" is set explicitly.
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // A 200/success from Nimble itself doesn't guarantee usable content
-      // -- confirmed live (2026-07-22, toyotaonthetrail.ca): vx8 returned
-      // status="success", status_code=200, but markdown.length=0. That
-      // used to count as a successful attempt here, which short-circuited
-      // the escalation loop before vx10 (the driver actually likely to
-      // help) ever got tried. 100 chars is a low bar -- any real listing
-      // page's markdown will be far longer than that; this only catches
-      // genuinely empty/near-empty responses (likely bot-detection or a
-      // blank shell), not legitimately short pages.
-      const md = data?.data?.markdown;
-      if (typeof md === "string" && md.trim().length >= 100) {
-        return { ok: true, data };
-      }
-      return { ok: false, errBody: `200 response but content too short (markdown.length=${md?.length ?? 0})`, timedOut: false };
+  // timeoutMs is treated as a TOTAL wall-clock budget for this driver so the
+  // documented worst-case chain math (max(vx6,vx8)+vx10+vx10-retry ≈ 102s) is
+  // preserved even with the added 429/5xx/network retry: each attempt uses the
+  // REMAINING budget, so the sum of attempts never exceeds the per-driver
+  // timeout. A fast transient rejection (429/5xx) leaves budget for one quick
+  // backoff+retry; a genuine timeout consumes the budget and is NOT retried
+  // here (retrying an abort just waits again — the vx10-retry decision lives in
+  // fetchListingContent, which keys off the timedOut flag below).
+  const deadline = Date.now() + timeoutMs;
+  const MAX_ATTEMPTS = 2;
+  let lastErr = "";
+  let lastTimedOut = false;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), remaining);
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }
-    return { ok: false, errBody: await res.text(), timedOut: false };
-  } catch (err) {
-    const timedOut = err instanceof Error && err.name === "AbortError";
-    return { ok: false, errBody: timedOut ? `timed out after ${timeoutMs}ms` : String(err), timedOut };
-  } finally {
-    clearTimeout(timer);
-    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    try {
+      const body: Record<string, unknown> = { url, driver, formats: ["markdown"] };
+      if (waitMs) body.wait = waitMs;
+      const res = await fetch("https://sdk.nimbleway.com/v1/extract", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${NIMBLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        // formats: ["markdown"] asks Nimble for clean, LLM-ready text rather
+        // than raw HTML -- cheaper and faster to feed to Claude. "render" is
+        // omitted -- confirmed via a real response warning that it's ignored
+        // once "driver" is set explicitly.
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // A 200/success from Nimble itself doesn't guarantee usable content
+        // -- confirmed live (2026-07-22, toyotaonthetrail.ca): vx8 returned
+        // status="success", status_code=200, but markdown.length=0. That
+        // used to count as a successful attempt here, which short-circuited
+        // the escalation loop before vx10 (the driver actually likely to
+        // help) ever got tried. 100 chars is a low bar -- any real listing
+        // page's markdown will be far longer than that; this only catches
+        // genuinely empty/near-empty responses (likely bot-detection or a
+        // blank shell), not legitimately short pages.
+        const md = data?.data?.markdown;
+        if (typeof md === "string" && md.trim().length >= 100) {
+          return { ok: true, data };
+        }
+        // Empty/short content is an app-level miss, not a transient server
+        // error -- don't retry it here; let the driver escalation handle it.
+        return { ok: false, errBody: `200 response but content too short (markdown.length=${md?.length ?? 0})`, timedOut: false };
+      }
+      // Non-ok HTTP. Retry a transient 429/5xx once if budget/attempts remain.
+      const errBody = await res.text();
+      lastErr = errBody;
+      if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_ATTEMPTS && !externalSignal?.aborted) {
+        const ra = parseRetryAfterMs(res);
+        const delay = ra != null ? ra : backoffDelayMs(attempt);
+        if (Date.now() + delay < deadline) {
+          await sleep(delay);
+          continue;
+        }
+      }
+      return { ok: false, errBody, timedOut: false };
+    } catch (err) {
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      lastTimedOut = timedOut;
+      lastErr = timedOut ? `timed out after ${timeoutMs}ms` : String(err);
+      // Aborted by the race winner (external signal) — stop, don't retry.
+      if (externalSignal?.aborted) return { ok: false, errBody: lastErr, timedOut };
+      // A timeout used the whole budget; retrying just waits again. Surface it
+      // so fetchListingContent can apply its timeout-vs-rejection logic.
+      if (timedOut) return { ok: false, errBody: lastErr, timedOut: true };
+      // Genuine network error — retry if budget/attempts remain.
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = backoffDelayMs(attempt);
+        if (Date.now() + delay < deadline) {
+          await sleep(delay);
+          continue;
+        }
+      }
+      return { ok: false, errBody: lastErr, timedOut: false };
+    } finally {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    }
   }
+  return { ok: false, errBody: lastErr || "no attempts made within budget", timedOut: lastTimedOut };
 }
 
 // Tags a pending nimbleExtract promise with the driver that produced it,
@@ -1416,7 +1565,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // individually defensive and skips itself when its inputs are absent, so a
 // partial fallback analysis (e.g. no financing, no MSRP) simply gets fewer
 // checks rather than erroring.
-async function enrichAnalysis(analysis: any): Promise<void> {
+async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   await applyVerifiedWarranty(analysis);
   await applyVerifiedFuelType(analysis);
   analysis.vinCheck = validateVin(analysis.vin);
@@ -1427,13 +1576,15 @@ async function enrichAnalysis(analysis: any): Promise<void> {
   // Manufacturer-site MSRP fallback -- only spend the extra search+extraction
   // cost when the vehicle doesn't already carry an MSRP. Catalog (a fast DB
   // read) is tried first; only on a miss does the ~30s manufacturer scrape run.
+  // The request deadline is threaded through so this expensive step self-skips
+  // when there isn't enough budget left to finish before the platform ceiling.
   if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
     const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
     if (catMsrp) {
       analysis.msrp = catMsrp;
       analysis.msrpSource = "catalog";
     } else {
-      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
       if (mfrMsrp) {
         analysis.msrp = mfrMsrp;
         analysis.msrpSource = "manufacturer_site";
@@ -1524,6 +1675,13 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // Request-level time budget. Supabase kills a function at ~150s (a raw 504
+  // that skips our credit-release path and strands the hold), so every retry/
+  // timeout decision downstream is bounded against a ~140s deadline to leave
+  // margin. The Nimble chain can already eat up to ~102s, so the main Claude
+  // call and the MSRP fallback both clamp their budgets to whatever remains.
+  const REQUEST_DEADLINE = Date.now() + 140_000;
+
   if (!ANTHROPIC_API_KEY || !NIMBLE_API_KEY) {
     console.error("ANTHROPIC_API_KEY or NIMBLE_API_KEY is not set on this function.");
     return new Response(
@@ -1605,7 +1763,7 @@ Deno.serve(async (req: Request) => {
       // failed -- so pages that DO load are completely unaffected.
       const fallback = await buildSm360FallbackAnalysis(url);
       if (fallback) {
-        await enrichAnalysis(fallback);
+        await enrichAnalysis(fallback, REQUEST_DEADLINE);
         try {
           await supabase
             .from("listing_analysis_cache")
@@ -1691,7 +1849,14 @@ Deno.serve(async (req: Request) => {
       `Listing content fetched via driver=${nimbleResult.driver}, pageContent.length=${pageContent.length}, containsMSRP=${pageContent.toUpperCase().includes("MSRP")}, containsLeasePaymentsInclude=${/payments include/i.test(pageContent)}`,
     );
 
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    // Tighter per-attempt timeout than analyze-quote's (~45s) because the Nimble
+    // chain above may already have consumed time; the budget is clamped to the
+    // request deadline so on the slow-Nimble path this makes a single bounded
+    // attempt instead of two. On timeout/network exhaustion fetchWithRetry
+    // throws → the outer catch logs + releases the credit hold (no strand); a
+    // spent-budget 5xx returns non-ok → the !ok branch below releases.
+    const claudeBudget = Math.max(1_000, REQUEST_DEADLINE - Date.now());
+    const claudeRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -1721,7 +1886,7 @@ Deno.serve(async (req: Request) => {
           },
         ],
       }),
-    });
+    }, { timeoutMs: 45_000, maxAttempts: 2, budgetMs: claudeBudget, label: "anthropic-listing" });
 
     if (!claudeRes.ok) {
       const errBody = await claudeRes.text();
@@ -1800,7 +1965,7 @@ Deno.serve(async (req: Request) => {
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
     // runs, so the two paths never drift apart.
-    await enrichAnalysis(analysis);
+    await enrichAnalysis(analysis, REQUEST_DEADLINE);
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache
