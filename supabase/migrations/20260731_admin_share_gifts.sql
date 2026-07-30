@@ -16,7 +16,7 @@
 --
 -- Depends on: 20260729_quote_credits.sql (credit_ledger),
 --             20260730_admin_economics.sql (fn_is_admin, admin_config, app_config).
--- pgcrypto (gen_random_bytes / gen_random_uuid) ships enabled on Supabase.
+-- Uses only built-in gen_random_uuid() (pg_catalog) -- no pgcrypto/extensions-schema dependency.
 -- ============================================================================
 
 -- ---- adjustable daily mint cap ------------------------------------------------
@@ -88,7 +88,7 @@ begin
   -- generate a unique, unambiguous short code (hex, uppercased). Retry on collision.
   loop
     v_try := v_try + 1;
-    v_code := upper(substring(encode(gen_random_bytes(6), 'hex') from 1 for 8));
+    v_code := upper(substring(replace(gen_random_uuid()::text, '-', '') from 1 for 8));
     begin
       insert into gift_code(code, created_by) values (v_code, v_admin);
       exit;  -- inserted OK
