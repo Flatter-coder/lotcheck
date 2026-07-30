@@ -676,18 +676,16 @@
           <div class="mal-lead">Rolling out city by city &mdash; we'll alert you the moment we track your vehicle. Waitlist only for now; no spam.</div>
           <div class="mal-field"><label>Vehicle</label>
             <div class="mal-row">
-              <!-- Makes we track: the 28 in msrp_catalog (pulled live from the DB)
-                   plus Audi, GMC, Land Rover, Mitsubishi (tracked via the rate
-                   catalogs). Tesla intentionally excluded. "Other" stays as a
-                   waitlist demand signal for anything not yet covered. -->
+              <!-- Only the 28 makes with verified MSRP rows in msrp_catalog
+                   (pulled live from the DB) -- the makes alerts can actually be
+                   anchored to. "Other" stays as a waitlist demand signal. -->
               <select id="malMake" aria-label="Make">
-                <option>Acura</option><option>Alfa Romeo</option><option>Audi</option><option>BMW</option>
-                <option>Buick</option><option>Cadillac</option><option>Chevrolet</option><option>Chrysler</option>
-                <option>Dodge</option><option>Fiat</option><option>Ford</option><option>Genesis</option>
-                <option>GMC</option><option>Honda</option><option>Hyundai</option><option>Infiniti</option>
-                <option>Jeep</option><option>Kia</option><option>Land Rover</option><option>Lexus</option>
-                <option>Lincoln</option><option>Mazda</option><option>Mercedes-Benz</option><option>Mini</option>
-                <option>Mitsubishi</option><option>Nissan</option><option>Porsche</option><option>Ram</option>
+                <option>Acura</option><option>Alfa Romeo</option><option>BMW</option><option>Buick</option>
+                <option>Cadillac</option><option>Chevrolet</option><option>Chrysler</option><option>Dodge</option>
+                <option>Fiat</option><option>Ford</option><option>Genesis</option><option>Honda</option>
+                <option>Hyundai</option><option>Infiniti</option><option>Jeep</option><option>Kia</option>
+                <option>Lexus</option><option>Lincoln</option><option>Mazda</option><option>Mercedes-Benz</option>
+                <option>Mini</option><option>Nissan</option><option>Porsche</option><option>Ram</option>
                 <option>Subaru</option><option>Toyota</option><option>Volkswagen</option><option>Volvo</option>
                 <option>Other</option>
               </select>
