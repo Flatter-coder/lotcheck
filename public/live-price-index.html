@@ -397,6 +397,83 @@
   .sn-analyze:hover{transform:translateY(-1px);opacity:.92}
   @media(max-width:880px){.sn-links{display:none}.sitenav-in{gap:10px;padding:10px 14px}.sn-cta{margin-left:auto;gap:8px}.sn-analyze{padding:8px 13px;font-size:.8rem}}
   @media (prefers-reduced-motion:reduce){.sn-dot{animation:none}.sn-links a::after,.sn-analyze{transition:none}}
+
+  /* ================= MSRP ALERTS WAITLIST WIDGET =================
+     Namespaced .mal-* to avoid clashes with the page (.scene/.floor already
+     exist). Uses page theme tokens so it flips light/dark automatically.
+     Cyan = hero accent; --up (green) = the "hit MSRP / on the list" state. */
+  .mal-section{grid-column:1 / -1}
+  .mal-widget{display:grid;grid-template-columns:1fr 1fr;background:var(--panel);
+    border:1px solid var(--hair);border-radius:16px;overflow:hidden;margin-top:4px}
+  @media(max-width:720px){.mal-widget{grid-template-columns:1fr}}
+
+  /* ---- 3D visual side ---- */
+  .mal-visual{position:relative;padding:22px 20px;border-right:1px solid var(--hair);
+    min-height:300px;overflow:hidden}
+  @media(max-width:720px){.mal-visual{border-right:0;border-bottom:1px solid var(--hair);min-height:250px}}
+  .mal-vhead{position:relative;z-index:3}
+  .mal-vhead .mal-kick{font-size:10.5px;letter-spacing:2.2px;text-transform:uppercase;color:var(--cyan);font-weight:800}
+  .mal-vhead h3{font-size:18px;letter-spacing:-.01em;margin-top:7px;font-weight:700;color:var(--ink)}
+  .mal-vhead p{font-size:12.5px;color:var(--dim);margin-top:6px;max-width:32ch;line-height:1.5}
+  .mal-scene{position:absolute;left:0;right:0;bottom:-10px;height:220px;perspective:900px;perspective-origin:50% 46%}
+  .mal-world{position:absolute;inset:0;transform-style:preserve-3d;transform:translateY(30px) rotateX(56deg)}
+  .mal-floor{position:absolute;left:50%;top:52%;width:360px;height:260px;margin:-130px 0 0 -180px;
+    background:linear-gradient(var(--cyan-soft) 1px,transparent 1px) 0 0/34px 34px,
+              linear-gradient(90deg,var(--cyan-soft) 1px,transparent 1px) 0 0/34px 34px;
+    -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%);mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%)}
+  .mal-msrpline{position:absolute;left:50%;top:52%;width:200px;height:4px;margin:-2px 0 0 -100px;border-radius:3px;
+    background:linear-gradient(90deg,transparent,var(--up),transparent);box-shadow:0 0 16px var(--up-soft)}
+  .mal-msrptag{position:absolute;left:50%;top:52%;transform:translate3d(120px,0,10px) rotateX(-56deg);
+    font-size:10.5px;font-weight:800;color:var(--up);white-space:nowrap;font-variant-numeric:tabular-nums}
+  .mal-ptok{position:absolute;left:50%;top:52%;transform-style:preserve-3d;will-change:transform}
+  .mal-ptok .mal-face{position:absolute;width:96px;height:44px;margin:-22px 0 0 -48px;border-radius:12px;transform:rotateX(-56deg);
+    display:grid;place-items:center;font-weight:800;font-size:16px;color:#06222a;font-variant-numeric:tabular-nums;
+    background:linear-gradient(150deg,var(--cyan),#2f9fb8);box-shadow:0 14px 30px -8px var(--cyan-dim),inset 0 1px 0 rgba(255,255,255,.35);transition:background .4s,box-shadow .4s}
+  .mal-ptok.mal-hit .mal-face{background:linear-gradient(150deg,var(--up),#2ba46a);color:#042417;box-shadow:0 14px 30px -8px var(--up-soft)}
+  .mal-pulse{position:absolute;left:50%;top:52%;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;border:2px solid var(--up);opacity:0}
+  .mal-pulse.mal-go{animation:malRing 1.1s ease-out}
+  @keyframes malRing{0%{opacity:.9;transform:scale(.3)}100%{opacity:0;transform:scale(3.4)}}
+  .mal-alertcard{position:absolute;right:18px;top:16px;z-index:4;background:var(--up-soft);border:1px solid var(--up);
+    border-radius:11px;padding:9px 11px;max-width:170px;opacity:0;transform:translateY(-6px);transition:.4s}
+  .mal-alertcard.mal-show{opacity:1;transform:none}
+  .mal-alertcard .mal-t{font-size:11px;font-weight:800;color:var(--up)}
+  .mal-alertcard .mal-b{font-size:11px;color:var(--ink);margin-top:2px}
+
+  /* ---- form side ---- */
+  .mal-form{padding:22px 20px;display:flex;flex-direction:column;gap:12px}
+  .mal-form .mal-lead{font-size:12.5px;color:var(--dim);line-height:1.5}
+  .mal-field label{font-size:10.5px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;display:block;margin-bottom:5px}
+  .mal-row{display:flex;gap:9px}
+  .mal-form input,.mal-form select{width:100%;background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;
+    color:var(--ink);font:inherit;font-size:13.5px;padding:10px 12px;outline:none;transition:border-color .2s}
+  .mal-form input:focus,.mal-form select:focus{border-color:var(--cyan)}
+  .mal-form input::placeholder{color:var(--dimmer)}
+  .mal-form select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
+    background-position:calc(100% - 15px) 17px,calc(100% - 10px) 17px;background-size:5px 5px;background-repeat:no-repeat}
+  .mal-seg{display:flex;background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;padding:3px;gap:2px}
+  .mal-seg button{flex:1;font:inherit;font-size:12px;font-weight:700;border:0;background:none;color:var(--dim);padding:8px 4px;border-radius:7px;cursor:pointer;transition:.2s}
+  .mal-seg button.mal-on{background:var(--cyan);color:var(--bg)}
+  .mal-consent{display:flex;gap:9px;align-items:flex-start;font-size:11.5px;color:var(--dim);line-height:1.45;cursor:pointer}
+  .mal-consent input{width:16px;height:16px;flex:none;margin-top:1px;accent-color:var(--up);cursor:pointer}
+  .mal-submit{background:var(--up);color:#04241a;font:inherit;font-weight:800;font-size:14px;border:0;border-radius:10px;padding:12px;cursor:pointer;transition:.2s}
+  .mal-submit:hover{filter:brightness(1.06)}
+  .mal-submit:disabled{opacity:.42;cursor:not-allowed;filter:none}
+  .mal-fine{font-size:10.5px;color:var(--dimmer);text-align:center}
+  .mal-err{font-size:12px;color:var(--down);text-align:center;min-height:0}
+
+  /* success state */
+  .mal-done{display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:28px 20px}
+  .mal-done.mal-show{display:flex}
+  .mal-check{width:54px;height:54px;border-radius:50%;border:2px solid var(--up);display:grid;place-items:center}
+  .mal-check svg{width:26px;height:26px}
+  .mal-done h3{font-size:16px;font-weight:700;color:var(--ink)}
+  .mal-done p{font-size:13px;color:var(--dim);max-width:36ch;line-height:1.5}
+  .mal-relink{background:none;border:1px solid var(--hair);color:var(--ink);font:inherit;font-size:12.5px;font-weight:700;border-radius:8px;padding:8px 16px;cursor:pointer;margin-top:4px}
+  .mal-relink:hover{border-color:var(--cyan)}
+  @media (prefers-reduced-motion:reduce){
+    .mal-ptok,.mal-face,.mal-alertcard{transition:none}
+    .mal-pulse.mal-go{animation:none}
+  }
 </style>
 </head>
 <body>
@@ -547,6 +624,76 @@
           <span class="lg"><span class="sw bad"></span>above MSRP · lower-rated</span>
           <span class="lg"><span class="sw neutral"></span>middle of the pack</span>
           <span class="lg"><span class="sw size"></span>dot size ≈ inventory</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- MSRP ALERTS WAITLIST -->
+    <section class="mal-section">
+      <h2>Get MSRP alerts <span class="n">waitlist · rolling out city by city</span></h2>
+      <div class="mal-widget">
+        <!-- 3D visual -->
+        <div class="mal-visual">
+          <div class="mal-vhead">
+            <div class="mal-kick">MSRP alerts</div>
+            <h3>We watch the price so you don't have to.</h3>
+            <p>Tell us your vehicle and city. When we start tracking it, we'll email you the moment it hits your target.</p>
+          </div>
+          <div class="mal-alertcard" id="malAlert"><div class="mal-t">Price hit MSRP</div><div class="mal-b">This is when we'd email you.</div></div>
+          <div class="mal-scene">
+            <div class="mal-world">
+              <div class="mal-floor"></div>
+              <div class="mal-msrpline"></div>
+              <div class="mal-msrptag" id="malMsrptag">MSRP $40,998</div>
+              <div class="mal-pulse" id="malPulse"></div>
+              <div class="mal-ptok" id="malPtok"><div class="mal-face" id="malFace">$43,100</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- form -->
+        <div class="mal-form" id="malForm">
+          <div class="mal-lead">Rolling out city by city &mdash; we'll alert you the moment we track your vehicle. Waitlist only for now; no spam.</div>
+          <div class="mal-field"><label>Vehicle</label>
+            <div class="mal-row">
+              <select id="malMake" aria-label="Make">
+                <option>Toyota</option><option>Honda</option><option>Ford</option><option>Hyundai</option>
+                <option>Volkswagen</option><option>Chevrolet</option><option>Nissan</option><option>Mazda</option>
+                <option>Kia</option><option>Subaru</option><option>Other</option>
+              </select>
+              <input id="malModel" placeholder="Model &mdash; e.g. RAV4" aria-label="Model"/>
+            </div>
+          </div>
+          <div class="mal-row">
+            <div class="mal-field" style="flex:1"><label>City</label>
+              <select id="malCity" aria-label="City">
+                <option>Calgary</option><option>Edmonton</option><option>Red Deer</option>
+                <option>Lethbridge</option><option>Fort McMurray</option><option>Other AB</option>
+              </select>
+            </div>
+            <div class="mal-field" style="flex:1"><label>Year <span style="text-transform:none;color:var(--dimmer)">(optional)</span></label>
+              <input id="malYear" placeholder="2026" inputmode="numeric" aria-label="Year"/></div>
+          </div>
+          <div class="mal-field"><label>Alert me when it's</label>
+            <div class="mal-seg" id="malSeg" role="group" aria-label="Alert threshold">
+              <button type="button" class="mal-on" data-v="at_msrp">At MSRP</button>
+              <button type="button" data-v="below_msrp">Below MSRP</button>
+              <button type="button" data-v="pct_below">5%+ under</button>
+            </div>
+          </div>
+          <div class="mal-field"><label>Email</label><input id="malEmail" type="email" placeholder="you@email.com" autocomplete="email" aria-label="Email"/></div>
+          <label class="mal-consent"><input type="checkbox" id="malConsent"/><span>Email me MSRP alerts for this vehicle. I can unsubscribe anytime. <span style="color:var(--dimmer)">One-click opt-out in every email.</span></span></label>
+          <div class="mal-err" id="malErr" role="alert"></div>
+          <button class="mal-submit" id="malSubmit" disabled>Notify me</button>
+          <div class="mal-fine">No spam, no selling your data. MSRP alerts only.</div>
+        </div>
+
+        <!-- success -->
+        <div class="mal-done" id="malDone">
+          <div class="mal-check"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5 11-11" stroke="var(--up)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>You're on the list</h3>
+          <p id="malDoneMsg">We'll email you the moment we track your vehicle in your city.</p>
+          <button class="mal-relink" id="malReset">Set another alert</button>
         </div>
       </div>
     </section>
@@ -1277,6 +1424,98 @@
   }else{
     updateTimer();
   }
+})();
+</script>
+
+<!-- ================= MSRP ALERTS WAITLIST ================= -->
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  var reduceM=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  var SUPA_URL="https://debigtyjhjamipooajhk.supabase.co/rest/v1/rpc/fn_alert_subscribe";
+  var ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
+
+  /* ---- 3D price-drop loop ---- */
+  var START=43100, MSRP=40998, ptok=$("malPtok"), face=$("malFace");
+  function lerp(a,b,t){return a+(b-a)*t;}
+  function money(n){return "$"+Math.round(n).toLocaleString("en-CA");}
+  var raf, t0;
+  function frame(ts){
+    if(!t0) t0=ts;
+    var el=(ts-t0), dur=3200, hold=1500, total=dur+hold;
+    var cyc=el%total;
+    if(cyc<dur){
+      var t=cyc/dur, e=t<.85?t/.85:1;
+      var z=lerp(150,24,e);
+      ptok.style.transform="translate3d(0,0,"+z+"px)";
+      face.textContent=money(lerp(START,MSRP,e));
+      if(t<.95){ ptok.classList.remove("mal-hit"); $("malAlert").classList.remove("mal-show"); }
+    } else {
+      face.textContent=money(MSRP);
+      ptok.style.transform="translate3d(0,0,24px)";
+      if(!ptok.classList.contains("mal-hit")){
+        ptok.classList.add("mal-hit");
+        var p=$("malPulse"); p.classList.remove("mal-go"); void p.offsetWidth; p.classList.add("mal-go");
+        $("malAlert").classList.add("mal-show");
+      }
+    }
+    raf=requestAnimationFrame(frame);
+  }
+  if(reduceM){ face.textContent=money(MSRP); ptok.classList.add("mal-hit"); ptok.style.transform="translate3d(0,0,24px)"; $("malAlert").classList.add("mal-show"); }
+  else raf=requestAnimationFrame(frame);
+
+  /* ---- form ---- */
+  var thr="at_msrp";
+  document.querySelectorAll("#malSeg button").forEach(function(b){
+    b.onclick=function(){ document.querySelectorAll("#malSeg button").forEach(function(x){x.classList.remove("mal-on");}); b.classList.add("mal-on"); thr=b.dataset.v; };
+  });
+  function emailOk(e){ return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e); }
+  function valid(){ return emailOk($("malEmail").value.trim()) && $("malConsent").checked && $("malModel").value.trim()!==""; }
+  function refresh(){ $("malSubmit").disabled=!valid(); }
+  ["malEmail","malModel","malConsent"].forEach(function(id){ $(id).addEventListener("input",refresh); $(id).addEventListener("change",refresh); });
+
+  $("malSubmit").onclick=function(){
+    if(!valid()) return;
+    var btn=$("malSubmit");
+    $("malErr").textContent="";
+    btn.disabled=true; btn.textContent="Submitting...";
+    var yearRaw=$("malYear").value.trim();
+    var year=/^\d{4}$/.test(yearRaw)?parseInt(yearRaw,10):null;
+    var payload={
+      p_email:$("malEmail").value.trim(),
+      p_make:$("malMake").value,
+      p_model:$("malModel").value.trim(),
+      p_year:year,
+      p_province:"AB",
+      p_city:$("malCity").value,
+      p_threshold:thr,
+      p_pct:thr==="pct_below"?5:null,
+      p_consent:$("malConsent").checked
+    };
+    fetch(SUPA_URL,{
+      method:"POST",
+      headers:{ "apikey":ANON, "Authorization":"Bearer "+ANON, "Content-Type":"application/json" },
+      body:JSON.stringify(payload)
+    }).then(function(res){
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      return res.json().catch(function(){return {};});
+    }).then(function(){
+      var v=($("malMake").value+" "+$("malModel").value.trim()).trim();
+      var thrTxt = thr==="at_msrp"?"hits MSRP" : thr==="below_msrp"?"drops below MSRP" : "goes 5%+ under MSRP";
+      $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").value+". We'll email you the moment it "+thrTxt+" once we're tracking your city.";
+      $("malForm").style.display="none"; $("malDone").classList.add("mal-show");
+    }).catch(function(){
+      btn.disabled=false; btn.textContent="Notify me";
+      $("malErr").textContent="Sorry, something went wrong saving your alert. Please try again.";
+    });
+  };
+
+  $("malReset").onclick=function(){
+    $("malDone").classList.remove("mal-show"); $("malForm").style.display="flex";
+    $("malEmail").value=""; $("malModel").value=""; $("malYear").value=""; $("malConsent").checked=false;
+    $("malSubmit").textContent="Notify me"; $("malErr").textContent=""; refresh();
+  };
 })();
 </script>
 </body>
