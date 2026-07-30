@@ -6337,6 +6337,16 @@ function QuoteCheckPage(){
                   <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
                     <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
                     <div style={{fontSize:20,fontWeight:1000,color:C.coralInk}}>{r.count} open recall{r.count>1?"s":""}</div>
+                    {/* Why-this-shows explainer -- pre-empts a dealer's "that's not
+                        true" dispute by grounding the recalls in public government
+                        data and pointing to VIN confirmation. Deliberately bold and
+                        high-contrast so it isn't missed. */}
+                    <div style={{marginTop:10,background:C.paper2,border:`1.5px solid ${C.coral}66`,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{fontSize:13,fontWeight:1000,color:C.coralInk,marginBottom:6,letterSpacing:0.2}}>Why you're seeing this</div>
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,fontWeight:700}}>
+                        These are open safety-recall campaigns <b>Transport Canada</b> has published for this vehicle's <b>year, make and model</b> — read live from the official federal <b>Vehicle Recall Database</b>. This is public government data, not LotCheck's opinion. Recalls are issued per model, so the dealer can confirm by <b>VIN</b> whether this exact vehicle is affected or has already had the free remedy done — ask them to show the VIN's recall status in writing before you sign.
+                      </div>
+                    </div>
                     {(r.items||[]).slice(0,4).map((it,i)=>(
                       <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
                         <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
