@@ -676,15 +676,18 @@
           <div class="mal-lead">Rolling out city by city &mdash; we'll alert you the moment we track your vehicle. Waitlist only for now; no spam.</div>
           <div class="mal-field"><label>Vehicle</label>
             <div class="mal-row">
+              <!-- The 28 makes actually in msrp_catalog (what we can track).
+                   Sourced live from the DB, not a hand-guessed list. "Other"
+                   stays as a waitlist demand signal for makes we don't yet cover. -->
               <select id="malMake" aria-label="Make">
-                <option>Acura</option><option>Audi</option><option>BMW</option><option>Buick</option>
+                <option>Acura</option><option>Alfa Romeo</option><option>BMW</option><option>Buick</option>
                 <option>Cadillac</option><option>Chevrolet</option><option>Chrysler</option><option>Dodge</option>
-                <option>Ford</option><option>Genesis</option><option>GMC</option><option>Honda</option>
+                <option>Fiat</option><option>Ford</option><option>Genesis</option><option>Honda</option>
                 <option>Hyundai</option><option>Infiniti</option><option>Jeep</option><option>Kia</option>
-                <option>Land Rover</option><option>Lexus</option><option>Lincoln</option><option>Mazda</option>
-                <option>Mercedes-Benz</option><option>MINI</option><option>Mitsubishi</option><option>Nissan</option>
-                <option>Porsche</option><option>Ram</option><option>Subaru</option><option>Tesla</option>
-                <option>Toyota</option><option>Volkswagen</option><option>Volvo</option><option>Other</option>
+                <option>Lexus</option><option>Lincoln</option><option>Mazda</option><option>Mercedes-Benz</option>
+                <option>Mini</option><option>Nissan</option><option>Porsche</option><option>Ram</option>
+                <option>Subaru</option><option>Toyota</option><option>Volkswagen</option><option>Volvo</option>
+                <option>Other</option>
               </select>
               <input id="malModel" placeholder="Model &mdash; e.g. RAV4" aria-label="Model"/>
             </div>
