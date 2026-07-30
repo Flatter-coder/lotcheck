@@ -2923,6 +2923,282 @@ function ProfitTrackerTab(){
   );
 }
 
+// ── Unit Economics tab ────────────────────────────────────────────────────
+// Free / shared / paid checks and their modeled API cost, driven by an
+// adjustable cost-per-check, plus a live-editable free-check daily cap.
+// ALL numbers here come from the admin-gated fn_admin_economics RPC
+// (aggregate-only, no PII) except the "logged" API spend, which reuses the
+// same real api_usage_log the Revenue tab already reads. Real vs estimated is
+// labelled explicitly — revenue is ESTIMATED (Stripe isn't wired yet).
+const ECON_WINDOWS = [["today","Today"],["7d","Last 7 days"],["30d","Last 30 days"]];
+// Pack prices are treated as USD, matching the existing Profit tab convention
+// (tier.price * count = USD, then × USD_TO_CAD for the CAD estimate).
+const PRICE_BY_CREDITS = {1:2.99, 5:9.99, 10:14.99, 25:9.99};
+
+function estRevenueUsd(purchasesByDelta){
+  if(!purchasesByDelta) return 0;
+  let sum=0;
+  for(const [delta,n] of Object.entries(purchasesByDelta)){
+    const d=Number(delta);
+    // Known tier price if the credit grant matches a pack; otherwise fall back
+    // to a per-credit proxy ($9.99 / 5 credits) so an unexpected grant size
+    // still contributes a sensible (clearly estimated) figure rather than $0.
+    const price = PRICE_BY_CREDITS[d] ?? d*(9.99/5);
+    sum += price*Number(n||0);
+  }
+  return sum;
+}
+
+function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoading, onSetCap, onRefresh}){
+  const {C}=useAdminTheme();
+
+  const [costPerCheck,setCostPerCheck]=useState(()=>{
+    try{ const v=Number(localStorage.getItem("lc_admin_cost_per_check")); return v>0?v:0.10; }catch{ return 0.10; }
+  });
+  function updateCpc(v){
+    const n=Math.max(0,Number(v)||0);
+    setCostPerCheck(n);
+    try{ localStorage.setItem("lc_admin_cost_per_check",String(n)); }catch{}
+  }
+
+  const status=econ?.free_check_status||null;
+  const [capInput,setCapInput]=useState("");
+  const [savingCap,setSavingCap]=useState(false);
+  useEffect(()=>{ if(status&&status.limit_per_day!=null) setCapInput(String(status.limit_per_day)); },[status?.limit_per_day]);
+
+  async function saveCap(){
+    setSavingCap(true);
+    await onSetCap(capInput);
+    setSavingCap(false);
+  }
+
+  // Real logged API spend (USD), windowed the same calendar-day way the RPC
+  // windows the counts, so "logged vs modeled" is an apples-to-apples compare.
+  const now=Date.now();
+  const startOfToday=new Date(); startOfToday.setHours(0,0,0,0);
+  const loggedCost=(win)=>{
+    let since;
+    if(win==="today") since=startOfToday.getTime();
+    else if(win==="7d") since=startOfToday.getTime()-6*86400000;
+    else since=startOfToday.getTime()-29*86400000;
+    return (apiUsage||[]).filter(u=>new Date(u.created_at).getTime()>=since)
+      .reduce((s,u)=>s+(Number(u.cost_usd)||0),0);
+  };
+
+  const fmtUsd=(n)=>`$${(Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const cad=(usd)=>`$${((Number(usd)||0)*USD_TO_CAD).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})} CAD`;
+
+  // Per-window derived economics.
+  function derive(win){
+    const w=econ?.windows?.[win]||{};
+    const free=Number(w.free_checks||0);
+    const shared=Number(w.gift_received_n||0);   // shared checks actually redeemed
+    const paid=Number(w.quote_check_n||0);       // signed-in credit spends
+    const totalChecks=free+shared+paid;
+    const freeCost=free*costPerCheck;
+    const sharedCost=shared*costPerCheck;
+    const paidCost=paid*costPerCheck;
+    const modeledSpend=totalChecks*costPerCheck;
+    const revenue=estRevenueUsd(w.purchases_by_delta);
+    const grossMargin=revenue-paidCost;              // paid checks vs their own cost
+    const netAfterSubsidy=revenue-modeledSpend;      // revenue minus ALL check cost (incl. free/shared subsidy)
+    return {
+      free, shared, paid, totalChecks,
+      freeCost, sharedCost, paidCost, modeledSpend,
+      revenue, grossMargin, netAfterSubsidy,
+      giftSent:Number(w.gift_sent_n||0),
+      purchaseN:Number(w.purchase_n||0),
+      logged:loggedCost(win),
+    };
+  }
+  const cols=ECON_WINDOWS.map(([win,label])=>({win,label,d:derive(win)}));
+
+  const cardStyle={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  const th={textAlign:"right",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 12px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4,whiteSpace:"nowrap"};
+  const td={textAlign:"right",padding:"12px",borderBottom:`1px solid ${C.line}`,fontFamily:"monospace",fontSize:13};
+  const RealTag=()=><span style={{fontSize:9,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>REAL</span>;
+  const EstTag=()=><span style={{fontSize:9,fontWeight:800,color:C.butterInk,background:C.butter+"55",borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>EST.</span>;
+
+  if(econLoading){
+    return <AdminEmpty>Loading unit economics…</AdminEmpty>;
+  }
+  if(econError||!econ){
+    return (
+      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+        <div style={{fontWeight:800,marginBottom:6}}>Couldn't load unit economics.</div>
+        <div>{econError||"No data returned."}</div>
+        <div style={{marginTop:8,color:C.inkFaint}}>
+          This RPC is admin-gated. Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260730_admin_economics.sql</code> is applied and your login email is listed in <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>admin_config.admin_emails</code>.
+        </div>
+        <button onClick={onRefresh} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>UNIT ECONOMICS</div>
+        <button onClick={onRefresh} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Calendar-day windows (DB timezone). Check counts and purchases are <b style={{color:C.tealInk}}>real</b> (from the credit ledger + free-check tally); modeled $ figures multiply those counts by the cost-per-check below. Revenue is <b style={{color:C.butterInk}}>estimated</b> from purchase grants — there's no Stripe billing yet. Pack prices are treated as USD (matching the Profit tab); CAD shown at the fixed {USD_TO_CAD} snapshot rate.
+      </div>
+
+      {/* Controls: cost-per-check */}
+      <div style={{...cardStyle,marginBottom:14,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:6}}>Cost per check <span style={{color:C.inkFaint,fontWeight:600}}>(USD — drives every modeled $ figure)</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:18,fontWeight:800,color:C.inkFaint}}>$</span>
+            <input type="number" min="0" step="0.01" value={costPerCheck}
+              onChange={e=>updateCpc(e.target.value)}
+              style={{width:120,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:16,fontWeight:700,outline:"none"}}/>
+            <span style={{fontSize:12,color:C.inkFaint}}>≈ {cad(costPerCheck)} each</span>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:C.inkFaint,maxWidth:340,lineHeight:1.5}}>
+          A modeling assumption you set, saved on this device. Use it to fill the gap where real API cost isn't logged (the PDF path doesn't write to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code>).
+        </div>
+      </div>
+
+      {/* Free-check breaker status + editable cap */}
+      <div style={{...cardStyle,marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Free-check breaker <RealTag/></div>
+          <div style={{fontSize:12,color:C.inkFaint}}>anonymous free checks used today</div>
+        </div>
+        {(()=>{
+          const used=Number(status?.used||0);
+          const lim=Number(status?.limit_per_day||0);
+          const pct=lim>0?Math.min(100,Math.round((used/lim)*100)):0;
+          const atCap=lim>0&&used>=lim;
+          return (
+            <>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+                <span style={{fontSize:30,fontWeight:800,color:atCap?C.coralInk:C.ink,fontFamily:"monospace"}}>{used.toLocaleString()}</span>
+                <span style={{fontSize:16,color:C.inkFaint}}>/ {lim<=0?"disabled":lim.toLocaleString()}</span>
+                {atCap&&<span style={{fontSize:11,fontWeight:800,color:C.coralInk,background:C.coralBg,borderRadius:5,padding:"2px 7px"}}>AT CAPACITY</span>}
+              </div>
+              <div style={{background:C.paper2,borderRadius:5,height:8,overflow:"hidden",marginBottom:16}}>
+                <div style={{width:`${pct}%`,height:"100%",background:atCap?C.coral:C.teal}}/>
+              </div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Daily free-check cap</div>
+                  <input type="number" min="0" step="1" value={capInput}
+                    onChange={e=>setCapInput(e.target.value)}
+                    style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
+                </div>
+                <button onClick={saveCap} disabled={savingCap||capInput===String(lim)}
+                  style={{background:(savingCap||capInput===String(lim))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(lim))?"default":"pointer"}}>
+                  {savingCap?"Saving…":"Save cap"}
+                </button>
+                <div style={{fontSize:11,color:C.inkFaint,maxWidth:300,lineHeight:1.5}}>
+                  Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.free_checks_per_day</code>. 0 disables anonymous free checks entirely.
+                </div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Checks matrix */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflowX:"auto",marginBottom:20}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+          <thead>
+            <tr>
+              <th style={{...th,textAlign:"left"}}>METRIC</th>
+              {cols.map(c=><th key={c.win} style={th}>{c.label.toUpperCase()}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              {label:"Free checks", sub:"anonymous · free", tag:"real", count:c=>c.free, cost:c=>c.freeCost},
+              {label:"Shared checks", sub:"gift redeemed · free", tag:"real", count:c=>c.shared, cost:c=>c.sharedCost},
+              {label:"Paid checks", sub:"signed-in credit spends", tag:"real", count:c=>c.paid, cost:c=>c.paidCost},
+            ].map(row=>(
+              <tr key={row.label}>
+                <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>{row.label}{row.tag==="real"?<RealTag/>:<EstTag/>}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>{row.sub}</div>
+                </td>
+                {cols.map(c=>(
+                  <td key={c.win} style={{...td,color:C.ink}}>
+                    <div style={{fontWeight:800,fontSize:15}}>{row.count(c.d).toLocaleString()}</div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{fmtUsd(row.cost(c.d))} <span style={{opacity:0.7}}>modeled</span></div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {/* Estimated revenue */}
+            <tr style={{background:C.paper2}}>
+              <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. revenue<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>from purchase grants</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td}}>
+                  <div style={{fontWeight:800,fontSize:15,color:C.ink}}>{fmtUsd(c.d.revenue)}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{c.d.purchaseN} purchase{c.d.purchaseN===1?"":"s"} · {cad(c.d.revenue)}</div>
+                </td>
+              ))}
+            </tr>
+            {/* Gross margin on paid */}
+            <tr>
+              <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. gross margin<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − paid-check cost</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td}}>
+                  <div style={{fontWeight:800,fontSize:15,color:c.d.grossMargin>=0?C.tealInk:C.coralInk}}>{fmtUsd(c.d.grossMargin)}</div>
+                </td>
+              ))}
+            </tr>
+            {/* Net after free/shared subsidy */}
+            <tr>
+              <td style={{padding:"12px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. net after subsidy<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − ALL check cost</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td,borderBottom:"none"}}>
+                  <div style={{fontWeight:800,fontSize:15,color:c.d.netAfterSubsidy>=0?C.tealInk:C.coralInk}}>{fmtUsd(c.d.netAfterSubsidy)}</div>
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* API spend: logged (real, partial) vs modeled */}
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:8}}>API SPEND · LOGGED vs MODELED</div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.6,maxWidth:760}}>
+        <b style={{color:C.tealInk}}>Logged</b> is the real cost written to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code> — but only the URL analyze function logs it; the <b>PDF path doesn't</b>, so this <b>undercounts</b>. <b style={{color:C.butterInk}}>Modeled</b> = every check (free + shared + paid) × cost-per-check, a fuller estimate.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+        {cols.map(c=>(
+          <div key={c.win} style={cardStyle}>
+            <div style={{fontSize:12,color:C.inkFaint,marginBottom:8}}>{c.label}</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+              <span style={{fontSize:11,fontWeight:800,color:C.tealInk}}>LOGGED{apiUsageLoading?"…":""}</span>
+              <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.logged)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+              <span style={{fontSize:11,fontWeight:800,color:C.butterInk}}>MODELED</span>
+              <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.modeledSpend)}</span>
+            </div>
+            <div style={{fontSize:11,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:8}}>
+              {c.d.totalChecks.toLocaleString()} check{c.d.totalChecks===1?"":"s"} total ({c.d.free}f · {c.d.shared}s · {c.d.paid}p)
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DealerModal({dealer,onSave,onClose}){
   const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false,amvic_number:"",amvic_verified:false,amvic_verified_at:null});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
@@ -3143,6 +3419,11 @@ function AdminPanel(){
   const [rejectedListings,setRejectedListings]=useState([]);
   const [reviewLoading,setReviewLoading]=useState(true);
 
+  // Unit Economics: one admin-gated RPC snapshot of aggregate-only figures.
+  const [econ,setEcon]=useState(null);
+  const [econLoading,setEconLoading]=useState(true);
+  const [econError,setEconError]=useState(null);
+
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{
       setSession(data.session);
@@ -3245,6 +3526,31 @@ function AdminPanel(){
     }
   }
   useEffect(()=>{ if(session) fetchReview(); else { setReviewListings([]); setRejectedListings([]); } },[session]);
+
+  async function fetchEcon(){
+    setEconLoading(true); setEconError(null);
+    try{
+      const {data,error}=await supabase.rpc("fn_admin_economics");
+      if(error) throw error;
+      setEcon(data||null);
+    }catch(err){
+      console.warn("⚠️ fn_admin_economics failed (did you run 20260730_admin_economics.sql, and is your login in admin_config.admin_emails?):",err.message);
+      setEcon(null);
+      setEconError(err.message||"Couldn't load economics.");
+    }finally{
+      setEconLoading(false);
+    }
+  }
+  useEffect(()=>{ if(session) fetchEcon(); else { setEcon(null); setEconError(null); } },[session]);
+
+  // Live-adjust the anonymous free-check daily cap via the admin-gated update
+  // RPC, then re-pull the snapshot so the breaker card reflects the new limit.
+  async function setFreeCap(value){
+    const {data,error}=await supabase.rpc("fn_admin_set_free_checks_per_day",{p_value:Math.round(Number(value)||0)});
+    if(error){ alert("Couldn't update the free-check cap: "+error.message); return null; }
+    await fetchEcon();
+    return data;
+  }
 
   function exportReportLeadsCsv(){
     const rows=[["email","source","created_at"],...reportLeads.map(l=>[l.email,l.source||"",l.created_at])];
@@ -3437,6 +3743,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
+          <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -3669,6 +3976,7 @@ function AdminPanel(){
 
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
         {tab==="profit" && <ProfitTrackerTab/>}
+        {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
