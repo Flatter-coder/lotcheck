@@ -362,8 +362,8 @@ section{padding:clamp(64px,9vw,120px) 0}
 .hud-name{display:block;font-weight:800;font-size:.85rem;color:var(--ink-soft)}
 .hud-bar{height:10px;border-radius:99px;background:rgba(51,48,90,.12);overflow:hidden}
 .hud-bar i{display:block;height:100%;width:0%;border-radius:inherit;background:linear-gradient(90deg,var(--teal),#63C6B9)}
-.stn-label{font-weight:800;font-size:17px;fill:var(--ink);opacity:.32;transition:opacity .4s}
-.station.on .stn-label{opacity:1}
+.stn-label{font-weight:800;font-size:17px;fill:var(--ink);opacity:.72;transition:opacity .4s,fill .3s}
+.station.on .stn-label{opacity:1;fill:#1E8A7E}
 .station .lamp{transition:fill .3s}
 .station.on .lamp{fill:#2FA79A;animation:lampflash .7s ease-out}
 @keyframes lampflash{0%{opacity:.15}45%{opacity:1}100%{opacity:1}}
