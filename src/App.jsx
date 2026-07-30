@@ -5247,6 +5247,218 @@ function DetailToggle({C, moreLabel, lessLabel, children, defaultOpen=false}){
   );
 }
 
+// ── Self-contained share link ───────────────────────────────────────────────
+// The report is packed into the URL FRAGMENT (never sent to a server, never
+// stored) so a shared link reconstructs the report entirely client-side —
+// keeping LotCheck's "analyzed once, never stored" promise literally true. A
+// compact field subset keeps the link short; long recall summaries are dropped
+// (the flip-book shows systems + dates only).
+function encodeReport(a){
+  const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
+    qp:a.quotedPrice,ms:a.msrp,
+    fin:a.financing?{p:a.financing.paymentAmount,f:a.financing.paymentFrequency,r:a.financing.rate,t:a.financing.termMonths}:null,
+    fr:a.financeRates?{d:a.financeRates.dealer?.apr??null,m:a.financeRates.manufacturer?.apr??null}:null,
+    rc:a.recalls?.checked?{n:a.recalls.count,it:(a.recalls.items||[]).slice(0,6).map(x=>({s:x.system,d:x.date}))}:null,
+    ao:(a.addOns||[]).map(x=>({n:x.name,p:x.price,vd:x.verdict||(x.flagged?"flagged":"standard")})),
+    tf:a.totalFlaggedCost,
+    ds:a.dealerSentiment?{r:a.dealerSentiment.rating,c:a.dealerSentiment.reviewCount,h:(a.dealerSentiment.highlights||[]).slice(0,3).map(x=>({r:x.rating,t:x.text}))}:null,
+    lv:a.leverageScore?{s:a.leverageScore.score,n:a.leverageScore.note}:null,
+    sw:a.standardWarranty?.coverage?{c:a.standardWarranty.coverage}:null,
+    sm:a.summary};
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+  catch{ return ""; }
+}
+function decodeReport(s){
+  try{
+    const b=s.replace(/-/g,"+").replace(/_/g,"/");
+    const c=JSON.parse(decodeURIComponent(escape(atob(b))));
+    return {vehicle:c.v,year:c.y,make:c.mk,model:c.md,trim:c.tr,dealerName:c.dn,dealerCity:c.dc,vehicleCondition:c.cond,
+      quotedPrice:c.qp,msrp:c.ms,
+      financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
+      financeRates:c.fr?{dealer:c.fr.d!=null?{apr:c.fr.d}:null,manufacturer:c.fr.m!=null?{apr:c.fr.m}:null}:null,
+      recalls:c.rc?{checked:true,count:c.rc.n,items:(c.rc.it||[]).map(x=>({system:x.s,date:x.d})),source:"Transport Canada VRDB"}:null,
+      addOns:(c.ao||[]).map(x=>({name:x.n,price:x.p,verdict:x.vd})),
+      totalFlaggedCost:c.tf,
+      dealerSentiment:c.ds?{rating:c.ds.r,reviewCount:c.ds.c,highlights:(c.ds.h||[]).map(x=>({rating:x.r,text:x.t})),dealerName:c.dn}:null,
+      leverageScore:c.lv?{score:c.lv.s,note:c.lv.n,computed:true}:null,
+      standardWarranty:c.sw?{coverage:c.sw.c}:null,
+      summary:c.sm,__shared:true};
+  }catch{ return null; }
+}
+
+// ── Report flip-book ("Report view") ────────────────────────────────────────
+// Presents the report as a two-page magazine spread you flip through (arrows /
+// ← → keys), instead of a long scroll. Pages are built DYNAMICALLY from the
+// analysis so variable content (0 vs many recalls, short/long fee lists) never
+// breaks a fixed layout — a page only appears when it has real data. Its own
+// "printed report" palette (paper + violet/teal), independent of the app theme.
+function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
+  const [cur,setCur]=useState(0);
+  const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
+  const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
+  const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
+  const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
+  const vehName=a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||"Vehicle";
+  const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"}, fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
+
+  // Build the page list — only pages backed by real data.
+  const P=[];
+  P.push({t:"cover"});
+  if(qp||ms) P.push({t:"deal"});
+  if(a.financing?.paymentAmount||a.financeRates?.dealer||a.financeRates?.manufacturer) P.push({t:"fin"});
+  if(a.recalls?.checked) P.push({t:"recalls"});
+  if(feeItems.length) P.push({t:"fees"});
+  if(a.dealerSentiment?.rating) P.push({t:"rep"});
+  if(a.leverageScore||a.summary) P.push({t:"bottom"});
+  if(P.length%2) P.push({t:"blank"});
+  const leaves=[]; for(let i=0;i<P.length;i+=2) leaves.push([P[i],P[i+1]]);
+  const N=leaves.length;
+  useEffect(()=>{
+    const h=(e)=>{ if(e.key==="ArrowRight"&&cur<N)setCur(cur+1); if(e.key==="ArrowLeft"&&cur>0)setCur(cur-1); };
+    window.addEventListener("keydown",h); return ()=>window.removeEventListener("keydown",h);
+  },[cur,N]);
+
+  const Page=({p,side})=>{
+    if(!p||p.t==="blank") return <div className="rfb-pg" style={{background:"#123f3a"}}/>;
+    const num=<div className={`rfb-pn ${side}`}>{p.t==="cover"?"":String(P.indexOf(p)+1).padStart(2,"0")}</div>;
+    if(p.t==="cover") return (
+      <div className="rfb-pg rfb-cover">
+        <div><div className="rfb-brand"><span className="rfb-mk"/>LotCheck</div>
+          <div className="rfb-ct">Quote Check Report</div>
+          <div className="rfb-veh">{a.year} {a.make}<br/>{a.model}</div>
+          <div className="rfb-dl">{[a.trim,a.dealerName,a.dealerCity].filter(Boolean).join(" · ")}</div></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+          <div className="rfb-seal">◈ Verified{a.vehicleCondition?` · ${a.vehicleCondition}`:""}</div>
+        </div>
+      </div>);
+    if(p.t==="deal") return (<div className="rfb-pg">{num}
+      <div className="rfb-k">The deal</div>
+      <h2 className="rfb-h2">{delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"}</h2>
+      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">the dealer's all-in price</div></div>}
+      {ms>0&&<div className="rfb-stat"><div className="rfb-lab">Verified MSRP</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}</div>}
+      <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
+    </div>);
+    if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=a.financeRates?.dealer?.apr, mRate=a.financeRates?.manufacturer?.apr;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Financing</div>
+      <h2 className="rfb-h2">{dRate&&mRate&&dRate>mRate?`Rate is ${(dRate-mRate).toFixed(2)}% over ${a.make}'s`:"Payment breakdown"}</h2>
+      {fin?.paymentAmount&&fin?.paymentFrequency&&<div className="rfb-stat"><div className="rfb-lab">On your quote</div><div className="rfb-big">{money(fin.paymentAmount)}<span style={{fontSize:16,color:"#9a94b4"}}>{fSuf[fin.paymentFrequency]}</span></div><div className="rfb-sub">{r?`${r}% APR · `:""}{fin.termMonths?`${fin.termMonths} months`:""}</div></div>}
+      <div className="rfb-rows">
+        {dRate!=null&&<div className="rfb-r"><span className="rfb-n">This dealer</span><span className="rfb-v bad">{dRate}%</span></div>}
+        {mRate!=null&&<div className="rfb-r"><span className="rfb-n">{a.make} advertised</span><span className="rfb-v">{mRate}%</span></div>}
+      </div>
+      {dRate&&mRate&&dRate>mRate&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Worth pushing back</div><div className="rfb-wt">{(dRate-mRate).toFixed(2)}% above {a.make}'s advertised rate — ask them to match the manufacturer rate.</div></div>}
+    </div>); }
+    if(p.t==="recalls"){ const r=a.recalls;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Safety</div>
+      <h2 className="rfb-h2">{r.count>0?`${r.count} open recall${r.count>1?"s":""}`:"No open recalls"}</h2>
+      {r.count>0?<>
+        <div className="rfb-why"><div className="rfb-wh">Why you're seeing this</div><div className="rfb-wt">Open safety-recall campaigns <b>Transport Canada</b> publishes for this year/make/model — read live from the federal Vehicle Recall Database. Government data, not our opinion. Confirm by <b>VIN</b> with the dealer.</div></div>
+        <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
+        <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
+      </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
+    </div>); }
+    if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
+      <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
+      <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div className="rfb-r" key={i}><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>)}</div>
+      <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Add-ons total</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
+    </div>);
+    if(p.t==="rep"){ const d=a.dealerSentiment;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Reputation</div>
+      <h2 className="rfb-h2">{d.dealerName||"This dealer"}</h2>
+      <div className="rfb-stat"><div className="rfb-lab">Google reviews</div><div className="rfb-big">{Number(d.rating).toFixed(1)}<span style={{fontSize:16,color:"#9a94b4"}}> · {Number(d.reviewCount||0).toLocaleString()}</span></div></div>
+      <div className="rfb-rows">{(d.highlights||[]).slice(0,3).map((h,i)=><div className="rfb-r" key={i}><span className="rfb-n">★{h.rating} · {h.text}</span></div>)}</div>
+      <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>Public Google reviews — snippets shown, linked to source.</div>
+    </div>); }
+    if(p.t==="bottom"){ const lv=a.leverageScore;
+      return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f0eafc)"}}>{num}<div className="rfb-k">Bottom line</div>
+      <h2 className="rfb-h2">{lv?`Leverage ${lv.score} / 10`:"The bottom line"}</h2>
+      {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">Computed only from the verified findings — not an opinion.</div></div>}
+      {a.summary&&<div className="rfb-lede" style={{marginTop:6}}>{a.summary}</div>}
+    </div>); }
+    return <div className="rfb-pg"/>;
+  };
+
+  return (
+    <div className="rfb-wrap">
+      <style>{RFB_CSS}</style>
+      <div className="rfb-bar">
+        <button className="rfb-exit" onClick={onExit}>‹ Scroll view</button>
+        <div className="rfb-count">{cur===0?"Cover":(cur===N?"End":`Spread ${cur} / ${N-1}`)}</div>
+        <button className="rfb-share" onClick={onShare}>{copied?"Link copied":"Copy share link"}</button>
+      </div>
+      <div className="rfb-book">
+        <div className="rfb-base l"><div className="rfb-inside"><div className="rfb-vmark">LotCheck · Verified</div></div></div>
+        <div className="rfb-base r"><div className="rfb-end"><div className="rfb-mk2"/><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Analyzed once, never stored</div></div></div>
+        {leaves.map((lf,i)=>(
+          <div className={`rfb-leaf ${i<cur?"flipped":""}`} key={i} style={{zIndex:i<cur?i:N-i}}>
+            <div className="rfb-face front"><Page p={lf[0]} side="r"/></div>
+            <div className="rfb-face back"><Page p={lf[1]} side="l"/></div>
+          </div>
+        ))}
+      </div>
+      <div className="rfb-ctr">
+        <button className="rfb-nav" onClick={()=>cur>0&&setCur(cur-1)} disabled={cur===0} aria-label="Previous">‹</button>
+        <button className="rfb-nav" onClick={()=>cur<N&&setCur(cur+1)} disabled={cur===N} aria-label="Next">›</button>
+      </div>
+      {shared&&<div className="rfb-shared">Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
+    </div>
+  );
+}
+
+const RFB_CSS=`
+  .rfb-wrap{display:flex;flex-direction:column;align-items:center;padding:8px 0 24px}
+  .rfb-bar{display:flex;align-items:center;gap:12px;width:100%;max-width:860px;margin-bottom:14px;flex-wrap:wrap}
+  .rfb-exit,.rfb-share{background:transparent;border:1px solid rgba(120,110,160,.35);border-radius:10px;padding:8px 14px;font:inherit;font-weight:800;font-size:13px;color:inherit;cursor:pointer}
+  .rfb-share{margin-left:auto;background:#6d4bd8;border-color:#6d4bd8;color:#fff}
+  .rfb-count{font-family:'JetBrains Mono',monospace;font-size:12px;opacity:.7}
+  .rfb-book{position:relative;width:min(860px,96vw);height:min(560px,68vh);perspective:2400px;box-shadow:0 40px 60px -30px rgba(0,0,0,.45)}
+  .rfb-base{position:absolute;top:0;bottom:0;width:50%;overflow:hidden}
+  .rfb-base.l{left:0;border-radius:10px 4px 4px 10px}.rfb-base.r{right:0;border-radius:4px 10px 10px 4px}
+  .rfb-inside{position:absolute;inset:0;background:linear-gradient(135deg,#123f3a,#171235);display:grid;place-items:center}
+  .rfb-vmark{font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.3em;color:rgba(127,224,211,.4);text-transform:uppercase;font-size:12px;transform:rotate(-90deg);white-space:nowrap}
+  .rfb-end{position:absolute;inset:0;background:linear-gradient(150deg,#171235,#123f3a);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px}
+  .rfb-mk2{width:40px;height:40px;border-radius:11px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);margin-bottom:14px}
+  .rfb-end h3{font-family:'Space Grotesk';font-weight:700;font-size:21px;margin:0 0 8px}
+  .rfb-end p{color:#c9c2ee;font-size:13px;margin:0;max-width:24ch;line-height:1.5}
+  .rfb-fine{color:#6f68a0;font-size:11px;margin-top:14px}
+  .rfb-leaf{position:absolute;top:0;right:0;width:50%;height:100%;transform-origin:left center;transform-style:preserve-3d;transition:transform .95s cubic-bezier(.2,.72,.2,1)}
+  .rfb-leaf.flipped{transform:rotateY(-180deg)}
+  .rfb-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;background:#fbf7ef}
+  .rfb-face.front{border-radius:4px 10px 10px 4px;box-shadow:inset 22px 0 40px -30px rgba(0,0,0,.35)}
+  .rfb-face.back{transform:rotateY(180deg);border-radius:10px 4px 4px 10px;box-shadow:inset -22px 0 40px -30px rgba(0,0,0,.35)}
+  .rfb-pg{position:absolute;inset:0;padding:32px 30px;display:flex;flex-direction:column;color:#241f3a;font-family:'Nunito',sans-serif}
+  .rfb-k{font-size:10.5px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;color:#6d4bd8}
+  .rfb-h2{font-family:'Space Grotesk';font-weight:700;font-size:23px;margin:6px 0 14px;line-height:1.12}
+  .rfb-pn{position:absolute;bottom:16px;font-size:10px;font-weight:800;color:#9a94b4;letter-spacing:.1em}
+  .rfb-pn.l{left:30px}.rfb-pn.r{right:30px}
+  .rfb-stat{margin-bottom:13px}.rfb-lab{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9a94b4}
+  .rfb-big{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:29px;line-height:1.1}
+  .rfb-sub{font-size:12px;color:#5d5878;margin-top:2px}
+  .rfb-tag{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px}
+  .rfb-tag.bad{background:#fbe7e2;color:#d6533f}
+  .rfb-rows{border-top:1px solid #e7e0d2;margin-top:4px}
+  .rfb-r{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #e7e0d2;font-size:12.5px}
+  .rfb-n{color:#241f3a;font-weight:700}.rfb-v{font-family:'JetBrains Mono';font-weight:800;white-space:nowrap}.rfb-v.bad{color:#d6533f}
+  .rfb-why{margin-top:12px;background:#fbe7e2;border:1px solid #eec3b8;border-radius:12px;padding:10px 12px}
+  .rfb-why.warn{background:#fbf0d8;border-color:#e9d29a}
+  .rfb-wh{font-size:12px;font-weight:1000;color:#d6533f;margin-bottom:4px}
+  .rfb-wt{font-size:11.5px;color:#241f3a;line-height:1.5;font-weight:600}
+  .rfb-lede{font-size:13px;color:#5d5878;line-height:1.55}
+  .rfb-cover{background:linear-gradient(150deg,#171235,#241a52 55%,#123f3a);color:#fff;justify-content:space-between;padding:38px 32px}
+  .rfb-brand{display:flex;align-items:center;gap:11px;font-weight:1000;font-size:22px}
+  .rfb-mk{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .rfb-ct{font-family:'Space Grotesk';font-weight:700;font-size:14px;letter-spacing:.24em;text-transform:uppercase;color:#7fe0d3;margin-top:24px}
+  .rfb-veh{font-family:'Space Grotesk';font-weight:700;font-size:28px;line-height:1.12;margin:8px 0 6px}
+  .rfb-dl{color:#c9c2ee;font-size:12.5px}
+  .rfb-seal{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(127,224,211,.5);border-radius:999px;padding:7px 14px;font-size:11px;font-weight:800;color:#7fe0d3;text-transform:capitalize}
+  .rfb-ctr{display:flex;gap:14px;margin-top:18px}
+  .rfb-nav{width:44px;height:44px;border-radius:50%;border:1px solid rgba(120,110,160,.4);background:rgba(120,110,160,.1);color:inherit;font-size:20px;cursor:pointer}
+  .rfb-nav:disabled{opacity:.3;cursor:default}
+  .rfb-shared{font-size:11px;opacity:.6;margin-top:12px}
+  @media(max-width:640px){.rfb-pg{padding:22px 18px}.rfb-h2{font-size:19px}.rfb-big{font-size:25px}}
+`;
+
 function QuoteCheckPage(){
   // Current signed-in user (magic-link). Single source of truth via the shared
   // hook; null when logged out. Drives the header entry point and the
@@ -5313,6 +5525,30 @@ function QuoteCheckPage(){
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
+  // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
+  // "Report view"). `sharedReport` is true when the analysis was reconstructed
+  // from a self-contained share link (#r=...), never fetched or stored.
+  const [reportView,setReportView]=useState("scroll");
+  const [sharedReport,setSharedReport]=useState(false);
+  const [linkCopied,setLinkCopied]=useState(false);
+  // On mount, reconstruct a shared report entirely client-side from the URL
+  // fragment — nothing hits a server, nothing is stored (keeps "never stored").
+  useEffect(()=>{
+    try{
+      const m=(window.location.hash||"").match(/[#&]r=([^&]+)/);
+      if(m){
+        const rep=decodeReport(m[1]);
+        if(rep){ setAnalysis(rep); setAnalysisSource("listing"); setStatus("done"); setReportView("flip"); setSharedReport(true);
+          window.history.replaceState({},"",window.location.pathname); }
+      }
+    }catch{}
+  },[]);
+  const copyShareLink=async()=>{
+    if(!analysis) return;
+    const url=window.location.origin+"/quote-check#r="+encodeReport(analysis);
+    try{ await navigator.clipboard.writeText(url); setLinkCopied(true); setTimeout(()=>setLinkCopied(false),2200); }
+    catch{ setLinkCopied(false); }
+  };
   // Tracks which analysis path produced the current `analysis` object --
   // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
   // Some copy below (the flagged-items banner especially) means something
@@ -6216,8 +6452,18 @@ function QuoteCheckPage(){
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
+            // Flip-book "Report view" replaces the scroll body when selected.
+            if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport}/>;
             return (
             <div>
+              {/* View toggle: Scroll (canonical) vs the flip-book Report view, + share link */}
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
+                  <button onClick={()=>setReportView("scroll")} style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>Scroll view</button>
+                  <button onClick={()=>setReportView("flip")} style={{background:"transparent",color:C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>Report view</button>
+                </div>
+                <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
+              </div>
               {/* Result-first sign-in invitation. Non-blocking: the full report
                   renders below regardless. Only shown to logged-out visitors --
                   once signed in it disappears. No paywall, no enforcement
