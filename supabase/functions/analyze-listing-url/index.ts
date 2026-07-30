@@ -100,12 +100,26 @@ async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
 // by the personal credit ledger above and never touch this). Calls the
 // SECURITY DEFINER RPC fn_try_free_check on the service-role client, which
 // ATOMICALLY returns TRUE and increments today's count if under the configured
-// daily limit, or FALSE once the limit is hit. Returns true = allowed, false =
-// blocked. FAILS OPEN on any RPC error: cost protection is best-effort, so a DB
-// blip must not hard-block legitimate users — we log it and allow the check.
-async function tryFreeCheck(): Promise<boolean> {
+// daily limit (global AND per-IP), or FALSE once either limit is hit. Returns
+// true = allowed, false = blocked. FAILS OPEN on any RPC error: cost protection
+// is best-effort, so a DB blip must not hard-block legitimate users — we log it
+// and allow the check.
+function clientIp(req: Request): string | null {
+  // Prefer the first hop in x-forwarded-for (the original client), fall back to
+  // x-real-ip. null when neither header is present.
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0].trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  return real ? real.trim() : null;
+}
+
+async function tryFreeCheck(req: Request): Promise<boolean> {
   try {
-    const { data, error } = await supabase.rpc("fn_try_free_check");
+    const ip = clientIp(req);
+    const { data, error } = await supabase.rpc("fn_try_free_check", { p_ip: ip });
     if (error) {
       console.error("fn_try_free_check failed (failing open):", error.message);
       return true;
@@ -1749,7 +1763,7 @@ Deno.serve(async (req: Request) => {
       // expensive Nimble/Claude work (and before the cache fast-path), so a
       // blocked check costs nothing. Signed-in callers took the credit-authorize
       // branch above and are unaffected.
-      const allowed = await tryFreeCheck();
+      const allowed = await tryFreeCheck(req);
       if (!allowed) {
         return new Response(JSON.stringify({ error: "free_limit_reached" }), {
           status: 429,
