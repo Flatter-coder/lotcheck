@@ -500,6 +500,27 @@
   .mal-form select option{background:var(--panel-2);color:var(--ink)}
   .mal-form select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);
     background-position:calc(100% - 15px) 17px,calc(100% - 10px) 17px;background-size:5px 5px;background-repeat:no-repeat}
+  /* Custom dropdown — replaces native <select> so the OPEN menu is themed on
+     every browser/OS (native option lists ignore CSS on macOS/Safari). */
+  .mal-cs{position:relative;width:100%}
+  .mal-cs-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;
+    background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;color:var(--ink);
+    font:inherit;font-size:13.5px;padding:10px 12px;cursor:pointer;text-align:left;transition:border-color .2s}
+  .mal-cs.open .mal-cs-btn,.mal-cs-btn:focus{outline:none;border-color:var(--cyan)}
+  .mal-cs-car{flex:none;width:9px;height:9px;border-right:2px solid var(--dim);border-bottom:2px solid var(--dim);
+    transform:rotate(45deg) translateY(-2px);transition:transform .2s}
+  .mal-cs.open .mal-cs-car{transform:rotate(-135deg) translateY(2px)}
+  /* OPAQUE menu: the panel tint is translucent, so composite it over the solid
+     --bg (a real color) — otherwise the dropdown shows the form through it. */
+  .mal-cs-menu{position:absolute;left:0;right:0;top:calc(100% + 5px);z-index:30;max-height:236px;overflow-y:auto;
+    background:linear-gradient(var(--panel-2),var(--panel-2)),var(--bg);
+    border:1px solid var(--hair);border-radius:9px;box-shadow:0 18px 44px -14px rgba(0,0,0,.65);
+    list-style:none;margin:0;padding:5px;display:none}
+  .mal-cs.open .mal-cs-menu{display:block}
+  .mal-cs-menu li{padding:8px 11px;border-radius:6px;font-size:13.5px;color:var(--ink);cursor:pointer;white-space:nowrap}
+  .mal-cs-menu li:hover{background:color-mix(in srgb,var(--cyan) 16%,transparent)}
+  .mal-cs-menu li.sel{color:var(--cyan);font-weight:800}
+  .mal-cs-menu::-webkit-scrollbar{width:9px}.mal-cs-menu::-webkit-scrollbar-thumb{background:var(--hair);border-radius:9px}
   .mal-seg{display:flex;background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;padding:3px;gap:2px}
   .mal-seg button{flex:1;font:inherit;font-size:12px;font-weight:700;border:0;background:none;color:var(--dim);padding:8px 4px;border-radius:7px;cursor:pointer;transition:.2s}
   .mal-seg button.mal-on{background:var(--cyan);color:var(--bg)}
@@ -711,25 +732,32 @@
               <!-- Only the 28 makes with verified MSRP rows in msrp_catalog
                    (pulled live from the DB) -- the makes alerts can actually be
                    anchored to. "Other" stays as a waitlist demand signal. -->
-              <select id="malMake" aria-label="Make">
-                <option>Acura</option><option>Alfa Romeo</option><option>BMW</option><option>Buick</option>
-                <option>Cadillac</option><option>Chevrolet</option><option>Chrysler</option><option>Dodge</option>
-                <option>Fiat</option><option>Ford</option><option>Genesis</option><option>Honda</option>
-                <option>Hyundai</option><option>Infiniti</option><option>Jeep</option><option>Kia</option>
-                <option>Lexus</option><option>Lincoln</option><option>Mazda</option><option>Mercedes-Benz</option>
-                <option>Mini</option><option>Nissan</option><option>Porsche</option><option>Ram</option>
-                <option>Subaru</option><option>Toyota</option><option>Volkswagen</option><option>Volvo</option>
-                <option>Other</option>
-              </select>
+              <div class="mal-cs" id="malMake" data-value="Acura">
+                <button type="button" class="mal-cs-btn" aria-label="Make"><span class="mal-cs-lab">Acura</span><span class="mal-cs-car"></span></button>
+                <ul class="mal-cs-menu" role="listbox">
+                  <li data-v="Acura">Acura</li><li data-v="Alfa Romeo">Alfa Romeo</li><li data-v="BMW">BMW</li><li data-v="Buick">Buick</li>
+                  <li data-v="Cadillac">Cadillac</li><li data-v="Chevrolet">Chevrolet</li><li data-v="Chrysler">Chrysler</li><li data-v="Dodge">Dodge</li>
+                  <li data-v="Fiat">Fiat</li><li data-v="Ford">Ford</li><li data-v="Genesis">Genesis</li><li data-v="Honda">Honda</li>
+                  <li data-v="Hyundai">Hyundai</li><li data-v="Infiniti">Infiniti</li><li data-v="Jeep">Jeep</li><li data-v="Kia">Kia</li>
+                  <li data-v="Lexus">Lexus</li><li data-v="Lincoln">Lincoln</li><li data-v="Mazda">Mazda</li><li data-v="Mercedes-Benz">Mercedes-Benz</li>
+                  <li data-v="Mini">Mini</li><li data-v="Nissan">Nissan</li><li data-v="Porsche">Porsche</li><li data-v="Ram">Ram</li>
+                  <li data-v="Subaru">Subaru</li><li data-v="Toyota">Toyota</li><li data-v="Volkswagen">Volkswagen</li><li data-v="Volvo">Volvo</li>
+                  <li data-v="Other">Other</li>
+                </ul>
+              </div>
               <input id="malModel" placeholder="Model &mdash; e.g. RAV4" aria-label="Model"/>
             </div>
           </div>
           <div class="mal-row">
             <div class="mal-field" style="flex:1"><label>City</label>
-              <select id="malCity" aria-label="City">
-                <option>Calgary</option><option>Edmonton</option><option>Red Deer</option>
-                <option>Lethbridge</option><option>Fort McMurray</option><option>Other AB</option>
-              </select>
+              <div class="mal-cs" id="malCity" data-value="Calgary">
+                <button type="button" class="mal-cs-btn" aria-label="City"><span class="mal-cs-lab">Calgary</span><span class="mal-cs-car"></span></button>
+                <ul class="mal-cs-menu" role="listbox">
+                  <li data-v="Calgary">Calgary</li><li data-v="Edmonton">Edmonton</li><li data-v="Red Deer">Red Deer</li>
+                  <li data-v="Lethbridge">Lethbridge</li><li data-v="Fort McMurray">Fort McMurray</li>
+                  <li data-v="Grande Prairie">Grande Prairie</li><li data-v="Other AB">Other AB</li>
+                </ul>
+              </div>
             </div>
             <div class="mal-field" style="flex:1"><label>Year <span style="text-transform:none;color:var(--dimmer)">(optional)</span></label>
               <input id="malYear" placeholder="2026" inputmode="numeric" aria-label="Year"/></div>
@@ -1526,6 +1554,27 @@
   else raf=requestAnimationFrame(frame);
 
   /* ---- form ---- */
+  // Custom dropdowns (make / city): fully themed on every browser/OS. The value
+  // lives in the element's data-value, read by the submit above.
+  document.querySelectorAll(".mal-cs").forEach(function(cs){
+    var btn=cs.querySelector(".mal-cs-btn"), lab=cs.querySelector(".mal-cs-lab");
+    cs.querySelectorAll(".mal-cs-menu li").forEach(function(li){
+      if(li.dataset.v===cs.dataset.value) li.classList.add("sel");
+      li.onclick=function(){
+        cs.dataset.value=li.dataset.v; lab.textContent=li.dataset.v;
+        cs.querySelectorAll(".mal-cs-menu li").forEach(function(x){ x.classList.toggle("sel", x===li); });
+        cs.classList.remove("open");
+      };
+    });
+    btn.onclick=function(e){
+      e.stopPropagation();
+      var wasOpen=cs.classList.contains("open");
+      document.querySelectorAll(".mal-cs.open").forEach(function(o){ o.classList.remove("open"); });
+      if(!wasOpen) cs.classList.add("open");
+    };
+  });
+  document.addEventListener("click",function(){ document.querySelectorAll(".mal-cs.open").forEach(function(o){ o.classList.remove("open"); }); });
+
   var thr="at_msrp";
   document.querySelectorAll("#malSeg button").forEach(function(b){
     b.onclick=function(){ document.querySelectorAll("#malSeg button").forEach(function(x){x.classList.remove("mal-on");}); b.classList.add("mal-on"); thr=b.dataset.v; };
@@ -1544,11 +1593,11 @@
     var year=/^\d{4}$/.test(yearRaw)?parseInt(yearRaw,10):null;
     var payload={
       p_email:$("malEmail").value.trim(),
-      p_make:$("malMake").value,
+      p_make:$("malMake").dataset.value,
       p_model:$("malModel").value.trim(),
       p_year:year,
       p_province:"AB",
-      p_city:$("malCity").value,
+      p_city:$("malCity").dataset.value,
       p_threshold:thr,
       p_pct:thr==="pct_below"?5:null,
       p_consent:$("malConsent").checked
@@ -1561,9 +1610,9 @@
       if(!res.ok) throw new Error("HTTP "+res.status);
       return res.json().catch(function(){return {};});
     }).then(function(){
-      var v=($("malMake").value+" "+$("malModel").value.trim()).trim();
+      var v=($("malMake").dataset.value+" "+$("malModel").value.trim()).trim();
       var thrTxt = thr==="at_msrp"?"hits MSRP" : thr==="below_msrp"?"drops below MSRP" : "goes 5%+ under MSRP";
-      $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").value+". We'll email you the moment it "+thrTxt+" once we're tracking your city.";
+      $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").dataset.value+". We'll email you the moment it "+thrTxt+" once we're tracking your city.";
       $("malForm").style.display="none"; $("malDone").classList.add("mal-show");
     }).catch(function(){
       btn.disabled=false; btn.textContent="Notify me";
