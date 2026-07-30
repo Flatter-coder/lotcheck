@@ -95,6 +95,28 @@ async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
   }
 }
 
+// ── Anonymous free-check circuit breaker ────────────────────────────────────
+// The global cost guard for ANONYMOUS free checks (signed-in users are covered
+// by the personal credit ledger above and never touch this). Calls the
+// SECURITY DEFINER RPC fn_try_free_check on the service-role client, which
+// ATOMICALLY returns TRUE and increments today's count if under the configured
+// daily limit, or FALSE once the limit is hit. Returns true = allowed, false =
+// blocked. FAILS OPEN on any RPC error: cost protection is best-effort, so a DB
+// blip must not hard-block legitimate users — we log it and allow the check.
+async function tryFreeCheck(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("fn_try_free_check");
+    if (error) {
+      console.error("fn_try_free_check failed (failing open):", error.message);
+      return true;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("fn_try_free_check threw (failing open):", e);
+    return true;
+  }
+}
+
 // Place a credit hold before any expensive work. null result → out of credits.
 async function authorizeCredit(
   userId: string,
@@ -1722,6 +1744,18 @@ Deno.serve(async (req: Request) => {
         );
       }
       holdId = authz.holdId;
+    } else {
+      // Anonymous request: enforce the global free-check breaker BEFORE any
+      // expensive Nimble/Claude work (and before the cache fast-path), so a
+      // blocked check costs nothing. Signed-in callers took the credit-authorize
+      // branch above and are unaffected.
+      const allowed = await tryFreeCheck();
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "free_limit_reached" }), {
+          status: 429,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Cache fast-path: a recent analysis of this exact URL is returned

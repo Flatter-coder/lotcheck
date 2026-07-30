@@ -4538,7 +4538,7 @@ function SignInSentHero(){
   );
 }
 
-function SignInModal({C, cardStyle, onClose}){
+function SignInModal({C, cardStyle, onClose, notice}){
   const [email,setEmail]=useState("");
   const [phase,setPhase]=useState("form"); // form | sending | sent | error
   const [errMsg,setErrMsg]=useState("");
@@ -4587,6 +4587,12 @@ function SignInModal({C, cardStyle, onClose}){
             <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
           </button>
         </div>
+
+        {notice&&phase!=="sent"&&(
+          <div style={{background:C.tealBg,border:`1px solid ${C.teal}55`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13,color:C.tealInk,fontWeight:700,lineHeight:1.5}}>
+            {notice}
+          </div>
+        )}
 
         {phase==="sent"?(
           <div style={{textAlign:"center",padding:"0 0 4px"}}>
@@ -4697,6 +4703,9 @@ function QuoteCheckPage(){
   // result-first sign-in prompt below. No gating/enforcement here (Phase 2).
   const user=useSupabaseUser();
   const [showSignIn,setShowSignIn]=useState(false);
+  // Optional nudge shown inside SignInModal — set when an anonymous user hits
+  // the global free-check breaker (HTTP 429 free_limit_reached), cleared on close.
+  const [signInNotice,setSignInNotice]=useState(null);
   // Phase 4 credits. Balance is server-authoritative -- read from fn_my_credits
   // on load / auth change and refreshed from each check's `credits.personal`;
   // never computed client-side. `freeUsed` gates the single anonymous free
@@ -5035,6 +5044,18 @@ function QuoteCheckPage(){
         let body={}; try{ body=await res.json(); }catch{}
         if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
       }
+      // Anonymous free-check breaker tripped (global daily cap). Not an analysis
+      // failure and distinct from out_of_credits (a signed-in user at 0). Nudge
+      // to sign in + buy a pack, since paid checks aren't limited by the breaker.
+      if(res.status===429){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="free_limit_reached"){
+          setStatus("idle");
+          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setShowSignIn(true);
+          return;
+        }
+      }
       const data=await res.json();
       if(!res.ok||data.error){
         setStatus("error");
@@ -5100,6 +5121,18 @@ function QuoteCheckPage(){
       if(res.status===402){
         let body={}; try{ body=await res.json(); }catch{}
         if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
+      }
+      // Anonymous free-check breaker tripped (global daily cap). Not an analysis
+      // failure and distinct from out_of_credits (a signed-in user at 0). Nudge
+      // to sign in + buy a pack, since paid checks aren't limited by the breaker.
+      if(res.status===429){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="free_limit_reached"){
+          setStatus("idle");
+          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setShowSignIn(true);
+          return;
+        }
       }
       const data=await res.json();
       if(!res.ok||data.error){
@@ -5301,9 +5334,28 @@ function QuoteCheckPage(){
               </button>
             )}
             <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
-              {[["dark","🌙 Dark"],["light","🌤️ Light"],["outdoor","☀️ Outdoor"]].map(([k,label])=>(
+              {[
+                ["dark","Dark",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>
+                  </svg>
+                )],
+                ["light","Light",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+                  </svg>
+                )],
+                ["outdoor","Outdoor",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5" fill="currentColor"/>
+                    <path d="M12 1v3M12 20v3M1 12h3M20 12h3M4 4l2 2M18 18l2 2M20 4l-2 2M6 18l-2 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                )],
+              ].map(([k,label,icon])=>(
                 <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
-                  style={{background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkFaint,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkFaint,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {icon}
                   {label}
                 </button>
               ))}
@@ -6027,7 +6079,7 @@ function QuoteCheckPage(){
           </div>
         </div>
       </div>
-      {showSignIn&&<SignInModal C={C} cardStyle={cardStyle} onClose={()=>setShowSignIn(false)}/>}
+      {showSignIn&&<SignInModal C={C} cardStyle={cardStyle} notice={signInNotice} onClose={()=>{setShowSignIn(false);setSignInNotice(null);}}/>}
       {showPaywall&&<QuotePaywallModal C={C} cardStyle={cardStyle} onClose={()=>setShowPaywall(false)}/>}
     </>
   );
