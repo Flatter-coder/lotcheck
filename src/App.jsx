@@ -3903,6 +3903,11 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const [tilt, setTilt] = useState("");
+  // Progressive disclosure: the payment + rate comparison + key markup warning
+  // stay visible (the collapsed summary); the full down-payment x term matrix,
+  // "what we'd do", lease detail, and disclosures live behind this toggle.
+  // Default collapsed; the expand animation is skipped under reduced-motion.
+  const [expanded, setExpanded] = useState(false);
   const onTilt = e => {
     if(reduceMotion) return;
     const r = e.currentTarget.getBoundingClientRect();
@@ -4168,50 +4173,12 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           </div>
         )}
 
-        {/* Heatmap: down payment x term, shaded by relative total interest */}
-        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:16,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
-        <div style={{overflowX:"auto",margin:"0 -4px"}}>
-          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
-            <thead>
-              <tr>
-                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
-                {FIN_TERMS.map(t => (
-                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {cellData.map((row,ri) => (
-                <tr key={downs[ri]}>
-                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
-                  {row.map(cell => {
-                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
-                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
-                    const hTL = h ? TL[h] : null;
-                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
-                    return (
-                      <td key={cell.t} style={{
-                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
-                        background: hTL ? hTL.bg : "transparent",
-                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
-                      }}>
-                        {aprValid && cell.P > 0 ? (
-                          <>
-                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
-                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
-                          </>
-                        ) : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
-          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
-        </div>
+        {/* ── COLLAPSED SUMMARY ────────────────────────────────────────────
+            The rate comparison (on-your-quote vs manufacturer vs Bank of
+            Canada) and the key markup warning stay visible above the toggle,
+            per the approved condensed layout. The full payment matrix, the
+            "what we'd do" recommendation, lease detail, and all disclosures
+            move behind the expander below. */}
 
         {/* Rate anchors -- only real ones; each coloured by its own band */}
         <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:14}}>
@@ -4270,6 +4237,80 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           </div>
         </div>
 
+        {/* Dealer-vs-manufacturer markup warning -- same gate (new vehicle,
+            spread > 0.1%) and extra-cost math (both APRs amortized over 60 mo
+            on the price, difference of totals) as main's card. Kept in the
+            collapsed summary as the key warning. */}
+        {isNew && spread != null && spread > 0.1 && (()=>{
+          const pd = price*(dealerRate/1200)/(1-Math.pow(1+dealerRate/1200,-60));
+          const pm = price*(mfrRate/1200)/(1-Math.pow(1+mfrRate/1200,-60));
+          const extra = Math.round((pd-pm)*60);
+          return (
+            <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+            </div>
+          );
+        })()}
+
+        {/* Expand/collapse control for the full breakdown. Reduced-motion-safe:
+            the chevron rotation and the grid-rows reveal both drop their
+            transition when the user prefers reduced motion. */}
+        <button onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}
+          style={{width:"100%",marginTop:14,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:12,color:C.ink,font:"inherit",fontWeight:800,fontSize:13,padding:"11px 14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <span>{expanded?"Hide the full breakdown":"Explore down payment & term — every scenario"}</span>
+          <span style={{transform:expanded?"rotate(180deg)":"none",transition:reduceMotion?"none":"transform .3s ease",lineHeight:1}}>▾</span>
+        </button>
+
+        {/* ── EXPANDED DETAIL (default collapsed) ──────────────────────────── */}
+        <div style={{display:"grid",gridTemplateRows:expanded?"1fr":"0fr",transition:reduceMotion?"none":"grid-template-rows .35s ease",overflow:"hidden"}}>
+          <div style={{minHeight:0,overflow:"hidden"}}>
+            <div style={{paddingTop:16}}>
+
+        {/* Heatmap: down payment x term, shaded by relative total interest */}
+        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:0,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
+        <div style={{overflowX:"auto",margin:"0 -4px"}}>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
+                {FIN_TERMS.map(t => (
+                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cellData.map((row,ri) => (
+                <tr key={downs[ri]}>
+                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
+                  {row.map(cell => {
+                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
+                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
+                    const hTL = h ? TL[h] : null;
+                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
+                    return (
+                      <td key={cell.t} style={{
+                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
+                        background: hTL ? hTL.bg : "transparent",
+                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
+                      }}>
+                        {aprValid && cell.P > 0 ? (
+                          <>
+                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
+                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
+                          </>
+                        ) : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
+          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
+        </div>
+
         {/* New-vs-used guard: on a USED vehicle the manufacturer's advertised
             rate is a NEW-car offer, flagged reference-only (main's exact copy). */}
         {mfrRate != null && !isNew && (
@@ -4292,20 +4333,6 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             </ul>
           </div>
         )}
-
-        {/* Dealer-vs-manufacturer markup warning -- same gate (new vehicle,
-            spread > 0.1%) and extra-cost math (both APRs amortized over 60 mo
-            on the price, difference of totals) as main's card. */}
-        {isNew && spread != null && spread > 0.1 && (()=>{
-          const pd = price*(dealerRate/1200)/(1-Math.pow(1+dealerRate/1200,-60));
-          const pm = price*(mfrRate/1200)/(1-Math.pow(1+mfrRate/1200,-60));
-          const extra = Math.round((pd-pm)*60);
-          return (
-            <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
-              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
-            </div>
-          );
-        })()}
 
         {/* LEASE markup warning (forward-compatible): only when a dealer/listing
             lease APR exists alongside the manufacturer lease rate on a new
@@ -4393,6 +4420,10 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
         <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
           Estimate only. Financed amount = price − down payment; excludes tax, fees, trade-in, and any manufacturer promo. Actual payments depend on the APR and term you're approved for.
         </div>
+
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -4405,6 +4436,108 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
 // with the QuoteCheckPage palette (C) so it matches whatever mode the page is in
 // (dark/light/outdoor), reusing the app's .lc-modal-overlay backdrop. This only
 // requests the link -- session creation happens on the redirect back.
+// Small envelope glyph shared by the sign-in hero + success animation. Pure
+// SVG (no emoji) so it stays crisp and takes the stroke colour of whatever
+// chip it sits on.
+function SignInEnvelope({size=22, stroke="#fff", width=2}){
+  return (
+    <svg width={size} height={Math.round(size*0.72)} viewBox="0 0 24 17" fill="none" aria-hidden="true">
+      <rect x="1" y="1.2" width="22" height="14.6" rx="2.6" stroke={stroke} strokeWidth={width}/>
+      <path d="M2.4 3.2 12 10l9.6-6.8" stroke={stroke} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// LotCheck-style isometric hero for the sign-in form: a tilted violet runway
+// down which one-time-link chips advance forward toward the viewer, aiming at
+// a glowing teal destination line (the inbox). Matches the app's IsoScanVisual
+// idiom (perspective + rotateX(52deg) tilt + translateZ) and the referral/MSRP
+// 3D language (violet #8b5cf6 / teal #4fd8c4 glass, forward-moving chips).
+// Motion is CSS-only; prefers-reduced-motion parks each chip on its inline
+// resting frame (a static isometric stack) via the QC_CSS media query.
+function SignInLinkHero(){
+  const V="#8b5cf6", VL="#a78bfa", TB="#4fd8c4";
+  const face={
+    position:"absolute",width:46,height:32,margin:"-16px 0 0 -23px",borderRadius:9,
+    transform:"rotateX(-52deg)",display:"grid",placeItems:"center",
+    background:`linear-gradient(150deg, ${VL}, ${V})`,
+    boxShadow:`0 12px 24px -8px ${V}99, inset 0 1px 0 rgba(255,255,255,.4)`,
+  };
+  // Each chip: a moving wrapper (animated) + a billboarded face. The inline
+  // transform is the reduced-motion resting frame; the animation overrides it
+  // while running.
+  const chips=[
+    {"--x":"-9px", delay:"0s",    rest:"translate3d(-9px,-30px,8px)"},
+    {"--x":"6px",  delay:"0.8s",  rest:"translate3d(6px,0px,30px)"},
+    {"--x":"-3px", delay:"1.6s",  rest:"translate3d(-3px,30px,50px)"},
+  ];
+  return (
+    <div style={{height:104,perspective:600,perspectiveOrigin:"50% 40%",position:"relative",margin:"2px 0 6px"}}>
+      <div style={{position:"absolute",inset:0,transformStyle:"preserve-3d",transform:"translateY(8px) rotateX(52deg)"}}>
+        {/* isometric floor grid */}
+        <div style={{
+          position:"absolute",left:"50%",top:"46%",width:200,height:150,margin:"-75px 0 0 -100px",
+          background:"linear-gradient(rgba(139,92,246,.16) 1px,transparent 1px) 0 0/28px 28px,"
+            +"linear-gradient(90deg,rgba(139,92,246,.16) 1px,transparent 1px) 0 0/28px 28px",
+          WebkitMaskImage:"radial-gradient(circle at 50% 46%,#000 30%,transparent 74%)",
+          maskImage:"radial-gradient(circle at 50% 46%,#000 30%,transparent 74%)",
+        }}/>
+        {/* glowing teal destination line (the inbox the link is headed to) */}
+        <div className="lc-si-line" style={{
+          position:"absolute",left:"50%",top:"63%",width:118,height:4,margin:"-2px 0 0 -59px",borderRadius:3,
+          background:`linear-gradient(90deg,transparent,${TB},transparent)`,
+          boxShadow:`0 0 14px ${TB}`,animation:"lc-si-glow 2.4s ease-in-out infinite",
+        }}/>
+        {/* forward-advancing link chips */}
+        {chips.map((c,i)=>(
+          <div key={i} className="lc-si-chip" style={{
+            position:"absolute",left:"50%",top:"46%",width:0,height:0,opacity:1,
+            transform:c.rest, "--x":c["--x"],
+            animation:"lc-si-advance 2.4s linear infinite", animationDelay:c.delay,
+          }}>
+            <div style={face}><SignInEnvelope size={20}/></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Success ("link sent") 3D element: a teal envelope that flies forward once,
+// growing and rising toward the camera -- reinforcing "your link is on its
+// way." Reduced motion parks it on the arrived frame (its inline transform).
+function SignInSentHero(){
+  const restFrame="translate3d(0px,24px,58px) scale(1)"; // final = arrived frame
+  return (
+    <div style={{height:96,perspective:620,perspectiveOrigin:"50% 42%",position:"relative",margin:"0 0 4px"}}>
+      <div style={{position:"absolute",inset:0,transformStyle:"preserve-3d",transform:"translateY(6px) rotateX(52deg)"}}>
+        {/* two speed lines on the runway to sell the forward launch */}
+        {[-16,16].map((x,i)=>(
+          <div key={i} className="lc-si-line" style={{
+            position:"absolute",left:"50%",top:"50%",width:3,height:70,margin:"-35px 0 0 -1.5px",
+            transform:`translate3d(${x}px,0px,0px)`,borderRadius:3,
+            background:"linear-gradient(rgba(79,216,196,.55),transparent)",
+            animation:"lc-si-glow 1.4s ease-in-out infinite",animationDelay:i?"0.2s":"0s",
+          }}/>
+        ))}
+        <div className="lc-si-env" style={{
+          position:"absolute",left:"50%",top:"42%",width:0,height:0,opacity:1,transform:restFrame,
+          animation:"lc-si-fly 1.15s cubic-bezier(.4,0,.2,1) forwards",
+        }}>
+          <div style={{
+            position:"absolute",width:66,height:46,margin:"-23px 0 0 -33px",borderRadius:12,
+            transform:"rotateX(-52deg)",display:"grid",placeItems:"center",
+            background:"linear-gradient(150deg,#5ff0d6,#2bb39c)",
+            boxShadow:"0 16px 30px -8px rgba(79,216,196,.6), inset 0 1px 0 rgba(255,255,255,.45)",
+          }}>
+            <SignInEnvelope size={30} stroke="#06342e" width={2.1}/>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SignInModal({C, cardStyle, onClose}){
   const [email,setEmail]=useState("");
   const [phase,setPhase]=useState("form"); // form | sending | sent | error
@@ -4449,13 +4582,15 @@ function SignInModal({C, cardStyle, onClose}){
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div style={{...cardStyle,width:"100%",maxWidth:420,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>🔑 Sign in to LotCheck</div>
-          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>Sign in to LotCheck</div>
+          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,cursor:"pointer",lineHeight:1,display:"grid",placeItems:"center",padding:2}}>
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          </button>
         </div>
 
         {phase==="sent"?(
-          <div style={{textAlign:"center",padding:"8px 0"}}>
-            <div style={{fontSize:44,marginBottom:10}}>📨</div>
+          <div style={{textAlign:"center",padding:"0 0 4px"}}>
+            <SignInSentHero/>
             <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>Check your inbox</div>
             <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
               We sent a sign-in link to <span style={{fontWeight:800,color:C.ink}}>{email.trim()}</span>. Open it on this device to finish signing in.
@@ -4464,6 +4599,7 @@ function SignInModal({C, cardStyle, onClose}){
           </div>
         ):(
           <>
+            <SignInLinkHero/>
             <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:14}}>
               Enter your email and we'll send you a one-time sign-in link. No password needed.
             </div>
@@ -5062,6 +5198,41 @@ function QuoteCheckPage(){
       76%,85% { opacity:1; transform:translateY(0); }
       89%,100%{ opacity:0; transform:translateY(-6px); }
     }
+    /* Sign-in modal hero: link chips advance down the runway toward the
+       viewer (translateY moves along the tilted floor, translateZ lifts it
+       off the floor toward the camera) then recycle -- always forward. Each
+       chip runs the same loop on a stagger so the stream never stalls. */
+    @keyframes lc-si-advance {
+      0%   { opacity:0; transform:translate3d(var(--x,0px),-62px,0px); }
+      14%  { opacity:1; }
+      80%  { opacity:1; }
+      100% { opacity:0; transform:translate3d(var(--x,0px),60px,54px); }
+    }
+    /* Sign-in success: the envelope flies forward once (grows + rises toward
+       the camera) -- "your link is on its way." forwards-fills to its arrived
+       frame. */
+    @keyframes lc-si-fly {
+      0%   { opacity:0; transform:translate3d(0px,-26px,0px) scale(.55); }
+      35%  { opacity:1; }
+      100% { opacity:1; transform:translate3d(0px,24px,58px) scale(1); }
+    }
+    /* Soft pulse on the destination line the chips advance toward. */
+    @keyframes lc-si-glow {
+      0%,100% { opacity:.32; }
+      50%     { opacity:.72; }
+    }
+    /* Reduced motion: park every sign-in animation on its resting frame
+       (each element carries an inline transform that reads as a static
+       isometric composition when the animation is off). */
+    @media (prefers-reduced-motion: reduce) {
+      .lc-si-chip, .lc-si-env, .lc-si-line { animation: none !important; }
+    }
+    /* Narrow phones: the top-bar controls (theme switch + credits chip +
+       sign-in) can't stay pinned right on their own wrapped line without
+       overflowing, so let them span the full row and wrap internally. */
+    @media (max-width:560px) {
+      .qc-topbar-controls { width:100%; margin-left:0 !important; justify-content:flex-start; }
+    }
   `;
 
   // Five example findings the scan demo cycles through -- a representative
@@ -5121,7 +5292,7 @@ function QuoteCheckPage(){
                 <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
               </div>
             </a>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",marginLeft:"auto"}}>
+            <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",marginLeft:"auto"}}>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
@@ -5301,7 +5472,65 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="done"&&analysis&&(
+          {status==="done"&&analysis&&(()=>{
+            // ── Shared report computations (used by the summary hero tiles and
+            //    the grouped Rebates & conditions card below). Every value is
+            //    derived from real analysis fields -- nothing fabricated. ──
+            // EVAP: mirror the card's own gate/logic exactly so the hero tile
+            // and the Rebates card always agree (lifted out of the card's old
+            // inline IIFE so both can read the same result).
+            const evapListMatch=analysis.year&&analysis.make&&analysis.model
+              ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
+              :null;
+            const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
+            const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
+            const evapShow=!!(analysis.year&&analysis.make&&analysis.model
+              &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"));
+            const rebate=evapShow?getRebate("AB",effectiveFuelType,{
+              year:analysis.year,make:analysis.make,model:analysis.model,
+              condition:analysis.vehicleCondition,
+              km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
+            }):null;
+            // Watch-outs tile: a COUNT of the report's own flagged items
+            // (recalls, odometer flag, invalid VIN, flagged add-ons) -- a
+            // factual tally of what's flagged below, never an invented rating.
+            let watchOuts=0;
+            if(analysis.recalls?.checked&&analysis.recalls.count>0) watchOuts+=analysis.recalls.count;
+            if(analysis.odometerCheck?.flag) watchOuts+=1;
+            if(analysis.vinCheck?.present&&!analysis.vinCheck.valid) watchOuts+=1;
+            if(analysis.addOns?.length) watchOuts+=analysis.addOns.filter(a=>(a.verdict||(a.flagged?"flagged":"standard"))==="flagged").length;
+            // Summary tiles -- factual figures only (no verdict chip). Built
+            // adaptively: only tiles backed by real data render.
+            const tiles=[];
+            const qPrice=Number(analysis.quotedPrice)||0;
+            const mPrice=Number(analysis.msrp)||0;
+            if(qPrice>0) tiles.push({label:"Price",value:`$${qPrice.toLocaleString()}`,sub:"quoted, before tax"});
+            else if(mPrice>0) tiles.push({label:"Price (MSRP)",value:`$${mPrice.toLocaleString()}`,sub:"quote didn't show a price"});
+            // Payment tile: prefer the dealer's DISCLOSED payment; otherwise a
+            // bi-weekly ESTIMATE, shown only on a verified listing price with a
+            // real rate -- never off an MSRP fallback, consistent with the
+            // financing card's price-verification gate.
+            (()=>{
+              const fr=analysis.financing?.paymentFrequency;
+              const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
+              const fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
+              if(analysis.financing?.paymentAmount&&fr){
+                tiles.push({label:fLbl[fr]||"Payment",value:`$${Math.round(analysis.financing.paymentAmount).toLocaleString()}`,valueSuffix:fSuf[fr]||"",sub:`${analysis.financing.rate?`${analysis.financing.rate}% · `:""}disclosed on quote`});
+                return;
+              }
+              const rate=analysis.financeRates?.dealer?.apr??analysis.financing?.rate??analysis.financeRates?.manufacturer?.apr??null;
+              if(qPrice>0&&rate!=null){
+                const termRaw=Number(analysis.financing?.termMonths)||0;
+                const term=FIN_TERMS.includes(termRaw)?termRaw:60;
+                const biw=amortPayment(qPrice,Number(rate),26,term);
+                if(biw>0) tiles.push({label:"Bi-weekly est.",value:`$${Math.round(biw).toLocaleString()}`,valueSuffix:"/2wk",sub:`${rate}% · ${term} mo · $0 down`});
+              }
+            })();
+            if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
+            tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
+            const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
+            const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
+            return (
             <div>
               {/* Result-first sign-in invitation. Non-blocking: the full report
                   renders below regardless. Only shown to logged-out visitors --
@@ -5321,8 +5550,22 @@ function QuoteCheckPage(){
                 </div>
               )}
 
+              {/* ── Summary hero: the vehicle, then a row of factual tiles
+                     (price, payment, rebate, watch-out count). Figures only --
+                     no verdict chip (house rule). Tiles are built adaptively
+                     above; 2-4 render depending on what real data exists. ── */}
               <div style={cardStyle}>
-                <div style={{fontSize:13,color:C.inkFaint}}>{analysis.vehicle||"Vehicle"}</div>
+                <div style={{fontSize:20,fontWeight:1000,color:C.ink,letterSpacing:-.3,lineHeight:1.15}}>{vehName}</div>
+                {metaBits.length>0&&<div style={{fontSize:12.5,color:C.inkSoft,marginTop:4}}>{metaBits.join(" · ")}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:16}}>
+                  {tiles.map((t,i)=>(
+                    <div key={i} style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 13px"}}>
+                      <div style={{fontSize:10.5,textTransform:"uppercase",letterSpacing:.7,color:C.inkFaint,fontWeight:800}}>{t.label}</div>
+                      <div style={{fontSize:19,fontWeight:1000,marginTop:3,letterSpacing:-.3,color:t.flag?C.butterInk:C.ink}}>{t.value}{t.valueSuffix&&<span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>{t.valueSuffix}</span>}</div>
+                      {t.sub&&<div style={{fontSize:11,color:C.inkSoft,marginTop:2}}>{t.sub}</div>}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Feed-fallback notice: the dealer page itself couldn't be read,
@@ -5335,6 +5578,32 @@ function QuoteCheckPage(){
                   <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.sourceNote||"The dealer's listing page couldn't be loaded, so this report was built from the dealer's own inventory feed. Itemized fees and the page's financing terms aren't included -- confirm them with the dealer."}</div>
                 </div>
               )}
+
+              {/* TL;DR -- the "Bottom line", promoted from the very bottom of the
+                  report to the top as its summary. Same analysis.summary text as
+                  before, unchanged. */}
+              {analysis.summary&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,borderLeft:`3px solid ${C.teal}`}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.tealInk,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>Bottom line</div>
+                  <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
+                </div>
+              )}
+
+              {/* Financing breakdown -- payment matrix (down payment x term x
+                  frequency) computed purely from the quoted price, plus the
+                  real rate anchors (quote / manufacturer finance & lease
+                  catalog / live Bank of Canada) and the payment-reconciliation
+                  (financingCheck) note. This is the single financing UI --
+                  replaces the earlier "Financing examples" card. Renders itself
+                  null when there's no quoted price. Now condensed: a summary
+                  with the full matrix behind an expander. */}
+              <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
+
+              {/* ── Detail cards in a 2-column grid on desktop, collapsing to a
+                     single column on mobile. auto-fit + minmax does the collapse
+                     with no media query; rowGap:0 defers vertical rhythm to each
+                     card's own marginBottom (from cardStyle). ── */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
 
               {/* MSRP on its own -- just the manufacturer's number, nothing
                   else mixed into this card. The comparison against what the
@@ -5427,15 +5696,6 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* Financing breakdown -- payment matrix (down payment x term x
-                  frequency) computed purely from the quoted price, plus the
-                  real rate anchors (quote / manufacturer finance & lease
-                  catalog / live Bank of Canada) and the payment-reconciliation
-                  (financingCheck) note. This is the single financing UI --
-                  replaces the earlier "Financing examples" card. Renders itself
-                  null when there's no quoted price. */}
-              <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
-
               {/* Dealer sentiment: what public Google reviews say about
                   THIS dealer, read for the patterns that actually predict
                   a good/bad buying experience (financing transparency,
@@ -5489,142 +5749,111 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* EVAP rebate check -- rendered for any BEV/PHEV (new OR used),
-                  since for a real EV the rebate status is information a buyer
-                  wants; only regular gas/diesel cars are hidden, where "not
-                  eligible" would just be noise. Reuses getRebate()/getEVAP() directly
-                  (defined elsewhere in this same file) against the structured
-                  year/make/model/fuelType/vehicleCondition fields the edge
-                  function now extracts -- same EVAP logic already used and
-                  verified for live listings, not a separate reimplementation.
-                  Province is hardcoded to "AB" since LotCheck is Alberta-only
-                  right now; revisit if that ever changes.
+              {/* ── Rebates & conditions ─────────────────────────────────────
+                  Groups the EVAP rebate check, any advertised conditional
+                  savings, and the itemized discounts/add-ons into ONE card per
+                  the approved layout. Each inner block keeps its own
+                  conditional, colour semantics, and honesty copy -- nothing is
+                  dropped or restated.
 
-                  2026-07-22 fix: confirmed live (Gateway Toyota C-HR) that a
-                  dealer page's OWN fuelType label can be wrong even when the
-                  page's detailed technical specs (battery kWh, electric range,
-                  NACS charging) are correct -- that page said "Fuel Type:
-                  Gasoline" on a vehicle Toyota's own official press release
-                  confirms is a genuine 77-kWh BEV, almost certainly a stale
-                  inventory-system default never updated for the new model
-                  year. A prompt-only fix (trust the structured field) made
-                  this WORSE, not better -- it made the extraction confidently
-                  wrong instead of uncertain. The real fix: don't rely purely
-                  on the page's own fuelType read at all when year+make+model
-                  matches the curated EVAP_LIST, which Vic has manually
-                  verified against Transport Canada -- that's a source of
-                  truth the page's own labels aren't. evapListMatch below
-                  checks that FIRST; effectiveFuelType prefers the verified
-                  list entry's fuel over the page extraction whenever there's
-                  a match, and the outer gate now also fires on a list match
-                  alone so a wrong "Gas" read can't hide a real EV rebate. */}
-              {(()=>{
-                const evapListMatch=analysis.year&&analysis.make&&analysis.model
-                  ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
-                  :null;
-                const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
-                const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
-                // Show for ANY BEV/PHEV, new or used -- for an actual EV the
-                // rebate status (eligible, or the specific reason it isn't) is
-                // real information, not noise. Only gas/diesel are hidden (the
-                // fuel gate below). getRebate gets the real condition + price
-                // so it reports "used / over cap / not on the list" correctly.
-                if(!(analysis.year&&analysis.make&&analysis.model
-                     &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"))) return null;
-                const rebate=getRebate("AB",effectiveFuelType,{
-                  year:analysis.year,make:analysis.make,model:analysis.model,
-                  condition:analysis.vehicleCondition,
-                  km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
-                });
-                return(
-                  <div style={{...cardStyle,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
-                    <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
-                      {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
-                    </div>
-                    {fuelMismatch&&(
-                      <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
-                        This page's own fuel-type label said "{analysis.fuelType}", but our verified records for this exact year/make/model show it's actually a {evapListMatch.fuel} -- using the verified value here.
-                      </div>
-                    )}
-                    {rebate.eligible?(
-                      <>
-                        <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
-                        <div style={{fontSize:12,color:C.inkSoft}}>
-                          ${rebate.federal.toLocaleString()} federal
-                          {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
-                          {rebate.note&&` — ${rebate.note}`}
-                        </div>
-                      </>
-                    ):(
-                      <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {analysis.totalFlaggedCost>0&&(
-                <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                  {!addOnsAreFees?(
-                    <>
-                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                        <FlagWaveIcon size={15}/>
-                        <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
-                      </div>
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
-                    </>
-                  ):(
-                    <>
-                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                        <FlagWaveIcon size={15}/>
-                        <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
-                      </div>
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {analysis.addOns?.length>0&&(
+                  EVAP note (unchanged rationale): the rebate status is shown for
+                  ANY BEV/PHEV, new or used, since for a real EV that status is
+                  information a buyer wants; only gas/diesel are hidden.
+                  effectiveFuelType/evapShow/rebate/fuelMismatch are computed once
+                  at the top of this report from the curated EVAP_LIST (a source
+                  of truth the page's own fuelType label isn't -- a stale
+                  inventory "Gas" read must not hide a real EV rebate) and reused
+                  by both the hero tile and this card so they always agree. ── */}
+              {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
                 <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
-                  {analysis.addOns.map((a,i)=>{
-                    // verdict: "good" (genuine buyer benefit -- a fair/legit
-                    // rate, a real discount), "flagged" (worth questioning),
-                    // or "standard" (a mandatory, unremarkable pass-through
-                    // like tax/registration -- neither a win nor a problem,
-                    // shown plainly so it isn't mislabeled as a "positive").
-                    const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
-                    const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
-                    return (
-                      <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
-                            {v==="good"&&<span>✓</span>}
-                            {v==="flagged"&&<FlagPyramidIcon size={13}/>}
-                            <span>{a.name}</span>
-                          </div>
-                          <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
+
+                  {evapShow&&(
+                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
+                      <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
+                        {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
+                      </div>
+                      {fuelMismatch&&(
+                        <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
+                          This page's own fuel-type label said "{analysis.fuelType}", but our verified records for this exact year/make/model show it's actually a {evapListMatch.fuel} -- using the verified value here.
                         </div>
-                        <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
-                      </div>
-                    );
-                  })}
-                  {/* Subtotal -- only for genuine fees, never discounts/
-                      conditions (summing those as a total-added figure
-                      would misrepresent them). When kind data exists,
-                      sums only the fee-kind items, so a mixed report
-                      (some fees, some discounts) doesn't fold a discount
-                      into what should be a pure cost total. */}
-                  {addOnsAreFees&&(()=>{
-                    const feeItems=addOnsHaveKind?analysis.addOns.filter(a=>a.kind==="fee"):analysis.addOns;
-                    if(!feeItems.length) return null;
-                    return (
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
-                        <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
-                        <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                      </div>
-                    );
-                  })()}
+                      )}
+                      {rebate.eligible?(
+                        <>
+                          <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
+                          <div style={{fontSize:12,color:C.inkSoft}}>
+                            ${rebate.federal.toLocaleString()} federal
+                            {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
+                            {rebate.note&&` — ${rebate.note}`}
+                          </div>
+                        </>
+                      ):(
+                        <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {analysis.totalFlaggedCost>0&&(
+                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                      {!addOnsAreFees?(
+                        <>
+                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                            <FlagWaveIcon size={15}/>
+                            <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
+                          </div>
+                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
+                        </>
+                      ):(
+                        <>
+                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                            <FlagWaveIcon size={15}/>
+                            <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
+                          </div>
+                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {analysis.addOns?.length>0&&(
+                    <div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
+                      {analysis.addOns.map((a,i)=>{
+                        // verdict: "good" (genuine buyer benefit), "flagged"
+                        // (worth questioning), or "standard" (a mandatory,
+                        // unremarkable pass-through shown plainly).
+                        const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
+                        const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
+                        return (
+                          <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
+                                {v==="good"&&<span>✓</span>}
+                                {v==="flagged"&&<FlagPyramidIcon size={13}/>}
+                                <span>{a.name}</span>
+                              </div>
+                              <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                            </div>
+                            <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
+                          </div>
+                        );
+                      })}
+                      {/* Subtotal -- only for genuine fees, never discounts/
+                          conditions. When kind data exists, sums only the
+                          fee-kind items so a mixed report doesn't fold a
+                          discount into a pure cost total. */}
+                      {addOnsAreFees&&(()=>{
+                        const feeItems=addOnsHaveKind?analysis.addOns.filter(a=>a.kind==="fee"):analysis.addOns;
+                        if(!feeItems.length) return null;
+                        return (
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
+                            <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
+                            <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5758,10 +5987,7 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:8}}>Bottom line</div>
-                <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
-              </div>
+              </div>{/* ── end detail grid ── */}
 
               <div style={cardStyle}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>📧 Email me this report</div>
@@ -5793,7 +6019,8 @@ function QuoteCheckPage(){
 
               <button onClick={reset} style={{width:"100%",background:C.ink,border:"none",borderRadius:999,padding:"13px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Check another quote</button>
             </div>
-          )}
+            );
+          })()}
 
           <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
             LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.
