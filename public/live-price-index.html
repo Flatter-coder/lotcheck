@@ -447,8 +447,11 @@
     -webkit-mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%);mask-image:radial-gradient(circle at 50% 45%,#000 30%,transparent 72%)}
   .mal-msrpline{position:absolute;left:50%;top:52%;width:200px;height:4px;margin:-2px 0 0 -100px;border-radius:3px;
     background:linear-gradient(90deg,transparent,var(--acc),transparent);box-shadow:0 0 16px color-mix(in srgb,var(--acc) 45%,transparent)}
-  .mal-msrptag{position:absolute;left:50%;top:52%;transform:translate3d(150px,26px,10px) rotateX(-56deg);
-    font-size:10.5px;font-weight:800;color:var(--acc);white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* Anchored to the panel's bottom-right corner (flat, out of the 3D world) so
+     it's always fully visible and never clipped by overflow, at any width. */
+  .mal-msrptag{position:absolute;right:16px;bottom:20px;z-index:2;
+    font-size:10.5px;font-weight:800;color:var(--acc);white-space:nowrap;font-variant-numeric:tabular-nums;
+    text-shadow:0 1px 6px rgba(0,0,0,.5)}
   .mal-ptok{position:absolute;left:50%;top:52%;transform-style:preserve-3d;will-change:transform}
   /* glassmorphism price card: frosted, teal neon border + glow */
   .mal-ptok .mal-face{position:absolute;width:106px;height:46px;margin:-23px 0 0 -53px;border-radius:13px;transform:rotateX(-56deg);
@@ -692,11 +695,11 @@
             <div class="mal-world">
               <div class="mal-floor"></div>
               <div class="mal-msrpline"></div>
-              <div class="mal-msrptag" id="malMsrptag">MSRP $40,998</div>
               <div class="mal-pulse" id="malPulse"></div>
               <div class="mal-ptok" id="malPtok"><div class="mal-face" id="malFace">$43,100</div></div>
             </div>
             <div class="mal-sweep"></div>
+            <div class="mal-msrptag" id="malMsrptag">MSRP $40,998</div>
           </div>
         </div>
 
