@@ -57,9 +57,11 @@ const CORS_HEADERS = {
 };
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
-// Keeps whatever model you already have configured as a secret; falls back
-// to a sensible default only if that secret isn't set.
-const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-5";
+// Single source of truth for the model, shared with analyze-listing-url:
+// both functions read ANTHROPIC_MODEL and default to the SAME model so the
+// two quote-analysis paths never silently diverge. Override via the
+// ANTHROPIC_MODEL secret to pin/rollback without a code change.
+const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -135,6 +137,93 @@ async function releaseCredit(hold: string | null): Promise<void> {
   } catch (e) {
     console.error("fn_release_quote threw:", e);
   }
+}
+
+// ── Resilient fetch (P0 hardening) ──────────────────────────────────────────
+// Wraps an outbound fetch with a per-attempt AbortController timeout plus
+// bounded retries on transient failures (HTTP 429/529/5xx, network errors, and
+// abort/timeouts). Real 4xx (400/401/…) are NOT retried. Backoff is exponential
+// with jitter and respects a Retry-After header when present. A hard maxAttempts
+// cap AND a total time budget keep the whole sequence comfortably under
+// Supabase's ~150s function ceiling — the budget stops a retry that couldn't
+// finish in time rather than risk a platform kill (which would strand the
+// reserved credit by skipping the release path).
+//
+// Behaviour contract used by callers below:
+//   • Returns the final Response — including a non-ok one after the retry
+//     budget is spent on a retryable status — so existing `if (!res.ok)`
+//     branches (which release the credit) still fire.
+//   • Throws only when retries are exhausted on a network/timeout error with no
+//     Response to return; the caller's surrounding try/catch releases the hold.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Retry-After may be a delay in seconds or an HTTP date. null when absent/invalid.
+function parseRetryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+// Exponential backoff with full-ish jitter: attempt 1 ≈ base, then ×2 each
+// attempt, half fixed + half random so retries don't thundering-herd.
+function backoffDelayMs(attempt: number, baseMs = 600): number {
+  const exp = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(exp / 2 + Math.random() * (exp / 2));
+}
+
+interface RetryOpts {
+  timeoutMs: number; // per-attempt abort timeout
+  maxAttempts: number; // hard cap on attempts
+  budgetMs: number; // total wall-clock budget for the whole sequence
+  baseBackoffMs?: number;
+  label?: string;
+}
+
+async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts): Promise<Response> {
+  const deadline = Date.now() + opts.budgetMs;
+  const base = opts.baseBackoffMs ?? 600;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const attemptTimeout = Math.min(opts.timeoutMs, remaining);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), attemptTimeout);
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      // Success or a real (non-retryable) error like 4xx → return immediately.
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
+      // Retryable status. Out of attempts → hand the non-ok Response back so the
+      // caller's !ok branch runs (and releases the credit).
+      if (attempt >= opts.maxAttempts) return res;
+      const ra = parseRetryAfterMs(res);
+      const delay = ra != null ? ra : backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) return res; // no budget left to wait+retry
+      try { await res.text(); } catch { /* drain body, ignore */ }
+      await sleep(delay);
+      continue;
+    } catch (err) {
+      // Network error or our own abort/timeout — retry if budget/attempts allow.
+      lastErr = err;
+      if (attempt >= opts.maxAttempts) throw err;
+      const delay = backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) throw err;
+      await sleep(delay);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
 }
 
 const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a photo of a paper quote). Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
@@ -243,7 +332,12 @@ Deno.serve(async (req: Request) => {
       : { type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } };
 
     // ---- Step 1: Claude reads the document ----
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+    // A big PDF can make this the slow part, so allow a generous per-attempt
+    // timeout with one retry. Budget math: 2 × 60s + backoff ≈ 122s worst case,
+    // comfortably under Supabase's ~150s ceiling. On timeout/network exhaustion
+    // fetchWithRetry throws → the outer catch releases the credit hold (no
+    // strand); a spent-budget 5xx returns non-ok → the !ok branch below releases.
+    const anthropicRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -264,7 +358,7 @@ Deno.serve(async (req: Request) => {
           { role: "user", content: [docBlock, { type: "text", text: EXTRACTION_PROMPT }] },
         ],
       }),
-    });
+    }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
 
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text();
