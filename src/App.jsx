@@ -5898,7 +5898,7 @@ function QuoteCheckPage(){
                 ["/#pipeline","10-point lane"],
                 ["/#report","Sample report"],
                 ["/#portal","Dealer portal"],
-                ["/live-price-index#alerts","MSRP Notifier"],
+                ["/live-price-index?view=alerts","MSRP Notifier"],
               ].map(([href,label])=>(
                 <a key={href} href={href}
                   style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}

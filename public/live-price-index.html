@@ -403,6 +403,17 @@
      exist). Uses page theme tokens so it flips light/dark automatically.
      Cyan = hero accent; --up (green) = the "hit MSRP / on the list" state. */
   .mal-section{grid-column:1 / -1}
+  /* Focused "MSRP Notifier" mode (?view=alerts): show ONLY the nav + the
+     Get-MSRP-alerts widget so the notifier isn't buried in the full index
+     page. Class is set on <html> before first paint by a script in <head>. */
+  html.alerts-only .ticker,
+  html.alerts-only header,
+  html.alerts-only .foot,
+  html.alerts-only .backbar,
+  html.alerts-only .report-head,
+  html.alerts-only .report > section:not(.mal-section){display:none!important}
+  html.alerts-only .wrap{max-width:900px;margin-inline:auto;padding-top:18px}
+  html.alerts-only .report{background:none;border:0;box-shadow:none;padding:0}
   .mal-widget{display:grid;grid-template-columns:1fr 1fr;background:var(--panel);
     border:1px solid var(--hair);border-radius:16px;overflow:hidden;margin-top:4px}
   @media(max-width:720px){.mal-widget{grid-template-columns:1fr}}
@@ -475,6 +486,7 @@
     .mal-pulse.mal-go{animation:none}
   }
 </style>
+<script>if(new URLSearchParams(location.search).get('view')==='alerts')document.documentElement.classList.add('alerts-only');</script>
 </head>
 <body>
 <nav class="sitenav" aria-label="Main">
@@ -490,7 +502,7 @@
       <a href="/#pipeline">10-point lane</a>
       <a href="/#report">Sample report</a>
       <a href="/#portal">Dealer portal</a>
-      <a href="/live-price-index#alerts">MSRP Notifier</a>
+      <a href="/live-price-index?view=alerts">MSRP Notifier</a>
     </div>
     <div class="sn-cta">
       <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
