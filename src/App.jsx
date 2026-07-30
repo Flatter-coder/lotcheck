@@ -4846,6 +4846,43 @@ function SignInSentHero(){
   );
 }
 
+// Disposable / temporary-email domains. Free personal credit is no longer minted
+// on signup (see fn_grant_signup), so this is not the primary farming defense —
+// it just keeps obvious throwaway inboxes out of the magic-link flow. Small,
+// hand-kept list of the common ones rather than an exhaustive service.
+const DISPOSABLE_EMAIL_DOMAINS=new Set([
+  "mailinator.com","guerrillamail.com","guerrillamail.info","sharklasers.com",
+  "10minutemail.com","10minutemail.net","tempmail.com","temp-mail.org","tempmail.net",
+  "tempmailo.com","yopmail.com","yopmail.fr","throwawaymail.com","getnada.com",
+  "nada.email","trashmail.com","trashmail.de","dispostable.com","maildrop.cc",
+  "mailnesia.com","fakeinbox.com","mohmal.com","emailondeck.com","mytemp.email",
+  "spam4.me","moakt.com","tempr.email","discard.email","getairmail.com",
+]);
+
+// Normalize an email for comparison/dedupe: lowercase + trim, and for Gmail
+// (gmail.com / googlemail.com) strip the +tag and dots in the local part, since
+// Gmail treats those as the same inbox. NOTE: Supabase Auth stores its own copy
+// of the email, so this is mainly for future client-side dedupe — the real
+// multi-account farming defense is the share-only signup grant, not this.
+export function normalizeEmail(email){
+  const raw=(email||"").trim().toLowerCase();
+  const at=raw.lastIndexOf("@");
+  if(at<0) return raw;
+  let local=raw.slice(0,at);
+  const domain=raw.slice(at+1);
+  if(domain==="gmail.com"||domain==="googlemail.com"){
+    local=local.split("+")[0].replace(/\./g,"");
+  }
+  return local+"@"+domain;
+}
+
+function isDisposableEmail(email){
+  const at=(email||"").trim().toLowerCase().lastIndexOf("@");
+  if(at<0) return false;
+  const domain=(email||"").trim().toLowerCase().slice(at+1);
+  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+}
+
 function SignInModal({C, cardStyle, onClose, notice}){
   const [email,setEmail]=useState("");
   const [phase,setPhase]=useState("form"); // form | sending | sent | error
@@ -4860,6 +4897,11 @@ function SignInModal({C, cardStyle, onClose, notice}){
     if(!validEmail(addr)){
       setPhase("error");
       setErrMsg("That doesn't look like a valid email address.");
+      return;
+    }
+    if(isDisposableEmail(addr)){
+      setPhase("error");
+      setErrMsg("Please use a permanent email address.");
       return;
     }
     setErrMsg("");
