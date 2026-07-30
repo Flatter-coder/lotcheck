@@ -5880,31 +5880,35 @@ function QuoteCheckPage(){
     <>
       <style>{GLOBAL_CSS}</style>
       <style>{QC_CSS}</style>
-      <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
-        <div style={{maxWidth:640,margin:"0 auto"}}>
-          <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:28}}>
-            {/* "Conic Spin" gradient Home button -- takes the analyze page
-                back to the welcome page. Style spec provided by Vic (fx-27:
-                conic-gradient at 200% that shifts position and scales 1.04
-                on hover, mono uppercase label), themed with the Sweet
-                Morning colors (#ED4264 base, #FFEDBC accent; the fx-27
-                color-mix(80% accent, base) stop precomputed as #FBCBAA for
-                browser safety). Fixed colors on purpose -- reads identically
-                across the dark/light/outdoor themes. */}
-            <a href="/" aria-label="Back to LotCheck welcome page"
-              onMouseEnter={e=>{e.currentTarget.style.backgroundPosition="100% 100%";e.currentTarget.style.transform="scale(1.04)";}}
-              onMouseLeave={e=>{e.currentTarget.style.backgroundPosition="0 0";e.currentTarget.style.transform="scale(1)";}}
-              style={{display:"inline-block",padding:"13px 24px",border:"1px solid transparent",borderRadius:8,color:"#FFF7E8",fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",textDecoration:"none",whiteSpace:"nowrap",background:"conic-gradient(from 0deg, #ED4264, #FBCBAA, #ED4264)",backgroundSize:"200% 200%",backgroundPosition:"0 0",transition:"background-position 0.6s ease, transform 0.4s ease",flexShrink:0}}>
-              ← Home
+      <div style={{minHeight:"100dvh",background:C.paper,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        {/* Full-width site nav -- the same tabs as the rest of LotCheck, so the
+            Quote Check page reads as part of the site, not a detached tool. The
+            theme toggle, credits chip and Sign in live on its right side. */}
+        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:C.paper,borderBottom:`1px solid ${C.line}`}}>
+          <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
+            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
+              <LogoMark size={30}/>
+              <span style={{fontWeight:1000,fontSize:19,color:C.ink}}>LotCheck</span>
             </a>
-            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:10,textDecoration:"none",flex:"1 1 220px",minWidth:180}}>
-              <LogoMark size={34}/>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
-                <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
-              </div>
-            </a>
-            <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap",marginLeft:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
+              {[
+                ["/live-price-index","MSRP Price Index"],
+                ["/alberta","Alberta Dealers Map"],
+                ["/#how","How it works"],
+                ["/#pipeline","10-point lane"],
+                ["/#report","Sample report"],
+                ["/#portal","Dealer portal"],
+                ["/live-price-index#alerts","MSRP Notifier"],
+              ].map(([href,label])=>(
+                <a key={href} href={href}
+                  style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.paper2;e.currentTarget.style.color=C.ink;}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=C.inkSoft;}}>
+                  {label}
+                </a>
+              ))}
+            </div>
+            <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
@@ -5988,6 +5992,12 @@ function QuoteCheckPage(){
               </button>
             )}
             </div>
+          </div>
+        </nav>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"24px 16px"}}>
+          <div style={{marginBottom:24}}>
+            <div style={{fontWeight:1000,fontSize:22,color:C.ink}}>LotCheck Quote Check</div>
+            <div style={{fontSize:13,color:C.inkSoft,marginTop:2}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
           </div>
 
           {/* Gift-link claim banner: someone arrived via …/quote-check?gift=CODE */}
