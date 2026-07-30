@@ -524,6 +524,28 @@
   .mal-seg{display:flex;background:var(--panel-2);border:1px solid var(--hair);border-radius:9px;padding:3px;gap:2px}
   .mal-seg button{flex:1;font:inherit;font-size:12px;font-weight:700;border:0;background:none;color:var(--dim);padding:8px 4px;border-radius:7px;cursor:pointer;transition:.2s}
   .mal-seg button.mal-on{background:var(--cyan);color:var(--bg)}
+  /* ── Kinetic MSRP target pad (replaces the 3-way threshold) ── */
+  .mal-padwrap{position:relative;transition:opacity .3s}
+  .mal-padwrap.locked{opacity:.42;pointer-events:none;filter:grayscale(.5)}
+  .mal-lockmsg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;font-size:12px;color:var(--dim);font-weight:700;z-index:5;padding:4px}
+  .mal-padwrap.locked .mal-lockmsg{display:flex}
+  .mal-padwrap.locked .mal-preadout,.mal-padwrap.locked .mal-psub,.mal-padwrap.locked .xy-pad{visibility:hidden}
+  .mal-preadout{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:3px}
+  .mal-pmain{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:19px;color:#37d39a}
+  .mal-ptarget{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--dim)}
+  .mal-psub{font-size:11.5px;color:var(--dimmer);min-height:15px;margin-bottom:12px;line-height:1.4}
+  .xy-pad{position:relative;height:66px;margin:2px 2px 0;touch-action:none;user-select:none;-webkit-user-select:none}
+  .xy-track{position:absolute;left:0;right:0;top:50%;height:8px;margin-top:-4px;border-radius:8px;background:rgba(255,255,255,.10);overflow:hidden}
+  .xy-fill{position:absolute;top:0;bottom:0;opacity:.55}
+  .xy-center{position:absolute;left:50%;top:50%;width:2px;height:24px;margin:-12px 0 0 -1px;background:#37d39a;opacity:.8;border-radius:2px}
+  .xy-centerlab{position:absolute;left:50%;top:calc(50% + 18px);transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:800;color:#37d39a;white-space:nowrap}
+  .xy-end{position:absolute;top:calc(50% - 24px);font-size:9.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--dimmer)}
+  .xy-end.l{left:0}.xy-end.r{right:0}
+  .xy-puck{position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;cursor:grab;
+    background:radial-gradient(circle at 38% 34%,#ffffff,var(--pc,#37d39a));border:2px solid rgba(255,255,255,.7);
+    box-shadow:0 5px 16px -4px var(--pg,rgba(55,211,154,.7)),0 0 0 5px var(--pgs,rgba(55,211,154,.15));
+    translate:calc(var(--x,0) * 1px) 0;transition:translate .52s cubic-bezier(.34,1.56,.64,1),box-shadow .2s,background .2s}
+  .xy-pad.dragging .xy-puck{transition-duration:70ms;cursor:grabbing}
   .mal-consent{display:flex;gap:9px;align-items:flex-start;font-size:11.5px;color:var(--dim);line-height:1.45;cursor:pointer}
   .mal-consent input{width:16px;height:16px;flex:none;margin-top:1px;accent-color:var(--up);cursor:pointer}
   .mal-submit{background:var(--up);color:#04241a;font:inherit;font-weight:800;font-size:14px;border:0;border-radius:10px;padding:12px;cursor:pointer;transition:.2s}
@@ -762,11 +784,18 @@
             <div class="mal-field" style="flex:1"><label>Year <span style="text-transform:none;color:var(--dimmer)">(optional)</span></label>
               <input id="malYear" placeholder="2026" inputmode="numeric" aria-label="Year"/></div>
           </div>
-          <div class="mal-field"><label>Alert me when it's</label>
-            <div class="mal-seg" id="malSeg" role="group" aria-label="Alert threshold">
-              <button type="button" class="mal-on" data-v="at_msrp">At MSRP</button>
-              <button type="button" data-v="below_msrp">Below MSRP</button>
-              <button type="button" data-v="pct_below">5%+ under</button>
+          <div class="mal-field"><label>Alert me when the price is</label>
+            <div class="mal-padwrap locked" id="malPadwrap">
+              <div class="mal-lockmsg" id="malLock">Enter your vehicle above to set your target.</div>
+              <div class="mal-preadout"><span class="mal-pmain" id="malPmain">At MSRP</span><span class="mal-ptarget" id="malPtarget"></span></div>
+              <div class="mal-psub" id="malPsub"></div>
+              <div class="xy-pad" id="malXy">
+                <div class="xy-track"><div class="xy-fill" id="malFill"></div></div>
+                <div class="xy-center"></div>
+                <div class="xy-centerlab" id="malCenterlab">MSRP</div>
+                <div class="xy-end l">&#9666; Under</div><div class="xy-end r">Over &#9656;</div>
+                <div class="xy-puck" id="malXyPuck"></div>
+              </div>
             </div>
           </div>
           <div class="mal-field"><label>Email</label><input id="malEmail" type="email" placeholder="you@email.com" autocomplete="email" aria-label="Email"/></div>
@@ -1575,10 +1604,72 @@
   });
   document.addEventListener("click",function(){ document.querySelectorAll(".mal-cs.open").forEach(function(o){ o.classList.remove("open"); }); });
 
-  var thr="at_msrp";
-  document.querySelectorAll("#malSeg button").forEach(function(b){
-    b.onclick=function(){ document.querySelectorAll("#malSeg button").forEach(function(x){x.classList.remove("mal-on");}); b.classList.add("mal-on"); thr=b.dataset.v; };
-  });
+  // ── Kinetic MSRP target pad ────────────────────────────────────────────────
+  // `target` = signed % vs MSRP (neg=under, 0=at, pos=over). Works on % even
+  // before an MSRP is known, so the waitlist is never blocked; shows the real $
+  // once the vehicle resolves in msrp_catalog.
+  var MINP=-12, MAXP=6, MSRP=0, half=1, dragging=false, target=0;
+  var pad=$("malXy"), puck=$("malXyPuck"), fill=$("malFill"), padwrap=$("malPadwrap"),
+      pMain=$("malPmain"), pTarget=$("malPtarget"), pSub=$("malPsub"), centerlab=$("malCenterlab"), lock=$("malLock");
+  function money(n){ return "$"+Math.round(n).toLocaleString("en-CA"); }
+  function clampN(v,a,b){ return Math.max(a,Math.min(b,v)); }
+  function measurePad(){ half=(pad.clientWidth-30)/2; if(half<1)half=1; }
+  function pctFromX(x){ var t=clampN(x,-half,half); return t<0?MINP*(-t/half):MAXP*(t/half); }
+  function xFromPct(p){ return p<0?-half*(p/MINP):half*(p/MAXP); }
+  function h2(h){ return [1,3,5].map(function(i){ return parseInt(h.slice(i,i+2),16); }); }
+  function mix(a,b,t){ var A=h2(a),B=h2(b); return "#"+A.map(function(v,i){ var n=Math.round(v+(B[i]-v)*clampN(t,0,1)).toString(16); return n.length<2?"0"+n:n; }).join(""); }
+  function colorFor(p){ if(p<=-5)return "#0f8a4c"; if(p<0)return mix("#5cf0a8","#0f8a4c",(-p)/5); if(Math.abs(p)<0.4)return "#37d39a"; if(p<=5)return mix("#f5c24b","#e5484d",p/5); return "#e5484d"; }
+  function hexA(hex,a){ var c=h2(hex); return "rgba("+c[0]+","+c[1]+","+c[2]+","+a+")"; }
+  function paintPad(p){ var c=colorFor(p); puck.style.setProperty("--pc",c); puck.style.setProperty("--pg",hexA(c,.7)); puck.style.setProperty("--pgs",hexA(c,.16)); fill.style.background=c; pMain.style.color=c; }
+  function labelPad(p){
+    if(MSRP>0){ var tg=MSRP*(1+p/100), d=Math.abs(tg-MSRP); pTarget.textContent=money(tg);
+      if(Math.abs(p)<0.4){ pMain.textContent="At MSRP"; pSub.textContent="Email me the moment a listing hits MSRP."; }
+      else if(p<0){ pMain.textContent=money(d)+" under"; pSub.textContent="Email me when it's "+Math.abs(p).toFixed(1)+"% under MSRP or better."; }
+      else { pMain.textContent=money(d)+" over"; pSub.textContent="Email me when it's within "+p.toFixed(1)+"% over MSRP — for hot models."; }
+    } else { pTarget.textContent="";
+      pSub.textContent="We'll confirm the MSRP once we start tracking your vehicle.";
+      if(Math.abs(p)<0.4){ pMain.textContent="At MSRP"; }
+      else if(p<0){ pMain.textContent=Math.abs(p).toFixed(1)+"% under MSRP"; }
+      else { pMain.textContent=p.toFixed(1)+"% over MSRP"; }
+    }
+  }
+  function drawFill(x){ var c=pad.clientWidth/2; if(x>=0){ fill.style.left=c+"px"; fill.style.width=x+"px"; } else { fill.style.left=(c+x)+"px"; fill.style.width=(-x)+"px"; } }
+  function renderPad(){ var x=xFromPct(target); puck.style.setProperty("--x",x.toFixed(1)); drawFill(x); paintPad(target); labelPad(target); }
+  function livePad(clientX){ var rect=pad.getBoundingClientRect(); var x=clampN(clientX-rect.left-rect.width/2,-half,half); target=pctFromX(x); puck.style.setProperty("--x",x.toFixed(1)); drawFill(x); paintPad(target); labelPad(target); }
+  function padDown(e){ if(padwrap.classList.contains("locked"))return; measurePad(); dragging=true; pad.classList.add("dragging"); livePad(e.clientX!=null?e.clientX:e.touches[0].clientX); e.preventDefault(); }
+  function padMove(e){ if(!dragging)return; livePad(e.clientX!=null?e.clientX:(e.touches&&e.touches[0].clientX)); }
+  function padUp(){ if(!dragging)return; dragging=false; pad.classList.remove("dragging"); target=Math.round(target*2)/2; renderPad(); }
+  puck.addEventListener("pointerdown",function(e){ try{puck.setPointerCapture(e.pointerId);}catch(_){} padDown(e); });
+  pad.addEventListener("pointerdown",padDown);
+  window.addEventListener("pointermove",padMove);
+  window.addEventListener("pointerup",padUp);
+  window.addEventListener("resize",function(){ if(!padwrap.classList.contains("locked")){ measurePad(); renderPad(); } });
+
+  // MSRP lookup from msrp_catalog (anon-readable). Found -> real MSRP anchor;
+  // not found -> pad still usable on % (waitlist stays open), $ marked TBD.
+  var CAT_URL="https://debigtyjhjamipooajhk.supabase.co/rest/v1/msrp_catalog", lookupT, lookupSeq=0;
+  function setPad(msrp){ MSRP=msrp>0?msrp:0; padwrap.classList.remove("locked"); centerlab.textContent=MSRP>0?("MSRP "+money(MSRP)):"MSRP TBD"; measurePad(); renderPad(); }
+  function lockPad(){ MSRP=0; padwrap.classList.add("locked"); lock.textContent="Enter your vehicle above to set your target."; }
+  function lookupMsrp(){
+    clearTimeout(lookupT);
+    var make=$("malMake").dataset.value, model=$("malModel").value.trim(), yearRaw=$("malYear").value.trim();
+    if(!model){ lockPad(); return; }
+    var seq=++lookupSeq;   // guard against out-of-order responses (fast typing)
+    lookupT=setTimeout(function(){
+      var q=CAT_URL+"?select=msrp,year&make=eq."+encodeURIComponent(make)+"&model=ilike."+encodeURIComponent("%"+model+"%")+"&msrp=not.is.null&order=year.desc,msrp.asc&limit=60";
+      fetch(q,{headers:{apikey:ANON,Authorization:"Bearer "+ANON}}).then(function(r){ return r.ok?r.json():[]; }).then(function(rows){
+        if(seq!==lookupSeq) return;   // a newer lookup superseded this one
+        if(!rows||!rows.length){ setPad(0); return; }
+        var yr=/^\d{4}$/.test(yearRaw)?parseInt(yearRaw,10):rows[0].year; // rows are year.desc -> latest
+        var pool=rows.filter(function(x){return x.year===yr;}); if(!pool.length)pool=rows;
+        var prices=pool.map(function(x){return Number(x.msrp);}).filter(function(n){return n>0;});
+        setPad(prices.length?Math.min.apply(null,prices):0);
+      }).catch(function(){ if(seq===lookupSeq) setPad(0); });
+    },420);
+  }
+  $("malModel").addEventListener("input",lookupMsrp);
+  $("malYear").addEventListener("input",lookupMsrp);
+  $("malMake").querySelectorAll(".mal-cs-menu li").forEach(function(li){ li.addEventListener("click",lookupMsrp); });
   function emailOk(e){ return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e); }
   function valid(){ return emailOk($("malEmail").value.trim()) && $("malConsent").checked && $("malModel").value.trim()!==""; }
   function refresh(){ $("malSubmit").disabled=!valid(); }
@@ -1591,33 +1682,34 @@
     btn.disabled=true; btn.textContent="Submitting...";
     var yearRaw=$("malYear").value.trim();
     var year=/^\d{4}$/.test(yearRaw)?parseInt(yearRaw,10):null;
-    var payload={
+    var base={
       p_email:$("malEmail").value.trim(),
       p_make:$("malMake").dataset.value,
       p_model:$("malModel").value.trim(),
       p_year:year,
       p_province:"AB",
       p_city:$("malCity").dataset.value,
-      p_threshold:thr,
-      p_pct:thr==="pct_below"?5:null,
       p_consent:$("malConsent").checked
     };
-    fetch(SUPA_URL,{
-      method:"POST",
-      headers:{ "apikey":ANON, "Authorization":"Bearer "+ANON, "Content-Type":"application/json" },
-      body:JSON.stringify(payload)
-    }).then(function(res){
-      if(!res.ok) throw new Error("HTTP "+res.status);
-      return res.json().catch(function(){return {};});
-    }).then(function(){
+    function post(p){ return fetch(SUPA_URL,{method:"POST",headers:{ "apikey":ANON, "Authorization":"Bearer "+ANON, "Content-Type":"application/json" },body:JSON.stringify(p)}).then(function(res){
+      if(!res.ok){ return res.text().then(function(t){ var e=new Error("HTTP "+res.status); e.status=res.status; e.body=t; throw e; }); }
+      return res.json().catch(function(){return {};}); }); }
+    // Legacy params work with the pre-migration RPC (over-MSRP maps to at_msrp),
+    // so a signup never fails in the window before 20260801_msrp_target_pct.sql runs.
+    function legacyParams(){ var t=target;
+      if(Math.abs(t)<0.4) return {p_threshold:"at_msrp",p_pct:null};
+      if(t<0) return {p_threshold:"pct_below",p_pct:Math.round(Math.abs(t))};
+      return {p_threshold:"at_msrp",p_pct:null}; }
+    function done(){
       var v=($("malMake").dataset.value+" "+$("malModel").value.trim()).trim();
-      var thrTxt = thr==="at_msrp"?"hits MSRP" : thr==="below_msrp"?"drops below MSRP" : "goes 5%+ under MSRP";
+      var thrTxt = Math.abs(target)<0.4?"hits MSRP" : target<0?("drops to "+Math.abs(target).toFixed(1)+"% under MSRP") : ("is within "+target.toFixed(1)+"% over MSRP");
       $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").dataset.value+". We'll email you the moment it "+thrTxt+" once we're tracking your city.";
       $("malForm").style.display="none"; $("malDone").classList.add("mal-show");
-    }).catch(function(){
-      btn.disabled=false; btn.textContent="Notify me";
-      $("malErr").textContent="Sorry, something went wrong saving your alert. Please try again.";
-    });
+    }
+    post(Object.assign({},base,{p_target_pct:target}))
+      .catch(function(err){ if(err&&(err.status===404||err.status===400)) return post(Object.assign({},base,legacyParams())); throw err; })
+      .then(done)
+      .catch(function(){ btn.disabled=false; btn.textContent="Notify me"; $("malErr").textContent="Sorry, something went wrong saving your alert. Please try again."; });
   };
 
   $("malReset").onclick=function(){
