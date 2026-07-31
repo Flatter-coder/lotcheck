@@ -53,7 +53,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
-const CLAUDE_MODEL = "claude-sonnet-5";
+// Single source of truth for the model, shared with analyze-quote: both
+// functions read ANTHROPIC_MODEL and default to the SAME model so the two
+// quote-analysis paths never silently diverge. Override via the ANTHROPIC_MODEL
+// secret to pin/rollback without a code change.
+const CLAUDE_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 
 // Per-URL analysis cache TTL. A dealer listing's price/incentives can
 // shift, but not minute-to-minute, so a short cache turns repeat scans of
@@ -66,6 +70,201 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
+
+// ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
+// A personal credit is deducted ONLY after an accurate result is delivered,
+// and ONLY for signed-in requests. Anonymous requests (no/invalid JWT — which
+// includes the anon key the frontend sends today) resolve to no user and take
+// the existing flow byte-for-byte unchanged: every helper below is a no-op
+// when there is no hold. The fn_* RPCs were REVOKED from public, so they are
+// called with the service-role `supabase` client above.
+
+// Resolve the signed-in caller from the Authorization: Bearer <jwt> header.
+// Returns null for anonymous / unresolvable tokens (the back-compat path).
+// Never throws — a transient auth failure falls back to the anonymous path.
+async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(jwt);
+    if (error || !data?.user) return null;
+    return data.user;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// ── Anonymous free-check circuit breaker ────────────────────────────────────
+// The global cost guard for ANONYMOUS free checks (signed-in users are covered
+// by the personal credit ledger above and never touch this). Calls the
+// SECURITY DEFINER RPC fn_try_free_check on the service-role client, which
+// ATOMICALLY returns TRUE and increments today's count if under the configured
+// daily limit (global AND per-IP), or FALSE once either limit is hit. Returns
+// true = allowed, false = blocked. FAILS OPEN on any RPC error: cost protection
+// is best-effort, so a DB blip must not hard-block legitimate users — we log it
+// and allow the check.
+function clientIp(req: Request): string | null {
+  // Prefer the first hop in x-forwarded-for (the original client), fall back to
+  // x-real-ip. null when neither header is present.
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0].trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  return real ? real.trim() : null;
+}
+
+async function tryFreeCheck(req: Request): Promise<boolean> {
+  try {
+    const ip = clientIp(req);
+    const { data, error } = await supabase.rpc("fn_try_free_check", { p_ip: ip });
+    if (error) {
+      console.error("fn_try_free_check failed (failing open):", error.message);
+      return true;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("fn_try_free_check threw (failing open):", e);
+    return true;
+  }
+}
+
+// Place a credit hold before any expensive work. null result → out of credits.
+async function authorizeCredit(
+  userId: string,
+): Promise<{ ok: true; holdId: string } | { ok: false; kind: "out_of_credits" | "error" }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_authorize_quote", { p_user: userId });
+    if (error) {
+      console.error("fn_authorize_quote failed:", error.message);
+      return { ok: false, kind: "error" };
+    }
+    if (!data) return { ok: false, kind: "out_of_credits" };
+    return { ok: true, holdId: data as string };
+  } catch (e) {
+    console.error("fn_authorize_quote threw:", e);
+    return { ok: false, kind: "error" };
+  }
+}
+
+// Finalize a hold as −1 after a delivered accurate result. Returns the new
+// personal balance for the response, or null if capture couldn't be recorded
+// (in which case the response simply omits `credits` — `analysis` is unchanged).
+async function captureCredit(hold: string | null): Promise<{ personal: number } | null> {
+  if (!hold) return null;
+  try {
+    const { data, error } = await supabase.rpc("fn_capture_quote", { p_hold: hold, p_quote: null });
+    if (error) {
+      console.error("fn_capture_quote failed:", error.message);
+      return null;
+    }
+    if (data == null) return null;
+    return { personal: Number(data) };
+  } catch (e) {
+    console.error("fn_capture_quote threw:", e);
+    return null;
+  }
+}
+
+// Drop an uncaptured hold on any failure after authorize → no charge.
+async function releaseCredit(hold: string | null): Promise<void> {
+  if (!hold) return;
+  try {
+    const { error } = await supabase.rpc("fn_release_quote", { p_hold: hold });
+    if (error) console.error("fn_release_quote failed:", error.message);
+  } catch (e) {
+    console.error("fn_release_quote threw:", e);
+  }
+}
+
+// ── Resilient fetch (P0 hardening) ──────────────────────────────────────────
+// Wraps an outbound fetch with a per-attempt AbortController timeout plus
+// bounded retries on transient failures (HTTP 429/529/5xx, network errors, and
+// abort/timeouts). Real 4xx (400/401/…) are NOT retried. Backoff is exponential
+// with jitter and respects a Retry-After header when present. A hard maxAttempts
+// cap AND a total time budget keep the whole sequence under Supabase's ~150s
+// function ceiling — the budget stops a retry that couldn't finish in time
+// rather than risk a platform kill (which would strand the reserved credit by
+// skipping the release path).
+//
+// Behaviour contract used by callers below:
+//   • Returns the final Response — including a non-ok one after the retry
+//     budget is spent on a retryable status — so existing `if (!res.ok)`
+//     branches (which release the credit / log usage) still fire.
+//   • Throws only when retries are exhausted on a network/timeout error with no
+//     Response to return; the caller's surrounding try/catch releases the hold.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Retry-After may be a delay in seconds or an HTTP date. null when absent/invalid.
+function parseRetryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+// Exponential backoff with full-ish jitter: attempt 1 ≈ base, then ×2 each
+// attempt, half fixed + half random so retries don't thundering-herd.
+function backoffDelayMs(attempt: number, baseMs = 600): number {
+  const exp = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(exp / 2 + Math.random() * (exp / 2));
+}
+
+interface RetryOpts {
+  timeoutMs: number; // per-attempt abort timeout
+  maxAttempts: number; // hard cap on attempts
+  budgetMs: number; // total wall-clock budget for the whole sequence
+  baseBackoffMs?: number;
+  label?: string;
+}
+
+async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts): Promise<Response> {
+  const deadline = Date.now() + opts.budgetMs;
+  const base = opts.baseBackoffMs ?? 600;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const attemptTimeout = Math.min(opts.timeoutMs, remaining);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), attemptTimeout);
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      // Success or a real (non-retryable) error like 4xx → return immediately.
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
+      // Retryable status. Out of attempts → hand the non-ok Response back so the
+      // caller's !ok branch runs (and releases the credit).
+      if (attempt >= opts.maxAttempts) return res;
+      const ra = parseRetryAfterMs(res);
+      const delay = ra != null ? ra : backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) return res; // no budget left to wait+retry
+      try { await res.text(); } catch { /* drain body, ignore */ }
+      await sleep(delay);
+      continue;
+    } catch (err) {
+      // Network error or our own abort/timeout — retry if budget/attempts allow.
+      lastErr = err;
+      if (attempt >= opts.maxAttempts) throw err;
+      const delay = backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) throw err;
+      await sleep(delay);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
+}
 
 const PRICING_CHANGE_DATE = new Date("2026-09-01T00:00:00Z");
 function computeCost(inputTokens: number, outputTokens: number): number {
@@ -403,7 +602,7 @@ function computeLeverageScore(analysis: any): void {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
-      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`);
+      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} MSRP`);
     } else if (deltaPct < -0.02) {
       score -= 1.0;
       basis.push(`already priced below MSRP`);
@@ -487,16 +686,43 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
 // available). Like manufacturer finance, a lease promo is a NEW-vehicle offer,
 // so the frontend treats it as a reference when the vehicle is used. Attaches
 // analysis.leaseRates.manufacturer. Never throws -- a missing table yields null.
+//
+// Phase 2 (lease payments) is additive: when the catalog row carries payment
+// data we surface it two ways, and the UI decides how to render:
+//   payment_source='advertised' -> manufacturer.payment (a FIXED advertised
+//     example for the scraped dealer's vehicle; shown as a reference, never
+//     recomputed for the user).
+//   payment_source='computed'   -> manufacturer.lease (residual %, apr, term;
+//     the UI computes the payment on the USER's own msrp/price, NOT the
+//     catalog's scraped cap_cost/down_payment/selling_price).
+// cap_cost/down_payment are deliberately NOT read here: those are the scraped
+// dealer's vehicle and must never drive the user's computed payment.
 async function resolveLeaseRates(analysis: any): Promise<void> {
   const out: any = { manufacturer: null };
   if (analysis.make) {
+    const COLS_FULL = "apr, term_months, annual_km, effective_date, model, residual_pct, advertised_payment, advertised_payment_tax, selling_price, payment_source";
+    const COLS_BASE = "apr, term_months, annual_km, effective_date, model";
     try {
-      const { data } = await supabase
+      // Prefer the Phase-2 columns; if they're not live in this DB yet the
+      // select errors, so fall back to APR-only rather than regress lease.
+      let data: any[] | null = null;
+      const full = await supabase
         .from("lease_rate_catalog")
-        .select("apr, term_months, annual_km, effective_date, model")
+        .select(COLS_FULL)
         .ilike("make", analysis.make)
         .order("term_months", { ascending: true })
         .limit(50);
+      if (full.error) {
+        const base = await supabase
+          .from("lease_rate_catalog")
+          .select(COLS_BASE)
+          .ilike("make", analysis.make)
+          .order("term_months", { ascending: true })
+          .limit(50);
+        data = base.data;
+      } else {
+        data = full.data;
+      }
       if (data?.length) {
         const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
         const modelNorm = norm(analysis.model || "");
@@ -504,12 +730,32 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
         const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
         if (pool.length) {
           const pick = pool.find((r: any) => r.term_months === 48) || pool[0];
-          out.manufacturer = {
+          const m: any = {
             apr: Number(pick.apr),
             termMonths: pick.term_months,
             annualKm: pick.annual_km ?? null,
             effectiveDate: pick.effective_date,
           };
+          const src = pick.payment_source;
+          if (src === "advertised" && pick.advertised_payment != null) {
+            m.payment = {
+              source: "advertised",
+              amount: Number(pick.advertised_payment),
+              withTax: pick.advertised_payment_tax != null ? Number(pick.advertised_payment_tax) : null,
+              sellingPrice: pick.selling_price != null ? Number(pick.selling_price) : null,
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          } else if (src === "computed" && pick.residual_pct != null) {
+            m.lease = {
+              source: "computed",
+              residualPct: Number(pick.residual_pct),
+              apr: Number(pick.apr),
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          }
+          out.manufacturer = m;
         }
       }
     } catch (err) {
@@ -670,6 +916,7 @@ async function lookupManufacturerMsrp(
   make: string,
   model: string,
   trim: string | null,
+  deadline?: number,
 ): Promise<number | null> {
   const domain = MANUFACTURER_DOMAINS[make.toLowerCase()];
   if (!domain || !NIMBLE_API_KEY || !ANTHROPIC_API_KEY) {
@@ -678,6 +925,17 @@ async function lookupManufacturerMsrp(
         `domain=${domain ?? "none (not in MANUFACTURER_DOMAINS)"}, ` +
         `NIMBLE_API_KEY=${NIMBLE_API_KEY ? "set" : "MISSING"}, ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY ? "set" : "MISSING"}`,
     );
+    return null;
+  }
+
+  // This best-effort fallback runs AFTER the main Claude call, so on the rare
+  // slow-Nimble path the request clock may already be well advanced. It needs a
+  // ~40s worst case (search + ~30s vx10 extract + Claude). If the caller's
+  // request deadline can't accommodate that, skip rather than risk pushing the
+  // whole request past Supabase's ~150s kill (which would strand the credit).
+  const MFR_MIN_BUDGET_MS = 40_000;
+  if (deadline != null && deadline - Date.now() < MFR_MIN_BUDGET_MS) {
+    console.log(`Manufacturer MSRP lookup skipped for ${year} ${make} ${model}: only ${Math.max(0, deadline - Date.now())}ms left in the request budget (needs ~${MFR_MIN_BUDGET_MS}ms).`);
     return null;
   }
 
@@ -703,7 +961,7 @@ async function lookupManufacturerMsrp(
     // regardless of brand, while static announcement pages and spec PDFs
     // are not. Query steers toward the latter accordingly.
     const query = `${year} ${make} ${model} ${trim ?? ""} pricing announcement press release MSRP Canada`.trim();
-    const searchRes = await fetch("https://sdk.nimbleway.com/v1/search", {
+    const searchRes = await fetchWithRetry("https://sdk.nimbleway.com/v1/search", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${NIMBLE_API_KEY}`,
@@ -717,7 +975,7 @@ async function lookupManufacturerMsrp(
         country: "CA",
         locale: "en",
       }),
-    });
+    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: 20_000, label: "nimble-search" });
 
     if (!searchRes.ok) {
       console.warn("Manufacturer MSRP search failed:", searchRes.status, await searchRes.text());
@@ -784,7 +1042,7 @@ async function lookupManufacturerMsrp(
       return null;
     }
 
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    const claudeRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -798,7 +1056,7 @@ async function lookupManufacturerMsrp(
           `You are looking for the manufacturer's suggested retail price (MSRP) for one specific vehicle trim on its own official Canadian manufacturer website. Find the MSRP for exactly: ${year} ${make} ${model}${trim ? " " + trim : ""}. Only use a price you can clearly attribute to this exact trim -- if the content shows multiple trims, pick the matching one, don't average or guess across trims. Return ONLY this JSON object, nothing else, no markdown fence: {"msrp": number or null}`,
         messages: [{ role: "user", content: pageContent }],
       }),
-    });
+    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: 30_000, label: "anthropic-mfr-msrp" });
 
     if (!claudeRes.ok) {
       console.warn("Manufacturer MSRP extraction call failed:", claudeRes.status, await claudeRes.text());
@@ -846,54 +1104,100 @@ async function nimbleExtract(
   waitMs?: number,
   externalSignal?: AbortSignal,
 ): Promise<NimbleResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const onExternalAbort = () => controller.abort();
-  if (externalSignal) {
-    if (externalSignal.aborted) controller.abort();
-    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
-  }
-  try {
-    const body: Record<string, unknown> = { url, driver, formats: ["markdown"] };
-    if (waitMs) body.wait = waitMs;
-    const res = await fetch("https://sdk.nimbleway.com/v1/extract", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${NIMBLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      // formats: ["markdown"] asks Nimble for clean, LLM-ready text rather
-      // than raw HTML -- cheaper and faster to feed to Claude. "render" is
-      // omitted -- confirmed via a real response warning that it's ignored
-      // once "driver" is set explicitly.
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // A 200/success from Nimble itself doesn't guarantee usable content
-      // -- confirmed live (2026-07-22, toyotaonthetrail.ca): vx8 returned
-      // status="success", status_code=200, but markdown.length=0. That
-      // used to count as a successful attempt here, which short-circuited
-      // the escalation loop before vx10 (the driver actually likely to
-      // help) ever got tried. 100 chars is a low bar -- any real listing
-      // page's markdown will be far longer than that; this only catches
-      // genuinely empty/near-empty responses (likely bot-detection or a
-      // blank shell), not legitimately short pages.
-      const md = data?.data?.markdown;
-      if (typeof md === "string" && md.trim().length >= 100) {
-        return { ok: true, data };
-      }
-      return { ok: false, errBody: `200 response but content too short (markdown.length=${md?.length ?? 0})`, timedOut: false };
+  // timeoutMs is treated as a TOTAL wall-clock budget for this driver so the
+  // documented worst-case chain math (max(vx6,vx8)+vx10+vx10-retry ≈ 102s) is
+  // preserved even with the added 429/5xx/network retry: each attempt uses the
+  // REMAINING budget, so the sum of attempts never exceeds the per-driver
+  // timeout. A fast transient rejection (429/5xx) leaves budget for one quick
+  // backoff+retry; a genuine timeout consumes the budget and is NOT retried
+  // here (retrying an abort just waits again — the vx10-retry decision lives in
+  // fetchListingContent, which keys off the timedOut flag below).
+  const deadline = Date.now() + timeoutMs;
+  const MAX_ATTEMPTS = 2;
+  let lastErr = "";
+  let lastTimedOut = false;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), remaining);
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort();
+      else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }
-    return { ok: false, errBody: await res.text(), timedOut: false };
-  } catch (err) {
-    const timedOut = err instanceof Error && err.name === "AbortError";
-    return { ok: false, errBody: timedOut ? `timed out after ${timeoutMs}ms` : String(err), timedOut };
-  } finally {
-    clearTimeout(timer);
-    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    try {
+      const body: Record<string, unknown> = { url, driver, formats: ["markdown"] };
+      if (waitMs) body.wait = waitMs;
+      const res = await fetch("https://sdk.nimbleway.com/v1/extract", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${NIMBLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        // formats: ["markdown"] asks Nimble for clean, LLM-ready text rather
+        // than raw HTML -- cheaper and faster to feed to Claude. "render" is
+        // omitted -- confirmed via a real response warning that it's ignored
+        // once "driver" is set explicitly.
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // A 200/success from Nimble itself doesn't guarantee usable content
+        // -- confirmed live (2026-07-22, toyotaonthetrail.ca): vx8 returned
+        // status="success", status_code=200, but markdown.length=0. That
+        // used to count as a successful attempt here, which short-circuited
+        // the escalation loop before vx10 (the driver actually likely to
+        // help) ever got tried. 100 chars is a low bar -- any real listing
+        // page's markdown will be far longer than that; this only catches
+        // genuinely empty/near-empty responses (likely bot-detection or a
+        // blank shell), not legitimately short pages.
+        const md = data?.data?.markdown;
+        if (typeof md === "string" && md.trim().length >= 100) {
+          return { ok: true, data };
+        }
+        // Empty/short content is an app-level miss, not a transient server
+        // error -- don't retry it here; let the driver escalation handle it.
+        return { ok: false, errBody: `200 response but content too short (markdown.length=${md?.length ?? 0})`, timedOut: false };
+      }
+      // Non-ok HTTP. Retry a transient 429/5xx once if budget/attempts remain.
+      const errBody = await res.text();
+      lastErr = errBody;
+      if (RETRYABLE_STATUS.has(res.status) && attempt < MAX_ATTEMPTS && !externalSignal?.aborted) {
+        const ra = parseRetryAfterMs(res);
+        const delay = ra != null ? ra : backoffDelayMs(attempt);
+        if (Date.now() + delay < deadline) {
+          await sleep(delay);
+          continue;
+        }
+      }
+      return { ok: false, errBody, timedOut: false };
+    } catch (err) {
+      const timedOut = err instanceof Error && err.name === "AbortError";
+      lastTimedOut = timedOut;
+      lastErr = timedOut ? `timed out after ${timeoutMs}ms` : String(err);
+      // Aborted by the race winner (external signal) — stop, don't retry.
+      if (externalSignal?.aborted) return { ok: false, errBody: lastErr, timedOut };
+      // A timeout used the whole budget; retrying just waits again. Surface it
+      // so fetchListingContent can apply its timeout-vs-rejection logic.
+      if (timedOut) return { ok: false, errBody: lastErr, timedOut: true };
+      // Genuine network error — retry if budget/attempts remain.
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = backoffDelayMs(attempt);
+        if (Date.now() + delay < deadline) {
+          await sleep(delay);
+          continue;
+        }
+      }
+      return { ok: false, errBody: lastErr, timedOut: false };
+    } finally {
+      clearTimeout(timer);
+      if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
+    }
   }
+  return { ok: false, errBody: lastErr || "no attempts made within budget", timedOut: lastTimedOut };
 }
 
 // Tags a pending nimbleExtract promise with the driver that produced it,
@@ -1012,6 +1316,325 @@ async function fetchListingContent(url: string): Promise<{ data: any; driver: st
   return { errBody: result.errBody };
 }
 
+// ── SM360 quoted-price resolver ────────────────────────────────────────────
+// SM360 (the platform behind Dilawri and many other Canadian dealer groups --
+// e.g. tazaparkvw.com) renders its listing price client-side, so the generic
+// Nimble-markdown -> Claude extractor can miss it entirely (confirmed real
+// case: a 2026 VW Atlas Highline demo came back "Quoted price: Not found",
+// which then suppressed the over-MSRP flag AND made the financing card fall
+// back to MSRP instead of the real ~$62.7K price).
+//
+// Every SM360 site exposes the SAME public JSON feed the catalog scrapers
+// already use (scripts/lib/sm360-stack.mjs):
+//   GET {origin}/{locale}/new-inventory/api/listing?page=N
+//   -> { vehicles: [ { vehicleId, year, model:{name}, trim:{name},
+//                      salePrice, listPrice, hasPrice, ... } ],
+//        pagination: { numberOfPages } }
+// The detail-page URL carries the unit's id as an `id<digits>` slug token
+// (e.g. .../2026-volkswagen-atlas-id38137169), and that number equals the
+// feed's top-level `vehicleId` -- CONFIRMED against the live feed, not a guess.
+// That per-VIN match matters: a single trim can have dozens of loaded units at
+// one dealer with DIFFERENT prices (24 Atlas Highline units spanning
+// $61,545-$63,545 on this one lot), so matching by year+model+trim alone would
+// pick an arbitrary, likely-wrong unit. We therefore key on vehicleId and only
+// fall back to year+model+trim when that yields EXACTLY ONE unit -- never guess
+// among several.
+//
+// Best-effort and fully defensive: bounded pagination, a hard timeout, and any
+// failure leaves analysis.quotedPrice untouched (no fabrication). Generic to
+// ANY SM360 host, not hardcoded to tazaparkvw.
+function parseSm360Listing(url: string): { origin: string; locale: string; vehicleId: number } | null {
+  try {
+    const u = new URL(url);
+    if (!/\/new-inventory\//i.test(u.pathname)) return null;
+    // The id token is the unit's vehicleId, as an `id<digits>` slug segment.
+    const m = u.pathname.match(/id(\d{4,})(?![0-9])/i);
+    if (!m) return null;
+    const localeSeg = u.pathname.match(/^\/(en|fr)\//i);
+    const locale = localeSeg ? localeSeg[1].toLowerCase() : "en";
+    return { origin: u.origin, locale, vehicleId: Number(m[1]) };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSm360Page(
+  origin: string,
+  locale: string,
+  page: number,
+  timeoutMs: number,
+): Promise<{ vehicles: any[]; numberOfPages: number } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${origin}/${locale}/new-inventory/api/listing?page=${page}`, {
+      headers: {
+        // Same header set proven against the SM360 feed in sm360-stack.mjs.
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      vehicles: Array.isArray(data?.vehicles) ? data.vehicles : [],
+      numberOfPages: Number(data?.pagination?.numberOfPages) || 1,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Reads salePrice first (the actual advertised selling price), then listPrice,
+// honouring hasPrice. Returns null when neither is a usable positive number.
+function sm360PriceOf(v: any): number | null {
+  if (v?.hasPrice === false) return null;
+  const sale = Number(v?.salePrice);
+  if (Number.isFinite(sale) && sale > 0) return sale;
+  const list = Number(v?.listPrice);
+  if (Number.isFinite(list) && list > 0) return list;
+  return null;
+}
+
+async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void> {
+  const parsed = parseSm360Listing(url);
+  if (!parsed) return;
+  const { origin, locale, vehicleId } = parsed;
+  const PAGE_TIMEOUT_MS = 8_000;
+  const MAX_PAGES = 25; // hard ceiling regardless of what pagination claims
+
+  try {
+    const norm = (s: any) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const wantYear = Number(analysis?.year) || null;
+    const wantModel = norm(analysis?.model);
+    const wantTrim = norm(analysis?.trim);
+    const fallbackMatches: any[] = [];
+
+    let pages = 1;
+    for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      if (!res) {
+        console.warn(`SM360 resolver: page ${page} fetch failed for ${origin}; aborting resolver.`);
+        return;
+      }
+      pages = Math.min(res.numberOfPages, MAX_PAGES);
+      for (const v of res.vehicles) {
+        // Primary path: exact vehicleId match -- the id from the URL slug.
+        if (Number(v?.vehicleId) === vehicleId) {
+          const price = sm360PriceOf(v);
+          if (price != null) {
+            analysis.quotedPrice = price;
+            analysis.quotedPriceSource = "sm360_feed";
+            console.log(`SM360 resolver: matched vehicleId ${vehicleId} on page ${page}, quotedPrice=${price} (salePrice=${v?.salePrice}, listPrice=${v?.listPrice}).`);
+            return;
+          }
+          console.log(`SM360 resolver: matched vehicleId ${vehicleId} but it has no usable price (hasPrice=${v?.hasPrice}).`);
+          return;
+        }
+        // Collect fallback candidates while we scan, in case the id never matches.
+        if (wantYear && wantModel && Number(v?.year) === wantYear && norm(v?.model?.name) === wantModel) {
+          if (!wantTrim || norm(v?.trim?.name) === wantTrim) fallbackMatches.push(v);
+        }
+      }
+    }
+
+    // Fallback: no id match (e.g. the unit sold and rotated out of the feed, or
+    // the slug id scheme differs on some host). Only trust it when it lands on
+    // EXACTLY ONE unit -- multiple same-trim units carry different prices, so
+    // guessing one would be fabrication. Also require a positive price.
+    const priced = fallbackMatches.filter((v) => sm360PriceOf(v) != null);
+    if (priced.length === 1) {
+      const price = sm360PriceOf(priced[0])!;
+      analysis.quotedPrice = price;
+      analysis.quotedPriceSource = "sm360_feed_fallback";
+      console.log(`SM360 resolver: no vehicleId match for ${vehicleId}; single year+model+trim unit matched, quotedPrice=${price}.`);
+    } else {
+      console.log(`SM360 resolver: no confident match for vehicleId ${vehicleId} (${priced.length} priced fallback candidate(s)); leaving quotedPrice as-is.`);
+    }
+  } catch (err) {
+    console.warn("resolveSm360QuotedPrice threw:", err);
+  }
+}
+
+// Maps an SM360 feed vehicle's fuel descriptor to the report's fuelType enum
+// ("BEV" | "PHEV" | "Hybrid" | "Gas" | "Diesel" | null). Conservative: only
+// returns a value it can defend from the feed's own fields; leaves null on
+// anything ambiguous (applyVerifiedFuelType may still override from the
+// catalog). Never fabricates -- an unknown fuel stays null.
+function sm360FuelType(v: any): string | null {
+  const slug = String(v?.fuel?.slug ?? v?.fuel?.name ?? "").toLowerCase();
+  const batt = Number(v?.batteryCapacity) || 0;
+  const range = Number(v?.batteryRange) || 0;
+  if (/plug|phev/.test(slug)) return "PHEV";
+  if (/hybrid/.test(slug)) return "Hybrid";
+  if (/electric|\bev\b|bev/.test(slug)) return "BEV";
+  if (/diesel/.test(slug)) return "Diesel";
+  if (/gas|petrol/.test(slug)) return "Gas";
+  // No usable fuel slug; only call it a BEV if the feed carries real battery
+  // specs, never on a bare zero.
+  if (batt > 0 && range > 0) return "BEV";
+  return null;
+}
+
+// ── SM360 feed FALLBACK builder ─────────────────────────────────────────────
+// When the dealer PAGE scrape fails/bot-blocks on an SM360 listing, the price
+// and core vehicle data for that exact unit are still available in the SM360
+// JSON feed (which does NOT depend on the page rendering). Rather than hard-
+// fail, this builds a real (possibly partial) analysis object from the feed's
+// own fields for the unit whose vehicleId is in the URL slug, so the report is
+// as rich as the feed allows.
+//
+// Matches on vehicleId only: unlike resolveSm360QuotedPrice's secondary
+// year+model+trim path, the page never loaded here, so there is no extracted
+// year/model/trim to match against -- vehicleId (from the URL) is the only key.
+// If the id isn't in the feed, returns null and the caller falls back to the
+// original "couldn't load / try screenshot" error. Never fabricates: any field
+// the feed doesn't provide is left unset. Fully defensive: bounded pagination,
+// per-page timeout, and any throw yields null.
+async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
+  const parsed = parseSm360Listing(url);
+  if (!parsed) return null;
+  const { origin, locale, vehicleId } = parsed;
+  const PAGE_TIMEOUT_MS = 8_000;
+  const MAX_PAGES = 25;
+
+  try {
+    let pages = 1;
+    let match: any = null;
+    for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      if (!res) {
+        console.warn(`SM360 fallback: page ${page} fetch failed for ${origin}; aborting fallback.`);
+        return null;
+      }
+      pages = Math.min(res.numberOfPages, MAX_PAGES);
+      match = res.vehicles.find((v: any) => Number(v?.vehicleId) === vehicleId) ?? null;
+      if (match) break;
+    }
+    if (!match) {
+      console.log(`SM360 fallback: vehicleId ${vehicleId} not found in feed for ${origin}; cannot build fallback.`);
+      return null;
+    }
+
+    const price = sm360PriceOf(match);
+    const year = Number(match?.year) || null;
+    const make = typeof match?.make?.name === "string" ? match.make.name : null;
+    const model = typeof match?.model?.name === "string" ? match.model.name : null;
+    const trim = typeof match?.trim?.name === "string" ? match.trim.name : null;
+
+    // VIN: the feed exposes it as `serialNo`. Only carry it if it at least
+    // looks like a 17-char VIN; validateVin re-checks the check digit
+    // downstream. Never invent one.
+    const vinRaw = typeof match?.serialNo === "string" ? match.serialNo.trim().toUpperCase() : "";
+    const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : null;
+
+    const odoNum = Number(match?.odometer);
+    const odometerKm = Number.isFinite(odoNum) && odoNum >= 0 ? odoNum : null;
+
+    const condition = match?.newVehicle === true
+      ? "new"
+      : match?.newVehicle === false
+        ? "used"
+        : (typeof match?.paymentOptions?.vehicleCondition === "string" ? match.paymentOptions.vehicleCondition : null);
+
+    const org = match?.primaryOrganizationUnit;
+    const dealerName = typeof org?.name === "string" ? org.name : null;
+    const dealerCity = typeof org?.city === "string"
+      ? (org?.province?.provinceCode ? `${org.city}, ${org.province.provinceCode}` : org.city)
+      : null;
+
+    const vehicleStr = [year, make, model, trim].filter(Boolean).join(" ") || null;
+
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year,
+      make,
+      model,
+      trim,
+      vin,
+      odometerKm,
+      fuelType: sm360FuelType(match),
+      vehicleCondition: condition,
+      dealerName,
+      dealerCity,
+      // MSRP is NOT in the feed as a standalone figure (salePrice/listPrice are
+      // the selling price). Leave null so the downstream catalog/manufacturer
+      // MSRP lookup fills it if it can -- same as the normal path.
+      msrp: null,
+      quotedPrice: price,
+      quotedPriceSource: price != null ? "sm360_feed" : null,
+      // The feed carries no itemized fees, no page financing disclosure, and no
+      // standalone warranty terms. Leave these empty/null rather than invent
+      // them; applyVerifiedWarranty still fills a NEW vehicle's real warranty
+      // from LotCheck's own verified table during enrichment.
+      standardWarranty: null,
+      addOns: [],
+      totalFlaggedCost: 0,
+      warranty: null,
+      financing: null,
+      // Honesty flags the UI can surface: the page itself could not be read,
+      // and this report was built from the dealer's own inventory feed.
+      source: "sm360_feed_fallback",
+      sourceNote: "The dealer's listing page couldn't be loaded (its site was blocking automated access), so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page couldn't be read and aren't included here.",
+      summary: `${vehicleStr ?? "This vehicle"}${price != null ? ` is listed at $${price.toLocaleString()}` : ""}. The dealer's listing page couldn't be loaded, so this report is based on the dealer's inventory feed rather than the full page -- itemized fees and the page's financing terms aren't included. Confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+    };
+
+    console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildSm360FallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
+// Shared downstream enrichment, run identically by BOTH the normal page-scrape
+// path and the SM360 feed fallback so a fallback report is as rich as its
+// (partial) data allows: verified warranty + fuel type, VIN pattern/check-digit
+// validation, Transport Canada recall lookup, the catalog->manufacturer MSRP
+// fallback, the financing/odometer plausibility checks, dealer/manufacturer
+// finance + lease rates, and finally the deterministic leverage score (which
+// must run last, after msrp/recalls/financing are populated). Every step is
+// individually defensive and skips itself when its inputs are absent, so a
+// partial fallback analysis (e.g. no financing, no MSRP) simply gets fewer
+// checks rather than erroring.
+async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
+  await applyVerifiedWarranty(analysis);
+  await applyVerifiedFuelType(analysis);
+  analysis.vinCheck = validateVin(analysis.vin);
+  if (analysis.year && analysis.make && analysis.model) {
+    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+  }
+
+  // Manufacturer-site MSRP fallback -- only spend the extra search+extraction
+  // cost when the vehicle doesn't already carry an MSRP. Catalog (a fast DB
+  // read) is tried first; only on a miss does the ~30s manufacturer scrape run.
+  // The request deadline is threaded through so this expensive step self-skips
+  // when there isn't enough budget left to finish before the platform ceiling.
+  if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
+    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+    if (catMsrp) {
+      analysis.msrp = catMsrp;
+      analysis.msrpSource = "catalog";
+    } else {
+      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
+      if (mfrMsrp) {
+        analysis.msrp = mfrMsrp;
+        analysis.msrpSource = "manufacturer_site";
+      }
+    }
+  }
+
+  computeFinancingCheck(analysis);
+  computeOdometerCheck(analysis);
+  await resolveFinanceRates(analysis);
+  await resolveLeaseRates(analysis);
+  computeLeverageScore(analysis);
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1088,6 +1711,13 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // Request-level time budget. Supabase kills a function at ~150s (a raw 504
+  // that skips our credit-release path and strands the hold), so every retry/
+  // timeout decision downstream is bounded against a ~140s deadline to leave
+  // margin. The Nimble chain can already eat up to ~102s, so the main Claude
+  // call and the MSRP fallback both clamp their budgets to whatever remains.
+  const REQUEST_DEADLINE = Date.now() + 140_000;
+
   if (!ANTHROPIC_API_KEY || !NIMBLE_API_KEY) {
     console.error("ANTHROPIC_API_KEY or NIMBLE_API_KEY is not set on this function.");
     return new Response(
@@ -1096,6 +1726,10 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  // Anonymous by default: null user → existing flow, no credit logic at all.
+  const creditUser = await resolveCreditUser(req);
+  let holdId: string | null = null;
+
   try {
     const { url } = await req.json();
     if (!url || typeof url !== "string") {
@@ -1103,6 +1737,39 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "No listing URL received." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
+    }
+
+    // Authorize a credit hold before any expensive work — and before the cache
+    // fast-path, since a cache hit is still a delivered accurate result that
+    // must capture. Signed-in only; anonymous callers skip this entirely. The
+    // 400 above runs before this, so a rejected request never places a hold.
+    if (creditUser) {
+      const authz = await authorizeCredit(creditUser.id);
+      if (!authz.ok) {
+        if (authz.kind === "out_of_credits") {
+          return new Response(
+            JSON.stringify({ error: "out_of_credits" }),
+            { status: 402, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ error: "Something went wrong analyzing that listing." }),
+          { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+      holdId = authz.holdId;
+    } else {
+      // Anonymous request: enforce the global free-check breaker BEFORE any
+      // expensive Nimble/Claude work (and before the cache fast-path), so a
+      // blocked check costs nothing. Signed-in callers took the credit-authorize
+      // branch above and are unaffected.
+      const allowed = await tryFreeCheck(req);
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "free_limit_reached" }), {
+          status: 429,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
     }
 
     // Cache fast-path: a recent analysis of this exact URL is returned
@@ -1117,8 +1784,13 @@ Deno.serve(async (req: Request) => {
       if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
         const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
         console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
+        // A cached delivery is still a delivered accurate result -> capture.
+        const credits = await captureCredit(holdId);
+        holdId = null;
         return new Response(
-          JSON.stringify({ analysis: cached.analysis, cached: true }),
+          JSON.stringify(credits
+            ? { analysis: cached.analysis, cached: true, credits }
+            : { analysis: cached.analysis, cached: true }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -1129,7 +1801,43 @@ Deno.serve(async (req: Request) => {
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
       console.error("Nimble extract failed after all attempts:", nimbleResult.errBody);
+
+      // Page load genuinely failed. Before hard-failing, if this is an SM360
+      // dealer listing, fall back to the platform's own JSON feed -- the price
+      // and core vehicle data for this exact unit live there and do NOT depend
+      // on the page rendering. This turns a "site is blocking us" dead end into
+      // a real (clearly-labelled, possibly partial) report. Only fires for
+      // SM360 URLs, and only here -- after the normal page path has already
+      // failed -- so pages that DO load are completely unaffected.
+      const fallback = await buildSm360FallbackAnalysis(url);
+      if (fallback) {
+        await enrichAnalysis(fallback, REQUEST_DEADLINE);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: fallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (SM360 fallback):", err);
+        }
+        // Logged as a success: we returned a usable report, just via the feed.
+        await logUsage({ success: true, errorMessage: `page-load failed, served SM360 feed fallback` });
+        console.log(`Served SM360 feed fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        // A usable report was delivered (via the feed) -> capture.
+        const credits = await captureCredit(holdId);
+        holdId = null;
+        return new Response(
+          JSON.stringify(credits
+            ? { analysis: fallback, source: "sm360_feed_fallback", credits }
+            : { analysis: fallback, source: "sm360_feed_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Not an SM360 listing (or its feed was also unreachable / the unit isn't
+      // in the feed): keep today's behaviour exactly.
       await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody}` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't load that page after a few tries. This dealer site may be blocking automated access right now -- try again in a moment, or use the upload/screenshot option instead." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1166,6 +1874,8 @@ Deno.serve(async (req: Request) => {
     if (!pageContent) {
       console.error("No usable content in Nimble response. Top-level keys:", Object.keys(nimbleData||{}), "data keys:", Object.keys(nimbleData?.data||{}));
       await logUsage({ success: false, errorMessage: `No content in Nimble response (status=${nimbleData?.status}, status_code=${nimbleData?.status_code})` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that page's content. Try a different listing." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1187,7 +1897,14 @@ Deno.serve(async (req: Request) => {
       `Listing content fetched via driver=${nimbleResult.driver}, pageContent.length=${pageContent.length}, containsMSRP=${pageContent.toUpperCase().includes("MSRP")}, containsLeasePaymentsInclude=${/payments include/i.test(pageContent)}`,
     );
 
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+    // Tighter per-attempt timeout than analyze-quote's (~45s) because the Nimble
+    // chain above may already have consumed time; the budget is clamped to the
+    // request deadline so on the slow-Nimble path this makes a single bounded
+    // attempt instead of two. On timeout/network exhaustion fetchWithRetry
+    // throws → the outer catch logs + releases the credit hold (no strand); a
+    // spent-budget 5xx returns non-ok → the !ok branch below releases.
+    const claudeBudget = Math.max(1_000, REQUEST_DEADLINE - Date.now());
+    const claudeRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -1217,12 +1934,14 @@ Deno.serve(async (req: Request) => {
           },
         ],
       }),
-    });
+    }, { timeoutMs: 45_000, maxAttempts: 2, budgetMs: claudeBudget, label: "anthropic-listing" });
 
     if (!claudeRes.ok) {
       const errBody = await claudeRes.text();
       console.error("Claude API call failed:", claudeRes.status, errBody);
       await logUsage({ success: false, errorMessage: `Claude HTTP ${claudeRes.status}` });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't analyze that listing. Please try again in a moment." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1244,6 +1963,8 @@ Deno.serve(async (req: Request) => {
         outputTokens: usage?.output_tokens,
         errorMessage: "No text block in response",
       });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read a response from the analysis. Please try again." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -1272,52 +1993,27 @@ Deno.serve(async (req: Request) => {
         outputTokens: usage?.output_tokens,
         errorMessage: `JSON parse failure (stop_reason=${stopReason}, output_tokens=${usage?.output_tokens})`,
       });
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that listing clearly. Try a different page." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
 
-    await applyVerifiedWarranty(analysis);
-    await applyVerifiedFuelType(analysis);
-    analysis.vinCheck = validateVin(analysis.vin);
-    if (analysis.year && analysis.make && analysis.model) {
-      analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
-    }
+    // SM360 quoted-price resolver: SM360 dealer sites render the price
+    // client-side, so the markdown extractor above can miss it. When this is
+    // an SM360 listing URL we prefer the platform's own JSON feed as the
+    // authoritative price for THIS exact unit (matched by the id in the URL),
+    // overriding whatever the generic extractor did or didn't find. Best-
+    // effort: on any failure it leaves analysis.quotedPrice untouched.
+    await resolveSm360QuotedPrice(url, analysis);
 
-    // Manufacturer-site MSRP fallback -- only spend the extra search+
-    // extraction cost when the dealer's own page genuinely didn't show
-    // an MSRP at all (real case: Calgary Honda Civic, "MSRP: Not shown
-    // on quote"). If this also comes up empty (manufacturer not yet in
-    // MANUFACTURER_DOMAINS, or genuinely not found), analysis.msrp just
-    // stays null -- the report still shows the dealer's quoted price on
-    // its own, without a false "verified" claim, exactly as before.
-    if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
-      // 1) Fast, authoritative catalog lookup first -- a DB read, no scrape.
-      //    When it hits, the ~30s manufacturer-site scrape is skipped
-      //    entirely.
-      const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
-      if (catMsrp) {
-        analysis.msrp = catMsrp;
-        analysis.msrpSource = "catalog";
-      } else {
-        // 2) Only if the catalog doesn't have it, pay for the manufacturer-
-        //    site scrape.
-        const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
-        if (mfrMsrp) {
-          analysis.msrp = mfrMsrp;
-          analysis.msrpSource = "manufacturer_site";
-        }
-      }
-    }
-
-    // Derived verification checks -- run last, after price/recalls are all
-    // populated, since the leverage score is computed from them.
-    computeFinancingCheck(analysis);
-    computeOdometerCheck(analysis);
-    await resolveFinanceRates(analysis);
-    await resolveLeaseRates(analysis);
-    computeLeverageScore(analysis);
+    // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
+    // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
+    // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
+    // runs, so the two paths never drift apart.
+    await enrichAnalysis(analysis, REQUEST_DEADLINE);
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache
@@ -1336,13 +2032,21 @@ Deno.serve(async (req: Request) => {
       outputTokens: usage?.output_tokens,
     });
 
+    // Delivered an accurate result -> capture the hold (signed-in only) and
+    // include the new balance. Null holdId out first so a later throw can't
+    // release a hold we've decided to charge. `analysis` is unchanged either way.
+    const credits = await captureCredit(holdId);
+    holdId = null;
     return new Response(
-      JSON.stringify({ analysis }),
+      JSON.stringify(credits ? { analysis, credits } : { analysis }),
       { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
   } catch (err) {
     console.error("analyze-listing-url error:", err);
     await logUsage({ success: false, errorMessage: String(err) });
+    // Any throw after a hold was placed must not charge the user.
+    await releaseCredit(holdId);
+    holdId = null;
     return new Response(
       JSON.stringify({ error: "Something went wrong analyzing that listing." }),
       { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },

@@ -57,13 +57,210 @@ const CORS_HEADERS = {
 };
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
-// Keeps whatever model you already have configured as a secret; falls back
-// to a sensible default only if that secret isn't set.
-const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-4-5";
+// Single source of truth for the model, shared with analyze-listing-url:
+// both functions read ANTHROPIC_MODEL and default to the SAME model so the
+// two quote-analysis paths never silently diverge. Override via the
+// ANTHROPIC_MODEL secret to pin/rollback without a code change.
+const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
+// A personal credit is deducted ONLY after an accurate result is delivered,
+// and ONLY for signed-in requests. Anonymous requests (no/invalid JWT — which
+// includes the anon key the frontend sends today) resolve to no user and take
+// the existing flow byte-for-byte unchanged: every helper below is a no-op
+// when there is no hold. The fn_* RPCs were REVOKED from public, so they are
+// called here with the service-role `supabase` client above.
+
+// Resolve the signed-in caller from the Authorization: Bearer <jwt> header.
+// Returns null for anonymous / unresolvable tokens (the back-compat path).
+// Never throws — a transient auth failure falls back to the anonymous path.
+async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
+  const authHeader = req.headers.get("Authorization") ?? "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return null;
+  try {
+    const { data, error } = await supabase.auth.getUser(jwt);
+    if (error || !data?.user) return null;
+    return data.user;
+  } catch (_e) {
+    return null;
+  }
+}
+
+// ── Anonymous free-check circuit breaker ────────────────────────────────────
+// The global cost guard for ANONYMOUS free checks (signed-in users are covered
+// by the personal credit ledger above and never touch this). Calls the
+// SECURITY DEFINER RPC fn_try_free_check on the service-role client, which
+// ATOMICALLY returns TRUE and increments today's count if under the configured
+// daily limit (global AND per-IP), or FALSE once either limit is hit. Returns
+// true = allowed, false = blocked. FAILS OPEN on any RPC error: cost protection
+// is best-effort, so a DB blip must not hard-block legitimate users — we log it
+// and allow the check.
+function clientIp(req: Request): string | null {
+  // Prefer the first hop in x-forwarded-for (the original client), fall back to
+  // x-real-ip. null when neither header is present.
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0].trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  return real ? real.trim() : null;
+}
+
+async function tryFreeCheck(req: Request): Promise<boolean> {
+  try {
+    const ip = clientIp(req);
+    const { data, error } = await supabase.rpc("fn_try_free_check", { p_ip: ip });
+    if (error) {
+      console.error("fn_try_free_check failed (failing open):", error.message);
+      return true;
+    }
+    return data === true;
+  } catch (e) {
+    console.error("fn_try_free_check threw (failing open):", e);
+    return true;
+  }
+}
+
+// Place a credit hold before any expensive work. null result → out of credits.
+async function authorizeCredit(
+  userId: string,
+): Promise<{ ok: true; holdId: string } | { ok: false; kind: "out_of_credits" | "error" }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_authorize_quote", { p_user: userId });
+    if (error) {
+      console.error("fn_authorize_quote failed:", error.message);
+      return { ok: false, kind: "error" };
+    }
+    if (!data) return { ok: false, kind: "out_of_credits" };
+    return { ok: true, holdId: data as string };
+  } catch (e) {
+    console.error("fn_authorize_quote threw:", e);
+    return { ok: false, kind: "error" };
+  }
+}
+
+// Finalize a hold as −1 after a delivered accurate result. Returns the new
+// personal balance for the response, or null if capture couldn't be recorded
+// (in which case the response simply omits `credits` — `analysis` is unchanged).
+async function captureCredit(hold: string | null): Promise<{ personal: number } | null> {
+  if (!hold) return null;
+  try {
+    const { data, error } = await supabase.rpc("fn_capture_quote", { p_hold: hold, p_quote: null });
+    if (error) {
+      console.error("fn_capture_quote failed:", error.message);
+      return null;
+    }
+    if (data == null) return null;
+    return { personal: Number(data) };
+  } catch (e) {
+    console.error("fn_capture_quote threw:", e);
+    return null;
+  }
+}
+
+// Drop an uncaptured hold on any failure after authorize → no charge.
+async function releaseCredit(hold: string | null): Promise<void> {
+  if (!hold) return;
+  try {
+    const { error } = await supabase.rpc("fn_release_quote", { p_hold: hold });
+    if (error) console.error("fn_release_quote failed:", error.message);
+  } catch (e) {
+    console.error("fn_release_quote threw:", e);
+  }
+}
+
+// ── Resilient fetch (P0 hardening) ──────────────────────────────────────────
+// Wraps an outbound fetch with a per-attempt AbortController timeout plus
+// bounded retries on transient failures (HTTP 429/529/5xx, network errors, and
+// abort/timeouts). Real 4xx (400/401/…) are NOT retried. Backoff is exponential
+// with jitter and respects a Retry-After header when present. A hard maxAttempts
+// cap AND a total time budget keep the whole sequence comfortably under
+// Supabase's ~150s function ceiling — the budget stops a retry that couldn't
+// finish in time rather than risk a platform kill (which would strand the
+// reserved credit by skipping the release path).
+//
+// Behaviour contract used by callers below:
+//   • Returns the final Response — including a non-ok one after the retry
+//     budget is spent on a retryable status — so existing `if (!res.ok)`
+//     branches (which release the credit) still fire.
+//   • Throws only when retries are exhausted on a network/timeout error with no
+//     Response to return; the caller's surrounding try/catch releases the hold.
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+// Retry-After may be a delay in seconds or an HTTP date. null when absent/invalid.
+function parseRetryAfterMs(res: Response): number | null {
+  const h = res.headers.get("retry-after");
+  if (!h) return null;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(h);
+  if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  return null;
+}
+
+// Exponential backoff with full-ish jitter: attempt 1 ≈ base, then ×2 each
+// attempt, half fixed + half random so retries don't thundering-herd.
+function backoffDelayMs(attempt: number, baseMs = 600): number {
+  const exp = baseMs * Math.pow(2, attempt - 1);
+  return Math.round(exp / 2 + Math.random() * (exp / 2));
+}
+
+interface RetryOpts {
+  timeoutMs: number; // per-attempt abort timeout
+  maxAttempts: number; // hard cap on attempts
+  budgetMs: number; // total wall-clock budget for the whole sequence
+  baseBackoffMs?: number;
+  label?: string;
+}
+
+async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts): Promise<Response> {
+  const deadline = Date.now() + opts.budgetMs;
+  const base = opts.baseBackoffMs ?? 600;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const attemptTimeout = Math.min(opts.timeoutMs, remaining);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), attemptTimeout);
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      // Success or a real (non-retryable) error like 4xx → return immediately.
+      if (res.ok || !RETRYABLE_STATUS.has(res.status)) return res;
+      // Retryable status. Out of attempts → hand the non-ok Response back so the
+      // caller's !ok branch runs (and releases the credit).
+      if (attempt >= opts.maxAttempts) return res;
+      const ra = parseRetryAfterMs(res);
+      const delay = ra != null ? ra : backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) return res; // no budget left to wait+retry
+      try { await res.text(); } catch { /* drain body, ignore */ }
+      await sleep(delay);
+      continue;
+    } catch (err) {
+      // Network error or our own abort/timeout — retry if budget/attempts allow.
+      lastErr = err;
+      if (attempt >= opts.maxAttempts) throw err;
+      const delay = backoffDelayMs(attempt, base);
+      if (Date.now() + delay >= deadline) throw err;
+      await sleep(delay);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (lastErr) throw lastErr;
+  throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
+}
 
 const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a photo of a paper quote). Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
 
@@ -122,6 +319,10 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { headers: CORS_HEADERS });
   }
 
+  // Anonymous by default: null user → existing flow, no credit logic at all.
+  const creditUser = await resolveCreditUser(req);
+  let holdId: string | null = null;
+
   try {
     const { fileBase64, mediaType } = await req.json();
 
@@ -141,13 +342,49 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    // Authorize a credit hold before any expensive work (signed-in only).
+    // Anonymous callers skip this entirely. The 400s above run before this,
+    // so a rejected request never places a hold.
+    if (creditUser) {
+      const authz = await authorizeCredit(creditUser.id);
+      if (!authz.ok) {
+        if (authz.kind === "out_of_credits") {
+          return new Response(JSON.stringify({ error: "out_of_credits" }), {
+            status: 402,
+            headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Something went wrong processing that file." }), {
+          status: 500,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+      holdId = authz.holdId;
+    } else {
+      // Anonymous request: enforce the global free-check breaker BEFORE any
+      // expensive Claude work, so a blocked check costs nothing. Signed-in
+      // callers took the credit-authorize branch above and are unaffected.
+      const allowed = await tryFreeCheck(req);
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "free_limit_reached" }), {
+          status: 429,
+          headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const isPdf = mediaType === "application/pdf";
     const docBlock = isPdf
       ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }
       : { type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } };
 
     // ---- Step 1: Claude reads the document ----
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+    // A big PDF can make this the slow part, so allow a generous per-attempt
+    // timeout with one retry. Budget math: 2 × 60s + backoff ≈ 122s worst case,
+    // comfortably under Supabase's ~150s ceiling. On timeout/network exhaustion
+    // fetchWithRetry throws → the outer catch releases the credit hold (no
+    // strand); a spent-budget 5xx returns non-ok → the !ok branch below releases.
+    const anthropicRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -168,11 +405,13 @@ Deno.serve(async (req: Request) => {
           { role: "user", content: [docBlock, { type: "text", text: EXTRACTION_PROMPT }] },
         ],
       }),
-    });
+    }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
 
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errText);
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "The analysis service returned an error. Please try again." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -197,6 +436,8 @@ Deno.serve(async (req: Request) => {
         `Failed to parse Claude's JSON output. stop_reason=${data.stop_reason}, output_tokens=${data.usage?.output_tokens}, rawText.length=${rawText.length}:`,
         rawText,
       );
+      await releaseCredit(holdId);
+      holdId = null;
       return new Response(
         JSON.stringify({ error: "Couldn't read that quote clearly. Try a clearer scan or a different file." }),
         { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
@@ -220,11 +461,19 @@ Deno.serve(async (req: Request) => {
     await resolveLeaseRates(analysis);
     computeLeverageScore(analysis);
 
-    return new Response(JSON.stringify({ analysis }), {
+    // Delivered an accurate result -> capture the hold (signed-in only) and
+    // include the new balance. Null holdId out first so a later throw can't
+    // release a hold we've decided to charge. `analysis` is unchanged either way.
+    const credits = await captureCredit(holdId);
+    holdId = null;
+    return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("analyze-quote error:", err);
+    // Any throw after a hold was placed must not charge the user.
+    await releaseCredit(holdId);
+    holdId = null;
     return new Response(JSON.stringify({ error: "Something went wrong processing that file." }), {
       status: 500,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
@@ -589,16 +838,43 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
 // model, pick a representative term (48mo, the common lease length, else the
 // shortest available). Attaches analysis.leaseRates.manufacturer. Never throws
 // -- if the table doesn't exist yet the lookup just yields null.
+//
+// Phase 2 (lease payments) is additive: when the catalog row carries payment
+// data we surface it two ways, and the UI decides how to render:
+//   payment_source='advertised' -> manufacturer.payment (a FIXED advertised
+//     example for the scraped dealer's vehicle; shown as a reference, never
+//     recomputed for the user).
+//   payment_source='computed'   -> manufacturer.lease (residual %, apr, term;
+//     the UI computes the payment on the USER's own msrp/price, NOT the
+//     catalog's scraped cap_cost/down_payment/selling_price).
+// cap_cost/down_payment are deliberately NOT read here: those are the scraped
+// dealer's vehicle and must never drive the user's computed payment.
 async function resolveLeaseRates(analysis: any): Promise<void> {
   const out: any = { manufacturer: null };
   if (analysis.make) {
+    const COLS_FULL = "apr, term_months, annual_km, effective_date, model, residual_pct, advertised_payment, advertised_payment_tax, selling_price, payment_source";
+    const COLS_BASE = "apr, term_months, annual_km, effective_date, model";
     try {
-      const { data } = await supabase
+      // Prefer the Phase-2 columns; if they're not live in this DB yet the
+      // select errors, so fall back to APR-only rather than regress lease.
+      let data: any[] | null = null;
+      const full = await supabase
         .from("lease_rate_catalog")
-        .select("apr, term_months, annual_km, effective_date, model")
+        .select(COLS_FULL)
         .ilike("make", analysis.make)
         .order("term_months", { ascending: true })
         .limit(50);
+      if (full.error) {
+        const base = await supabase
+          .from("lease_rate_catalog")
+          .select(COLS_BASE)
+          .ilike("make", analysis.make)
+          .order("term_months", { ascending: true })
+          .limit(50);
+        data = base.data;
+      } else {
+        data = full.data;
+      }
       if (data?.length) {
         const norm = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
         const modelNorm = norm(analysis.model || "");
@@ -606,12 +882,32 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
         const pool = byModel.length ? byModel : data.filter((r: any) => !r.model);
         if (pool.length) {
           const pick = pool.find((r: any) => r.term_months === 48) || pool[0];
-          out.manufacturer = {
+          const m: any = {
             apr: Number(pick.apr),
             termMonths: pick.term_months,
             annualKm: pick.annual_km ?? null,
             effectiveDate: pick.effective_date,
           };
+          const src = pick.payment_source;
+          if (src === "advertised" && pick.advertised_payment != null) {
+            m.payment = {
+              source: "advertised",
+              amount: Number(pick.advertised_payment),
+              withTax: pick.advertised_payment_tax != null ? Number(pick.advertised_payment_tax) : null,
+              sellingPrice: pick.selling_price != null ? Number(pick.selling_price) : null,
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          } else if (src === "computed" && pick.residual_pct != null) {
+            m.lease = {
+              source: "computed",
+              residualPct: Number(pick.residual_pct),
+              apr: Number(pick.apr),
+              term: pick.term_months,
+              annualKm: pick.annual_km ?? null,
+            };
+          }
+          out.manufacturer = m;
         }
       }
     } catch (err) {
