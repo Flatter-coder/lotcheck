@@ -310,6 +310,23 @@
   .legend .sw{width:22px;height:9px;border-radius:3px;flex:none}
   .legend .pinico{display:inline-flex;align-items:flex-end;gap:4px}
   .legend .pinico i{display:block;width:7px;border-radius:50%;background:var(--pin-col);opacity:.8}
+
+  /* ---------------- selected-city dealer drill-down ---------------- */
+  .drill-card{margin-top:16px}
+  .drill-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .drill-cityname{color:var(--cyan);font-weight:700}
+  .drill-count{font-size:12px;color:var(--dim);white-space:nowrap}
+  .drill-list{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:7px;
+    max-height:230px;overflow:auto}
+  .drill-item{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;
+    background:var(--panel-2,rgba(255,255,255,.03));border:1px solid var(--hair);
+    color:var(--ink);font-size:13px;text-decoration:none;line-height:1.25;transition:border-color .15s,background .15s}
+  .drill-item:hover{border-color:var(--cyan);background:var(--cyan-soft,rgba(78,200,224,.10))}
+  .drill-item .di-dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);flex:none;box-shadow:0 0 7px var(--cyan-dim)}
+  .drill-item .di-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drill-more{grid-column:1/-1;font-size:11.5px;color:var(--dimmer);padding:6px 2px 0}
+  .drill-empty{grid-column:1/-1;font-size:12.5px;color:var(--dim);padding:8px 2px}
+  .drill-note{font-size:10.5px;color:var(--dimmer);margin-top:12px;line-height:1.5}
   .wx-status{position:absolute;right:16px;bottom:14px;z-index:5;display:inline-flex;align-items:center;gap:7px;
     padding:8px 12px;border-radius:11px;background:var(--panel-solid);border:1px solid var(--hair);
     font-size:10.5px;color:var(--dim);letter-spacing:.2px;max-width:calc(100% - 32px)}
@@ -394,7 +411,7 @@
     <div><h1>Alberta — dealer network map</h1><div class="sub">LotCheck · 3D terrain view</div></div>
   </div>
   <div class="badges">
-    <span class="pill">Demo data</span>
+    <span class="pill live" title="Dealer counts are live from OpenStreetMap"><span class="dotc"></span>Live dealers</span>
     <span class="pill live" id="wxPill" title="Weather is live from Open-Meteo"><span class="dotc"></span>Live weather</span>
     <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
       <span class="knob"><span id="themeIco">☾</span></span>
@@ -500,6 +517,16 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ===== Drill-down BELOW the map — the actual dealerships in the selected city ===== -->
+  <div class="card drill-card">
+    <div class="drill-head">
+      <div class="lbl">Dealerships in <span id="drillCity" class="drill-cityname">Edmonton</span></div>
+      <div class="drill-count mono" id="drillCount">—</div>
+    </div>
+    <div class="drill-list" id="drillList"></div>
+    <div class="drill-note">Real dealerships from OpenStreetMap, binned to the nearest city — tap one to open it in Google Maps. Always verify a specific dealer's AMVIC licence before you buy.</div>
   </div>
 
   <!-- ===== Radial gauge BELOW the map — selected city's dealer price vs MSRP ===== -->
@@ -1172,12 +1199,30 @@
     else { rWeather.className="rw empty"; rWeather.innerHTML=""; }
   }
   function hotClass(pinEl,on){pinEl.classList.toggle("hot",on);}
+  function esc(s){return String(s).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});}
+  // Drill-down: list the actual dealerships in the selected city (real OSM names,
+  // each linking out to Google Maps). Names arrive on CITIES[i].sample once the
+  // live data file loads; until then it shows a loading line.
+  function renderDrill(c){
+    var listEl=document.getElementById("drillList"); if(!listEl) return;
+    document.getElementById("drillCity").textContent=c.name;
+    document.getElementById("drillCount").textContent=c.dealers+" dealership"+(c.dealers===1?"":"s");
+    var names=c.sample||[];
+    if(!names.length){ listEl.innerHTML='<div class="drill-empty">Loading dealer list…</div>'; return; }
+    var extra=Math.max(0, c.dealers-names.length);
+    listEl.innerHTML=names.map(function(n){
+      var href="https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(n+" "+c.name+" AB");
+      return '<a class="drill-item" target="_blank" rel="noopener noreferrer" href="'+href+'" title="Open in Google Maps">'+
+             '<span class="di-dot"></span><span class="di-name">'+esc(n)+'</span></a>';
+    }).join('')+(extra>0?'<div class="drill-more">+ '+extra+' more dealership'+(extra===1?"":"s")+' not listed</div>':'');
+  }
   function select(i){
     var c=CITIES[i];
     pinsHost.querySelectorAll(".pin").forEach(function(p){p.classList.toggle("sel",+p.dataset.i===i);});
     selected=c;
     setReadout(c,true);
     drawGauge(c,true);
+    renderDrill(c);             // list the real dealerships in this city
     applyScene(c);              // drive day/night + precipitation from the selected city
   }
   pinsHost.addEventListener("mouseover",function(e){

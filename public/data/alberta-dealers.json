@@ -1,6 +1,6 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-07-31",
+  "generatedAt": "2026-08-01",
   "totalDealers": 403,
   "cities": [
     {
@@ -12,7 +12,21 @@
         "Mercedes-Benz Downtown Calgary",
         "Jack Carter Chevrolet",
         "Stoney Trail Mazda",
-        "Sunridge Mazda"
+        "Sunridge Mazda",
+        "Sunridge Nissan",
+        "Canyon Meadows Hyundai",
+        "Universal Lincoln Ford",
+        "Sundridge Automotive",
+        "Heninger Toyota",
+        "Calgary Honda",
+        "Advantage Ford",
+        "CMP Classic",
+        "T&T Honda",
+        "Eastside Kia",
+        "South Pointe Toyota",
+        "Woodridge Ford",
+        "Renfrew Chrysler Dodge Jeep Ram",
+        "Royal Oak Nissan"
       ]
     },
     {
@@ -24,7 +38,21 @@
         "Northgate GM",
         "North Side Mitsubishi",
         "Landmark Mazda",
-        "DriveNation West Edmonton"
+        "DriveNation West Edmonton",
+        "Northgate Chevrolet Buick GMC",
+        "Dawson Motors",
+        "Platinum Fine Cars",
+        "Koch Ford",
+        "Amigo's Car Sales",
+        "Derrick Dodge (Dealership)",
+        "Revolution Auto Sales",
+        "Sunny Auto Sales",
+        "European Auto Tinting",
+        "Matrix Motors YEG",
+        "Dubsport",
+        "Ay Motor Dealership",
+        "Off Whyte",
+        "Fort Road Motors"
       ]
     },
     {
@@ -36,7 +64,18 @@
         "Gary Moe Mitsubishi Red Deer",
         "Southside Dodge Chrysler Jeep Ram",
         "MGM Ford",
-        "Wheaton Chevrolet of Red Deer"
+        "Wheaton Chevrolet of Red Deer",
+        "Kipp Scott GMC Cadillac Buick",
+        "Red Deer Nissan",
+        "Red Deer Dodge",
+        "Gary Moe Hyundai",
+        "Kia Red Deer",
+        "Cam Clark Ford",
+        "Gary Moe Mazda",
+        "Fourlane Ford",
+        "Innisfail Chrysler",
+        "Scott Subaru",
+        "Kia Red Deer"
       ]
     },
     {
@@ -48,7 +87,12 @@
         "Gary Moe Mazda Lethbridge",
         "J & R Auto Sales",
         "Brooks Auto Sales",
-        "Dunlop Ford"
+        "Dunlop Ford",
+        "Murray Chevrolet Cadillac",
+        "Lethbridge Kia",
+        "Raymond Motors",
+        "House of Cars",
+        "Ford;College Ford Lincoln"
       ]
     },
     {
@@ -60,7 +104,11 @@
         "Medicine Hat Nissan",
         "Big M Ford Lincoln",
         "Murray Hyundai Medicine Hat",
-        "Davis GMC Buick"
+        "Davis GMC Buick",
+        "City Chrysler",
+        "Sun City Ford",
+        "Sun Valley Honda",
+        "Medicine Hat Toyota"
       ]
     },
     {
@@ -88,7 +136,14 @@
         "Dodge Truck Centre",
         "Davis Chevrolet",
         "Airdrie Honda",
-        "Adrenalin Motors Carstairs"
+        "Adrenalin Motors Carstairs",
+        "Champion Ford",
+        "House Of Cars (Airdrie)",
+        "Cam Clark Ford",
+        "SJL Auto Ltd.",
+        "Airdrie Truck & Auto",
+        "Starwest Motorcars",
+        "Great West Kenworth Balzac"
       ]
     },
     {
@@ -100,7 +155,8 @@
         "Spruce Grove Hyundai",
         "Stony Plain Chrysler Dodge Jeep Ram",
         "BenJ Auto",
-        "Competition Chevrolet"
+        "Competition Chevrolet",
+        "Spruce Grove Nissan"
       ]
     },
     {
@@ -112,7 +168,11 @@
         "Sherwood Nissan",
         "Park Mazda",
         "Sherwood Park Chevrolet",
-        "Sherwood Park Buick GMC"
+        "Sherwood Park Buick GMC",
+        "Sherwood Park Toyota",
+        "Sherwood Honda",
+        "Sherwood Park Hyundai",
+        "Sherwood Ford"
       ]
     },
     {
@@ -124,7 +184,21 @@
         "Edmonton Jaguar/Land Rover",
         "Mercedes-Benz Edmonton West",
         "Ron Hodgson Chevrolet Buick GMC",
-        "St. Albert Dodge Chrysler Jeep Ram"
+        "St. Albert Dodge Chrysler Jeep Ram",
+        "Crosstown Auto Centre",
+        "Lexus of Edmonton",
+        "Affordable Auto & Truck",
+        "Go Honda",
+        "Tesla",
+        "Big West Ford",
+        "Martin Motor Sports",
+        "Go North Nissan",
+        "Mac James Motors",
+        "City Ford",
+        "Northstar Hyundai",
+        "Woody's RV World",
+        "Freedom Credit",
+        "Kia North Edmonton"
       ]
     },
     {
@@ -154,7 +228,8 @@
         "Silverwood Toyota",
         "Nissan Lloydminster",
         "Denham Chrysler",
-        "Silverwood Toyota"
+        "Silverwood Toyota",
+        "Honda"
       ]
     },
     {
@@ -176,7 +251,8 @@
         "Okotoks GM",
         "Okotoks Honda",
         "Okotoks Nissan",
-        "Murray Okotoks"
+        "Murray Okotoks",
+        "Okotoks Ford"
       ]
     },
     {
@@ -219,7 +295,13 @@
         "Canmore Jeep",
         "Canmore Ram",
         "Chevrolet",
-        "GMC"
+        "GMC",
+        "Buick",
+        "Canmore Stellantis",
+        "Wolfe Canmore - Chevrolet GMC Buick",
+        "Wolfe Canmore - Chevrolet GMC Buick",
+        "Cam Clark Ford Canmore",
+        "Canmore Toyota"
       ]
     },
     {

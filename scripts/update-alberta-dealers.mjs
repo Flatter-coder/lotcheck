@@ -60,7 +60,7 @@ let assigned = 0;
 for (const d of dealers) {
   let best = null, bestKm = Infinity;
   for (const [name, lat, lon] of CITIES) { const dist = km(d.lat, d.lon, lat, lon); if (dist < bestKm) { bestKm = dist; best = name; } }
-  if (best && bestKm <= MAX_KM) { counts[best].count++; if (counts[best].sample.length < 6) counts[best].sample.push(d.name); assigned++; }
+  if (best && bestKm <= MAX_KM) { counts[best].count++; if (counts[best].sample.length < 20) counts[best].sample.push(d.name); assigned++; }
 }
 
 // Date passed in by the workflow (Date.* is fine in a plain Node script; kept as
