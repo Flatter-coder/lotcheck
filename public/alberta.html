@@ -1324,8 +1324,17 @@
     var a=polarR(v0,r), b=polarR(v1,r);
     return "M"+a.x.toFixed(1)+" "+a.y.toFixed(1)+" A"+r+" "+r+" 0 0 1 "+b.x.toFixed(1)+" "+b.y.toFixed(1);
   }
+  // Traffic-light colour for how far over MSRP: green (at/just over) -> amber
+  // -> red (highest). Smoothly interpolated across the 0..6% gauge range.
+  function gaugeColor(mean){
+    var f=Math.max(0,Math.min(1,mean/GMAX));
+    var green=[47,167,126], amber=[224,168,0], red=[208,50,43], c1,c2,t;
+    if(f<0.5){ c1=green;c2=amber;t=f/0.5; } else { c1=amber;c2=red;t=(f-0.5)/0.5; }
+    return [0,1,2].map(function(i){ return Math.round(c1[i]+(c2[i]-c1[i])*t); });
+  }
   function drawGauge(city,animate){
     var mean=city.premium/city.avgMsrp*100;
+    var rgb=gaugeColor(mean), col='rgb('+rgb.join(',')+')';
     var svg=document.getElementById("gauge");
     var html='';
     html+='<path d="'+arcPath(GMIN,GMAX,R)+'" fill="none" stroke="var(--hair)" stroke-width="13" stroke-linecap="round"/>';
@@ -1333,10 +1342,10 @@
       var o=polarR(t,R+9), o2=polarR(t,R-9);
       html+='<line x1="'+o2.x.toFixed(1)+'" y1="'+o2.y.toFixed(1)+'" x2="'+o.x.toFixed(1)+'" y2="'+o.y.toFixed(1)+'" stroke="var(--grid)" stroke-width="1"/>';
       var lp=polarR(t,R+20);
-      html+='<text x="'+lp.x.toFixed(1)+'" y="'+(lp.y+3).toFixed(1)+'" fill="var(--dimmer)" font-size="8.5" text-anchor="middle" font-family="monospace">+'+t+'%</text>';
+      html+='<text x="'+lp.x.toFixed(1)+'" y="'+(lp.y+3).toFixed(1)+'" fill="var(--dim)" font-size="10" font-weight="700" text-anchor="middle" font-family="monospace">+'+t+'%</text>';
     });
     var arc=arcPath(GMIN,mean,R);
-    html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="var(--cyan)" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
+    html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="'+col+'" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
     var p=polar(mean);
     html+='<g class="g-needle">';
     html+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x.toFixed(1)+'" y2="'+p.y.toFixed(1)+'" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>';
@@ -1346,7 +1355,8 @@
       var arcEl=svg.querySelector(".g-arc");
       requestAnimationFrame(function(){requestAnimationFrame(function(){arcEl.style.strokeDashoffset="0";});});
     }
-    document.getElementById("gVal").textContent=pctS(mean);
+    var gv=document.getElementById("gVal"); gv.textContent=pctS(mean);
+    gv.style.color=col; gv.style.textShadow='0 0 16px rgba('+rgb.join(',')+',.32)';
     document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
     document.getElementById("gCity").innerHTML=city.name+'<span>, AB</span>';
     document.getElementById("gNote").innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
