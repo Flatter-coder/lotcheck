@@ -5738,7 +5738,7 @@ function VerifyPage(){
         {o.finance&&o.finance.dealer!=null&&<Row t="Financing APR (dealer)" v={`${o.finance.dealer}%`}/>}
         {o.reputation&&<Row t="Dealer reputation" v={`${o.reputation.rating.toFixed(1)}★ / ${o.reputation.reviews.toLocaleString()}`}/>}
       </div>
-      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report. This page recomputes its fingerprint live from the link — we keep no copy. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
+      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report — only its fingerprint (a one-way code that proves the report is genuine but can't reconstruct its details). This page recomputes that fingerprint live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
     </div></div>
   );
 }
@@ -5955,6 +5955,15 @@ function QuoteCheckPage(){
         email,
         source: analysisSource==="listing" ? (urlInput.trim()||null) : (fileName||null),
       }).then(({error})=>{ if(error) console.warn("⚠️ quote_report_leads insert failed:",error.message); });
+      // Fire-and-forget: record ONLY the fingerprint in the issuance ledger so a
+      // dispute can be independently confirmed from our side. fn_log_issuance
+      // re-derives the fingerprint in-DB and rejects any spoofed pair, so this
+      // client call can only ever log a real, self-consistent report. No
+      // personal data is sent -- just the (public) report id + verify payload.
+      if(analysis?.reportId&&analysis?.verifyPayload){
+        supabase.rpc("fn_log_issuance",{p_report_id:analysis.reportId,p_verify_payload:analysis.verifyPayload})
+          .then(({error})=>{ if(error) console.warn("⚠️ fn_log_issuance failed:",error.message); });
+      }
     }catch(err){
       setEmailStatus("error");
       setEmailErr("Couldn't reach the email service. Check your connection and try again.");
@@ -7241,7 +7250,7 @@ function QuoteCheckPage(){
                     <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
                   </div>
                   <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
-                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end.
+                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check. We don't store your report — only its fingerprint, a one-way code that proves the report is genuine but can't reconstruct any of its details.
                   </div>
                   {analysis.verifyPayload&&(
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
