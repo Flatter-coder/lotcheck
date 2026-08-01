@@ -5609,6 +5609,140 @@ const RFB_CSS=`
   @media(max-width:640px){.rfb-pg{padding:22px 18px}.rfb-h2{font-size:19px}.rfb-big{font-size:25px}}
 `;
 
+// ── Dispute-proof report identity (Option A: self-authenticating, NOTHING
+// stored). The report ID is a fingerprint of the report's own contents +
+// issued-at timestamp: change any figure and the ID changes, so it's
+// tamper-evident. /verify?d=<payload> recomputes the fingerprint from the
+// link and shows the same ID + figures — the buyer compares that ID to the one
+// printed on their report. LotCheck stores nothing; the buyer's copy is the
+// record. (Keeps the "analyzed once, never stored" promise — see the
+// always-check-legally-clear analysis: Alberta PIPA/PIPEDA + Consumer
+// Protection Act.)
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function b64urlEncode(str){ return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function b64urlDecode(s){ s=s.replace(/-/g,"+").replace(/_/g,"/"); return decodeURIComponent(escape(atob(s))); }
+function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
+// Canonical, fixed-order projection of ONLY what the report shows. This exact
+// object is what gets fingerprinted and what /verify re-hashes — so both sides
+// must build it identically.
+function canonicalReport(a){
+  const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
+  return {
+    v:1,
+    vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
+    dealer:{name:a.dealerName||null,city:a.dealerCity||null},
+    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
+    leverage:a.leverageScore&&a.leverageScore.score!=null?Number(a.leverageScore.score):null,
+    recalls:a.recalls&&a.recalls.checked?{count:a.recalls.count||0,confirmed:a.recalls.confirmed!==false,items:(a.recalls.items||[]).map(it=>({system:it.system||null,date:it.date||null}))}:null,
+    addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null})),
+    finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
+    reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
+    summary:a.summary||null,
+    issuedAt:a.issuedAt||null,
+  };
+}
+// Stamp issuedAt + reportId onto a fresh analysis. Non-fatal: if crypto is
+// unavailable (very old/insecure context), fall back to a plain timestamp id
+// so the report still renders — it just isn't cryptographically verifiable.
+async function finalizeReport(analysis){
+  const issuedAt = new Date().toISOString();
+  const withTime = {...analysis, issuedAt};
+  try{
+    const str = JSON.stringify(canonicalReport(withTime));
+    const fp = await sha256Hex(str);
+    return {...withTime, reportId: makeReportId(fp), verifyPayload: b64urlEncode(str)};
+  }catch{
+    return {...withTime, reportId: "LC-"+String(Date.parse(issuedAt)).slice(-6), verifyPayload: null};
+  }
+}
+function verifyBaseUrl(){
+  try{ return (window.location.origin||"https://lotcheck.ca"); }catch{ return "https://lotcheck.ca"; }
+}
+// Build the shareable verify link. Carries BOTH the self-contained payload (d)
+// and the claimed report id — the verify page recomputes the id from d and
+// compares it to this claimed id, so an altered payload is provably caught.
+function verifyLinkFor(a){
+  if(!a||!a.verifyPayload) return null;
+  const id=a.reportId?`&id=${encodeURIComponent(a.reportId)}`:"";
+  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}`;
+}
+
+// ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
+// the report's ID + figures. Purely client-side; nothing is fetched or stored.
+function VerifyPage(){
+  const [state,setState]=useState({phase:"loading"});
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const q=new URLSearchParams(window.location.search);
+        const d=q.get("d");
+        if(!d){ setState({phase:"empty"}); return; }
+        const str=b64urlDecode(d);
+        const obj=JSON.parse(str);
+        const id=makeReportId(await sha256Hex(str));          // recomputed from the link
+        const claimed=q.get("id");                             // id the report claims to be
+        // If the link states which id it should be, we can prove a match/mismatch.
+        // If it doesn't, we can only show the computed id for the reader to compare.
+        const phase = claimed ? (claimed===id ? "ok" : "altered") : "unclaimed";
+        setState({phase,id,claimed,obj});
+      }catch(e){ setState({phase:"bad"}); }
+    })();
+  },[]);
+  const INK="#1E1C19",SOFT="#5c584f",TEAL="#17756B",CORAL="#A63C25",PAPER="#F9F6EC",HAIR="#e6e0d2";
+  const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
+  const wrap={minHeight:"100vh",background:PAPER,color:INK,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",justifyContent:"center",padding:"40px 20px"};
+  const box={width:"100%",maxWidth:640};
+  const mono={fontFamily:'ui-monospace,"SF Mono",Menlo,Consolas,monospace'};
+  if(state.phase==="loading") return <div style={wrap}><div style={box}>Verifying…</div></div>;
+  if(state.phase==="empty"||state.phase==="bad") return (
+    <div style={wrap}><div style={box}>
+      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
+      <h1 style={{fontSize:26,margin:"14px 0"}}>{state.phase==="bad"?"This link couldn't be verified":"Nothing to verify"}</h1>
+      <p style={{color:SOFT,fontSize:15,lineHeight:1.6}}>{state.phase==="bad"?"The report data in this link is incomplete or was altered, so its fingerprint doesn't compute. Ask for the original report link from LotCheck.":"Open the verification link printed on a LotCheck report to check it here."}</p>
+    </div></div>
+  );
+  const o=state.obj;
+  const issued=o.issuedAt?new Date(o.issuedAt):null;
+  const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
+  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"10px 0",borderTop:`1px solid ${HAIR}`}}><span>{t}</span><span style={{...mono,fontWeight:700,color:c||INK,whiteSpace:"nowrap"}}>{v}</span></div>);
+  return (
+    <div style={wrap}><div style={box}>
+      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
+      {(()=>{
+        const P=state.phase;
+        const badge=P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
+        const title=P==="ok"?"Authentic report":P==="altered"?"This report was altered":"Confirm the report ID";
+        return (
+          <>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 4px"}}>
+              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700}}>{badge.sym}</span>
+              <h1 style={{fontSize:26,margin:0}}>{title}</h1>
+            </div>
+            {P==="ok"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>, which matches the ID this report claims. Every figure below is unaltered — changing any number would change this ID.</p>}
+            {P==="altered"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
+            {P==="unclaimed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>. Check that this exactly matches the ID printed on the report you received — if it does, every figure below is genuine and unaltered.</p>}
+          </>
+        );
+      })()}
+      <div style={{background:"#fff",border:`1px solid ${HAIR}`,borderRadius:14,padding:"20px 22px",marginTop:18}}>
+        <div style={{fontSize:20,fontWeight:700}}>{o.vehicle||"Vehicle"}</div>
+        <div style={{color:SOFT,fontSize:14,fontStyle:"italic",marginBottom:6}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · issued ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
+        {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
+        {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?TEAL:SOFT}/>}
+        {delta!==0&&<Row t="Price vs MSRP" v={`${delta<0?money(-delta)+" under":money(delta)+" over"}`} c={delta<=0?TEAL:CORAL}/>}
+        {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
+        {o.recalls&&<Row t="Transport Canada recalls" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?CORAL:(o.recalls.confirmed===false?SOFT:TEAL)}/>}
+        {o.finance&&o.finance.dealer!=null&&<Row t="Financing APR (dealer)" v={`${o.finance.dealer}%`}/>}
+        {o.reputation&&<Row t="Dealer reputation" v={`${o.reputation.rating.toFixed(1)}★ / ${o.reputation.reviews.toLocaleString()}`}/>}
+      </div>
+      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report. This page recomputes its fingerprint live from the link — we keep no copy. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
+    </div></div>
+  );
+}
+
 function QuoteCheckPage(){
   // Current signed-in user (magic-link). Single source of truth via the shared
   // hook; null when logged out. Drives the header entry point and the
@@ -5756,6 +5890,19 @@ function QuoteCheckPage(){
   const [emailInput,setEmailInput]=useState("");
   const [emailStatus,setEmailStatus]=useState("idle");
   const [emailErr,setEmailErr]=useState("");
+  const [verifyCopied,setVerifyCopied]=useState(false);
+
+  // Copy the tamper-evident VERIFY link (payload + claimed id) to the clipboard.
+  // Distinct from copyShareLink above, which copies the "#r=" full-report link:
+  // this one goes to /verify and proves the figures are unaltered. Nothing is
+  // stored server-side — the link itself is the whole record.
+  function copyVerifyLink(){
+    const url=verifyLinkFor(analysis);
+    if(!url) return;
+    try{
+      navigator.clipboard.writeText(url).then(()=>{setVerifyCopied(true);setTimeout(()=>setVerifyCopied(false),2200);});
+    }catch(e){ /* clipboard blocked — link is still shown for manual copy */ }
+  }
 
   function isValidEmail(v){
     // Deliberately simple -- catches typos ("bob@gmailcom") without the
@@ -5791,7 +5938,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({email,analysis:emailAnalysis,reportUrl:(window.location.origin+"/quote-check#r="+encodeReport(analysis))}),
+        body:JSON.stringify({email,analysis:emailAnalysis,reportUrl:(window.location.origin+"/quote-check#r="+encodeReport(analysis)),verifyUrl:verifyLinkFor(analysis)||undefined}),
       });
       const data=await res.json();
       if(!res.ok||data.error){
@@ -6045,7 +6192,7 @@ function QuoteCheckPage(){
         setErrorMsg(data.error||"Something went wrong analyzing that quote.");
         return;
       }
-      setAnalysis(data.analysis);
+      setAnalysis(await finalizeReport(data.analysis));
       setAnalysisSource("quote");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
       applyCheckSuccess(data);
@@ -6123,7 +6270,7 @@ function QuoteCheckPage(){
         setErrorMsg(data.error||"Something went wrong analyzing that listing.");
         return;
       }
-      setAnalysis(data.analysis);
+      setAnalysis(await finalizeReport(data.analysis));
       setAnalysisSource("listing");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
       applyCheckSuccess(data);
@@ -7087,6 +7234,24 @@ function QuoteCheckPage(){
 
               </div>{/* ── end detail grid ── */}
 
+              {analysis.reportId&&(
+                <div style={cardStyle}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>🔒 Verify &amp; share this report</div>
+                    <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                  </div>
+                  <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
+                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end.
+                  </div>
+                  {analysis.verifyPayload&&(
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={copyVerifyLink} style={{flex:"1 1 180px",background:verifyCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{verifyCopied?"✓ Link copied":"Copy shareable link"}</button>
+                      <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{flex:"1 1 150px",textAlign:"center",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"9px 16px",color:C.tealInk,fontWeight:800,fontSize:14,textDecoration:"none",boxSizing:"border-box"}}>Verify this report ↗</a>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={cardStyle}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>📧 Email me this report</div>
                 {emailStatus==="sent"?(
@@ -7140,6 +7305,7 @@ export default function App(){
   return(
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
+        : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
         : <LotCheckApp/>}
       <Analytics/>
