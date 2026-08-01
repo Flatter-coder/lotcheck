@@ -333,6 +333,63 @@
   .drill-more{grid-column:1/-1;font-size:11.5px;color:var(--dimmer);padding:6px 2px 0}
   .drill-empty{grid-column:1/-1;font-size:12.5px;color:var(--dim);padding:8px 2px}
   .drill-note{font-size:10.5px;color:var(--dimmer);margin-top:12px;line-height:1.5}
+
+  /* ---------------- Option 2: HUD overlay panels (float over the map's empty space) ---------------- */
+  .hud{position:absolute;z-index:6;background:rgba(10,14,20,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border:1px solid var(--hair-strong);border-radius:14px;box-shadow:0 18px 46px -22px rgba(0,0,0,.78)}
+  /* narrow panels sit in the empty gutters either side of the centred terrain,
+     never over the pins; below 900px they stack (see media query) so they can't
+     crowd a small map. */
+  .dealer-hud{top:14px;width:clamp(214px,25%,296px);padding:13px 15px}
+  .gauge-hud{top:50%;transform:translateY(-50%);width:clamp(184px,21%,236px);padding:12px 14px 14px;text-align:center}
+  /* Version B (default): gauge LEFT, dealers RIGHT */
+  .dealer-hud{right:16px;left:auto}
+  .gauge-hud{left:16px;right:auto}
+  /* .swap flips to Version A: dealers left, gauge right */
+  .scene.swap .dealer-hud{left:16px;right:auto}
+  .scene.swap .gauge-hud{right:16px;left:auto}
+  .hud-top{display:flex;align-items:center;gap:8px}
+  .hud .rn{font-size:15px;font-weight:700;letter-spacing:-.2px}
+  .hud .rc{font-size:11.5px;color:var(--dim);margin-top:2px}
+  .hud .rw{margin-left:auto;min-height:0}
+  .hud-dealers{margin-top:11px;display:flex;flex-direction:column;gap:7px}
+  .hud-dealers .drill-item{margin:0}
+  .hud-all{margin-top:9px;width:100%;background:rgba(78,200,224,.1);border:1px solid var(--cyan-dim,rgba(78,200,224,.4));
+    color:var(--cyan);font-weight:700;font-size:12px;border-radius:9px;padding:8px;cursor:pointer;font-family:inherit}
+  .hud-all:hover{background:rgba(78,200,224,.18)}
+  .hud-foot{font-size:10px;color:var(--dimmer);margin-top:9px}
+  .hud-lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-family:ui-monospace,monospace;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:5px}
+  .hud-sample{color:#f5c95c;border:1px solid rgba(245,201,92,.5);border-radius:5px;padding:0 5px;font-size:8px;letter-spacing:.04em}
+  .gauge-hud .gaugewrap{position:relative}
+  .gauge-hud .gnote{display:none}
+  .gauge-hud .gcity{font-size:15px;font-weight:700;color:var(--cyan);margin-top:2px}
+  .gauge-hud .gcity span{font-size:11px;color:var(--dim);font-weight:500}
+  .gauge-hud .gmsrp{font-size:11px;color:var(--dim);margin-top:3px}
+  .gauge-hud .gmsrp .k{margin-right:5px}
+  .gauge-hud .gmsrp .v{color:var(--ink);font-weight:700}
+  /* view-all modal */
+  .dealer-modal{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:20px}
+  .dealer-modal[hidden]{display:none}
+  .dm-backdrop{position:absolute;inset:0;background:rgba(4,6,9,.66);backdrop-filter:blur(3px);cursor:pointer}
+  .dm-panel{position:relative;width:min(560px,100%);max-height:86%;display:flex;flex-direction:column;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);border-radius:16px;box-shadow:0 30px 70px -20px #000;padding:16px 18px}
+  .dm-head{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;margin-bottom:12px}
+  .dm-head .dm-city{color:var(--cyan)}
+  .dm-close{background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:6px;line-height:1}
+  .dm-close:hover{background:var(--panel-2,rgba(255,255,255,.06));color:var(--ink)}
+  .dm-list{overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:7px}
+  .dm-note{font-size:10.5px;color:var(--dimmer);margin-top:14px;line-height:1.5}
+  /* narrow screens: don't overlay a small map — stack the panels (map first,
+     then gauge + dealers) so nothing crowds the terrain. */
+  @media(max-width:860px){
+    .scene{height:auto;min-height:0}
+    .hud{position:static;transform:none;width:auto;max-width:none;margin:0 0 12px;order:2}
+    .world{order:1}
+    .gauge-hud{text-align:left}
+    .scene .compass,.scene .legend,.scene .wx-status{display:none}
+    .dealer-modal{position:fixed}
+  }
+  @media(max-width:860px){.scene{display:flex;flex-direction:column}}
   .wx-status{position:absolute;right:16px;bottom:14px;z-index:5;display:inline-flex;align-items:center;gap:7px;
     padding:8px 12px;border-radius:11px;background:var(--panel-solid);border:1px solid var(--hair);
     font-size:10.5px;color:var(--dim);letter-spacing:.2px;max-width:calc(100% - 32px)}
@@ -429,13 +486,36 @@
   <div class="card">
     <div class="lbl">Dealer coverage · relief view (tilt with your cursor)</div>
     <div class="scene" id="scene">
-      <div class="readout" id="readout">
-        <span class="dotc"></span>
-        <span>
-          <span class="rn" id="rName">Hover a city</span>
-          <span class="rc" id="rCount">33 Alberta markets · pin size = dealer count</span>
-        </span>
-        <span class="rw empty" id="rWeather" aria-live="polite"></span>
+      <div class="hud dealer-hud" id="readout">
+        <div class="hud-top">
+          <span class="dotc"></span>
+          <span class="rn" id="rName">Edmonton, AB</span>
+          <span class="rw empty" id="rWeather" aria-live="polite"></span>
+        </div>
+        <div class="rc" id="rCount">selected market</div>
+        <div class="hud-dealers" id="drillList"></div>
+        <button class="hud-all" id="drillAll" type="button" hidden>View all</button>
+        <div class="hud-foot">Real dealerships · OpenStreetMap</div>
+      </div>
+      <!-- price gauge floats on the right -->
+      <div class="hud gauge-hud" id="gaugeHud">
+        <div class="hud-lbl">Price vs MSRP <span class="hud-sample">sample</span></div>
+        <div class="gaugewrap">
+          <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
+          <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
+        </div>
+        <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
+        <div class="gmsrp"><span class="k">Avg new MSRP</span><span class="v mono" id="gAvg">$0</span></div>
+        <div class="gnote" id="gNote"></div>
+      </div>
+      <!-- full dealer list, opened from "View all" -->
+      <div class="dealer-modal" id="dealerModal" hidden>
+        <div class="dm-backdrop" id="dmBackdrop"></div>
+        <div class="dm-panel" role="dialog" aria-modal="true" aria-label="All dealerships">
+          <div class="dm-head"><span>Dealerships in <span class="dm-city" id="dmCity">—</span></span><button class="dm-close" id="dmClose" aria-label="Close">✕</button></div>
+          <div class="dm-list" id="dmList"></div>
+          <div class="dm-note">Real dealerships from OpenStreetMap, binned to the nearest city — tap one to open it in Google Maps. Always verify a specific dealer's AMVIC licence before you buy.</div>
+        </div>
       </div>
       <div class="compass" id="compass" title="Map orientation · North up" aria-hidden="true">
         <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -526,37 +606,12 @@
     </div>
   </div>
 
-  <!-- ===== Drill-down BELOW the map — the actual dealerships in the selected city ===== -->
-  <div class="card drill-card">
-    <div class="drill-head">
-      <div class="lbl">Dealerships in <span id="drillCity" class="drill-cityname">Edmonton</span></div>
-      <div class="drill-count mono" id="drillCount">—</div>
-    </div>
-    <div class="drill-list" id="drillList"></div>
-    <div class="drill-note">Real dealerships from OpenStreetMap, binned to the nearest city — tap one to open it in Google Maps. Always verify a specific dealer's AMVIC licence before you buy.</div>
-  </div>
-
-  <!-- ===== Radial gauge BELOW the map — selected city's dealer price vs MSRP ===== -->
-  <div class="card gauge-card">
-    <div class="lbl">Selected city · dealer price vs MSRP</div>
-    <div class="gauge-row">
-      <div class="gaugewrap">
-        <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
-        <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
-      </div>
-      <div class="gauge-side">
-        <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
-        <div class="gmsrp"><span class="k">Avg new MSRP</span><span class="v mono" id="gAvg">$0</span></div>
-        <div class="gnote" id="gNote"></div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <div class="foot">
   ◆ <b>Dealer counts are live — <span id="dealerSource">real Alberta car dealerships from OpenStreetMap</span>, each binned to its nearest city.</b>
   Weather (temperature, condition, day/night) is <b>live from Open-Meteo</b> (free, no key), labelled with its fetch time.
-  The <b>price-vs-MSRP gauge below is still sample data</b> — it goes live once the market-price pipeline (scraped listings measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
+  The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (scraped listings measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
 </div>
 
 <script>
@@ -1231,19 +1286,38 @@
   // Drill-down: list the actual dealerships in the selected city (real OSM names,
   // each linking out to Google Maps). Names arrive on CITIES[i].sample once the
   // live data file loads; until then it shows a loading line.
-  function renderDrill(c){
-    var listEl=document.getElementById("drillList"); if(!listEl) return;
-    document.getElementById("drillCity").textContent=c.name;
-    document.getElementById("drillCount").textContent=c.dealers+" dealership"+(c.dealers===1?"":"s");
-    var names=c.sample||[];
-    if(!names.length){ listEl.innerHTML='<div class="drill-empty">Loading dealer list…</div>'; return; }
-    var extra=Math.max(0, c.dealers-names.length);
-    listEl.innerHTML=names.map(function(n){
-      var href="https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(n+" "+c.name+" AB");
-      return '<a class="drill-item" target="_blank" rel="noopener noreferrer" href="'+href+'" title="Open in Google Maps">'+
-             '<span class="di-dot"></span><span class="di-name">'+esc(n)+'</span></a>';
-    }).join('')+(extra>0?'<div class="drill-more">+ '+extra+' more dealership'+(extra===1?"":"s")+' not listed</div>':'');
+  function dealerRow(n,city){
+    var href="https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(n+" "+city+" AB");
+    return '<a class="drill-item" target="_blank" rel="noopener noreferrer" href="'+href+'" title="Open in Google Maps">'+
+           '<span class="di-dot"></span><span class="di-name">'+esc(n)+'</span></a>';
   }
+  // Left/right HUD dealer panel: show only the first 3 (keeps it uncluttered);
+  // "View all N" opens the full list in a modal.
+  function renderDrill(c){
+    var listEl=document.getElementById("drillList"), allBtn=document.getElementById("drillAll"); if(!listEl) return;
+    var names=c.sample||[];
+    if(!names.length){ listEl.innerHTML='<div class="drill-empty">Loading dealer list…</div>'; if(allBtn) allBtn.hidden=true; return; }
+    listEl.innerHTML=names.slice(0,3).map(function(n){ return dealerRow(n,c.name); }).join('');
+    if(allBtn){ allBtn.hidden=(c.dealers<=3); allBtn.textContent="View all "+c.dealers+" →"; }
+  }
+  // Full-list modal, opened from "View all".
+  function openDealerModal(c){
+    if(!c) return;
+    document.getElementById("dmCity").textContent=c.name;
+    var names=c.sample||[], extra=Math.max(0, c.dealers-names.length);
+    document.getElementById("dmList").innerHTML=names.map(function(n){ return dealerRow(n,c.name); }).join('')+
+      (extra>0?'<div class="drill-more">+ '+extra+' more dealership'+(extra===1?"":"s")+' not on the map yet</div>':'');
+    document.getElementById("dealerModal").hidden=false;
+  }
+  function closeDealerModal(){ document.getElementById("dealerModal").hidden=true; }
+  (function(){
+    var allBtn=document.getElementById("drillAll");
+    if(allBtn) allBtn.addEventListener("click",function(){ openDealerModal(selected); });
+    var cl=document.getElementById("dmClose"), bk=document.getElementById("dmBackdrop");
+    if(cl) cl.addEventListener("click",closeDealerModal);
+    if(bk) bk.addEventListener("click",closeDealerModal);
+    document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeDealerModal(); });
+  })();
   function select(i){
     var c=CITIES[i];
     pinsHost.querySelectorAll(".pin").forEach(function(p){p.classList.toggle("sel",+p.dataset.i===i);});
@@ -1253,14 +1327,15 @@
     renderDrill(c);             // list the real dealerships in this city
     applyScene(c);              // drive day/night + precipitation from the selected city
   }
+  // Hover just highlights the pin (its city label turns blue); the HUD panel
+  // stays on the SELECTED city so its header and dealer list never disagree.
   pinsHost.addEventListener("mouseover",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
-    hotClass(p,true); setReadout(CITIES[+p.dataset.i], +p.dataset.i===(selected&&selected.i));
+    hotClass(p,true);
   });
   pinsHost.addEventListener("mouseout",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
     hotClass(p,false);
-    if(selected) setReadout(selected,true); else setReadout(null);
   });
   pinsHost.addEventListener("click",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
