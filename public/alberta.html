@@ -351,7 +351,7 @@
   .drill-list{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:7px;
     max-height:230px;overflow:auto}
   .drill-item{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;
-    background:var(--panel-2,rgba(255,255,255,.03));border:1px solid var(--hair);
+    background:color-mix(in srgb, var(--ink) 6%, transparent);border:1px solid var(--hair);
     color:var(--ink);font-size:13px;text-decoration:none;line-height:1.25;transition:border-color .15s,background .15s}
   .drill-item:hover{border-color:var(--cyan);background:var(--cyan-soft,rgba(78,200,224,.10))}
   .drill-item .di-dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);flex:none;box-shadow:0 0 7px var(--cyan-dim)}
@@ -361,8 +361,8 @@
   .drill-note{font-size:10.5px;color:var(--dimmer);margin-top:12px;line-height:1.5}
 
   /* ---------------- Option 2: HUD overlay panels (float over the map's empty space) ---------------- */
-  .hud{position:absolute;z-index:6;background:rgba(10,14,20,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
-    border:1px solid var(--hair-strong);border-radius:14px;box-shadow:0 18px 46px -22px rgba(0,0,0,.78)}
+  .hud{position:absolute;z-index:6;background:var(--panel-solid);color:var(--ink);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border:1px solid var(--hair-strong);border-radius:14px;box-shadow:0 18px 46px -22px var(--shadow)}
   /* narrow panels sit in the empty gutters either side of the centred terrain,
      never over the pins; below 900px they stack (see media query) so they can't
      crowd a small map. */
@@ -380,9 +380,9 @@
   .hud .rw{margin-left:auto;min-height:0}
   .hud-dealers{margin-top:11px;display:flex;flex-direction:column;gap:7px}
   .hud-dealers .drill-item{margin:0}
-  .hud-all{margin-top:9px;width:100%;background:rgba(78,200,224,.1);border:1px solid var(--cyan-dim,rgba(78,200,224,.4));
+  .hud-all{margin-top:9px;width:100%;background:var(--cyan-soft);border:1px solid var(--cyan-dim,rgba(78,200,224,.4));
     color:var(--cyan);font-weight:700;font-size:12px;border-radius:9px;padding:8px;cursor:pointer;font-family:inherit}
-  .hud-all:hover{background:rgba(78,200,224,.18)}
+  .hud-all:hover{filter:brightness(1.15)}
   .hud-foot{font-size:10px;color:var(--dimmer);margin-top:9px}
   .hud-lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-family:ui-monospace,monospace;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:5px}
   .hud-sample{color:#f5c95c;border:1px solid rgba(245,201,92,.5);border-radius:5px;padding:0 5px;font-size:8px;letter-spacing:.04em}
