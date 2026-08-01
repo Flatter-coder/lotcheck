@@ -153,7 +153,13 @@
   .scene.ready .plane{transform:rotateX(var(--rx,36deg)) rotateY(var(--ry,0deg)) rotateZ(var(--rz,-4deg)) scale(var(--wscale,1))}
   .relief{position:absolute;inset:0;width:100%;height:100%;display:block;
     filter:drop-shadow(0 26px 30px var(--shadow))}
-  .pins{position:absolute;inset:0;transform-style:preserve-3d}
+  /* dealer-density heat field: soft cyan glows under the pins, sized + brightened
+     by real dealer count, composited so clusters read denser. Painted on the
+     tilted plane (below pins), so it reads as light on the terrain surface. */
+  .density{position:absolute;inset:0;pointer-events:none;z-index:0;
+    opacity:.85;transition:opacity .6s ease}
+  .scene.night .density{opacity:1}   /* glows read stronger against the night terrain */
+  .pins{position:absolute;inset:0;transform-style:preserve-3d;z-index:1}
 
   /* ---------------- day / night sky ---------------- */
   .sky{position:absolute;inset:0;z-index:0;border-radius:14px;overflow:hidden;pointer-events:none;
@@ -513,6 +519,7 @@
         <div class="plane" id="plane">
           <svg class="relief" id="relief" viewBox="0 0 460 760" xmlns="http://www.w3.org/2000/svg"
                role="img" aria-label="Shaded-relief map of Alberta: jagged Rocky Mountains along the south-west, flat plains to the east"></svg>
+          <div class="density" id="density"></div>
           <div class="pins" id="pins"></div>
         </div>
       </div>
@@ -790,6 +797,27 @@
     });
     pinsHost.innerHTML="";
     pinsHost.appendChild(frag);
+    renderDensity();
+  }
+
+  // Dealer-density heat field: one soft cyan glow per city, sized + brightened
+  // by real dealer count and composited so clusters (Calgary/Airdrie, Edmonton/
+  // St. Albert) read denser. Rebuilt with the pins, incl. after live data loads.
+  function renderDensity(){
+    var el=document.getElementById("density"); if(!el) return;
+    var maxD=1; CITIES.forEach(function(c){ if(c.dealers>maxD) maxD=c.dealers; });
+    var layers=[];
+    CITIES.forEach(function(c){
+      if(!c.dealers) return;
+      var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
+      var s=Math.sqrt(c.dealers);
+      var rw=Math.max(5, Math.min(26, 4+s*1.7));       // glow width %
+      var rh=rw*0.62;                                    // plane is taller than wide -> keep it ~round
+      var a=Math.max(0.06, Math.min(0.26, 0.05 + (c.dealers/maxD)*0.2));
+      layers.push('radial-gradient(ellipse '+rw.toFixed(1)+'% '+rh.toFixed(1)+'% at '+x.toFixed(2)+'% '+y.toFixed(2)+
+        '%, rgba(78,200,224,'+a.toFixed(3)+') 0%, rgba(78,200,224,'+(a*0.4).toFixed(3)+') 38%, rgba(78,200,224,0) 72%)');
+    });
+    el.style.backgroundImage=layers.join(',');
   }
 
   // ================= WEATHER (Open-Meteo, the ONLY external call) =================
