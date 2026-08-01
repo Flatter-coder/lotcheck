@@ -118,11 +118,11 @@
   .pill.live .dotc{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan-dim)}
   /* persistent site nav (matches the other pages) — themed with the page vars */
   .sitenav{position:sticky;top:0;z-index:300;background:var(--panel-solid);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
-  .sitenav-in{max-width:1120px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:24px}
+  .sitenav-in{max-width:1320px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:20px}
   .sn-logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:1.02rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none;flex:none}
   .sn-logo svg{display:block}
-  .sn-links{display:flex;gap:22px;margin-left:auto;align-items:center;flex-wrap:wrap}
-  .sn-links a{position:relative;font-size:.99rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
+  .sn-links{display:flex;gap:15px;margin-left:auto;align-items:center;flex-wrap:nowrap}
+  .sn-links a{position:relative;font-size:.9rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s;white-space:nowrap}
   .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left;transition:transform .2s}
   .sn-links a:hover{color:var(--ink)}
   .sn-links a:hover::after{transform:scaleX(1)}
