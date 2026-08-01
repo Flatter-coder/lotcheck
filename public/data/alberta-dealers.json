@@ -1,0 +1,412 @@
+{
+  "source": "OpenStreetMap (shop=car), via Overpass",
+  "generatedAt": "2026-08-01",
+  "totalDealers": 403,
+  "cities": [
+    {
+      "name": "Calgary",
+      "count": 141,
+      "sample": [
+        "Royal Oak Audi",
+        "Stadium Nissan",
+        "Mercedes-Benz Downtown Calgary",
+        "Jack Carter Chevrolet",
+        "Stoney Trail Mazda",
+        "Sunridge Mazda",
+        "Sunridge Nissan",
+        "Canyon Meadows Hyundai",
+        "Universal Lincoln Ford",
+        "Sundridge Automotive",
+        "Heninger Toyota",
+        "Calgary Honda",
+        "Advantage Ford",
+        "CMP Classic",
+        "T&T Honda",
+        "Eastside Kia",
+        "South Pointe Toyota",
+        "Woodridge Ford",
+        "Renfrew Chrysler Dodge Jeep Ram",
+        "Royal Oak Nissan"
+      ]
+    },
+    {
+      "name": "Edmonton",
+      "count": 86,
+      "sample": [
+        "Car Corner Inc.",
+        "Alberta Honda",
+        "Northgate GM",
+        "North Side Mitsubishi",
+        "Landmark Mazda",
+        "DriveNation West Edmonton",
+        "Northgate Chevrolet Buick GMC",
+        "Dawson Motors",
+        "Platinum Fine Cars",
+        "Koch Ford",
+        "Amigo's Car Sales",
+        "Derrick Dodge (Dealership)",
+        "Revolution Auto Sales",
+        "Sunny Auto Sales",
+        "European Auto Tinting",
+        "Matrix Motors YEG",
+        "Dubsport",
+        "Ay Motor Dealership",
+        "Off Whyte",
+        "Fort Road Motors"
+      ]
+    },
+    {
+      "name": "Red Deer",
+      "count": 17,
+      "sample": [
+        "Palliser Chevrolet",
+        "Red Deer Toyota",
+        "Gary Moe Mitsubishi Red Deer",
+        "Southside Dodge Chrysler Jeep Ram",
+        "MGM Ford",
+        "Wheaton Chevrolet of Red Deer",
+        "Kipp Scott GMC Cadillac Buick",
+        "Red Deer Nissan",
+        "Red Deer Dodge",
+        "Gary Moe Hyundai",
+        "Kia Red Deer",
+        "Cam Clark Ford",
+        "Gary Moe Mazda",
+        "Fourlane Ford",
+        "Innisfail Chrysler",
+        "Scott Subaru",
+        "Kia Red Deer"
+      ]
+    },
+    {
+      "name": "Lethbridge",
+      "count": 11,
+      "sample": [
+        "Lethbridge Volkswagen",
+        "Lethbridge Toyota",
+        "Gary Moe Mazda Lethbridge",
+        "J & R Auto Sales",
+        "Brooks Auto Sales",
+        "Dunlop Ford",
+        "Murray Chevrolet Cadillac",
+        "Lethbridge Kia",
+        "Raymond Motors",
+        "House of Cars",
+        "Ford;College Ford Lincoln"
+      ]
+    },
+    {
+      "name": "Medicine Hat",
+      "count": 10,
+      "sample": [
+        "House Of Cars (Medicine Hat)",
+        "Murray Chevrolet Cadillac",
+        "Medicine Hat Nissan",
+        "Big M Ford Lincoln",
+        "Murray Hyundai Medicine Hat",
+        "Davis GMC Buick",
+        "City Chrysler",
+        "Sun City Ford",
+        "Sun Valley Honda",
+        "Medicine Hat Toyota"
+      ]
+    },
+    {
+      "name": "Grande Prairie",
+      "count": 2,
+      "sample": [
+        "Sean Sargent Toyota",
+        "Grande Prairie Nissan"
+      ]
+    },
+    {
+      "name": "Fort McMurray",
+      "count": 2,
+      "sample": [
+        "Noral Toyota",
+        "Summit GM"
+      ]
+    },
+    {
+      "name": "Airdrie",
+      "count": 13,
+      "sample": [
+        "Cam Clark Super Store",
+        "Airdrie Chrysler",
+        "Dodge Truck Centre",
+        "Davis Chevrolet",
+        "Airdrie Honda",
+        "Adrenalin Motors Carstairs",
+        "Champion Ford",
+        "House Of Cars (Airdrie)",
+        "Cam Clark Ford",
+        "SJL Auto Ltd.",
+        "Airdrie Truck & Auto",
+        "Starwest Motorcars",
+        "Great West Kenworth Balzac"
+      ]
+    },
+    {
+      "name": "Spruce Grove",
+      "count": 7,
+      "sample": [
+        "Parkland Chrysler Dodge Jeep Ram",
+        "Zender Ford",
+        "Spruce Grove Hyundai",
+        "Stony Plain Chrysler Dodge Jeep Ram",
+        "BenJ Auto",
+        "Competition Chevrolet",
+        "Spruce Grove Nissan"
+      ]
+    },
+    {
+      "name": "Sherwood Park",
+      "count": 10,
+      "sample": [
+        "Sherwood Kia",
+        "Sherwood Kia",
+        "Sherwood Nissan",
+        "Park Mazda",
+        "Sherwood Park Chevrolet",
+        "Sherwood Park Buick GMC",
+        "Sherwood Park Toyota",
+        "Sherwood Honda",
+        "Sherwood Park Hyundai",
+        "Sherwood Ford"
+      ]
+    },
+    {
+      "name": "St. Albert",
+      "count": 26,
+      "sample": [
+        "Subaru city",
+        "Porsche Edmonton",
+        "Edmonton Jaguar/Land Rover",
+        "Mercedes-Benz Edmonton West",
+        "Ron Hodgson Chevrolet Buick GMC",
+        "St. Albert Dodge Chrysler Jeep Ram",
+        "Crosstown Auto Centre",
+        "Lexus of Edmonton",
+        "Affordable Auto & Truck",
+        "Go Honda",
+        "Tesla",
+        "Big West Ford",
+        "Martin Motor Sports",
+        "Go North Nissan",
+        "Mac James Motors",
+        "City Ford",
+        "Northstar Hyundai",
+        "Woody's RV World",
+        "Freedom Credit",
+        "Kia North Edmonton"
+      ]
+    },
+    {
+      "name": "Leduc",
+      "count": 3,
+      "sample": [
+        "Devon Chrysler Dodge Jeep Ram",
+        "Kross Auto",
+        "Leduc Hyundai"
+      ]
+    },
+    {
+      "name": "Camrose",
+      "count": 3,
+      "sample": [
+        "Lamb Ford",
+        "Camrose Chrysler",
+        "McClellan Wheaton Chevrolet Buick GMC Ltd"
+      ]
+    },
+    {
+      "name": "Lloydminster",
+      "count": 7,
+      "sample": [
+        "Boundary Ford",
+        "Westridge Buick GMC",
+        "Silverwood Toyota",
+        "Nissan Lloydminster",
+        "Denham Chrysler",
+        "Silverwood Toyota",
+        "Honda"
+      ]
+    },
+    {
+      "name": "Cochrane",
+      "count": 4,
+      "sample": [
+        "Cochrane Toyota",
+        "Cochrane Dodge Chrysler Jeep and Ram",
+        "Cochrane Nissan",
+        "North Star Ford - Cochrane"
+      ]
+    },
+    {
+      "name": "Okotoks",
+      "count": 7,
+      "sample": [
+        "Okotoks Nissan",
+        "Okotoks Toyota",
+        "Okotoks GM",
+        "Okotoks Honda",
+        "Okotoks Nissan",
+        "Murray Okotoks",
+        "Okotoks Ford"
+      ]
+    },
+    {
+      "name": "Wetaskiwin",
+      "count": 5,
+      "sample": [
+        "Pioneer Chrysler",
+        "Brentridge Ford Sales Ltd.",
+        "Adams Chevrolet Buick GMC Ltd.",
+        "Denham Ford",
+        "Toyota City Wetaskiwin"
+      ]
+    },
+    {
+      "name": "Brooks",
+      "count": 4,
+      "sample": [
+        "Hardwood Ford",
+        "Davis Chevrolet Brooks",
+        "Martin Chrysler",
+        "Honda Magic"
+      ]
+    },
+    {
+      "name": "Cold Lake",
+      "count": 4,
+      "sample": [
+        "Cold Lake Ford",
+        "Smyl Motors",
+        "Cold Lake Chrysler",
+        "Lake City GM"
+      ]
+    },
+    {
+      "name": "Canmore",
+      "count": 12,
+      "sample": [
+        "Canmore Chrysler",
+        "Canmore Dodge",
+        "Canmore Jeep",
+        "Canmore Ram",
+        "Chevrolet",
+        "GMC",
+        "Buick",
+        "Canmore Stellantis",
+        "Wolfe Canmore - Chevrolet GMC Buick",
+        "Wolfe Canmore - Chevrolet GMC Buick",
+        "Cam Clark Ford Canmore",
+        "Canmore Toyota"
+      ]
+    },
+    {
+      "name": "Hinton",
+      "count": 3,
+      "sample": [
+        "Griffiths Ford",
+        "Stetson Chevrolet Buick GMC",
+        "Big Rock Chrysler Dodge Jeep Ram"
+      ]
+    },
+    {
+      "name": "Whitecourt",
+      "count": 2,
+      "sample": [
+        "Eagle River Chrysler",
+        "Whitecourt Ford"
+      ]
+    },
+    {
+      "name": "Peace River",
+      "count": 3,
+      "sample": [
+        "Peace River Ford",
+        "Thomas Homes & RV Center",
+        "Junction Motors"
+      ]
+    },
+    {
+      "name": "High River",
+      "count": 5,
+      "sample": [
+        "County Chrysler Dodge Jeep Ram",
+        "Chinook Truck and Auto",
+        "High River Ford",
+        "High River Toyota",
+        "High River Chevrolet Buick GMC"
+      ]
+    },
+    {
+      "name": "Fort Saskatchewan",
+      "count": 3,
+      "sample": [
+        "Badger Truck Parts",
+        "Heartland Ford",
+        "Southfort Chevrolet"
+      ]
+    },
+    {
+      "name": "Lacombe",
+      "count": 2,
+      "sample": [
+        "Western Iron Trailers Inc",
+        "Popow & Sons Towing"
+      ]
+    },
+    {
+      "name": "Sylvan Lake",
+      "count": 0,
+      "sample": []
+    },
+    {
+      "name": "Drumheller",
+      "count": 3,
+      "sample": [
+        "Drumheller Chrysler",
+        "Westergard Motors",
+        "Western Chevrolet"
+      ]
+    },
+    {
+      "name": "Taber",
+      "count": 0,
+      "sample": []
+    },
+    {
+      "name": "Bonnyville",
+      "count": 2,
+      "sample": [
+        "Ducharme Motors",
+        "Used"
+      ]
+    },
+    {
+      "name": "Slave Lake",
+      "count": 0,
+      "sample": []
+    },
+    {
+      "name": "Rocky Mountain House",
+      "count": 2,
+      "sample": [
+        "Edwards Chevrolet",
+        "Rainbow Ford"
+      ]
+    },
+    {
+      "name": "Strathmore",
+      "count": 4,
+      "sample": [
+        "Strathmore Ford",
+        "Manulift EMI",
+        "Strathmore Motor Products",
+        "Dodge"
+      ]
+    }
+  ]
+}

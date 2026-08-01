@@ -124,24 +124,6 @@
     display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
   :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
 
-  /* persistent site nav (matches the welcome page) — themed with page vars */
-  .sitenav{position:sticky;top:0;z-index:300;background:var(--panel-solid);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
-  .sitenav-in{max-width:1120px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:24px}
-  .sn-logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:1.02rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none;flex:none}
-  .sn-logo svg{display:block}
-  .sn-links{display:flex;gap:22px;margin-left:auto;align-items:center}
-  .sn-links a{position:relative;font-size:.99rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
-  .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left;transition:transform .2s}
-  .sn-links a:hover{color:var(--ink)}
-  .sn-links a:hover::after{transform:scaleX(1)}
-  .sn-links a.sn-live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
-  .sn-links a.sn-live::after{transform:scaleX(1)}
-  .sn-cta{flex:none;display:flex;align-items:center;gap:12px}
-  .sn-analyze{padding:9px 18px;border-radius:999px;background:var(--ink);color:var(--bg);font-weight:700;font-size:.86rem;text-decoration:none;white-space:nowrap;transition:transform .2s,opacity .2s}
-  .sn-analyze:hover{transform:translateY(-1px);opacity:.92}
-  @media(max-width:880px){.sn-links{display:none}.sitenav-in{gap:10px;padding:10px 14px}.sn-cta{margin-left:auto;gap:8px}.sn-analyze{padding:8px 13px;font-size:.8rem}}
-  @media (prefers-reduced-motion:reduce){.sn-dot{animation:none}.sn-links a::after,.sn-analyze{transition:none}}
-
   /* ---------------- layout ---------------- */
   .wrap{max-width:1080px;margin:0 auto;padding:14px 30px 0}
   @media(min-width:1500px){header,.wrap,.foot{max-width:1340px}}
@@ -171,7 +153,39 @@
   .scene.ready .plane{transform:rotateX(var(--rx,36deg)) rotateY(var(--ry,0deg)) rotateZ(var(--rz,-4deg)) scale(var(--wscale,1))}
   .relief{position:absolute;inset:0;width:100%;height:100%;display:block;
     filter:drop-shadow(0 26px 30px var(--shadow))}
-  .pins{position:absolute;inset:0;transform-style:preserve-3d}
+  /* dealer-density heat field: soft cyan glows under the pins, sized + brightened
+     by real dealer count, composited so clusters read denser. Painted on the
+     tilted plane (below pins), so it reads as light on the terrain surface. */
+  .density{position:absolute;inset:0;pointer-events:none;z-index:0;
+    opacity:.85;transition:opacity .6s ease}
+  .scene.night .density{opacity:1}   /* glows read stronger against the night terrain */
+  .pins{position:absolute;inset:0;transform-style:preserve-3d;z-index:1}
+
+  /* ---------------- agriculture/wildlife critters (for fun) — sit on the tilted
+     terrain and animate, so they blend into the 3D land ---------------- */
+  .agri{position:absolute;inset:0;transform-style:preserve-3d;z-index:1;pointer-events:none}
+  .critter{position:absolute;transform-style:preserve-3d;opacity:.94}
+  .critter-stand{transform-origin:bottom center;transform:rotateX(-36deg);will-change:transform}
+  .critter-stand svg{display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+  .critter-shadow{position:absolute;left:50%;bottom:-1px;width:60%;height:5px;transform:translateX(-50%);
+    background:radial-gradient(closest-side,rgba(0,0,0,.42),transparent);border-radius:50%}
+  .c-tractor .critter-stand svg{width:30px}
+  .c-combine .critter-stand svg{width:40px}
+  .c-bison   .critter-stand svg{width:22px}
+  .c-horse   .critter-stand svg{width:20px}
+  /* tractor tills a short row back and forth */
+  .c-tractor{animation:till 6.5s ease-in-out infinite}
+  @keyframes till{0%,100%{transform:translate(0,0)}48%{transform:translate(24px,-3px)}52%{transform:translate(24px,-3px)}}
+  /* combine harvests across a longer strip */
+  .c-combine{animation:harvest 11s ease-in-out infinite}
+  @keyframes harvest{0%{transform:translate(0,0)}50%{transform:translate(38px,-4px)}100%{transform:translate(0,0)}}
+  .c-combine .reel{transform-origin:40px 12px;animation:spin 1.4s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* bison + horses graze with a gentle bob and slow drift */
+  .c-bison{animation:graze 7s ease-in-out infinite}
+  .c-horse{animation:graze 6s ease-in-out infinite}
+  @keyframes graze{0%,100%{transform:translate(0,0)}50%{transform:translate(6px,-1.5px)}}
+  @media(prefers-reduced-motion:reduce){.c-tractor,.c-combine,.c-bison,.c-horse,.c-combine .reel{animation:none}}
 
   /* ---------------- day / night sky ---------------- */
   .sky{position:absolute;inset:0;z-index:0;border-radius:14px;overflow:hidden;pointer-events:none;
@@ -285,6 +299,16 @@
   .pin.sel{--pin-col:var(--cyan)}
   .pin.hot .pin-head,.pin.sel .pin-head{box-shadow:0 0 0 4px var(--cyan-soft),0 3px 8px -1px var(--shadow)}
   .pin.sel .pin-head{border-width:2.2px}
+  /* No transition on the label: it sits inside the pins' preserve-3d transform
+     stack, where color/opacity transitions can stick at their start value and
+     leave the name invisible or un-highlighted. Instant apply is crisp + correct. */
+  /* small-town labels (.opt) stay hidden to de-clutter, and reveal on hover/select
+     so every pin can be tied to its city/town the moment you touch it */
+  .pin-label.opt{opacity:0}
+  .pin.hot .pin-label.opt,.pin.sel .pin-label.opt{opacity:1}
+  /* the city/town name turns blue with its pin so the two are unmistakably linked */
+  .pin.hot .pin-label,.pin.sel .pin-label{color:var(--cyan);font-weight:700}
+  .pin.sel{z-index:6}  /* selected pin's label rides above neighbours */
 
   /* ---------------- overlays ---------------- */
   .readout{position:absolute;left:16px;top:14px;z-index:5;display:flex;align-items:center;gap:11px;
@@ -318,6 +342,80 @@
   .legend .sw{width:22px;height:9px;border-radius:3px;flex:none}
   .legend .pinico{display:inline-flex;align-items:flex-end;gap:4px}
   .legend .pinico i{display:block;width:7px;border-radius:50%;background:var(--pin-col);opacity:.8}
+
+  /* ---------------- selected-city dealer drill-down ---------------- */
+  .drill-card{margin-top:16px}
+  .drill-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .drill-cityname{color:var(--cyan);font-weight:700}
+  .drill-count{font-size:12px;color:var(--dim);white-space:nowrap}
+  .drill-list{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:7px;
+    max-height:230px;overflow:auto}
+  .drill-item{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;
+    background:var(--panel-2,rgba(255,255,255,.03));border:1px solid var(--hair);
+    color:var(--ink);font-size:13px;text-decoration:none;line-height:1.25;transition:border-color .15s,background .15s}
+  .drill-item:hover{border-color:var(--cyan);background:var(--cyan-soft,rgba(78,200,224,.10))}
+  .drill-item .di-dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);flex:none;box-shadow:0 0 7px var(--cyan-dim)}
+  .drill-item .di-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .drill-more{grid-column:1/-1;font-size:11.5px;color:var(--dimmer);padding:6px 2px 0}
+  .drill-empty{grid-column:1/-1;font-size:12.5px;color:var(--dim);padding:8px 2px}
+  .drill-note{font-size:10.5px;color:var(--dimmer);margin-top:12px;line-height:1.5}
+
+  /* ---------------- Option 2: HUD overlay panels (float over the map's empty space) ---------------- */
+  .hud{position:absolute;z-index:6;background:rgba(10,14,20,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border:1px solid var(--hair-strong);border-radius:14px;box-shadow:0 18px 46px -22px rgba(0,0,0,.78)}
+  /* narrow panels sit in the empty gutters either side of the centred terrain,
+     never over the pins; below 900px they stack (see media query) so they can't
+     crowd a small map. */
+  .dealer-hud{top:14px;width:clamp(214px,25%,296px);padding:13px 15px}
+  .gauge-hud{top:14px;width:clamp(184px,21%,236px);padding:12px 14px 14px;text-align:center}
+  /* Version B (default): gauge LEFT, dealers RIGHT */
+  .dealer-hud{right:16px;left:auto}
+  .gauge-hud{left:16px;right:auto}
+  /* .swap flips to Version A: dealers left, gauge right */
+  .scene.swap .dealer-hud{left:16px;right:auto}
+  .scene.swap .gauge-hud{right:16px;left:auto}
+  .hud-top{display:flex;align-items:center;gap:8px}
+  .hud .rn{font-size:15px;font-weight:700;letter-spacing:-.2px}
+  .hud .rc{font-size:11.5px;color:var(--dim);margin-top:2px}
+  .hud .rw{margin-left:auto;min-height:0}
+  .hud-dealers{margin-top:11px;display:flex;flex-direction:column;gap:7px}
+  .hud-dealers .drill-item{margin:0}
+  .hud-all{margin-top:9px;width:100%;background:rgba(78,200,224,.1);border:1px solid var(--cyan-dim,rgba(78,200,224,.4));
+    color:var(--cyan);font-weight:700;font-size:12px;border-radius:9px;padding:8px;cursor:pointer;font-family:inherit}
+  .hud-all:hover{background:rgba(78,200,224,.18)}
+  .hud-foot{font-size:10px;color:var(--dimmer);margin-top:9px}
+  .hud-lbl{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-family:ui-monospace,monospace;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:5px}
+  .hud-sample{color:#f5c95c;border:1px solid rgba(245,201,92,.5);border-radius:5px;padding:0 5px;font-size:8px;letter-spacing:.04em}
+  .gauge-hud .gaugewrap{position:relative}
+  .gauge-hud .gnote{display:none}
+  .gauge-hud .gcity{font-size:15px;font-weight:700;color:var(--cyan);margin-top:2px}
+  .gauge-hud .gcity span{font-size:11px;color:var(--dim);font-weight:500}
+  .gauge-hud .gmsrp{font-size:11px;color:var(--dim);margin-top:3px}
+  .gauge-hud .gmsrp .k{margin-right:5px}
+  .gauge-hud .gmsrp .v{color:var(--ink);font-weight:700}
+  /* view-all modal */
+  .dealer-modal{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:20px}
+  .dealer-modal[hidden]{display:none}
+  .dm-backdrop{position:absolute;inset:0;background:rgba(4,6,9,.66);backdrop-filter:blur(3px);cursor:pointer}
+  .dm-panel{position:relative;width:min(560px,100%);max-height:86%;display:flex;flex-direction:column;
+    background:var(--panel-solid);border:1px solid var(--hair-strong);border-radius:16px;box-shadow:0 30px 70px -20px #000;padding:16px 18px}
+  .dm-head{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;margin-bottom:12px}
+  .dm-head .dm-city{color:var(--cyan)}
+  .dm-close{background:none;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:6px;line-height:1}
+  .dm-close:hover{background:var(--panel-2,rgba(255,255,255,.06));color:var(--ink)}
+  .dm-list{overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:7px}
+  .dm-note{font-size:10.5px;color:var(--dimmer);margin-top:14px;line-height:1.5}
+  /* narrow screens: don't overlay a small map — stack the panels (map first,
+     then gauge + dealers) so nothing crowds the terrain. */
+  @media(max-width:860px){
+    .scene{height:auto;min-height:0}
+    .hud{position:static;transform:none;width:auto;max-width:none;margin:0 0 12px;order:2}
+    .world{order:1}
+    .gauge-hud{text-align:left}
+    .scene .compass,.scene .legend,.scene .wx-status{display:none}
+    .dealer-modal{position:fixed}
+  }
+  @media(max-width:860px){.scene{display:flex;flex-direction:column}}
   .wx-status{position:absolute;right:16px;bottom:14px;z-index:5;display:inline-flex;align-items:center;gap:7px;
     padding:8px 12px;border-radius:11px;background:var(--panel-solid);border:1px solid var(--hair);
     font-size:10.5px;color:var(--dim);letter-spacing:.2px;max-width:calc(100% - 32px)}
@@ -332,13 +430,16 @@
   @media(min-width:1500px){.gauge-row{grid-template-columns:minmax(0,400px) 1fr;gap:34px}}
   .gaugewrap{position:relative}
   svg.gauge{width:100%;height:auto;display:block;overflow:visible}
-  .g-center{position:absolute;left:0;right:0;bottom:8px;text-align:center;pointer-events:none}
+  /* readout sits BELOW the dial (in flow), not overlaid on it, so the needle
+     pivot can never land on the number (+3●4% collision). Tucked up slightly
+     into the empty band beneath the semicircle's baseline. */
+  .g-center{text-align:center;pointer-events:none;margin-top:-18px}
   .g-center .gv{font-size:clamp(24px,1.4vw + 16px,40px);font-weight:700;letter-spacing:-.6px;text-shadow:0 0 18px var(--cyan-dim)}
   .g-center .gl{font-size:10.5px;color:var(--dim);margin-top:2px}
   .g-needle{transition:transform .8s cubic-bezier(.16,1,.3,1)}
   .g-arc{transition:stroke-dashoffset .9s cubic-bezier(.16,1,.3,1)}
   .gauge-side{display:flex;flex-direction:column;gap:14px}
-  .gcity{font-size:clamp(20px,1vw + 14px,32px);font-weight:700;letter-spacing:-.4px}
+  .gcity{font-size:clamp(20px,1vw + 14px,32px);font-weight:700;letter-spacing:-.4px;color:var(--cyan)}
   .gcity span{font-size:12px;color:var(--dim);font-weight:500;margin-left:2px}
   .gmsrp{display:flex;flex-direction:column;gap:4px;border:1px solid var(--hair);border-radius:12px;
     background:var(--panel-2);padding:12px 14px;align-self:flex-start;min-width:180px}
@@ -364,29 +465,6 @@
 </style>
 </head>
 <body>
-<nav class="sitenav" aria-label="Main">
-  <div class="sitenav-in">
-    <a class="sn-logo" href="/" aria-label="LotCheck home">
-      <svg width="42" height="24" viewBox="-145 -44 320 182" aria-hidden="true"><polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g class="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g class="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g></svg>
-      LotCheck
-    </a>
-    <div class="sn-links">
-      <a href="/live-price-index">MSRP Price Index</a>
-      <a class="sn-live" href="/alberta" aria-current="page">Alberta Dealers Map</a>
-      <a href="/#how">How it works</a>
-      <a href="/#pipeline">10-point lane</a>
-      <a href="/#report">Sample report</a>
-      <a href="/#portal">Dealer portal</a>
-      <a href="/live-price-index?view=alerts">MSRP Notifier</a>
-    </div>
-    <div class="sn-cta">
-      <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
-        <span class="knob"><span id="themeIco">☾</span></span>
-      </button>
-      <a class="sn-analyze" href="/quote-check">Analyze my quote</a>
-    </div>
-  </div>
-</nav>
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
@@ -422,8 +500,11 @@
     <div><h1>Alberta — dealer network map</h1><div class="sub">LotCheck · 3D terrain view</div></div>
   </div>
   <div class="badges">
-    <span class="pill">Demo data</span>
+    <span class="pill live" title="Dealer counts are live from OpenStreetMap"><span class="dotc"></span>Live dealers</span>
     <span class="pill live" id="wxPill" title="Weather is live from Open-Meteo"><span class="dotc"></span>Live weather</span>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
+      <span class="knob"><span id="themeIco">☾</span></span>
+    </button>
   </div>
 </header>
 
@@ -431,13 +512,35 @@
   <div class="card">
     <div class="lbl">Dealer coverage · relief view (tilt with your cursor)</div>
     <div class="scene" id="scene">
-      <div class="readout" id="readout">
-        <span class="dotc"></span>
-        <span>
-          <span class="rn" id="rName">Hover a city</span>
-          <span class="rc" id="rCount">33 Alberta markets · pin size = dealer count</span>
-        </span>
-        <span class="rw empty" id="rWeather" aria-live="polite"></span>
+      <div class="hud dealer-hud" id="readout">
+        <div class="hud-top">
+          <span class="dotc"></span>
+          <span class="rn" id="rName">Edmonton, AB</span>
+          <span class="rw empty" id="rWeather" aria-live="polite"></span>
+        </div>
+        <div class="rc" id="rCount">selected market</div>
+        <div class="hud-dealers" id="drillList"></div>
+        <button class="hud-all" id="drillAll" type="button" hidden>View all</button>
+        <div class="hud-foot">Real dealerships · OpenStreetMap</div>
+      </div>
+      <!-- price gauge floats on the right -->
+      <div class="hud gauge-hud" id="gaugeHud">
+        <div class="hud-lbl">Price vs MSRP <span class="hud-sample">sample</span></div>
+        <div class="gaugewrap">
+          <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
+          <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
+        </div>
+        <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
+        <div class="gnote" id="gNote"></div>
+      </div>
+      <!-- full dealer list, opened from "View all" -->
+      <div class="dealer-modal" id="dealerModal" hidden>
+        <div class="dm-backdrop" id="dmBackdrop"></div>
+        <div class="dm-panel" role="dialog" aria-modal="true" aria-label="All dealerships">
+          <div class="dm-head"><span>Dealerships in <span class="dm-city" id="dmCity">—</span></span><button class="dm-close" id="dmClose" aria-label="Close">✕</button></div>
+          <div class="dm-list" id="dmList"></div>
+          <div class="dm-note">Real dealerships from OpenStreetMap, binned to the nearest city — tap one to open it in Google Maps. Always verify a specific dealer's AMVIC licence before you buy.</div>
+        </div>
       </div>
       <div class="compass" id="compass" title="Map orientation · North up" aria-hidden="true">
         <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
@@ -521,34 +624,20 @@
         <div class="plane" id="plane">
           <svg class="relief" id="relief" viewBox="0 0 460 760" xmlns="http://www.w3.org/2000/svg"
                role="img" aria-label="Shaded-relief map of Alberta: jagged Rocky Mountains along the south-west, flat plains to the east"></svg>
+          <div class="density" id="density"></div>
+          <div class="agri" id="agri" aria-hidden="true"></div>
           <div class="pins" id="pins"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ===== Radial gauge BELOW the map — selected city's dealer price vs MSRP ===== -->
-  <div class="card gauge-card">
-    <div class="lbl">Selected city · dealer price vs MSRP</div>
-    <div class="gauge-row">
-      <div class="gaugewrap">
-        <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
-        <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
-      </div>
-      <div class="gauge-side">
-        <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
-        <div class="gmsrp"><span class="k">Avg new MSRP</span><span class="v mono" id="gAvg">$0</span></div>
-        <div class="gnote" id="gNote"></div>
-      </div>
-    </div>
-  </div>
 </div>
 
 <div class="foot">
-  ◆ <b>Demo visualization — city positions are real geographic coordinates; dealer counts and price-vs-MSRP figures are sample data for design preview.</b>
-  Current weather (temperature, condition and day/night) is <b>live from Open-Meteo</b> (free, no key) and labelled with its fetch time; if the request fails it falls back to clearly-marked sample weather.
-  In production each pin is a real dealership geocoded from LotCheck's locations pipeline (<span class="mono">get-dealer-sentiment</span>); each city's price-vs-MSRP is
-  computed from scraped listings measured against <span class="mono">msrp_catalog</span>; and weather is read live from <span class="mono">Open-Meteo</span>. Terrain shading is stylized, not survey elevation.
+  ◆ <b>Dealer counts are live — <span id="dealerSource">real Alberta car dealerships from OpenStreetMap</span>, each binned to its nearest city.</b>
+  Weather (temperature, condition, day/night) is <b>live from Open-Meteo</b> (free, no key), labelled with its fetch time.
+  The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (scraped listings measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
 </div>
 
 <script>
@@ -738,21 +827,31 @@
   var pinsHost=document.getElementById("pins");
   function renderPins(){
     var rank={};
-    CITIES.slice().sort(function(a,b){return b.dealers-a.dealers;}).forEach(function(c,idx){rank[c.i]=idx;});
+    var ranked=CITIES.slice().sort(function(a,b){return b.dealers-a.dealers;});
+    ranked.forEach(function(c,idx){rank[c.i]=idx;});
 
-    // ---- label placement: keep labels off the right frame + de-cluster near neighbours ----
-    // Labelled pins (dealers>=15) default to a right-anchored label; pins near the right
-    // edge flip left, and any two same-side labels that would collide push the smaller apart.
-    var labeled=CITIES.filter(function(c){return c.dealers>=15;}).map(function(c){
-      return {i:c.i,d:c.dealers,x:projX(c.lon)/PW*100,y:projY(c.lat)/PH*100,side:'right'};
-    });
-    labeled.forEach(function(o){ if(o.x>66) o.side='left'; });
-    for(var a=0;a<labeled.length;a++){ for(var b=a+1;b<labeled.length;b++){
-      var A=labeled[a], B=labeled[b];
-      if(A.side===B.side && Math.abs(A.x-B.x)<10 && Math.abs(A.y-B.y)<8){
-        var lo=(A.d<B.d)?A:B; lo.side=(lo.side==='right')?'left':'right';
+    // ---- label placement: side-aware greedy de-clutter ----
+    // Only the biggest markets get a default label, biggest first. Each label
+    // occupies a horizontal SPAN in its anchor direction (right-anchored spans
+    // to the right of the pin, left-anchored to the left); a candidate is placed
+    // on whichever side doesn't overlap an already-placed label at a similar
+    // latitude — else it's skipped and revealed on hover/select. This kills both
+    // metro-adjacent collisions (Edmonton/St. Albert) and the east-edge
+    // left-label overhang (Lloydminster reaching back toward Edmonton).
+    var LW=14, MINY=6.5;                                    // label span width + latitude band, in projected %
+    function xspan(x,side){ return side==='left' ? [x-LW,x] : [x,x+LW]; }
+    function xover(a,b){ return !(b[0]>a[1] || b[1]<a[0]); }
+    var labeled=[];
+    ranked.slice(0,12).forEach(function(c){                 // consider only the 12 biggest markets
+      if(labeled.length>=7) return;
+      var x=projX(c.lon)/PW*100, y=projY(c.lat)/PH*100;
+      var sides = x>62 ? ['left','right'] : ['right','left'];
+      for(var s=0;s<sides.length;s++){
+        var side=sides[s], sp=xspan(x,side);
+        var clash=labeled.some(function(o){ return Math.abs(o.y-y)<MINY && xover(sp, xspan(o.x,o.side)); });
+        if(!clash){ labeled.push({i:c.i,d:c.dealers,x:x,y:y,side:side}); break; }
       }
-    }}
+    });
     var lmap={}; labeled.forEach(function(o){lmap[o.i]=o;});
 
     var frag=document.createDocumentFragment();
@@ -760,9 +859,9 @@
       var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
       var head=Math.min(30, 9+Math.sqrt(c.dealers)*1.9);
       var stem=Math.round(head*1.35+10);
-      var label=c.dealers>=15;
       var lc=lmap[c.i];
-      var lblCls='pin-label'+(lc&&lc.side==='left'?' left':'');
+      var big=!!lc;            // labelled by the greedy de-clutter above; others reveal on hover/select
+      var lblCls='pin-label'+(lc&&lc.side==='left'?' left':'')+(big?'':' opt');
       var el=document.createElement("div");
       el.className="pin";
       el.dataset.i=c.i;
@@ -773,12 +872,59 @@
       var st=el.appendChild(document.createElement("div")); st.className="pin-stand";
       st.style.transitionDelay=(reduce?0:(rank[c.i]*34+120))+"ms";
       st.innerHTML='<div class="pin-head"></div><div class="pin-stem"></div>'+
-        (label?'<div class="'+lblCls+'">'+c.name+'<span class="pin-temp" data-ti="'+c.i+'"></span></div>':'');
+        '<div class="'+lblCls+'">'+c.name+'<span class="pin-temp" data-ti="'+c.i+'"></span></div>';
       var sh=el.appendChild(document.createElement("div")); sh.className="pin-shadow";
       frag.appendChild(el);
     });
     pinsHost.innerHTML="";
     pinsHost.appendChild(frag);
+    renderDensity();
+  }
+
+  // Dealer-density heat field: one soft cyan glow per city, sized + brightened
+  // by real dealer count and composited so clusters (Calgary/Airdrie, Edmonton/
+  // St. Albert) read denser. Rebuilt with the pins, incl. after live data loads.
+  function renderDensity(){
+    var el=document.getElementById("density"); if(!el) return;
+    var maxD=1; CITIES.forEach(function(c){ if(c.dealers>maxD) maxD=c.dealers; });
+    var layers=[];
+    CITIES.forEach(function(c){
+      if(!c.dealers) return;
+      var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
+      var s=Math.sqrt(c.dealers);
+      var rw=Math.max(5, Math.min(26, 4+s*1.7));       // glow width %
+      var rh=rw*0.62;                                    // plane is taller than wide -> keep it ~round
+      var a=Math.max(0.06, Math.min(0.26, 0.05 + (c.dealers/maxD)*0.2));
+      layers.push('radial-gradient(ellipse '+rw.toFixed(1)+'% '+rh.toFixed(1)+'% at '+x.toFixed(2)+'% '+y.toFixed(2)+
+        '%, rgba(78,200,224,'+a.toFixed(3)+') 0%, rgba(78,200,224,'+(a*0.4).toFixed(3)+') 38%, rgba(78,200,224,0) 72%)');
+    });
+    el.style.backgroundImage=layers.join(',');
+  }
+
+  // ---- little animated critters that ride the tilted terrain (for fun) ----
+  var AGRI_SVG={
+    tractor:'<svg viewBox="0 0 40 28"><circle cx="11" cy="20" r="6.4" fill="#232323"/><circle cx="11" cy="20" r="2.7" fill="#f7d21a"/><circle cx="30" cy="22" r="3.7" fill="#232323"/><circle cx="30" cy="22" r="1.5" fill="#f7d21a"/><rect x="6" y="10" width="17" height="8" rx="2" fill="#3a7d2c"/><rect x="19" y="6" width="10" height="11" rx="2" fill="#367c2b"/><rect x="8" y="3" width="9" height="9" rx="1.6" fill="#2f6b25"/><rect x="9.5" y="4.5" width="6" height="4" rx="1" fill="#bfe3b8" opacity=".8"/><rect x="26" y="2" width="1.7" height="5" rx=".8" fill="#2b2b2b"/></svg>',
+    combine:'<svg viewBox="0 0 50 30"><circle cx="15" cy="22" r="7" fill="#232323"/><circle cx="15" cy="22" r="2.8" fill="#cfcfcf"/><circle cx="35" cy="24" r="3.7" fill="#232323"/><rect x="8" y="8" width="27" height="12" rx="2" fill="#d0322b"/><rect x="12" y="2.5" width="10" height="7.5" rx="1.6" fill="#a51f1f"/><rect x="13.5" y="4" width="6.5" height="4" rx="1" fill="#e8f0ff" opacity=".75"/><rect x="34" y="15" width="13" height="8" rx="1" fill="#b71c1c"/><g class="reel" fill="none" stroke="#ffd54f" stroke-width="1.5"><circle cx="40" cy="12" r="4.2"/><line x1="40" y1="7.8" x2="40" y2="16.2"/><line x1="35.8" y1="12" x2="44.2" y2="12"/><line x1="37" y1="9" x2="43" y2="15"/><line x1="43" y1="9" x2="37" y2="15"/></g></svg>',
+    bison:'<svg viewBox="0 0 30 22"><path d="M3.5 17 Q3 9 8.5 8.2 Q9.5 4.5 13 5.6 Q16 6 16.5 9 L15 9.2 Q22 8.4 24.6 12.4 Q26.4 13.4 25.4 16.6 L23.4 16.6 L22.6 13.6 L20.6 16.8 L10.4 16.8 L9.4 13.4 L7.4 16.8 L5.4 16.8 L5.6 12.4 Z" fill="#4a3526"/><circle cx="9.5" cy="9.4" r=".9" fill="#1e150e"/></svg>',
+    horse:'<svg viewBox="0 0 30 24"><path d="M5.5 19 L6.4 11.5 Q6.6 8.6 9.6 8.4 L17.5 8.4 Q19.4 5 22 3.6 L23.4 5.6 L21.4 8.8 Q24 10 24 14 L23 19 L21.2 19 L21.4 13.2 L18.2 13.4 L18.2 19 L16.4 19 L16.4 13.2 L11.4 13.2 L11.4 19 L9.6 19 L9.6 12.4 L8.2 19 Z" fill="#7a4a2b"/><path d="M22 3.6 L20.4 4.8 L21.8 5.6 Z" fill="#5e3a22"/></svg>',
+  };
+  function renderAgri(){
+    var host=document.getElementById("agri"); if(!host) return;
+    // placed near (but not on) their cities: Edmonton, Medicine Hat, Fort McMurray, Red Deer
+    var items=[
+      {t:"tractor", lat:53.50, lon:-113.40},
+      {t:"combine", lat:49.92, lon:-110.92},
+      {t:"bison",   lat:56.62, lon:-111.65},
+      {t:"bison",   lat:56.78, lon:-111.20},
+      {t:"bison",   lat:56.55, lon:-111.30},
+      {t:"horse",   lat:52.14, lon:-113.58},
+      {t:"horse",   lat:52.38, lon:-114.02},
+    ];
+    host.innerHTML=items.map(function(it,i){
+      var x=(projX(it.lon)/PW*100).toFixed(2), y=(projY(it.lat)/PH*100).toFixed(2);
+      return '<div class="critter c-'+it.t+'" style="left:'+x+'%;top:'+y+'%;animation-delay:'+(i*0.8).toFixed(1)+'s">'+
+        '<div class="critter-shadow"></div><div class="critter-stand">'+AGRI_SVG[it.t]+'</div></div>';
+    }).join('');
   }
 
   // ================= WEATHER (Open-Meteo, the ONLY external call) =================
@@ -1166,7 +1312,6 @@
     document.getElementById("gVal").textContent=pctS(mean);
     document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
     document.getElementById("gCity").innerHTML=city.name+'<span>, AB</span>';
-    document.getElementById("gAvg").textContent=money(city.avgMsrp);
     document.getElementById("gNote").innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
       signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle.';
   }
@@ -1188,22 +1333,60 @@
     else { rWeather.className="rw empty"; rWeather.innerHTML=""; }
   }
   function hotClass(pinEl,on){pinEl.classList.toggle("hot",on);}
+  function esc(s){return String(s).replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});}
+  // Drill-down: list the actual dealerships in the selected city (real OSM names,
+  // each linking out to Google Maps). Names arrive on CITIES[i].sample once the
+  // live data file loads; until then it shows a loading line.
+  function dealerRow(n,city){
+    var href="https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(n+" "+city+" AB");
+    return '<a class="drill-item" target="_blank" rel="noopener noreferrer" href="'+href+'" title="Open in Google Maps">'+
+           '<span class="di-dot"></span><span class="di-name">'+esc(n)+'</span></a>';
+  }
+  // Left/right HUD dealer panel: show only the first 3 (keeps it uncluttered);
+  // "View all N" opens the full list in a modal.
+  function renderDrill(c){
+    var listEl=document.getElementById("drillList"), allBtn=document.getElementById("drillAll"); if(!listEl) return;
+    var names=c.sample||[];
+    if(!names.length){ listEl.innerHTML='<div class="drill-empty">Loading dealer list…</div>'; if(allBtn) allBtn.hidden=true; return; }
+    listEl.innerHTML=names.slice(0,3).map(function(n){ return dealerRow(n,c.name); }).join('');
+    if(allBtn){ allBtn.hidden=(c.dealers<=3); allBtn.textContent="View all "+c.dealers+" →"; }
+  }
+  // Full-list modal, opened from "View all".
+  function openDealerModal(c){
+    if(!c) return;
+    document.getElementById("dmCity").textContent=c.name;
+    var names=c.sample||[], extra=Math.max(0, c.dealers-names.length);
+    document.getElementById("dmList").innerHTML=names.map(function(n){ return dealerRow(n,c.name); }).join('')+
+      (extra>0?'<div class="drill-more">+ '+extra+' more dealership'+(extra===1?"":"s")+' not on the map yet</div>':'');
+    document.getElementById("dealerModal").hidden=false;
+  }
+  function closeDealerModal(){ document.getElementById("dealerModal").hidden=true; }
+  (function(){
+    var allBtn=document.getElementById("drillAll");
+    if(allBtn) allBtn.addEventListener("click",function(){ openDealerModal(selected); });
+    var cl=document.getElementById("dmClose"), bk=document.getElementById("dmBackdrop");
+    if(cl) cl.addEventListener("click",closeDealerModal);
+    if(bk) bk.addEventListener("click",closeDealerModal);
+    document.addEventListener("keydown",function(e){ if(e.key==="Escape") closeDealerModal(); });
+  })();
   function select(i){
     var c=CITIES[i];
     pinsHost.querySelectorAll(".pin").forEach(function(p){p.classList.toggle("sel",+p.dataset.i===i);});
     selected=c;
     setReadout(c,true);
     drawGauge(c,true);
+    renderDrill(c);             // list the real dealerships in this city
     applyScene(c);              // drive day/night + precipitation from the selected city
   }
+  // Hover just highlights the pin (its city label turns blue); the HUD panel
+  // stays on the SELECTED city so its header and dealer list never disagree.
   pinsHost.addEventListener("mouseover",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
-    hotClass(p,true); setReadout(CITIES[+p.dataset.i], +p.dataset.i===(selected&&selected.i));
+    hotClass(p,true);
   });
   pinsHost.addEventListener("mouseout",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
     hotClass(p,false);
-    if(selected) setReadout(selected,true); else setReadout(null);
   });
   pinsHost.addEventListener("click",function(e){
     var p=e.target.closest(".pin"); if(!p)return;
@@ -1279,11 +1462,31 @@
   var EDM=1; // Edmonton index in CITIES — default selection
   renderRelief();
   renderPins();
+  renderAgri();                // little animated tractors/critters on the land (for fun)
   sizeCanvas();                // size precipitation canvas before first paint
   buildClouds();               // build the layered depth-cloud planes
   lockAngle();                 // permanent viewing angle = Signature 36° + auto-fit scale
   select(EDM);                 // default: Edmonton (readout + gauge + scene)
   loadWeather();               // live fetch (single allowed external call); updates UI + scene when done
+
+  // ---- live dealer counts: real Alberta car dealerships (OpenStreetMap), binned per city ----
+  // Same-origin static asset refreshed by a scheduled job; falls back silently to the
+  // built-in counts if it can't load, so the map always renders.
+  fetch("/data/alberta-dealers.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null;}).then(function(data){
+    if(!data||!Array.isArray(data.cities)) return;
+    var byName={}; data.cities.forEach(function(c){byName[c.name]=c;});
+    var changed=false;
+    CITIES.forEach(function(c){ var row=byName[c.name]; if(row&&typeof row.count==="number"){ c.dealers=row.count; c.sample=row.sample||[]; changed=true; } });
+    if(!changed) return;
+    var keep=selected?selected.i:EDM;
+    sceneEl.style.setProperty("--pindur","0s");            // no entrance grow on this data refresh
+    renderPins();
+    pinsHost.querySelectorAll(".pin-stand").forEach(function(el){ el.style.transitionDelay="0ms"; });
+    select(keep);                                          // re-render clears .sel — restore it
+    var src=document.getElementById("dealerSource");
+    if(src&&data.totalDealers) src.textContent=data.totalDealers+" real car dealerships from OpenStreetMap"+(data.generatedAt?" · updated "+data.generatedAt:"");
+    setTimeout(function(){ sceneEl.style.setProperty("--pindur",".5s"); },60);
+  }).catch(function(){});
   requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
   // after the entrance fly-in settles, drop the plane + pin durations to the snappy preset speed
   // and clear the per-pin stagger so angle switches are immediate (not staggered).
