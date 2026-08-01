@@ -3694,6 +3694,135 @@ function AlertFoldersTab(){
   );
 }
 
+// ── Admin "Disputes" tab: confirm a report's authenticity from LotCheck's
+// side. Two tools: (1) look up a report ID in the issuance ledger, (2) paste a
+// disputed verify link and get a combined verdict — does its payload reproduce
+// the ID it claims (client-side, like /verify), AND did we issue that ID
+// (server-side ledger). Backs a dealer dispute with a definitive answer.
+function IssuanceLedgerTab(){
+  const {C}=useAdminTheme();
+  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:14,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
+  const fmt=(x)=>{ try{ return x?new Date(x).toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"}):"—"; }catch{ return "—"; } };
+
+  // ── Tool 1: look up a report ID ────────────────────────────────────────
+  const [idInput,setIdInput]=useState("");
+  const [idBusy,setIdBusy]=useState(false);
+  const [idResult,setIdResult]=useState(null); // {found, rows} | {error}
+  async function lookupId(){
+    const rid=(idInput||"").trim().toUpperCase();
+    if(!rid){ setIdResult(null); return; }
+    setIdBusy(true); setIdResult(null);
+    try{
+      const {data,error}=await supabase.rpc("fn_report_issuance_lookup",{p_report_id:rid});
+      if(error) throw error;
+      setIdResult({found:(data||[]).length>0, rows:data||[]});
+    }catch(e){ setIdResult({error:e.message||"Lookup failed."}); }
+    finally{ setIdBusy(false); }
+  }
+
+  // ── Tool 2: check a disputed link ──────────────────────────────────────
+  const [linkInput,setLinkInput]=useState("");
+  const [linkBusy,setLinkBusy]=useState(false);
+  const [verdict,setVerdict]=useState(null);
+  async function checkLink(){
+    const raw=(linkInput||"").trim();
+    if(!raw){ setVerdict(null); return; }
+    setLinkBusy(true); setVerdict(null);
+    try{
+      // Accept a full /verify URL or a bare payload. Pull out d + claimed id.
+      let d=raw, claimed=null;
+      try{ const u=new URL(raw); d=u.searchParams.get("d")||raw; claimed=u.searchParams.get("id"); }catch{}
+      const str=b64urlDecode(d);
+      const obj=JSON.parse(str);
+      const computed=makeReportId(await sha256Hex(str));
+      const intact = claimed ? (claimed===computed) : null; // null = no claimed id to compare
+      // Server side: did WE issue this (recomputed) id?
+      let ledger={found:false,rows:[]};
+      try{
+        const {data,error}=await supabase.rpc("fn_report_issuance_lookup",{p_report_id:computed});
+        if(!error) ledger={found:(data||[]).length>0, rows:data||[]};
+      }catch{}
+      setVerdict({computed,claimed,intact,ledger,obj});
+    }catch(e){ setVerdict({error:"Couldn't read that link — the payload is incomplete or not a LotCheck verify link."}); }
+    finally{ setLinkBusy(false); }
+  }
+
+  const Pill=({tone,children})=>{
+    const map={good:{c:C.tealInk,b:C.tealBg},bad:{c:C.coralInk,b:C.coralBg},warn:{c:C.butterInk,b:C.butter+"55"}};
+    const s=map[tone]||map.warn;
+    return <span style={{fontSize:11,fontWeight:800,color:s.c,background:s.b,borderRadius:6,padding:"3px 9px"}}>{children}</span>;
+  };
+
+  return (
+    <div>
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:6}}>REPORT DISPUTES</div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Confirm a LotCheck report from our side. The ledger stores only a report ID + one-way fingerprint + issue time — no personal data, no report contents. Use it when a dealer disputes a report at the table.
+      </div>
+
+      {/* Tool 1 */}
+      <div style={{...card,marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Look up a report ID</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input value={idInput} onChange={e=>setIdInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")lookupId();}} placeholder="LC-00A9-AFE" style={{...inputStyle,flex:"1 1 220px",width:"auto"}}/>
+          <button onClick={lookupId} disabled={idBusy} style={{background:idBusy?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:idBusy?"default":"pointer",whiteSpace:"nowrap"}}>{idBusy?"Looking…":"Look up"}</button>
+        </div>
+        {idResult&&idResult.error&&<div style={{marginTop:12,fontSize:12,color:C.coralInk}}>{idResult.error}</div>}
+        {idResult&&!idResult.error&&(
+          idResult.found?(
+            <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+              {idResult.rows.map((r,i)=>(
+                <div key={i} style={{background:C.tealBg,border:`1px solid ${C.teal}55`,borderRadius:10,padding:"12px 14px"}}>
+                  <div style={{marginBottom:6}}><Pill tone="good">Issued by LotCheck</Pill></div>
+                  <div style={{fontSize:13,color:C.ink}}>Issued <b>{fmt(r.issued_at)}</b> · logged {fmt(r.created_at)}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,fontFamily:"monospace",marginTop:4,wordBreak:"break-all"}}>fingerprint {r.fingerprint}</div>
+                </div>
+              ))}
+            </div>
+          ):(
+            <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"12px 14px",fontSize:13,color:C.coralInk}}>
+              <Pill tone="bad">Not on file</Pill>
+              <div style={{marginTop:6}}>No issuance record for that ID. Either it was never emailed (only emailed reports are logged), or the ID is not one of ours.</div>
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Tool 2 */}
+      <div style={card}>
+        <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:8}}>Check a disputed link</div>
+        <textarea value={linkInput} onChange={e=>setLinkInput(e.target.value)} rows={3} placeholder="Paste the full verify link (…/verify?d=…&id=LC-…) or just the payload"
+          style={{...inputStyle,resize:"vertical",fontSize:12}}/>
+        <button onClick={checkLink} disabled={linkBusy} style={{marginTop:10,background:linkBusy?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:linkBusy?"default":"pointer"}}>{linkBusy?"Checking…":"Check link"}</button>
+
+        {verdict&&verdict.error&&<div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"12px 14px",fontSize:13,color:C.coralInk}}>{verdict.error}</div>}
+        {verdict&&!verdict.error&&(()=>{
+          const altered = verdict.intact===false;
+          const genuine = verdict.intact!==false && verdict.ledger.found;
+          const tone = altered?"bad":genuine?"good":"warn";
+          const headline = altered?"Altered — do not trust"
+            : genuine?"Genuine LotCheck report"
+            : "Self-consistent, but not in our ledger";
+          const box = tone==="bad"?{bg:C.coralBg,br:C.coral}:tone==="good"?{bg:C.tealBg,br:C.teal}:{bg:C.butter+"22",br:C.butter};
+          const issued=verdict.ledger.rows[0]?.issued_at;
+          return (
+            <div style={{marginTop:12,background:box.bg,border:`1px solid ${box.br}77`,borderRadius:10,padding:"14px 16px"}}>
+              <div style={{marginBottom:8}}><Pill tone={tone}>{headline}</Pill></div>
+              <div style={{fontSize:13,color:C.ink,lineHeight:1.7}}>
+                <div>Vehicle: <b>{verdict.obj?.vehicle||"—"}</b>{verdict.obj?.dealer?.name?` · ${verdict.obj.dealer.name}`:""}</div>
+                <div>Link's contents produce ID <b style={{fontFamily:"monospace"}}>{verdict.computed}</b>{verdict.claimed?<> · claims <b style={{fontFamily:"monospace",color:altered?C.coralInk:C.ink}}>{verdict.claimed}</b></>:<span style={{color:C.inkFaint}}> · (no claimed ID in link)</span>}</div>
+                {altered&&<div style={{color:C.coralInk}}>The contents were changed after issue — the fingerprints don't match.</div>}
+                <div>Our ledger: {verdict.ledger.found?<b style={{color:C.tealInk}}>issued {fmt(issued)}</b>:<b style={{color:C.inkFaint}}>no record</b>}</div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -4047,6 +4176,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
           <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
+          <AdminTabButton active={tab==="disputes"} onClick={()=>setTab("disputes")}>Disputes</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -4282,6 +4412,7 @@ function AdminPanel(){
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
         {tab==="alerts" && <AlertFoldersTab/>}
+        {tab==="disputes" && <IssuanceLedgerTab/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
