@@ -531,7 +531,6 @@
           <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
         </div>
         <div class="gcity" id="gCity">Edmonton<span>, AB</span></div>
-        <div class="gmsrp"><span class="k">Avg new MSRP</span><span class="v mono" id="gAvg">$0</span></div>
         <div class="gnote" id="gNote"></div>
       </div>
       <!-- full dealer list, opened from "View all" -->
@@ -1313,7 +1312,6 @@
     document.getElementById("gVal").textContent=pctS(mean);
     document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
     document.getElementById("gCity").innerHTML=city.name+'<span>, AB</span>';
-    document.getElementById("gAvg").textContent=money(city.avgMsrp);
     document.getElementById("gNote").innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
       signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle.';
   }
