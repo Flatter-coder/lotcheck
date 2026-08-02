@@ -5655,6 +5655,12 @@ function canonicalReport(a){
 // didn't provide one (older responses / non-server paths). See make-it-
 // dispute-proof.
 async function finalizeReport(analysis){
+  // The server (analyze-quote / analyze-listing-url) already finalizes the
+  // report — it stamps issuedAt, computes the ID + payload, and SIGNS them.
+  // Trust that verbatim: the signature is over the server's exact canonical
+  // bytes, so recomputing here would break it. Only compute client-side when
+  // the server didn't (older responses / local demos) — that path is unsigned.
+  if(analysis?.verifyPayload && analysis?.reportId) return analysis;
   const issuedAt = analysis?.issuedAt || new Date().toISOString();
   const withTime = {...analysis, issuedAt};
   try{
@@ -5668,13 +5674,34 @@ async function finalizeReport(analysis){
 function verifyBaseUrl(){
   try{ return (window.location.origin||"https://lotcheck.ca"); }catch{ return "https://lotcheck.ca"; }
 }
-// Build the shareable verify link. Carries BOTH the self-contained payload (d)
-// and the claimed report id — the verify page recomputes the id from d and
-// compares it to this claimed id, so an altered payload is provably caught.
+// Build the shareable verify link. Carries the self-contained payload (d), the
+// claimed report id, and — when the report was signed — the signature (s) +
+// key id (k). /verify recomputes the id AND checks the signature.
 function verifyLinkFor(a){
   if(!a||!a.verifyPayload) return null;
   const id=a.reportId?`&id=${encodeURIComponent(a.reportId)}`:"";
-  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}`;
+  const s=a.sig?`&s=${encodeURIComponent(a.sig)}`:"";
+  const k=a.keyId?`&k=${encodeURIComponent(a.keyId)}`:"";
+  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}${s}${k}`;
+}
+
+// ── Report signing (provenance). Public keys only — safe to ship. Each report
+// carries a keyId so keys can rotate; keep retired public keys here so old
+// links keep verifying. Private key lives only on the server.
+const REPORT_PUBLIC_KEYS = {
+  k1: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErEpWm/YsbAN9i9RkuGAPDadAp8BJ+i3j7V1WVUtvsQgmBN04hEQksYdyUksotL6LYOrPAnRkpqh6DXmMlTI7FA==",
+};
+function b64urlToBytes(s){ s=s.replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4)s+="="; const bin=atob(s); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i); return arr; }
+// Verify an ECDSA P-256 signature over the payload bytes with the named public
+// key. Returns true only on a cryptographically valid signature from LotCheck.
+async function verifyReportSignature(payloadB64url, sigB64url, keyId){
+  try{
+    const pubB64 = REPORT_PUBLIC_KEYS[keyId];
+    if(!pubB64 || !sigB64url) return false;
+    const spki = Uint8Array.from(atob(pubB64), c=>c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("spki", spki, {name:"ECDSA",namedCurve:"P-256"}, false, ["verify"]);
+    return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, key, b64urlToBytes(sigB64url), b64urlToBytes(payloadB64url));
+  }catch(e){ return false; }
 }
 
 // ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
@@ -5691,10 +5718,17 @@ function VerifyPage(){
         const obj=JSON.parse(str);
         const id=makeReportId(await sha256Hex(str));          // recomputed from the link
         const claimed=q.get("id");                             // id the report claims to be
-        // If the link states which id it should be, we can prove a match/mismatch.
-        // If it doesn't, we can only show the computed id for the reader to compare.
-        const phase = claimed ? (claimed===id ? "ok" : "altered") : "unclaimed";
-        setState({phase,id,claimed,obj});
+        const sig=q.get("s"), keyId=q.get("k");                // signature + key id, if signed
+        // Provenance (strongest): a valid LotCheck signature proves the report
+        // came from us AND is unaltered — no lookup, nothing stored. Integrity
+        // (fallback): if unsigned, we can still prove the payload reproduces the
+        // claimed id, but not that WE issued it.
+        const signed = !!(sig && keyId);
+        const sigValid = signed ? await verifyReportSignature(d, sig, keyId) : false;
+        const phase = signed
+          ? (sigValid ? "signed" : "altered")
+          : (claimed ? (claimed===id ? "ok" : "altered") : "unclaimed");
+        setState({phase,id,claimed,obj,signed,sigValid});
       }catch(e){ setState({phase:"bad"}); }
     })();
   },[]);
@@ -5720,16 +5754,18 @@ function VerifyPage(){
       <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
       {(()=>{
         const P=state.phase;
-        const badge=P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
-        const title=P==="ok"?"Authentic report":P==="altered"?"This report was altered":"Confirm the report ID";
+        const badge=P==="signed"?{bg:TEAL,sym:"🔏"}:P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
+        const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
         return (
           <>
             <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 4px"}}>
-              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700}}>{badge.sym}</span>
+              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:P==="signed"?13:15,fontWeight:700}}>{badge.sym}</span>
               <h1 style={{fontSize:26,margin:0}}>{title}</h1>
             </div>
+            {P==="signed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report carries a valid cryptographic signature from LotCheck over report ID <b style={{...mono,color:INK}}>{state.id}</b>. It could <b>only</b> have been issued by LotCheck, and not one figure has been altered since — changing anything would break the signature.</p>}
             {P==="ok"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>, which matches the ID this report claims. Every figure below is unaltered — changing any number would change this ID.</p>}
-            {P==="altered"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
+            {P==="altered"&&state.signed&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report presents a LotCheck signature, but it is <b style={{color:CORAL}}>not valid</b> for these contents. The report was altered after signing, or was not issued by LotCheck — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
+            {P==="altered"&&!state.signed&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
             {P==="unclaimed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>. Check that this exactly matches the ID printed on the report you received — if it does, every figure below is genuine and unaltered.</p>}
           </>
         );
@@ -7244,11 +7280,13 @@ function QuoteCheckPage(){
               {analysis.reportId&&(
                 <div style={cardStyle}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>🔒 Verify &amp; share this report</div>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>🔒 Verify &amp; share this report{analysis.sig&&<span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>🔏 SIGNED</span>}</div>
                     <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
                   </div>
                   <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
-                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end.
+                    {analysis.sig
+                      ? "This report is cryptographically signed by LotCheck — anyone can confirm it genuinely came from us and that not one figure was altered. Every number cites a source you can re-check, and nothing is stored on our end."
+                      : "This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end."}
                   </div>
                   {analysis.verifyPayload&&(
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
