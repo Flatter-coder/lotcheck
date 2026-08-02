@@ -5647,8 +5647,15 @@ function canonicalReport(a){
 // Stamp issuedAt + reportId onto a fresh analysis. Non-fatal: if crypto is
 // unavailable (very old/insecure context), fall back to a plain timestamp id
 // so the report still renders — it just isn't cryptographically verifiable.
+//
+// issuedAt is set by the SERVER (analyze-quote / analyze-listing-url stamp it
+// from the trusted server clock) and preferred here, so a user changing their
+// device clock cannot alter the report's issued date — which is fingerprinted
+// into the report ID. We only fall back to the local clock when the server
+// didn't provide one (older responses / non-server paths). See make-it-
+// dispute-proof.
 async function finalizeReport(analysis){
-  const issuedAt = new Date().toISOString();
+  const issuedAt = analysis?.issuedAt || new Date().toISOString();
   const withTime = {...analysis, issuedAt};
   try{
     const str = JSON.stringify(canonicalReport(withTime));
