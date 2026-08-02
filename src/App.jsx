@@ -7267,13 +7267,37 @@ function QuoteCheckPage(){
                 );
               })()}
 
-              {analysis.warranty?.offered&&(
-                <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:8}}>Warranty / protection plan</div>
-                  <div style={{color:C.ink,fontSize:14,marginBottom:4}}>{analysis.warranty.offered}{analysis.warranty.price?` — $${analysis.warranty.price.toLocaleString()}`:""}</div>
-                  <div style={{fontSize:12,color:C.inkFaint}}>{analysis.warranty.assessment}</div>
-                </div>
-              )}
+              {analysis.warranty?.offered&&(()=>{
+                // A SOLD extended warranty / protection plan is always an optional
+                // add-on. Flag it as such and, when we know the free coverage this
+                // vehicle already carries, put the two side by side so the buyer
+                // has the leverage to decline or negotiate. Neutral + factual:
+                // no "overpriced"/"ripoff" language (see neutral-factual-language,
+                // defamation-proof-and-compliant).
+                const w=analysis.warranty;
+                const sw=analysis.standardWarranty;
+                const isNew=analysis.vehicleCondition==="new";
+                const price=w.price?`$${Number(w.price).toLocaleString()}`:null;
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${C.butter}`,background:C.butterBg}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Extended warranty / protection plan</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.butterInk,background:C.butter+"66",borderRadius:5,padding:"2px 8px",letterSpacing:.3}}>⚠ OPTIONAL ADD-ON</span>
+                    </div>
+                    <div style={{color:C.ink,fontSize:15,fontWeight:800,marginBottom:6}}>{w.offered}{price?` — ${price}`:""}</div>
+                    {isNew&&sw?.coverage?(
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
+                        You already get <b>{sw.coverage}</b> at no cost on this new {analysis.make||"vehicle"}{sw.verified?" — verified against the manufacturer's official Canadian terms":""}. This plan is <b>optional and negotiable</b>: you can decline it, and extended coverage can usually be bought later or from another provider.
+                      </div>
+                    ):(
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
+                        This is an <b>optional add-on</b>. Confirm whether the original manufacturer warranty is still active first (it usually runs from the in-service date, not the sale date) — extended coverage is negotiable and can be declined or purchased later.
+                      </div>
+                    )}
+                    {w.assessment&&<div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5}}>{w.assessment}</div>}
+                  </div>
+                );
+              })()}
 
               </div>{/* ── end detail grid ── */}
 
