@@ -5640,6 +5640,7 @@ function canonicalReport(a){
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
+    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
     summary:a.summary||null,
     issuedAt:a.issuedAt||null,
   };
@@ -5934,6 +5935,26 @@ function QuoteCheckPage(){
   const [emailStatus,setEmailStatus]=useState("idle");
   const [emailErr,setEmailErr]=useState("");
   const [verifyCopied,setVerifyCopied]=useState(false);
+  const [histStatus,setHistStatus]=useState("idle"); // idle | loading | done | error
+  const [history,setHistory]=useState(null);
+
+  // Opt-in, PAID full vehicle history (VinAudit). Deliberately NOT automatic —
+  // the buyer clicks to pull it, so the $3 lookup only runs on demand.
+  async function fetchVehicleHistory(){
+    const vin=(analysis?.vin||"").trim();
+    if(!vin){ return; }
+    setHistStatus("loading");
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/vin-lookup",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SB_ANON_KEY,"Authorization":`Bearer ${SB_ANON_KEY}`},
+        body:JSON.stringify({vin}),
+      });
+      const data=await res.json();
+      if(data&&data.history){ setHistory(data.history); setHistStatus("done"); }
+      else { setHistStatus("error"); }
+    }catch(e){ setHistStatus("error"); }
+  }
 
   // Copy the tamper-evident VERIFY link (payload + claimed id) to the clipboard.
   // Distinct from copyShareLink above, which copies the "#r=" full-report link:
@@ -6914,6 +6935,29 @@ function QuoteCheckPage(){
                   appears when its check ran, and reuses the same teal=good /
                   coral=concern language as the price cards above. ── */}
 
+              {/* Independent used-market value (VinAudit, auto when a VIN is
+                  present + live). This is the buyer-side value anchor — NOT the
+                  dealer's trade-in number — so the asking price is judged against
+                  real recent sales. */}
+              {analysis.marketValue&&analysis.marketValue.average!=null&&(()=>{
+                const mv=analysis.marketValue;
+                const asking=Number(analysis.quotedPrice)||0;
+                const avg=Number(mv.average);
+                const delta=(asking&&avg)?asking-avg:0;
+                const good=delta<=0;
+                return (
+                  <div style={{...cardStyle,background:good?C.tealBg:C.coralBg,border:`1px solid ${(good?C.teal:C.coral)}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · VinAudit (independent)</div>
+                    <div style={{fontSize:18,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.1}}>
+                      {(asking&&avg)?`Asking is ${delta<=0?`$${Math.abs(delta).toLocaleString()} under`:`$${delta.toLocaleString()} over`} market`:`Market average $${avg.toLocaleString()}`}
+                    </div>
+                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{mv.count?`, from ${Number(mv.count).toLocaleString()} recent sales`:""}. This is the independent market value — not the dealer's trade-in number.
+                    </div>
+                  </div>
+                );
+              })()}
+
               {analysis.leverageScore?.computed&&(
                 <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
                   <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
@@ -7073,6 +7117,40 @@ function QuoteCheckPage(){
                   </div>
                 );
               })()}
+
+              {/* Opt-in vehicle history (VinAudit). The paid pull runs only on
+                  the button click — never automatically. Independent of the
+                  dealer's own CARFAX. */}
+              {analysis.vin&&(
+                <div style={cardStyle}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Vehicle history</div>
+                    <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>VinAudit · independent</span>
+                  </div>
+                  {histStatus==="idle"&&(<>
+                    <div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.55,marginBottom:10}}>Pull the accident, title, odometer, and lien history for this VIN — an independent check, not the dealer's own report.</div>
+                    <button onClick={fetchVehicleHistory} style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Get full vehicle history</button>
+                  </>)}
+                  {histStatus==="loading"&&<div style={{fontSize:13,color:C.inkSoft}}>Checking VinAudit…</div>}
+                  {histStatus==="error"&&<div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.5}}>History isn't available for this VIN right now — try again shortly.</div>}
+                  {histStatus==="done"&&history&&(()=>{
+                    const h=history, c=h.counts||{};
+                    const Row=({label,val,tone})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderTop:`1px solid ${C.line}`}}><span style={{fontSize:13,color:C.ink}}>{label}</span><span style={{fontSize:13,fontWeight:800,color:tone==="bad"?C.coralInk:tone==="good"?C.tealInk:C.ink,whiteSpace:"nowrap"}}>{val}</span></div>);
+                    return (<div>
+                      {h.clean===true&&<div style={{fontSize:14,fontWeight:800,color:C.tealInk,marginBottom:6}}>✓ No branding, salvage, or insurance write-off on record</div>}
+                      {h.clean===false&&<div style={{fontSize:14,fontWeight:800,color:C.coralInk,marginBottom:6}}>⚠ Records found — review the details below</div>}
+                      <Row label="Accidents" val={c.accidents>0?`${c.accidents} on record`:"None on record"} tone={c.accidents>0?"bad":"good"}/>
+                      <Row label="Title brands" val={c.brands>0?`${c.brands}`:"None"} tone={c.brands>0?"bad":"good"}/>
+                      <Row label="Salvage / insurance" val={c.salvage>0?`${c.salvage}`:"None"} tone={c.salvage>0?"bad":"good"}/>
+                      <Row label="Liens / impounds" val={c.liens>0?`${c.liens}`:"None on record"} tone={c.liens>0?"bad":"good"}/>
+                      <Row label="Odometer readings" val={h.odometer&&h.odometer.length?`${h.odometer.length} recorded`:"—"}/>
+                      {c.caRegistrations>0&&<Row label="Canadian registrations" val={`${c.caRegistrations}`}/>}
+                      {c.caRecalls>0&&<Row label="Canadian recalls" val={`${c.caRecalls}`} tone="bad"/>}
+                      <div style={{fontSize:11,color:C.inkFaint,lineHeight:1.5,marginTop:8}}>Source: VinAudit, {(()=>{try{return new Date(h.asOf).toLocaleDateString("en-CA",{year:"numeric",month:"short",day:"numeric"});}catch{return "recent";}})()}. VIN records from provincial agencies + aggregated data; confirm anything material before you buy.</div>
+                    </div>);
+                  })()}
+                </div>
+              )}
 
               {/* ── Rebates & conditions ─────────────────────────────────────
                   Groups the EVAP rebate check, any advertised conditional
