@@ -7035,6 +7035,45 @@ function QuoteCheckPage(){
                 </div>
               )}
 
+              {/* Used vehicles: how much of the ORIGINAL manufacturer warranty is
+                  left, estimated from the verified catalog terms + model year +
+                  odometer. Labelled ESTIMATED (the clock starts at the in-service
+                  date, which we approximate with the model year). */}
+              {analysis.remainingWarranty&&(analysis.remainingWarranty.basic||analysis.remainingWarranty.powertrain)&&(()=>{
+                const rw=analysis.remainingWarranty;
+                const anyActive=(rw.basic&&rw.basic.active)||(rw.powertrain&&rw.powertrain.active);
+                const Term=({label,t})=>{
+                  if(!t) return null;
+                  const parts=[];
+                  if(t.active){
+                    parts.push(`~${t.yearsLeft} yr`);
+                    if(t.kmUnlimited) parts.push("unlimited km");
+                    else if(t.odometerKnown&&t.kmLeft!=null) parts.push(`${Number(t.kmLeft).toLocaleString()} km`);
+                  }
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+                      <span style={{fontSize:13,color:C.ink}}>{label} <span style={{color:C.inkFaint}}>({t.term})</span></span>
+                      <span style={{fontSize:13,fontWeight:800,color:t.active?C.tealInk:C.coralInk,whiteSpace:"nowrap"}}>{t.active?`${parts.join(" / ")} left`:"Expired"}</span>
+                    </div>
+                  );
+                };
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${anyActive?C.teal+"55":C.line}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Factory warranty remaining</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>ESTIMATED</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:2}}>Based on the {rw.modelYear} model year{rw.odometerKm!=null?` and ${Number(rw.odometerKm).toLocaleString()} km`:""}{rw.make?` · ${rw.make}`:""}.</div>
+                    <Term label="Basic / comprehensive" t={rw.basic}/>
+                    <Term label="Powertrain" t={rw.powertrain}/>
+                    <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.55,marginTop:8}}>
+                      Coverage ends at whichever comes first — years or kilometres. Estimated from the model year; the clock actually starts on the in-service date, so confirm it on the VIN/CARFAX report{rw.odometerKm==null?" (the odometer wasn't listed, so this is time-based only)":""}.
+                    </div>
+                    {rw.sourceUrl&&<a href={rw.sourceUrl} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:6}}>Manufacturer's official terms ↗</a>}
+                  </div>
+                );
+              })()}
+
               {/* ── Rebates & conditions ─────────────────────────────────────
                   Groups the EVAP rebate check, any advertised conditional
                   savings, and the itemized discounts/add-ons into ONE card per
