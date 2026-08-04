@@ -7202,6 +7202,33 @@ function QuoteCheckPage(){
                 );
               })()}
 
+              {/* S11 — financing-contingent-discount trap. Frames the counter-
+                  question and quantifies the trade-off when rate data is present.
+                  See dealer-tactics-safeguards.md (S11). */}
+              {analysis.financingTrap&&(()=>{
+                const t=analysis.financingTrap;
+                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const trap=t.mode==="quantified"&&t.isTrap;
+                const bg=trap?C.coralBg:C.butterBg, br=trap?C.coral:C.butter, ink=trap?C.coralInk:C.butterInk;
+                return (
+                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
+                      <FlagWaveIcon size={15}/>
+                      <div style={{fontSize:13,fontWeight:800,color:ink}}>{trap?"Financing trap — the discount may cost you":"Discount vs. financing — ask before you sign"}</div>
+                    </div>
+                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:8}}>
+                      {t.mode==="quantified"?(trap
+                        ? <>This <b>{m(t.discount)} discount</b> may be tied to dealer financing. If so, financing at <b>{t.dealerApr}%</b> instead of the <b>{t.promoApr}%</b> promo adds about <b style={{color:C.coralInk}}>{m(t.extraInterest)}</b> in interest over {t.term} months — <b>more than the discount</b>. You'd net <b style={{color:C.coralInk}}>lose {m(Math.abs(t.net))}</b>.</>
+                        : <>This <b>{m(t.discount)} discount</b> beats the higher rate here: financing at {t.dealerApr}% vs the {t.promoApr}% promo adds about {m(t.extraInterest)}, so the discount still nets you about <b style={{color:C.tealInk}}>{m(t.net)}</b> — but confirm you can keep the promo rate.</>)
+                      : <>This discount may be offered <b>"in lieu of special financing"</b> — meaning you might not also get the low promo APR. A higher rate can quietly erase a discount over the life of the loan.</>}
+                    </div>
+                    <div style={{fontSize:12.5,color:ink,fontWeight:800,background:"#fff8",borderRadius:9,padding:"9px 12px"}}>
+                      Ask: "Is this price in lieu of special financing? Can I get the discount <i>and</i> the promo APR?"
+                    </div>
+                  </div>
+                );
+              })()}
+
               {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
                 <div style={cardStyle}>
                   <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
