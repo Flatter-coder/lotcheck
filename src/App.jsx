@@ -5442,6 +5442,12 @@ function decodeReport(s){
 // analysis so variable content (0 vs many recalls, short/long fee lists) never
 // breaks a fixed layout — a page only appears when it has real data. Its own
 // "printed report" palette (paper + violet/teal), independent of the app theme.
+// The real LotCheck logo (isometric gate + car) as a reusable mark — same art
+// as the site header. Rendered via innerHTML so the raw SVG polygons drop in
+// without JSX conversion. Used on the report cover + end page.
+const LOGO_INNER=`<polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/>`;
+function RealLogo({width=40}){ return <svg width={width} height={Math.round(width*182/320)} viewBox="-145 -44 320 182" aria-hidden="true" dangerouslySetInnerHTML={{__html:LOGO_INNER}}/>; }
+
 function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
   const [cur,setCur]=useState(0);
   const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
@@ -5474,7 +5480,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
     const num=<div className={`rfb-pn ${side}`}>{p.t==="cover"?"":String(P.indexOf(p)+1).padStart(2,"0")}</div>;
     if(p.t==="cover") return (
       <div className="rfb-pg rfb-cover">
-        <div><div className="rfb-brand"><span className="rfb-mk"/>LotCheck</div>
+        <div><div className="rfb-brand"><RealLogo width={38}/>LotCheck</div>
           <div className="rfb-ct">Quote Check Report</div>
           <div className="rfb-veh">{a.year} {a.make}<br/>{a.model}</div>
           <div className="rfb-dl">{[a.trim,a.dealerName,a.dealerCity].filter(Boolean).join(" · ")}</div></div>
@@ -5539,7 +5545,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
       </div>
       <div className="rfb-book">
         <div className="rfb-base l"><div className="rfb-inside"><div className="rfb-vmark">LotCheck · Verified</div></div></div>
-        <div className="rfb-base r"><div className="rfb-end"><div className="rfb-mk2"/><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Analyzed once, never stored</div></div></div>
+        <div className="rfb-base r"><div className="rfb-end"><div style={{marginBottom:14}}><RealLogo width={52}/></div><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Analyzed once, never stored</div></div></div>
         {leaves.map((lf,i)=>(
           <div className={`rfb-leaf ${i<cur?"flipped":""}`} key={i} style={{zIndex:i<cur?i:N-i}}>
             <div className="rfb-face front"><Page p={lf[0]} side="r"/></div>
@@ -6065,8 +6071,6 @@ function QuoteCheckPage(){
   const [emailStatus,setEmailStatus]=useState("idle");
   const [emailErr,setEmailErr]=useState("");
   const [verifyCopied,setVerifyCopied]=useState(false);
-  const [histStatus,setHistStatus]=useState("idle"); // idle | loading | done | error
-  const [history,setHistory]=useState(null);
   const [scriptCopied,setScriptCopied]=useState(false);
   function copyCounterScript(){
     const cs=analysis?.counterScript; if(!cs?.moves?.length) return;
@@ -6074,23 +6078,8 @@ function QuoteCheckPage(){
     try{ navigator.clipboard.writeText(text).then(()=>{setScriptCopied(true);setTimeout(()=>setScriptCopied(false),2200);}); }catch(e){}
   }
 
-  // Opt-in, PAID full vehicle history (VinAudit). Deliberately NOT automatic —
-  // the buyer clicks to pull it, so the $3 lookup only runs on demand.
-  async function fetchVehicleHistory(){
-    const vin=(analysis?.vin||"").trim();
-    if(!vin){ return; }
-    setHistStatus("loading");
-    try{
-      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/vin-lookup",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","apikey":SB_ANON_KEY,"Authorization":`Bearer ${SB_ANON_KEY}`},
-        body:JSON.stringify({vin}),
-      });
-      const data=await res.json();
-      if(data&&data.history){ setHistory(data.history); setHistStatus("done"); }
-      else { setHistStatus("error"); }
-    }catch(e){ setHistStatus("error"); }
-  }
+  // Native VIN history removed — VinAudit subscription cancelled. History is
+  // handled via the CARFAX hand-off; a new provider can slot in here later.
 
   // Copy the tamper-evident VERIFY link (payload + claimed id) to the clipboard.
   // Distinct from copyShareLink above, which copies the "#r=" full-report link:
@@ -6688,7 +6677,7 @@ function QuoteCheckPage(){
                 )],
               ].map(([k,label,icon])=>(
                 <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
-                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkFaint,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkSoft,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
                   {icon}
                   {label}
                 </button>
@@ -7071,10 +7060,10 @@ function QuoteCheckPage(){
                   appears when its check ran, and reuses the same teal=good /
                   coral=concern language as the price cards above. ── */}
 
-              {/* Independent used-market value (VinAudit, auto when a VIN is
-                  present + live). This is the buyer-side value anchor — NOT the
-                  dealer's trade-in number — so the asking price is judged against
-                  real recent sales. */}
+              {/* Independent used-market value (provider-agnostic, auto when a
+                  VIN is present + a market-value provider is live). Buyer-side
+                  value anchor — NOT the dealer's trade-in number. Source label
+                  comes from the data so it stays accurate as providers change. */}
               {analysis.marketValue&&analysis.marketValue.average!=null&&(()=>{
                 const mv=analysis.marketValue;
                 const asking=Number(analysis.quotedPrice)||0;
@@ -7083,12 +7072,12 @@ function QuoteCheckPage(){
                 const good=delta<=0;
                 return (
                   <div style={{...cardStyle,background:good?C.tealBg:C.coralBg,border:`1px solid ${(good?C.teal:C.coral)}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · VinAudit (independent)</div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · {mv.source||"independent"}</div>
                     <div style={{fontSize:18,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.1}}>
                       {(asking&&avg)?`Asking is ${delta<=0?`$${Math.abs(delta).toLocaleString()} under`:`$${delta.toLocaleString()} over`} market`:`Market average $${avg.toLocaleString()}`}
                     </div>
                     <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
-                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{mv.count?`, from ${Number(mv.count).toLocaleString()} recent sales`:""}. This is the independent market value — not the dealer's trade-in number.
+                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{(mv.comps||mv.count)?`, from ${Number(mv.comps||mv.count).toLocaleString()} recent listings`:""}. This is the independent market value — not the dealer's trade-in number.
                     </div>
                   </div>
                 );
@@ -7254,39 +7243,9 @@ function QuoteCheckPage(){
                 );
               })()}
 
-              {/* Opt-in vehicle history (VinAudit). The paid pull runs only on
-                  the button click — never automatically. Independent of the
-                  dealer's own CARFAX. */}
-              {analysis.vin&&(
-                <div style={cardStyle}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Vehicle history</div>
-                    <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>VinAudit · independent</span>
-                  </div>
-                  {histStatus==="idle"&&(<>
-                    <div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.55,marginBottom:10}}>Pull the accident, title, odometer, and lien history for this VIN — an independent check, not the dealer's own report.</div>
-                    <button onClick={fetchVehicleHistory} style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>Get full vehicle history</button>
-                  </>)}
-                  {histStatus==="loading"&&<div style={{fontSize:13,color:C.inkSoft}}>Checking VinAudit…</div>}
-                  {histStatus==="error"&&<div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.5}}>History isn't available for this VIN right now — try again shortly.</div>}
-                  {histStatus==="done"&&history&&(()=>{
-                    const h=history, c=h.counts||{};
-                    const Row=({label,val,tone})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderTop:`1px solid ${C.line}`}}><span style={{fontSize:13,color:C.ink}}>{label}</span><span style={{fontSize:13,fontWeight:800,color:tone==="bad"?C.coralInk:tone==="good"?C.tealInk:C.ink,whiteSpace:"nowrap"}}>{val}</span></div>);
-                    return (<div>
-                      {h.clean===true&&<div style={{fontSize:14,fontWeight:800,color:C.tealInk,marginBottom:6}}>✓ No branding, salvage, or insurance write-off on record</div>}
-                      {h.clean===false&&<div style={{fontSize:14,fontWeight:800,color:C.coralInk,marginBottom:6}}>⚠ Records found — review the details below</div>}
-                      <Row label="Accidents" val={c.accidents>0?`${c.accidents} on record`:"None on record"} tone={c.accidents>0?"bad":"good"}/>
-                      <Row label="Title brands" val={c.brands>0?`${c.brands}`:"None"} tone={c.brands>0?"bad":"good"}/>
-                      <Row label="Salvage / insurance" val={c.salvage>0?`${c.salvage}`:"None"} tone={c.salvage>0?"bad":"good"}/>
-                      <Row label="Liens / impounds" val={c.liens>0?`${c.liens}`:"None on record"} tone={c.liens>0?"bad":"good"}/>
-                      <Row label="Odometer readings" val={h.odometer&&h.odometer.length?`${h.odometer.length} recorded`:"—"}/>
-                      {c.caRegistrations>0&&<Row label="Canadian registrations" val={`${c.caRegistrations}`}/>}
-                      {c.caRecalls>0&&<Row label="Canadian recalls" val={`${c.caRecalls}`} tone="bad"/>}
-                      <div style={{fontSize:11,color:C.inkFaint,lineHeight:1.5,marginTop:8}}>Source: VinAudit, {(()=>{try{return new Date(h.asOf).toLocaleDateString("en-CA",{year:"numeric",month:"short",day:"numeric"});}catch{return "recent";}})()}. VIN records from provincial agencies + aggregated data; confirm anything material before you buy.</div>
-                    </div>);
-                  })()}
-                </div>
-              )}
+              {/* Native VIN history removed (VinAudit cancelled). The CARFAX
+                  hand-off above is the history path; a new provider can slot in
+                  behind the same card later. */}
 
               {/* ── Rebates & conditions ─────────────────────────────────────
                   Groups the EVAP rebate check, any advertised conditional
