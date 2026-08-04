@@ -5709,81 +5709,116 @@ async function verifyReportSignature(payloadB64url, sigB64url, keyId){
 // the report's ID + figures. Purely client-side; nothing is fetched or stored.
 function VerifyPage(){
   const [state,setState]=useState({phase:"loading"});
-  useEffect(()=>{
-    (async()=>{
-      try{
-        const q=new URLSearchParams(window.location.search);
-        const d=q.get("d");
-        if(!d){ setState({phase:"empty"}); return; }
-        const str=b64urlDecode(d);
-        const obj=JSON.parse(str);
-        const id=makeReportId(await sha256Hex(str));          // recomputed from the link
-        const claimed=q.get("id");                             // id the report claims to be
-        const sig=q.get("s"), keyId=q.get("k");                // signature + key id, if signed
-        // Provenance (strongest): a valid LotCheck signature proves the report
-        // came from us AND is unaltered — no lookup, nothing stored. Integrity
-        // (fallback): if unsigned, we can still prove the payload reproduces the
-        // claimed id, but not that WE issued it.
-        const signed = !!(sig && keyId);
-        const sigValid = signed ? await verifyReportSignature(d, sig, keyId) : false;
-        const phase = signed
-          ? (sigValid ? "signed" : "altered")
-          : (claimed ? (claimed===id ? "ok" : "altered") : "unclaimed");
-        setState({phase,id,claimed,obj,signed,sigValid});
-      }catch(e){ setState({phase:"bad"}); }
-    })();
-  },[]);
-  const INK="#1E1C19",SOFT="#5c584f",TEAL="#17756B",CORAL="#A63C25",PAPER="#F9F6EC",HAIR="#e6e0d2";
+  const [input,setInput]=useState("");
+  async function runVerify(d,id,s,k){
+    setState({phase:"loading"});
+    try{
+      if(!d){ setState({phase:"empty"}); return; }
+      const str=b64urlDecode(d);
+      const obj=JSON.parse(str);
+      const rid=makeReportId(await sha256Hex(str));   // recomputed from the link
+      const signed=!!(s&&k);
+      const sigValid=signed?await verifyReportSignature(d,s,k):false;
+      // Provenance (strongest): a valid signature proves LotCheck issued it AND
+      // nothing changed. Integrity (fallback): unsigned -> only id-match.
+      const phase=signed?(sigValid?"signed":"altered"):(id?(id===rid?"ok":"altered"):"unclaimed");
+      setState({phase,id:rid,claimed:id,obj,signed,sigValid});
+    }catch(e){ setState({phase:"bad"}); }
+  }
+  useEffect(()=>{ const q=new URLSearchParams(window.location.search); runVerify(q.get("d"),q.get("id"),q.get("s"),q.get("k")); },[]);
+  function verifyFromInput(){
+    const raw=(input||"").trim(); if(!raw) return;
+    let d=null,id=null,s=null,k=null;
+    try{ const u=new URL(raw); d=u.searchParams.get("d"); id=u.searchParams.get("id"); s=u.searchParams.get("s"); k=u.searchParams.get("k"); }
+    catch{ try{ const qs=raw.includes("?")?raw.slice(raw.indexOf("?")+1):raw; const p=new URLSearchParams(qs); d=p.get("d"); id=p.get("id"); s=p.get("s"); k=p.get("k"); }catch{} }
+    runVerify(d,id,s,k);
+  }
+
+  const P=state.phase;
+  const authentic=P==="signed"||P==="ok", isBad=P==="altered"||P==="bad";
+  const mono='ui-monospace,"SF Mono",Menlo,Consolas,monospace';
   const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
-  const wrap={minHeight:"100vh",background:PAPER,color:INK,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",justifyContent:"center",padding:"40px 20px"};
-  const box={width:"100%",maxWidth:640};
-  const mono={fontFamily:'ui-monospace,"SF Mono",Menlo,Consolas,monospace'};
-  if(state.phase==="loading") return <div style={wrap}><div style={box}>Verifying…</div></div>;
-  if(state.phase==="empty"||state.phase==="bad") return (
-    <div style={wrap}><div style={box}>
-      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
-      <h1 style={{fontSize:26,margin:"14px 0"}}>{state.phase==="bad"?"This link couldn't be verified":"Nothing to verify"}</h1>
-      <p style={{color:SOFT,fontSize:15,lineHeight:1.6}}>{state.phase==="bad"?"The report data in this link is incomplete or was altered, so its fingerprint doesn't compute. Ask for the original report link from LotCheck.":"Open the verification link printed on a LotCheck report to check it here."}</p>
-    </div></div>
-  );
-  const o=state.obj;
-  const issued=o.issuedAt?new Date(o.issuedAt):null;
-  const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
-  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"10px 0",borderTop:`1px solid ${HAIR}`}}><span>{t}</span><span style={{...mono,fontWeight:700,color:c||INK,whiteSpace:"nowrap"}}>{v}</span></div>);
+  const idText=state.id||"LC-••••-•••";
+  const seal=authentic?{bg:"#0f6e56",bd:"#34d399",gl:P==="signed"?"🔏":"✓"}:isBad?{bg:"#7a2417",bd:"#f0997b",gl:"✕"}:{bg:"#2a2740",bd:"#7f77dd",gl:"🔒"};
+  const css=`
+  @keyframes vFloat{0%,100%{transform:translateY(0) rotateX(8deg) rotateY(-9deg)}50%{transform:translateY(-9px) rotateX(8deg) rotateY(-9deg)}}
+  @keyframes vSweep{0%{top:-10%;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:108%;opacity:0}}
+  @keyframes vSeal{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
+  @keyframes vRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+  @keyframes vGrid{0%{background-position:0 0}100%{background-position:0 26px}}
+  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK{animation:none!important}}
+  @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}`;
+  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}><span style={{fontSize:13,color:"#c3bfe0"}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||"#eafff6",whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
+
   return (
-    <div style={wrap}><div style={box}>
-      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
-      {(()=>{
-        const P=state.phase;
-        const badge=P==="signed"?{bg:TEAL,sym:"🔏"}:P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
-        const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
-        return (
-          <>
-            <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 4px"}}>
-              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:P==="signed"?13:15,fontWeight:700}}>{badge.sym}</span>
-              <h1 style={{fontSize:26,margin:0}}>{title}</h1>
+    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",padding:"28px 18px",display:"flex",justifyContent:"center",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <div style={{width:"100%",maxWidth:920}}>
+        <div style={{color:"#7f77dd",fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
+        <div className="vgc" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:18,overflow:"hidden"}}>
+
+          <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:"1px solid rgba(255,255,255,.06)",overflow:"hidden"}}>
+            <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",perspective:1000}}>
+              <div className="vfloatK" style={{position:"relative",width:220,height:150,borderRadius:14,background:"linear-gradient(160deg,rgba(255,255,255,.09),rgba(255,255,255,.03))",border:`1px solid ${seal.bd}66`,boxShadow:`0 26px 60px -20px ${seal.bd}80,0 0 30px -8px ${seal.bd}55`,padding:16,overflow:"hidden",animation:"vFloat 5s ease-in-out infinite"}}>
+                <div style={{fontSize:9,letterSpacing:2,color:"#9fb9ff",fontWeight:700,textTransform:"uppercase"}}>LotCheck report</div>
+                <div style={{fontFamily:mono,fontSize:21,fontWeight:700,color:"#eafff6",marginTop:6,textShadow:`0 0 14px ${seal.bd}88`}}>{idText}</div>
+                <div style={{fontSize:10,color:"#b6b1d6",marginTop:3}}>{state.obj?.vehicle||"cryptographically signed"}</div>
+                {(P==="loading"||P==="empty")&&<div style={{position:"absolute",left:0,right:0,height:"22%",background:"linear-gradient(180deg,transparent,rgba(52,211,153,.28),transparent)",animation:"vSweep 3.2s ease-in-out infinite"}}/>}
+                <div style={{position:"absolute",right:0,bottom:0,width:56,height:56,borderRadius:"50%",border:`2px solid ${seal.bd}`,animation:"vRing 2.4s ease-out infinite"}}/>
+                <div key={P} style={{position:"absolute",right:-14,bottom:-14,width:56,height:56,borderRadius:"50%",background:seal.bg,border:`2px solid ${seal.bd}`,display:"flex",alignItems:"center",justifyContent:"center",color:"#eafff6",fontSize:24,boxShadow:`0 0 26px -4px ${seal.bd}`,animation:"vSeal 1s ease-out both"}}>{seal.gl}</div>
+              </div>
             </div>
-            {P==="signed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report carries a valid cryptographic signature from LotCheck over report ID <b style={{...mono,color:INK}}>{state.id}</b>. It could <b>only</b> have been issued by LotCheck, and not one figure has been altered since — changing anything would break the signature.</p>}
-            {P==="ok"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>, which matches the ID this report claims. Every figure below is unaltered — changing any number would change this ID.</p>}
-            {P==="altered"&&state.signed&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report presents a LotCheck signature, but it is <b style={{color:CORAL}}>not valid</b> for these contents. The report was altered after signing, or was not issued by LotCheck — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
-            {P==="altered"&&!state.signed&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
-            {P==="unclaimed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>. Check that this exactly matches the ID printed on the report you received — if it does, every figure below is genuine and unaltered.</p>}
-          </>
-        );
-      })()}
-      <div style={{background:"#fff",border:`1px solid ${HAIR}`,borderRadius:14,padding:"20px 22px",marginTop:18}}>
-        <div style={{fontSize:20,fontWeight:700}}>{o.vehicle||"Vehicle"}</div>
-        <div style={{color:SOFT,fontSize:14,fontStyle:"italic",marginBottom:6}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · issued ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
-        {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
-        {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?TEAL:SOFT}/>}
-        {delta!==0&&<Row t="Price vs MSRP" v={`${delta<0?money(-delta)+" under":money(delta)+" over"}`} c={delta<=0?TEAL:CORAL}/>}
-        {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
-        {o.recalls&&<Row t="Transport Canada recalls" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?CORAL:(o.recalls.confirmed===false?SOFT:TEAL)}/>}
-        {o.finance&&o.finance.dealer!=null&&<Row t="Financing APR (dealer)" v={`${o.finance.dealer}%`}/>}
-        {o.reputation&&<Row t="Dealer reputation" v={`${o.reputation.rating.toFixed(1)}★ / ${o.reputation.reviews.toLocaleString()}`}/>}
+            <div style={{position:"relative",zIndex:2,display:"inline-flex",alignItems:"center",gap:7,fontSize:11,fontWeight:700,color:"#5dcaa5",background:"rgba(52,211,153,.12)",border:"1px solid rgba(52,211,153,.35)",borderRadius:8,padding:"6px 11px",alignSelf:"flex-start"}}>Tamper-proof · nothing stored</div>
+          </div>
+
+          <div style={{padding:"24px 22px",color:"#e9e6f5"}}>
+            {P==="loading"&&<div style={{color:"#b6b1d6",fontSize:14}}>Verifying…</div>}
+            {(P==="empty"||P==="bad")&&(<>
+              <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:"#7f77dd",fontWeight:700}}>Verify</div>
+              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:"#fff"}}>Is this LotCheck report real?</div>
+              <div style={{fontSize:13,color:"#b6b1d6",lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the report link, or scan the QR on any LotCheck PDF. We recompute its fingerprint and check the signature — right here, nothing stored."}</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:10,padding:"11px 12px",fontSize:12.5,color:"#e9e6f5",outline:"none",boxSizing:"border-box"}}/>
+                <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
+              </div>
+              <div style={{marginTop:12,fontSize:11.5,color:"#8b86ad"}}>Or scan the QR on the printed report.</div>
+            </>)}
+            {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
+              const o=state.obj||{};
+              const issued=o.issuedAt?new Date(o.issuedAt):null;
+              const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
+              const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
+              const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
+              return (<div>
+                <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:6}}>
+                  <span style={{width:24,height:24,borderRadius:999,background:accent,color:"#0e0b1c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900}}>{authentic?"✓":isBad?"✕":"?"}</span>
+                  <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{title}</div>
+                </div>
+                <div style={{fontSize:12.5,color:"#b6b1d6",lineHeight:1.6,marginBottom:12}}>
+                  {P==="signed"&&<>Valid LotCheck signature over <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>. Could only have been issued by LotCheck, and not one figure has changed.</>}
+                  {P==="ok"&&<>Contents produce <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>, matching the claimed ID. Every figure below is unaltered.</>}
+                  {P==="altered"&&state.signed&&<>The signature is <b style={{color:"#f0997b"}}>not valid</b> for these contents — altered after signing, or not from LotCheck. Don't trust the figures.</>}
+                  {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#f0997b"}}>{state.id}</b>. A figure was changed after issue.</>}
+                  {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
+                </div>
+                <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{o.vehicle||"Vehicle"}</div>
+                  <div style={{fontSize:12.5,color:"#b6b1d6",fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
+                  {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
+                  {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?"#34d399":"#b6b1d6"}/>}
+                  {delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
+                  {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
+                </div>
+                <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:"1px solid rgba(255,255,255,.16)",color:"#c3bfe0",borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+              </div>);
+            })()}
+          </div>
+        </div>
+        <p style={{color:"#8b86ad",fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
       </div>
-      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report. This page recomputes its fingerprint live from the link — we keep no copy. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
-    </div></div>
+    </div>
   );
 }
 
