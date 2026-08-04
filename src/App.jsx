@@ -7229,6 +7229,30 @@ function QuoteCheckPage(){
                 );
               })()}
 
+              {/* S12 — doc-fee vs jurisdiction benchmark. Fail-safe: only renders
+                  when the server had a backed benchmark. See dealer-tactics-
+                  safeguards.md (S12). */}
+              {analysis.docFeeCheck&&(()=>{
+                const d=analysis.docFeeCheck;
+                const m=(n)=>`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const clean=d.kind==="within_cap";
+                const bg=clean?C.tealBg:C.butterBg, br=clean?C.teal:C.butter, ink=clean?C.tealInk:C.butterInk;
+                return (
+                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
+                    <div style={{fontSize:13,fontWeight:800,color:ink,marginBottom:6}}>
+                      {clean?"✓ Doc fee in line":"Doc fee — worth questioning"}
+                    </div>
+                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6}}>
+                      {d.kind==="allin"&&<>Your <b>{m(d.docFee)} doc/admin fee</b> — {d.jurisdiction} requires <b>all-in advertised pricing</b> ({d.body}), so this should already be <b>inside the advertised price</b>. Ask why it's separate.</>}
+                      {d.kind==="over_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is about <b style={{color:C.coralInk}}>{m(d.overBy)} above</b> {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). It's negotiable — push back.</>}
+                      {d.kind==="over_norm"&&<>{d.jurisdiction} doesn't cap doc fees, and your <b>{m(d.docFee)}</b> is at the high end ({d.note}). Negotiable — ask them to reduce it.</>}
+                      {d.kind==="within_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is within {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). Nothing to flag here.</>}
+                    </div>
+                    <a href={d.source} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:7}}>Source ↗</a>
+                  </div>
+                );
+              })()}
+
               {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
                 <div style={cardStyle}>
                   <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
