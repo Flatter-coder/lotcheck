@@ -5758,7 +5758,11 @@ function VerifyPage(){
   @keyframes vSeal{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
   @keyframes vRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
   @keyframes vGrid{0%{background-position:0 0}100%{background-position:0 26px}}
-  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK{animation:none!important}}
+  .lc-gate-car{animation:lcGateDrive 4s linear infinite}
+  @keyframes lcGateDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
+  .lc-gate-window{animation:lcGateFlash 4s linear infinite}
+  @keyframes lcGateFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
+  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.lc-gate-car,.lc-gate-window{animation:none!important}}
   @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
   @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
   .vnav-links a:hover{color:#fff!important}`;
@@ -5784,16 +5788,12 @@ function VerifyPage(){
 
           <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:"1px solid rgba(255,255,255,.06)",overflow:"hidden"}}>
             <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
-            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",perspective:1000}}>
-              <div className="vfloatK" style={{position:"relative",width:220,height:150,borderRadius:14,background:"linear-gradient(160deg,rgba(255,255,255,.09),rgba(255,255,255,.03))",border:`1px solid ${seal.bd}66`,boxShadow:`0 26px 60px -20px ${seal.bd}80,0 0 30px -8px ${seal.bd}55`,padding:16,overflow:"hidden",animation:"vFloat 5s ease-in-out infinite"}}>
-                <div style={{fontSize:9,letterSpacing:2,color:"#9fb9ff",fontWeight:700,textTransform:"uppercase"}}>LotCheck report</div>
-                <div style={{fontFamily:mono,fontSize:21,fontWeight:700,color:"#eafff6",marginTop:6,textShadow:`0 0 14px ${seal.bd}88`}}>{idText}</div>
-                <div style={{fontSize:10,color:"#b6b1d6",marginTop:3}}>{state.obj?.vehicle||"cryptographically signed"}</div>
-                {(P==="loading"||P==="empty")&&<div style={{position:"absolute",left:0,right:0,height:"22%",background:"linear-gradient(180deg,transparent,rgba(52,211,153,.28),transparent)",animation:"vSweep 3.2s ease-in-out infinite"}}/>}
-                <div style={{position:"absolute",right:0,bottom:0,width:56,height:56,borderRadius:"50%",border:`2px solid ${seal.bd}`,animation:"vRing 2.4s ease-out infinite"}}/>
-                <div key={P} style={{position:"absolute",right:-14,bottom:-14,width:56,height:56,borderRadius:"50%",background:seal.bg,border:`2px solid ${seal.bd}`,display:"flex",alignItems:"center",justifyContent:"center",color:"#eafff6",fontSize:24,boxShadow:`0 0 26px -4px ${seal.bd}`,animation:"vSeal 1s ease-out both"}}>{seal.gl}</div>
-              </div>
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+              <svg viewBox="-145 -44 320 182" aria-hidden="true" style={{width:"78%",maxWidth:300,filter:`drop-shadow(0 24px 44px ${seal.bd}44)`}}>
+                <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g className="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
+              </svg>
             </div>
+            <div key={P} style={{position:"absolute",right:16,bottom:52,zIndex:3,width:48,height:48,borderRadius:"50%",background:seal.bg,border:`2px solid ${seal.bd}`,display:"flex",alignItems:"center",justifyContent:"center",color:"#eafff6",fontSize:21,boxShadow:`0 0 26px -4px ${seal.bd}`,animation:"vSeal 1s ease-out both"}}>{seal.gl}</div>
             <div style={{position:"relative",zIndex:2,display:"inline-flex",alignItems:"center",gap:7,fontSize:11,fontWeight:700,color:"#5dcaa5",background:"rgba(52,211,153,.12)",border:"1px solid rgba(52,211,153,.35)",borderRadius:8,padding:"6px 11px",alignSelf:"flex-start"}}>Tamper-proof · nothing stored</div>
           </div>
 
