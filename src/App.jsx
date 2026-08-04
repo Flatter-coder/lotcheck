@@ -5710,6 +5710,7 @@ async function verifyReportSignature(payloadB64url, sigB64url, keyId){
 function VerifyPage(){
   const [state,setState]=useState({phase:"loading"});
   const [input,setInput]=useState("");
+  const [hint,setHint]=useState("");
   async function runVerify(d,id,s,k){
     setState({phase:"loading"});
     try{
@@ -5727,10 +5728,21 @@ function VerifyPage(){
   }
   useEffect(()=>{ const q=new URLSearchParams(window.location.search); runVerify(q.get("d"),q.get("id"),q.get("s"),q.get("k")); },[]);
   function verifyFromInput(){
-    const raw=(input||"").trim(); if(!raw) return;
+    const raw=(input||"").trim(); if(!raw){ setHint("Paste the verify link from your LotCheck report, or scan the QR on the PDF."); return; }
     let d=null,id=null,s=null,k=null;
     try{ const u=new URL(raw); d=u.searchParams.get("d"); id=u.searchParams.get("id"); s=u.searchParams.get("s"); k=u.searchParams.get("k"); }
     catch{ try{ const qs=raw.includes("?")?raw.slice(raw.indexOf("?")+1):raw; const p=new URLSearchParams(qs); d=p.get("d"); id=p.get("id"); s=p.get("s"); k=p.get("k"); }catch{} }
+    if(!d){
+      // No payload to verify. The most common mistake: pasting the report ID
+      // (e.g. LC-5369-4D9), which is a one-way fingerprint — nothing is stored
+      // to look it up. Point the user to the full verify link / QR instead.
+      const looksLikeId=/^LC[-\s]?[0-9A-Z]{3,4}[-\s]?[0-9A-Z]{2,4}$/i.test(raw);
+      setHint(looksLikeId
+        ? "That's the report ID — it can't be checked on its own (nothing is stored to look it up). Use the “Copy verify link” button on your report, or scan the QR on the emailed PDF. The link looks like lotcheck.ca/verify?d=…"
+        : "That doesn't look like a LotCheck verify link. Paste the full link — it starts with lotcheck.ca/verify?d=… — or scan the QR on the PDF.");
+      return;
+    }
+    setHint("");
     runVerify(d,id,s,k);
   }
 
@@ -5792,10 +5804,12 @@ function VerifyPage(){
               <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:"#fff"}}>Is this LotCheck report real?</div>
               <div style={{fontSize:13,color:"#b6b1d6",lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the report link, or scan the QR on any LotCheck PDF. We recompute its fingerprint and check the signature — right here, nothing stored."}</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.14)",borderRadius:10,padding:"11px 12px",fontSize:12.5,color:"#e9e6f5",outline:"none",boxSizing:"border-box"}}/>
+                <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:"rgba(255,255,255,.06)",border:`1px solid ${hint?"rgba(240,153,123,.6)":"rgba(255,255,255,.14)"}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:"#e9e6f5",outline:"none",boxSizing:"border-box"}}/>
                 <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
               </div>
-              <div style={{marginTop:12,fontSize:11.5,color:"#8b86ad"}}>Or scan the QR on the printed report.</div>
+              {hint
+                ? <div style={{marginTop:11,fontSize:12,lineHeight:1.55,color:"#f0b79b",background:"rgba(240,153,123,.1)",border:"1px solid rgba(240,153,123,.28)",borderRadius:9,padding:"9px 11px"}}>{hint}</div>
+                : <div style={{marginTop:12,fontSize:11.5,color:"#8b86ad"}}>Paste the link, or scan the QR on the printed report — the report ID alone can’t be checked.</div>}
             </>)}
             {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
               const o=state.obj||{};
