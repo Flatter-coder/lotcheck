@@ -5747,12 +5747,25 @@ function VerifyPage(){
   @keyframes vRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
   @keyframes vGrid{0%{background-position:0 0}100%{background-position:0 26px}}
   @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK{animation:none!important}}
-  @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}`;
+  @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
+  @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
+  .vnav-links a:hover{color:#fff!important}`;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}><span style={{fontSize:13,color:"#c3bfe0"}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||"#eafff6",whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/live-price-index?view=alerts"],["Verify","/verify"]];
   return (
-    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",padding:"28px 18px",display:"flex",justifyContent:"center",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
+      <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
+          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <div className="vnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#34d399":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          </div>
+          <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+      <div style={{padding:"28px 18px",display:"flex",justifyContent:"center"}}>
       <div style={{width:"100%",maxWidth:920}}>
         <div style={{color:"#7f77dd",fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
         <div className="vgc" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:18,overflow:"hidden"}}>
@@ -5817,6 +5830,7 @@ function VerifyPage(){
           </div>
         </div>
         <p style={{color:"#8b86ad",fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
+      </div>
       </div>
     </div>
   );
