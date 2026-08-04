@@ -6484,6 +6484,19 @@ function QuoteCheckPage(){
           return;
         }
       }
+      // The listing couldn't be read (JS-rendered / bot-protected dealer site,
+      // no price found). NOT charged. Steer to the photo/PDF upload, which reads
+      // the real quote reliably — don't dump an empty "report" on the buyer.
+      if(res.status===422){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="unreadable_listing"){
+          // Existing error card already shows an "Upload a screenshot instead →"
+          // CTA for url attempts; the message tells them they weren't charged.
+          setStatus("error");
+          setErrorMsg(body.message||"We couldn't read the price on this dealer listing. Upload a screenshot or PDF of the quote instead — you haven't been charged.");
+          return;
+        }
+      }
       const data=await res.json();
       if(!res.ok||data.error){
         setStatus("error");
