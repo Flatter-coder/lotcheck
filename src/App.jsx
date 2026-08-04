@@ -5727,12 +5727,15 @@ function guillocheRings(seed,cx,cy,R,steps){
   return [ring(1,0),ring(1,2.4),ring(0.66,0),ring(0.66,1.9)];
 }
 function Seal({seed,size=120,gid,ink="#eafff6"}){
-  const S=size, cx=S/2, cy=S/2, R=S*0.40;
+  const S=size, cx=S/2, cy=S/2, R=S*0.34;
   const rings=guillocheRings(seed,cx,cy,R,700);
   const id=gid||("sg"+seed);
   return (
     <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} aria-hidden="true">
       <defs><radialGradient id={id}><stop offset="0" stopColor="#5dcaa5"/><stop offset="0.6" stopColor="#8b7be6"/><stop offset="1" stopColor="#6d3bd6"/></radialGradient></defs>
+      {/* certificate frame — makes it read as a proper stamp/seal */}
+      <circle cx={cx} cy={cy} r={S*0.47} fill="none" stroke="#8b7be6" strokeWidth={S*0.012} opacity="0.9"/>
+      <circle cx={cx} cy={cy} r={S*0.43} fill="none" stroke="#5dcaa5" strokeWidth={S*0.006} opacity="0.8"/>
       {rings.map((d,i)=><path key={i} d={d} fill="none" stroke={`url(#${id})`} strokeWidth={i%2?0.5:0.75} opacity={i%2?0.55:0.95}/>)}
       <circle cx={cx} cy={cy} r={R*0.30} fill="none" stroke="#8b7be6" strokeWidth="0.8" opacity="0.7"/>
       <text x={cx} y={cy+3.5} textAnchor="middle" fontFamily="ui-monospace,Menlo,Consolas,monospace" fontSize={S*0.09} fontWeight="700" fill={ink}>LC</text>
