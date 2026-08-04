@@ -5705,6 +5705,66 @@ async function verifyReportSignature(payloadB64url, sigB64url, keyId){
   }catch(e){ return false; }
 }
 
+// ── Unique visual signature ("LotCheck seal"). A guilloché rosette whose exact
+// shape is DERIVED from the report's ECDSA signature (falls back to reportId),
+// so every report's seal is different and none can be reproduced without our
+// private key — alter any figure and the signature (and the seal) changes. The
+// generator is byte-identical to the one in the email edge function so the seal
+// matches on-screen, on the PDF, and on /verify.
+function sealSeed(s){ let h=2166136261>>>0; const str=String(s||"lotcheck"); for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function guillocheRings(seed,cx,cy,R,steps){
+  const rnd=mulberry32(seed);
+  const petal=4+Math.floor(rnd()*7), fine=16+Math.floor(rnd()*26), ph=rnd()*6.28318;
+  const a1=R*(0.10+rnd()*0.13), a2=R*(0.04+rnd()*0.07);
+  const ring=(scale,off)=>{ let d=""; const n=steps||600; for(let i=0;i<=n;i++){ const t=i/n*6.28318; const rr=R*scale+a1*Math.sin(petal*t+ph)+a2*Math.sin(fine*t); const x=cx+(rr+off)*Math.cos(t), y=cy+(rr+off)*Math.sin(t); d+=(i?"L":"M")+x.toFixed(1)+" "+y.toFixed(1)+" "; } return d; };
+  return [ring(1,0),ring(1,2.4),ring(0.66,0),ring(0.66,1.9)];
+}
+function Seal({seed,size=120,gid,ink="#eafff6"}){
+  const S=size, cx=S/2, cy=S/2, R=S*0.40;
+  const rings=guillocheRings(seed,cx,cy,R,700);
+  const id=gid||("sg"+seed);
+  return (
+    <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} aria-hidden="true">
+      <defs><radialGradient id={id}><stop offset="0" stopColor="#5dcaa5"/><stop offset="0.6" stopColor="#8b7be6"/><stop offset="1" stopColor="#6d3bd6"/></radialGradient></defs>
+      {rings.map((d,i)=><path key={i} d={d} fill="none" stroke={`url(#${id})`} strokeWidth={i%2?0.5:0.75} opacity={i%2?0.55:0.95}/>)}
+      <circle cx={cx} cy={cy} r={R*0.30} fill="none" stroke="#8b7be6" strokeWidth="0.8" opacity="0.7"/>
+      <text x={cx} y={cy+3.5} textAnchor="middle" fontFamily="ui-monospace,Menlo,Consolas,monospace" fontSize={S*0.09} fontWeight="700" fill={ink}>LC</text>
+    </svg>
+  );
+}
+// ── Verification shield (replaces the padlock). state: "idle" | "ok" | "bad".
+// When "ok" the shield fills and the check draws in; "bad" shows an X. CSS
+// keyframes (shFill/shDraw/shCheck) are injected by the host page's <style>.
+function Shield({state="idle",size=64}){
+  const col=state==="ok"?"#34d399":state==="bad"?"#f0997b":"#8b7be6";
+  const bg=state==="ok"?"#0f6e56":state==="bad"?"#7a2417":"#2a2740";
+  const P="M50 6 L90 22 L90 58 C90 90 72 106 50 114 C28 106 10 90 10 58 L10 22 Z";
+  const cls=state==="ok"?"sh-anim":"";
+  return (
+    <svg className={cls} width={size} height={size*1.2} viewBox="0 0 100 120" aria-hidden="true">
+      <defs><clipPath id={"scl"+state}><path d={P}/></clipPath></defs>
+      <path d={P} fill={bg} opacity="0.5"/>
+      <g clipPath={`url(#scl${state})`}><rect className="sh-fill" x="0" y="0" width="100" height="120" fill={col} opacity="0.32"/></g>
+      <path className="sh-outline" d={P} fill="none" stroke={col} strokeWidth="4" strokeDasharray="420"/>
+      {state==="bad"
+        ? <path d="M36 44 L64 76 M64 44 L36 76" stroke="#fff" strokeWidth="7" strokeLinecap="round" fill="none"/>
+        : state==="idle"
+        ? <g><rect x="40" y="52" width="20" height="18" rx="3" fill="none" stroke="#cfc9f5" strokeWidth="4"/><path d="M43 52 v-6 a7 7 0 0 1 14 0 v6" fill="none" stroke="#cfc9f5" strokeWidth="4"/></g>
+        : <path className="sh-check" d="M34 60 L46 74 L70 40" fill="none" stroke="#eafff6" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>}
+    </svg>
+  );
+}
+const SHIELD_CSS=`
+  .sh-fill{transform:translateY(60px)}
+  .sh-anim .sh-fill{animation:shFill 3.6s ease-in-out infinite}
+  @keyframes shFill{0%,8%{transform:translateY(60px)}42%,92%{transform:translateY(0)}100%{transform:translateY(60px)}}
+  .sh-anim .sh-outline{animation:shDraw 3.6s ease-in-out infinite}
+  @keyframes shDraw{0%{stroke-dashoffset:420}30%,100%{stroke-dashoffset:0}}
+  .sh-anim .sh-check{stroke-dasharray:80;animation:shCheck 3.6s ease-in-out infinite}
+  @keyframes shCheck{0%,45%{stroke-dashoffset:80;opacity:0}55%{opacity:1}62%,92%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:80;opacity:0}}
+  @media(prefers-reduced-motion:reduce){.sh-fill{transform:translateY(0)!important}.sh-anim *{animation:none!important}}`;
+
 // ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
 // the report's ID + figures. Purely client-side; nothing is fetched or stored.
 function VerifyPage(){
@@ -5723,7 +5783,7 @@ function VerifyPage(){
       // Provenance (strongest): a valid signature proves LotCheck issued it AND
       // nothing changed. Integrity (fallback): unsigned -> only id-match.
       const phase=signed?(sigValid?"signed":"altered"):(id?(id===rid?"ok":"altered"):"unclaimed");
-      setState({phase,id:rid,claimed:id,obj,signed,sigValid});
+      setState({phase,id:rid,claimed:id,obj,signed,sigValid,sig:s});
     }catch(e){ setState({phase:"bad"}); }
   }
   useEffect(()=>{ const q=new URLSearchParams(window.location.search); runVerify(q.get("d"),q.get("id"),q.get("s"),q.get("k")); },[]);
@@ -5765,7 +5825,7 @@ function VerifyPage(){
   @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.lc-gate-car,.lc-gate-window{animation:none!important}}
   @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
   @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
-  .vnav-links a:hover{color:#fff!important}`;
+  .vnav-links a:hover{color:#fff!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}><span style={{fontSize:13,color:"#c3bfe0"}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||"#eafff6",whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
   const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/live-price-index?view=alerts"],["Verify","/verify"]];
@@ -5793,7 +5853,7 @@ function VerifyPage(){
                 <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g className="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
               </svg>
             </div>
-            <div key={P} style={{position:"absolute",right:16,bottom:52,zIndex:3,width:48,height:48,borderRadius:"50%",background:seal.bg,border:`2px solid ${seal.bd}`,display:"flex",alignItems:"center",justifyContent:"center",color:"#eafff6",fontSize:21,boxShadow:`0 0 26px -4px ${seal.bd}`,animation:"vSeal 1s ease-out both"}}>{seal.gl}</div>
+            <div key={P} style={{position:"absolute",right:14,bottom:44,zIndex:3,filter:`drop-shadow(0 0 16px ${seal.bd}66)`,animation:"vSeal 1s ease-out both"}}><Shield state={authentic?"ok":isBad?"bad":"idle"} size={56}/></div>
             <div style={{position:"relative",zIndex:2,display:"inline-flex",alignItems:"center",gap:7,fontSize:11,fontWeight:700,color:"#5dcaa5",background:"rgba(52,211,153,.12)",border:"1px solid rgba(52,211,153,.35)",borderRadius:8,padding:"6px 11px",alignSelf:"flex-start"}}>Tamper-proof · nothing stored</div>
           </div>
 
@@ -5829,6 +5889,12 @@ function VerifyPage(){
                   {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#f0997b"}}>{state.id}</b>. A figure was changed after issue.</>}
                   {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
                 </div>
+                {P==="signed"&&state.sig&&(
+                  <div style={{display:"flex",alignItems:"center",gap:12,margin:"2px 0 14px",padding:"10px 12px",background:"rgba(127,119,221,.08)",border:"1px solid rgba(127,119,221,.25)",borderRadius:10}}>
+                    <div style={{flex:"none"}}><Seal seed={sealSeed(state.sig)} size={66} gid="vseal"/></div>
+                    <div style={{fontSize:11.5,color:"#c3bfe0",lineHeight:1.5}}>This report's <b style={{color:"#a99ff0"}}>unique seal</b> — drawn from its signature. No other report has it, and it can't be reproduced without LotCheck's key.</div>
+                  </div>
+                )}
                 <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"14px 16px"}}>
                   <div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{o.vehicle||"Vehicle"}</div>
                   <div style={{fontSize:12.5,color:"#b6b1d6",fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
@@ -7605,9 +7671,12 @@ function QuoteCheckPage(){
 
               {analysis.reportId&&(
                 <div style={cardStyle}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>🔒 Verify &amp; share this report{analysis.sig&&<span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>🔏 SIGNED</span>}</div>
-                    <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>🔒 Verify &amp; share this report{analysis.sig&&<span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>🔏 SIGNED</span>}</div>
+                      <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint,marginTop:3}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                    </div>
+                    {(analysis.sig||analysis.reportId)&&<div style={{flex:"none",textAlign:"center"}}><Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={62} gid="rseal" ink="#33305a"/><div style={{fontSize:8.5,fontWeight:700,letterSpacing:.5,color:C.inkFaint,marginTop:1}}>UNIQUE SEAL</div></div>}
                   </div>
                   <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
                     {analysis.sig
@@ -7676,7 +7745,7 @@ function TrustPage(){
   const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
   const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
   @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
-  .tnav-links a:hover{color:#fff!important}`;
+  .tnav-links a:hover{color:#fff!important}`+SHIELD_CSS;
   return (
     <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif",color:"#e9e6f5"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
@@ -7696,7 +7765,7 @@ function TrustPage(){
           <div style={{fontSize:26,fontWeight:800,color:"#fff",margin:"8px 0 6px"}}>Is it a real LotCheck report?</div>
           <div style={{fontSize:14.5,color:"#b6b1d6",lineHeight:1.6}}>Every genuine LotCheck report proves itself. Scammers can copy a look — they can't copy the math. Here's the 10-second check.</div>
           <div style={{marginTop:16,display:"flex",gap:12,alignItems:"center",background:"rgba(52,211,153,.1)",border:"1px solid rgba(52,211,153,.3)",borderRadius:12,padding:"14px 16px"}}>
-            <div style={{flex:"none",width:44,height:44,borderRadius:"50%",background:"#0f6e56",border:"2px solid #34d399",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"#eafff6"}}>✓</div>
+            <div style={{flex:"none"}}><Shield state="ok" size={52}/></div>
             <div style={{fontSize:13.5,lineHeight:1.55,color:"#dffff2"}}>The one rule: scan the QR (or open the verify link) — it must open <b style={{color:"#5dcaa5"}}>lotcheck.ca/verify</b> and show a green <b style={{color:"#5dcaa5"}}>“Signed &amp; authentic”</b> seal. No green check = not a real LotCheck report.</div>
           </div>
         </div>
