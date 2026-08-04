@@ -5937,6 +5937,12 @@ function QuoteCheckPage(){
   const [verifyCopied,setVerifyCopied]=useState(false);
   const [histStatus,setHistStatus]=useState("idle"); // idle | loading | done | error
   const [history,setHistory]=useState(null);
+  const [scriptCopied,setScriptCopied]=useState(false);
+  function copyCounterScript(){
+    const cs=analysis?.counterScript; if(!cs?.moves?.length) return;
+    const text=cs.moves.map((m,i)=>`${i+1}. ${m.say}`).join("\n");
+    try{ navigator.clipboard.writeText(text).then(()=>{setScriptCopied(true);setTimeout(()=>setScriptCopied(false),2200);}); }catch(e){}
+  }
 
   // Opt-in, PAID full vehicle history (VinAudit). Deliberately NOT automatic —
   // the buyer clicks to pull it, so the $3 lookup only runs on demand.
@@ -7249,6 +7255,35 @@ function QuoteCheckPage(){
                       {d.kind==="within_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is within {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). Nothing to flag here.</>}
                     </div>
                     <a href={d.source} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:7}}>Source ↗</a>
+                  </div>
+                );
+              })()}
+
+              {/* Counter-script — the actionable capstone: exactly what to say to
+                  get a better deal, aggregated from every safeguard above.
+                  Green-when-clean if there's nothing to push on. */}
+              {analysis.counterScript?.moves?.length>0&&(()=>{
+                const cs=analysis.counterScript;
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${(cs.clean?C.teal:C.tealInk)}55`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>{cs.clean?"Say this to confirm":"What to say — your counter-script"}</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>USE ON THE CALL</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5,marginBottom:10}}>
+                      {cs.clean
+                        ?"This deal looks straight — no add-ons or traps flagged. Just lock in the number:"
+                        :"Read these to the dealer, in order. Every line comes from a finding above — say them and hold."}
+                    </div>
+                    <div>
+                      {cs.moves.map((mv,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,padding:"9px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                          <span style={{flexShrink:0,width:20,height:20,borderRadius:999,background:C.tealBg,color:C.tealInk,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</span>
+                          <div style={{fontSize:13.5,color:C.ink,lineHeight:1.5}}>{mv.say}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={copyCounterScript} style={{marginTop:12,width:"100%",background:scriptCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{scriptCopied?"✓ Copied — paste it into your notes":"Copy script"}</button>
                   </div>
                 );
               })()}
