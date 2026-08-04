@@ -5844,6 +5844,7 @@ function VerifyPage(){
           </div>
         </div>
         <p style={{color:"#8b86ad",fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
+        <a href="/real" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:700,color:"#7f77dd",textDecoration:"none"}}>Worried about fakes? How to spot a real LotCheck report →</a>
       </div>
       </div>
     </div>
@@ -7666,6 +7667,77 @@ function QuoteCheckPage(){
   );
 }
 
+// Trust page (/real): turns the cryptographic signing into user-facing brand
+// protection — how to tell a genuine, verifiable LotCheck report from a fake.
+// VinAudit can only post a "beware" banner; we can prove authenticity, so this
+// page teaches the one-scan check. Nav on top per the site-wide rule.
+function TrustPage(){
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/live-price-index?view=alerts"],["Verify","/verify"]];
+  const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
+  const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
+  @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
+  .tnav-links a:hover{color:#fff!important}`;
+  return (
+    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif",color:"#e9e6f5"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
+          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {NAV.map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
+          </div>
+          <a href="/quote-check" className="tnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+
+      <div style={{maxWidth:720,margin:"0 auto",padding:"28px 18px"}}>
+        <div style={{background:"radial-gradient(120% 90% at 30% 8%,#221f3a,#0e0b1c)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:24}}>
+          <div style={{fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:800,color:"#7f77dd",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>LotCheck · Trust</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#fff",margin:"8px 0 6px"}}>Is it a real LotCheck report?</div>
+          <div style={{fontSize:14.5,color:"#b6b1d6",lineHeight:1.6}}>Every genuine LotCheck report proves itself. Scammers can copy a look — they can't copy the math. Here's the 10-second check.</div>
+          <div style={{marginTop:16,display:"flex",gap:12,alignItems:"center",background:"rgba(52,211,153,.1)",border:"1px solid rgba(52,211,153,.3)",borderRadius:12,padding:"14px 16px"}}>
+            <div style={{flex:"none",width:44,height:44,borderRadius:"50%",background:"#0f6e56",border:"2px solid #34d399",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"#eafff6"}}>✓</div>
+            <div style={{fontSize:13.5,lineHeight:1.55,color:"#dffff2"}}>The one rule: scan the QR (or open the verify link) — it must open <b style={{color:"#5dcaa5"}}>lotcheck.ca/verify</b> and show a green <b style={{color:"#5dcaa5"}}>“Signed &amp; authentic”</b> seal. No green check = not a real LotCheck report.</div>
+          </div>
+        </div>
+
+        <div className="tsteps" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,margin:"18px 0"}}>
+          {[["1","Find the QR code at the bottom of the PDF, or the verify link in your email."],["2","Scan it. It opens lotcheck.ca/verify and re-checks the report live."],["3","Green “Signed & authentic” = real. Red or no result = fake or altered."]].map(([n,t])=>(
+            <div key={n} style={card}>
+              <div style={{width:24,height:24,borderRadius:"50%",background:"#2FA79A",color:"#fff",fontWeight:900,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>{n}</div>
+              <p style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,margin:0}}>{t}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="tcols" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div style={{...card,background:"rgba(127,119,221,.08)",borderColor:"rgba(127,119,221,.3)"}}>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#a99ff0"}}>🔒 Why a fake can't pass</h3>
+            <ul style={{margin:0,padding:0}}>
+              {["Each report is cryptographically signed with a key only LotCheck holds — can't be forged.","The report ID is a fingerprint of its contents — change one figure and it stops matching.","The check runs on our site with our public key — a copycat site can't fake a pass.","We store nothing — the proof travels inside the link."].map((t,i)=>(
+                <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0}}>·</span>{t}</li>
+              ))}
+            </ul>
+          </div>
+          <div style={{...card,background:"rgba(240,153,123,.08)",borderColor:"rgba(240,153,123,.3)"}}>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#f0b79b"}}>⚠ Red flags of a fake</h3>
+            <ul style={{margin:0,padding:0}}>
+              {["Won't verify at lotcheck.ca/verify — or has no QR/link at all.","Shows a “verified” result on some other website.","Report ID fails or shows “altered.”","Came from a look-alike domain (the real site is lotcheck.ca).","Asks you to pay on an unfamiliar site."].map((t,i)=>(
+                <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0,color:"#f0997b"}}>›</span>{t}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div style={{marginTop:20,textAlign:"center"}}>
+          <a href="/verify" style={{display:"inline-block",background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:15,textDecoration:"none",padding:"13px 26px",borderRadius:11}}>Verify a report now →</a>
+          <div style={{fontSize:11.5,color:"#8b86ad",marginTop:9}}>Nothing is stored. The check runs from the report's own link.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
 // and quote-check page happens here by choosing which fully separate
@@ -7676,6 +7748,7 @@ export default function App(){
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/verify") ? <VerifyPage/>
+        : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
         : <LotCheckApp/>}
       <Analytics/>
