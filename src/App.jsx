@@ -7167,6 +7167,41 @@ function QuoteCheckPage(){
                   of truth the page's own fuelType label isn't -- a stale
                   inventory "Gas" read must not hide a real EV rebate) and reused
                   by both the hero tile and this card so they always agree. ── */}
+              {/* S3 — "What you'll really pay": reconcile the selling price up to
+                  the real out-the-door, splitting unavoidable fees from removable
+                  dealer add-ons so the buyer sees exactly how much markup they
+                  can decline. See dealer-tactics-safeguards.md (S3). */}
+              {analysis.reconciliation&&(()=>{
+                const r=analysis.reconciliation;
+                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const removable=Number(r.addonsTotal)||0, feesT=Number(r.feesTotal)||0, added=Number(r.addedOnTop)||0;
+                if(!added&&r.sellingPrice==null) return null;
+                const names=(r.addons||[]).map(a=>a.name).filter(Boolean);
+                const Row=({label,val,sub,tone,strong})=>(
+                  <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"8px 0",borderTop:`1px solid ${C.line}`}}>
+                    <div><div style={{fontSize:13,fontWeight:strong?800:600,color:C.ink}}>{label}</div>{sub&&<div style={{fontSize:11,color:C.inkFaint,marginTop:1}}>{sub}</div>}</div>
+                    <div style={{fontSize:strong?16:14,fontWeight:strong?1000:800,color:tone==="coral"?C.coralInk:C.ink,whiteSpace:"nowrap"}}>{val}</div>
+                  </div>
+                );
+                return (
+                  <div style={cardStyle}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What you'll really pay</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>OUT-THE-DOOR</span>
+                    </div>
+                    {r.sellingPrice!=null&&<Row label="Selling price" val={m(r.sellingPrice)}/>}
+                    {feesT>0&&<Row label="Unavoidable fees" sub="doc, registration, freight, tax" val={`+ ${m(feesT)}`}/>}
+                    {removable>0&&<Row label="Dealer add-ons — removable" sub="negotiable · you can decline these" val={`+ ${m(removable)}`} tone="coral"/>}
+                    {r.realPreTax!=null&&<Row label="Real price, before tax" val={m(r.realPreTax)} strong/>}
+                    {removable>0&&(
+                      <div style={{marginTop:10,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:11,padding:"11px 13px",fontSize:12.5,color:C.ink,lineHeight:1.55}}>
+                        <b style={{color:C.coralInk}}>${removable.toLocaleString()}</b> of this quote is <b>removable dealer add-ons</b>{names.length?` (${names.slice(0,3).join(", ")}${names.length>3?"…":""})`:""}. They're negotiable — ask to have them taken off before you sign.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
                 <div style={cardStyle}>
                   <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
