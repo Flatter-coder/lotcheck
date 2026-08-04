@@ -5710,6 +5710,30 @@ async function verifyReportSignature(payloadB64url, sigB64url, keyId){
     return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, key, b64urlToBytes(sigB64url), b64urlToBytes(payloadB64url));
   }catch(e){ return false; }
 }
+// Verify a signature directly over payload BYTES (the decompressed canonical).
+async function verifyReportSignatureBytes(payloadBytes, sigB64url, keyId){
+  try{
+    const pubB64 = REPORT_PUBLIC_KEYS[keyId];
+    if(!pubB64 || !sigB64url) return false;
+    const spki = Uint8Array.from(atob(pubB64), c=>c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("spki", spki, {name:"ECDSA",namedCurve:"P-256"}, false, ["verify"]);
+    return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, key, b64urlToBytes(sigB64url), payloadBytes);
+  }catch(e){ return false; }
+}
+// Verify payloads are gzip-compressed (so the QR stays scannable). Detect the
+// gzip magic header and inflate; legacy uncompressed payloads pass through
+// unchanged, so old report links still verify.
+async function maybeGunzip(bytes){
+  try{
+    if(bytes.length>=2 && bytes[0]===0x1f && bytes[1]===0x8b && typeof DecompressionStream!=="undefined"){
+      const ds=new DecompressionStream("gzip");
+      const w=ds.writable.getWriter(); w.write(bytes); w.close();
+      const ab=await new Response(ds.readable).arrayBuffer();
+      return new Uint8Array(ab);
+    }
+  }catch(e){ /* fall through to raw */ }
+  return bytes;
+}
 
 // ── Unique visual signature ("LotCheck seal"). A guilloché rosette whose exact
 // shape is DERIVED from the report's ECDSA signature (falls back to reportId),
@@ -5784,11 +5808,15 @@ function VerifyPage(){
     setState({phase:"loading"});
     try{
       if(!d){ setState({phase:"empty"}); return; }
-      const str=b64urlDecode(d);
+      // Payload is gzip-compressed (falls back to raw for legacy links). Inflate
+      // to the canonical string, then hash + verify the signature over those
+      // exact bytes — the same bytes the server signed.
+      const canonBytes=await maybeGunzip(b64urlToBytes(d));
+      const str=new TextDecoder().decode(canonBytes);
       const obj=JSON.parse(str);
       const rid=makeReportId(await sha256Hex(str));   // recomputed from the link
       const signed=!!(s&&k);
-      const sigValid=signed?await verifyReportSignature(d,s,k):false;
+      const sigValid=signed?await verifyReportSignatureBytes(canonBytes,s,k):false;
       // Provenance (strongest): a valid signature proves LotCheck issued it AND
       // nothing changed. Integrity (fallback): unsigned -> only id-match.
       const phase=signed?(sigValid?"signed":"altered"):(id?(id===rid?"ok":"altered"):"unclaimed");
