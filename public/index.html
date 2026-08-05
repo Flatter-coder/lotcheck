@@ -750,6 +750,55 @@ footer{padding:34px 0 44px}
   </div>
 </section>
 
+<section id="orrery3d" style="padding:64px 20px">
+  <div class="wrap" style="max-width:960px;margin:0 auto;text-align:center">
+    <div style="font-size:12px;letter-spacing:3px;text-transform:uppercase;font-weight:800;color:#2a9d8f;margin-bottom:8px">Deal Orrery · 3D</div>
+    <h2 style="margin:0 0 8px">See your deal in 3D.</h2>
+    <p style="max-width:560px;margin:0 auto 22px;color:var(--muted,#5B5885)">Your quote is the core. Every fee orbits it — bigger sphere, bigger charge. <b style="color:#d6533f">Flagged fees glow red.</b> The teal ring is MSRP; a deal over sticker floats above it.</p>
+    <div id="homeOrrery" style="height:440px;border-radius:20px;overflow:hidden;background:radial-gradient(120% 90% at 50% -10%,#141640,#04050c 62%);position:relative;box-shadow:0 30px 70px -30px rgba(10,12,40,.7)"></div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:16px;font-size:12px;color:var(--muted,#8f8ab8)">
+      <span>Auto-rotating preview · real WebGL</span>
+      <a href="/quote-check" style="display:inline-flex;align-items:center;gap:6px;background:#2a9d8f;color:#fff;font-weight:800;font-size:14px;text-decoration:none;padding:10px 20px;border-radius:12px">Try it on your quote →</a>
+    </div>
+  </div>
+  <script type="module">
+  (async function(){
+    var host=document.getElementById('homeOrrery'); if(!host) return;
+    var THREE; try{ THREE=await import('https://unpkg.com/three@0.160.0/build/three.module.js'); }catch(e){ return; }
+    var deal={asking:68900,msrp:64900,fees:[{a:2595,f:false},{a:1499,f:true},{a:699,f:true},{a:299,f:true},{a:249,f:false},{a:199,f:false}]};
+    try{
+      var W=function(){return host.clientWidth||900}, H=function(){return 440};
+      var scene=new THREE.Scene(); scene.fog=new THREE.FogExp2(0x04050c,0.02);
+      var cam=new THREE.PerspectiveCamera(52,W()/H(),0.1,400); cam.position.set(15,10,21); cam.lookAt(0,1,0);
+      var rnd; try{ rnd=new THREE.WebGLRenderer({antialias:true,alpha:true}); }catch(e){ return; }
+      rnd.setSize(W(),H()); rnd.setPixelRatio(Math.min(devicePixelRatio,2)); host.appendChild(rnd.domElement);
+      scene.add(new THREE.AmbientLight(0x8899ff,0.6));
+      var key=new THREE.PointLight(0x35e0d0,120,140); key.position.set(0,7,0); scene.add(key);
+      var sg=new THREE.BufferGeometry(),N=700,pos=new Float32Array(N*3);
+      for(var i=0;i<N;i++){var r=60+Math.random()*120,t=Math.random()*6.283,p=Math.acos(2*Math.random()-1);pos[i*3]=r*Math.sin(p)*Math.cos(t);pos[i*3+1]=r*Math.cos(p);pos[i*3+2]=r*Math.sin(p)*Math.sin(t);}
+      sg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+      scene.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0x8b7be6,size:.5,transparent:true,opacity:.7})));
+      function halo(color,size){var c=document.createElement('canvas');c.width=c.height=128;var x=c.getContext('2d');var col=new THREE.Color(color),g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba('+(col.r*255|0)+','+(col.g*255|0)+','+(col.b*255|0)+',.9)');g.addColorStop(.4,'rgba('+(col.r*255|0)+','+(col.g*255|0)+','+(col.b*255|0)+',.25)');g.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=g;x.fillRect(0,0,128,128);var t=new THREE.Texture(c);t.needsUpdate=true;var s=new THREE.Sprite(new THREE.SpriteMaterial({map:t,blending:THREE.AdditiveBlending,transparent:true,depthWrite:false}));s.scale.set(size,size,1);return s;}
+      var sys=new THREE.Group(); scene.add(sys);
+      var ring=new THREE.Mesh(new THREE.TorusGeometry(9,0.06,12,120),new THREE.MeshBasicMaterial({color:0x35e0d0,transparent:true,opacity:.55})); ring.rotation.x=Math.PI/2; sys.add(ring);
+      var disc=new THREE.Mesh(new THREE.CircleGeometry(9,64),new THREE.MeshBasicMaterial({color:0x35e0d0,transparent:true,opacity:.05,side:THREE.DoubleSide})); disc.rotation.x=-Math.PI/2; sys.add(disc);
+      var over=deal.asking-deal.msrp, coreY=Math.max(0,over)/900;
+      var core=new THREE.Group(); core.position.y=coreY; sys.add(core);
+      var cm=new THREE.Mesh(new THREE.IcosahedronGeometry(2.2,1),new THREE.MeshStandardMaterial({color:0x0b3b39,emissive:0x35e0d0,emissiveIntensity:.9,metalness:.3,roughness:.35,flatShading:true})); core.add(cm); core.add(halo(0x35e0d0,10));
+      var maxA=Math.max.apply(null,deal.fees.map(function(f){return f.a})),orbits=[];
+      deal.fees.forEach(function(f,i){var rad=6.5+i*2.2;var pv=new THREE.Group();pv.rotation.x=(-14+i*5)*Math.PI/180;pv.rotation.z=i*7*Math.PI/180;pv.rotation.y=i*1.1;core.add(pv);
+        var pts=[];for(var a=0;a<=64;a++){var t=a/64*6.283;pts.push(new THREE.Vector3(Math.cos(t)*rad,0,Math.sin(t)*rad));}
+        pv.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:f.f?0xff6a4d:0x8b7be6,transparent:true,opacity:.28})));
+        var bp=new THREE.Group();pv.add(bp);var sz=.5+1.4*Math.sqrt(f.a/maxA),col=f.f?0xff6a4d:0x8b7be6;
+        var b=new THREE.Mesh(new THREE.SphereGeometry(sz,24,24),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:.7,roughness:.4}));b.position.x=rad;bp.add(b);var h=halo(col,sz*4.2);h.position.x=rad;bp.add(h);
+        orbits.push({bp:bp,sp:0.18+(deal.fees.length-i)*0.03});});
+      addEventListener('resize',function(){cam.aspect=W()/H();cam.updateProjectionMatrix();rnd.setSize(W(),H());});
+      var t0=0; (function loop(t){requestAnimationFrame(loop);var dt=(t-t0)/1000||0;t0=t;orbits.forEach(function(o){o.bp.rotation.y+=o.sp*dt});core.rotation.y+=0.15*dt;cm.rotation.x+=0.1*dt;sys.rotation.y+=0.12*dt;rnd.render(scene,cam);})(0);
+    }catch(e){}
+  })();
+  </script>
+</section>
+
 <section id="portal">
   <div class="wrap">
     <div class="sec-head rv">
