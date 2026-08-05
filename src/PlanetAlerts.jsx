@@ -100,15 +100,16 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
        vec3 cellId=floor(q*3.5);
        float flick=step(0.972,hash(cellId+floor(t*7.0)));
        col+=vec3(0.85,0.92,1.0)*flick*smoothstep(0.55,0.8,cloud)*uStorm*(1.0-dayA*0.6)*1.7;
-       // aurora ribbons near the poles
-       float pole=smoothstep(0.6,0.9,abs(u.y));
+       // aurora ribbons near the poles (brighter + wider)
+       float pole=smoothstep(0.48,0.92,abs(u.y));
        float ph=atan(u.z,u.x)*3.0+t*0.6+fbm4(vP*2.0)*4.0;
-       float rib=pow(sin(ph)*0.5+0.5,4.0);
-       col+=mix(vec3(0.20,1.0,0.6),vec3(0.4,0.55,1.0),0.5+0.5*sin(ph*0.5))*rib*pole*(1.0-dayA)*0.55;
-       float fres=pow(1.0-max(dot(N,normalize(vV)),0.0),3.0);float d=uDensity;
-       col+=vec3(0.22,0.85,1.0)*fres*d*(0.4+0.6*dayA);
-       col+=vec3(0.62,0.45,1.0)*pow(fres,1.6)*d*0.5*(1.0-dayA);
-       col.r+=fres*d*0.06;col.b+=fres*d*0.10;
+       float rib=pow(sin(ph)*0.5+0.5,3.0);
+       col+=mix(vec3(0.20,1.0,0.55),vec3(0.5,0.5,1.0),0.5+0.5*sin(ph*0.5))*rib*pole*(1.0-dayA)*0.95;
+       // atmosphere rim — softened so it's a thin edge, not a fat halo
+       float fres=pow(1.0-max(dot(N,normalize(vV)),0.0),3.2);float d=uDensity;
+       col+=vec3(0.22,0.80,1.0)*fres*d*(0.2+0.35*dayA);
+       col+=vec3(0.55,0.42,1.0)*pow(fres,1.7)*d*0.28*(1.0-dayA);
+       col.b+=fres*d*0.06;
        gl_FragColor=vec4(col,1.0);}`;
     const planetGeo = new THREE.SphereGeometry(1.5, 96, 96);
     const planet = new THREE.Mesh(planetGeo, new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag }));
@@ -118,14 +119,14 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     const spin = new THREE.Group(); spin.add(tiltGroup); scene.add(spin);
 
     // atmosphere glow shell
-    const glowGeo = new THREE.SphereGeometry(1.72, 64, 64);
+    const glowGeo = new THREE.SphereGeometry(1.63, 64, 64);
     const glow = new THREE.Mesh(glowGeo, new THREE.ShaderMaterial({
       transparent: true, blending: THREE.AdditiveBlending, side: THREE.BackSide, uniforms,
       vertexShader: `varying vec3 vN;varying vec3 vV;void main(){vN=normalize(mat3(modelMatrix)*normal);
         vec4 wp=modelMatrix*vec4(position,1.0);vV=normalize(cameraPosition-wp.xyz);gl_Position=projectionMatrix*viewMatrix*wp;}`,
       fragmentShader: `varying vec3 vN;varying vec3 vV;uniform float uDensity;
-        void main(){float f=pow(1.0-max(dot(normalize(vN),normalize(vV)),0.0),2.6);
-        gl_FragColor=vec4(mix(vec3(0.35,0.55,1.0),vec3(0.20,0.85,1.0),0.5),f*uDensity*0.8);}`,
+        void main(){float f=pow(1.0-max(dot(normalize(vN),normalize(vV)),0.0),3.4);
+        gl_FragColor=vec4(mix(vec3(0.30,0.55,1.0),vec3(0.25,0.80,1.0),0.5),f*(0.32+uDensity*0.16));}`,
     }));
     tiltGroup.add(glow);
 
@@ -141,16 +142,77 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ map: rtex, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
     ring.rotation.x = Math.PI / 2 * 0.92; tiltGroup.add(ring);
 
+    // ── orbiting satellites (little craft on tilted orbits) ──────────────────
+    const satBodyGeo = new THREE.BoxGeometry(0.07, 0.07, 0.11);
+    const panelGeo = new THREE.BoxGeometry(0.20, 0.006, 0.07);
+    const glintGeo = new THREE.SphereGeometry(0.022, 8, 8);
+    const satBodyMat = new THREE.MeshBasicMaterial({ color: 0xdfe7ff });
+    const panelMat = new THREE.MeshBasicMaterial({ color: 0x3a74ff });
+    const glintMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff });
+    const satPivots = [];
+    [{ r: 2.35, inc: 0.55, sp: 0.24, ph: 0 }, { r: 2.9, inc: -0.9, sp: -0.17, ph: 2.2 }, { r: 3.4, inc: 0.28, sp: 0.12, ph: 4.1 }].forEach((cfg) => {
+      const pivot = new THREE.Group(); pivot.rotation.x = cfg.inc; pivot.rotation.y = cfg.ph;
+      const sat = new THREE.Group();
+      const body = new THREE.Mesh(satBodyGeo, satBodyMat);
+      const p1 = new THREE.Mesh(panelGeo, panelMat); p1.position.x = 0.14;
+      const p2 = new THREE.Mesh(panelGeo, panelMat); p2.position.x = -0.14;
+      const glint = new THREE.Mesh(glintGeo, glintMat); glint.position.y = 0.06;
+      sat.add(body, p1, p2, glint); sat.position.x = cfg.r; sat.rotation.z = 0.4;
+      pivot.add(sat); scene.add(pivot); satPivots.push({ pivot, sp: cfg.sp });
+    });
+
+    // ── shooting comet (streaks across the far background, then reappears) ────
+    const cometHeadGeo = new THREE.SphereGeometry(0.05, 12, 12);
+    const cometTailGeo = new THREE.ConeGeometry(0.07, 1.2, 12, 1, true);
+    const cometHeadMat = new THREE.MeshBasicMaterial({ color: 0xeaf6ff });
+    const cometTailMat = new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const comet = new THREE.Group();
+    const cometHead = new THREE.Mesh(cometHeadGeo, cometHeadMat); cometHead.position.y = 0.6;   // apex = leading head
+    comet.add(cometHead, new THREE.Mesh(cometTailGeo, cometTailMat));
+    comet.visible = false; scene.add(comet);
+    const V_UP = new THREE.Vector3(0, 1, 0), cStart = new THREE.Vector3(), cEnd = new THREE.Vector3();
+    let cActive = false, cProg = 0, cSpeed = 0.6, cWait = 1.2, cIdle = 0;
+    const launchComet = () => {
+      const y = 1.6 + Math.random() * 3.0, z = -7 - Math.random() * 5, dir = Math.random() < 0.5 ? 1 : -1;
+      cStart.set(-11 * dir, y, z); cEnd.set(11 * dir, y - 2.2 - Math.random() * 2.0, z);
+      comet.quaternion.setFromUnitVectors(V_UP, cEnd.clone().sub(cStart).normalize());
+      cProg = 0; cSpeed = 0.5 + Math.random() * 0.35; cActive = true; comet.visible = true;
+    };
+
+    // ── background aurora curtain (northern-lights ribbons behind the planet) ─
+    const auroraGeo = new THREE.PlaneGeometry(36, 16);
+    const auroraMat = new THREE.ShaderMaterial({
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, uniforms: { uTime: uniforms.uTime },
+      vertexShader: `varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader: `precision highp float;varying vec2 vUv;uniform float uTime;
+        float h(float x){return fract(sin(x*127.1)*43758.5453);}
+        float n(float x){float i=floor(x),f=fract(x);return mix(h(i),h(i+1.0),f*f*(3.0-2.0*f));}
+        void main(){float x=vUv.x,y=vUv.y;
+          float base=0.32+n(x*6.0+uTime*0.15)*0.22+n(x*13.0-uTime*0.1)*0.12;
+          float band=smoothstep(base,base+0.03,y)*(1.0-smoothstep(base+0.30,base+0.60,y));
+          band*=0.6+0.4*n(x*44.0+uTime*0.4);
+          vec3 c=mix(vec3(0.12,1.0,0.5),vec3(0.3,0.6,1.0),smoothstep(base,base+0.4,y));
+          c=mix(c,vec3(0.6,0.3,1.0),smoothstep(base+0.28,base+0.6,y));
+          float edge=smoothstep(0.0,0.16,x)*smoothstep(1.0,0.84,x);
+          gl_FragColor=vec4(c,band*edge*0.42);}`,
+    });
+    const aurora = new THREE.Mesh(auroraGeo, auroraMat); aurora.position.set(0, 3.6, -9); scene.add(aurora);
+
     const onResize = () => { if (!renderer) return; camera.aspect = W() / H(); camera.updateProjectionMatrix(); renderer.setSize(W(), H()); };
     window.addEventListener("resize", onResize);
 
+    let prevT = 0;
     const loop = (t) => {
       if (disposed) return;
       raf = requestAnimationFrame(loop);
+      const dt = prevT ? Math.min(0.05, (t - prevT) / 1000) : 0.016; prevT = t;
       uniforms.uTime.value = t * 0.001;
       planet.rotation.y = t * 0.00002;
       ring.rotation.z += 0.0006;
       stars.rotation.y += 0.0002;
+      for (const s of satPivots) s.pivot.rotation.y += s.sp * dt;   // satellites orbit
+      if (cActive) { cProg += dt * cSpeed; comet.position.lerpVectors(cStart, cEnd, cProg); if (cProg >= 1) { cActive = false; comet.visible = false; cWait = 2.5 + Math.random() * 5; cIdle = 0; } }
+      else { cIdle += dt; if (cIdle >= cWait) launchComet(); }
       controls.update();
       renderer.render(scene, camera);
     };
@@ -159,7 +221,7 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     return () => {
       disposed = true; cancelAnimationFrame(raf); window.removeEventListener("resize", onResize);
       controls.dispose();
-      [sg, planetGeo, glowGeo, ringGeo, rtex].forEach((d) => d && d.dispose && d.dispose());
+      [sg, planetGeo, glowGeo, ringGeo, rtex, satBodyGeo, panelGeo, glintGeo, cometHeadGeo, cometTailGeo, auroraGeo].forEach((d) => d && d.dispose && d.dispose());
       scene.traverse((o) => { if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map) m.map.dispose(); m.dispose && m.dispose(); }); } });
       renderer.dispose();
       uniformsRef.current = null; tiltObjRef.current = null;
