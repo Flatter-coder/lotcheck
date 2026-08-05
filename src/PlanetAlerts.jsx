@@ -8,10 +8,11 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
-export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
+export default function PlanetAlerts({ tilt = 23, density = 0.9, theme = "dark" }) {
   const ref = useRef(null);
   const uniformsRef = useRef(null);
   const tiltObjRef = useRef(null);
+  const fxRef = useRef(null);
 
   // slider → uniform / rotation, no scene rebuild
   useEffect(() => { if (tiltObjRef.current) tiltObjRef.current.rotation.z = (tilt * Math.PI) / 180; }, [tilt]);
@@ -24,6 +25,18 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     uniformsRef.current.uDensity.value = d;
     uniformsRef.current.uStorm.value = Math.min(1, d / 1.5);
   }, [density]);
+
+  // Bright mode: the additive space glows (aurora curtain, atmosphere halo, ring)
+  // blow out to white on a light page, so hide/soften them. Dark mode = full glow.
+  useEffect(() => {
+    const fx = fxRef.current; if (!fx) return;
+    const d = theme === "dark";
+    fx.aurora.visible = d;
+    fx.glow.visible = d;
+    fx.ring.material.blending = d ? THREE.AdditiveBlending : THREE.NormalBlending;
+    fx.ring.material.opacity = d ? 1 : 0.45;
+    fx.ring.material.needsUpdate = true;
+  }, [theme]);
 
   useEffect(() => {
     const app = ref.current;
@@ -146,9 +159,9 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     const satBodyGeo = new THREE.BoxGeometry(0.07, 0.07, 0.11);
     const panelGeo = new THREE.BoxGeometry(0.20, 0.006, 0.07);
     const glintGeo = new THREE.SphereGeometry(0.022, 8, 8);
-    const satBodyMat = new THREE.MeshBasicMaterial({ color: 0xdfe7ff });
-    const panelMat = new THREE.MeshBasicMaterial({ color: 0x3a74ff });
-    const glintMat = new THREE.MeshBasicMaterial({ color: 0x9fe8ff });
+    const satBodyMat = new THREE.MeshBasicMaterial({ color: 0xdadde4 });   // silver body
+    const panelMat = new THREE.MeshBasicMaterial({ color: 0xbfc5d0 });     // silver panels (reflective foil), not blue
+    const glintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });     // bright specular glint
     const satPivots = [];
     [{ r: 2.35, inc: 0.55, sp: 0.24, ph: 0 }, { r: 2.9, inc: -0.9, sp: -0.17, ph: 2.2 }, { r: 3.4, inc: 0.28, sp: 0.12, ph: 4.1 }].forEach((cfg) => {
       const pivot = new THREE.Group(); pivot.rotation.x = cfg.inc; pivot.rotation.y = cfg.ph;
@@ -180,7 +193,7 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
       const y = 1.6 + Math.random() * 3.0, z = -7 - Math.random() * 5, dir = Math.random() < 0.5 ? 1 : -1;
       cStart.set(-11 * dir, y, z); cEnd.set(11 * dir, y - 2.2 - Math.random() * 2.0, z);
       comet.quaternion.setFromUnitVectors(V_UP, cEnd.clone().sub(cStart).normalize());
-      cProg = 0; cSpeed = 0.5 + Math.random() * 0.35; cActive = true; comet.visible = true;
+      cProg = 0; cSpeed = 0.25 + Math.random() * 0.175; cActive = true; comet.visible = true;   // 50% slower
     };
 
     // ── background aurora curtain (northern-lights ribbons behind the planet) ─
@@ -201,6 +214,13 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
           gl_FragColor=vec4(c,band*edge*0.42);}`,
     });
     const aurora = new THREE.Mesh(auroraGeo, auroraMat); aurora.position.set(0, 3.6, -9); scene.add(aurora);
+
+    // register the theme-sensitive glows + apply the initial theme (avoids a
+    // bright-mode flash before the [theme] effect runs).
+    fxRef.current = { aurora, glow, ring };
+    { const d = theme === "dark"; aurora.visible = d; glow.visible = d;
+      ring.material.blending = d ? THREE.AdditiveBlending : THREE.NormalBlending;
+      ring.material.opacity = d ? 1 : 0.45; ring.material.needsUpdate = true; }
 
     const onResize = () => { if (!renderer) return; camera.aspect = W() / H(); camera.updateProjectionMatrix(); renderer.setSize(W(), H()); };
     window.addEventListener("resize", onResize);
