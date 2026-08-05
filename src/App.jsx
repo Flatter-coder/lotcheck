@@ -3588,6 +3588,83 @@ function GiveCheckTab(){
 // breakdown), drill-down to the buyer list. This is the Dealer Bridge's
 // inventory ([[alerts-are-bridge-inventory]]) — owner-only. Reads the RLS-locked
 // msrp_alert_subscription via the admin-gated fn_admin_alert_folders RPC.
+// The owner's dispatch console: enter one at/below-MSRP car a dealer is offering,
+// see how many CONFIRMED buyers it matches (make + city), and send them the alert.
+// fn_admin_push_candidate records the car + returns the match count; the
+// alert-dispatch edge fn emails the matched buyers and logs each send (dedupe).
+function PushCarPanel({C,onDispatched}){
+  const blank={make:"",model:"",year:"",city:"",province:"AB",price:"",below:false,dealer:"",note:""};
+  const [f,setF]=useState(blank);
+  const [open,setOpen]=useState(false);
+  const [cand,setCand]=useState(null);      // {id,matches} after matching
+  const [busy,setBusy]=useState("");         // "match" | "send" | ""
+  const [msg,setMsg]=useState(null);         // {kind,text}
+  const set=(k)=>(e)=>{ setF(s=>({...s,[k]:e.target.type==="checkbox"?e.target.checked:e.target.value})); setCand(null); setMsg(null); };
+
+  async function match(){
+    setMsg(null);
+    if(!f.make.trim()||!f.city.trim()){ setMsg({kind:"bad",text:"Make and city are required."}); return; }
+    setBusy("match");
+    const {data,error}=await supabase.rpc("fn_admin_push_candidate",{
+      p_make:f.make.trim(), p_model:f.model.trim()||null, p_year:f.year?+f.year:null,
+      p_city:f.city.trim(), p_province:f.province.trim()||"AB",
+      p_price:f.price?+f.price:null, p_below:f.below, p_dealer:f.dealer.trim()||null, p_note:f.note.trim()||null,
+    });
+    setBusy("");
+    if(error){ setMsg({kind:"bad",text:error.message||"Couldn't record that car."}); return; }
+    setCand({id:data.id,matches:data.matches});
+  }
+
+  async function send(){
+    if(!cand?.id) return;
+    setBusy("send"); setMsg(null);
+    try{
+      const {data,error}=await supabase.functions.invoke("alert-dispatch",{body:{candidate_id:cand.id}});
+      if(error||!data?.ok) throw new Error(data?.error||error?.message||"Dispatch failed.");
+      setMsg({kind:"ok",text:`Sent ${data.sent} alert${data.sent===1?"":"s"}${data.failed?`, ${data.failed} failed`:""}.`});
+      setCand(null); setF(blank); onDispatched&&onDispatched();
+    }catch(e){ setMsg({kind:"bad",text:e.message||"Dispatch failed. Is the alert-dispatch function deployed + RESEND_API_KEY set?"}); }
+    setBusy("");
+  }
+
+  const inp={background:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 10px",color:C.ink,fontSize:12.5,fontWeight:600,width:"100%",boxSizing:"border-box"};
+  const lab={fontSize:10,fontWeight:800,color:C.inkFaint,letterSpacing:.4,display:"block",marginBottom:4,textTransform:"uppercase"};
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:16,marginBottom:16}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+        <div style={{fontSize:13,fontWeight:900,color:C.ink}}>📣 Push a car → alert matching buyers</div>
+        <span style={{fontSize:11,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
+      </div>
+      {!open && <div style={{fontSize:11,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
+      {open && <>
+        <div style={{fontSize:11,color:C.inkFaint,margin:"8px 0 14px",lineHeight:1.6,maxWidth:720}}>
+          <b style={{color:C.inkSoft}}>The process:</b> a signup emails the buyer a confirm link → they click it (now “confirmed”). When you enter an at/below-MSRP car below, step 1 shows how many confirmed buyers match; step 2 emails them and logs each send so no one is emailed twice for the same car.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+          <div><label style={lab}>Make *</label><input style={inp} value={f.make} onChange={set("make")} placeholder="Toyota"/></div>
+          <div><label style={lab}>Model</label><input style={inp} value={f.model} onChange={set("model")} placeholder="RAV4"/></div>
+          <div><label style={lab}>Year</label><input style={inp} value={f.year} onChange={set("year")} placeholder="2025" inputMode="numeric"/></div>
+          <div><label style={lab}>City *</label><input style={inp} value={f.city} onChange={set("city")} placeholder="Calgary"/></div>
+          <div><label style={lab}>Province</label><input style={inp} value={f.province} onChange={set("province")} placeholder="AB"/></div>
+          <div><label style={lab}>Price (CAD)</label><input style={inp} value={f.price} onChange={set("price")} placeholder="41990" inputMode="numeric"/></div>
+          <div><label style={lab}>Dealer</label><input style={inp} value={f.dealer} onChange={set("dealer")} placeholder="ABC Toyota"/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lab}>Note (internal)</label><input style={inp} value={f.note} onChange={set("note")} placeholder="e.g. demo unit, in stock this week"/></div>
+        </div>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.inkSoft,fontWeight:700,margin:"12px 0 4px",cursor:"pointer"}}>
+          <input type="checkbox" checked={f.below} onChange={set("below")} style={{accentColor:C.teal}}/> This car is <b>below</b> MSRP (not just at it)
+        </label>
+        {msg && <div style={{fontSize:12,fontWeight:700,margin:"10px 0 2px",color:msg.kind==="ok"?C.tealInk:C.coralInk}}>{msg.text}</div>}
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}>
+          <button onClick={match} disabled={busy==="match"} style={{background:C.card,border:`1px solid ${C.teal}`,borderRadius:9,padding:"9px 16px",color:C.tealInk,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="match"?"Matching…":"1 · Match buyers"}</button>
+          {cand && (cand.matches>0
+            ? <button onClick={send} disabled={busy==="send"} style={{background:C.teal,border:"none",borderRadius:9,padding:"9px 18px",color:"#fff",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="send"?"Sending…":`2 · Send ${cand.matches} alert${cand.matches===1?"":"s"}`}</button>
+            : <span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>No confirmed buyers match this make + city yet.</span>)}
+        </div>
+      </>}
+    </div>
+  );
+}
+
 function AlertFoldersTab(){
   const {C}=useAdminTheme();
   const [data,setData]=useState(null);
@@ -3652,6 +3729,8 @@ function AlertFoldersTab(){
         Every waitlist signup, filed by make — the Dealer Bridge's demand inventory. <b style={{color:C.inkSoft}}>{data?.total||0}</b> total signup{(data?.total||0)===1?"":"s"}. Owner-only; buyers are never handed to a dealer without a separate, explicit consent.
       </div>
 
+      <PushCarPanel C={C} onDispatched={load}/>
+
       {folders.length===0?(
         <AdminEmpty icon="📭">No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
       ):(
@@ -3672,7 +3751,7 @@ function AlertFoldersTab(){
                 {open&&(
                   <div style={{marginTop:12,borderTop:`1px solid ${C.line}`,overflowX:"auto"}}>
                     <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:12.5}}>
-                      <thead><tr>{["Email","Model","Year","City","Alert when","Signed up"].map(h=>(
+                      <thead><tr>{["Email","Model","Year","City","Alert when","Status","Signed up"].map(h=>(
                         <th key={h} style={{textAlign:"left",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
                       <tbody>{f.list.map((r,i)=>(
                         <tr key={i}>
@@ -3681,6 +3760,9 @@ function AlertFoldersTab(){
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.year||"—"}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.city||"—"}{r.province?`, ${r.province}`:""}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:11,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}>{r.status==="confirmed"
+                            ? <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px"}}>✓ Confirmed</span>
+                            : <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:5,padding:"2px 7px"}}>Waitlist</span>}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:11}}>{fmtDate(r.created_at)}</td>
                         </tr>
                       ))}</tbody>
@@ -7859,6 +7941,7 @@ function MsrpAlertsPage(){
   const [consent,setConsent]=useState(false);
   const [busy,setBusy]=useState(false);
   const [done,setDone]=useState(false);
+  const [emailed,setEmailed]=useState(false);   // did the confirmation email actually send?
   const [err,setErr]=useState("");
 
   const climate = dens<5?"Clear — near MSRP":dens<12?"Cloudy — small markup":"Stormy — over sticker";
@@ -7869,13 +7952,27 @@ function MsrpAlertsPage(){
     if(!consent){ setErr("Please tick the box so we're allowed to email you."); return; }
     setBusy(true);
     const v=MAL_VEHICLES[veh], c=MAL_CITIES[city];
-    const {error}=await supabase.rpc("fn_alert_subscribe",{
-      p_email:email.trim(), p_make:v.make, p_model:v.model, p_year:v.year,
-      p_province:c.province, p_city:c.city, p_threshold:thr, p_pct:null, p_consent:true,
-    });
+    const body={ email:email.trim(), make:v.make, model:v.model, year:v.year,
+      province:c.province, city:c.city, threshold:thr, pct:null, consent:true };
+    // Preferred path: the alert-subscribe edge fn records the row AND sends the
+    // CASL confirmation email. If it's unreachable, fall back to the anon RPC so
+    // the signup is never lost — the buyer just won't get a confirm email (no SPOF).
+    let ok=false, sentEmail=false;
+    try{
+      const {data,error}=await supabase.functions.invoke("alert-subscribe",{body});
+      if(!error && data && data.ok){ ok=true; sentEmail=!!data.emailed; }
+      else if(data && data.error){ setErr("Couldn't save that — "+data.error); }
+    }catch(_){ /* fall through to RPC */ }
+    if(!ok){
+      const {error}=await supabase.rpc("fn_alert_subscribe",{
+        p_email:email.trim(), p_make:v.make, p_model:v.model, p_year:v.year,
+        p_province:c.province, p_city:c.city, p_threshold:thr, p_pct:null, p_consent:true,
+      });
+      if(!error){ ok=true; }
+      else if(!err){ setErr("Couldn't save that — "+(error.message||"please try again.")); }
+    }
     setBusy(false);
-    if(error){ setErr("Couldn't save that — "+(error.message||"please try again.")); return; }
-    setDone(true);
+    if(ok){ setEmailed(sentEmail); setDone(true); setErr(""); }
   }
 
   const css=`
@@ -7918,8 +8015,12 @@ function MsrpAlertsPage(){
         {done ? (
           <div style={{textAlign:"center",padding:"6px 4px"}}>
             <div style={{fontSize:26,marginBottom:8}}>✦</div>
-            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>You're on the waitlist.</div>
-            <div style={{fontSize:13,color:"#c7cee6",lineHeight:1.5}}>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</div>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>{emailed?"Check your email to confirm.":"You're on the waitlist."}</div>
+            <div style={{fontSize:13,color:"#c7cee6",lineHeight:1.5}}>
+              {emailed
+                ? <>We sent a confirmation link for the {MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} in {MAL_CITIES[city].city}. Click it and you're set — that one click is what lets us email you. Live tracking rolls out across Alberta soon.</>
+                : <>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</>}
+            </div>
             <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:"1px solid rgba(150,170,255,.3)",color:"#9aa2c4",borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
           </div>
         ) : (
@@ -7971,6 +8072,47 @@ function MsrpAlertsPage(){
   );
 }
 
+// The CASL double-opt-in landing page. The confirmation email links here with
+// ?token=<uuid>; we call fn_alert_confirm (anon; the token IS the auth) which
+// flips the row 'waitlist' -> 'confirmed'. Only confirmed rows are ever alerted.
+function AlertConfirmPage(){
+  const [state,setState]=useState("working");   // working | ok | bad
+  const [veh,setVeh]=useState("");
+  useEffect(()=>{
+    const token=new URLSearchParams(window.location.search).get("token");
+    if(!token){ setState("bad"); return; }
+    (async()=>{
+      const {data,error}=await supabase.rpc("fn_alert_confirm",{p_token:token});
+      if(!error && data && data.ok){
+        setVeh([data.make,data.model].filter(Boolean).join(" ")+(data.city?" · "+data.city:""));
+        setState("ok");
+      }else setState("bad");
+    })();
+  },[]);
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,
+      background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,sans-serif",color:"#eaf0ff"}}>
+      <div style={{maxWidth:440,textAlign:"center",background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",borderRadius:20,padding:"34px 28px",backdropFilter:"blur(16px)"}}>
+        <div style={{font:"800 11px/1 ui-monospace,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase",marginBottom:14}}>LotCheck · MSRP Alerts</div>
+        {state==="working" && <div style={{fontSize:15,color:"#c7cee6"}}>Confirming…</div>}
+        {state==="ok" && <>
+          <div style={{fontSize:34,marginBottom:10}}>✦</div>
+          <h1 style={{fontSize:24,fontWeight:800,margin:"0 0 10px"}}>You're confirmed.</h1>
+          <p style={{fontSize:14.5,lineHeight:1.6,color:"#c7cee6",margin:"0 0 8px"}}>{veh?<>We'll email you when a <b style={{color:"#fff"}}>{veh}</b> is offered at or below MSRP.</>:"Your MSRP alert is active."}</p>
+          <p style={{fontSize:12.5,color:"#8a92b4",margin:"0 0 20px"}}>Live tracking is rolling out city by city in Alberta — you're in line.</p>
+          <a href="/quote-check" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Check a quote now →</a>
+        </>}
+        {state==="bad" && <>
+          <div style={{fontSize:34,marginBottom:10}}>⚠️</div>
+          <h1 style={{fontSize:22,fontWeight:800,margin:"0 0 10px"}}>That link didn't work.</h1>
+          <p style={{fontSize:14,lineHeight:1.6,color:"#c7cee6",margin:"0 0 20px"}}>The confirmation link may have expired or already been used. You can sign up again in a moment.</p>
+          <a href="/msrp-alerts" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Back to MSRP Alerts</a>
+        </>}
+      </div>
+    </div>
+  );
+}
+
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
 // and quote-check page happens here by choosing which fully separate
@@ -7983,6 +8125,7 @@ export default function App(){
         : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : path.startsWith("/alert-confirm") ? <AlertConfirmPage/>
         : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
         : <LotCheckApp/>}
       <Analytics/>
