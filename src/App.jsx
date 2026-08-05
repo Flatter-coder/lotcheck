@@ -6813,6 +6813,34 @@ function QuoteCheckPage(){
 
           {status==="idle"&&(
             <>
+            {/* PRIMARY: paste a dealer listing link — reads the live page, even
+                JS-rendered / bot-protected dealer sites (render + vision). */}
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`2px solid ${C.teal}`,borderRadius:22,padding:"22px 22px",boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)"}}>
+              <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:800,letterSpacing:.4,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"4px 11px",marginBottom:10}}>🔗 Fastest way</div>
+              <div style={{color:C.ink,fontWeight:1000,fontSize:18,marginBottom:6}}>Paste a dealer listing link</div>
+              <div style={{fontSize:13,color:C.inkSoft,marginBottom:14,lineHeight:1.5}}>We open the live page and read the price, fees, financing and specs — even on dealer sites that load the price with scripts. Just paste the link.</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input
+                  type="url"
+                  placeholder="https://dealer-site.com/inventory/..."
+                  value={urlInput}
+                  onChange={e=>setUrlInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
+                  style={{flex:"1 1 240px",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"13px 16px",color:C.ink,fontSize:15,outline:"none",boxSizing:"border-box"}}
+                />
+                <button onClick={handleUrlAnalyze}
+                  style={{background:C.teal,border:"none",borderRadius:10,padding:"13px 26px",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Analyze →
+                </button>
+              </div>
+            </div>
+
+            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
+              <div style={{flex:1,height:1,background:C.line}}/>
+              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR UPLOAD A QUOTE</div>
+              <div style={{flex:1,height:1,background:C.line}}/>
+            </div>
+
             <div
               onDragOver={e=>{e.preventDefault();setDragOver(true);}}
               onDragLeave={()=>setDragOver(false)}
@@ -6850,34 +6878,9 @@ function QuoteCheckPage(){
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
 
-            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
-              <div style={{flex:1,height:1,background:C.line}}/>
-              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
-              <div style={{flex:1,height:1,background:C.line}}/>
-            </div>
-
-            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"16px 18px"}}>
-              <div style={{color:C.ink,fontWeight:800,fontSize:14,marginBottom:8}}>Paste a dealer listing link instead</div>
-              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically. Dealer links take up to a minute to read; uploading a photo is faster.</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <input
-                  type="url"
-                  placeholder="https://dealer-site.com/inventory/..."
-                  value={urlInput}
-                  onChange={e=>setUrlInput(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
-                  style={{flex:"1 1 220px",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 14px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
-                />
-                <button onClick={handleUrlAnalyze}
-                  style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 22px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",whiteSpace:"nowrap"}}>
-                  Analyze →
-                </button>
-              </div>
-            </div>
-
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
               {[
-                {n:"1",label:"Upload or paste",desc:"Drop a file, click to browse, or paste (Ctrl+V / Cmd+V) a screenshot"},
+                {n:"1",label:"Paste a link or upload",desc:"Paste a dealer listing link, drop a file, or paste a screenshot"},
                 {n:"2",label:"We read it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
                 {n:"3",label:"See what's real",desc:"True MSRP, flagged add-ons, and any EVAP rebate you qualify for"},
               ].map((s,i)=>(
