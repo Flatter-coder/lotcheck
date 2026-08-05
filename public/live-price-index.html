@@ -731,8 +731,8 @@
         <div class="mal-visual">
           <div class="mal-vhead">
             <div class="mal-kick">MSRP alerts</div>
-            <h3>We watch the price so you don't have to.</h3>
-            <p>Tell us your vehicle and city. When we start tracking it, we'll email you the moment it hits your target.</p>
+            <h3>We'll watch the price so you don't have to.</h3>
+            <p>Tell us your vehicle and city to join the waitlist. Live MSRP tracking isn't running yet &mdash; it rolls out city by city, and you'll be first to get the alert the moment it launches for yours.</p>
           </div>
           <div class="mal-alertcard" id="malAlert"><div class="mal-t">Price hit MSRP</div><div class="mal-b">This is when we'd email you.</div></div>
           <div class="mal-scene">
@@ -749,7 +749,7 @@
 
         <!-- form -->
         <div class="mal-form" id="malForm">
-          <div class="mal-lead">Rolling out city by city &mdash; we'll alert you the moment we track your vehicle. Waitlist only for now; no spam.</div>
+          <div class="mal-lead">Waitlist only &mdash; live tracking isn't running yet. Join now and you'll be first when it rolls out to your city. No spam.</div>
           <div class="mal-field"><label>Vehicle</label>
             <div class="mal-row">
               <!-- Only the 28 makes with verified MSRP rows in msrp_catalog
@@ -810,7 +810,7 @@
         <div class="mal-done" id="malDone">
           <div class="mal-check"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12.5l5 5 11-11" stroke="var(--up)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
           <h3>You're on the list</h3>
-          <p id="malDoneMsg">We'll email you the moment we track your vehicle in your city.</p>
+          <p id="malDoneMsg">You're on the waitlist &mdash; we'll email you as soon as live tracking launches for your city.</p>
           <button class="mal-relink" id="malReset">Set another alert</button>
         </div>
       </div>
@@ -1704,7 +1704,7 @@
     function done(){
       var v=($("malMake").dataset.value+" "+$("malModel").value.trim()).trim();
       var thrTxt = Math.abs(target)<0.4?"hits MSRP" : target<0?("drops to "+Math.abs(target).toFixed(1)+"% under MSRP") : ("is within "+target.toFixed(1)+"% over MSRP");
-      $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").dataset.value+". We'll email you the moment it "+thrTxt+" once we're tracking your city.";
+      $("malDoneMsg").textContent="You're on the waitlist for the "+v+" in "+$("malCity").dataset.value+". Live tracking isn't running there yet - we'll email you the moment it launches (and when it "+thrTxt+").";
       $("malForm").style.display="none"; $("malDone").classList.add("mal-show");
     }
     post(Object.assign({},base,{p_target_pct:target}))
