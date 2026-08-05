@@ -161,14 +161,18 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
       pivot.add(sat); scene.add(pivot); satPivots.push({ pivot, sp: cfg.sp });
     });
 
-    // ── shooting comet (streaks across the far background, then reappears) ────
-    const cometHeadGeo = new THREE.SphereGeometry(0.05, 12, 12);
-    const cometTailGeo = new THREE.ConeGeometry(0.07, 1.2, 12, 1, true);
-    const cometHeadMat = new THREE.MeshBasicMaterial({ color: 0xeaf6ff });
-    const cometTailMat = new THREE.MeshBasicMaterial({ color: 0x7fd8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    // ── shooting comet — style #14 "Midnight deep-void": a small dim head with
+    //    a soft midnight-blue coma and a subtle wispy trail (minimal, not flashy).
+    const cometHeadGeo = new THREE.SphereGeometry(0.038, 12, 12);
+    const cometComaGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const cometTailGeo = new THREE.ConeGeometry(0.05, 0.95, 12, 1, true);
+    const cometHeadMat = new THREE.MeshBasicMaterial({ color: 0xcdd8ff });
+    const cometComaMat = new THREE.MeshBasicMaterial({ color: 0x5a74d8, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false });
+    const cometTailMat = new THREE.MeshBasicMaterial({ color: 0x33447f, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
     const comet = new THREE.Group();
     const cometHead = new THREE.Mesh(cometHeadGeo, cometHeadMat); cometHead.position.y = 0.6;   // apex = leading head
-    comet.add(cometHead, new THREE.Mesh(cometTailGeo, cometTailMat));
+    const cometComa = new THREE.Mesh(cometComaGeo, cometComaMat); cometComa.position.y = 0.6;   // soft glow around the head
+    comet.add(cometComa, cometHead, new THREE.Mesh(cometTailGeo, cometTailMat));
     comet.visible = false; scene.add(comet);
     const V_UP = new THREE.Vector3(0, 1, 0), cStart = new THREE.Vector3(), cEnd = new THREE.Vector3();
     let cActive = false, cProg = 0, cSpeed = 0.6, cWait = 1.2, cIdle = 0;
@@ -221,7 +225,7 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     return () => {
       disposed = true; cancelAnimationFrame(raf); window.removeEventListener("resize", onResize);
       controls.dispose();
-      [sg, planetGeo, glowGeo, ringGeo, rtex, satBodyGeo, panelGeo, glintGeo, cometHeadGeo, cometTailGeo, auroraGeo].forEach((d) => d && d.dispose && d.dispose());
+      [sg, planetGeo, glowGeo, ringGeo, rtex, satBodyGeo, panelGeo, glintGeo, cometHeadGeo, cometComaGeo, cometTailGeo, auroraGeo].forEach((d) => d && d.dispose && d.dispose());
       scene.traverse((o) => { if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { if (m.map) m.map.dispose(); m.dispose && m.dispose(); }); } });
       renderer.dispose();
       uniformsRef.current = null; tiltObjRef.current = null;
