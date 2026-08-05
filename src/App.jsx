@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
 import heic2any from "heic2any";
+import DealOrrery from "./DealOrrery.jsx";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 // Public anon key. Named once so the credit-aware fetches below can send it as
@@ -6987,16 +6988,27 @@ function QuoteCheckPage(){
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
             if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
-            return (
-            <div>
-              {/* View toggle: Scroll (canonical) vs the flip-book Report view, + share link */}
+            // 3-way view toggle (scroll / report / orrery), active state highlighted.
+            const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
+            const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  <button onClick={()=>setReportView("scroll")} style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>Scroll view</button>
-                  <button onClick={()=>setReportView("flip")} style={{background:"transparent",color:C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>Report view</button>
+                  {vBtn("scroll","Scroll view")}{vBtn("flip","Report view")}{vBtn("orrery","3D Orrery")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
+            );
+            // 3D Orrery view — the deal as a navigable hologram (real WebGL).
+            if(reportView==="orrery") return (
+              <div>
+                {viewToggle}
+                <DealOrrery analysis={analysis} height={540}/>
+                <div style={{fontSize:12,color:C.inkFaint,textAlign:"center",marginTop:8,lineHeight:1.5}}>Drag to orbit · scroll to zoom. Your quote is the core; fees orbit it (bigger = pricier), <b style={{color:C.coralInk}}>flagged fees glow red</b>, and the teal ring is MSRP.</div>
+              </div>
+            );
+            return (
+            <div>
+              {viewToggle}
               {/* Result-first sign-in invitation. Non-blocking: the full report
                   renders below regardless. Only shown to logged-out visitors --
                   once signed in it disappears. No paywall, no enforcement
