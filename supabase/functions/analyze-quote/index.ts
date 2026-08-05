@@ -49,6 +49,13 @@
 // Supabase injects both automatically into every Edge Function at runtime.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { finalizeServerSide } from "../_shared/report-sign.ts";
+import { canonicalMake } from "../_shared/makes.ts";
+import { computeRemainingWarranty } from "../_shared/warranty.ts";
+import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { buildFeeObservations } from "../_shared/fee-vocab.ts";
+import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { assessDocFee } from "../_shared/docfee.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -445,21 +452,54 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---- Step 2: Verification -- look up the REAL MSRP in our own catalog ----
-    const msrpLookup = await lookupVerifiedMsrp(extracted);
+    // Resolve the vehicle's CANONICAL base model first (e.g. "Palisade Ultimate
+    // Calligraphy" -> "PALISADE"). Both the MSRP catalog and Transport Canada's
+    // recall API key on the base model with an EXACT match, so trim leaking into
+    // the model field silently breaks BOTH -- the Palisade seatbelt-recall miss
+    // (2026-08). One resolver feeds both lookups. See make-recalls-fail-safe.
+    const baseModel = await resolveBaseModel(extracted.year, extracted.make, extracted.model);
+    const msrpLookup = await lookupVerifiedMsrp(extracted, baseModel);
     await applyVerifiedFuelType(extracted);
 
     // ---- Step 3: Assemble the analysis in the exact shape App.jsx renders ----
     const analysis = buildAnalysis(extracted, msrpLookup);
     await applyVerifiedWarranty(analysis);
+    await applyRemainingWarranty(analysis);
+    // Auto market value (best-effort, live mode only, cheap). Gives used cars a
+    // real value anchor instead of the synthetic estimate. No-op until
+    // VINAUDIT_MODE=live + a VIN is present.
+    if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
     analysis.vinCheck = validateVin(analysis.vin);
     if (analysis.year && analysis.make && analysis.model) {
-      analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+      analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model, baseModel);
     }
     computeFinancingCheck(analysis);
     computeOdometerCheck(analysis);
     await resolveFinanceRates(analysis);
     await resolveLeaseRates(analysis);
     computeLeverageScore(analysis);
+    // S3 — deal reconciliation: split fees vs negotiable dealer add-ons so the
+    // report shows the real out-the-door + how much markup is removable.
+    { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }
+    // S11 — financing-contingent-discount trap (runs after reconciliation + finance rates).
+    { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }
+    // S12 — doc-fee vs jurisdiction benchmark (fail-safe: only flags with a backed benchmark).
+    { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }
+    // Counter-script — aggregate every safeguard's "say this" (runs LAST).
+    analysis.counterScript = buildCounterScript(analysis);
+
+    // Server-authoritative identity: stamps issuedAt from the trusted server
+    // clock (so a device-clock change can't alter the date), computes the
+    // report ID + verify payload, and SIGNS them (ECDSA P-256) when the signing
+    // key is configured. Best-effort — never fails the report. See
+    // report-signing-scope + make-it-dispute-proof.
+    await finalizeServerSide(analysis);
+
+    // Flywheel Phase 1 — LOG ONLY, stores nothing (see fee-vocab.ts). De-
+    // identified fee projection to validate the normalizer; gated on FLYWHEEL_LOG.
+    if (Deno.env.get("FLYWHEEL_LOG") === "on") {
+      try { const obs = buildFeeObservations(analysis); if (obs.length) console.log(`flywheel: ${obs.length} fee obs ${JSON.stringify(obs)}`); } catch (e) { console.warn("flywheel log skipped:", (e as Error)?.message); }
+    }
 
     // Delivered an accurate result -> capture the hold (signed-in only) and
     // include the new balance. Null holdId out first so a later throw can't
@@ -537,10 +577,51 @@ async function applyVerifiedFuelType(extracted: any): Promise<void> {
   }
 }
 
-async function lookupVerifiedMsrp(extracted: any) {
-  const { year, make, model, trim } = extracted || {};
+// Resolve the extracted model to its CANONICAL base model using our own
+// msrp_catalog (authoritative for covered makes). "Palisade Ultimate
+// Calligraphy" -> "PALISADE". Returns null when we can't confidently resolve,
+// so callers fall back to best-effort matching + the confirmed-match gate in
+// lookupRecalls. Never throws.
+async function resolveBaseModel(year: number, make: string, model: string): Promise<string | null> {
+  if (!year || !make || !model) return null;
+  try {
+    const { data } = await supabase
+      .from("msrp_catalog")
+      .select("model")
+      .eq("year", year)
+      .ilike("make", make)
+      .not("model", "is", null)
+      .limit(400);
+    if (!data?.length) return null;
+    const em = String(model).trim().toUpperCase();
+    let best: string | null = null;
+    for (const row of data) {
+      const cm = String(row.model || "").trim();
+      if (!cm) continue;
+      const cmU = cm.toUpperCase();
+      if (em === cmU || em.startsWith(cmU + " ")) {
+        if (!best || cm.length > best.length) best = cm; // longest (most specific) canonical match wins
+      }
+    }
+    return best;
+  } catch { return null; }
+}
+
+async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
+  let { year, make, model, trim } = extracted || {};
   if (!year || !make || !model) {
     return { value: null, matchType: "insufficient_data" };
+  }
+  // Prefer the canonical base model. If the extractor merged the trim into the
+  // model field, recover the trim from the leftover words so we still hit the
+  // right catalog row instead of falling through to "not found".
+  if (baseModel) {
+    const bm = String(baseModel).trim(), emU = String(model).trim().toUpperCase(), bmU = bm.toUpperCase();
+    if (bmU !== emU && emU.startsWith(bmU + " ")) {
+      const residual = String(model).trim().slice(bm.length).trim();
+      if (residual && !trim) trim = residual;
+    }
+    model = bm;
   }
 
   try {
@@ -614,10 +695,11 @@ async function lookupVerifiedMsrp(extracted: any) {
 async function applyVerifiedWarranty(analysis: any): Promise<void> {
   if (!analysis || analysis.vehicleCondition !== "new" || !analysis.make) return;
   try {
+    const make = canonicalMake(analysis.make); // normalize "Mercedes"/"VW"/"Range Rover" -> catalog make
     const { data, error } = await supabase
       .from("manufacturer_warranties")
       .select("basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
-      .ilike("make", analysis.make)
+      .ilike("make", make)
       .maybeSingle();
     if (error) {
       console.warn("⚠️ manufacturer_warranties lookup failed:", error.message);
@@ -632,7 +714,7 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
     if (data.corrosion_coverage) parts.push(`${data.corrosion_coverage} corrosion`);
     analysis.standardWarranty = {
       coverage: parts.join(", "),
-      note: `Included at no extra cost with every new ${analysis.make} -- verified against ${analysis.make}'s official Canadian warranty terms, not an AI estimate.`,
+      note: `Included at no extra cost with every new ${make} -- verified against ${make}'s official Canadian warranty terms, not an AI estimate.`,
       verified: true,
       roadsideAssistance: data.roadside_assistance ?? null,
       hybridEvCoverage: data.hybrid_ev_coverage ?? null,
@@ -641,6 +723,28 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
   } catch (err) {
     console.warn("⚠️ applyVerifiedWarranty threw:", err);
     if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
+  }
+}
+
+// For a USED vehicle, estimate how much of the ORIGINAL manufacturer warranty
+// is left, from the verified catalog terms + model year + odometer. Sets
+// analysis.remainingWarranty. Never throws. (New vehicles get the full-coverage
+// treatment via applyVerifiedWarranty instead.)
+async function applyRemainingWarranty(analysis: any): Promise<void> {
+  if (!analysis || analysis.vehicleCondition === "new" || !analysis.make || !analysis.year) return;
+  try {
+    const make = canonicalMake(analysis.make);
+    const { data, error } = await supabase
+      .from("manufacturer_warranties")
+      .select("basic_coverage, powertrain_coverage, source_url")
+      .ilike("make", make)
+      .maybeSingle();
+    if (error || !data) return;
+    const odo = analysis.odometerKm != null ? Number(analysis.odometerKm) : null;
+    const rw = computeRemainingWarranty(data, Number(analysis.year), odo, new Date().getUTCFullYear());
+    if (rw) { rw.make = make; analysis.remainingWarranty = rw; }
+  } catch (err) {
+    console.warn("⚠️ applyRemainingWarranty threw:", err);
   }
 }
 
@@ -700,38 +804,71 @@ async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolea
     return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
   } finally { clearTimeout(timer); }
 }
-async function lookupRecalls(year: number, make: string, model: string): Promise<any> {
+// Candidate model strings, most-authoritative first. TC's model-name match is
+// EXACT, so "Palisade Ultimate Calligraphy" returns zero while "Palisade"
+// returns the real recalls. We try the catalog-canonical base model first, then
+// the full string, then progressively drop trailing (trim) words -- stopping at
+// the first candidate that TC recognises. Multi-word base models ("Santa Fe",
+// "Grand Cherokee", "Cross Sport") survive because we stop at the first hit.
+function modelCandidates(model: string, baseModel?: string | null): string[] {
+  const seen = new Set<string>(); const out: string[] = [];
+  const push = (m?: string | null) => { const v = (m || "").trim(); if (v && !seen.has(v.toUpperCase())) { seen.add(v.toUpperCase()); out.push(v); } };
+  push(baseModel);
+  push(model);
+  const toks = String(model || "").trim().split(/\s+/);
+  for (let n = toks.length - 1; n >= 1; n--) push(toks.slice(0, n).join(" "));
+  return out;
+}
+// Does TC recognise this make/model at all? Distinguishes a CONFIRMED clean bill
+// from a lookup miss. Queries a PAST window (year-10..year-1) to dodge the TC
+// quirk where a range ending in the newest model year silently drops that year.
+async function tcModelKnown(make: string, model: string, year: number): Promise<boolean> {
+  const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
+  const res = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year - 10}-${year - 1}?format=json`, 10000);
+  return res.ok && (res.data?.ResultSet?.length ?? 0) > 0;
+}
+// Returns a tri-state:
+//   { checked:false }                       -> registry unreachable ("couldn't verify")
+//   { checked:true, count:N>0, items }       -> recalls found
+//   { checked:true, count:0, confirmed:true} -> CONFIRMED clean (model matched TC)
+//   { checked:true, count:0, confirmed:false}-> zero, but model never matched -> "couldn't confirm"
+// A negative safety claim ("no open recalls") is ONLY safe when confirmed=true.
+async function lookupRecalls(year: number, make: string, model: string, baseModel?: string | null): Promise<any> {
   try {
     const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-    const listUrl = `${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year}-${year}?format=json`;
-    const listRes = await tcFetchJson(listUrl, 12000);
-    // Unreachable registry must NOT masquerade as "no recalls" -- report it
-    // honestly so the UI can say "couldn't verify" instead of a false all-clear.
-    if (!listRes.ok) {
-      console.warn("Recall list fetch failed:", listRes.error, listUrl);
-      return { checked: false, error: listRes.error, source: "Transport Canada VRDB" };
+    const candidates = modelCandidates(model, baseModel);
+    let anyOk = false, matchedModel: string | null = null;
+    let byNumber = new Map<string, { recallNumber: string; date: string | null }>();
+    for (const cand of candidates) {
+      const listRes = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(cand)}/year-range/${year}-${year}?format=json`, 12000);
+      if (!listRes.ok) continue;
+      anyOk = true;
+      const m = new Map<string, { recallNumber: string; date: string | null }>();
+      for (const r of (listRes.data?.ResultSet ?? [])) {
+        const o = tcRecordToObj(r); const num = o["Recall number"];
+        if (num && !m.has(num)) m.set(num, { recallNumber: num, date: o["Recall date"] || null });
+      }
+      if (m.size > 0) { byNumber = m; matchedModel = cand; break; }
     }
-    const rows: any[] = listRes.data?.ResultSet ?? [];
-    const byNumber = new Map<string, { recallNumber: string; date: string | null }>();
-    for (const r of rows) {
-      const o = tcRecordToObj(r);
-      const num = o["Recall number"];
-      if (num && !byNumber.has(num)) byNumber.set(num, { recallNumber: num, date: o["Recall date"] || null });
+    // Every candidate URL failed -> registry unreachable, NOT a clean bill.
+    if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
+
+    if (byNumber.size > 0) {
+      const nums = Array.from(byNumber.keys()).slice(0, 8);
+      const items = await Promise.all(nums.map(async (num) => {
+        const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
+        const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
+        const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
+        return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
+          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
+      }));
+      return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
     }
-    if (byNumber.size === 0) return { checked: true, count: 0, items: [], source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-    const nums = Array.from(byNumber.keys()).slice(0, 8);
-    const items = await Promise.all(nums.map(async (num) => {
-      const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
-      const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
-      const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
-      return {
-        recallNumber: num, date: byNumber.get(num)!.date,
-        system: o["SYSTEM_TYPE_ETXT"] || null,
-        unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null,
-        summary: comment ? comment.slice(0, 400) : null,
-      };
-    }));
-    return { checked: true, count: byNumber.size, items, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+
+    // Zero for every candidate. Trust it as a clean bill ONLY if we know the
+    // model name is right: catalog-canonical (baseModel) OR TC recognises it.
+    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
+    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) { console.warn("lookupRecalls threw:", err); return { checked: false }; }
 }
 

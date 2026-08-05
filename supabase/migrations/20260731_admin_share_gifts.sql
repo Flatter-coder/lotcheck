@@ -16,7 +16,7 @@
 --
 -- Depends on: 20260729_quote_credits.sql (credit_ledger),
 --             20260730_admin_economics.sql (fn_is_admin, admin_config, app_config).
--- Uses only built-in gen_random_uuid() (pg_catalog) -- no pgcrypto/extensions-schema dependency.
+-- pgcrypto (gen_random_bytes / gen_random_uuid) ships enabled on Supabase.
 -- ============================================================================
 
 -- ---- adjustable daily mint cap ------------------------------------------------
