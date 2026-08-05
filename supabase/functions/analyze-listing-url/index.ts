@@ -557,7 +557,14 @@ async function lookupRecalls(year: number, make: string, model: string, baseMode
       return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
     }
 
-    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
+    // count:0 — a negative recall claim is only SAFE if the model is one TC
+    // actually tracks. baseModel (from our catalogue) proves that; otherwise try
+    // EACH candidate over the wider window, so a trim or renamed nameplate
+    // ("bZ Woodland" -> "bZ", which TC knows via the bZ4X history) still confirms
+    // clean instead of degrading to an unconfirmed "couldn't check". Only a model
+    // TC has never heard of stays confirmed:false. See make-recalls-fail-safe.
+    let confirmed = !!baseModel;
+    if (!confirmed) { for (const cand of candidates) { if (await tcModelKnown(make, cand, year)) { confirmed = true; break; } } }
     return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) {
     console.warn("lookupRecalls threw:", err);

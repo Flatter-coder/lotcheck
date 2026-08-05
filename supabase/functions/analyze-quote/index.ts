@@ -866,8 +866,13 @@ async function lookupRecalls(year: number, make: string, model: string, baseMode
     }
 
     // Zero for every candidate. Trust it as a clean bill ONLY if we know the
-    // model name is right: catalog-canonical (baseModel) OR TC recognises it.
-    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
+    // model name is right: catalog-canonical (baseModel) OR TC recognises one of
+    // the candidates. Trying EACH candidate over the wider window means a trim or
+    // renamed nameplate ("bZ Woodland" -> "bZ", which TC knows via the bZ4X
+    // history) confirms clean instead of degrading to an unconfirmed "couldn't
+    // check"; only a model TC has never heard of stays confirmed:false.
+    let confirmed = !!baseModel;
+    if (!confirmed) { for (const cand of candidates) { if (await tcModelKnown(make, cand, year)) { confirmed = true; break; } } }
     return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) { console.warn("lookupRecalls threw:", err); return { checked: false }; }
 }
