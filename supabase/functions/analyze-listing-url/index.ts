@@ -50,6 +50,14 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { finalizeServerSide } from "../_shared/report-sign.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled } from "../_shared/scrapfly.ts";
+import { buildFeeObservations } from "../_shared/fee-vocab.ts";
+import { canonicalMake } from "../_shared/makes.ts";
+import { computeRemainingWarranty } from "../_shared/warranty.ts";
+import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { assessDocFee } from "../_shared/docfee.ts";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -306,10 +314,11 @@ async function logUsage(fields: {
 async function applyVerifiedWarranty(analysis: any): Promise<void> {
   if (!analysis || analysis.vehicleCondition !== "new" || !analysis.make) return;
   try {
+    const make = canonicalMake(analysis.make); // normalize "Mercedes"/"VW"/"Range Rover" -> catalog make
     const { data, error } = await supabase
       .from("manufacturer_warranties")
       .select("basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
-      .ilike("make", analysis.make)
+      .ilike("make", make)
       .maybeSingle();
     if (error) {
       console.warn("⚠️ manufacturer_warranties lookup failed:", error.message);
@@ -324,7 +333,7 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
     if (data.corrosion_coverage) parts.push(`${data.corrosion_coverage} corrosion`);
     analysis.standardWarranty = {
       coverage: parts.join(", "),
-      note: `Included at no extra cost with every new ${analysis.make} -- verified against ${analysis.make}'s official Canadian warranty terms, not an AI estimate.`,
+      note: `Included at no extra cost with every new ${make} -- verified against ${make}'s official Canadian warranty terms, not an AI estimate.`,
       verified: true,
       roadsideAssistance: data.roadside_assistance ?? null,
       hybridEvCoverage: data.hybrid_ev_coverage ?? null,
@@ -333,6 +342,27 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
   } catch (err) {
     console.warn("⚠️ applyVerifiedWarranty threw:", err);
     if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
+  }
+}
+
+// For a USED vehicle, estimate how much of the ORIGINAL manufacturer warranty
+// is left, from the verified catalog terms + model year + odometer. Sets
+// analysis.remainingWarranty. Never throws.
+async function applyRemainingWarranty(analysis: any): Promise<void> {
+  if (!analysis || analysis.vehicleCondition === "new" || !analysis.make || !analysis.year) return;
+  try {
+    const make = canonicalMake(analysis.make);
+    const { data, error } = await supabase
+      .from("manufacturer_warranties")
+      .select("basic_coverage, powertrain_coverage, source_url")
+      .ilike("make", make)
+      .maybeSingle();
+    if (error || !data) return;
+    const odo = analysis.odometerKm != null ? Number(analysis.odometerKm) : null;
+    const rw = computeRemainingWarranty(data, Number(analysis.year), odo, new Date().getUTCFullYear());
+    if (rw) { rw.make = make; analysis.remainingWarranty = rw; }
+  } catch (err) {
+    console.warn("⚠️ applyRemainingWarranty threw:", err);
   }
 }
 
@@ -460,42 +490,75 @@ async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolea
   }
 }
 
-async function lookupRecalls(year: number, make: string, model: string): Promise<any> {
+// Resolve the extracted model to its CANONICAL base model via our own
+// msrp_catalog ("Palisade Ultimate Calligraphy" -> "PALISADE"). Feeds both the
+// recall and MSRP lookups so trim in the model field can't break the exact
+// match either one needs. Null when we can't confidently resolve. Never throws.
+async function resolveBaseModel(year: number, make: string, model: string): Promise<string | null> {
+  if (!year || !make || !model) return null;
+  try {
+    const { data } = await supabase
+      .from("msrp_catalog").select("model")
+      .eq("year", year).ilike("make", make).not("model", "is", null).limit(400);
+    if (!data?.length) return null;
+    const em = String(model).trim().toUpperCase(); let best: string | null = null;
+    for (const row of data) {
+      const cm = String(row.model || "").trim(); if (!cm) continue;
+      const cmU = cm.toUpperCase();
+      if (em === cmU || em.startsWith(cmU + " ")) { if (!best || cm.length > best.length) best = cm; }
+    }
+    return best;
+  } catch { return null; }
+}
+function modelCandidates(model: string, baseModel?: string | null): string[] {
+  const seen = new Set<string>(); const out: string[] = [];
+  const push = (m?: string | null) => { const v = (m || "").trim(); if (v && !seen.has(v.toUpperCase())) { seen.add(v.toUpperCase()); out.push(v); } };
+  push(baseModel); push(model);
+  const toks = String(model || "").trim().split(/\s+/);
+  for (let n = toks.length - 1; n >= 1; n--) push(toks.slice(0, n).join(" "));
+  return out;
+}
+async function tcModelKnown(make: string, model: string, year: number): Promise<boolean> {
+  const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
+  const res = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year - 10}-${year - 1}?format=json`, 10000);
+  return res.ok && (res.data?.ResultSet?.length ?? 0) > 0;
+}
+// Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
+// CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
+// negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
+async function lookupRecalls(year: number, make: string, model: string, baseModel?: string | null): Promise<any> {
   try {
     const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-    const listUrl = `${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year}-${year}?format=json`;
-    const listRes = await tcFetchJson(listUrl, 12000);
-    // Unreachable registry must NOT masquerade as "no recalls" -- report it
-    // honestly so the UI can say "couldn't verify" instead of a false all-clear.
-    if (!listRes.ok) {
-      console.warn("Recall list fetch failed:", listRes.error, listUrl);
-      return { checked: false, error: listRes.error, source: "Transport Canada VRDB" };
+    const candidates = modelCandidates(model, baseModel);
+    let anyOk = false, matchedModel: string | null = null;
+    let byNumber = new Map<string, { recallNumber: string; date: string | null }>();
+    for (const cand of candidates) {
+      const listRes = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(cand)}/year-range/${year}-${year}?format=json`, 12000);
+      if (!listRes.ok) continue;
+      anyOk = true;
+      const m = new Map<string, { recallNumber: string; date: string | null }>();
+      for (const r of (listRes.data?.ResultSet ?? [])) {
+        const o = tcRecordToObj(r); const num = o["Recall number"];
+        if (num && !m.has(num)) m.set(num, { recallNumber: num, date: o["Recall date"] || null });
+      }
+      if (m.size > 0) { byNumber = m; matchedModel = cand; break; }
     }
-    const rows: any[] = listRes.data?.ResultSet ?? [];
-    const byNumber = new Map<string, { recallNumber: string; date: string | null }>();
-    for (const r of rows) {
-      const o = tcRecordToObj(r);
-      const num = o["Recall number"];
-      if (num && !byNumber.has(num)) byNumber.set(num, { recallNumber: num, date: o["Recall date"] || null });
+    if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
+
+    if (byNumber.size > 0) {
+      const nums = Array.from(byNumber.keys()).slice(0, 8);
+      const items = await Promise.all(nums.map(async (num) => {
+        const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
+        const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
+        const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
+        return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
+          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
+      }));
+      return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
     }
-    if (byNumber.size === 0) {
-      return { checked: true, count: 0, items: [], source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-    }
-    // Detail (affected system + summary) for up to 8 recalls, in parallel.
-    const nums = Array.from(byNumber.keys()).slice(0, 8);
-    const items = await Promise.all(nums.map(async (num) => {
-      const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
-      const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
-      const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
-      return {
-        recallNumber: num,
-        date: byNumber.get(num)!.date,
-        system: o["SYSTEM_TYPE_ETXT"] || null,
-        unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null,
-        summary: comment ? comment.slice(0, 400) : null,
-      };
-    }));
-    return { checked: true, count: byNumber.size, items, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+
+    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
+    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) {
     console.warn("lookupRecalls threw:", err);
     return { checked: false };
@@ -783,11 +846,12 @@ async function lookupCatalogMsrp(
   make: string,
   model: string,
   trim: string | null,
+  opts?: { rawModel?: string | null; fuelType?: string | null },
 ): Promise<number | null> {
   try {
     const { data, error } = await supabase
       .from("msrp_catalog")
-      .select("trim, msrp")
+      .select("trim, msrp, fuel_type")
       .eq("year", year)
       .ilike("make", make)
       .ilike("model", model)
@@ -800,27 +864,38 @@ async function lookupCatalogMsrp(
     if (rows.length === 0) return null;
     const num = (r: any) => Number(r.msrp);
 
-    // Only one row for this year/make/model and no trim to disambiguate --
-    // safe to use it directly.
-    if (rows.length === 1 && !trim) return num(rows[0]);
+    // Partition by fuel so a hybrid trim can't collide with its gas twin
+    // (Palisade "Luxury Hybrid 8-Passenger" vs a gas "Luxury 8-Passenger").
+    // The base-model resolve strips "Hybrid" from the model, so the hybrid
+    // signal is recovered from the raw model / verified fuel type / trim text.
+    const rowHybrid = (r: any) => /hybrid|phev/i.test(String(r.trim || "")) || /hybrid|phev/i.test(String(r.fuel_type || ""));
+    const isHybrid = /hybrid|phev/i.test(String(opts?.rawModel || "")) || /hybrid|phev/i.test(String(opts?.fuelType || "")) || /hybrid|phev/i.test(String(trim || ""));
+    let pool = rows;
+    if (isHybrid) { const h = rows.filter(rowHybrid); if (h.length) pool = h; }
+    else { const g = rows.filter((r: any) => !rowHybrid(r)); if (g.length) pool = g; }
 
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    // Only one row for this year/make/model(/fuel) and no trim to disambiguate.
+    if (pool.length === 1 && !trim) return num(pool[0]);
+
+    // Normalise trims, dropping the "hybrid"/"phev" token (the fuel partition
+    // above already separated hybrid from gas) so it never blocks a match.
+    const norm = (s: string) => s.toLowerCase().replace(/hybrid|phev/g, "").replace(/[^a-z0-9]+/g, "");
     const want = trim ? norm(trim) : "";
 
     // 1) exact normalized trim match
-    let hits = want ? rows.filter((r: any) => r.trim && norm(r.trim) === want) : [];
+    let hits = want ? pool.filter((r: any) => r.trim && norm(r.trim) === want) : [];
     // 2) otherwise containment either direction (dealer "GT Premium" vs
     //    catalog "GT (Premium Package)") -- accepted only if it lands on
     //    exactly one row, never an ambiguous set.
     if (hits.length === 0 && want) {
-      hits = rows.filter((r: any) => r.trim && (norm(r.trim).includes(want) || want.includes(norm(r.trim))));
+      hits = pool.filter((r: any) => r.trim && (norm(r.trim).includes(want) || want.includes(norm(r.trim))));
     }
     if (hits.length === 1) {
       const v = num(hits[0]);
-      console.log(`Catalog MSRP hit: ${year} ${make} ${model} ${trim ?? ""} -> ${v}`);
+      console.log(`Catalog MSRP hit: ${year} ${make} ${model} ${trim ?? ""} (${isHybrid ? "hybrid" : "gas"}) -> ${v}`);
       return v;
     }
-    console.log(`Catalog MSRP: ${rows.length} row(s) for ${year} ${make} ${model} but no unambiguous trim match for "${trim ?? ""}" -- deferring to manufacturer fallback.`);
+    console.log(`Catalog MSRP: ${pool.length}/${rows.length} pooled row(s) for ${year} ${make} ${model} but no unambiguous trim match for "${trim ?? ""}" -- deferring to manufacturer fallback.`);
     return null;
   } catch (err) {
     console.warn("lookupCatalogMsrp threw:", err);
@@ -1591,6 +1666,168 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
   }
 }
 
+// ── Direct-fetch + schema.org JSON-LD fallback ──────────────────────────────
+// When the Nimble page scrape fails AND the SM360 inventory-feed fallback
+// doesn't apply -- e.g. a `/new-catalog/` model/brochure page whose slug id is
+// a CATALOG id, not a lot unit's vehicleId (so it's absent from the inventory
+// feed), or a non-SM360 platform -- many modern dealer platforms STILL serve
+// the full HTML, including a clean schema.org Vehicle/Car + Offer JSON-LD block,
+// to a plain browser-UA fetch, even from behind Cloudflare where Nimble's
+// drivers get walled. Confirmed live (2026-07-30, tazaparkvw.com SM360 catalog
+// page): a direct fetch returned HTTP 200 with `"@type":"Car"` carrying
+// year/make/model/trim + `offers.price` (CAD), no Cloudflare challenge. This
+// builds a real, clearly-labelled, STRUCTURED-ONLY analysis from that data
+// (price + core vehicle facts); the shared enrichment then fills
+// MSRP/recalls/warranty/leverage. Page fees/financing are NOT read (that needs
+// the rendered page), so the sourceNote says so and points to the screenshot
+// path. Never throws; returns null when there's no usable priced vehicle node.
+async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-CA,en;q=0.9",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html && html.length > 0 ? html : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
+// a price out of a page's <script type="application/ld+json"> blocks. Handles
+// @graph arrays and a top-level array of nodes. Returns normalized fields, or
+// null if no usable vehicle node is present. Never throws.
+function extractJsonLdVehicle(html: string): {
+  year: number | null; make: string | null; model: string | null; trim: string | null;
+  vin: string | null; odometerKm: number | null; price: number | null; currency: string | null;
+  condition: string | null; dealerName: string | null; dealerCity: string | null;
+} | null {
+  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((m) => m[1].trim());
+  if (blocks.length === 0) return null;
+
+  const nodes: any[] = [];
+  for (const b of blocks) {
+    try {
+      const parsed = JSON.parse(b);
+      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.["@graph"]) ? parsed["@graph"] : [parsed]);
+      for (const n of arr) if (n && typeof n === "object") nodes.push(n);
+    } catch { /* one malformed block never sinks the rest */ }
+  }
+
+  const typeOf = (n: any): string[] => {
+    const t = n?.["@type"];
+    return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
+  };
+  const isVehicle = (n: any) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
+  const firstOffer = (n: any): any => {
+    const o = n?.offers;
+    if (!o) return null;
+    return Array.isArray(o) ? (o[0] ?? null) : o;
+  };
+  const priceFrom = (offer: any): number | null => {
+    if (!offer) return null;
+    const cand = offer.price ?? offer.lowPrice ?? offer?.priceSpecification?.price;
+    const num = Number(String(cand ?? "").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(num) && num > 0 ? num : null;
+  };
+
+  let node: any = null; let offer: any = null; let price: number | null = null;
+  for (const n of nodes) {
+    if (!isVehicle(n)) continue;
+    const o = firstOffer(n);
+    const p = priceFrom(o);
+    if (p != null) { node = n; offer = o; price = p; break; } // best: a priced vehicle node
+    if (!node) { node = n; offer = o; } // weak fallback: a vehicle node with no price
+  }
+  if (!node) return null;
+  if (price == null) price = priceFrom(offer);
+
+  const str = (v: any): string | null =>
+    (typeof v === "string" && v.trim()) ? v.trim()
+      : (v && typeof v.name === "string" && v.name.trim()) ? v.name.trim() : null;
+  const titleCase = (s: string | null) => s ? s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase()) : s;
+
+  const yearRaw = node.vehicleModelDate ?? node.modelDate ?? node.productionDate ?? node.releaseDate;
+  const ym = String(yearRaw ?? "").match(/\b(19|20)\d{2}\b/);
+  const year = ym ? Number(ym[0]) : null;
+
+  const make = titleCase(str(node.brand) || str(node.manufacturer));
+  const model = str(node.model) || str(node.name);
+  const trim = titleCase(str(node.vehicleConfiguration) || str(node.trim) || str(node.vehicleModelConfiguration));
+
+  const vinRaw = typeof node.vehicleIdentificationNumber === "string" ? node.vehicleIdentificationNumber.trim().toUpperCase() : "";
+  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+
+  let odometerKm: number | null = null;
+  const odo = node.mileageFromOdometer;
+  if (odo != null) {
+    const v = Number(typeof odo === "object" ? odo.value : odo);
+    if (Number.isFinite(v) && v >= 0) {
+      const unit = String(typeof odo === "object" ? (odo.unitCode || odo.unitText || "") : "").toUpperCase();
+      odometerKm = /SMI|MILE/.test(unit) ? Math.round(v * 1.60934) : Math.round(v);
+    }
+  }
+
+  const cond = String(node.itemCondition || offer?.itemCondition || "").toLowerCase();
+  let condition: string | null = /new/.test(cond) ? "new" : (/used|refurb/.test(cond) ? "used" : null);
+  if (condition == null && odometerKm != null) condition = odometerKm <= 100 ? "new" : "used";
+
+  const currency = str(offer?.priceCurrency);
+  const seller = offer?.seller || node?.seller;
+  const addr = seller?.address;
+  const locality = str(addr?.addressLocality);
+  const region = str(addr?.addressRegion);
+  const dealerCity = locality ? (region ? `${locality}, ${region}` : locality) : null;
+
+  if (!year && !make && !model && price == null) return null;
+  return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
+}
+
+async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
+  try {
+    const html = await fetchDirectHtml(url, 15_000);
+    if (!html) { console.log(`JSON-LD fallback: direct fetch returned nothing for ${url}.`); return null; }
+    const v = extractJsonLdVehicle(html);
+    if (!v || (v.price == null && !v.year && !v.model)) {
+      console.log(`JSON-LD fallback: no usable schema.org Vehicle/Offer in ${url}.`);
+      return null;
+    }
+    const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year: v.year, make: v.make, model: v.model, trim: v.trim,
+      vin: v.vin, odometerKm: v.odometerKm, fuelType: null,
+      vehicleCondition: v.condition,
+      dealerName: v.dealerName, dealerCity: v.dealerCity,
+      msrp: null,
+      quotedPrice: v.price,
+      quotedPriceSource: v.price != null ? "structured_data" : null,
+      standardWarranty: null,
+      addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      source: "structured_data_fallback",
+      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own structured product data (schema.org). Core vehicle details and the advertised price come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
+      summary: `${vehicleStr ?? "This vehicle"}${v.price != null ? ` is listed at $${v.price.toLocaleString()}${v.currency && v.currency !== "CAD" ? " " + v.currency : ""}` : ""}. This report was built from the page's structured data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+    };
+    console.log(`JSON-LD fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.price ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildJsonLdFallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
 // Shared downstream enrichment, run identically by BOTH the normal page-scrape
 // path and the SM360 feed fallback so a fallback report is as rich as its
 // (partial) data allows: verified warranty + fuel type, VIN pattern/check-digit
@@ -1603,10 +1840,17 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // checks rather than erroring.
 async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   await applyVerifiedWarranty(analysis);
+  await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
+  // Auto market value (best-effort, live mode only). No-op until VINAUDIT_MODE=live.
+  if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
   analysis.vinCheck = validateVin(analysis.vin);
+  // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
+  // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model
+  // field can't produce a false "no recalls"/"MSRP not found". See make-recalls-fail-safe.
+  const baseModel = await resolveBaseModel(analysis.year, analysis.make, analysis.model);
   if (analysis.year && analysis.make && analysis.model) {
-    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model, baseModel);
   }
 
   // Manufacturer-site MSRP fallback -- only spend the extra search+extraction
@@ -1615,7 +1859,7 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   // The request deadline is threaded through so this expensive step self-skips
   // when there isn't enough budget left to finish before the platform ceiling.
   if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
-    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, baseModel || analysis.model, analysis.trim ?? null, { rawModel: analysis.model, fuelType: analysis.fuelType });
     if (catMsrp) {
       analysis.msrp = catMsrp;
       analysis.msrpSource = "catalog";
@@ -1633,6 +1877,11 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   await resolveFinanceRates(analysis);
   await resolveLeaseRates(analysis);
   computeLeverageScore(analysis);
+  // Deal Decoder — run AFTER msrp + finance rates are resolved.
+  { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
+  { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
+  { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
+  analysis.counterScript = buildCounterScript(analysis);                                       // counter-script (last)
 }
 
 const CORS_HEADERS = {
@@ -1640,6 +1889,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
 
 const SYSTEM_PROMPT = `You are analyzing the extracted text content of a Canadian car dealership's vehicle listing web page, for a buyer using LotCheck.
 
@@ -1784,6 +2034,18 @@ Deno.serve(async (req: Request) => {
       if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
         const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
         console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
+        // Guardrail: an empty cached entry (no price/MSRP) is not a report --
+        // don't charge, steer to upload (same as the fresh-scrape path).
+        const cachedHasPricing = (Number(cached.analysis.quotedPrice) > 0) || (Number(cached.analysis.msrp) > 0);
+        if (!cachedHasPricing) {
+          await releaseCredit(holdId);
+          holdId = null;
+          return new Response(
+            JSON.stringify({ error: "unreadable_listing", message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.", vehicle: cached.analysis.vehicle || null, dealerName: cached.analysis.dealerName || null }),
+            { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+          );
+        }
+        await finalizeServerSide(cached.analysis); // finalizes entries cached before this change
         // A cached delivery is still a delivered accurate result -> capture.
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -1812,6 +2074,7 @@ Deno.serve(async (req: Request) => {
       const fallback = await buildSm360FallbackAnalysis(url);
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
+        await finalizeServerSide(fallback);
         try {
           await supabase
             .from("listing_analysis_cache")
@@ -1829,6 +2092,35 @@ Deno.serve(async (req: Request) => {
           JSON.stringify(credits
             ? { analysis: fallback, source: "sm360_feed_fallback", credits }
             : { analysis: fallback, source: "sm360_feed_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Second fallback: many dealer platforms (incl. SM360 `/new-catalog/`
+      // model pages, whose slug id isn't an inventory vehicleId, and non-SM360
+      // sites) still serve clean schema.org Vehicle/Offer JSON-LD to a plain
+      // browser-UA fetch even when Nimble is walled. Build a structured-only
+      // report from that. Only runs after BOTH the page scrape and the SM360
+      // feed fallback have already failed, so pages that load are unaffected.
+      const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
+      if (jsonLdFallback) {
+        await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
+        await finalizeServerSide(jsonLdFallback);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: jsonLdFallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (JSON-LD fallback):", err);
+        }
+        await logUsage({ success: true, errorMessage: `page-load failed, served structured-data (JSON-LD) fallback` });
+        console.log(`Served structured-data (JSON-LD) fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        const credits = await captureCredit(holdId);
+        holdId = null;
+        return new Response(
+          JSON.stringify(credits
+            ? { analysis: jsonLdFallback, source: "structured_data_fallback", credits }
+            : { analysis: jsonLdFallback, source: "structured_data_fallback" }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -2014,6 +2306,60 @@ Deno.serve(async (req: Request) => {
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
     // runs, so the two paths never drift apart.
     await enrichAnalysis(analysis, REQUEST_DEADLINE);
+
+    // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
+    // scrape can come back with no usable pricing. A report with no asking price
+    // AND no MSRP is not a Quote Check -- it's an empty page. Do NOT charge for
+    // it and do NOT deliver it as a report; tell the client to steer the buyer
+    // to the photo/PDF upload (which reads the real quote reliably). Also skip
+    // the cache so a later upload/readable retry isn't blocked by an empty hit.
+    let gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+
+    // RESCUE (inert unless SCRAPFLY_API_KEY is set): the normal Nimble path got
+    // no price -> render the page through Scrapfly's anti-bot engine and read the
+    // result with Claude vision (the "render the page, then read what a human
+    // sees" flow), then re-enrich. Turns a would-be empty report into a real one
+    // for JS-rendered / bot-protected dealer sites. Fully fail-safe: any failure
+    // returns null and we fall through to the guardrail exactly as before.
+    if (!gotPricing && scrapflyEnabled()) {
+      try {
+        const rescued = await rescueListingViaScrapfly(url, {
+          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+          budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
+        });
+        if (rescued) {
+          mergeRescued(analysis, rescued);
+          await enrichAnalysis(analysis, REQUEST_DEADLINE);
+          gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+          console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}`);
+        }
+      } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
+    }
+
+    if (!gotPricing) {
+      await logUsage({ success: false, errorMessage: "unreadable_listing (no price/MSRP extracted)" });
+      await releaseCredit(holdId);
+      holdId = null;
+      return new Response(
+        JSON.stringify({
+          error: "unreadable_listing",
+          message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.",
+          vehicle: analysis.vehicle || null,
+          dealerName: analysis.dealerName || null,
+        }),
+        { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+
+    await finalizeServerSide(analysis);
+
+    // Flywheel Phase 1 — LOG ONLY, stores nothing. Projects the (already
+    // extracted) fees into DE-IDENTIFIED observations so we can validate the
+    // normalizer against real quotes. No DB write; gated behind FLYWHEEL_LOG.
+    // Capture (writing rows) is Phase 3, gated on legal sign-off.
+    if (Deno.env.get("FLYWHEEL_LOG") === "on") {
+      try { const obs = buildFeeObservations(analysis); if (obs.length) console.log(`flywheel: ${obs.length} fee obs ${JSON.stringify(obs)}`); } catch (e) { console.warn("flywheel log skipped:", (e as Error)?.message); }
+    }
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache
