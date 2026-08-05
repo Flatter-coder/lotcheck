@@ -568,7 +568,7 @@
     .mal-pulse.mal-go{animation:none}
   }
 </style>
-<script>if(new URLSearchParams(location.search).get('view')==='alerts')document.documentElement.classList.add('alerts-only');</script>
+<script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
 </head>
 <body>
 <nav class="sitenav" aria-label="Main">
@@ -584,7 +584,7 @@
       <a href="/#pipeline">10-point lane</a>
       <a href="/#report">Sample report</a>
       <a href="/#portal">Dealer portal</a>
-      <a href="/live-price-index?view=alerts">MSRP Notifier</a>
+      <a href="/msrp-alerts">MSRP Notifier</a>
       <a href="/verify">Verify</a>
     </div>
     <div class="sn-cta">
@@ -723,7 +723,7 @@
     </section>
 
     <!-- MSRP ALERTS WAITLIST -->
-    <section class="mal-section" id="alerts">
+    <section class="mal-section" id="alerts" style="display:none">
       <h2>Get MSRP alerts <span class="n">waitlist · rolling out city by city</span></h2>
       <div class="mal-widget">
         <!-- 3D visual -->
