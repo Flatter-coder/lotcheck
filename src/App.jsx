@@ -8072,6 +8072,8 @@ function MsrpAlertsPage(){
     .mal-seg button.on{border-color:${T.cyan};color:${T.cyan};background:${dark?"rgba(58,224,255,.08)":"rgba(14,138,168,.10)"}}
     .mal-col{scrollbar-width:none;-ms-overflow-style:none}
     .mal-col::-webkit-scrollbar{display:none}
+    .mal-navlinks{scrollbar-width:none;-ms-overflow-style:none}
+    .mal-navlinks::-webkit-scrollbar{display:none}
     @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
     @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
     @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}`;
@@ -8084,7 +8086,7 @@ function MsrpAlertsPage(){
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1180,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
-          <div style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
+          <div className="mal-navlinks" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
             {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
           <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?"☀":"☾"}</button>
