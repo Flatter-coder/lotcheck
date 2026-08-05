@@ -2378,6 +2378,50 @@ function LogoMark({ size = 32 }) {
   );
 }
 
+// Self-contained animated brand mark — the same gate+car as LogoMark, but it
+// carries its OWN keyframes so the car drives through the gate on any page,
+// including the cosmic pages (MSRP/Verify/Trust) that don't load GLOBAL_CSS.
+function SiteLogo({ size = 30 }) {
+  return (
+    <div style={{ position:"relative", width:size, height:size, flexShrink:0 }}>
+      <style dangerouslySetInnerHTML={{__html:`
+        .slc-car{animation:slcDrive 4s linear infinite}
+        .slc-win{animation:slcFlash 4s linear infinite}
+        @keyframes slcDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
+        @keyframes slcFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
+        @media(prefers-reduced-motion:reduce){.slc-car,.slc-win{animation:none!important}}
+      `}}/>
+      <svg width={size} height={size} viewBox="-95 -45 145 130" aria-hidden="true">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g className="slc-win"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(58,224,255,.5)"/></g>
+        <g className="slc-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 // ── Admin panel colors — LotCheck brand palette, independent of the shared
 // dark GLOBAL_CSS theme so this doesn't touch the buyer-facing site ────────
 // Two on-brand palettes, not a light theme + a generic navy fallback — dark
@@ -5955,9 +5999,9 @@ function VerifyPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
           <div className="vnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
-            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#34d399":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#3ae0ff":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
           <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
@@ -7852,7 +7896,7 @@ function TrustPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
           <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {NAV.map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
           </div>
@@ -7915,20 +7959,38 @@ function TrustPage(){
 // to the same SECURITY DEFINER RPC fn_alert_subscribe (CASL consent required;
 // anon can insert, never read). [[nothing-published-without-verification]],
 // [[alerts-are-bridge-inventory]] (signups file by make+city into demand folders).
-const MAL_VEHICLES=[
-  {label:"2026 Toyota RAV4 Hybrid",make:"Toyota",model:"RAV4 Hybrid",year:2026},
-  {label:"2026 Hyundai Tucson Hybrid",make:"Hyundai",model:"Tucson Hybrid",year:2026},
-  {label:"2026 Mazda CX-5",make:"Mazda",model:"CX-5",year:2026},
-  {label:"2026 Honda CR-V",make:"Honda",model:"CR-V",year:2026},
-  {label:"2026 Kia Sportage",make:"Kia",model:"Sportage",year:2026},
-  {label:"2026 Toyota Grand Highlander",make:"Toyota",model:"Grand Highlander",year:2026},
-];
-const MAL_CITIES=[
-  {label:"Calgary, AB",city:"Calgary",province:"AB"},
-  {label:"Edmonton, AB",city:"Edmonton",province:"AB"},
-  {label:"Red Deer, AB",city:"Red Deer",province:"AB"},
-  {label:"Lethbridge, AB",city:"Lethbridge",province:"AB"},
-];
+// Top new models sold in Canada (trucks, SUVs, sedans, minivans, EVs) — the cars
+// a buyer is most likely to want an MSRP alert on. year=2026 model-year default.
+const MAL_VEHICLES=(()=>{const m=[
+  // Pickups
+  ["Ford","F-150"],["Ram","1500"],["Chevrolet","Silverado 1500"],["GMC","Sierra 1500"],["Toyota","Tacoma"],
+  // Compact SUVs / crossovers
+  ["Toyota","RAV4"],["Toyota","RAV4 Hybrid"],["Honda","CR-V"],["Mazda","CX-5"],["Hyundai","Tucson"],
+  ["Kia","Sportage"],["Nissan","Rogue"],["Ford","Escape"],["Chevrolet","Equinox"],["Subaru","Forester"],
+  ["Volkswagen","Tiguan"],
+  // Subcompact SUVs
+  ["Hyundai","Kona"],["Kia","Seltos"],["Chevrolet","Trax"],["Subaru","Crosstrek"],
+  // Midsize / 3-row SUVs
+  ["Toyota","Highlander"],["Toyota","Grand Highlander"],["Hyundai","Santa Fe"],["Kia","Sorento"],["Ford","Explorer"],
+  // Sedans
+  ["Honda","Civic"],["Toyota","Corolla"],["Toyota","Camry"],["Hyundai","Elantra"],
+  // Minivans
+  ["Toyota","Sienna"],["Kia","Carnival"],
+  // EVs
+  ["Tesla","Model Y"],["Hyundai","Ioniq 5"],
+];return m.map(([make,model])=>({label:`2026 ${make} ${model}`,make,model,year:2026}));})();
+
+// Alberta municipalities that have new-car dealerships. Major metros first, then
+// alphabetical, so a buyer can find their town. All province "AB".
+const MAL_CITIES=(()=>{const c=[
+  "Calgary","Edmonton","Red Deer","Lethbridge","Medicine Hat","Fort McMurray","Grande Prairie",
+  "Airdrie","St. Albert","Sherwood Park","Spruce Grove","Leduc","Camrose","Lloydminster","Cochrane",
+  "Okotoks","Fort Saskatchewan","Wetaskiwin","Lacombe","Sylvan Lake","Brooks","Cold Lake","Canmore",
+  "High River","Stony Plain","Drayton Valley","Hinton","Edson","Whitecourt","Peace River","Drumheller",
+  "Olds","Ponoka","Wainwright","Vegreville","Stettler","Rocky Mountain House","Bonnyville","Slave Lake",
+  "Taber","Strathmore","Innisfail","Westlock","Barrhead","St. Paul","Vermilion","Claresholm","Pincher Creek",
+  "Cardston","Provost",
+];return c.map(city=>({label:`${city}, AB`,city,province:"AB"}));})();
 const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
 
 function MsrpAlertsPage(){
@@ -7986,8 +8048,11 @@ function MsrpAlertsPage(){
     .mal-seg{display:flex;gap:6px}
     .mal-seg button{flex:1;background:rgba(8,10,24,.5);border:1px solid rgba(150,170,255,.2);color:#9aa2c4;border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
     .mal-seg button.on{border-color:#3ae0ff;color:#3ae0ff;background:rgba(58,224,255,.08)}
-    @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:32px}}
-    @media(max-width:620px){.mal-hero{max-width:none!important;right:20px}}`;
+    .mal-col{scrollbar-width:thin}
+    .mal-col::-webkit-scrollbar{width:6px}.mal-col::-webkit-scrollbar-thumb{background:rgba(150,170,255,.25);border-radius:3px}
+    @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
+    @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
+    @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}`;
 
   return (
     <div style={{position:"relative",height:"100vh",overflow:"hidden",background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:"#eaf0ff"}}>
@@ -7996,7 +8061,7 @@ function MsrpAlertsPage(){
 
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:"rgba(10,10,22,.55)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <div style={{maxWidth:1180,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
           <div style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
             {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#3ae0ff":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
@@ -8004,13 +8069,14 @@ function MsrpAlertsPage(){
         </div>
       </nav>
 
-      <div className="mal-hero" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:88,maxWidth:430,zIndex:10}}>
+      <div className="mal-col" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:"50%",transform:"translateY(-50%)",width:"min(400px,90vw)",maxHeight:"calc(100vh - 92px)",overflowY:"auto",zIndex:10,display:"flex",flexDirection:"column"}}>
+      <div className="mal-hero" style={{marginBottom:16}}>
         <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
         <h1>The moment it's at MSRP, you'll know.</h1>
         <p style={{fontSize:15,lineHeight:1.6,color:"#c7cee6",maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
       </div>
 
-      <div className="mal" style={{position:"absolute",left:"clamp(20px,4vw,48px)",bottom:26,width:"min(350px,88vw)",padding:18,borderRadius:20,zIndex:10,
+      <div className="mal" style={{width:"100%",padding:18,borderRadius:20,boxSizing:"border-box",
         background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
         {done ? (
           <div style={{textAlign:"center",padding:"6px 4px"}}>
@@ -8050,6 +8116,7 @@ function MsrpAlertsPage(){
             </div>
           </>
         )}
+      </div>
       </div>
 
       <div className="mal-panel" style={{position:"absolute",right:"clamp(20px,3vw,32px)",top:"50%",transform:"translateY(-50%)",width:230,padding:"16px 16px 18px",borderRadius:18,zIndex:10,
