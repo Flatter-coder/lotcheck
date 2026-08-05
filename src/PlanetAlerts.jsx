@@ -15,8 +15,15 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
 
   // slider → uniform / rotation, no scene rebuild
   useEffect(() => { if (tiltObjRef.current) tiltObjRef.current.rotation.z = (tilt * Math.PI) / 180; }, [tilt]);
-  // density drives the atmosphere glow directly (0 = clear sky, no halo) so the dial reads true.
-  useEffect(() => { if (uniformsRef.current) uniformsRef.current.uDensity.value = Math.max(0, density); }, [density]);
+  // density drives BOTH the atmosphere glow (0 = clear sky, no halo) and the
+  // weather: uStorm ramps cloud coverage/lightning so the dial = market climate
+  // (clear -> cloudy -> stormy). Reads true at 0.
+  useEffect(() => {
+    if (!uniformsRef.current) return;
+    const d = Math.max(0, density);
+    uniformsRef.current.uDensity.value = d;
+    uniformsRef.current.uStorm.value = Math.min(1, d / 1.5);
+  }, [density]);
 
   useEffect(() => {
     const app = ref.current;
@@ -49,7 +56,7 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xbfd0ff, size: 0.06, transparent: true, opacity: 0.9 }));
     scene.add(stars);
 
-    const uniforms = { uTime: { value: 0 }, uLight: { value: new THREE.Vector3(1.0, 0.35, 0.55).normalize() }, uDensity: { value: Math.max(0, density) } };
+    const uniforms = { uTime: { value: 0 }, uLight: { value: new THREE.Vector3(1.0, 0.35, 0.55).normalize() }, uDensity: { value: Math.max(0, density) }, uStorm: { value: Math.min(1, Math.max(0, density) / 1.5) } };
     uniformsRef.current = uniforms;
 
     const vert = `varying vec3 vN;varying vec3 vP;varying vec3 vV;
@@ -57,26 +64,47 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
       vec4 wp=modelMatrix*vec4(position,1.0);vV=normalize(cameraPosition-wp.xyz);
       gl_Position=projectionMatrix*viewMatrix*wp;}`;
     const frag = `precision highp float;varying vec3 vN;varying vec3 vP;varying vec3 vV;
-      uniform float uTime;uniform vec3 uLight;uniform float uDensity;
+      uniform float uTime;uniform vec3 uLight;uniform float uDensity;uniform float uStorm;
       float hash(vec3 p){p=fract(p*0.3183099+0.1);p*=17.0;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
       float vnoise(vec3 x){vec3 i=floor(x),f=fract(x);f=f*f*(3.0-2.0*f);
        return mix(mix(mix(hash(i+vec3(0,0,0)),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
                   mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),f.x),mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);}
       float fbm(vec3 p){float s=0.0,a=0.5;for(int i=0;i<5;i++){s+=a*vnoise(p);p*=2.03;a*=0.5;}return s;}
+      float fbm4(vec3 p){float s=0.0,a=0.5;for(int i=0;i<4;i++){s+=a*vnoise(p);p*=2.05;a*=0.5;}return s;}
+      vec3 rotY(vec3 p,float a){float c=cos(a),s=sin(a);return vec3(p.x*c-p.z*s,p.y,p.x*s+p.z*c);}
       void main(){
-       vec3 N=normalize(vN);
+       vec3 N=normalize(vN);vec3 u=normalize(vP);float t=uTime;
        float land=fbm(vP*1.7);float lm=smoothstep(0.52,0.6,land);
        vec3 ocean=vec3(0.03,0.12,0.28);
        vec3 grnd=mix(vec3(0.10,0.42,0.34),vec3(0.55,0.42,0.22),smoothstep(0.6,0.8,land));
-       float ice=smoothstep(0.72,0.9,abs(vP.y));
+       float ice=smoothstep(0.72,0.9,abs(u.y));
        vec3 dayCol=mix(ocean,grnd,lm);dayCol=mix(dayCol,vec3(0.85,0.92,1.0),ice);
-       float cl=fbm(vP*2.3+vec3(uTime*0.02,0.0,uTime*0.015));
-       float cloud=smoothstep(0.55,0.75,cl);dayCol=mix(dayCol,vec3(0.95,0.97,1.0),cloud*0.75);
+       // WEATHER: differential-rotation swirl (seamless 3D noise) + cyclonic warp.
+       // Latitude-dependent band speed/direction -> a satellite-imagery swirl.
+       float ang=t*0.05+0.35*sin(u.y*7.5);
+       vec3 q=rotY(vP,ang);
+       q+=0.18*vec3(fbm4(vP*2.4+vec3(0.0,t*0.03,0.0))-0.5,0.0,fbm4(vP*2.4+vec3(9.0,0.0,t*0.03))-0.5);
+       float clouds=fbm4(q*2.1+vec3(0.0,t*0.02,0.0))*0.62+fbm4(q*4.3+7.0-vec3(0.0,t*0.05,0.0))*0.38;
+       float cover=mix(0.60,0.40,uStorm);float sharp=mix(0.80,0.54,uStorm);   // stormier => more, harder cloud
+       float cloud=smoothstep(cover,sharp,clouds);
+       float tropics=smoothstep(0.55,0.0,abs(u.y));                            // convective towers near equator
+       cloud=clamp(cloud*mix(0.85,1.2,tropics),0.0,1.0);
+       vec3 cloudCol=mix(vec3(0.96,0.98,1.0),vec3(0.72,0.76,0.86),uStorm*0.8);
+       dayCol=mix(dayCol,cloudCol,cloud*0.9);
        float lambert=dot(N,normalize(uLight));float dayA=smoothstep(-0.08,0.28,lambert);
        float city=smoothstep(0.62,0.66,fbm(vP*8.0))*lm;
-       vec3 night=mix(vec3(0.06,0.03,0.16),vec3(0.14,0.06,0.28),fbm(vP*1.2));
-       night+=city*vec3(1.0,0.75,0.35)*1.4;
+       vec3 night=mix(vec3(0.04,0.02,0.12),vec3(0.11,0.05,0.24),fbm(vP*1.2));
+       night+=city*vec3(1.0,0.75,0.35)*1.4*(1.0-cloud);
        vec3 col=mix(night,dayCol,dayA);
+       // lightning: sparse flashes inside dense storm cells
+       vec3 cellId=floor(q*3.5);
+       float flick=step(0.972,hash(cellId+floor(t*7.0)));
+       col+=vec3(0.85,0.92,1.0)*flick*smoothstep(0.55,0.8,cloud)*uStorm*(1.0-dayA*0.6)*1.7;
+       // aurora ribbons near the poles
+       float pole=smoothstep(0.6,0.9,abs(u.y));
+       float ph=atan(u.z,u.x)*3.0+t*0.6+fbm4(vP*2.0)*4.0;
+       float rib=pow(sin(ph)*0.5+0.5,4.0);
+       col+=mix(vec3(0.20,1.0,0.6),vec3(0.4,0.55,1.0),0.5+0.5*sin(ph*0.5))*rib*pole*(1.0-dayA)*0.55;
        float fres=pow(1.0-max(dot(N,normalize(vV)),0.0),3.0);float d=uDensity;
        col+=vec3(0.22,0.85,1.0)*fres*d*(0.4+0.6*dayA);
        col+=vec3(0.62,0.45,1.0)*pow(fres,1.6)*d*0.5*(1.0-dayA);

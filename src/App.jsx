@@ -8011,6 +8011,25 @@ function MsrpAlertsPage(){
 
   const climate = dens<5?"Clear — near MSRP":dens<12?"Cloudy — small markup":"Stormy — over sticker";
 
+  // Dark/bright toggle — shares the site-wide "lc-theme" key so it stays in sync
+  // with Quote Check / the Price Index. Defaults to the OS preference.
+  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="light")return "light"; if(s==="dark")return "dark"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
+  const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
+  const dark=theme==="dark";
+  const T = dark ? {
+    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#eaf0ff", soft:"#c7cee6", faint:"#9aa2c4",
+    navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6",
+    panelBg:"rgba(16,18,38,.6)", panelBorder:"rgba(150,170,255,.22)", panel2Bg:"rgba(16,18,38,.5)", panel2Border:"rgba(150,170,255,.2)",
+    inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
+    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
+  } : {
+    pageBg:"radial-gradient(125% 120% at 78% 6%,#e6ebff 0%,#eef1fb 48%,#f7f8fc 100%)", text:"#33305a", soft:"#5b5885", faint:"#706d96",
+    navBg:"rgba(255,255,255,.72)", navBorder:"rgba(51,48,90,.1)", logoText:"#33305a", link:"#5b5885",
+    panelBg:"rgba(255,255,255,.72)", panelBorder:"rgba(51,48,90,.14)", panel2Bg:"rgba(255,255,255,.66)", panel2Border:"rgba(51,48,90,.12)",
+    inputBg:"rgba(255,255,255,.92)", inputBorder:"rgba(51,48,90,.2)", segBg:"rgba(255,255,255,.72)", segBorder:"rgba(51,48,90,.16)",
+    rangeTrack:"rgba(51,48,90,.18)", thumbBorder:"#ffffff", cyan:"#0e8aa8", heroGrad:"linear-gradient(100deg,#2a2650,#0e8aa8 55%,#7a4fd0)",
+  };
+
   async function submit(){
     setErr("");
     if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())){ setErr("Enter a valid email so we can reach you."); return; }
@@ -8042,80 +8061,81 @@ function MsrpAlertsPage(){
 
   const css=`
     .mal-hero h1{font-size:clamp(30px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:14px 0 10px;font-weight:800;
-      background:linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff);-webkit-background-clip:text;background-clip:text;color:transparent}
-    .mal select,.mal input[type=email]{width:100%;background:rgba(8,10,24,.6);color:#eaf0ff;border:1px solid rgba(150,170,255,.25);
+      background:${T.heroGrad};-webkit-background-clip:text;background-clip:text;color:transparent}
+    .mal select,.mal input[type=email]{width:100%;background:${T.inputBg};color:${T.text};border:1px solid ${T.inputBorder};
       border-radius:11px;padding:10px 11px;font:600 13px/1.1 inherit;outline:none;box-sizing:border-box}
-    .mal select:focus,.mal input[type=email]:focus{border-color:#3ae0ff}
-    .mal input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;background:rgba(150,170,255,.25);outline:none}
-    .mal input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#3ae0ff;box-shadow:0 0 12px #3ae0ff;cursor:pointer;border:2px solid #071018}
+    .mal select:focus,.mal input[type=email]:focus{border-color:${T.cyan}}
+    .mal input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;background:${T.rangeTrack};outline:none}
+    .mal input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:${T.cyan};box-shadow:0 0 12px ${T.cyan};cursor:pointer;border:2px solid ${T.thumbBorder}}
     .mal-seg{display:flex;gap:6px}
-    .mal-seg button{flex:1;background:rgba(8,10,24,.5);border:1px solid rgba(150,170,255,.2);color:#9aa2c4;border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
-    .mal-seg button.on{border-color:#3ae0ff;color:#3ae0ff;background:rgba(58,224,255,.08)}
+    .mal-seg button{flex:1;background:${T.segBg};border:1px solid ${T.segBorder};color:${T.faint};border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
+    .mal-seg button.on{border-color:${T.cyan};color:${T.cyan};background:${dark?"rgba(58,224,255,.08)":"rgba(14,138,168,.10)"}}
     .mal-col{scrollbar-width:thin}
-    .mal-col::-webkit-scrollbar{width:6px}.mal-col::-webkit-scrollbar-thumb{background:rgba(150,170,255,.25);border-radius:3px}
+    .mal-col::-webkit-scrollbar{width:6px}.mal-col::-webkit-scrollbar-thumb{background:${T.rangeTrack};border-radius:3px}
     @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
     @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
     @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}`;
 
   return (
-    <div style={{position:"relative",height:"100vh",overflow:"hidden",background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:"#eaf0ff"}}>
+    <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <PlanetAlerts tilt={tilt} density={dens/10}/>
 
-      <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:"rgba(10,10,22,.55)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+      <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1180,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
           <div style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
-            {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#3ae0ff":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+            {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
+          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?"☀":"☾"}</button>
           <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
       </nav>
 
       <div className="mal-col" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:"50%",transform:"translateY(-50%)",width:"min(400px,90vw)",maxHeight:"calc(100vh - 92px)",overflowY:"auto",zIndex:10,display:"flex",flexDirection:"column"}}>
       <div className="mal-hero" style={{marginBottom:16}}>
-        <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
+        <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:T.cyan,textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
         <h1>The moment it's at MSRP, you'll know.</h1>
-        <p style={{fontSize:15,lineHeight:1.6,color:"#c7cee6",maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
+        <p style={{fontSize:15,lineHeight:1.6,color:T.soft,maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
       </div>
 
       <div className="mal" style={{width:"100%",padding:18,borderRadius:20,boxSizing:"border-box",
-        background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
+        background:T.panelBg,border:`1px solid ${T.panelBorder}`,backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:dark?"0 20px 60px rgba(0,0,0,.5)":"0 20px 50px rgba(51,48,90,.14)"}}>
         {done ? (
           <div style={{textAlign:"center",padding:"6px 4px"}}>
-            <div style={{fontSize:26,marginBottom:8}}>✦</div>
+            <div style={{fontSize:26,marginBottom:8,color:T.cyan}}>✦</div>
             <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>{emailed?"Check your email to confirm.":"You're on the waitlist."}</div>
-            <div style={{fontSize:13,color:"#c7cee6",lineHeight:1.5}}>
+            <div style={{fontSize:13,color:T.soft,lineHeight:1.5}}>
               {emailed
                 ? <>We sent a confirmation link for the {MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} in {MAL_CITIES[city].city}. Click it and you're set — that one click is what lets us email you. Live tracking rolls out across Alberta soon.</>
                 : <>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</>}
             </div>
-            <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:"1px solid rgba(150,170,255,.3)",color:"#9aa2c4",borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
+            <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:`1px solid ${T.panelBorder}`,color:T.faint,borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
           </div>
         ) : (
           <>
-            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Vehicle</label>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Vehicle</label>
               <select value={veh} onChange={e=>setVeh(+e.target.value)}>{MAL_VEHICLES.map((v,i)=><option key={i} value={i}>{v.label}</option>)}</select></div>
             <div style={{display:"flex",gap:8,marginBottom:11}}>
-              <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>City</label>
+              <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>City</label>
                 <select value={city} onChange={e=>setCity(+e.target.value)}>{MAL_CITIES.map((c,i)=><option key={i} value={i}>{c.label}</option>)}</select></div>
             </div>
-            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Alert me when it's</label>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Alert me when it's</label>
               <div className="mal-seg">
                 <button className={thr==="at_msrp"?"on":""} onClick={()=>setThr("at_msrp")}>At MSRP</button>
                 <button className={thr==="below_msrp"?"on":""} onClick={()=>setThr("below_msrp")}>Below MSRP</button>
               </div></div>
-            <div style={{marginBottom:12}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Email</label>
+            <div style={{marginBottom:12}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Email</label>
               <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/></div>
-            <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:11.5,color:"#9aa2c4",lineHeight:1.4,cursor:"pointer",marginBottom:12}}>
-              <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} style={{marginTop:2,accentColor:"#3ae0ff"}}/>
+            <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:11.5,color:T.faint,lineHeight:1.4,cursor:"pointer",marginBottom:12}}>
+              <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} style={{marginTop:2,accentColor:T.cyan}}/>
               <span>Email me when MSRP tracking launches for this car in my city. I can unsubscribe anytime. No spam.</span></label>
-            {err && <div style={{fontSize:12,color:"#ff8f77",marginBottom:9}}>{err}</div>}
+            {err && <div style={{fontSize:12,color:"#e05a3c",marginBottom:9}}>{err}</div>}
             <button onClick={submit} disabled={busy} style={{width:"100%",border:"none",borderRadius:12,padding:12,font:"800 14px inherit",color:"#04121a",cursor:busy?"default":"pointer",opacity:busy?.7:1,
               background:"linear-gradient(100deg,#3ae0ff,#b090ff)",boxShadow:"0 8px 26px rgba(58,224,255,.35)"}}>{busy?"Joining…":"Notify me when it hits MSRP"}</button>
             <div style={{display:"flex",alignItems:"center",gap:8,marginTop:11}}>
-              <span style={{font:"800 9.5px/1 ui-monospace,monospace",letterSpacing:".08em",textTransform:"uppercase",color:"#3ae0ff",border:"1px solid #3ae0ff",borderRadius:999,padding:"5px 8px"}}>Waitlist</span>
-              <small style={{fontSize:11.5,color:"#9aa2c4",lineHeight:1.4}}>Live price tracking isn't running yet — join to be first when it launches in Alberta.</small>
+              <span style={{font:"800 9.5px/1 ui-monospace,monospace",letterSpacing:".08em",textTransform:"uppercase",color:T.cyan,border:`1px solid ${T.cyan}`,borderRadius:999,padding:"5px 8px"}}>Waitlist</span>
+              <small style={{fontSize:11.5,color:T.faint,lineHeight:1.4}}>Live price tracking isn't running yet — join to be first when it launches in Alberta.</small>
             </div>
           </>
         )}
@@ -8123,21 +8143,21 @@ function MsrpAlertsPage(){
       </div>
 
       <div className="mal-panel" style={{position:"absolute",right:"clamp(20px,3vw,32px)",top:"50%",transform:"translateY(-50%)",width:230,padding:"16px 16px 18px",borderRadius:18,zIndex:10,
-        background:"rgba(16,18,38,.5)",border:"1px solid rgba(150,170,255,.2)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)"}}>
-        <div style={{margin:"0 0 2px",fontSize:12,letterSpacing:".14em",textTransform:"uppercase",color:"#3ae0ff",fontWeight:800}}>Weather station</div>
-        <p style={{fontSize:11,color:"#8a92b4",margin:"0 0 14px",lineHeight:1.4}}>Drag the planet to orbit. These dials shape the visualization.</p>
-        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#c7cee6",fontWeight:700,marginBottom:6}}><span>Axial tilt</span><span style={{color:"#3ae0ff",fontFamily:"ui-monospace,monospace"}}>{tilt}°</span></div>
+        background:T.panel2Bg,border:`1px solid ${T.panel2Border}`,backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)"}}>
+        <div style={{margin:"0 0 2px",fontSize:12,letterSpacing:".14em",textTransform:"uppercase",color:T.cyan,fontWeight:800}}>Weather station</div>
+        <p style={{fontSize:11,color:T.faint,margin:"0 0 14px",lineHeight:1.4}}>Drag the planet to orbit. These dials shape the weather — clear to stormy.</p>
+        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.soft,fontWeight:700,marginBottom:6}}><span>Axial tilt</span><span style={{color:T.cyan,fontFamily:"ui-monospace,monospace"}}>{tilt}°</span></div>
           <input type="range" min="0" max="45" value={tilt} onChange={e=>setTilt(+e.target.value)}/></div>
-        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#c7cee6",fontWeight:700,marginBottom:6}}><span>Atmospheric density</span><span style={{color:"#3ae0ff",fontFamily:"ui-monospace,monospace"}}>{(dens/10).toFixed(1)}</span></div>
+        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.soft,fontWeight:700,marginBottom:6}}><span>Storm intensity</span><span style={{color:T.cyan,fontFamily:"ui-monospace,monospace"}}>{(dens/10).toFixed(1)}</span></div>
           <input type="range" min="0" max="20" value={dens} onChange={e=>setDens(+e.target.value)}/></div>
-        <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(150,170,255,.15)"}}>
-          <div style={{font:"800 9px/1 ui-monospace,monospace",letterSpacing:".1em",textTransform:"uppercase",color:"#8a92b4"}}>Market climate</div>
+        <div style={{marginTop:16,paddingTop:14,borderTop:`1px solid ${T.panel2Border}`}}>
+          <div style={{font:"800 9px/1 ui-monospace,monospace",letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Market climate</div>
           <div style={{fontSize:18,fontWeight:800,marginTop:5,letterSpacing:"-.01em"}}>{climate}</div>
-          <div style={{fontSize:10.5,color:"#7a82a4",marginTop:4}}>Preview metaphor · not live data yet</div>
+          <div style={{fontSize:10.5,color:T.faint,marginTop:4}}>Preview metaphor · not live data yet</div>
         </div>
       </div>
 
-      <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:"#5c6488",letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
+      <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:T.faint,letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
     </div>
   );
 }
