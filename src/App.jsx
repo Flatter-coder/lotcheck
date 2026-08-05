@@ -7964,24 +7964,43 @@ function TrustPage(){
 // [[alerts-are-bridge-inventory]] (signups file by make+city into demand folders).
 // Top new models sold in Canada (trucks, SUVs, sedans, minivans, EVs) — the cars
 // a buyer is most likely to want an MSRP alert on. year=2026 model-year default.
-const MAL_VEHICLES=(()=>{const m=[
-  // Pickups
-  ["Ford","F-150"],["Ram","1500"],["Chevrolet","Silverado 1500"],["GMC","Sierra 1500"],["Toyota","Tacoma"],
-  // Compact SUVs / crossovers
-  ["Toyota","RAV4"],["Toyota","RAV4 Hybrid"],["Honda","CR-V"],["Mazda","CX-5"],["Hyundai","Tucson"],
-  ["Kia","Sportage"],["Nissan","Rogue"],["Ford","Escape"],["Chevrolet","Equinox"],["Subaru","Forester"],
-  ["Volkswagen","Tiguan"],
-  // Subcompact SUVs
-  ["Hyundai","Kona"],["Kia","Seltos"],["Chevrolet","Trax"],["Subaru","Crosstrek"],
-  // Midsize / 3-row SUVs
-  ["Toyota","Highlander"],["Toyota","Grand Highlander"],["Hyundai","Santa Fe"],["Kia","Sorento"],["Ford","Explorer"],
-  // Sedans
-  ["Honda","Civic"],["Toyota","Corolla"],["Toyota","Camry"],["Hyundai","Elantra"],
-  // Minivans
-  ["Toyota","Sienna"],["Kia","Carnival"],
-  // EVs
-  ["Tesla","Model Y"],["Hyundai","Ioniq 5"],
-];return m.map(([make,model])=>({label:`2026 ${make} ${model}`,make,model,year:2026}));})();
+// Comprehensive Canadian new-vehicle lineup, grouped by make (alphabetical) so
+// the dropdown covers mainstream + luxury and a buyer can find their car.
+const MAL_VEHICLE_MAP={
+  Acura:["MDX","RDX","Integra","TLX","ZDX"],
+  Audi:["Q3","Q5","Q7","Q8","A4","A5","Q4 e-tron","Q8 e-tron"],
+  BMW:["X1","X3","X5","X7","3 Series","5 Series","iX","i4"],
+  Buick:["Encore GX","Envista","Envision","Enclave"],
+  Cadillac:["XT4","XT5","XT6","Escalade","Lyriq","CT5"],
+  Chevrolet:["Silverado 1500","Equinox","Equinox EV","Blazer","Blazer EV","Trax","Trailblazer","Traverse","Tahoe","Suburban","Colorado","Corvette"],
+  Chrysler:["Pacifica","Grand Caravan"],
+  Dodge:["Hornet","Durango","Charger"],
+  Ford:["F-150","F-150 Lightning","Super Duty","Escape","Explorer","Edge","Bronco","Bronco Sport","Ranger","Maverick","Mustang","Mustang Mach-E","Expedition"],
+  Genesis:["GV70","GV80","G70","G80","GV60"],
+  GMC:["Sierra 1500","Terrain","Acadia","Yukon","Canyon","Hummer EV"],
+  Honda:["Civic","Accord","CR-V","HR-V","Pilot","Passport","Ridgeline","Odyssey","Prologue"],
+  Hyundai:["Tucson","Santa Fe","Kona","Kona Electric","Elantra","Sonata","Palisade","Ioniq 5","Ioniq 6","Venue","Santa Cruz"],
+  Infiniti:["QX50","QX60","QX80"],
+  Jeep:["Wrangler","Grand Cherokee","Compass","Gladiator","Wagoneer","Grand Wagoneer"],
+  Kia:["Sportage","Sorento","Telluride","Seltos","Soul","Forte","K5","Carnival","EV6","EV9","Niro"],
+  "Land Rover":["Range Rover","Range Rover Sport","Range Rover Velar","Range Rover Evoque","Defender","Discovery"],
+  Lexus:["RX","NX","UX","TX","GX","ES","IS","RZ"],
+  Lincoln:["Corsair","Nautilus","Aviator","Navigator"],
+  Mazda:["CX-5","CX-30","CX-50","CX-70","CX-90","Mazda3","MX-5"],
+  "Mercedes-Benz":["GLA","GLB","GLC","GLE","GLS","C-Class","E-Class","EQB","EQE"],
+  MINI:["Cooper","Countryman"],
+  Mitsubishi:["Outlander","Outlander PHEV","RVR","Eclipse Cross"],
+  Nissan:["Rogue","Sentra","Altima","Kicks","Murano","Pathfinder","Frontier","Titan","Ariya","Leaf","Versa","Armada"],
+  Polestar:["Polestar 2","Polestar 3"],
+  Porsche:["Macan","Cayenne","911","Panamera","Taycan"],
+  Ram:["1500","2500","3500","ProMaster"],
+  Subaru:["Forester","Outback","Crosstrek","Impreza","Legacy","Ascent","WRX","Solterra","BRZ"],
+  Tesla:["Model 3","Model Y","Model S","Model X","Cybertruck"],
+  Toyota:["RAV4","RAV4 Prime","Corolla","Corolla Cross","Camry","Highlander","Grand Highlander","Tacoma","Tundra","4Runner","Sequoia","Sienna","Prius","C-HR","Crown","bZ","GR86","Supra"],
+  Volkswagen:["Tiguan","Atlas","Atlas Cross Sport","Jetta","Golf GTI","Taos","ID.4"],
+  Volvo:["XC40","XC60","XC90","XC40 Recharge","S60","C40"],
+};
+const MAL_VEHICLES=Object.entries(MAL_VEHICLE_MAP).flatMap(([make,models])=>models.map((model)=>({label:`2026 ${make} ${model}`,make,model,year:2026})));
 
 // Alberta municipalities that have new-car dealerships. Major metros first, then
 // alphabetical, so a buyer can find their town. All province "AB".
@@ -8013,21 +8032,25 @@ function MsrpAlertsPage(){
 
   // Dark/bright toggle — shares the site-wide "lc-theme" key so it stays in sync
   // with Quote Check / the Price Index. Defaults to the OS preference.
-  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="light")return "light"; if(s==="dark")return "dark"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
+  // Only "dark" is dark; light + outdoor both map to the bright theme, so landing
+  // here from any Quote Check / Price Index mode reads consistently.
+  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
   const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
   const dark=theme==="dark";
+  // Colors mirror the MSRP Price Index tokens exactly (dark: cosmic + #3ae0ff;
+  // light: #f5f7fa bg, #0d8fb0 cyan, #141c28 ink) so the two pages never diverge.
   const T = dark ? {
-    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#eaf0ff", soft:"#c7cee6", faint:"#9aa2c4",
+    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
     navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6",
     panelBg:"rgba(16,18,38,.6)", panelBorder:"rgba(150,170,255,.22)", panel2Bg:"rgba(16,18,38,.5)", panel2Border:"rgba(150,170,255,.2)",
     inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
     rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
   } : {
-    pageBg:"radial-gradient(125% 120% at 78% 6%,#e6ebff 0%,#eef1fb 48%,#f7f8fc 100%)", text:"#33305a", soft:"#5b5885", faint:"#706d96",
-    navBg:"rgba(255,255,255,.72)", navBorder:"rgba(51,48,90,.1)", logoText:"#33305a", link:"#5b5885",
-    panelBg:"rgba(255,255,255,.72)", panelBorder:"rgba(51,48,90,.14)", panel2Bg:"rgba(255,255,255,.66)", panel2Border:"rgba(51,48,90,.12)",
-    inputBg:"rgba(255,255,255,.92)", inputBorder:"rgba(51,48,90,.2)", segBg:"rgba(255,255,255,.72)", segBorder:"rgba(51,48,90,.16)",
-    rangeTrack:"rgba(51,48,90,.18)", thumbBorder:"#ffffff", cyan:"#0e8aa8", heroGrad:"linear-gradient(100deg,#2a2650,#0e8aa8 55%,#7a4fd0)",
+    pageBg:"#f5f7fa", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
+    navBg:"rgba(253,254,255,.82)", navBorder:"rgba(22,32,52,.1)", logoText:"#141c28", link:"#5a6577",
+    panelBg:"rgba(255,255,255,.72)", panelBorder:"rgba(22,32,52,.1)", panel2Bg:"rgba(255,255,255,.62)", panel2Border:"rgba(22,32,52,.1)",
+    inputBg:"rgba(255,255,255,.92)", inputBorder:"rgba(22,32,52,.16)", segBg:"rgba(255,255,255,.72)", segBorder:"rgba(22,32,52,.14)",
+    rangeTrack:"rgba(22,32,52,.18)", thumbBorder:"#ffffff", cyan:"#0d8fb0", heroGrad:"linear-gradient(100deg,#141c28,#0d8fb0 55%,#5a4fd0)",
   };
 
   async function submit(){
@@ -8081,12 +8104,12 @@ function MsrpAlertsPage(){
   return (
     <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
-      <PlanetAlerts tilt={tilt} density={dens/10}/>
+      <PlanetAlerts tilt={tilt} density={dens/10} theme={theme}/>
 
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
-        <div style={{maxWidth:1180,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
+        <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
-          <div className="mal-navlinks" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
+          <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
             {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
           <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?"☀":"☾"}</button>
@@ -8117,7 +8140,9 @@ function MsrpAlertsPage(){
         ) : (
           <>
             <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Vehicle</label>
-              <select value={veh} onChange={e=>setVeh(+e.target.value)}>{MAL_VEHICLES.map((v,i)=><option key={i} value={i}>{v.label}</option>)}</select></div>
+              <select value={veh} onChange={e=>setVeh(+e.target.value)}>{Object.keys(MAL_VEHICLE_MAP).map((mk)=>(
+                <optgroup key={mk} label={mk}>{MAL_VEHICLES.map((v,i)=>v.make===mk?<option key={i} value={i}>{v.model}</option>:null)}</optgroup>
+              ))}</select></div>
             <div style={{display:"flex",gap:8,marginBottom:11}}>
               <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>City</label>
                 <select value={city} onChange={e=>setCity(+e.target.value)}>{MAL_CITIES.map((c,i)=><option key={i} value={i}>{c.label}</option>)}</select></div>
