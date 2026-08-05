@@ -58,6 +58,8 @@ import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee } from "../_shared/docfee.ts";
+import { lookupRecalls } from "../_shared/recalls.ts";
+import { canonicalModel } from "../_shared/models.ts";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -465,37 +467,15 @@ function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: st
 // certificate: UnknownIssuer"), so an https fetch fails at connect time. The
 // endpoint serves the same JSON over plain http with no redirect, which
 // avoids the cert problem. Confirmed 2026-07-22.
-const TC_VRDB_BASE = "http://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
-const TC_RECALLS_PAGE = "https://tc.canada.ca/en/road-transportation/defects-recalls-vehicles-tires-child-car-seats";
-
-function tcRecordToObj(record: any[]): Record<string, string> {
-  const o: Record<string, string> = {};
-  for (const f of record || []) {
-    if (f?.Name) o[f.Name] = f?.Value?.Literal ?? "";
-  }
-  return o;
-}
-
-async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolean; data?: any; error?: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// Resolve the extracted model to its CANONICAL base model via our own
-// msrp_catalog ("Palisade Ultimate Calligraphy" -> "PALISADE"). Feeds both the
-// recall and MSRP lookups so trim in the model field can't break the exact
-// match either one needs. Null when we can't confidently resolve. Never throws.
+// Resolve the extracted model to its CANONICAL base model. Static map first
+// (canonicalModel — works even with an empty msrp_catalog, and fixes naming
+// traps like "bZ Woodland" -> "bZ" and "Mustang Mach-E"), then the catalog as a
+// secondary source. Feeds both the recall and MSRP lookups so trim in the model
+// field can't break the exact match either one needs. Never throws.
 async function resolveBaseModel(year: number, make: string, model: string): Promise<string | null> {
   if (!year || !make || !model) return null;
+  const canon = canonicalModel(make, model);
+  if (canon) return canon;
   try {
     const { data } = await supabase
       .from("msrp_catalog").select("model")
@@ -509,67 +489,6 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     }
     return best;
   } catch { return null; }
-}
-function modelCandidates(model: string, baseModel?: string | null): string[] {
-  const seen = new Set<string>(); const out: string[] = [];
-  const push = (m?: string | null) => { const v = (m || "").trim(); if (v && !seen.has(v.toUpperCase())) { seen.add(v.toUpperCase()); out.push(v); } };
-  push(baseModel); push(model);
-  const toks = String(model || "").trim().split(/\s+/);
-  for (let n = toks.length - 1; n >= 1; n--) push(toks.slice(0, n).join(" "));
-  return out;
-}
-async function tcModelKnown(make: string, model: string, year: number): Promise<boolean> {
-  const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-  const res = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year - 10}-${year - 1}?format=json`, 10000);
-  return res.ok && (res.data?.ResultSet?.length ?? 0) > 0;
-}
-// Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
-// CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
-// negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
-async function lookupRecalls(year: number, make: string, model: string, baseModel?: string | null): Promise<any> {
-  try {
-    const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-    const candidates = modelCandidates(model, baseModel);
-    let anyOk = false, matchedModel: string | null = null;
-    let byNumber = new Map<string, { recallNumber: string; date: string | null }>();
-    for (const cand of candidates) {
-      const listRes = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(cand)}/year-range/${year}-${year}?format=json`, 12000);
-      if (!listRes.ok) continue;
-      anyOk = true;
-      const m = new Map<string, { recallNumber: string; date: string | null }>();
-      for (const r of (listRes.data?.ResultSet ?? [])) {
-        const o = tcRecordToObj(r); const num = o["Recall number"];
-        if (num && !m.has(num)) m.set(num, { recallNumber: num, date: o["Recall date"] || null });
-      }
-      if (m.size > 0) { byNumber = m; matchedModel = cand; break; }
-    }
-    if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
-
-    if (byNumber.size > 0) {
-      const nums = Array.from(byNumber.keys()).slice(0, 8);
-      const items = await Promise.all(nums.map(async (num) => {
-        const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
-        const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
-        const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
-        return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
-          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
-      }));
-      return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-    }
-
-    // count:0 — a negative recall claim is only SAFE if the model is one TC
-    // actually tracks. baseModel (from our catalogue) proves that; otherwise try
-    // EACH candidate over the wider window, so a trim or renamed nameplate
-    // ("bZ Woodland" -> "bZ", which TC knows via the bZ4X history) still confirms
-    // clean instead of degrading to an unconfirmed "couldn't check". Only a model
-    // TC has never heard of stays confirmed:false. See make-recalls-fail-safe.
-    let confirmed = !!baseModel;
-    if (!confirmed) { for (const cand of candidates) { if (await tcModelKnown(make, cand, year)) { confirmed = true; break; } } }
-    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-  } catch (err) {
-    console.warn("lookupRecalls threw:", err);
-    return { checked: false };
-  }
 }
 
 // Financing math check: reconcile the dealer's OWN disclosed payment stream
