@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
 import heic2any from "heic2any";
 import DealOrrery from "./DealOrrery.jsx";
+import PlanetAlerts from "./PlanetAlerts.jsx";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 // Public anon key. Named once so the credit-aware fetches below can send it as
@@ -5866,7 +5867,7 @@ function VerifyPage(){
   .vnav-links a:hover{color:#fff!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}><span style={{fontSize:13,color:"#c3bfe0"}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||"#eafff6",whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/live-price-index?view=alerts"],["Verify","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
   return (
     <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
@@ -6683,7 +6684,7 @@ function QuoteCheckPage(){
                 ["/#pipeline","10-point lane"],
                 ["/#report","Sample report"],
                 ["/#portal","Dealer portal"],
-                ["/live-price-index?view=alerts","MSRP Notifier"],
+                ["/msrp-alerts","MSRP Notifier"],
               ].map(([href,label])=>(
                 <a key={href} href={href}
                   style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}
@@ -7759,7 +7760,7 @@ function QuoteCheckPage(){
 // VinAudit can only post a "beware" banner; we can prove authenticity, so this
 // page teaches the one-scan check. Nav on top per the site-wide rule.
 function TrustPage(){
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/live-price-index?view=alerts"],["Verify","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
   const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
   const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
   @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
@@ -7825,6 +7826,151 @@ function TrustPage(){
   );
 }
 
+// ── MSRP Alerts page (concept #11 "Cosmic Weather Station") ───────────────────
+// A React route (/msrp-alerts) that replaces the old static live-price-index
+// widget. The 3D planet is decorative; the copy stays an HONEST WAITLIST — live
+// price tracking isn't running yet, so we never imply an alert will fire. Submits
+// to the same SECURITY DEFINER RPC fn_alert_subscribe (CASL consent required;
+// anon can insert, never read). [[nothing-published-without-verification]],
+// [[alerts-are-bridge-inventory]] (signups file by make+city into demand folders).
+const MAL_VEHICLES=[
+  {label:"2026 Toyota RAV4 Hybrid",make:"Toyota",model:"RAV4 Hybrid",year:2026},
+  {label:"2026 Hyundai Tucson Hybrid",make:"Hyundai",model:"Tucson Hybrid",year:2026},
+  {label:"2026 Mazda CX-5",make:"Mazda",model:"CX-5",year:2026},
+  {label:"2026 Honda CR-V",make:"Honda",model:"CR-V",year:2026},
+  {label:"2026 Kia Sportage",make:"Kia",model:"Sportage",year:2026},
+  {label:"2026 Toyota Grand Highlander",make:"Toyota",model:"Grand Highlander",year:2026},
+];
+const MAL_CITIES=[
+  {label:"Calgary, AB",city:"Calgary",province:"AB"},
+  {label:"Edmonton, AB",city:"Edmonton",province:"AB"},
+  {label:"Red Deer, AB",city:"Red Deer",province:"AB"},
+  {label:"Lethbridge, AB",city:"Lethbridge",province:"AB"},
+];
+const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+
+function MsrpAlertsPage(){
+  const [tilt,setTilt]=useState(23);
+  const [dens,setDens]=useState(9);          // slider 0–20; density = dens/10
+  const [veh,setVeh]=useState(0);
+  const [city,setCity]=useState(0);
+  const [email,setEmail]=useState("");
+  const [thr,setThr]=useState("at_msrp");
+  const [consent,setConsent]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [done,setDone]=useState(false);
+  const [err,setErr]=useState("");
+
+  const climate = dens<5?"Clear — near MSRP":dens<12?"Cloudy — small markup":"Stormy — over sticker";
+
+  async function submit(){
+    setErr("");
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())){ setErr("Enter a valid email so we can reach you."); return; }
+    if(!consent){ setErr("Please tick the box so we're allowed to email you."); return; }
+    setBusy(true);
+    const v=MAL_VEHICLES[veh], c=MAL_CITIES[city];
+    const {error}=await supabase.rpc("fn_alert_subscribe",{
+      p_email:email.trim(), p_make:v.make, p_model:v.model, p_year:v.year,
+      p_province:c.province, p_city:c.city, p_threshold:thr, p_pct:null, p_consent:true,
+    });
+    setBusy(false);
+    if(error){ setErr("Couldn't save that — "+(error.message||"please try again.")); return; }
+    setDone(true);
+  }
+
+  const css=`
+    .mal-hero h1{font-size:clamp(30px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:14px 0 10px;font-weight:800;
+      background:linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .mal select,.mal input[type=email]{width:100%;background:rgba(8,10,24,.6);color:#eaf0ff;border:1px solid rgba(150,170,255,.25);
+      border-radius:11px;padding:10px 11px;font:600 13px/1.1 inherit;outline:none;box-sizing:border-box}
+    .mal select:focus,.mal input[type=email]:focus{border-color:#3ae0ff}
+    .mal input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;background:rgba(150,170,255,.25);outline:none}
+    .mal input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#3ae0ff;box-shadow:0 0 12px #3ae0ff;cursor:pointer;border:2px solid #071018}
+    .mal-seg{display:flex;gap:6px}
+    .mal-seg button{flex:1;background:rgba(8,10,24,.5);border:1px solid rgba(150,170,255,.2);color:#9aa2c4;border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
+    .mal-seg button.on{border-color:#3ae0ff;color:#3ae0ff;background:rgba(58,224,255,.08)}
+    @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:32px}}
+    @media(max-width:620px){.mal-hero{max-width:none!important;right:20px}}`;
+
+  return (
+    <div style={{position:"relative",height:"100vh",overflow:"hidden",background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:"#eaf0ff"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <PlanetAlerts tilt={tilt} density={dens/10}/>
+
+      <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:"rgba(10,10,22,.55)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+        <div style={{maxWidth:1180,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
+          <a href="/" style={{textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}>LotCheck</a>
+          <div style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
+            {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#3ae0ff":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          </div>
+          <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+
+      <div className="mal-hero" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:88,maxWidth:430,zIndex:10}}>
+        <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
+        <h1>The moment it's at MSRP, you'll know.</h1>
+        <p style={{fontSize:15,lineHeight:1.6,color:"#c7cee6",maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
+      </div>
+
+      <div className="mal" style={{position:"absolute",left:"clamp(20px,4vw,48px)",bottom:26,width:"min(350px,88vw)",padding:18,borderRadius:20,zIndex:10,
+        background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
+        {done ? (
+          <div style={{textAlign:"center",padding:"6px 4px"}}>
+            <div style={{fontSize:26,marginBottom:8}}>✦</div>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>You're on the waitlist.</div>
+            <div style={{fontSize:13,color:"#c7cee6",lineHeight:1.5}}>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</div>
+            <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:"1px solid rgba(150,170,255,.3)",color:"#9aa2c4",borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
+          </div>
+        ) : (
+          <>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Vehicle</label>
+              <select value={veh} onChange={e=>setVeh(+e.target.value)}>{MAL_VEHICLES.map((v,i)=><option key={i} value={i}>{v.label}</option>)}</select></div>
+            <div style={{display:"flex",gap:8,marginBottom:11}}>
+              <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>City</label>
+                <select value={city} onChange={e=>setCity(+e.target.value)}>{MAL_CITIES.map((c,i)=><option key={i} value={i}>{c.label}</option>)}</select></div>
+            </div>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Alert me when it's</label>
+              <div className="mal-seg">
+                <button className={thr==="at_msrp"?"on":""} onClick={()=>setThr("at_msrp")}>At MSRP</button>
+                <button className={thr==="below_msrp"?"on":""} onClick={()=>setThr("below_msrp")}>Below MSRP</button>
+              </div></div>
+            <div style={{marginBottom:12}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:"#9aa2c4",display:"block",marginBottom:5}}>Email</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/></div>
+            <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:11.5,color:"#9aa2c4",lineHeight:1.4,cursor:"pointer",marginBottom:12}}>
+              <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} style={{marginTop:2,accentColor:"#3ae0ff"}}/>
+              <span>Email me when MSRP tracking launches for this car in my city. I can unsubscribe anytime. No spam.</span></label>
+            {err && <div style={{fontSize:12,color:"#ff8f77",marginBottom:9}}>{err}</div>}
+            <button onClick={submit} disabled={busy} style={{width:"100%",border:"none",borderRadius:12,padding:12,font:"800 14px inherit",color:"#04121a",cursor:busy?"default":"pointer",opacity:busy?.7:1,
+              background:"linear-gradient(100deg,#3ae0ff,#b090ff)",boxShadow:"0 8px 26px rgba(58,224,255,.35)"}}>{busy?"Joining…":"Notify me when it hits MSRP"}</button>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:11}}>
+              <span style={{font:"800 9.5px/1 ui-monospace,monospace",letterSpacing:".08em",textTransform:"uppercase",color:"#3ae0ff",border:"1px solid #3ae0ff",borderRadius:999,padding:"5px 8px"}}>Waitlist</span>
+              <small style={{fontSize:11.5,color:"#9aa2c4",lineHeight:1.4}}>Live price tracking isn't running yet — join to be first when it launches in Alberta.</small>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="mal-panel" style={{position:"absolute",right:"clamp(20px,3vw,32px)",top:"50%",transform:"translateY(-50%)",width:230,padding:"16px 16px 18px",borderRadius:18,zIndex:10,
+        background:"rgba(16,18,38,.5)",border:"1px solid rgba(150,170,255,.2)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)"}}>
+        <div style={{margin:"0 0 2px",fontSize:12,letterSpacing:".14em",textTransform:"uppercase",color:"#3ae0ff",fontWeight:800}}>Weather station</div>
+        <p style={{fontSize:11,color:"#8a92b4",margin:"0 0 14px",lineHeight:1.4}}>Drag the planet to orbit. These dials shape the visualization.</p>
+        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#c7cee6",fontWeight:700,marginBottom:6}}><span>Axial tilt</span><span style={{color:"#3ae0ff",fontFamily:"ui-monospace,monospace"}}>{tilt}°</span></div>
+          <input type="range" min="0" max="45" value={tilt} onChange={e=>setTilt(+e.target.value)}/></div>
+        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#c7cee6",fontWeight:700,marginBottom:6}}><span>Atmospheric density</span><span style={{color:"#3ae0ff",fontFamily:"ui-monospace,monospace"}}>{(dens/10).toFixed(1)}</span></div>
+          <input type="range" min="0" max="20" value={dens} onChange={e=>setDens(+e.target.value)}/></div>
+        <div style={{marginTop:16,paddingTop:14,borderTop:"1px solid rgba(150,170,255,.15)"}}>
+          <div style={{font:"800 9px/1 ui-monospace,monospace",letterSpacing:".1em",textTransform:"uppercase",color:"#8a92b4"}}>Market climate</div>
+          <div style={{fontSize:18,fontWeight:800,marginTop:5,letterSpacing:"-.01em"}}>{climate}</div>
+          <div style={{fontSize:10.5,color:"#7a82a4",marginTop:4}}>Preview metaphor · not live data yet</div>
+        </div>
+      </div>
+
+      <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:"#5c6488",letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
+    </div>
+  );
+}
+
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
 // and quote-check page happens here by choosing which fully separate
@@ -7837,6 +7983,7 @@ export default function App(){
         : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
