@@ -6327,11 +6327,14 @@ function QuoteCheckPage(){
     coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
     butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
   };
+  // Dark = the cosmic palette from the MSRP Notifier page: near-black indigo
+  // chrome + cyan hero accent. Coral (flags) and butter (caution) stay warm so
+  // the color-coding still reads. Light/outdoor modes are unchanged.
   const QC_DARK={
-    ink:"#EDEBF7", inkSoft:"#B9B6D6", inkFaint:"#8D89B8",
-    paper:"#15121F", paper2:"#1C1830", card:"#211C34",
-    line:"rgba(237,235,247,.14)", borderWidth:"1px", cardShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
-    teal:"#2FA79A", tealInk:"#5FD8CB", tealBg:"rgba(47,167,154,.18)",
+    ink:"#eaf0ff", inkSoft:"#c7cee6", inkFaint:"#9aa2c4",
+    paper:"#080a1c", paper2:"#0f1228", card:"#15163a",
+    line:"rgba(150,170,255,.16)", borderWidth:"1px", cardShadow:"0 20px 60px -20px rgba(0,0,0,.6)",
+    teal:"#3ae0ff", tealInk:"#8fe9ff", tealBg:"rgba(58,224,255,.14)",
     coral:"#F2836B", coralInk:"#FF9E85", coralBg:"rgba(242,131,107,.18)",
     butter:"#F5C95C", butterInk:"#F5C95C", butterBg:"rgba(245,201,92,.18)",
   };
@@ -6792,11 +6795,11 @@ function QuoteCheckPage(){
     <>
       <style>{GLOBAL_CSS}</style>
       <style>{QC_CSS}</style>
-      <div style={{minHeight:"100dvh",background:C.paper,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+      <div style={{minHeight:"100dvh",background:qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper,backgroundColor:qcTheme==="dark"?"#05060f":undefined,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         {/* Full-width site nav -- the same tabs as the rest of LotCheck, so the
             Quote Check page reads as part of the site, not a detached tool. The
             theme toggle, credits chip and Sign in live on its right side. */}
-        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:C.paper,borderBottom:`1px solid ${C.line}`}}>
+        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper,backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
           <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
               <LogoMark size={30}/>
