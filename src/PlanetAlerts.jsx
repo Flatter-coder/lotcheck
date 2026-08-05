@@ -15,7 +15,8 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
 
   // slider → uniform / rotation, no scene rebuild
   useEffect(() => { if (tiltObjRef.current) tiltObjRef.current.rotation.z = (tilt * Math.PI) / 180; }, [tilt]);
-  useEffect(() => { if (uniformsRef.current) uniformsRef.current.uDensity.value = Math.max(0.05, density); }, [density]);
+  // density drives the atmosphere glow directly (0 = clear sky, no halo) so the dial reads true.
+  useEffect(() => { if (uniformsRef.current) uniformsRef.current.uDensity.value = Math.max(0, density); }, [density]);
 
   useEffect(() => {
     const app = ref.current;
@@ -48,7 +49,7 @@ export default function PlanetAlerts({ tilt = 23, density = 0.9 }) {
     const stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xbfd0ff, size: 0.06, transparent: true, opacity: 0.9 }));
     scene.add(stars);
 
-    const uniforms = { uTime: { value: 0 }, uLight: { value: new THREE.Vector3(1.0, 0.35, 0.55).normalize() }, uDensity: { value: Math.max(0.05, density) } };
+    const uniforms = { uTime: { value: 0 }, uLight: { value: new THREE.Vector3(1.0, 0.35, 0.55).normalize() }, uDensity: { value: Math.max(0, density) } };
     uniformsRef.current = uniforms;
 
     const vert = `varying vec3 vN;varying vec3 vP;varying vec3 vV;
