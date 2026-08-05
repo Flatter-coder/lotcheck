@@ -8070,8 +8070,8 @@ function MsrpAlertsPage(){
     .mal-seg{display:flex;gap:6px}
     .mal-seg button{flex:1;background:${T.segBg};border:1px solid ${T.segBorder};color:${T.faint};border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
     .mal-seg button.on{border-color:${T.cyan};color:${T.cyan};background:${dark?"rgba(58,224,255,.08)":"rgba(14,138,168,.10)"}}
-    .mal-col{scrollbar-width:thin}
-    .mal-col::-webkit-scrollbar{width:6px}.mal-col::-webkit-scrollbar-thumb{background:${T.rangeTrack};border-radius:3px}
+    .mal-col{scrollbar-width:none;-ms-overflow-style:none}
+    .mal-col::-webkit-scrollbar{display:none}
     @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
     @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
     @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}`;
@@ -8140,21 +8140,6 @@ function MsrpAlertsPage(){
           </>
         )}
       </div>
-      </div>
-
-      <div className="mal-panel" style={{position:"absolute",right:"clamp(20px,3vw,32px)",top:"50%",transform:"translateY(-50%)",width:230,padding:"16px 16px 18px",borderRadius:18,zIndex:10,
-        background:T.panel2Bg,border:`1px solid ${T.panel2Border}`,backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)"}}>
-        <div style={{margin:"0 0 2px",fontSize:12,letterSpacing:".14em",textTransform:"uppercase",color:T.cyan,fontWeight:800}}>Weather station</div>
-        <p style={{fontSize:11,color:T.faint,margin:"0 0 14px",lineHeight:1.4}}>Drag the planet to orbit. These dials shape the weather — clear to stormy.</p>
-        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.soft,fontWeight:700,marginBottom:6}}><span>Axial tilt</span><span style={{color:T.cyan,fontFamily:"ui-monospace,monospace"}}>{tilt}°</span></div>
-          <input type="range" min="0" max="45" value={tilt} onChange={e=>setTilt(+e.target.value)}/></div>
-        <div style={{margin:"14px 0"}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:T.soft,fontWeight:700,marginBottom:6}}><span>Storm intensity</span><span style={{color:T.cyan,fontFamily:"ui-monospace,monospace"}}>{(dens/10).toFixed(1)}</span></div>
-          <input type="range" min="0" max="20" value={dens} onChange={e=>setDens(+e.target.value)}/></div>
-        <div style={{marginTop:16,paddingTop:14,borderTop:`1px solid ${T.panel2Border}`}}>
-          <div style={{font:"800 9px/1 ui-monospace,monospace",letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Market climate</div>
-          <div style={{fontSize:18,fontWeight:800,marginTop:5,letterSpacing:"-.01em"}}>{climate}</div>
-          <div style={{fontSize:10.5,color:T.faint,marginTop:4}}>Preview metaphor · not live data yet</div>
-        </div>
       </div>
 
       <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:T.faint,letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
