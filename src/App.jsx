@@ -5448,7 +5448,7 @@ function decodeReport(s){
 const LOGO_INNER=`<polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/>`;
 function RealLogo({width=40}){ return <svg width={width} height={Math.round(width*182/320)} viewBox="-145 -44 320 182" aria-hidden="true" dangerouslySetInnerHTML={{__html:LOGO_INNER}}/>; }
 
-function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
+function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   const [cur,setCur]=useState(0);
   const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
   const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
@@ -5536,7 +5536,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
   };
 
   return (
-    <div className="rfb-wrap">
+    <div className="rfb-wrap" style={{color:ink||"#241f3a"}}>
       <style>{RFB_CSS}</style>
       <div className="rfb-bar">
         <button className="rfb-exit" onClick={onExit}>‹ Scroll view</button>
@@ -5565,7 +5565,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared}){
 const RFB_CSS=`
   .rfb-wrap{display:flex;flex-direction:column;align-items:center;padding:8px 0 24px}
   .rfb-bar{display:flex;align-items:center;gap:12px;width:100%;max-width:860px;margin-bottom:14px;flex-wrap:wrap}
-  .rfb-exit,.rfb-share{background:transparent;border:1px solid rgba(120,110,160,.35);border-radius:10px;padding:8px 14px;font:inherit;font-weight:800;font-size:13px;color:inherit;cursor:pointer}
+  .rfb-exit,.rfb-share{background:transparent;border:1px solid rgba(120,110,160,.55);border-radius:10px;padding:8px 14px;font:inherit;font-weight:800;font-size:13px;color:inherit;cursor:pointer}
   .rfb-share{margin-left:auto;background:#6d4bd8;border-color:#6d4bd8;color:#fff}
   .rfb-count{font-family:'JetBrains Mono',monospace;font-size:12px;opacity:.7}
   .rfb-book{position:relative;width:min(860px,96vw);height:min(560px,68vh);perspective:2400px;box-shadow:0 40px 60px -30px rgba(0,0,0,.45)}
@@ -5609,7 +5609,7 @@ const RFB_CSS=`
   .rfb-dl{color:#c9c2ee;font-size:12.5px}
   .rfb-seal{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(127,224,211,.5);border-radius:999px;padding:7px 14px;font-size:11px;font-weight:800;color:#7fe0d3;text-transform:capitalize}
   .rfb-ctr{display:flex;gap:14px;margin-top:18px}
-  .rfb-nav{width:44px;height:44px;border-radius:50%;border:1px solid rgba(120,110,160,.4);background:rgba(120,110,160,.1);color:inherit;font-size:20px;cursor:pointer}
+  .rfb-nav{width:44px;height:44px;border-radius:50%;border:1px solid rgba(120,110,160,.55);background:rgba(120,110,160,.18);color:inherit;font-size:20px;cursor:pointer}
   .rfb-nav:disabled{opacity:.3;cursor:default}
   .rfb-shared{font-size:11px;opacity:.6;margin-top:12px}
   @media(max-width:640px){.rfb-pg{padding:22px 18px}.rfb-h2{font-size:19px}.rfb-big{font-size:25px}}
@@ -6986,7 +6986,7 @@ function QuoteCheckPage(){
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
-            if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport}/>;
+            if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
             return (
             <div>
               {/* View toggle: Scroll (canonical) vs the flip-book Report view, + share link */}
