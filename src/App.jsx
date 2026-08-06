@@ -6216,17 +6216,22 @@ function VerifyPage(){
   const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
   const idText=state.id||"LC-••••-•••";
   const seal=authentic?{bg:"#0f6e56",bd:"#34d399",gl:P==="signed"?"🔏":"✓"}:isBad?{bg:"#7a2417",bd:"#f0997b",gl:"✕"}:{bg:"#2a2740",bd:"#7f77dd",gl:"🔒"};
+  // Whole-card edge flashes green when the report verifies, red when it fails.
+  const edgeBorder=authentic?"#10b981":isBad?"#f43f5e":T.cardBd;
+  const edgeAnim=authentic?"vEdgeOk 1.15s ease-out 3 forwards":isBad?"vEdgeBad 1.15s ease-out 3 forwards":"none";
   const css=`
   @keyframes vFloat{0%,100%{transform:translateY(0) rotateX(8deg) rotateY(-9deg)}50%{transform:translateY(-9px) rotateX(8deg) rotateY(-9deg)}}
   @keyframes vSweep{0%{top:-10%;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:108%;opacity:0}}
   @keyframes vSeal{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
   @keyframes vRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
   @keyframes vGrid{0%{background-position:0 0}100%{background-position:0 26px}}
+  @keyframes vEdgeOk{0%{box-shadow:0 0 0 1px rgba(16,185,129,.4),0 0 12px 2px rgba(16,185,129,.25)}50%{box-shadow:0 0 0 2.5px #10b981,0 0 44px 9px rgba(16,185,129,.6)}100%{box-shadow:0 0 0 1.5px rgba(16,185,129,.5),0 0 22px 4px rgba(16,185,129,.32)}}
+  @keyframes vEdgeBad{0%{box-shadow:0 0 0 1px rgba(244,63,94,.4),0 0 12px 2px rgba(244,63,94,.25)}50%{box-shadow:0 0 0 2.5px #f43f5e,0 0 44px 9px rgba(244,63,94,.6)}100%{box-shadow:0 0 0 1.5px rgba(244,63,94,.5),0 0 22px 4px rgba(244,63,94,.32)}}
   .lc-gate-car{animation:lcGateDrive 4s linear infinite}
   @keyframes lcGateDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
   .lc-gate-window{animation:lcGateFlash 4s linear infinite}
   @keyframes lcGateFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
-  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.lc-gate-car,.lc-gate-window{animation:none!important}}
+  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.vedge,.lc-gate-car,.lc-gate-window{animation:none!important}}
   @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
   @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
   .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
@@ -6249,7 +6254,7 @@ function VerifyPage(){
       <div style={{padding:"28px 18px",display:"flex",justifyContent:"center"}}>
       <div style={{width:"100%",maxWidth:920}}>
         <div style={{color:T.eyebrow,fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
-        <div className="vgc" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:T.card,border:`1px solid ${T.cardBd}`,borderRadius:18,overflow:"hidden",boxShadow:vdark?"none":"0 20px 50px rgba(51,48,90,.12)"}}>
+        <div className="vgc vedge" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:T.card,border:`1px solid ${edgeBorder}`,borderRadius:18,overflow:"hidden",boxShadow:vdark?"none":"0 20px 50px rgba(51,48,90,.12)",animation:edgeAnim}}>
 
           <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:`1px solid ${T.cardBd}`,overflow:"hidden",background:vdark?"transparent":"linear-gradient(180deg,#141238,#0e0b1c)"}}>
             <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
