@@ -20,11 +20,18 @@ const CITIES = [
 ];
 const MAX_KM = 35;
 const OUT = "public/data/alberta-dealers.json";
+// Multiple independent Overpass mirrors so one being down / rate-limited (429)
+// doesn't fail the refresh. Order = try-first preference.
 const OVERPASS = [
   "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter", // fallback mirror
+  "https://lz4.overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter",
 ];
 const QUERY = '[out:json][timeout:90];area["ISO3166-2"="CA-AB"]->.ab;nwr["shop"="car"](area.ab);out center tags;';
+const ROUNDS = 4;               // passes over the whole mirror list before giving up
+const REQ_TIMEOUT_MS = 120000;  // per-request cap so a hung mirror can't stall a round
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function km(aLat, aLon, bLat, bLon) {
   const R = 6371, r = Math.PI / 180;
@@ -35,16 +42,33 @@ function km(aLat, aLon, bLat, bLon) {
 
 async function fetchOverpass() {
   let lastErr;
-  for (const base of OVERPASS) {
-    try {
-      const res = await fetch(base, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "data=" + encodeURIComponent(QUERY),
-      });
-      if (!res.ok) { lastErr = new Error(`HTTP ${res.status} from ${base}`); continue; }
-      return (await res.json()).elements || [];
-    } catch (e) { lastErr = e; }
+  // Up to ROUNDS passes over every mirror, with growing backoff between passes.
+  // 429 (rate limit) and 5xx (gateway) are transient, so a later pass often wins.
+  for (let round = 0; round < ROUNDS; round++) {
+    for (const base of OVERPASS) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => { try { ctrl.abort(); } catch {} }, REQ_TIMEOUT_MS);
+      try {
+        const res = await fetch(base, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "data=" + encodeURIComponent(QUERY),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) { lastErr = new Error(`HTTP ${res.status} from ${base}`); continue; }
+        const els = (await res.json()).elements || [];
+        // Some mirrors soft-fail with a 200 + empty body when overloaded. Treat a
+        // suspiciously-small result as a miss and keep trying other mirrors/rounds.
+        if (els.length < 50) { lastErr = new Error(`only ${els.length} elements from ${base}`); continue; }
+        return els;
+      } catch (e) { lastErr = e; }
+      finally { clearTimeout(timer); }
+    }
+    if (round < ROUNDS - 1) {
+      const wait = 8000 * (round + 1);   // 8s, 16s, 24s
+      console.warn(`Overpass unavailable (${lastErr?.message || "unknown"}); retrying all mirrors in ${wait / 1000}s…`);
+      await sleep(wait);
+    }
   }
   throw lastErr || new Error("all Overpass endpoints failed");
 }
