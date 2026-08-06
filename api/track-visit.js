@@ -39,10 +39,21 @@ export default async function handler(req) {
     const lat = req.headers.get("x-vercel-ip-latitude");
     const lon = req.headers.get("x-vercel-ip-longitude");
 
+    // Coarse device/OS from the User-Agent so the admin can see iPhone vs
+    // Android vs Desktop. Deliberately NOT storing the full UA string (that's
+    // fingerprinting-adjacent) -- just one bucket. iPadOS Safari reports a
+    // desktop UA, so some iPads land in "Desktop"; fine for a rough split.
+    const ua = req.headers.get("user-agent") || "";
+    const device = /iPhone|iPad|iPod/i.test(ua) ? "iOS"
+      : /Android/i.test(ua) ? "Android"
+      : /Mobile|Windows Phone|BlackBerry|Opera Mini/i.test(ua) ? "Other mobile"
+      : ua ? "Desktop" : "Unknown";
+
     const row = {
       visitor_id: body.visitor_id || "unknown",
       path: body.path || "/",
       referrer_source: body.referrer_source || "Direct",
+      device,
       // City names are sent URI-encoded to support multi-byte characters
       // (accented city names, etc.) -- decode before storing.
       city: city ? decodeURIComponent(city) : null,

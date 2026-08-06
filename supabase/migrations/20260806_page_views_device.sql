@@ -1,0 +1,14 @@
+-- ============================================================================
+-- page_views.device — a coarse device/OS bucket so the admin Traffic panel can
+-- show iPhone vs Android vs Desktop.
+--
+-- Written server-side by /api/track-visit from the request User-Agent, bucketed
+-- to one of: 'iOS' | 'Android' | 'Other mobile' | 'Desktop' | 'Unknown'. The
+-- full User-Agent string is deliberately NOT stored (that's fingerprinting-
+-- adjacent); only the bucket. Existing rows stay NULL and render as
+-- "Unknown (before tracking)" until new visits arrive.
+--
+-- Nullable, no RLS change: anon insert (the edge fn) and the admin read both
+-- keep working as before.
+-- ============================================================================
+alter table public.page_views add column if not exists device text;

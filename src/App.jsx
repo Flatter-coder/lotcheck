@@ -3890,7 +3890,7 @@ function AdminPanel(){
     async function fetchViews(){
       setViewsLoading(true);
       try{
-        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source, city, country, latitude, longitude").order("created_at",{ascending:true}).limit(50000);
+        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source, city, country, latitude, longitude, device").order("created_at",{ascending:true}).limit(50000);
         if(error) throw error;
         if(!cancelled) setPageViews(data||[]);
       }catch(err){
@@ -4125,6 +4125,12 @@ function AdminPanel(){
     trafficSources[src]=(trafficSources[src]||0)+1;
   });
   const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
+  // Device / OS breakdown (iPhone vs Android vs Desktop) — captured server-side
+  // in /api/track-visit from the User-Agent. Rows before this shipped have no
+  // device, shown as "Unknown (before tracking)".
+  const trafficDevices={};
+  pageViews.forEach(v=>{ const d=v.device||"Unknown (before tracking)"; trafficDevices[d]=(trafficDevices[d]||0)+1; });
+  const sortedDevices=Object.entries(trafficDevices).sort((a,b)=>b[1]-a[1]);
 
   const themeState=useThemeState();
   const {C}=themeState;
@@ -4257,6 +4263,32 @@ function AdminPanel(){
                           </div>
                           <div style={{background:C.paper2,borderRadius:4,height:6,overflow:"hidden"}}>
                             <div style={{width:`${pct}%`,height:"100%",background:src==="Internal navigation"?C.inkFaint:src==="Direct"?C.ink:C.teal}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>What visitors are on</div>
+                {sortedDevices.every(([d])=>d==="Unknown (before tracking)")?(
+                  <div style={{color:C.inkFaint,fontSize:13,lineHeight:1.6}}>
+                    Device tracking just went live — iPhone / Android / Desktop will fill in from here forward.
+                  </div>
+                ):(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {sortedDevices.map(([d,count])=>{
+                      const pct=Math.round((count/pageViews.length)*100);
+                      return(
+                        <div key={d}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                            <span style={{color:C.ink,fontWeight:700}}>{d==="iOS"?"iPhone / iPad (iOS)":d}</span>
+                            <span style={{color:C.inkFaint}}>{count.toLocaleString()} · {pct}%</span>
+                          </div>
+                          <div style={{background:C.paper2,borderRadius:4,height:6,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:d==="iOS"?C.teal:d==="Android"?C.butterInk:d==="Desktop"?C.ink:C.inkFaint}}/>
                           </div>
                         </div>
                       );
