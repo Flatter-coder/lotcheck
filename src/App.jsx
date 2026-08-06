@@ -5753,7 +5753,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("score", "Scorecard")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
           ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
@@ -5836,6 +5836,34 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
             {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
             <div style={cardBox(evidenceItem)}><Head c={evidenceItem} /><div>{evidenceItem.body}</div></div>
           </div>
+        </div>
+      )}
+
+            {view === "score" && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ ...cardBox({ cosmic: true }), alignItems: "center", textAlign: "center", padding: 24 }}>
+            <div style={{ fontSize: 56, fontWeight: 800, fontFamily: mono, color: scoreColor, lineHeight: 1 }}>{score != null ? score.toFixed(1) : "—"}<span style={{ fontSize: 20, color: MUT }}>/10</span></div>
+            <div style={{ ...klabel, marginTop: 8 }}>Negotiation leverage{score != null ? ` · ${score >= 7 ? "strong" : score >= 4 ? "fair" : "weak"}` : ""}</div>
+            {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}</div>}
+            {a.summary && <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 12, textAlign: "left", maxWidth: 660 }}>{a.summary}</div>}
+          </div>
+          {pointItems.filter((p) => p.tone === "flag").length > 0 ? (
+            <div>
+              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {pointItems.filter((p) => p.tone === "flag").length} thing{pointItems.filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
+                {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...cardBox({ tone: "pass" }), textAlign: "center" }}><div style={{ fontSize: 15, fontWeight: 800, color: TEAL }}>✓ Nothing flagged — this one checks out</div></div>
+          )}
+          <div style={cardBox({ tone: "muted" })}>
+            <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
+              {pointItems.filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+            </div>
+          </div>
+          {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
         </div>
       )}
 
@@ -7406,14 +7434,14 @@ function QuoteCheckPage(){
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
-            if(reportView==="deck"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
+            if(reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
             if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("deck","Deck")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                  {vBtn("deck","Deck")}{vBtn("score","Scorecard")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
