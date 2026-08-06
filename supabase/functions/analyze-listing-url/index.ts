@@ -1723,14 +1723,63 @@ function extractJsonLdVehicle(html: string): {
   return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
 }
 
+// Common dealer-platform embedded-JSON price keys (NOT schema.org). Some
+// platforms (e.g. jackcarterchev.ca) put the price in a JS data blob rather than
+// JSON-LD; read the canonically-keyed MSRP / asking price deterministically.
+function extractPlatformPrice(html: string): { msrp: number | null; price: number | null } {
+  const toNum = (s?: string): number | null => {
+    if (!s) return null;
+    const n = Number(String(s).replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) && n >= 1000 && n < 500000 ? Math.round(n) : null; // drops 999,999 "call for price" + junk
+  };
+  const grab = (keys: string[]): number | null => {
+    for (const k of keys) {
+      const m = html.match(new RegExp('"' + k + '"\\s*:\\s*(?:"?\\$?([0-9][0-9,]{3,8})"?|\\{[^}]*?"(?:formattedAmountRounded|formattedAmount|amount)"\\s*:\\s*"?\\$?([0-9][0-9,]{3,8}))', 'i'));
+      if (m) { const n = toNum(m[1] || m[2]); if (n) return n; }
+    }
+    return null;
+  };
+  return {
+    msrp: grab(["msrp", "listPrice", "retailPrice"]),
+    price: grab(["sellingPrice", "internetPrice", "salePrice", "askingPrice", "ourPrice", "finalPrice", "displayPrice", "yourPrice", "advertisedPrice"]),
+  };
+}
+
+// Parse year/make/model from a listing URL slug when the page itself can't be
+// read, e.g. ".../2026-chevrolet-silverado-1500-lt-id15235195.htm".
+function vehicleFromUrl(url: string): { year: number | null; make: string | null; model: string | null } {
+  try {
+    let seg = (new URL(url).pathname.split("/").filter(Boolean).pop() || "").replace(/\.html?$/i, "");
+    seg = seg.replace(/[-_]?id[-_]?[0-9a-z]+$/i, "").replace(/[-_][0-9A-HJ-NPR-Z]{11,17}$/i, ""); // strip trailing id / VIN
+    const parts = seg.split(/[-_]/).filter(Boolean);
+    const yi = parts.findIndex((p) => /^20[12]\d$/.test(p));
+    if (yi < 0) return { year: null, make: null, model: null };
+    const rest = parts.slice(yi + 1).filter((p) => !/^(new|used|certified|cpo)$/i.test(p));
+    const tc = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+    return { year: Number(parts[yi]), make: rest.length ? canonicalMake(tc(rest[0])) : null, model: rest.slice(1).map(tc).join(" ") || null };
+  } catch { return { year: null, make: null, model: null }; }
+}
+
 async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
   try {
     const html = await fetchDirectHtml(url, 15_000);
     if (!html) { console.log(`JSON-LD fallback: direct fetch returned nothing for ${url}.`); return null; }
-    const v = extractJsonLdVehicle(html);
+    let v = extractJsonLdVehicle(html);
+    let platformMsrp: number | null = null;
+    // If schema.org has no usable vehicle/price, fall back to the platform's own
+    // embedded-JSON price keys + the URL slug for the vehicle. Deterministic.
     if (!v || (v.price == null && !v.year && !v.model)) {
-      console.log(`JSON-LD fallback: no usable schema.org Vehicle/Offer in ${url}.`);
-      return null;
+      const pp = extractPlatformPrice(html);
+      const vu = vehicleFromUrl(url);
+      if ((pp.price || pp.msrp) && (vu.year || vu.model)) {
+        platformMsrp = pp.msrp;
+        v = { year: vu.year, make: vu.make, model: vu.model, trim: null, vin: null, odometerKm: null,
+              price: pp.price ?? null, currency: "CAD", condition: null, dealerName: null, dealerCity: null } as any;
+        console.log(`JSON-LD fallback: no schema.org vehicle; used platform price for ${url} (price=${pp.price ?? "none"}, msrp=${pp.msrp ?? "none"}).`);
+      } else {
+        console.log(`JSON-LD fallback: no usable schema.org Vehicle/Offer and no platform price in ${url}.`);
+        return null;
+      }
     }
     const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
     const analysis: any = {
@@ -1739,7 +1788,7 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       vin: v.vin, odometerKm: v.odometerKm, fuelType: null,
       vehicleCondition: v.condition,
       dealerName: v.dealerName, dealerCity: v.dealerCity,
-      msrp: null,
+      msrp: platformMsrp,
       quotedPrice: v.price,
       quotedPriceSource: v.price != null ? "structured_data" : null,
       standardWarranty: null,
