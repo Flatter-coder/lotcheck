@@ -5638,7 +5638,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const [vCopied, setVCopied] = useState(false);
   const sourceUrl = a.sourceUrl || a.listingUrl || null;
   const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
-  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2*/" + sourceUrl : null;
+  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2999/" + sourceUrl : null; // far-future ts -> latest capture (not the calendar)
   const listingShot = a.listingShot || null;
   useEffect(() => { if (!sourceUrl) return; try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) {} }, [sourceUrl]);
 
@@ -5780,10 +5780,10 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
 
       {view === "sidebar" && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
-          <div style={{ flex: "0 0 216px", minWidth: 176, display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ flex: "0 0 190px", minWidth: 150, display: "flex", flexDirection: "column", gap: 5 }}>
             {items.map((c, i) => (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: sel === i ? "rgba(15,23,42,.85)" : "transparent", border: `1px solid ${sel === i ? (c.glow ? CY : BORD) : "transparent"}`, borderRadius: 10, padding: "9px 11px", color: sel === i ? "#fff" : MUT2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>))}
           </div>
-          <div style={{ flex: "1 1 420px", minWidth: 0 }}><div style={cardBox(items[sel])}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}><div style={cardBox(items[sel])}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
         </div>
       )}
 
