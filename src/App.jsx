@@ -5635,6 +5635,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
   const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap", cursor: "pointer" };
 
+  const [vCopied, setVCopied] = useState(false);
   const sourceUrl = a.sourceUrl || a.listingUrl || null;
   const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
   const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2*/" + sourceUrl : null;
@@ -5721,7 +5722,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
         {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
-        <button onClick={onShare} style={linkBtn}>{copied ? "Link copied" : "Copy share link"}</button>
+        {verifyHref && <button onClick={() => { try { navigator.clipboard.writeText(verifyHref).then(() => { setVCopied(true); setTimeout(() => setVCopied(false), 2000); }).catch(() => {}); } catch (e) {} }} style={linkBtn}>{vCopied ? "Verify link copied \u2713" : "Copy verify link"}</button>}
       </div>
       <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.</div>
     </div>
@@ -6266,7 +6267,7 @@ function VerifyPage(){
             {(P==="empty"||P==="bad")&&(<>
               <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:T.eyebrow,fontWeight:700}}>Verify</div>
               <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:T.heading}}>Is this LotCheck report real?</div>
-              <div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the report link, or scan the QR on any LotCheck PDF. We recompute its fingerprint and check the signature — right here, nothing stored."}</div>
+              <div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the verify link, or scan the QR on any LotCheck PDF — we recompute its fingerprint and check the signature, nothing stored. The report ID on its own can't be checked (there's nothing stored to look it up)."}</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:T.inputBg,border:`1px solid ${hint?"rgba(240,153,123,.6)":T.inputBd}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:T.text,outline:"none",boxSizing:"border-box"}}/>
                 <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
