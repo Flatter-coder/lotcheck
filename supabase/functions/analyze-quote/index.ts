@@ -497,11 +497,14 @@ Deno.serve(async (req: Request) => {
     // report-signing-scope + make-it-dispute-proof.
     await finalizeServerSide(analysis);
 
-    // Flywheel Phase 1 — LOG ONLY, stores nothing (see fee-vocab.ts). De-
-    // identified fee projection to validate the normalizer; gated on FLYWHEEL_LOG.
-    if (Deno.env.get("FLYWHEEL_LOG") === "on") {
-      try { const obs = buildFeeObservations(analysis); if (obs.length) console.log(`flywheel: ${obs.length} fee obs ${JSON.stringify(obs)}`); } catch (e) { console.warn("flywheel log skipped:", (e as Error)?.message); }
-    }
+    // Flywheel Phase 3 — de-identified fee capture, SELF-GATING at the DB. The
+    // RPC stores NOTHING until an admin flips flywheel_capture_enabled (post
+    // legal sign-off + reworded copy), so "nothing stored" stays literally true
+    // today. Best-effort — never blocks or breaks the report.
+    try {
+      const obs = buildFeeObservations(analysis);
+      if (obs.length) await supabase.rpc("fn_capture_fee_observations", { p_obs: obs });
+    } catch (e) { console.warn("flywheel capture skipped:", (e as Error)?.message); }
 
     // Delivered an accurate result -> capture the hold (signed-in only) and
     // include the new balance. Null holdId out first so a later throw can't

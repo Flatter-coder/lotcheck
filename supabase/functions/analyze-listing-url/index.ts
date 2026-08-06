@@ -2279,13 +2279,14 @@ Deno.serve(async (req: Request) => {
 
     await finalizeServerSide(analysis);
 
-    // Flywheel Phase 1 — LOG ONLY, stores nothing. Projects the (already
-    // extracted) fees into DE-IDENTIFIED observations so we can validate the
-    // normalizer against real quotes. No DB write; gated behind FLYWHEEL_LOG.
-    // Capture (writing rows) is Phase 3, gated on legal sign-off.
-    if (Deno.env.get("FLYWHEEL_LOG") === "on") {
-      try { const obs = buildFeeObservations(analysis); if (obs.length) console.log(`flywheel: ${obs.length} fee obs ${JSON.stringify(obs)}`); } catch (e) { console.warn("flywheel log skipped:", (e as Error)?.message); }
-    }
+    // Flywheel Phase 3 — de-identified fee capture, SELF-GATING at the DB. The
+    // RPC stores NOTHING until an admin flips flywheel_capture_enabled (post
+    // legal sign-off + reworded copy), so "nothing stored" stays literally true
+    // today. Best-effort — never blocks or breaks the report.
+    try {
+      const obs = buildFeeObservations(analysis);
+      if (obs.length) await supabase.rpc("fn_capture_fee_observations", { p_obs: obs });
+    } catch (e) { console.warn("flywheel capture skipped:", (e as Error)?.message); }
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache
