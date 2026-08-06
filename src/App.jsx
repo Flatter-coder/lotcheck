@@ -5753,7 +5753,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
           ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
@@ -5794,6 +5794,50 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         </div>
         <div style={{ marginTop: 14 }}><div style={cardBox(pointItems[selP])}><Head c={pointItems[selP]} n={`point ${selP + 1} / 10`} /><div>{pointItems[selP].body}</div></div></div>
       </>)}
+
+            {view === "hud" && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ ...cardBox({ cosmic: true }), flex: "1 1 230px", minWidth: 220, alignItems: "center", textAlign: "center", padding: 18 }}>
+              <div style={{ ...klabel, alignSelf: "flex-start" }}>Negotiation leverage</div>
+              {score != null ? (
+                <div style={{ width: 168, maxWidth: "100%" }}>
+                  <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
+                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
+                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
+                    <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}><line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" /></g>
+                    <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
+                  </svg>
+                  <div style={{ fontSize: 34, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -8 }}>{score.toFixed(1)}<span style={{ fontSize: 14, color: MUT }}>/10</span></div>
+                </div>
+              ) : <div style={{ padding: "20px 0", color: MUT }}>No score</div>}
+            </div>
+            <div style={{ flex: "2 1 320px", minWidth: 280, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(132px,1fr))", gap: 10 }}>
+              {[["Price vs MSRP", pointItems[0].v, pointItems[0].tone], ["Watch-outs", flagged.length ? flagged.length + " flagged" : "None", flagged.length ? "flag" : "pass"], ["Recalls", pointItems[1].v, pointItems[1].tone], ["Dealer", pointItems[9].v, pointItems[9].tone]].map(([l, v, t], i) => (
+                <div key={i} style={{ background: "rgba(15,23,42,.5)", border: `1px solid ${t === "flag" ? CY : BORD}`, borderRadius: 12, padding: 14, boxShadow: t === "flag" ? `0 0 0 1px ${CY}, 0 0 16px ${CY}44` : "none" }}>
+                  <div style={{ fontSize: 10.5, color: MUT, fontFamily: mono, textTransform: "uppercase", letterSpacing: ".06em" }}>{l}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, fontFamily: mono, color: t === "flag" ? ROSE : t === "pass" ? TEAL : "#fff", marginTop: 6, wordBreak: "break-word" }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {pointItems.filter((p) => p.tone === "flag").length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
+              {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+            </div>
+          )}
+          <div style={cardBox({ tone: "muted" })}>
+            <div style={{ ...klabel, marginBottom: 10 }}>10-point verification</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
+              {pointItems.map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), boxShadow: p.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
+            {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
+            <div style={cardBox(evidenceItem)}><Head c={evidenceItem} /><div>{evidenceItem.body}</div></div>
+          </div>
+        </div>
+      )}
 
       {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
     </div>
@@ -7362,14 +7406,14 @@ function QuoteCheckPage(){
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
-            if(reportView==="deck"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
+            if(reportView==="deck"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
             if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("deck","Deck")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                  {vBtn("deck","Deck")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
