@@ -1613,18 +1613,37 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Full browser header set. Cloudflare's bot-fight mode challenges requests
+    // that claim a Chrome UA but omit the client-hint / fetch-metadata headers
+    // real Chrome sends -- which is why a thin UA-only fetch got walled while a
+    // complete one sails through (verified against Cloudflare-fronted EDealer
+    // sites, e.g. lexusofroyaloak.com). No Accept-Encoding -- let the runtime
+    // negotiate + auto-decompress so we never parse compressed bytes.
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-CA,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
       },
       redirect: "follow",
       signal: controller.signal,
     });
     if (!res.ok) return null;
     const html = await res.text();
-    return html && html.length > 0 ? html : null;
+    if (!html || html.length < 500) return null;
+    // A Cloudflare/queue interstitial returns 200 with a small challenge shell
+    // (no real content) -- treat it as a failed load so we never parse it. Guard
+    // on size so a real page that merely references Cloudflare isn't dropped.
+    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) return null;
+    return html;
   } catch {
     return null;
   } finally {
