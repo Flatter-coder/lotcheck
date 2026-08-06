@@ -1739,10 +1739,18 @@ function extractPlatformPrice(html: string): { msrp: number | null; price: numbe
     }
     return null;
   };
-  return {
-    msrp: grab(["msrp", "listPrice", "retailPrice"]),
-    price: grab(["sellingPrice", "internetPrice", "salePrice", "askingPrice", "ourPrice", "finalPrice", "displayPrice", "yourPrice", "advertisedPrice"]),
-  };
+  const msrp = grab(["msrp", "listPrice", "retailPrice"]);
+  let price = grab(["sellingPrice", "internetPrice", "salePrice", "askingPrice", "ourPrice", "finalPrice", "displayPrice", "yourPrice", "advertisedPrice"]);
+  // Some platforms expose the selling price only as the amount financed across
+  // loan terms ("term":N,"amount":X). X is constant regardless of term = the
+  // vehicle price. Use it when there's no keyed selling price, sanity-bounded
+  // against MSRP so we never grab a payment or an unrelated figure.
+  if (!price) {
+    const fm = html.match(/"term"\s*:\s*\d+\s*,\s*"amount"\s*:\s*([0-9]{4,6})/i);
+    const p = fm ? toNum(fm[1]) : null;
+    if (p && (!msrp || (p <= msrp * 1.15 && p >= msrp * 0.4))) price = p;
+  }
+  return { msrp, price };
 }
 
 // Parse year/make/model from a listing URL slug when the page itself can't be
