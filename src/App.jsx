@@ -6005,6 +6005,20 @@ function VerifyPage(){
 
   const P=state.phase;
   const authentic=P==="signed"||P==="ok", isBad=P==="altered"||P==="bad";
+  // Dark/bright toggle — synced to the site-wide lc-theme key, colors identical
+  // to the MSRP Alerts / Price Index tokens so Verify matches the rest of the site.
+  const [vTheme,setVTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
+  const toggleVTheme=()=>{ const n=vTheme==="dark"?"light":"dark"; setVTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
+  const vdark=vTheme==="dark";
+  const T=vdark?{
+    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
+    navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6", cyan:"#3ae0ff", eyebrow:"#8b83de", heading:"#fff",
+    card:"rgba(255,255,255,.03)", cardBd:"rgba(255,255,255,.08)", rowBd:"rgba(255,255,255,.08)", inputBg:"rgba(255,255,255,.06)", inputBd:"rgba(255,255,255,.14)",
+  }:{
+    pageBg:"#f5f7fa", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
+    navBg:"rgba(253,254,255,.82)", navBorder:"rgba(22,32,52,.1)", logoText:"#141c28", link:"#5a6577", cyan:"#0d8fb0", eyebrow:"#6f57e6", heading:"#141c28",
+    card:"rgba(255,255,255,.72)", cardBd:"rgba(22,32,52,.1)", rowBd:"rgba(22,32,52,.1)", inputBg:"rgba(255,255,255,.92)", inputBd:"rgba(22,32,52,.16)",
+  };
   const mono='ui-monospace,"SF Mono",Menlo,Consolas,monospace';
   const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
   const idText=state.id||"LC-••••-•••";
@@ -6022,28 +6036,29 @@ function VerifyPage(){
   @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.lc-gate-car,.lc-gate-window{animation:none!important}}
   @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
   @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
-  .vnav-links a:hover{color:#fff!important}`+SHIELD_CSS;
-  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,.08)"}}><span style={{fontSize:13,color:"#c3bfe0"}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||"#eafff6",whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
+  .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
+  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
   const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["Dealer portal","/#portal"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
   return (
-    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
+    <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
-      <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
-        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
-          <div className="vnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
-            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?"#3ae0ff":"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+      <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
+        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:16}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
+          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
+          <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?"☀":"☾"}</button>
           <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
       </nav>
       <div style={{padding:"28px 18px",display:"flex",justifyContent:"center"}}>
       <div style={{width:"100%",maxWidth:920}}>
-        <div style={{color:"#7f77dd",fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
-        <div className="vgc" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:18,overflow:"hidden"}}>
+        <div style={{color:T.eyebrow,fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
+        <div className="vgc" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:T.card,border:`1px solid ${T.cardBd}`,borderRadius:18,overflow:"hidden",boxShadow:vdark?"none":"0 20px 50px rgba(51,48,90,.12)"}}>
 
-          <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:"1px solid rgba(255,255,255,.06)",overflow:"hidden"}}>
+          <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:`1px solid ${T.cardBd}`,overflow:"hidden",background:vdark?"transparent":"linear-gradient(180deg,#141238,#0e0b1c)"}}>
             <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
               <svg viewBox="-145 -44 320 182" aria-hidden="true" style={{width:"78%",maxWidth:300,filter:`drop-shadow(0 24px 44px ${seal.bd}44)`}}>
@@ -6054,19 +6069,19 @@ function VerifyPage(){
             <div style={{position:"relative",zIndex:2,display:"inline-flex",alignItems:"center",gap:7,fontSize:11,fontWeight:700,color:"#5dcaa5",background:"rgba(52,211,153,.12)",border:"1px solid rgba(52,211,153,.35)",borderRadius:8,padding:"6px 11px",alignSelf:"flex-start"}}>Tamper-proof · nothing stored</div>
           </div>
 
-          <div style={{padding:"24px 22px",color:"#e9e6f5"}}>
-            {P==="loading"&&<div style={{color:"#b6b1d6",fontSize:14}}>Verifying…</div>}
+          <div style={{padding:"24px 22px",color:T.text}}>
+            {P==="loading"&&<div style={{color:T.soft,fontSize:14}}>Verifying…</div>}
             {(P==="empty"||P==="bad")&&(<>
-              <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:"#7f77dd",fontWeight:700}}>Verify</div>
-              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:"#fff"}}>Is this LotCheck report real?</div>
-              <div style={{fontSize:13,color:"#b6b1d6",lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the report link, or scan the QR on any LotCheck PDF. We recompute its fingerprint and check the signature — right here, nothing stored."}</div>
+              <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:T.eyebrow,fontWeight:700}}>Verify</div>
+              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:T.heading}}>Is this LotCheck report real?</div>
+              <div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the report link, or scan the QR on any LotCheck PDF. We recompute its fingerprint and check the signature — right here, nothing stored."}</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:"rgba(255,255,255,.06)",border:`1px solid ${hint?"rgba(240,153,123,.6)":"rgba(255,255,255,.14)"}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:"#e9e6f5",outline:"none",boxSizing:"border-box"}}/>
+                <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:T.inputBg,border:`1px solid ${hint?"rgba(240,153,123,.6)":T.inputBd}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:T.text,outline:"none",boxSizing:"border-box"}}/>
                 <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
               </div>
               {hint
-                ? <div style={{marginTop:11,fontSize:12,lineHeight:1.55,color:"#f0b79b",background:"rgba(240,153,123,.1)",border:"1px solid rgba(240,153,123,.28)",borderRadius:9,padding:"9px 11px"}}>{hint}</div>
-                : <div style={{marginTop:12,fontSize:11.5,color:"#8b86ad"}}>Paste the link, or scan the QR on the printed report — the report ID alone can’t be checked.</div>}
+                ? <div style={{marginTop:11,fontSize:12,lineHeight:1.55,color:"#c0532f",background:"rgba(240,153,123,.14)",border:"1px solid rgba(240,153,123,.4)",borderRadius:9,padding:"9px 11px"}}>{hint}</div>
+                : <div style={{marginTop:12,fontSize:11.5,color:T.faint}}>Paste the link, or scan the QR on the printed report — the report ID alone can’t be checked.</div>}
             </>)}
             {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
               const o=state.obj||{};
@@ -6077,37 +6092,37 @@ function VerifyPage(){
               return (<div>
                 <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:6}}>
                   <span style={{width:24,height:24,borderRadius:999,background:accent,color:"#0e0b1c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900}}>{authentic?"✓":isBad?"✕":"?"}</span>
-                  <div style={{fontSize:18,fontWeight:800,color:"#fff"}}>{title}</div>
+                  <div style={{fontSize:18,fontWeight:800,color:T.heading}}>{title}</div>
                 </div>
-                <div style={{fontSize:12.5,color:"#b6b1d6",lineHeight:1.6,marginBottom:12}}>
-                  {P==="signed"&&<>Valid LotCheck signature over <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>. Could only have been issued by LotCheck, and not one figure has changed.</>}
-                  {P==="ok"&&<>Contents produce <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>, matching the claimed ID. Every figure below is unaltered.</>}
-                  {P==="altered"&&state.signed&&<>The signature is <b style={{color:"#f0997b"}}>not valid</b> for these contents — altered after signing, or not from LotCheck. Don't trust the figures.</>}
-                  {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#f0997b"}}>{state.id}</b>. A figure was changed after issue.</>}
-                  {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:"#eafff6"}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
+                <div style={{fontSize:12.5,color:T.soft,lineHeight:1.6,marginBottom:12}}>
+                  {P==="signed"&&<>Valid LotCheck signature over <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Could only have been issued by LotCheck, and not one figure has changed.</>}
+                  {P==="ok"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>, matching the claimed ID. Every figure below is unaltered.</>}
+                  {P==="altered"&&state.signed&&<>The signature is <b style={{color:"#d6533f"}}>not valid</b> for these contents — altered after signing, or not from LotCheck. Don't trust the figures.</>}
+                  {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#d6533f"}}>{state.id}</b>. A figure was changed after issue.</>}
+                  {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
                 </div>
                 {P==="signed"&&state.sig&&(
-                  <div style={{display:"flex",alignItems:"center",gap:12,margin:"2px 0 14px",padding:"10px 12px",background:"rgba(127,119,221,.08)",border:"1px solid rgba(127,119,221,.25)",borderRadius:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,margin:"2px 0 14px",padding:"10px 12px",background:vdark?"rgba(127,119,221,.08)":"rgba(111,87,230,.08)",border:`1px solid ${vdark?"rgba(127,119,221,.25)":"rgba(111,87,230,.28)"}`,borderRadius:10}}>
                     <div style={{flex:"none"}}><Seal seed={sealSeed(state.sig)} size={66} gid="vseal"/></div>
-                    <div style={{fontSize:11.5,color:"#c3bfe0",lineHeight:1.5}}>This report's <b style={{color:"#a99ff0"}}>unique seal</b> — drawn from its signature. No other report has it, and it can't be reproduced without LotCheck's key.</div>
+                    <div style={{fontSize:11.5,color:T.soft,lineHeight:1.5}}>This report's <b style={{color:T.eyebrow}}>unique seal</b> — drawn from its signature. No other report has it, and it can't be reproduced without LotCheck's key.</div>
                   </div>
                 )}
-                <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"14px 16px"}}>
-                  <div style={{fontSize:15,fontWeight:700,color:"#fff"}}>{o.vehicle||"Vehicle"}</div>
-                  <div style={{fontSize:12.5,color:"#b6b1d6",fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
+                <div style={{background:vdark?"rgba(255,255,255,.04)":"rgba(255,255,255,.6)",border:`1px solid ${T.cardBd}`,borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:15,fontWeight:700,color:T.heading}}>{o.vehicle||"Vehicle"}</div>
+                  <div style={{fontSize:12.5,color:T.soft,fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
                   {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
-                  {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?"#34d399":"#b6b1d6"}/>}
+                  {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?"#34d399":T.soft}/>}
                   {delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
                 </div>
-                <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:"1px solid rgba(255,255,255,.16)",color:"#c3bfe0",borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+                <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
               </div>);
             })()}
           </div>
         </div>
-        <p style={{color:"#8b86ad",fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
-        <a href="/real" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:700,color:"#7f77dd",textDecoration:"none"}}>Worried about fakes? How to spot a real LotCheck report →</a>
+        <p style={{color:T.faint,fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
+        <a href="/real" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:700,color:T.eyebrow,textDecoration:"none"}}>Worried about fakes? How to spot a real LotCheck report →</a>
       </div>
       </div>
     </div>
