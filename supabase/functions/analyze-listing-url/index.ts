@@ -1129,7 +1129,7 @@ async function nimbleExtract(
       else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
     }
     try {
-      const body: Record<string, unknown> = { url, driver, formats: ["markdown"] };
+      const body: Record<string, unknown> = { url, driver, formats: ["markdown", "html"] };
       if (waitMs) body.wait = waitMs;
       const res = await fetch("https://sdk.nimbleway.com/v1/extract", {
         method: "POST",
@@ -1137,10 +1137,12 @@ async function nimbleExtract(
           "Authorization": `Bearer ${NIMBLE_API_KEY}`,
           "Content-Type": "application/json",
         },
-        // formats: ["markdown"] asks Nimble for clean, LLM-ready text rather
-        // than raw HTML -- cheaper and faster to feed to Claude. "render" is
-        // omitted -- confirmed via a real response warning that it's ignored
-        // once "driver" is set explicitly.
+        // markdown = clean LLM-ready text for Claude; html = the RENDERED HTML so
+        // we can also read the page's schema.org JSON-LD (Offer.price) directly.
+        // Dealer sites JS-render the priced vehicle Offer, which markdown strips —
+        // keeping the HTML lets extractJsonLdVehicle() rescue a missed price.
+        // "render" is omitted -- confirmed via a real response warning that it's
+        // ignored once "driver" is set explicitly.
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -2240,6 +2242,25 @@ Deno.serve(async (req: Request) => {
     // to the photo/PDF upload (which reads the real quote reliably). Also skip
     // the cache so a later upload/readable retry isn't blocked by an empty hit.
     let gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+
+    // RESCUE 1 (free, deterministic): the model read the page but found no price.
+    // The advertised price is almost always in the rendered page's schema.org
+    // JSON-LD (Offer.price) even when the visible text is ambiguous — read it
+    // straight from the HTML we now fetch. Labelled structured_data so the report
+    // shows it as the page's listing price and tells the buyer to confirm the OTD.
+    if (!gotPricing && typeof rawHtml === "string" && rawHtml.length > 0) {
+      try {
+        const ld = extractJsonLdVehicle(rawHtml);
+        if (ld && Number(ld.price) > 0) {
+          analysis.quotedPrice = ld.price;
+          analysis.quotedPriceSource = "structured_data";
+          if (ld.currency && ld.currency !== "CAD") analysis.quotedPriceCurrency = ld.currency;
+          await enrichAnalysis(analysis, REQUEST_DEADLINE);
+          gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+          console.log(`JSON-LD price rescue for ${url}: quotedPrice=${ld.price} ${ld.currency ?? "CAD"}, gotPricing=${gotPricing}`);
+        }
+      } catch (e) { console.warn("JSON-LD price rescue threw (ignored):", (e as Error)?.message); }
+    }
 
     // RESCUE (inert unless SCRAPFLY_API_KEY is set): the normal Nimble path got
     // no price -> render the page through Scrapfly's anti-bot engine and read the
