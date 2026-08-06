@@ -5608,6 +5608,249 @@ function decodeReport(s){
 const LOGO_INNER=`<polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/>`;
 function RealLogo({width=40}){ return <svg width={width} height={Math.round(width*182/320)} viewBox="-145 -44 320 182" aria-hidden="true" dangerouslySetInnerHTML={{__html:LOGO_INNER}}/>; }
 
+// Three presentations of the SAME audit data, toggled in-place: #24 deck
+// (swipe cards), #17 heatmap (grid, hot = flagged), #18 sidebar (rail + panel).
+// Money items glow cyan; a VERDICT cover leads, an EVIDENCE card closes it
+// (signature + Internet Archive snapshot). A report view alongside scroll/flip/orrery.
+function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink }){
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
+
+  const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
+  const f = score != null ? score / 10 : 0;
+  const CIRC = 314.159, fillOffset = CIRC * (1 - f), needleDeg = -90 + f * 180;
+  const rno = a.reportId || "LC-—";
+  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
+  const verifyHref = (typeof verifyLinkFor === "function") ? verifyLinkFor(a) : null;
+
+  const CY = "#22d3ee", TEAL = "#10b981", ROSE = "#f43f5e", AMBER = "#fbbf24", TX = "#e2e8f0", MUT = "#64748b", MUT2 = "#94a3b8", BORD = "#1e293b";
+  const mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  const flagged = (a.addOns || []).filter((x) => x.verdict === "flagged");
+  const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
+  const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
+  const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
+  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap" };
+
+  const sourceUrl = a.sourceUrl || a.listingUrl || null;
+  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
+  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2*/" + sourceUrl : null;
+  const listingShot = a.listingShot || null; // base64/data-url set by analyzer when available
+
+  // Independent Internet Archive snapshot of the listing at report time
+  // (fire-and-forget) so the original page survives a later dealer edit. We
+  // store nothing ourselves.
+  useEffect(() => {
+    if (!sourceUrl) return;
+    try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) { /* best-effort */ }
+  }, [sourceUrl]);
+
+  const Chip = ({ txt, tone }) => {
+    const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2;
+    const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)";
+    return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>;
+  };
+  const KV = ({ k, v, c }) => (<div><div style={{ color: MUT, fontSize: 11, fontFamily: mono }}>{k}</div><div style={{ fontSize: 24, fontWeight: 700, color: c || "#fff", fontFamily: mono, marginTop: 4 }}>{v}</div></div>);
+
+  const cards = [];
+
+  cards.push({ key: "verdict", title: "The verdict", cosmic: true, body: (
+    <div style={{ textAlign: "center" }}>
+      {score != null ? (
+        <>
+          <div style={{ position: "relative", width: 200, maxWidth: "100%", margin: "0 auto" }}>
+            <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
+              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
+              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
+              <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}>
+                <line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" />
+              </g>
+              <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
+            </svg>
+          </div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
+          <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
+        </>
+      ) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available for this quote.</div>}
+      {(qp || ms) > 0 && (
+        <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>
+          {qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}
+        </div>
+      )}
+      <div style={{ marginTop: 14 }}>
+        {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
+        {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
+        {a.financingCheck?.checked && a.financingCheck.consistent && <Chip txt="✓ Math checks" tone="pass" />}
+      </div>
+      {a.summary && <div style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 14, textAlign: "left" }}>{a.summary}</div>}
+    </div>
+  )});
+
+  cards.push({ key: "price", title: "Price vs MSRP", tone: !priceVerified ? "flag" : (delta > 0 ? "flag" : "pass"), glow: false, body: (
+    <div>
+      <div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : (delta > 0 ? ROSE : TEAL) }}>
+        {(qp && ms) ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}
+      </div>
+      <div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{(qp && ms) ? ` vs ${money(ms)} MSRP` : ""} · {priceVerified ? "price verified" : "price not verified"}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+        <KV k="ASKING PRICE" v={qp ? money(qp) : "—"} />
+        <KV k={priceVerified ? "MSRP" : "CATALOG MSRP"} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} />
+      </div>
+    </div>
+  )});
+
+  if ((a.addOns || []).length) cards.push({ key: "addons", title: flagged.length ? "⚠ Flagged add-ons" : "Add-ons & fees", tone: flagged.length ? "flag" : "muted", glow: flagged.length > 0, body: (
+    <div>
+      {flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}
+      {(a.addOns || []).map((x, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}>
+          <div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? "🔻 " : ""}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div>
+        </div>
+      ))}
+    </div>
+  )});
+
+  if (a.financeRates?.dealer || a.financing?.paymentAmount) {
+    const dr = a.financeRates?.dealer?.apr, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1;
+    const price = qp || ms || 0; let extra = null;
+    if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
+    const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" };
+    cards.push({ key: "finance", title: "Financing", tone: high ? "flag" : "muted", glow: high, body: (
+      <div>
+        {a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}
+        {dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}
+        {high
+          ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div>
+          : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}
+      </div>
+    )});
+  }
+
+  if (a.recalls?.checked) {
+    if (a.recalls.count > 0) cards.push({ key: "recalls", title: "⚠ Recalls · Transport Canada", tone: "flag", glow: true, body: (
+      <div>
+        <div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{a.recalls.count} open recall{a.recalls.count > 1 ? "s" : ""}</div>
+        {(a.recalls.items || []).slice(0, 4).map((it, i) => (
+          <div key={i} style={{ padding: "9px 0", borderTop: `1px solid ${BORD}` }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>
+            {it.summary && <div style={{ fontSize: 12, color: MUT2, marginTop: 3, lineHeight: 1.5 }}>{it.summary}</div>}
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: MUT, marginTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div>
+      </div>
+    )});
+    else if (a.recalls.count === 0 && a.recalls.confirmed === false) cards.push({ key: "recalls", title: "Recalls · couldn't confirm", tone: "muted", glow: false, body: (
+      <div><div style={{ fontSize: 15, fontWeight: 800, color: AMBER }}>Couldn't confirm this exact model</div><div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 8, lineHeight: 1.6 }}>This is <b>not</b> an all-clear — check open recalls directly by VIN at Transport Canada before you sign.</div></div>
+    )});
+    else cards.push({ key: "recalls", title: "Recalls · Transport Canada", tone: "pass", glow: false, body: (
+      <div style={{ fontSize: 18, fontWeight: 800, color: TEAL }}>✓ No open recalls found</div>
+    )});
+  }
+
+  const checks = [];
+  if (a.vinCheck?.present) checks.push([a.vinCheck.valid ? "✓" : "⚠", `VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + a.vinCheck.vin : ""}`, a.vinCheck.valid]);
+  if (a.odometerCheck?.checked) checks.push([a.odometerCheck.flag ? "⚠" : "✓", `Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`, !a.odometerCheck.flag]);
+  if (a.financingCheck?.checked) checks.push([a.financingCheck.consistent ? "✓" : "⚠", `Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`, a.financingCheck.consistent]);
+  if (a.standardWarranty?.coverage) checks.push(["✓", `Included warranty: ${a.standardWarranty.coverage}`, true]);
+  if (a.evapRebate?.eligible) checks.push(["✓", `EV rebate ${money(a.evapRebate.total)} eligible`, true]);
+  if (checks.length) { const anyFlag = checks.some((c) => c[2] === false); cards.push({ key: "checks", title: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: anyFlag, body: (
+    <div>{checks.map((c, i) => (<div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", fontSize: 13.5, lineHeight: 1.5 }}><span style={{ color: c[2] === false ? ROSE : c[2] ? TEAL : MUT2 }}>{c[0]}</span><span style={{ color: "#e2e8f0" }}>{c[1]}</span></div>))}</div>
+  )}); }
+
+  if (a.dealerSentiment && (a.dealerSentiment.rating || (a.dealerSentiment.highlights || []).length)) cards.push({ key: "rep", title: "Dealer reputation", tone: "muted", glow: false, body: (
+    <div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{a.dealerSentiment.rating ? `★ ${Number(a.dealerSentiment.rating).toFixed(1)}` : "—"}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{a.dealerSentiment.reviewCount ? ` · ${Number(a.dealerSentiment.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>
+      {(a.dealerSentiment.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}
+    </div>
+  )});
+
+  cards.push({ key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
+      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
+      {listingShot && <img src={listingShot} alt="Listing at report time" style={{ width: "100%", borderRadius: 10, border: `1px solid ${BORD}` }} />}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
+        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
+      </div>
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
+        LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.
+      </div>
+    </div>
+  )});
+
+  const cs = a.counterScript;
+  if (cs && Array.isArray(cs.moves) && cs.moves.length) cards.push({ key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: (
+    <div>{cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}</div>
+  )});
+
+  // ── shared derived controls ──
+  const [idx, setIdx] = useState(0);
+  const [sel, setSel] = useState(0);
+  const N = cards.length;
+  const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
+  useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
+  const touchX = useRef(null);
+  const toneColor = (c) => c.cosmic ? CY : c.tone === "flag" ? ROSE : c.tone === "pass" ? TEAL : MUT2;
+  const cardBox = (c) => ({ minHeight: 300, borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
+  const navBtn = (side) => ({ position: "absolute", [side]: -6, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
+  const CardBody = ({ c }) => (
+    <div style={cardBox(c)}>
+      <div style={{ ...klabel, color: c.glow ? CY : MUT2, marginBottom: 14 }}>{c.title}</div>
+      <div style={{ flex: 1 }}>{c.body}</div>
+    </div>
+  );
+  const vb = (v, label) => <button key={v} onClick={() => onView && onView(v)} style={{ background: view === v ? CY : "transparent", color: view === v ? "#04222b" : MUT2, border: "none", borderRadius: 8, padding: "6px 11px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{label}</button>;
+
+  return (
+    <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
+        <button onClick={onShare} style={{ marginLeft: "auto", background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: MUT2, fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{copied ? "Link copied" : "Copy link"}</button>
+      </div>
+
+      {view === "deck" && (<>
+        <div style={{ position: "relative" }} onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (touchX.current == null) return; const dx = e.changedTouches[0].clientX - touchX.current; if (dx < -40) go(1); else if (dx > 40) go(-1); touchX.current = null; }}>
+          <button onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous card" style={{ ...navBtn("left"), opacity: idx === 0 ? .35 : 1 }}>‹</button>
+          <div style={{ overflow: "hidden", borderRadius: 16 }}>
+            <div style={{ display: "flex", transform: `translateX(-${idx * 100}%)`, transition: "transform .38s cubic-bezier(.4,0,.2,1)" }}>
+              {cards.map((c, i) => (<div key={c.key} style={{ flex: "0 0 100%", minWidth: 0, boxSizing: "border-box", padding: "0 1px" }} aria-hidden={i !== idx}><div style={cardBox(c)}><div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}><span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: MUT }}>{String(i + 1).padStart(2, "0")} / {String(N).padStart(2, "0")}</span></div><div style={{ flex: 1 }}>{c.body}</div></div></div>))}
+            </div>
+          </div>
+          <button onClick={() => go(1)} disabled={idx === N - 1} aria-label="Next card" style={{ ...navBtn("right"), opacity: idx === N - 1 ? .35 : 1 }}>›</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>{cards.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}</div>
+        <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or ← →  ·  card {idx + 1} of {N}  ·  Scroll for email / PDF</div>
+      </>)}
+
+      {view === "sidebar" && (
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ flex: "0 0 200px", minWidth: 160, display: "flex", flexDirection: "column", gap: 6 }}>
+            {cards.map((c, i) => (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: sel === i ? "rgba(15,23,42,.85)" : "transparent", border: `1px solid ${sel === i ? (c.glow ? CY : BORD) : "transparent"}`, borderRadius: 10, padding: "9px 11px", color: sel === i ? "#fff" : MUT2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>))}
+          </div>
+          <div style={{ flex: "1 1 300px", minWidth: 0 }}><CardBody c={cards[sel]} /></div>
+        </div>
+      )}
+
+      {view === "heatmap" && (<>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(76px,1fr))", gap: 8 }}>
+          {cards.map((c, i) => (<button key={c.key} onClick={() => setSel(i)} title={c.title} style={{ aspectRatio: "1", borderRadius: 10, border: `1px solid ${sel === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.cosmic ? "rgba(34,211,238,.10)" : c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 8, display: "flex", flexDirection: "column", justifyContent: "space-between" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")}</span><span style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1", textAlign: "left" }}>{c.title.replace(/^[^A-Za-z0-9]+/, "")}</span></button>))}
+        </div>
+        <div style={{ marginTop: 14 }}><CardBody c={cards[sel]} /></div>
+      </>)}
+
+      {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
+    </div>
+  );
+}
+
 function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   const [cur,setCur]=useState(0);
   const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
@@ -5808,6 +6051,7 @@ function canonicalReport(a){
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
     marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
     summary:a.summary||null,
+    source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };
 }
@@ -6198,7 +6442,7 @@ function QuoteCheckPage(){
   // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
   // "Report view"). `sharedReport` is true when the analysis was reconstructed
   // from a self-contained share link (#r=...), never fetched or stored.
-  const [reportView,setReportView]=useState("scroll");
+  const [reportView,setReportView]=useState("deck");
   const [sharedReport,setSharedReport]=useState(false);
   const [linkCopied,setLinkCopied]=useState(false);
   // On mount, reconstruct a shared report entirely client-side from the URL
@@ -6681,7 +6925,7 @@ function QuoteCheckPage(){
         setErrorMsg(data.error||"Something went wrong analyzing that listing.");
         return;
       }
-      setAnalysis(await finalizeReport(data.analysis));
+      setAnalysis(await finalizeReport({ ...data.analysis, sourceUrl: url, capturedAt: new Date().toISOString() }));
       setAnalysisSource("listing");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
       applyCheckSuccess(data);
@@ -7164,13 +7408,14 @@ function QuoteCheckPage(){
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
+            if(reportView==="deck"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
             if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("scroll","Scroll view")}{vBtn("flip","Report view")}{vBtn("orrery","3D Orrery")}
+                  {vBtn("deck","Deck")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
