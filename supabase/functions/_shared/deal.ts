@@ -63,7 +63,9 @@ export function buildCounterScript(analysis: any): CounterScript {
     moves.push({ topic: "Add-ons", say: `Please take off the ${money(rec.addonsTotal)} in dealer add-ons${names.length ? ` (${names.join(", ")})` : ""} — I don't want them.` });
   }
   const qp = num(analysis?.quotedPrice), msrp = num(analysis?.msrp);
-  if (qp != null && msrp != null && qp > msrp + 100) {
+  // msrp > 0 (not just != null): a missing MSRP reads as 0, and "$X over MSRP ($0)"
+  // is nonsense — skip the price move entirely when we don't have a real MSRP.
+  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100) {
     // S14 — one dealer's price isn't "the market"; the market is real deals across dealers.
     moves.push({ topic: "Price", say: `This is about ${money(qp - msrp)} over MSRP (${money(msrp)}). "Market value" is set by real deals across many dealers, not one store's number — I'd need this at MSRP to move forward.` });
   }

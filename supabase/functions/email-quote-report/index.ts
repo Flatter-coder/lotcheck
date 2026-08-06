@@ -469,10 +469,12 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  drawSeal(M + W - 116, y - 9, 15); // small stamp left of the header text
-  right("QUOTE CHECK REPORT", { size: 8.5, font: sansB, color: SOFT });
+  // Seal sits in the far-right corner; the title + No. are right-aligned to a
+  // margin LEFT of it (rx) so they never collide with the stamp.
+  drawSeal(M + W - 20, y - 11, 13);
+  right("QUOTE CHECK REPORT", { rx: M + W - 52, size: 8.5, font: sansB, color: SOFT });
   y -= 20;
-  right("No. " + RID, { size: 8.5, font: mono, color: FAINT });
+  right("No. " + RID, { rx: M + W - 52, size: 8.5, font: mono, color: FAINT });
   y -= 2;
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.4, color: INK });
   y -= 22;
