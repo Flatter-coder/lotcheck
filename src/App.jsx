@@ -8409,7 +8409,7 @@ function MsrpAlertsPage(){
     inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
     rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
   } : {
-    pageBg:"#f5f7fa", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
+    pageBg:"radial-gradient(120% 90% at 72% 25%,#e6ecf7 0%,#d6deef 55%,#c7d1e6 100%)", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
     navBg:"rgba(253,254,255,.82)", navBorder:"rgba(22,32,52,.1)", logoText:"#141c28", link:"#5a6577",
     panelBg:"rgba(255,255,255,.72)", panelBorder:"rgba(22,32,52,.1)", panel2Bg:"rgba(255,255,255,.62)", panel2Border:"rgba(22,32,52,.1)",
     inputBg:"rgba(255,255,255,.92)", inputBorder:"rgba(22,32,52,.16)", segBg:"rgba(255,255,255,.72)", segBorder:"rgba(22,32,52,.14)",
