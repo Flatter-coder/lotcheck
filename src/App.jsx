@@ -8402,18 +8402,20 @@ function MsrpAlertsPage(){
   const dark=theme==="dark";
   // Colors mirror the MSRP Price Index tokens exactly (dark: cosmic + #3ae0ff;
   // light: #f5f7fa bg, #0d8fb0 cyan, #141c28 ink) so the two pages never diverge.
+  // Starry in both modes (cosmic scene). Dark = deep night; "light" = a lighter
+  // blue-twilight sky — both keep white stars visible and light, readable text.
   const T = dark ? {
-    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
+    pageBg:"radial-gradient(ellipse at bottom,#1b2735 0%,#090a0f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
     navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6",
     panelBg:"rgba(16,18,38,.6)", panelBorder:"rgba(150,170,255,.22)", panel2Bg:"rgba(16,18,38,.5)", panel2Border:"rgba(150,170,255,.2)",
     inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
     rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
   } : {
-    pageBg:"radial-gradient(120% 90% at 72% 25%,#e6ecf7 0%,#d6deef 55%,#c7d1e6 100%)", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
-    navBg:"rgba(253,254,255,.82)", navBorder:"rgba(22,32,52,.1)", logoText:"#141c28", link:"#5a6577",
-    panelBg:"rgba(255,255,255,.72)", panelBorder:"rgba(22,32,52,.1)", panel2Bg:"rgba(255,255,255,.62)", panel2Border:"rgba(22,32,52,.1)",
-    inputBg:"rgba(255,255,255,.92)", inputBorder:"rgba(22,32,52,.16)", segBg:"rgba(255,255,255,.72)", segBorder:"rgba(22,32,52,.14)",
-    rangeTrack:"rgba(22,32,52,.18)", thumbBorder:"#ffffff", cyan:"#0d8fb0", heroGrad:"linear-gradient(100deg,#141c28,#0d8fb0 55%,#5a4fd0)",
+    pageBg:"radial-gradient(ellipse at bottom,#26324f 0%,#0e1424 100%)", text:"#eef2fb", soft:"#c3cbe0", faint:"#8f99b4",
+    navBg:"rgba(14,20,36,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#c3cbe0",
+    panelBg:"rgba(20,26,48,.58)", panelBorder:"rgba(150,170,255,.24)", panel2Bg:"rgba(20,26,48,.48)", panel2Border:"rgba(150,170,255,.2)",
+    inputBg:"rgba(12,16,32,.55)", inputBorder:"rgba(150,170,255,.26)", segBg:"rgba(12,16,32,.5)", segBorder:"rgba(150,170,255,.2)",
+    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#0b1220", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
   };
 
   async function submit(){
@@ -8462,11 +8464,29 @@ function MsrpAlertsPage(){
     .mal-navlinks::-webkit-scrollbar{display:none}
     @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
     @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
-    @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}`;
+    @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}
+    .mal-stars{position:absolute;inset:0;overflow:hidden;z-index:0;pointer-events:none}
+    .mal-star{position:absolute;top:0;left:0;background:transparent;animation-name:malStar;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
+    @keyframes malStar{from{transform:translateY(0)}to{transform:translateY(-2000px)}}
+    @media(prefers-reduced-motion:reduce){.mal-star{animation:none}}`;
+
+  // Generate the three star layers once (stable across re-renders) — a
+  // box-shadow starfield scrolling upward behind the planet, in both themes.
+  const starRef = useRef(null);
+  if(!starRef.current){
+    const gen=(n)=>{const a=[];for(let i=0;i<n;i++)a.push(`${Math.random()*2000|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
+    starRef.current=[{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}];
+  }
 
   return (
     <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
+      <div className="mal-stars" aria-hidden="true">
+        {starRef.current.flatMap((L,i)=>[
+          <div key={i+"a"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur}}/>,
+          <div key={i+"b"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur,top:2000}}/>,
+        ])}
+      </div>
       <PlanetAlerts tilt={tilt} density={dens/10} theme={theme}/>
 
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
