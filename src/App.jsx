@@ -8472,18 +8472,27 @@ function MsrpAlertsPage(){
 
   // Generate the three star layers once (stable across re-renders) — a
   // box-shadow starfield scrolling upward behind the planet, in both themes.
-  const starRef = useRef(null);
-  if(!starRef.current){
-    const W=Math.max(window.innerWidth,document.documentElement.clientWidth,2000);  // cover the full viewport width
-    const gen=(n)=>{const a=[];const cnt=Math.round(n*W/2000);for(let i=0;i<cnt;i++)a.push(`${Math.random()*W|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
-    starRef.current=[{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}];
-  }
+  const [starLayers,setStarLayers]=useState([]);
+  useEffect(()=>{
+    let t;
+    const build=()=>{
+      // Cover the FULL current viewport width (TVs, wide monitors, browser
+      // zoom-out). Density scales with width so phones stay light.
+      const W=Math.max(window.innerWidth,document.documentElement.clientWidth,360);
+      const gen=(n)=>{const a=[];const cnt=Math.max(1,Math.round(n*W/2000));for(let i=0;i<cnt;i++)a.push(`${Math.random()*W|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
+      setStarLayers([{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}]);
+    };
+    build();
+    const onR=()=>{clearTimeout(t);t=setTimeout(build,200);};  // rebuild on resize/zoom/rotate
+    window.addEventListener("resize",onR);
+    return ()=>{clearTimeout(t);window.removeEventListener("resize",onR);};
+  },[]);
 
   return (
     <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <div className="mal-stars" aria-hidden="true">
-        {starRef.current.flatMap((L,i)=>[
+        {starLayers.flatMap((L,i)=>[
           <div key={i+"a"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur}}/>,
           <div key={i+"b"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur,top:2000}}/>,
         ])}
