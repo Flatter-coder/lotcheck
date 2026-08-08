@@ -67,6 +67,12 @@
     min-height:100vh;padding-bottom:64px;overflow-x:hidden;-webkit-font-smoothing:antialiased}
   /* Cosmic backdrop in dark mode only — matches the MSRP Notifier page. Light mode stays flat. */
   :root:not([data-theme="light"]) body{background:radial-gradient(125% 130% at 78% 6%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat;background-color:#05060f}
+  /* Animated starfield behind everything (above the bg gradient, below content). */
+  .starfield{position:fixed;inset:0;overflow:hidden;z-index:-1;pointer-events:none}
+  :root[data-theme="light"] .starfield{display:none}
+  .star{position:absolute;top:0;left:0;background:transparent;animation:starDrift linear infinite;will-change:transform}
+  @keyframes starDrift{from{transform:translateY(0)}to{transform:translateY(-2000px)}}
+  @media(prefers-reduced-motion:reduce){.star{animation:none}}
   .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
   .up{color:var(--up)} .down{color:var(--down)}
 
@@ -574,6 +580,7 @@
 <script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
 </head>
 <body>
+<div class="starfield" id="starfield" aria-hidden="true"></div>
 <nav class="sitenav" aria-label="Main">
   <div class="sitenav-in">
     <a class="sn-logo" href="/" aria-label="LotCheck home">
@@ -1720,6 +1727,22 @@
     $("malEmail").value=""; $("malModel").value=""; $("malYear").value=""; $("malConsent").checked=false;
     $("malSubmit").textContent="Notify me"; $("malErr").textContent=""; refresh();
   };
+})();
+</script>
+<script>
+/* Populate the starfield: 3 layers of box-shadow stars, each duplicated at
+   top:2000px so the upward scroll loops seamlessly (behind all content). */
+(function(){
+  var sf=document.getElementById("starfield"); if(!sf) return;
+  function stars(n){var a=[];for(var i=0;i<n;i++){a.push((Math.random()*2000|0)+"px "+(Math.random()*2000|0)+"px #fff");}return a.join(",");}
+  [[600,1,"50s"],[220,2,"100s"],[90,3,"150s"]].forEach(function(c){
+    var sh=stars(c[0]);
+    [0,2000].forEach(function(top){
+      var d=document.createElement("div"); d.className="star";
+      d.style.cssText="width:"+c[1]+"px;height:"+c[1]+"px;top:"+top+"px;box-shadow:"+sh+";animation-duration:"+c[2];
+      sf.appendChild(d);
+    });
+  });
 })();
 </script>
 </body>
