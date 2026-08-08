@@ -6315,7 +6315,7 @@ function VerifyPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:16}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
           <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
@@ -7144,7 +7144,7 @@ function QuoteCheckPage(){
         <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper,backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
           <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
             <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
-              <LogoMark size={30}/>
+              <LogoMark size={45}/>
               <span style={{fontWeight:1000,fontSize:19,color:C.ink}}>LotCheck</span>
             </a>
             <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
@@ -8248,7 +8248,7 @@ function TrustPage(){
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
           <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {NAV.map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
           </div>
@@ -8501,7 +8501,7 @@ function MsrpAlertsPage(){
 
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={30}/>LotCheck</a>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
           <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
             {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
@@ -8701,7 +8701,7 @@ function LotCheckApp(){
         <LiveBackground/>
         <header className="lc-header">
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-            <LogoMark size={32}/>
+            <LogoMark size={48}/>
             <div style={{minWidth:0}}>
               <div style={{fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
