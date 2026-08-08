@@ -1960,6 +1960,17 @@ Guidelines:
 - If the page shows more than one financing/lease scenario (e.g. different terms or km allowances via URL parameters), extract the one that matches the payment actually displayed as the primary/selected option on the page, not an alternate scenario buried elsewhere in the disclosure text.
 - Respond with ONLY the JSON object above. No markdown formatting, no code fences, no preamble or explanation outside the JSON.`;
 
+// Third-party listing marketplaces/aggregators whose ToS bar automated access
+// (see Century 21 v. Zoocasa). LotCheck reads DEALER-OWN sites only; these are
+// refused server-side (the client blocks them pre-flight too). Buyers use the
+// dealer's own link or upload a screenshot. Hybrid policy pending legal sign-off.
+const AGGREGATOR_HOSTS = ["autotrader.ca","autotrader.com","cargurus.ca","cargurus.com","kijiji.ca","kijijiautos.ca","ebay.ca","ebay.com","facebook.com","fb.com","carfax.ca","carfax.com","clutch.ca","carpages.ca","cars.com","truecar.com","carvana.com"];
+function aggregatorHost(raw: string): string | null {
+  let host: string;
+  try { host = new URL(raw.trim()).hostname.toLowerCase().replace(/^www\./, ""); } catch { return null; }
+  return AGGREGATOR_HOSTS.find((d) => host === d || host.endsWith("." + d)) ?? null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -1990,6 +2001,20 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({ error: "No listing URL received." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Aggregator/marketplace gate — refuse before any credit hold or scrape, so
+    // a blocked link costs the user nothing. Dealer-own sites pass through.
+    const blockedHost = aggregatorHost(url);
+    if (blockedHost) {
+      return new Response(
+        JSON.stringify({
+          error: "aggregator_not_supported",
+          host: blockedHost,
+          message: `${blockedHost} is a listing marketplace we can't read by link. Paste the dealer's own website link for the same vehicle, or upload a screenshot of the listing instead.`,
+        }),
+        { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
 
