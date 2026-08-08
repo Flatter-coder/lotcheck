@@ -1734,9 +1734,10 @@
    top:2000px so the upward scroll loops seamlessly (behind all content). */
 (function(){
   var sf=document.getElementById("starfield"); if(!sf) return;
-  function stars(n){var a=[];for(var i=0;i<n;i++){a.push((Math.random()*2000|0)+"px "+(Math.random()*2000|0)+"px #fff");}return a.join(",");}
+  var W=Math.max(window.innerWidth,document.documentElement.clientWidth,2000);  // cover the full viewport width
+  function stars(n){var a=[];for(var i=0;i<n;i++){a.push((Math.random()*W|0)+"px "+(Math.random()*2000|0)+"px #fff");}return a.join(",");}
   [[600,1,"50s"],[220,2,"100s"],[90,3,"150s"]].forEach(function(c){
-    var sh=stars(c[0]);
+    var sh=stars(Math.round(c[0]*W/2000));  // scale count to keep density
     [0,2000].forEach(function(top){
       var d=document.createElement("div"); d.className="star";
       d.style.cssText="width:"+c[1]+"px;height:"+c[1]+"px;top:"+top+"px;box-shadow:"+sh+";animation-duration:"+c[2];

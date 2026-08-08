@@ -8474,7 +8474,8 @@ function MsrpAlertsPage(){
   // box-shadow starfield scrolling upward behind the planet, in both themes.
   const starRef = useRef(null);
   if(!starRef.current){
-    const gen=(n)=>{const a=[];for(let i=0;i<n;i++)a.push(`${Math.random()*2000|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
+    const W=Math.max(window.innerWidth,document.documentElement.clientWidth,2000);  // cover the full viewport width
+    const gen=(n)=>{const a=[];const cnt=Math.round(n*W/2000);for(let i=0;i<cnt;i++)a.push(`${Math.random()*W|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
     starRef.current=[{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}];
   }
 
