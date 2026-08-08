@@ -16,6 +16,7 @@
     --cyan:#3ae0ff;
     --cyan-soft:rgba(58,224,255,.14);
     --cyan-dim:rgba(58,224,255,.42);
+    --nav-hover:#38BDF8;
     --ink:#e7ecf3;
     --dim:#8b95a6;
     --dimmer:#586172;
@@ -56,6 +57,7 @@
     --cyan:#0d8fb0;
     --cyan-soft:rgba(13,143,176,.1);
     --cyan-dim:rgba(13,143,176,.34);
+    --nav-hover:#2FA79A;
     --ink:#141c28;
     --dim:#5a6577;
     --dimmer:#93a0b2;
@@ -125,8 +127,8 @@
   .sn-logo svg{display:block}
   .sn-links{display:flex;gap:15px;margin-left:auto;align-items:center;flex-wrap:nowrap}
   .sn-links a{position:relative;font-size:.9rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s;white-space:nowrap}
-  .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--cyan);transform:scaleX(0);transform-origin:left;transition:transform .2s}
-  .sn-links a:hover{color:var(--ink)}
+  .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--nav-hover);transform:scaleX(0);transform-origin:left;transition:transform .2s}
+  .sn-links a:hover{color:var(--nav-hover)}
   .sn-links a:hover::after{transform:scaleX(1)}
   .sn-links a.sn-live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
   .sn-links a.sn-live::after{transform:scaleX(1)}
