@@ -43,6 +43,7 @@
   --asphalt:#D9DBEF;
   --teal:#2FA79A;
   --teal-ink:#17756B;
+  --nav-hover:#2FA79A; /* nav tab hover — green in light */
   --live:#22C55E;
   --coral:#F2836B;
   --coral-ink:#A63C25;
@@ -68,6 +69,7 @@ html[data-theme="dark"]{
   --line:rgba(237,235,247,.14);
   --teal-ink:#5FD8CB;
   --coral-ink:#FF9E85;
+  --nav-hover:#38BDF8; /* nav tab hover — blue in dark (like Analyze button) */
   --shadow-hard:10px 12px 0 rgba(0,0,0,.4);
   --shadow-soft:0 18px 40px -18px rgba(0,0,0,.6);
 }
@@ -169,9 +171,10 @@ html[data-theme="dark"] .nav{background:rgba(21,18,31,.82)}
 }
 .nav-links a::after{
   content:"";position:absolute;left:0;bottom:0;height:3px;width:100%;border-radius:2px;
-  background:var(--teal);transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease-out);
+  background:var(--nav-hover);transform:scaleX(0);transform-origin:left;transition:transform .3s var(--ease-out);
 }
-.nav-links a:hover{color:var(--ink)}
+.nav-links a{transition:color .2s var(--ease-out)}
+.nav-links a:hover{color:var(--nav-hover)}
 .nav-links a:hover::after{transform:scaleX(1)}
 .nav-links a.live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
 .nav-links a.live::after{transform:scaleX(1)}
@@ -430,6 +433,13 @@ section{padding:clamp(64px,9vw,120px) 0}
 .dial .num small{display:block;font-size:.62rem;color:var(--ink-faint);letter-spacing:.1em;font-weight:800;line-height:1}
 .rep-score p{font-size:.95rem;color:var(--ink-soft)}
 .rep-score p b{color:var(--ink)}
+/* Report card — dark-mode-native colors (was a light design bleeding onto the dark card) */
+html[data-theme="dark"] .rep-head{background:linear-gradient(180deg,#241F38,#1D1930)}
+html[data-theme="dark"] .rep-head .rep-brand{color:var(--ink)}
+html[data-theme="dark"] .rep-row:hover{background:rgba(237,235,247,.05)}
+html[data-theme="dark"] .tag-ok{background:rgba(95,216,203,.16);color:var(--teal-ink)}
+html[data-theme="dark"] .tag-flag{background:rgba(255,158,133,.16);color:var(--coral-ink)}
+html[data-theme="dark"] .dial .track{stroke:rgba(237,235,247,.12)}
 .report-copy .flag-list{list-style:none;display:grid;gap:14px;margin:26px 0 30px}
 .report-copy .flag-list li{display:flex;gap:14px;align-items:flex-start;font-weight:600;color:var(--ink-soft)}
 .report-copy .flag-list li b{color:var(--ink)}
