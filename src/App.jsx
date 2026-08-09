@@ -2365,9 +2365,9 @@ function LiveTicker({listings,onSelect}){
 // emoji used elsewhere as a decorative "success" indicator (trial badges,
 // empty states) is untouched, since that's a different meaning, not branding.
 function LogoMark({ size = 32 }) {
-  // Real animated gate+car mark, pulled directly from the live homepage --
-  // this replaces the old coral cube, which was never updated when the
-  // homepage logo changed. viewBox is 145x130 (not perfectly square);
+  // Isometric gate+car mark -- a car driving through the purple scan gate,
+  // matching the live homepage "how it works" scene. Pulled directly from the
+  // homepage. viewBox is 145x130 (not perfectly square);
   // width/height are both set to `size` for a clean square footprint at
   // every call site, matching what the coral cube it replaces did.
   return (
@@ -4082,6 +4082,493 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   );
 }
 
+// ── Dispute-proof report identity (Option A: self-authenticating, NOTHING
+// stored). The report ID is a fingerprint of the report's own contents +
+// issued-at timestamp: change any figure and the ID changes, so it's
+// tamper-evident. /verify?d=<payload> recomputes the fingerprint from the
+// link and shows the same ID + figures — the buyer compares that ID to the one
+// printed on their report. LotCheck stores nothing; the buyer's copy is the
+// record. (Keeps the "analyzed once, never stored" promise — see the
+// always-check-legally-clear analysis: Alberta PIPA/PIPEDA + Consumer
+// Protection Act.)
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function b64urlEncode(str){ return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function b64urlDecode(s){ s=s.replace(/-/g,"+").replace(/_/g,"/"); return decodeURIComponent(escape(atob(s))); }
+function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
+// Canonical, fixed-order projection of ONLY what the report shows. This exact
+// object is what gets fingerprinted and what /verify re-hashes — so both sides
+// must build it identically.
+function canonicalReport(a){
+  const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
+  return {
+    v:1,
+    vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
+    dealer:{name:a.dealerName||null,city:a.dealerCity||null},
+    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
+    leverage:a.leverageScore&&a.leverageScore.score!=null?Number(a.leverageScore.score):null,
+    recalls:a.recalls&&a.recalls.checked?{count:a.recalls.count||0,confirmed:a.recalls.confirmed!==false,items:(a.recalls.items||[]).map(it=>({system:it.system||null,date:it.date||null}))}:null,
+    addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null})),
+    finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
+    reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
+    summary:a.summary||null,
+    source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
+    issuedAt:a.issuedAt||null,
+  };
+}
+// Stamp issuedAt + reportId onto a fresh analysis. Non-fatal: if crypto is
+// unavailable (very old/insecure context), fall back to a plain timestamp id
+// so the report still renders — it just isn't cryptographically verifiable.
+async function finalizeReport(analysis){
+  const issuedAt = new Date().toISOString();
+  const withTime = {...analysis, issuedAt};
+  try{
+    const str = JSON.stringify(canonicalReport(withTime));
+    const fp = await sha256Hex(str);
+    return {...withTime, reportId: makeReportId(fp), verifyPayload: b64urlEncode(str)};
+  }catch{
+    return {...withTime, reportId: "LC-"+String(Date.parse(issuedAt)).slice(-6), verifyPayload: null};
+  }
+}
+function verifyBaseUrl(){
+  try{ return (window.location.origin||"https://lotcheck.ca"); }catch{ return "https://lotcheck.ca"; }
+}
+// Build the shareable verify link. Carries BOTH the self-contained payload (d)
+// and the claimed report id — the verify page recomputes the id from d and
+// compares it to this claimed id, so an altered payload is provably caught.
+function verifyLinkFor(a){
+  if(!a||!a.verifyPayload) return null;
+  const id=a.reportId?`&id=${encodeURIComponent(a.reportId)}`:"";
+  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}`;
+}
+
+// ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
+// the report's ID + figures. Purely client-side; nothing is fetched or stored.
+function VerifyPage(){
+  const [state,setState]=useState({phase:"loading"});
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const q=new URLSearchParams(window.location.search);
+        const d=q.get("d");
+        if(!d){ setState({phase:"empty"}); return; }
+        const str=b64urlDecode(d);
+        const obj=JSON.parse(str);
+        const id=makeReportId(await sha256Hex(str));          // recomputed from the link
+        const claimed=q.get("id");                             // id the report claims to be
+        // If the link states which id it should be, we can prove a match/mismatch.
+        // If it doesn't, we can only show the computed id for the reader to compare.
+        const phase = claimed ? (claimed===id ? "ok" : "altered") : "unclaimed";
+        setState({phase,id,claimed,obj});
+      }catch(e){ setState({phase:"bad"}); }
+    })();
+  },[]);
+  const INK="#1E1C19",SOFT="#5c584f",TEAL="#17756B",CORAL="#A63C25",PAPER="#F9F6EC",HAIR="#e6e0d2";
+  const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
+  const wrap={minHeight:"100vh",background:PAPER,color:INK,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",justifyContent:"center",padding:"40px 20px"};
+  const box={width:"100%",maxWidth:640};
+  const mono={fontFamily:'ui-monospace,"SF Mono",Menlo,Consolas,monospace'};
+  if(state.phase==="loading") return <div style={wrap}><div style={box}>Verifying…</div></div>;
+  if(state.phase==="empty"||state.phase==="bad") return (
+    <div style={wrap}><div style={box}>
+      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
+      <h1 style={{fontSize:26,margin:"14px 0"}}>{state.phase==="bad"?"This link couldn't be verified":"Nothing to verify"}</h1>
+      <p style={{color:SOFT,fontSize:15,lineHeight:1.6}}>{state.phase==="bad"?"The report data in this link is incomplete or was altered, so its fingerprint doesn't compute. Ask for the original report link from LotCheck.":"Open the verification link printed on a LotCheck report to check it here."}</p>
+    </div></div>
+  );
+  const o=state.obj;
+  const issued=o.issuedAt?new Date(o.issuedAt):null;
+  const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
+  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"10px 0",borderTop:`1px solid ${HAIR}`}}><span>{t}</span><span style={{...mono,fontWeight:700,color:c||INK,whiteSpace:"nowrap"}}>{v}</span></div>);
+  return (
+    <div style={wrap}><div style={box}>
+      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
+      {(()=>{
+        const P=state.phase;
+        const badge=P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
+        const title=P==="ok"?"Authentic report":P==="altered"?"This report was altered":"Confirm the report ID";
+        return (
+          <>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 4px"}}>
+              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700}}>{badge.sym}</span>
+              <h1 style={{fontSize:26,margin:0}}>{title}</h1>
+            </div>
+            {P==="ok"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>, which matches the ID this report claims. Every figure below is unaltered — changing any number would change this ID.</p>}
+            {P==="altered"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
+            {P==="unclaimed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>. Check that this exactly matches the ID printed on the report you received — if it does, every figure below is genuine and unaltered.</p>}
+          </>
+        );
+      })()}
+      <div style={{background:"#fff",border:`1px solid ${HAIR}`,borderRadius:14,padding:"20px 22px",marginTop:18}}>
+        <div style={{fontSize:20,fontWeight:700}}>{o.vehicle||"Vehicle"}</div>
+        <div style={{color:SOFT,fontSize:14,fontStyle:"italic",marginBottom:6}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · issued ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
+        {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
+        {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?TEAL:SOFT}/>}
+        {delta!==0&&<Row t="Price vs MSRP" v={`${delta<0?money(-delta)+" under":money(delta)+" over"}`} c={delta<=0?TEAL:CORAL}/>}
+        {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
+        {o.recalls&&<Row t="Transport Canada recalls" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?CORAL:(o.recalls.confirmed===false?SOFT:TEAL)}/>}
+        {o.finance&&o.finance.dealer!=null&&<Row t="Financing APR (dealer)" v={`${o.finance.dealer}%`}/>}
+        {o.reputation&&<Row t="Dealer reputation" v={`${o.reputation.rating.toFixed(1)}★ / ${o.reputation.reviews.toLocaleString()}`}/>}
+      </div>
+      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report. This page recomputes its fingerprint live from the link — we keep no copy. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
+    </div></div>
+  );
+}
+
+// #24 "swipe card stack" — the on-screen report as a stepped deck: one section
+// per card, navigable by swipe / ← → / dots, with the money items (flagged
+// add-ons, high APR, open recalls, the "say this" script) carrying the cosmic
+// cyan glow. A dark cosmic VERDICT cover card leads, an EVIDENCE card closes the
+// audit (tamper-evident signature + independent Internet Archive snapshot so a
+// dealer editing the page later can't dispute what it said). Stores nothing.
+function HudReport({ analysis, analysisSource, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend, onReset }){
+  const a = analysis;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
+
+  const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + v.toLocaleString("en-CA"); };
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
+  const f = score != null ? score / 10 : 0;
+  const CIRC = 314.159, fillOffset = CIRC * (1 - f), needleDeg = -90 + f * 180;
+  const rno = a.reportId || (() => { const s = (a.vehicle || "") + (a.dealerName || ""); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return "LC-" + (1000 + (h % 9000)); })();
+  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
+  const verifyHref = verifyLinkFor(a);
+
+  const CY = "#22d3ee", TEAL = "#10b981", ROSE = "#f43f5e", AMBER = "#fbbf24", TX = "#e2e8f0", MUT = "#64748b", MUT2 = "#94a3b8", BORD = "#1e293b";
+  const mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  const flagged = (a.addOns || []).filter((x) => x.verdict === "flagged");
+  const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
+  const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
+  const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
+  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap" };
+
+  // Evidence / provenance
+  const sourceUrl = a.sourceUrl || a.listingUrl || null;
+  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
+  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2*/" + sourceUrl : null;
+
+  // Fire an independent Internet Archive snapshot of the listing at report time
+  // (fire-and-forget, no-cors) so the original page is preserved by a neutral
+  // third party if the dealer later edits it. We still store nothing ourselves.
+  useEffect(() => {
+    if (analysisSource !== "listing" || !sourceUrl) return;
+    try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) { /* best-effort */ }
+  }, [analysisSource, sourceUrl]);
+
+  const Chip = ({ txt, tone }) => {
+    const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2;
+    const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)";
+    return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>;
+  };
+  const KV = ({ k, v, c }) => (<div><div style={{ color: MUT, fontSize: 11, fontFamily: mono }}>{k}</div><div style={{ fontSize: 24, fontWeight: 700, color: c || "#fff", fontFamily: mono, marginTop: 4 }}>{v}</div></div>);
+
+  // ── build the deck (only cards that have data) ──
+  const cards = [];
+
+  // 0 · VERDICT (dark cosmic cover)
+  cards.push({ key: "verdict", title: "The verdict", cosmic: true, body: (
+    <div style={{ textAlign: "center" }}>
+      {score != null ? (
+        <>
+          <div style={{ position: "relative", width: 200, maxWidth: "100%", margin: "0 auto" }}>
+            <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
+              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
+              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
+              <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}>
+                <line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" />
+              </g>
+              <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
+            </svg>
+          </div>
+          <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
+          <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
+        </>
+      ) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available for this quote.</div>}
+      {(qp || ms) > 0 && (
+        <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>
+          {qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}
+        </div>
+      )}
+      <div style={{ marginTop: 14 }}>
+        {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
+        {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
+        {a.financingCheck?.checked && a.financingCheck.consistent && <Chip txt="✓ Math checks" tone="pass" />}
+      </div>
+      {a.summary && <div style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 14, textAlign: "left" }}>{a.summary}</div>}
+    </div>
+  )});
+
+  // 1 · PRICE
+  cards.push({ key: "price", title: "Price vs MSRP", tone: !priceVerified ? "flag" : (delta > 0 ? "flag" : "pass"), glow: false, body: (
+    <div>
+      <div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : (delta > 0 ? ROSE : TEAL) }}>
+        {(qp && ms) ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}
+      </div>
+      <div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{(qp && ms) ? ` vs ${money(ms)} MSRP` : ""} · {priceVerified ? "price verified" : "price not verified"}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+        <KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} />
+        <KV k={a.msrpBasis === "starting_at" ? "MSRP · STARTING AT" : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} />
+      </div>
+      {a.allInPricing && a.allInPricing.body && (
+        <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>
+          Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.
+        </div>
+      )}
+      {a.msrpInflation && a.msrpInflation.dealerStated && (
+        <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>
+          ⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.
+        </div>
+      )}
+    </div>
+  )});
+
+  // 1b · FIRST SEEN (days on lot) — motivated-seller leverage from the dealer's
+  // own inventory data. Uiverse-style 3D striped card (imtausef) adapted to the
+  // traffic-light system: ≤30 green · 31–89 amber · 90–119 red · 120+ blinking
+  // red. Only rendered when real data exists — never estimated.
+  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
+    const d = Number(a.daysOnLot.days);
+    const months = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
+    const state = d >= 120 ? "blink" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
+    const ACC = state === "green" ? "#8ed500" : state === "amber" ? "#ffb020" : "#ff3b5c";
+    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
+    const MONTHS3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const bulb = (on, color, blink) => (
+      <span style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto",
+        background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none",
+        animation: on && blink ? "lcDolBlink 0.9s step-end infinite" : "none" }} />
+    );
+    cards.push({ key: "dayslot", title: d >= 90 ? "⚠ First seen · days on lot" : "First seen · days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <style>{`
+          @keyframes lcDolBlink { 50% { opacity: 0.15; box-shadow: none; } }
+          .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
+          .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
+            background: linear-gradient(135deg, #0000 18.75%, #f3f3f3 0 31.25%, #0000 0),
+              repeating-linear-gradient(45deg, #f3f3f3 -6.25% 6.25%, #141414 0 18.75%);
+            background-size: 60px 60px; background-position: 0 0, 0 0; background-color: #141414;
+            width: 100%; position: relative;
+            box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
+          .lc-dol-card:hover { background-position: -100px 100px, -100px 100px; transform: rotate3d(0.5, 1, 0, 22deg); }
+          .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
+          .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
+          .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
+          .lc-dol-chip { cursor: default; margin-top: 1rem; display: inline-block; font-weight: 900; font-size: 9px;
+            text-transform: uppercase; color: ${ACC}; background: #141414; padding: 0.5rem 0.7rem; transform: translate3d(0,0,20px); }
+          .lc-dol-datebox { position: absolute; top: 26px; right: 26px; height: 62px; width: 62px; background: #141414;
+            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2;
+            ${state === "blink" ? "animation: lcDolBlink 0.9s step-end infinite;" : ""} }
+          .lc-dol-logo { position: absolute; top: 8px; left: 10px; transform: translate3d(0,0,80px); z-index: 2; }
+          .lc-dol-light { position: absolute; top: 96px; right: 34px; background: #141414; border: 1px solid #2a2a2a;
+            border-radius: 999px; padding: 5px 4px; transform: translate3d(0,0,70px); z-index: 2; }
+        `}</style>
+        <div className="lc-dol-parent">
+          <div className="lc-dol-card">
+            <div className="lc-dol-logo"><LogoMark size={34} /></div>
+            <div className="lc-dol-datebox">
+              {sinceD ? (<>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 9, fontWeight: 700 }}>{MONTHS3[sinceD.getMonth()]} {sinceD.getFullYear()}</span>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 20, fontWeight: 900 }}>{sinceD.getDate()}</span>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 7, fontWeight: 700, letterSpacing: ".08em" }}>FIRST SEEN</span>
+              </>) : (
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 18, fontWeight: 900, marginTop: 10 }}>{d}d</span>
+              )}
+            </div>
+            <div className="lc-dol-light">
+              {bulb(state === "red" || state === "blink", "#ff3b5c", state === "blink")}
+              {bulb(state === "amber", "#ffb020", false)}
+              {bulb(state === "green", "#8ed500", false)}
+            </div>
+            <div className="lc-dol-content">
+              <span className="lc-dol-title">{d.toLocaleString()} DAYS ON LOT</span>
+              <div className="lc-dol-text">
+                {months ? `About ${months} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
+                {d >= 90
+                  ? " Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage."
+                  : d >= 31
+                    ? " A month-plus on the lot — worth asking what they'll do on price to move it."
+                    : " Recently listed — limited sitting-time leverage on this unit."}
+              </div>
+              <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )});
+  }
+
+  // 2 · ADD-ONS
+  if ((a.addOns || []).length) cards.push({ key: "addons", title: flagged.length ? "⚠ Flagged add-ons" : (analysisSource === "listing" ? "Discounts & conditions" : "Add-ons & fees"), tone: flagged.length ? "flag" : "muted", glow: flagged.length > 0, body: (
+    <div>
+      {flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}
+      {(a.addOns || []).map((x, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}>
+          <div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? "🔻 " : ""}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div>
+        </div>
+      ))}
+    </div>
+  )});
+
+  // 3 · FINANCING
+  if (a.financeRates?.dealer) {
+    const high = a.financeRates.manufacturer && a.financeRates.dealer.apr - a.financeRates.manufacturer.apr > 0.1;
+    const price = qp || ms || 0;
+    let extra = null;
+    if (high && price) { const rd = a.financeRates.dealer.apr / 1200, rm = a.financeRates.manufacturer.apr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
+    cards.push({ key: "finance", title: "Financing APR", tone: high ? "flag" : "muted", glow: high, body: (
+      <div>
+        <div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff" }}>{a.financeRates.dealer.apr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>
+        {high
+          ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(a.financeRates.dealer.apr - a.financeRates.manufacturer.apr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {a.financeRates.manufacturer.apr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div>
+          : (a.financeRates.manufacturer ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {a.financeRates.manufacturer.apr}% on new.</div> : null)}
+      </div>
+    )});
+  }
+
+  // 4 · RECALLS
+  if (a.recalls?.checked) {
+    if (a.recalls.count > 0) cards.push({ key: "recalls", title: "⚠ Recalls · Transport Canada", tone: "flag", glow: true, body: (
+      <div>
+        <div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{a.recalls.count} open recall{a.recalls.count > 1 ? "s" : ""}</div>
+        {(a.recalls.items || []).slice(0, 4).map((it, i) => (
+          <div key={i} style={{ padding: "9px 0", borderTop: `1px solid ${BORD}` }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>
+            {it.summary && <div style={{ fontSize: 12, color: MUT2, marginTop: 3, lineHeight: 1.5 }}>{it.summary}</div>}
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: MUT, marginTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div>
+      </div>
+    )});
+    else if (a.recalls.count === 0 && a.recalls.confirmed === false) cards.push({ key: "recalls", title: "Recalls · couldn't confirm", tone: "muted", glow: false, body: (
+      <div><div style={{ fontSize: 15, fontWeight: 800, color: AMBER }}>Couldn't confirm this exact model</div><div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 8, lineHeight: 1.6 }}>This is <b>not</b> an all-clear — check open recalls directly by VIN at Transport Canada before you sign.</div></div>
+    )});
+    else cards.push({ key: "recalls", title: "Recalls · Transport Canada", tone: "pass", glow: false, body: (
+      <div style={{ fontSize: 18, fontWeight: 800, color: TEAL }}>✓ No open recalls found</div>
+    )});
+  }
+
+  // 5 · QUICK CHECKS
+  const checks = [];
+  if (a.vinCheck?.present) checks.push([a.vinCheck.valid ? "✓" : "⚠", `VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + a.vinCheck.vin : ""}`, a.vinCheck.valid]);
+  if (a.odometerCheck?.checked) checks.push([a.odometerCheck.flag ? "⚠" : "✓", `Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`, !a.odometerCheck.flag]);
+  if (a.financingCheck?.checked) checks.push([a.financingCheck.consistent ? "✓" : "⚠", `Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`, a.financingCheck.consistent]);
+  if (a.standardWarranty?.coverage) checks.push(["✓", `Included warranty: ${a.standardWarranty.coverage}`, true]);
+  if (a.evapRebate?.eligible) checks.push(["✓", `EV rebate ${money(a.evapRebate.total)} eligible`, true]);
+  else if (a.evapRebate?.ineligibleReason) checks.push(["•", `EV rebate: ${a.evapRebate.ineligibleReason}`, null]);
+  if (checks.length) { const anyFlag = checks.some((c) => c[2] === false); cards.push({ key: "checks", title: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: anyFlag, body: (
+    <div>{checks.map((c, i) => (<div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", fontSize: 13.5, lineHeight: 1.5 }}><span style={{ color: c[2] === false ? ROSE : c[2] ? TEAL : MUT2 }}>{c[0]}</span><span style={{ color: "#e2e8f0" }}>{c[1]}</span></div>))}</div>
+  )}); }
+
+  // 6 · DEALER REPUTATION
+  if (a.dealerSentiment && (a.dealerSentiment.rating || (a.dealerSentiment.highlights || []).length)) cards.push({ key: "rep", title: "Dealer reputation", tone: "muted", glow: false, body: (
+    <div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{a.dealerSentiment.rating ? `★ ${Number(a.dealerSentiment.rating).toFixed(1)}` : "—"}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{a.dealerSentiment.reviewCount ? ` · ${Number(a.dealerSentiment.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>
+      {(a.dealerSentiment.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}
+    </div>
+  )});
+
+  // 7 · EVIDENCE (dispute-proof)
+  cards.push({ key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
+      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
+        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
+      </div>
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
+        LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.
+      </div>
+    </div>
+  )});
+
+  // 8 · SAY THIS (capstone, glows)
+  const cs = a.counterScript;
+  if (cs && Array.isArray(cs.moves) && cs.moves.length) cards.push({ key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: (
+    <div>{cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}</div>
+  )});
+
+  // ── deck controls ──
+  const [idx, setIdx] = useState(0);
+  const N = cards.length;
+  const clamp = (n) => Math.max(0, Math.min(N - 1, n));
+  const go = (d) => setIdx((i) => clamp(i + d));
+  useEffect(() => { const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N]);
+  const touchX = useRef(null);
+
+  const cardBox = (c) => ({ minHeight: 344, borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
+  const navBtn = (side) => ({ position: "absolute", [side]: -6, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, lineHeight: "34px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
+
+  return (
+    <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX }}>
+      <style>{`@keyframes hudUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}`}</style>
+
+      {/* header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "1px solid rgba(34,211,238,.2)", paddingBottom: 14, marginBottom: 8, gap: 14, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "-.02em" }}>REPORT <span style={{ color: CY }}>{rno}</span></div>
+          <div style={{ fontSize: 11, color: MUT, letterSpacing: ".16em", textTransform: "uppercase", marginTop: 4 }}>{analysisSource === "listing" ? "Listing analysis" : "Quote analysis"} {"·"} {a.vehicle || "Your quote"}</div>
+        </div>
+        <div style={{ padding: "5px 13px", borderRadius: 999, background: "rgba(8,51,68,.3)", border: `1px solid ${priceVerified ? "rgba(34,211,238,.3)" : "rgba(244,63,94,.35)"}`, color: priceVerified ? CY : ROSE, fontSize: 11, fontFamily: mono, whiteSpace: "nowrap" }}>STATUS: {priceVerified ? "VERIFIED" : "PRICE UNVERIFIED"}</div>
+      </div>
+      <div style={{ fontSize: 11, color: MUT, fontFamily: mono, marginBottom: 16 }}>{issued ? `Issued ${issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : "Self-verifying report"} {"·"} tamper-evident</div>
+
+      {/* deck viewport */}
+      <div style={{ position: "relative" }} onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (touchX.current == null) return; const dx = e.changedTouches[0].clientX - touchX.current; if (dx < -40) go(1); else if (dx > 40) go(-1); touchX.current = null; }}>
+        <button onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous card" style={{ ...navBtn("left"), opacity: idx === 0 ? .35 : 1 }}>‹</button>
+        <div style={{ overflow: "hidden", borderRadius: 16 }}>
+          <div style={{ display: "flex", transform: `translateX(-${idx * 100}%)`, transition: "transform .38s cubic-bezier(.4,0,.2,1)" }}>
+            {cards.map((c, i) => (
+              <div key={c.key} style={{ flex: "0 0 100%", minWidth: 0, boxSizing: "border-box", padding: "0 1px" }} aria-hidden={i !== idx}>
+                <div style={cardBox(c)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}>
+                    <span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span>
+                    <span style={{ fontSize: 11, fontFamily: mono, color: MUT, whiteSpace: "nowrap" }}>{String(i + 1).padStart(2, "0")} / {String(N).padStart(2, "0")}</span>
+                  </div>
+                  <div style={{ flex: 1 }}>{c.body}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button onClick={() => go(1)} disabled={idx === N - 1} aria-label="Next card" style={{ ...navBtn("right"), opacity: idx === N - 1 ? .35 : 1 }}>›</button>
+      </div>
+
+      {/* dots + counter */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>
+        {cards.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Go to card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}
+      </div>
+      <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or use ← →  ·  card {idx + 1} of {N}</div>
+
+      {/* actions: email + reset */}
+      <div style={{ marginTop: 18, borderRadius: 16, padding: 18, border: `1px solid ${BORD}`, background: "rgba(15,23,42,.4)" }}>
+        <div style={{ ...klabel, marginBottom: 12 }}>Email me this report (PDF)</div>
+        {emailStatus === "sent" ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: TEAL, fontWeight: 700, fontSize: 14 }}>{"✓"} Sent to {emailInput.trim()}</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input type="email" placeholder="you@email.com" value={emailInput} onChange={(e) => { setEmailInput(e.target.value); if (emailErr) setEmailErr(""); }} disabled={emailStatus === "sending"} style={{ flex: "1 1 200px", background: "#020617", border: `1px solid ${emailErr ? ROSE : BORD}`, borderRadius: 10, padding: "11px 14px", color: TX, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              <button onClick={onSend} disabled={emailStatus === "sending"} style={{ background: CY, border: "none", borderRadius: 10, padding: "11px 20px", color: "#04222b", fontWeight: 800, fontSize: 14, cursor: emailStatus === "sending" ? "default" : "pointer", whiteSpace: "nowrap" }}>{emailStatus === "sending" ? "Sending…" : "Send"}</button>
+            </div>
+            {emailErr && <div style={{ fontSize: 12, color: ROSE, marginTop: 8 }}>{emailErr}</div>}
+            <div style={{ fontSize: 11, color: MUT, marginTop: 8 }}>Used once to send this report, then not kept.</div>
+          </>
+        )}
+      </div>
+
+      <button onClick={onReset} style={{ width: "100%", marginTop: 16, background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: 13, color: TX, fontWeight: 700, cursor: "pointer" }}>Check another quote</button>
+    </div>
+  );
+}
+
 // ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
 // MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
 // uploaded to Supabase Storage or saved anywhere -- the file is read in the
@@ -4089,26 +4576,22 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
 function QuoteCheckPage(){
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [analysis,setAnalysis]=useState(null);
-  // Tracks which analysis path produced the current `analysis` object --
-  // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
-  // Some copy below (the flagged-items banner especially) means something
-  // different depending on the source: a flagged fee on a formal quote is
-  // money being taken from the buyer, but a flagged condition on a listing
-  // is usually a rebate/discount that might not apply -- money that MIGHT
-  // not come to the buyer, not money being extracted. Same verdict schema,
-  // opposite real-world meaning, so the wording needs to match the source.
-  const [analysisSource,setAnalysisSource]=useState(null); // "quote" | "listing"
+  // Tracks which analysis path produced the current `analysis` object. Only
+  // "quote" (uploaded document/photo) is produced now — URL/listing analysis
+  // was removed (scraping third-party listing sites conflicts with their ToS;
+  // buyers upload their own screenshot/quote instead). The "listing" branches
+  // downstream are harmless legacy and simply never fire.
+  const [analysisSource,setAnalysisSource]=useState(null); // "quote"
   const [errorMsg,setErrorMsg]=useState("");
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
-  const [urlInput,setUrlInput]=useState("");
   const fileInputRef=useRef(null);
-  // Paywall state -- pendingAction holds whatever the user was trying to do
-  // (upload a file, or analyze a URL) when the gate blocked them, so it can
-  // resume automatically once they've unlocked access, rather than making
-  // them re-select their file or retype the URL after "paying."
+  // Paywall state -- pendingAction holds the file the user was trying to
+  // upload when the gate blocked them, so it can resume automatically once
+  // they've unlocked access, rather than making them re-select their file
+  // after "paying."
   const [showPaywall,setShowPaywall]=useState(false);
-  const [pendingAction,setPendingAction]=useState(null); // {type:"file",file} | {type:"url",url}
+  const [pendingAction,setPendingAction]=useState(null); // {type:"file",file}
   // True only for the single attempt that runs immediately after a
   // purchase. If THAT attempt fails, the person just paid and hit the same
   // wall they paid to get past -- that's a materially different, worse
@@ -4117,12 +4600,6 @@ function QuoteCheckPage(){
   // real success) and hand them a fallback that doesn't depend on the same
   // thing that just failed.
   const [justPurchased,setJustPurchased]=useState(false);
-  // Which method the most recent attempt actually used -- set the moment an
-  // attempt starts, regardless of whether it succeeds, so an error state
-  // always knows precisely what to suggest instead (a failed URL attempt
-  // should point at upload, since that doesn't depend on a third-party site
-  // being scrapable at all -- a failed upload needs different guidance).
-  const [lastAttemptType,setLastAttemptType]=useState(null); // "file" | "url"
 
   // Email-a-copy state -- separate from the main analyze flow so a failed
   // email send never wipes out the report the person can already see on
@@ -4130,7 +4607,18 @@ function QuoteCheckPage(){
   const [emailInput,setEmailInput]=useState("");
   const [emailStatus,setEmailStatus]=useState("idle");
   const [emailErr,setEmailErr]=useState("");
-
+  const [linkCopied,setLinkCopied]=useState(false);
+  // Self-contained shareable proof link: the report packed into the URL, decoded
+  // 100% client-side at /verify — nothing is stored (keeps "analyzed once, never
+  // stored"). The report ID is a fingerprint of the contents, so any altered
+  // figure changes it → tamper-evident. See make-it-dispute-proof.
+  function copyShareLink(){
+    const url=verifyLinkFor(analysis);
+    if(!url) return;
+    try{
+      navigator.clipboard.writeText(url).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2200);});
+    }catch(e){ /* clipboard blocked — link is still shown for manual copy */ }
+  }
   function isValidEmail(v){
     // Deliberately simple -- catches typos ("bob@gmailcom") without the
     // false-negative risk of a stricter regex rejecting a real address.
@@ -4153,7 +4641,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({email,analysis}),
+        body:JSON.stringify({email,analysis,verifyUrl:verifyLinkFor(analysis)||undefined}),
       });
       const data=await res.json();
       if(!res.ok||data.error){
@@ -4247,7 +4735,6 @@ function QuoteCheckPage(){
       return;
     }
     setFileName(file.name);
-    setLastAttemptType("file");
     setStatus("analyzing");
     setErrorMsg("");
 
@@ -4290,57 +4777,8 @@ function QuoteCheckPage(){
         setErrorMsg(data.error||"Something went wrong analyzing that quote.");
         return;
       }
-      setAnalysis(data.analysis);
+      setAnalysis(await finalizeReport(data.analysis));
       setAnalysisSource("quote");
-      consumeQuoteCredit();
-      setJustPurchased(false);
-      setStatus("done");
-    }catch(err){
-      setStatus("error");
-      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
-    }
-  };
-
-  function isValidUrl(v){
-    try{ const u=new URL(v.trim()); return u.protocol==="http:"||u.protocol==="https:"; }catch{ return false; }
-  }
-
-  const handleUrlAnalyze=async()=>{
-    const url=urlInput.trim();
-    if(!isValidUrl(url)){
-      setStatus("error");
-      setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
-      return;
-    }
-    if(!getQuoteCheckAccess().allowed){
-      setPendingAction({type:"url",url});
-      setShowPaywall(true);
-      return;
-    }
-    setFileName(new URL(url).hostname);
-    setLastAttemptType("url");
-    setStatus("analyzing");
-    setErrorMsg("");
-
-    try{
-      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-        },
-        body:JSON.stringify({url}),
-      });
-
-      const data=await res.json();
-      if(!res.ok||data.error){
-        setStatus("error");
-        setErrorMsg(data.error||"Something went wrong analyzing that listing.");
-        return;
-      }
-      setAnalysis(data.analysis);
-      setAnalysisSource("listing");
       consumeQuoteCredit();
       setJustPurchased(false);
       setStatus("done");
@@ -4356,7 +4794,6 @@ function QuoteCheckPage(){
     setAnalysisSource(null);
     setErrorMsg("");
     setFileName("");
-    setUrlInput("");
     setJustPurchased(false);
   };
 
@@ -4494,31 +4931,6 @@ function QuoteCheckPage(){
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
 
-            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
-              <div style={{flex:1,height:1,background:C.line}}/>
-              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
-              <div style={{flex:1,height:1,background:C.line}}/>
-            </div>
-
-            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"16px 18px"}}>
-              <div style={{color:C.ink,fontWeight:800,fontSize:14,marginBottom:8}}>Paste a dealer listing link instead</div>
-              <div style={{fontSize:12,color:C.inkFaint,marginBottom:12}}>For a car on a dealer's website — too long to screenshot, or the price loads dynamically.</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <input
-                  type="url"
-                  placeholder="https://dealer-site.com/inventory/..."
-                  value={urlInput}
-                  onChange={e=>setUrlInput(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
-                  style={{flex:"1 1 220px",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 14px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
-                />
-                <button onClick={handleUrlAnalyze}
-                  style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 22px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer",whiteSpace:"nowrap"}}>
-                  Analyze →
-                </button>
-              </div>
-            </div>
-
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
               {[
                 {n:"1",label:"Upload or paste",desc:"Drop a file, click to browse, or paste (Ctrl+V / Cmd+V) a screenshot"},
@@ -4552,19 +4964,7 @@ function QuoteCheckPage(){
               <div style={{fontSize:13,color:C.inkSoft,marginBottom:16,lineHeight:1.6}}>
                 This attempt wasn't charged -- nothing is deducted from your purchase unless a report actually comes back. {errorMsg}
               </div>
-              {lastAttemptType==="url"?(
-                <>
-                  <div style={{fontSize:12,color:C.inkFaint,marginBottom:14,lineHeight:1.5}}>
-                    Dealer sites occasionally can't be read automatically. Uploading a screenshot of the same page works even when the link doesn't, since it never depends on the dealer's site cooperating.
-                  </div>
-                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
-                  <div>
-                    <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
-                  </div>
-                </>
-              ):(
-                <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try a different photo →</button>
-              )}
+              <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try a different photo →</button>
             </div>
           )}
 
@@ -4576,6 +4976,15 @@ function QuoteCheckPage(){
             </div>
           )}
 
+          {/* Dark HUD report kept (disabled) — shipping the light report + trust layer first; the HUD reskin is a later polish. */}
+          {false&&status==="done"&&analysis&&(
+            <HudReport
+              analysis={analysis} analysisSource={analysisSource}
+              emailInput={emailInput} setEmailInput={setEmailInput}
+              emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr}
+              onSend={sendReportEmail} onReset={reset}
+            />
+          )}
           {status==="done"&&analysis&&(
             <div>
               <div style={cardStyle}>
@@ -4712,6 +5121,24 @@ function QuoteCheckPage(){
                 <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
               </div>
 
+              {analysis.reportId&&(
+                <div style={cardStyle}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>🔒 Verify &amp; share this report</div>
+                    <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                  </div>
+                  <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
+                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end.
+                  </div>
+                  {analysis.verifyPayload&&(
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button onClick={copyShareLink} style={{flex:"1 1 180px",background:linkCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{linkCopied?"✓ Link copied":"Copy shareable link"}</button>
+                      <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{flex:"1 1 150px",textAlign:"center",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"9px 16px",color:C.tealInk,fontWeight:800,fontSize:14,textDecoration:"none",boxSizing:"border-box"}}>Verify this report ↗</a>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={cardStyle}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>📧 Email me this report</div>
                 {emailStatus==="sent"?(
@@ -4759,7 +5186,6 @@ function QuoteCheckPage(){
             setPendingAction(null);
             setJustPurchased(true);
             if(action?.type==="file") handleFile(action.file);
-            else if(action?.type==="url") handleUrlAnalyze();
           }}
         />
       )}
@@ -4776,6 +5202,7 @@ export default function App(){
   return(
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
+        : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
         : <LotCheckApp/>}
       <Analytics/>

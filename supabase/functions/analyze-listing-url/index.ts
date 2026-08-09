@@ -50,6 +50,15 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { finalizeServerSide } from "../_shared/report-sign.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled } from "../_shared/scrapfly.ts";
+import { buildFeeObservations } from "../_shared/fee-vocab.ts";
+import { canonicalMake } from "../_shared/makes.ts";
+import { computeRemainingWarranty } from "../_shared/warranty.ts";
+import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
+import { pickTrimMsrp } from "../_shared/trim-match.js";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -306,10 +315,11 @@ async function logUsage(fields: {
 async function applyVerifiedWarranty(analysis: any): Promise<void> {
   if (!analysis || analysis.vehicleCondition !== "new" || !analysis.make) return;
   try {
+    const make = canonicalMake(analysis.make); // normalize "Mercedes"/"VW"/"Range Rover" -> catalog make
     const { data, error } = await supabase
       .from("manufacturer_warranties")
       .select("basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
-      .ilike("make", analysis.make)
+      .ilike("make", make)
       .maybeSingle();
     if (error) {
       console.warn("⚠️ manufacturer_warranties lookup failed:", error.message);
@@ -324,7 +334,7 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
     if (data.corrosion_coverage) parts.push(`${data.corrosion_coverage} corrosion`);
     analysis.standardWarranty = {
       coverage: parts.join(", "),
-      note: `Included at no extra cost with every new ${analysis.make} -- verified against ${analysis.make}'s official Canadian warranty terms, not an AI estimate.`,
+      note: `Included at no extra cost with every new ${make} -- verified against ${make}'s official Canadian warranty terms, not an AI estimate.`,
       verified: true,
       roadsideAssistance: data.roadside_assistance ?? null,
       hybridEvCoverage: data.hybrid_ev_coverage ?? null,
@@ -333,6 +343,27 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
   } catch (err) {
     console.warn("⚠️ applyVerifiedWarranty threw:", err);
     if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
+  }
+}
+
+// For a USED vehicle, estimate how much of the ORIGINAL manufacturer warranty
+// is left, from the verified catalog terms + model year + odometer. Sets
+// analysis.remainingWarranty. Never throws.
+async function applyRemainingWarranty(analysis: any): Promise<void> {
+  if (!analysis || analysis.vehicleCondition === "new" || !analysis.make || !analysis.year) return;
+  try {
+    const make = canonicalMake(analysis.make);
+    const { data, error } = await supabase
+      .from("manufacturer_warranties")
+      .select("basic_coverage, powertrain_coverage, source_url")
+      .ilike("make", make)
+      .maybeSingle();
+    if (error || !data) return;
+    const odo = analysis.odometerKm != null ? Number(analysis.odometerKm) : null;
+    const rw = computeRemainingWarranty(data, Number(analysis.year), odo, new Date().getUTCFullYear());
+    if (rw) { rw.make = make; analysis.remainingWarranty = rw; }
+  } catch (err) {
+    console.warn("⚠️ applyRemainingWarranty threw:", err);
   }
 }
 
@@ -460,42 +491,78 @@ async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolea
   }
 }
 
-async function lookupRecalls(year: number, make: string, model: string): Promise<any> {
+// Resolve the extracted model to its CANONICAL base model via our own
+// msrp_catalog ("Palisade Ultimate Calligraphy" -> "PALISADE"). Feeds both the
+// recall and MSRP lookups so trim in the model field can't break the exact
+// match either one needs. Null when we can't confidently resolve. Never throws.
+async function resolveBaseModel(year: number, make: string, model: string): Promise<string | null> {
+  if (!year || !make || !model) return null;
+  try {
+    // Year-tolerant (±1) like lookupCatalogMsrp: catalog rows lag/lead the
+    // listing's model year, and a year miss here blanked the whole MSRP chain
+    // (2026 BMW listing vs 2025-MY catalog rows).
+    const { data } = await supabase
+      .from("msrp_catalog").select("model")
+      .in("year", [year - 1, year, year + 1]).ilike("make", make).not("model", "is", null).limit(400);
+    if (!data?.length) return null;
+    const em = String(model).trim().toUpperCase(); let best: string | null = null;
+    for (const row of data) {
+      const cm = String(row.model || "").trim(); if (!cm) continue;
+      const cmU = cm.toUpperCase();
+      if (em === cmU || em.startsWith(cmU + " ")) { if (!best || cm.length > best.length) best = cm; }
+    }
+    return best;
+  } catch { return null; }
+}
+function modelCandidates(model: string, baseModel?: string | null): string[] {
+  const seen = new Set<string>(); const out: string[] = [];
+  const push = (m?: string | null) => { const v = (m || "").trim(); if (v && !seen.has(v.toUpperCase())) { seen.add(v.toUpperCase()); out.push(v); } };
+  push(baseModel); push(model);
+  const toks = String(model || "").trim().split(/\s+/);
+  for (let n = toks.length - 1; n >= 1; n--) push(toks.slice(0, n).join(" "));
+  return out;
+}
+async function tcModelKnown(make: string, model: string, year: number): Promise<boolean> {
+  const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
+  const res = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year - 10}-${year - 1}?format=json`, 10000);
+  return res.ok && (res.data?.ResultSet?.length ?? 0) > 0;
+}
+// Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
+// CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
+// negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
+async function lookupRecalls(year: number, make: string, model: string, baseModel?: string | null): Promise<any> {
   try {
     const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-    const listUrl = `${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year}-${year}?format=json`;
-    const listRes = await tcFetchJson(listUrl, 12000);
-    // Unreachable registry must NOT masquerade as "no recalls" -- report it
-    // honestly so the UI can say "couldn't verify" instead of a false all-clear.
-    if (!listRes.ok) {
-      console.warn("Recall list fetch failed:", listRes.error, listUrl);
-      return { checked: false, error: listRes.error, source: "Transport Canada VRDB" };
+    const candidates = modelCandidates(model, baseModel);
+    let anyOk = false, matchedModel: string | null = null;
+    let byNumber = new Map<string, { recallNumber: string; date: string | null }>();
+    for (const cand of candidates) {
+      const listRes = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(cand)}/year-range/${year}-${year}?format=json`, 12000);
+      if (!listRes.ok) continue;
+      anyOk = true;
+      const m = new Map<string, { recallNumber: string; date: string | null }>();
+      for (const r of (listRes.data?.ResultSet ?? [])) {
+        const o = tcRecordToObj(r); const num = o["Recall number"];
+        if (num && !m.has(num)) m.set(num, { recallNumber: num, date: o["Recall date"] || null });
+      }
+      if (m.size > 0) { byNumber = m; matchedModel = cand; break; }
     }
-    const rows: any[] = listRes.data?.ResultSet ?? [];
-    const byNumber = new Map<string, { recallNumber: string; date: string | null }>();
-    for (const r of rows) {
-      const o = tcRecordToObj(r);
-      const num = o["Recall number"];
-      if (num && !byNumber.has(num)) byNumber.set(num, { recallNumber: num, date: o["Recall date"] || null });
+    if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
+
+    if (byNumber.size > 0) {
+      const nums = Array.from(byNumber.keys()).slice(0, 8);
+      const items = await Promise.all(nums.map(async (num) => {
+        const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
+        const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
+        const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
+        return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
+          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
+      }));
+      return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
     }
-    if (byNumber.size === 0) {
-      return { checked: true, count: 0, items: [], source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-    }
-    // Detail (affected system + summary) for up to 8 recalls, in parallel.
-    const nums = Array.from(byNumber.keys()).slice(0, 8);
-    const items = await Promise.all(nums.map(async (num) => {
-      const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
-      const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
-      const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
-      return {
-        recallNumber: num,
-        date: byNumber.get(num)!.date,
-        system: o["SYSTEM_TYPE_ETXT"] || null,
-        unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null,
-        summary: comment ? comment.slice(0, 400) : null,
-      };
-    }));
-    return { checked: true, count: byNumber.size, items, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+
+    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
+    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) {
     console.warn("lookupRecalls threw:", err);
     return { checked: false };
@@ -621,6 +688,14 @@ function computeLeverageScore(analysis: any): void {
   if (analysis.financingCheck?.checked && analysis.financingCheck.consistent === false) {
     score += 1.0;
     basis.push(`financing numbers that don't reconcile`);
+  }
+  // Days on lot — the "motivated seller" signal (dealer-platform data, capped
+  // at +2.5 per days-on-lot-scope.md). Absolute-day buckets; no data → 0 and
+  // NO basis line (a miss must never read as "fresh listing").
+  const dol = Number(analysis.daysOnLot?.days) || 0;
+  if (dol >= 30) {
+    score += dol >= 90 ? 2.5 : dol >= 60 ? 1.5 : 0.75;
+    basis.push(`on the lot ${dol} days (dealer inventory data)`);
   }
 
   score = Math.max(0, Math.min(10, Math.round(score * 10) / 10));
@@ -773,59 +848,104 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
 // applyVerifiedFuelType. Returns null (never throws) on any miss, so the
 // manufacturer fallback still runs.
 //
-// Trim matching is deliberately conservative: MSRP varies a lot by trim
-// (e.g. CX-5 GX $36,300 vs GT Premium $46,700), so a wrong-trim match is
-// worse than no match. It only accepts an UNAMBIGUOUS hit -- an exact
-// normalized trim match, or a single containment match -- never a guess
-// across trims.
+// Matching is the shared trim-fingerprinting scorer (_shared/trim-match.js):
+// drivetrain + order-independent trim tokens + distinctive features + price
+// proximity, with a fuel partition. Regression-locked by
+// scripts/test-trim-match.mjs — run it after ANY change to the matcher.
+// Returns { msrp, trim, basis } where basis is "exact" (trim pinned) or
+// "starting_at" (honest floor, never a guess dressed as exact).
+interface CatalogMsrp { msrp: number; trim: string | null; basis: "exact" | "starting_at"; year?: number; }
 async function lookupCatalogMsrp(
   year: number,
   make: string,
   model: string,
   trim: string | null,
-): Promise<number | null> {
+  opts?: { rawModel?: string | null; fuelType?: string | null; quotedPrice?: number | null; drivetrain?: string | null; vinDrive?: string | null },
+): Promise<CatalogMsrp | null> {
   try {
-    const { data, error } = await supabase
+    // Year-tolerant: catalog rows lag/lead the listing's model year (a 2026
+    // listing vs 2025-MY catalog rows was a hard miss — the BMW 5 Series case).
+    // Query the exact year ± 1, PREFER exact-year rows, and when only an
+    // adjacent year exists use it as an honest "starting_at" reference with the
+    // catalog year attached — a labelled prior-year MSRP beats a blank.
+    const years = [year, year - 1, year + 1];
+    let data: any[] | null = null;
+    const full = await supabase
       .from("msrp_catalog")
-      .select("trim, msrp")
-      .eq("year", year)
+      .select("year, trim, msrp, fuel_type, drivetrain, attrs")
+      .in("year", years)
       .ilike("make", make)
       .ilike("model", model)
       .not("msrp", "is", null);
-    if (error) {
-      console.warn("⚠️ msrp_catalog MSRP lookup failed:", error.message);
-      return null;
+    if (full.error) {
+      const base = await supabase
+        .from("msrp_catalog")
+        .select("year, trim, msrp, fuel_type")
+        .in("year", years)
+        .ilike("make", make)
+        .ilike("model", model)
+        .not("msrp", "is", null);
+      if (base.error) {
+        console.warn("⚠️ msrp_catalog MSRP lookup failed:", base.error.message);
+        return null;
+      }
+      data = base.data;
+    } else {
+      data = full.data;
     }
-    const rows = (data ?? []).filter((r: any) => r.msrp != null && !isNaN(Number(r.msrp)));
-    if (rows.length === 0) return null;
-    const num = (r: any) => Number(r.msrp);
+    const all = (data ?? []).filter((r: any) => r.msrp != null && !isNaN(Number(r.msrp)));
+    if (all.length === 0) return null;
+    const exactYear = all.filter((r: any) => Number(r.year) === year);
+    // Nearest year wins among the adjacents (prefer the older row on a tie —
+    // last year's real price over next year's early figure).
+    const rows = exactYear.length ? exactYear
+      : all.filter((r: any) => Number(r.year) === year - 1).length ? all.filter((r: any) => Number(r.year) === year - 1)
+      : all.filter((r: any) => Number(r.year) === year + 1);
+    const rowYear = Number(rows[0]?.year);
 
-    // Only one row for this year/make/model and no trim to disambiguate --
-    // safe to use it directly.
-    if (rows.length === 1 && !trim) return num(rows[0]);
+    // The hybrid/PHEV signal can live in the raw model or trim text even after
+    // the base-model resolve stripped it — recover it for the fuel partition.
+    const textFuel = /phev|plug/i.test(String(opts?.rawModel || "") + " " + String(trim || "")) ? "PHEV"
+      : /hybrid/i.test(String(opts?.rawModel || "") + " " + String(trim || "")) ? "Hybrid" : null;
 
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
-    const want = trim ? norm(trim) : "";
-
-    // 1) exact normalized trim match
-    let hits = want ? rows.filter((r: any) => r.trim && norm(r.trim) === want) : [];
-    // 2) otherwise containment either direction (dealer "GT Premium" vs
-    //    catalog "GT (Premium Package)") -- accepted only if it lands on
-    //    exactly one row, never an ambiguous set.
-    if (hits.length === 0 && want) {
-      hits = rows.filter((r: any) => r.trim && (norm(r.trim).includes(want) || want.includes(norm(r.trim))));
-    }
-    if (hits.length === 1) {
-      const v = num(hits[0]);
-      console.log(`Catalog MSRP hit: ${year} ${make} ${model} ${trim ?? ""} -> ${v}`);
-      return v;
-    }
-    console.log(`Catalog MSRP: ${rows.length} row(s) for ${year} ${make} ${model} but no unambiguous trim match for "${trim ?? ""}" -- deferring to manufacturer fallback.`);
-    return null;
+    const picked = pickTrimMsrp(rows, {
+      trim,
+      // normDrive() inside the matcher parses AWD/FWD words out of whatever
+      // string it gets, so the trim text doubles as a drivetrain source.
+      drivetrain: opts?.drivetrain || trim || null,
+      vinDrive: opts?.vinDrive || null,
+      fuelType: opts?.fuelType || textFuel,
+      quotedPrice: opts?.quotedPrice ?? null,
+    });
+    if (!picked) return null;
+    const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear };
+    // An adjacent-year figure is a reference, never an exact sticker for THIS
+    // model year — force the honest "starting_at" basis.
+    if (rowYear !== year) out.basis = "starting_at";
+    console.log(`Catalog MSRP: ${year} ${make} ${model} "${trim ?? ""}" -> ${out.msrp} (${out.basis}${out.trim ? `, trim ${out.trim}` : ""}${rowYear !== year ? `, ${rowYear} MY reference` : ""})`);
+    return out;
   } catch (err) {
     console.warn("lookupCatalogMsrp threw:", err);
     return null;
   }
+}
+
+// Free, authoritative drivetrain from the VIN (NHTSA vPIC). The VIN is the
+// strongest trim signal a listing carries — it can't be mistyped marketing
+// copy. Best-effort: 6s budget, null on any failure, never throws.
+async function decodeVinDrive(vin: string | null | undefined): Promise<string | null> {
+  const v = String(vin || "").trim();
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/i.test(v)) return null;
+  try {
+    const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(v)}?format=json`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const j: any = await res.json();
+    const d = String(j?.Results?.[0]?.DriveType || "");
+    if (/awd|all.?wheel|4wd|4x4/i.test(d)) return "AWD";
+    if (/front/i.test(d)) return "FWD";
+    if (/rear/i.test(d)) return "RWD";
+    return null;
+  } catch { return null; }
 }
 
 // Small, curated map of manufacturer -> official Canadian site domain.
@@ -1400,6 +1520,51 @@ function sm360PriceOf(v: any): number | null {
   return null;
 }
 
+// Days-on-lot from the SM360 feed's OWN inventory fields (daysInInventory /
+// dateEntry) — the dealer platform's authoritative count, not an estimate.
+// This is the zero-vendor days-on-lot source: read per-request from the same
+// public feed that already resolves the price. Conservative: only records a
+// positive integer day count; dateEntry (epoch ms) is attached when sane.
+// Source-labelled so the report card stays dispute-proof.
+function captureSm360DaysOnLot(v: any, analysis: any): void {
+  const days = Number(v?.daysInInventory);
+  if (!Number.isFinite(days) || days <= 0) return;
+  const entryMs = Number(v?.dateEntry);
+  const since = Number.isFinite(entryMs) && entryMs > 946684800000 && entryMs < 4102444800000
+    ? new Date(entryMs).toISOString().slice(0, 10) : null;
+  analysis.daysOnLot = {
+    days: Math.round(days),
+    since,
+    source: "dealer_platform_feed",
+    sourceLabel: "the dealer's own inventory feed",
+  };
+  console.log(`SM360 days-on-lot: ${Math.round(days)} days (since ${since ?? "?"}).`);
+}
+
+// Dealer financing from the SM360 feed's paymentOptions.finance.term — the
+// dealer's own advertised APR/term/payment for THIS unit (page scrapes often
+// miss it; the feed always carries it when the dealer publishes payments).
+// Fills analysis.financing only when the page didn't already disclose a rate,
+// so a page-stated rate always wins. Feeds financeRates.dealer + the
+// financing-math check downstream. Never fabricates: no apr -> no-op.
+function captureSm360Financing(v: any, analysis: any): void {
+  if (analysis?.financing?.rate != null) return;
+  const t = v?.paymentOptions?.finance?.term;
+  const apr = Number(t?.apr);
+  if (!Number.isFinite(apr) || apr <= 0 || apr > 30) return;
+  const term = Number(t?.term);
+  const payment = Number(t?.payment);
+  analysis.financing = {
+    ...(analysis.financing || {}),
+    rate: apr,
+    termMonths: Number.isFinite(term) && term > 0 ? Math.round(term) : null,
+    payment: Number.isFinite(payment) && payment > 0 ? Math.round(payment * 100) / 100 : null,
+    frequency: "monthly",
+    source: "sm360_feed",
+  };
+  console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"}/mo (dealer feed).`);
+}
+
 async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void> {
   const parsed = parseSm360Listing(url);
   if (!parsed) return;
@@ -1425,6 +1590,8 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
       for (const v of res.vehicles) {
         // Primary path: exact vehicleId match -- the id from the URL slug.
         if (Number(v?.vehicleId) === vehicleId) {
+          captureSm360DaysOnLot(v, analysis);
+          captureSm360Financing(v, analysis);
           const price = sm360PriceOf(v);
           if (price != null) {
             analysis.quotedPrice = price;
@@ -1449,6 +1616,8 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
     const priced = fallbackMatches.filter((v) => sm360PriceOf(v) != null);
     if (priced.length === 1) {
       const price = sm360PriceOf(priced[0])!;
+      captureSm360DaysOnLot(priced[0], analysis);
+      captureSm360Financing(priced[0], analysis);
       analysis.quotedPrice = price;
       analysis.quotedPriceSource = "sm360_feed_fallback";
       console.log(`SM360 resolver: no vehicleId match for ${vehicleId}; single year+model+trim unit matched, quotedPrice=${price}.`);
@@ -1583,10 +1752,174 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
       summary: `${vehicleStr ?? "This vehicle"}${price != null ? ` is listed at $${price.toLocaleString()}` : ""}. The dealer's listing page couldn't be loaded, so this report is based on the dealer's inventory feed rather than the full page -- itemized fees and the page's financing terms aren't included. Confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
 
+    captureSm360DaysOnLot(match, analysis);
+    captureSm360Financing(match, analysis);
     console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
     return analysis;
   } catch (err) {
     console.warn("buildSm360FallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
+// ── Direct-fetch + schema.org JSON-LD fallback ──────────────────────────────
+// When the Nimble page scrape fails AND the SM360 inventory-feed fallback
+// doesn't apply -- e.g. a `/new-catalog/` model/brochure page whose slug id is
+// a CATALOG id, not a lot unit's vehicleId (so it's absent from the inventory
+// feed), or a non-SM360 platform -- many modern dealer platforms STILL serve
+// the full HTML, including a clean schema.org Vehicle/Car + Offer JSON-LD block,
+// to a plain browser-UA fetch, even from behind Cloudflare where Nimble's
+// drivers get walled. Confirmed live (2026-07-30, tazaparkvw.com SM360 catalog
+// page): a direct fetch returned HTTP 200 with `"@type":"Car"` carrying
+// year/make/model/trim + `offers.price` (CAD), no Cloudflare challenge. This
+// builds a real, clearly-labelled, STRUCTURED-ONLY analysis from that data
+// (price + core vehicle facts); the shared enrichment then fills
+// MSRP/recalls/warranty/leverage. Page fees/financing are NOT read (that needs
+// the rendered page), so the sourceNote says so and points to the screenshot
+// path. Never throws; returns null when there's no usable priced vehicle node.
+async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-CA,en;q=0.9",
+      },
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html && html.length > 0 ? html : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
+// a price out of a page's <script type="application/ld+json"> blocks. Handles
+// @graph arrays and a top-level array of nodes. Returns normalized fields, or
+// null if no usable vehicle node is present. Never throws.
+function extractJsonLdVehicle(html: string): {
+  year: number | null; make: string | null; model: string | null; trim: string | null;
+  vin: string | null; odometerKm: number | null; price: number | null; currency: string | null;
+  condition: string | null; dealerName: string | null; dealerCity: string | null;
+} | null {
+  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((m) => m[1].trim());
+  if (blocks.length === 0) return null;
+
+  const nodes: any[] = [];
+  for (const b of blocks) {
+    try {
+      const parsed = JSON.parse(b);
+      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.["@graph"]) ? parsed["@graph"] : [parsed]);
+      for (const n of arr) if (n && typeof n === "object") nodes.push(n);
+    } catch { /* one malformed block never sinks the rest */ }
+  }
+
+  const typeOf = (n: any): string[] => {
+    const t = n?.["@type"];
+    return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
+  };
+  const isVehicle = (n: any) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
+  const firstOffer = (n: any): any => {
+    const o = n?.offers;
+    if (!o) return null;
+    return Array.isArray(o) ? (o[0] ?? null) : o;
+  };
+  const priceFrom = (offer: any): number | null => {
+    if (!offer) return null;
+    const cand = offer.price ?? offer.lowPrice ?? offer?.priceSpecification?.price;
+    const num = Number(String(cand ?? "").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(num) && num > 0 ? num : null;
+  };
+
+  let node: any = null; let offer: any = null; let price: number | null = null;
+  for (const n of nodes) {
+    if (!isVehicle(n)) continue;
+    const o = firstOffer(n);
+    const p = priceFrom(o);
+    if (p != null) { node = n; offer = o; price = p; break; } // best: a priced vehicle node
+    if (!node) { node = n; offer = o; } // weak fallback: a vehicle node with no price
+  }
+  if (!node) return null;
+  if (price == null) price = priceFrom(offer);
+
+  const str = (v: any): string | null =>
+    (typeof v === "string" && v.trim()) ? v.trim()
+      : (v && typeof v.name === "string" && v.name.trim()) ? v.name.trim() : null;
+  const titleCase = (s: string | null) => s ? s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase()) : s;
+
+  const yearRaw = node.vehicleModelDate ?? node.modelDate ?? node.productionDate ?? node.releaseDate;
+  const ym = String(yearRaw ?? "").match(/\b(19|20)\d{2}\b/);
+  const year = ym ? Number(ym[0]) : null;
+
+  const make = titleCase(str(node.brand) || str(node.manufacturer));
+  const model = str(node.model) || str(node.name);
+  const trim = titleCase(str(node.vehicleConfiguration) || str(node.trim) || str(node.vehicleModelConfiguration));
+
+  const vinRaw = typeof node.vehicleIdentificationNumber === "string" ? node.vehicleIdentificationNumber.trim().toUpperCase() : "";
+  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+
+  let odometerKm: number | null = null;
+  const odo = node.mileageFromOdometer;
+  if (odo != null) {
+    const v = Number(typeof odo === "object" ? odo.value : odo);
+    if (Number.isFinite(v) && v >= 0) {
+      const unit = String(typeof odo === "object" ? (odo.unitCode || odo.unitText || "") : "").toUpperCase();
+      odometerKm = /SMI|MILE/.test(unit) ? Math.round(v * 1.60934) : Math.round(v);
+    }
+  }
+
+  const cond = String(node.itemCondition || offer?.itemCondition || "").toLowerCase();
+  let condition: string | null = /new/.test(cond) ? "new" : (/used|refurb/.test(cond) ? "used" : null);
+  if (condition == null && odometerKm != null) condition = odometerKm <= 100 ? "new" : "used";
+
+  const currency = str(offer?.priceCurrency);
+  const seller = offer?.seller || node?.seller;
+  const addr = seller?.address;
+  const locality = str(addr?.addressLocality);
+  const region = str(addr?.addressRegion);
+  const dealerCity = locality ? (region ? `${locality}, ${region}` : locality) : null;
+
+  if (!year && !make && !model && price == null) return null;
+  return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
+}
+
+async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
+  try {
+    const html = await fetchDirectHtml(url, 15_000);
+    if (!html) { console.log(`JSON-LD fallback: direct fetch returned nothing for ${url}.`); return null; }
+    const v = extractJsonLdVehicle(html);
+    if (!v || (v.price == null && !v.year && !v.model)) {
+      console.log(`JSON-LD fallback: no usable schema.org Vehicle/Offer in ${url}.`);
+      return null;
+    }
+    const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year: v.year, make: v.make, model: v.model, trim: v.trim,
+      vin: v.vin, odometerKm: v.odometerKm, fuelType: null,
+      vehicleCondition: v.condition,
+      dealerName: v.dealerName, dealerCity: v.dealerCity,
+      msrp: null,
+      quotedPrice: v.price,
+      quotedPriceSource: v.price != null ? "structured_data" : null,
+      standardWarranty: null,
+      addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      source: "structured_data_fallback",
+      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own structured product data (schema.org). Core vehicle details and the advertised price come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
+      summary: `${vehicleStr ?? "This vehicle"}${v.price != null ? ` is listed at $${v.price.toLocaleString()}${v.currency && v.currency !== "CAD" ? " " + v.currency : ""}` : ""}. This report was built from the page's structured data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+    };
+    console.log(`JSON-LD fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.price ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildJsonLdFallbackAnalysis threw:", err);
     return null;
   }
 }
@@ -1603,10 +1936,22 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // checks rather than erroring.
 async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   await applyVerifiedWarranty(analysis);
+  await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
+  // Auto market value (best-effort, live mode only). No-op until VINAUDIT_MODE=live.
+  if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
   analysis.vinCheck = validateVin(analysis.vin);
+  // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
+  // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model
+  // field can't produce a false "no recalls"/"MSRP not found". See make-recalls-fail-safe.
+  // Resolve against model + trim COMBINED: the scraper often splits a compound
+  // model name into model + trim ("bZ Woodland" -> model "bZ", trim "Woodland";
+  // "Grand Cherokee L" -> "Grand Cherokee" + "L"). resolveBaseModel returns the
+  // LONGEST catalog model that prefixes the combined string, so the split name
+  // reunites to the right row while ordinary trims ("XLE Premium") never over-merge.
+  const baseModel = await resolveBaseModel(analysis.year, analysis.make, [analysis.model, analysis.trim].filter(Boolean).join(" "));
   if (analysis.year && analysis.make && analysis.model) {
-    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model);
+    analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model, baseModel);
   }
 
   // Manufacturer-site MSRP fallback -- only spend the extra search+extraction
@@ -1615,10 +1960,21 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   // The request deadline is threaded through so this expensive step self-skips
   // when there isn't enough budget left to finish before the platform ceiling.
   if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
-    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null);
+    // VIN -> drivetrain (free, NHTSA): the strongest trim-disambiguation signal.
+    const vinDrive = await decodeVinDrive(analysis.vin);
+    const catMsrp = await lookupCatalogMsrp(analysis.year, analysis.make, baseModel || analysis.model, analysis.trim ?? null, {
+      rawModel: analysis.model, fuelType: analysis.fuelType,
+      quotedPrice: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null,
+      drivetrain: analysis.drivetrain ?? null, vinDrive,
+    });
     if (catMsrp) {
-      analysis.msrp = catMsrp;
+      analysis.msrp = catMsrp.msrp;
       analysis.msrpSource = "catalog";
+      // "exact" = trim pinned; "starting_at" = honest floor. The UI label flips
+      // on this so a floor is never presented as the exact trim MSRP.
+      analysis.msrpBasis = catMsrp.basis;
+      if (catMsrp.trim) analysis.msrpTrim = catMsrp.trim;
+      if (catMsrp.year && catMsrp.year !== analysis.year) analysis.msrpYear = catMsrp.year; // adjacent-MY reference, surfaced honestly
     } else {
       const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
       if (mfrMsrp) {
@@ -1628,11 +1984,44 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
     }
   }
 
+  // Dealer-stated vs manufacturer MSRP — an inflated sticker is a real tactic
+  // (pad the MSRP so an advertised "saving" looks bigger than it is). When the
+  // LISTING itself supplied the MSRP (not our own catalog), cross-check it against
+  // the catalog's manufacturer MSRP. If the dealer's number is materially higher,
+  // anchor to the TRUE manufacturer figure and record the inflation so the report
+  // can show both and name the tactic — dispute-proof, never misleading.
+  if (analysis.msrp && analysis.msrpSource !== "catalog" && analysis.msrpSource !== "manufacturer_site"
+      && analysis.year && analysis.make && analysis.model) {
+    const vinDrive = await decodeVinDrive(analysis.vin);
+    const ref = await lookupCatalogMsrp(analysis.year, analysis.make, baseModel || analysis.model, analysis.trim ?? null, {
+      rawModel: analysis.model, fuelType: analysis.fuelType,
+      quotedPrice: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null,
+      drivetrain: analysis.drivetrain ?? null, vinDrive,
+    });
+    const stated = Number(analysis.msrp);
+    // Only call inflation against an EXACT trim match — comparing a dealer's
+    // trim-specific MSRP to a "starting at" floor would flag honest stickers.
+    if (ref && ref.basis === "exact" && stated > ref.msrp * 1.03 && stated - ref.msrp > 800) {
+      analysis.dealerStatedMsrp = stated;
+      analysis.msrp = ref.msrp;          // anchor Price-vs-MSRP to the true manufacturer MSRP
+      analysis.msrpSource = "catalog";
+      analysis.msrpBasis = ref.basis;
+      if (ref.trim) analysis.msrpTrim = ref.trim;
+      analysis.msrpInflation = { dealerStated: stated, manufacturer: ref.msrp, overBy: Math.round(stated - ref.msrp) };
+    }
+  }
+
   computeFinancingCheck(analysis);
   computeOdometerCheck(analysis);
   await resolveFinanceRates(analysis);
   await resolveLeaseRates(analysis);
   computeLeverageScore(analysis);
+  // Deal Decoder — run AFTER msrp + finance rates are resolved.
+  { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
+  { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
+  { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
+  { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; } // S25 (all-in label + safeguard)
+  analysis.counterScript = buildCounterScript(analysis);                                       // counter-script (last)
 }
 
 const CORS_HEADERS = {
@@ -1640,6 +2029,7 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
 
 const SYSTEM_PROMPT = `You are analyzing the extracted text content of a Canadian car dealership's vehicle listing web page, for a buyer using LotCheck.
 
@@ -1706,6 +2096,46 @@ Guidelines:
 - If the page shows more than one financing/lease scenario (e.g. different terms or km allowances via URL parameters), extract the one that matches the payment actually displayed as the primary/selected option on the page, not an alternate scenario buried elsewhere in the disclosure text.
 - Respond with ONLY the JSON object above. No markdown formatting, no code fences, no preamble or explanation outside the JSON.`;
 
+// Third-party listing aggregators whose Terms of Service prohibit automated
+// access / scraping / commercial reuse of their data. LotCheck must never
+// server-side fetch these: the fetch (not the buyer viewing the page) is what
+// breaches their ToS, and our anti-bot headers arguably circumvent their
+// access controls. A buyer's right to VERIFY is preserved via the screenshot-
+// upload path — the buyer captures their own image, LotCheck reads that image
+// and never touches the aggregator's servers. Dealer-owned domains are NOT
+// here: those are the dealer's own listing and keep the URL path. This is a
+// compliance gate pending lawyer sign-off (see always-check-legally-clear).
+const AGGREGATOR_HOSTS = [
+  "autotrader.ca",
+  "autotrader.com",
+  "cargurus.ca",
+  "cargurus.com",
+  "kijijiautos.ca",
+  "kijiji.ca",
+  "carfax.ca",
+  "carfax.com",
+  "clutch.ca",
+  "carpages.ca",
+  "autotrader.co.uk",
+  "cars.com",
+  "truecar.com",
+  "carvana.com",
+];
+
+// Returns the matched aggregator host if `raw` is a URL on one of them, else
+// null. Matches the registrable domain and any subdomain (www., m., etc.).
+function aggregatorHost(raw: string): string | null {
+  let host: string;
+  try {
+    host = new URL(raw.trim()).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+  return (
+    AGGREGATOR_HOSTS.find((d) => host === d || host.endsWith("." + d)) ?? null
+  );
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
@@ -1736,6 +2166,28 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({ error: "No listing URL received." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Aggregator ToS gate. Runs before the credit hold and any scrape, so a
+    // blocked link costs the user nothing. We do NOT auto-fetch AutoTrader/
+    // CarGurus/etc.; instead we tell the buyer how to verify without LotCheck
+    // touching those servers (paste the dealer's own link, or upload a
+    // screenshot). Structured error so the client can render the two options.
+    const blockedHost = aggregatorHost(url);
+    if (blockedHost) {
+      return new Response(
+        JSON.stringify({
+          error: "aggregator_not_supported",
+          host: blockedHost,
+          message:
+            `${blockedHost} is a listing marketplace whose terms don't allow other ` +
+            `services to pull pages from it automatically. You can still verify this ` +
+            `deal two ways: paste the dealer's own website link for the same vehicle, ` +
+            `or upload a screenshot of the listing — LotCheck reads your screenshot ` +
+            `directly and never touches ${blockedHost}.`,
+        }),
+        { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
 
@@ -1784,6 +2236,18 @@ Deno.serve(async (req: Request) => {
       if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
         const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
         console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
+        // Guardrail: an empty cached entry (no price/MSRP) is not a report --
+        // don't charge, steer to upload (same as the fresh-scrape path).
+        const cachedHasPricing = (Number(cached.analysis.quotedPrice) > 0) || (Number(cached.analysis.msrp) > 0);
+        if (!cachedHasPricing) {
+          await releaseCredit(holdId);
+          holdId = null;
+          return new Response(
+            JSON.stringify({ error: "unreadable_listing", message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.", vehicle: cached.analysis.vehicle || null, dealerName: cached.analysis.dealerName || null }),
+            { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+          );
+        }
+        await finalizeServerSide(cached.analysis); // finalizes entries cached before this change
         // A cached delivery is still a delivered accurate result -> capture.
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -1812,6 +2276,7 @@ Deno.serve(async (req: Request) => {
       const fallback = await buildSm360FallbackAnalysis(url);
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
+        await finalizeServerSide(fallback);
         try {
           await supabase
             .from("listing_analysis_cache")
@@ -1829,6 +2294,35 @@ Deno.serve(async (req: Request) => {
           JSON.stringify(credits
             ? { analysis: fallback, source: "sm360_feed_fallback", credits }
             : { analysis: fallback, source: "sm360_feed_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Second fallback: many dealer platforms (incl. SM360 `/new-catalog/`
+      // model pages, whose slug id isn't an inventory vehicleId, and non-SM360
+      // sites) still serve clean schema.org Vehicle/Offer JSON-LD to a plain
+      // browser-UA fetch even when Nimble is walled. Build a structured-only
+      // report from that. Only runs after BOTH the page scrape and the SM360
+      // feed fallback have already failed, so pages that load are unaffected.
+      const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
+      if (jsonLdFallback) {
+        await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
+        await finalizeServerSide(jsonLdFallback);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: jsonLdFallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (JSON-LD fallback):", err);
+        }
+        await logUsage({ success: true, errorMessage: `page-load failed, served structured-data (JSON-LD) fallback` });
+        console.log(`Served structured-data (JSON-LD) fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        const credits = await captureCredit(holdId);
+        holdId = null;
+        return new Response(
+          JSON.stringify(credits
+            ? { analysis: jsonLdFallback, source: "structured_data_fallback", credits }
+            : { analysis: jsonLdFallback, source: "structured_data_fallback" }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -2014,6 +2508,71 @@ Deno.serve(async (req: Request) => {
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
     // runs, so the two paths never drift apart.
     await enrichAnalysis(analysis, REQUEST_DEADLINE);
+
+    // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
+    // scrape can come back with no usable pricing. A report with no asking price
+    // AND no MSRP is not a Quote Check -- it's an empty page. Do NOT charge for
+    // it and do NOT deliver it as a report; tell the client to steer the buyer
+    // to the photo/PDF upload (which reads the real quote reliably). Also skip
+    // the cache so a later upload/readable retry isn't blocked by an empty hit.
+    let gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+
+    // RESCUE (inert unless SCRAPFLY_API_KEY is set): render the page through
+    // Scrapfly's anti-bot engine and read the full-page screenshot with Claude
+    // vision -- the "render the page, then read what a human sees" flow -- then
+    // re-enrich. Fires whenever the asking PRICE is missing: the price is the
+    // field a text scrape drops on JS/Cloudflare pages, and a catalog-filled MSRP
+    // must NOT suppress it (else the report shows an MSRP but no deal). Fully
+    // fail-safe: any failure returns null and we fall through as before.
+    if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
+      try {
+        const rescued = await rescueListingViaScrapfly(url, {
+          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+          budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
+        });
+        if (rescued) {
+          const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
+          mergeRescued(analysis, rescued);
+          await enrichAnalysis(analysis, REQUEST_DEADLINE);
+          // Screenshot showed a dealer MSRP above the manufacturer catalog figure ->
+          // inflated-sticker tactic. Anchor stays the TRUE catalog MSRP; record the
+          // gap and refresh the counter-script so the "Inflated MSRP" move appears.
+          if (rescuedMsrp && Number(analysis.msrp) > 0 && analysis.msrpSource === "catalog" && analysis.msrpBasis === "exact"
+              && rescuedMsrp > Number(analysis.msrp) * 1.03 && rescuedMsrp - Number(analysis.msrp) > 800 && !analysis.msrpInflation) {
+            analysis.dealerStatedMsrp = rescuedMsrp;
+            analysis.msrpInflation = { dealerStated: rescuedMsrp, manufacturer: Number(analysis.msrp), overBy: Math.round(rescuedMsrp - Number(analysis.msrp)) };
+            analysis.counterScript = buildCounterScript(analysis);
+          }
+          gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+          console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
+        }
+      } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
+    }
+
+    if (!gotPricing) {
+      await logUsage({ success: false, errorMessage: "unreadable_listing (no price/MSRP extracted)" });
+      await releaseCredit(holdId);
+      holdId = null;
+      return new Response(
+        JSON.stringify({
+          error: "unreadable_listing",
+          message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.",
+          vehicle: analysis.vehicle || null,
+          dealerName: analysis.dealerName || null,
+        }),
+        { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+
+    await finalizeServerSide(analysis);
+
+    // Flywheel Phase 1 — LOG ONLY, stores nothing. Projects the (already
+    // extracted) fees into DE-IDENTIFIED observations so we can validate the
+    // normalizer against real quotes. No DB write; gated behind FLYWHEEL_LOG.
+    // Capture (writing rows) is Phase 3, gated on legal sign-off.
+    if (Deno.env.get("FLYWHEEL_LOG") === "on") {
+      try { const obs = buildFeeObservations(analysis); if (obs.length) console.log(`flywheel: ${obs.length} fee obs ${JSON.stringify(obs)}`); } catch (e) { console.warn("flywheel log skipped:", (e as Error)?.message); }
+    }
 
     // Populate the cache with the finished, enriched analysis so the next
     // scan of this URL within the TTL is instant. Best-effort -- a cache

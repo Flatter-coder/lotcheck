@@ -11,3 +11,4 @@ scripts/out/
 # OS / editor cruft
 .DS_Store
 *.log
+.gstack/
