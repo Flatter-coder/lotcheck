@@ -1823,18 +1823,35 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Full browser header set. Cloudflare's bot-fight mode challenges requests
+    // that claim a Chrome UA but omit the client-hint / fetch-metadata headers
+    // real Chrome sends -- a thin UA-only fetch gets walled while a complete
+    // one sails through (verified live: fishcreeknissancalgary.ca returned the
+    // full 1MB page to this header set after walling the thin version).
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-CA,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
       },
       redirect: "follow",
       signal: controller.signal,
     });
     if (!res.ok) return null;
     const html = await res.text();
-    return html && html.length > 0 ? html : null;
+    if (!html || html.length < 500) return null;
+    // A Cloudflare/queue interstitial returns 200 with a small challenge shell
+    // (no real content) -- treat it as a failed load so we never parse it.
+    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) return null;
+    return html;
   } catch {
     return null;
   } finally {
@@ -1943,6 +1960,10 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       return null;
     }
     const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    // Deterministic price-gating detection: the page's own CTA text, read
+    // straight from the HTML -- no LLM involved on this path. Only claimed when
+    // no price was found (a priced page merely offering e-price forms isn't gated).
+    const gated = v.price == null && /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i.test(html);
     const analysis: any = {
       vehicle: vehicleStr,
       year: v.year, make: v.make, model: v.model, trim: v.trim,
@@ -1952,6 +1973,7 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       msrp: null,
       quotedPrice: v.price,
       quotedPriceSource: v.price != null ? "structured_data" : null,
+      priceDisclosure: v.price != null ? "advertised" : (gated ? "contact_for_price" : "not_shown"),
       standardWarranty: null,
       addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
       source: "structured_data_fallback",
