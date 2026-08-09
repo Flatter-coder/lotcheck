@@ -5619,6 +5619,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
 
   const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  // Only an EXACT trim MSRP supports an over/under claim. A "starting_at" floor
+  // (base trim / adjacent model year) is a reference, not this unit's sticker —
+  // an option-loaded car above the base floor is NOT "over MSRP".
+  const msrpExact = ms > 0 && a.msrpBasis !== "starting_at";
+  const deltaOk = !!(qp && ms && msrpExact);
   const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
@@ -5660,7 +5665,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
         <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
       </>) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available.</div>}
-      {(qp || ms) > 0 && <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}</div>}
+      {(qp || ms) > 0 && <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
       <div style={{ marginTop: 14 }}>
         {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
         {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
@@ -5674,8 +5679,8 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // ── the canonical 10-point audit — always 10, each with its result + body ──
   const P = [];
   // 1 Price vs MSRP
-  P.push({ title: "Price vs MSRP", tone: !priceVerified ? "flag" : (!ms ? "muted" : delta > 0 ? "flag" : "pass"), v: (qp && ms) ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (priceVerified ? "—" : "UNVERIFIED"),
-    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : delta > 0 ? ROSE : TEAL }}>{(qp && ms) ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{(qp && ms) ? ` vs ${money(ms)} MSRP` : ""} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} /><KV k={a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} /></div>{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
+  P.push({ title: "Price vs MSRP", tone: !priceVerified ? "flag" : (!ms ? "muted" : (deltaOk ? (delta > 0 ? "flag" : "pass") : "muted")), v: deltaOk ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (ms ? "FROM " + money(ms) : (priceVerified ? "—" : "UNVERIFIED")),
+    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "")} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} /><KV k={a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} /></div>{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
   // 2 Recalls
   { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
     let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
@@ -5740,33 +5745,29 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Number(a.daysOnLot.days);
     const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
-    const dolState = d >= 120 ? "blink" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
+    const dolState = d >= 90 ? "red" : d >= 31 ? "amber" : "green";
     const ACC = dolState === "green" ? "#8ed500" : dolState === "amber" ? "#ffb020" : "#ff3b5c";
     const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
     const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    const bulb = (on, color, blink) => (
-      <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none", animation: on && blink ? "lcDolBlink 0.9s step-end infinite" : "none" }} />
+    const bulb = (on, color) => (
+      <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none" }} />
     );
     daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
       <div style={{ display: "flex", justifyContent: "center" }}>
         <style>{`
-          @keyframes lcDolBlink { 50% { opacity: 0.15; box-shadow: none; } }
           .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
           .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
-            background: linear-gradient(135deg, #0000 18.75%, #f3f3f3 0 31.25%, #0000 0),
-              repeating-linear-gradient(45deg, #f3f3f3 -6.25% 6.25%, #141414 0 18.75%);
-            background-size: 60px 60px; background-position: 0 0, 0 0; background-color: #141414;
+            background: #ffffff;
             width: 100%; position: relative;
             box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
-          .lc-dol-card:hover { background-position: -100px 100px, -100px 100px; transform: rotate3d(0.5, 1, 0, 22deg); }
+          .lc-dol-card:hover { transform: rotate3d(0.5, 1, 0, 22deg); }
           .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
           .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
           .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
           .lc-dol-chip { cursor: default; margin-top: 1rem; display: inline-block; font-weight: 900; font-size: 9px;
             text-transform: uppercase; color: ${ACC}; background: #141414; padding: 0.5rem 0.7rem; transform: translate3d(0,0,20px); }
           .lc-dol-datebox { position: absolute; top: 26px; right: 26px; height: 62px; width: 62px; background: #141414;
-            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2;
-            ${dolState === "blink" ? "animation: lcDolBlink 0.9s step-end infinite;" : ""} }
+            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2; }
           .lc-dol-logo { position: absolute; top: 8px; left: 10px; transform: translate3d(0,0,80px); z-index: 2; }
           .lc-dol-light { position: absolute; top: 96px; right: 34px; background: #141414; border: 1px solid #2a2a2a;
             border-radius: 999px; padding: 5px 4px; transform: translate3d(0,0,70px); z-index: 2; }
@@ -5784,9 +5785,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               )}
             </div>
             <div className="lc-dol-light">
-              {bulb(dolState === "red" || dolState === "blink", "#ff3b5c", dolState === "blink")}
-              {bulb(dolState === "amber", "#ffb020", false)}
-              {bulb(dolState === "green", "#8ed500", false)}
+              {bulb(dolState === "red", "#ff3b5c")}
+              {bulb(dolState === "amber", "#ffb020")}
+              {bulb(dolState === "green", "#8ed500")}
             </div>
             <div className="lc-dol-content">
               <span className="lc-dol-title">{d.toLocaleString()} DAYS ON LOT</span>
@@ -5888,7 +5889,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               ) : <div style={{ padding: "20px 0", color: MUT }}>No score</div>}
             </div>
             <div style={{ flex: "2 1 320px", minWidth: 280, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(132px,1fr))", gap: 10 }}>
-              {[["Price vs MSRP", pointItems[0].v, pointItems[0].tone], ["Watch-outs", flagged.length ? flagged.length + " flagged" : "None", flagged.length ? "flag" : "pass"], ["Recalls", pointItems[1].v, pointItems[1].tone], ["Dealer", pointItems[9].v, pointItems[9].tone]].map(([l, v, t], i) => (
+              {[["Price vs MSRP", pointItems[0].v, pointItems[0].tone], ["Watch-outs", flagged.length ? flagged.length + " flagged" : "None", flagged.length ? "flag" : "pass"], ["Recalls", pointItems[1].v, pointItems[1].tone], ["Dealer", pointItems[9].v, pointItems[9].tone], ...(a.daysOnLot && Number(a.daysOnLot.days) > 0 ? [["Days on lot", Number(a.daysOnLot.days).toLocaleString() + " days", Number(a.daysOnLot.days) >= 90 ? "flag" : Number(a.daysOnLot.days) >= 31 ? "muted" : "pass"]] : [])].map(([l, v, t], i) => (
                 <div key={i} style={{ background: "rgba(15,23,42,.5)", border: `1px solid ${t === "flag" ? CY : BORD}`, borderRadius: 12, padding: 14, boxShadow: t === "flag" ? `0 0 0 1px ${CY}, 0 0 16px ${CY}44` : "none" }}>
                   <div style={{ fontSize: 10.5, color: MUT, fontFamily: mono, textTransform: "uppercase", letterSpacing: ".06em" }}>{l}</div>
                   <div style={{ fontSize: 17, fontWeight: 800, fontFamily: mono, color: t === "flag" ? ROSE : t === "pass" ? TEAL : "#fff", marginTop: 6, wordBreak: "break-word" }}>{v}</div>
@@ -5896,9 +5897,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               ))}
             </div>
           </div>
-          {pointItems.filter((p) => p.tone === "flag").length > 0 && (
+          {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-              {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+              {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
             </div>
           )}
           <div style={cardBox({ tone: "muted" })}>

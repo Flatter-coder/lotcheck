@@ -65,7 +65,10 @@ export function buildCounterScript(analysis: any): CounterScript {
   const qp = num(analysis?.quotedPrice), msrp = num(analysis?.msrp);
   // msrp > 0 (not just != null): a missing MSRP reads as 0, and "$X over MSRP ($0)"
   // is nonsense — skip the price move entirely when we don't have a real MSRP.
-  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100) {
+  // Also require an EXACT trim basis: a "starting_at" floor (base trim / adjacent
+  // model year) is NOT this unit's MSRP — an option-loaded car above the base
+  // floor is not "over MSRP", and saying so at the table would be wrong.
+  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100 && analysis?.msrpBasis !== "starting_at") {
     // S14 — one dealer's price isn't "the market"; the market is real deals across dealers.
     moves.push({ topic: "Price", say: `This is about ${money(qp - msrp)} over MSRP (${money(msrp)}). "Market value" is set by real deals across many dealers, not one store's number — I'd need this at MSRP to move forward.` });
   }

@@ -665,7 +665,11 @@ function computeLeverageScore(analysis: any): void {
 
   const msrp = Number(analysis.msrp) || null;
   const quoted = Number(analysis.quotedPrice) || null;
-  if (msrp && quoted) {
+  // Only an EXACT trim MSRP can support an over/under-MSRP claim. A
+  // "starting_at" floor (base trim / adjacent MY) says nothing about THIS
+  // unit's sticker — an option-loaded car above the base floor isn't "over
+  // MSRP", so it must not add leverage or a basis line.
+  if (msrp && quoted && analysis.msrpBasis !== "starting_at") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
@@ -1554,15 +1558,50 @@ function captureSm360Financing(v: any, analysis: any): void {
   if (!Number.isFinite(apr) || apr <= 0 || apr > 30) return;
   const term = Number(t?.term);
   const payment = Number(t?.payment);
+  const totalObl = Number(t?.aprDetails?.totalObligation);
+  // Field names match computeFinancingCheck's contract (paymentAmount/
+  // paymentFrequency/termMonths/totalObligation) so the math check runs.
   analysis.financing = {
     ...(analysis.financing || {}),
     rate: apr,
     termMonths: Number.isFinite(term) && term > 0 ? Math.round(term) : null,
-    payment: Number.isFinite(payment) && payment > 0 ? Math.round(payment * 100) / 100 : null,
-    frequency: "monthly",
+    paymentAmount: Number.isFinite(payment) && payment > 0 ? Math.round(payment * 100) / 100 : null,
+    paymentFrequency: "monthly",
+    totalObligation: Number.isFinite(totalObl) && totalObl > 0 ? Math.round(totalObl * 100) / 100 : null,
     source: "sm360_feed",
   };
   console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"}/mo (dealer feed).`);
+}
+
+// Identity + add-ons from the feed the page scrape misses: VIN (serialNo),
+// odometer, and — the big one — the dealer's own itemized accessories/options
+// (paymentOptions.addedItems.items: "Demo Winter Tire Set $6,919", "Premium
+// Essential Package $5,400"...) plus the dealer rebate as a discount line.
+// These feed the add-ons audit + reconciliation, which otherwise read
+// "NONE LISTED" while thousands in extras sit on the cash worksheet.
+// Fill-only: never overwrites page-extracted values.
+function captureSm360Extras(v: any, analysis: any): void {
+  const vin = String(v?.serialNo || "").trim().toUpperCase();
+  if (!analysis.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) analysis.vin = vin;
+  const odo = Number(v?.odometer);
+  if ((analysis.odometerKm == null || Number(analysis.odometerKm) === 0) && Number.isFinite(odo) && odo > 0) analysis.odometerKm = odo;
+  if (!Array.isArray(analysis.addOns) || analysis.addOns.length === 0) {
+    const items = v?.paymentOptions?.addedItems?.items;
+    const out: any[] = [];
+    if (Array.isArray(items)) {
+      for (const it of items) {
+        const price = Number(it?.retail);
+        const name = String(it?.description || "").trim();
+        if (name && Number.isFinite(price) && price > 0) out.push({ name, price, verdict: null, reason: null });
+      }
+    }
+    const rebate = Number(v?.paymentOptions?.bestIncentives?.dealerRebates);
+    if (Number.isFinite(rebate) && rebate > 0) out.push({ name: "Dealer discount", price: -rebate, verdict: "good", reason: null });
+    if (out.length) {
+      analysis.addOns = out;
+      console.log(`SM360 extras: ${out.length} itemized add-on/discount line(s) from the feed.`);
+    }
+  }
 }
 
 async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void> {
@@ -1592,6 +1631,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
         if (Number(v?.vehicleId) === vehicleId) {
           captureSm360DaysOnLot(v, analysis);
           captureSm360Financing(v, analysis);
+          captureSm360Extras(v, analysis);
           const price = sm360PriceOf(v);
           if (price != null) {
             analysis.quotedPrice = price;
@@ -1618,6 +1658,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
       const price = sm360PriceOf(priced[0])!;
       captureSm360DaysOnLot(priced[0], analysis);
       captureSm360Financing(priced[0], analysis);
+      captureSm360Extras(priced[0], analysis);
       analysis.quotedPrice = price;
       analysis.quotedPriceSource = "sm360_feed_fallback";
       console.log(`SM360 resolver: no vehicleId match for ${vehicleId}; single year+model+trim unit matched, quotedPrice=${price}.`);
@@ -1754,6 +1795,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 
     captureSm360DaysOnLot(match, analysis);
     captureSm360Financing(match, analysis);
+    captureSm360Extras(match, analysis);
     console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
     return analysis;
   } catch (err) {
