@@ -26,6 +26,15 @@ const CAMRY = [
   { trim: "XSE", msrp: 49547, fuel_type: "Hybrid", drivetrain: "AWD", attrs: { digitalKey2: true } },
 ];
 
+// 2026 Rogue (gas) — official Nissan Canada newsroom ladder (all AWD, no FWD).
+const ROGUE = [
+  { trim: "S",          msrp: 34598, fuel_type: "Gas", drivetrain: "AWD" },
+  { trim: "SV",         msrp: 38498, fuel_type: "Gas", drivetrain: "AWD" },
+  { trim: "Dark Armor", msrp: 40798, fuel_type: "Gas", drivetrain: "AWD" },
+  { trim: "Rock Creek", msrp: 41798, fuel_type: "Gas", drivetrain: "AWD" },
+  { trim: "Platinum",   msrp: 46298, fuel_type: "Gas", drivetrain: "AWD" },
+];
+
 // Single-row (base) models — must still resolve to their one figure.
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
@@ -61,6 +70,15 @@ const CASES = [
   // it must NOT fall to the $38k SE tier. Accept either XLE or XSE.
   ["Camry, only 'Digital Key 2.0' feature + AWD -> XLE/XSE tier (~$49k, not $38k)", CAMRY,
     { drivetrain: "AWD", fuelType: "Hybrid", features: ["digitalKey2"], quotedPrice: 49500 }, [49442, 49547]],
+
+  // ROGUE — the Fish Creek case: per-trim resolution incl. Rock Creek.
+  ["Rogue Rock Creek (trim name)", ROGUE,
+    { trim: "Rock Creek", drivetrain: "AWD", fuelType: "Gas" }, 41798],
+  ["Rogue Rock Creek (trim 'Rock Creek Intelligent AWD')", ROGUE,
+    { trim: "Rock Creek Intelligent AWD", fuelType: "Gas" }, 41798],
+  ["Rogue Platinum", ROGUE, { trim: "Platinum AWD", fuelType: "Gas" }, 46298],
+  ["Rogue, no trim signal -> honest starting-at base", ROGUE,
+    { fuelType: "Gas" }, 34598],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
