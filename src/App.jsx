@@ -7599,6 +7599,7 @@ function QuoteCheckPage(){
               }
             })();
             if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
+            if(analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0) tiles.push({label:"Days on lot",value:Number(analysis.daysOnLot.days).toLocaleString(),sub:analysis.daysOnLot.since?`first seen ${analysis.daysOnLot.since}`:"dealer inventory data",flag:Number(analysis.daysOnLot.days)>=90});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
@@ -7651,14 +7652,35 @@ function QuoteCheckPage(){
               <div style={cardStyle}>
                 <div style={{fontSize:20,fontWeight:1000,color:C.ink,letterSpacing:-.3,lineHeight:1.15}}>{vehName}</div>
                 {metaBits.length>0&&<div style={{fontSize:12.5,color:C.inkSoft,marginTop:4}}>{metaBits.join(" · ")}</div>}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:16}}>
-                  {tiles.map((t,i)=>(
-                    <div key={i} style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 13px"}}>
-                      <div style={{fontSize:10.5,textTransform:"uppercase",letterSpacing:.7,color:C.inkFaint,fontWeight:800}}>{t.label}</div>
-                      <div style={{fontSize:19,fontWeight:1000,marginTop:3,letterSpacing:-.3,color:t.flag?C.butterInk:C.ink}}>{t.value}{t.valueSuffix&&<span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>{t.valueSuffix}</span>}</div>
-                      {t.sub&&<div style={{fontSize:11,color:C.inkSoft,marginTop:2}}>{t.sub}</div>}
-                    </div>
-                  ))}
+                {/* Uiverse pastel stat tiles (kushalyadavweb): the four pastel
+                    fills + matching label colors cycle across however many
+                    tiles exist; hover scales the tile up (the design's
+                    signature), overflow stays visible so it pops over
+                    neighbours. Values render in dark ink for contrast on the
+                    pastel fills (data must stay readable). */}
+                <style>{`
+                  .lcq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 16px; overflow: visible; }
+                  .lcq-tile { border-radius: 10px; padding: 13px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; transition: all 350ms ease-in-out; position: relative; }
+                  .lcq-tile:hover { transform: scale(1.35); z-index: 6; box-shadow: 0 14px 30px -10px rgba(0,0,0,.35); }
+                  @media (prefers-reduced-motion: reduce) { .lcq-tile:hover { transform: none; } }
+                  .lcq-tile .lcq-ico { font-size: 26px; line-height: 1; margin-bottom: 7px; }
+                  .lcq-tile .lcq-qty { font-size: 25px; font-weight: 600; color: #1c1633; letter-spacing: -.4px; line-height: 1.05; }
+                  .lcq-tile .lcq-txt { font-size: 12px; font-weight: 600; margin-top: 3px; }
+                  .lcq-tile .lcq-sub { font-size: 10px; font-weight: 600; color: rgba(28,22,51,.55); margin-top: 3px; line-height: 1.35; }
+                `}</style>
+                <div className="lcq-tiles">
+                  {tiles.map((t,i)=>{
+                    const BG=["#c7c7ff","#ffd8be","#a9ecbf","#f3bbe1"], TX=["rgba(149,149,255,1)","rgba(252,161,71,1)","rgba(66,193,110,1)","rgba(220,91,183,1)"];
+                    const ico=/price|msrp/i.test(t.label)?"💵":/weekly|monthly|payment/i.test(t.label)?"🗓️":/rebate/i.test(t.label)?"⚡":/days on lot/i.test(t.label)?"⏱️":/watch/i.test(t.label)?(t.flag?"⚠️":"✅"):"📋";
+                    return (
+                      <div key={i} className="lcq-tile" style={{background:BG[i%4]}}>
+                        <div className="lcq-ico">{ico}</div>
+                        <div className="lcq-qty">{t.value}{t.valueSuffix&&<span style={{fontSize:13,fontWeight:600,color:"rgba(28,22,51,.6)"}}>{t.valueSuffix}</span>}</div>
+                        <div className="lcq-txt" style={{color:TX[i%4]}}>{t.label}</div>
+                        {t.sub&&<div className="lcq-sub">{t.sub}</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
