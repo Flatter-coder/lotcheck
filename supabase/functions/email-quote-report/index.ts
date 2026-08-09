@@ -363,6 +363,66 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   return P.slice(0, 10);
 }
 
+// "What this means" — the plain-language translation printed under each audit
+// point, mirroring the on-screen explanation layer. DETERMINISTIC: built from
+// the same verified fields the point shows (never free-styled), compressed for
+// print. Returns null when a point needs no gloss.
+function pointExplain(t: string, a: any): string | null {
+  const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const exact = ms > 0 && a.msrpBasis !== "starting_at";
+  switch (t) {
+    case "Price vs MSRP":
+      if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
+      if (qp && ms && exact) return delta > 0
+        ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(delta)} more than sticker - anything over sticker is pure negotiation room.`
+        : delta === 0
+          ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
+          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`;
+      if (ms) return `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`;
+      return "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+    case "Transport Canada recalls":
+      if (a.recalls?.checked && a.recalls.count > 0) return `A recall is a safety defect the manufacturer must fix free of charge. Have the dealer complete the repair${a.recalls.count > 1 ? "s" : ""} before delivery - it costs you nothing.`;
+      if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
+      return "This exact model couldn't be confirmed in the registry - not an all-clear. Check by VIN at Transport Canada (free) before signing.";
+    case "Add-ons & fee audit":
+      return (a.addOns || []).length
+        ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
+        : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";
+    case "Financing APR": case "Financing APR (this dealer)":
+      return a.financeRates?.dealer?.apr != null
+        ? "APR is the yearly interest rate on the loan. Compare it against your own bank or credit union before accepting - dealer rates often carry hidden markup."
+        : "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
+    case "Financing math":
+      if (a.financingCheck?.checked) return a.financingCheck.consistent
+        ? "We recomputed the advertised payment from the price, rate and term - the numbers line up."
+        : "We recomputed the payment from the price, rate and term - and they don't line up. Ask them to show the calculation line by line.";
+      return "Not enough financing detail (payment, term, total) was shown to re-check the math. Ask for all three in writing.";
+    case "Odometer":
+      if (a.odometerCheck?.checked) return a.vehicleCondition === "new"
+        ? "A truly new car should read near zero km - thousands on the clock means it's been driven (demo/loaner) and should be priced below new."
+        : "Compare the reading against the car's age - roughly 15,000-20,000 km per year is typical.";
+      return "No odometer reading was shown. Read it off the dash yourself before signing - never off the paperwork alone.";
+    case "VIN check":
+      return a.vinCheck?.present
+        ? "The VIN is the car's unique fingerprint. Before signing, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
+        : "The VIN (the car's unique fingerprint) isn't shown. Ask for it - it unlocks recalls, history, and proof the paperwork matches the car.";
+    case "EV / PHEV rebate":
+      if (a.evapRebate?.eligible) return "Government money you may qualify for - the dealer doesn't control it. Make sure it's applied on top of your negotiated price, not instead of a discount.";
+      if (a.fuelType === "BEV" || a.fuelType === "PHEV") return "This electric/plug-in doesn't qualify (price cap or model list). Don't let anyone imply a government discount that isn't there.";
+      return "Rebates apply only to electric and plug-in vehicles - none is in play on a gas vehicle.";
+    case "Included warranty":
+      return a.standardWarranty?.coverage
+        ? "Every new vehicle already includes the factory warranty at no charge. When the finance office pitches an extended warranty, remember this coverage is already yours for free."
+        : "Factory warranty terms couldn't be confirmed from this listing. Ask exactly what's covered and for how long, in writing, before considering paid coverage.";
+    case "Dealer reputation":
+      return a.dealerSentiment?.rating
+        ? "The dealer's public Google rating from real customers - how they treat people after the handshake."
+        : "No public reviews were found - not a red flag by itself, but you have no track record to lean on.";
+    default: return null;
+  }
+}
+
 // Editorial report — ink-on-cream, typeset masthead (no logo), serif display
 // headline, monospace figures, and a vector semicircle leverage gauge. Prints
 // clean (no dark fill). The status line + MSRP label flip on whether the
@@ -547,13 +607,34 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
     rule();
   }
 
-  // ---- 10-POINT AUDIT (always exactly 10) ----
+  // ---- 10-POINT AUDIT (always exactly 10, each with its plain-language gloss) ----
   kicker("10-POINT AUDIT");
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
   for (const p of tenPoints(a)) {
     need(19); T(p.t, { size: 10.5, font: serif, color: p.tone === "muted" ? SOFT : INK }); right(p.v, { size: 9.5, font: monoB, color: toneColor[p.tone] || INK }); y -= 16.5;
+    // "What this means" — the printed twin of the on-screen explanation box,
+    // indented under its point in small italic so the audit stays scannable.
+    const ex = pointExplain(p.t, a);
+    if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, x: M + 10, maxW: W - 10 }); advance(4); }
   }
   rule();
+
+  // ---- DAYS ON LOT — the motivated-seller clock (dealer's own inventory data) ----
+  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
+    const d = Math.round(Number(a.daysOnLot.days));
+    need(70);
+    kicker("DAYS ON LOT");
+    T(`${d.toLocaleString("en-CA")} days on the lot`, { size: 15, font: serifB, color: d >= 90 ? CORAL : INK }); y -= 20;
+    para(`First seen ${a.daysOnLot.since || "date not published"} - source: ${a.daysOnLot.sourceLabel || "dealer inventory data"}.`, { size: 9, color: SOFT, lead: 4 });
+    advance(2);
+    para(d >= 90
+      ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. Dealers pay interest on unsold stock every week - at this age you're doing them a favour by buying it. Negotiate like it."
+      : d >= 31
+        ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. A month-plus of sitting is real carrying cost - reasonable grounds to ask for a better price."
+        : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. This one is fresh, so sitting-time won't move the price much yet.",
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
 
   // ---- RECALL DETAIL ----
   if (a.recalls?.checked && a.recalls.count > 0 && (a.recalls.items || []).length) {
