@@ -5717,7 +5717,64 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : <Simple big="Not found" c={MUT2} note="No public Google reviews were located for this dealer." />;
     P.push({ title: "Dealer reputation", tone, v, body }); }
 
-  const pointItems = P.slice(0, 10).map((p, i) => ({ key: "p" + i, title: p.title, tone: p.tone, v: p.v, glow: p.tone === "flag", point: true, body: p.body }));
+  // ── "What this means" — every card carries a plain-language translation of
+  // its data, written for a first-time buyer (no jargon). Deterministic: built
+  // from the same verified fields the card shows, never free-styled, so the
+  // explanation can't drift from the evidence (claims-must-stay-backed).
+  const explainFor = {
+    "Price vs MSRP": !qp
+      ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
+      : deltaOk
+        ? (delta > 0
+          ? `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(delta)} MORE than that sticker. Anything over sticker is pure negotiation room.`
+          : delta === 0
+            ? "MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking exactly the sticker — not a markup, but not a deal either."
+            : `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(-delta)} BELOW that sticker — a real discount, worth confirming nothing was added back in fees.`)
+        : ms
+          ? `The manufacturer's price for this model STARTS at ${money(ms)} for the base version. This exact car has extra options on top, so we don't call it "over" or "under" — use the base number as your reference point and make the dealer justify everything above it.`
+          : "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.",
+    "Transport Canada recalls": a.recalls?.checked && a.recalls.count > 0
+      ? `A recall means the manufacturer found a safety defect and must fix it FREE of charge. This vehicle's model has ${a.recalls.count} unfixed recall${a.recalls.count > 1 ? "s" : ""} on record — tell the dealer to complete the repair before you take delivery. It costs you nothing.`
+      : a.recalls?.checked && a.recalls.confirmed !== false
+        ? "A recall means the manufacturer found a safety defect they must fix for free. Canada's government registry shows none outstanding for this model — a clean bill on this point."
+        : "We couldn't confirm this exact model in the government recall registry, so don't treat this as an all-clear — check by VIN at Transport Canada (free) before signing.",
+    "Add-ons & fee audit": (a.addOns || []).length
+      ? "These are things the DEALER added on top of the car's price — packages, accessories, protection products. They're where dealers make extra margin, and you can say no to most of them. Every line here is one you're allowed to question."
+      : "The listing doesn't itemize any dealer extras. That doesn't mean there are none — ask for the full out-the-door breakdown in writing before you agree to anything.",
+    "Financing APR": a.financeRates?.dealer?.apr != null
+      ? `APR is the yearly interest rate on the loan. This dealer advertises ${a.financeRates.dealer.apr}% — compare it against your own bank or credit union before accepting, because dealer rates often carry hidden markup.`
+      : "The listing doesn't advertise a financing rate. Get the APR in writing and compare it with your own bank before you sign anything in the finance office.",
+    "Financing math": a.financingCheck?.checked
+      ? (a.financingCheck.consistent
+        ? "We recomputed the advertised payment from the price, rate and term — the numbers line up. No hidden amount is baked into the payment."
+        : "We recomputed the advertised payment from the price, rate and term — and they DON'T line up. Something extra is baked into the payment. Ask them to show the calculation line by line.")
+      : "The listing doesn't show enough financing detail (payment, term and total) for us to re-check the math. Ask for all three in writing — then the payment can be verified.",
+    "Odometer": a.odometerCheck?.checked
+      ? `This is how far the car has actually been driven: ${Number(a.odometerCheck.km).toLocaleString()} km. ${a.vehicleCondition === "new" ? "A truly new car should be near zero — anything in the thousands means it's been driven (demo/loaner) and should be priced below new." : "Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."}`
+      : "No odometer reading was shown. Always read it off the dash yourself before signing — never off the paperwork alone.",
+    "VIN check": a.vinCheck?.present
+      ? "The VIN is the car's unique fingerprint. This one has a valid format — before you sign, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
+      : "The listing doesn't show the VIN (the car's unique fingerprint). Ask for it — it lets you verify recalls, history and that the paperwork matches the actual car.",
+    "EV / PHEV rebate": a.evapRebate?.eligible
+      ? `Government money you may qualify for on this vehicle: ${money(a.evapRebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
+      : (a.fuelType === "BEV" || a.fuelType === "PHEV")
+        ? "This electric/plug-in vehicle doesn't qualify for the federal rebate (usually the price cap or the model list). Don't let anyone imply a government discount that isn't there."
+        : "Rebates only apply to electric and plug-in vehicles — this one runs on gas, so there's no government money in play.",
+    "Included warranty": a.standardWarranty?.coverage
+      ? "Every new vehicle already includes the manufacturer's factory warranty at no charge — shown here. When the finance office pitches an 'extended warranty,' remember this coverage is already yours for free."
+      : "We couldn't confirm the factory warranty terms from this listing. Every new vehicle includes one — ask exactly what's covered and for how long, in writing, before considering any paid coverage.",
+    "Dealer reputation": a.dealerSentiment?.rating
+      ? `This is the dealer's public Google rating from real customers — ${Number(a.dealerSentiment.rating).toFixed(1)} stars over ${Number(a.dealerSentiment.reviewCount || 0).toLocaleString()} reviews. It tells you how they treat people after the handshake.`
+      : "We couldn't find public reviews for this dealer. That's not a red flag by itself — but walk in knowing you have no track record to lean on.",
+  };
+  const ExplainBox = ({ txt }) => txt ? (
+    <div style={{ marginTop: 16, background: "rgba(34,211,238,.06)", border: `1px solid rgba(34,211,238,.25)`, borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: CY, fontWeight: 800, marginBottom: 6 }}>What this means</div>
+      <div style={{ fontSize: 13, color: "#dbeafe", lineHeight: 1.65 }}>{txt}</div>
+    </div>
+  ) : null;
+
+  const pointItems = P.slice(0, 10).map((p, i) => ({ key: "p" + i, title: p.title, tone: p.tone, v: p.v, glow: p.tone === "flag", point: true, body: (<>{p.body}<ExplainBox txt={explainFor[p.title]} /></>) }));
 
   const evidenceItem = { key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -5753,7 +5810,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none" }} />
     );
     daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
-      <div style={{ display: "flex", justifyContent: "center" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <style>{`
           .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
           .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
@@ -5802,6 +5859,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
             </div>
           </div>
+        </div>
+        <div style={{ width: "min(320px, 100%)" }}>
+          <ExplainBox txt={`This is how long this exact car has been sitting unsold — ${d.toLocaleString()} days, counted by the dealer's own inventory system (not our guess). Dealers pay interest on unsold cars every single week, so the longer one sits, the more motivated they are to move it. ${d >= 90 ? "At this age, you're doing them a favour by buying it — negotiate like it." : d >= 31 ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}`} />
         </div>
       </div>
     )};
