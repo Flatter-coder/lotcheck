@@ -5,6 +5,11 @@ name: Catalog rates (daily)
 # track monthly promo periods that can shift mid-month, so refresh them daily.
 # MSRP-only makes (GM, Ford, Kia, Nissan, Volvo, Porsche, Mercedes) are omitted
 # here — they produce no rate rows.
+#
+# Each make runs as its OWN matrix job with fail-fast:false, so one OEM changing
+# or removing an endpoint (e.g. Genesis 404) can never abort the others — every
+# reachable make still refreshes. A broken make shows as a single red leg (which
+# needs its scraper fixed), not a failed run that skips everyone after it.
 on:
   workflow_dispatch:
   schedule:
@@ -12,7 +17,29 @@ on:
 jobs:
   rates:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Toyota,        script: scrape-toyota.mjs }
+          - { name: Lexus,         script: scrape-lexus.mjs }
+          - { name: Stellantis,    script: scrape-stellantis.mjs }
+          - { name: Genesis,       script: scrape-genesis.mjs }
+          - { name: Hyundai,       script: scrape-hyundai.mjs }
+          - { name: Mazda,         script: scrape-mazda.mjs }
+          - { name: Honda,         script: scrape-honda.mjs }
+          - { name: Acura,         script: scrape-acura.mjs }
+          - { name: MINI,          script: scrape-mini.mjs }
+          - { name: Subaru,        script: scrape-subaru.mjs }
+          - { name: Volkswagen,    script: scrape-vw.mjs }
+          - { name: BMW,           script: scrape-bmw.mjs }
+          - { name: Mercedes-Benz, script: scrape-mercedes-rates.mjs }
+          - { name: Ford,          script: scrape-ford-rates.mjs }
+          - { name: Nissan,        script: scrape-nissan-rates.mjs }
+          - { name: Infiniti,      script: scrape-infiniti-rates.mjs }
+          - { name: GM,            script: scrape-gm-rates.mjs }
+    name: ${{ matrix.name }} rates
     env:
       CATALOG_RATES_ONLY: "1"
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -22,40 +49,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Toyota rates
-        run: node scripts/scrape-toyota.mjs
-      - name: Lexus rates
-        run: node scripts/scrape-lexus.mjs
-      - name: Stellantis rates (Jeep/Ram/Dodge/Chrysler/Fiat/Alfa)
-        run: node scripts/scrape-stellantis.mjs
-      - name: Genesis rates
-        run: node scripts/scrape-genesis.mjs
-      - name: Hyundai rates
-        run: node scripts/scrape-hyundai.mjs
-      - name: Mazda rates
-        run: node scripts/scrape-mazda.mjs
-      - name: Honda rates
-        run: node scripts/scrape-honda.mjs
-      - name: Acura rates
-        run: node scripts/scrape-acura.mjs
-      - name: MINI rates
-        run: node scripts/scrape-mini.mjs
-      - name: Subaru rates
-        run: node scripts/scrape-subaru.mjs
-      - name: Volkswagen rates
-        run: node scripts/scrape-vw.mjs
-      - name: BMW rates
-        run: node scripts/scrape-bmw.mjs
-      - name: Mercedes-Benz rates
-        run: node scripts/scrape-mercedes-rates.mjs
-      - name: Ford rates
-        run: node scripts/scrape-ford-rates.mjs
-      - name: Nissan rates
-        run: node scripts/scrape-nissan-rates.mjs
-      - name: Infiniti rates
-        run: node scripts/scrape-infiniti-rates.mjs
-      - name: GM rates (Chevrolet/GMC/Buick)
-        run: node scripts/scrape-gm-rates.mjs
-      - name: Summary
-        if: success()
-        run: echo "✅ Daily rate refresh complete — $(date)"
+      - name: ${{ matrix.name }} rates
+        run: node scripts/${{ matrix.script }}

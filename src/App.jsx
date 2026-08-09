@@ -1,14 +1,46 @@
-import { useState, useEffect, useRef, useContext, createContext } from "react";
+import { useState, useEffect, useRef, useContext, createContext, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
 import heic2any from "heic2any";
+import DealOrrery from "./DealOrrery.jsx";
+import PlanetAlerts from "./PlanetAlerts.jsx";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
+// Public anon key. Named once so the credit-aware fetches below can send it as
+// the `apikey` header (and as the Bearer fallback for anonymous requests) without
+// re-pasting the literal.
+const SB_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
 const supabase = createClient(
   "https://debigtyjhjamipooajhk.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A"
+  SB_ANON_KEY
+  // No custom auth options -> supabase-js defaults apply: persistSession:true
+  // and detectSessionInUrl:true, so a magic-link return (…/quote-check#access_token=…)
+  // establishes the session automatically on load and survives reloads.
 );
+
+// ── User auth (magic link) ────────────────────────────────────────────────────
+// Single source of truth for the current Supabase auth user in the *public*
+// app. Reads the existing session once on mount, then keeps it live via one
+// onAuthStateChange subscription (cleaned up on unmount). The admin dashboard
+// (AdminPanel) manages its own session on the /admin route; that component and
+// the public pages are never mounted at the same time (App routes to exactly
+// one page by pathname), so these subscriptions never coexist or conflict.
+// The same magic-link OTP and password (admin) flows share this one client.
+function useSupabaseUser(){
+  const [user,setUser]=useState(null);
+  useEffect(()=>{
+    let active=true;
+    supabase.auth.getSession().then(({data})=>{
+      if(active) setUser(data.session?.user||null);
+    });
+    const {data:sub}=supabase.auth.onAuthStateChange((_event,session)=>{
+      setUser(session?.user||null);
+    });
+    return()=>{ active=false; sub.subscription.unsubscribe(); };
+  },[]);
+  return user;
+}
 
 // ── Global responsive styles injected once ────────────────────────────────────
 const GLOBAL_CSS = `
@@ -527,78 +559,19 @@ function formatMsLeft(ms) {
   return `${h}h ${m}m`;
 }
 
-// ── Quote Check access -- real, persisted, honestly limited ────────────────
-// Same stopgap philosophy as the trial system above: no real accounts or
-// billing exist yet, so this is tracked in localStorage per browser, not
-// per person -- clearing browser data or switching devices resets it. That's
-// a real limitation, not abuse-proofing, but it's the same honest trade-off
-// already accepted for the Pro trial, and it beats pretending to gate
-// something with no actual enforcement behind it.
-//
-// Three ways to have access to a quote check, checked in this order:
-//   1. The free first check -- once per browser, ever.
-//   2. An active $9.99 "subscription" window -- 25 quotes within 30 days of
-//      purchase. Framed as a 30-day window, not auto-renewing, since there's
-//      no real recurring charge behind it -- pretending it renews forever
-//      without ever billing again would be actively misleading.
-//   3. Purchased bundle credits (pay-per-use) -- consumed one at a time,
-//      never expire.
-const QC_ACCESS_KEY = "lc_qc_access";
-const QC_SUB_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const QC_SUB_QUOTA = 25;
-
-function loadQcAccess() {
-  try {
-    const raw = window.localStorage.getItem(QC_ACCESS_KEY);
-    if (!raw) return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
-    const parsed = JSON.parse(raw);
-    return {
-      freeUsed: !!parsed.freeUsed,
-      subStart: parsed.subStart || null,
-      subUsed: Number(parsed.subUsed) || 0,
-      bundleCredits: Math.max(0, Number(parsed.bundleCredits) || 0),
-    };
-  } catch (e) {
-    return { freeUsed: false, subStart: null, subUsed: 0, bundleCredits: 0 };
-  }
+// ── Quote Check credits ─────────────────────────────────────────────────
+// The old client-side subscription/bundle stopgap is gone. Credits are now
+// server-authoritative (Phase 3 edge functions + fn_my_credits RPC): the
+// frontend only DISPLAYS balances the server reports and never grants or
+// deducts locally. The one thing still tracked client-side is the single
+// anonymous free check, gated by a per-device localStorage flag.
+const LC_FREE_USED_KEY = "lc_free_used";
+function isFreeCheckUsed() {
+  try { return window.localStorage.getItem(LC_FREE_USED_KEY) === "1"; }
+  catch { return false; } // localStorage unavailable (private browsing etc.)
 }
-function saveQcAccess(a) {
-  try { window.localStorage.setItem(QC_ACCESS_KEY, JSON.stringify(a)); } catch (e) {}
-}
-// Returns whether a quote check is allowed right now, and why -- used both
-// to gate a new analysis and to decide what the paywall should say.
-function getQuoteCheckAccess() {
-  const a = loadQcAccess();
-  if (!a.freeUsed) return { allowed: true, reason: "free" };
-  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
-    return { allowed: true, reason: "subscription", remaining: QC_SUB_QUOTA - a.subUsed };
-  }
-  if (a.bundleCredits > 0) return { allowed: true, reason: "bundle", remaining: a.bundleCredits };
-  return { allowed: false, reason: "none" };
-}
-// Called once a quote check actually succeeds -- consumes whichever credit
-// source was used, in the same priority order as getQuoteCheckAccess above.
-function consumeQuoteCredit() {
-  const a = loadQcAccess();
-  if (!a.freeUsed) { a.freeUsed = true; saveQcAccess(a); return; }
-  if (a.subStart && Date.now() - a.subStart < QC_SUB_WINDOW_MS && a.subUsed < QC_SUB_QUOTA) {
-    a.subUsed += 1; saveQcAccess(a); return;
-  }
-  if (a.bundleCredits > 0) { a.bundleCredits -= 1; saveQcAccess(a); return; }
-}
-// Grants credit after a simulated purchase. No real payment is processed --
-// see QuotePaywallModal below for the same honest "processing..." stopgap
-// already used by UnlockModal elsewhere in this file.
-function grantBundleCredits(n) {
-  const a = loadQcAccess();
-  a.bundleCredits += n;
-  saveQcAccess(a);
-}
-function activateQcSubscription() {
-  const a = loadQcAccess();
-  a.subStart = Date.now();
-  a.subUsed = 0;
-  saveQcAccess(a);
+function markFreeCheckUsed() {
+  try { window.localStorage.setItem(LC_FREE_USED_KEY, "1"); } catch {}
 }
 
 // ── Anonymous visitor ID — persisted so repeat visits from the same browser
@@ -747,10 +720,12 @@ function getRebate(province,fuel,listing){
   if(!listing||fuel==="Gas"||fuel==="Hybrid"||fuel==="Diesel"){
     return{federal:0,provincial:0,total:0,prov_name:null,note:"",eligible:false,ineligibleReason:"Gas and standard hybrid vehicles are not eligible for EVAP."};
   }
-  // A vehicle is used if: km > 10,000 OR it's more than 1 model year old
-  // This catches listings where km data is missing/zero but the car is clearly used
+  // A vehicle is used if the caller says so explicitly (listing.condition),
+  // OR km > 10,000, OR it's more than 1 model year old. The explicit flag
+  // matters for nearly-new used EVs (a demo/lease-return current-year car can
+  // have very low km yet still be "used" for EVAP, which is new-only).
   const currentYear = new Date().getFullYear();
-  const isUsed = listing.km > 10000 || (listing.year < currentYear - 1);
+  const isUsed = listing.condition==="used" || listing.km > 10000 || (listing.year < currentYear - 1);
   const overPriceCap = listing.price > 50000;
   if(isUsed){
     const federal=fuel==="BEV"?r.federal_bev:fuel==="PHEV"?r.federal_phev:0;
@@ -2365,9 +2340,9 @@ function LiveTicker({listings,onSelect}){
 // emoji used elsewhere as a decorative "success" indicator (trial badges,
 // empty states) is untouched, since that's a different meaning, not branding.
 function LogoMark({ size = 32 }) {
-  // Isometric gate+car mark -- a car driving through the purple scan gate,
-  // matching the live homepage "how it works" scene. Pulled directly from the
-  // homepage. viewBox is 145x130 (not perfectly square);
+  // Real animated gate+car mark, pulled directly from the live homepage --
+  // this replaces the old coral cube, which was never updated when the
+  // homepage logo changed. viewBox is 145x130 (not perfectly square);
   // width/height are both set to `size` for a clean square footprint at
   // every call site, matching what the coral cube it replaces did.
   return (
@@ -2385,6 +2360,50 @@ function LogoMark({ size = 32 }) {
         <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
         <g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(59,130,246,.4)"/></g>
         <g className="lc-gate-car">
+          <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
+          <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
+          <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
+          <polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/>
+          <polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/>
+          <polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/>
+          <polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/>
+          <polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/>
+          <polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/>
+          <polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/>
+          <polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/>
+          <polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// Self-contained animated brand mark — the same gate+car as LogoMark, but it
+// carries its OWN keyframes so the car drives through the gate on any page,
+// including the cosmic pages (MSRP/Verify/Trust) that don't load GLOBAL_CSS.
+function SiteLogo({ size = 30 }) {
+  return (
+    <div style={{ position:"relative", width:size, height:size, flexShrink:0 }}>
+      <style dangerouslySetInnerHTML={{__html:`
+        .slc-car{animation:slcDrive 4s linear infinite}
+        .slc-win{animation:slcFlash 4s linear infinite}
+        @keyframes slcDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
+        @keyframes slcFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
+        @media(prefers-reduced-motion:reduce){.slc-car,.slc-win{animation:none!important}}
+      `}}/>
+      <svg width={size} height={size} viewBox="-95 -45 145 130" aria-hidden="true">
+        <polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/>
+        <polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/>
+        <polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/>
+        <polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/>
+        <polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/>
+        <polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/>
+        <polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/>
+        <polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/>
+        <polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/>
+        <polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/>
+        <g className="slc-win"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(58,224,255,.5)"/></g>
+        <g className="slc-car">
           <polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/>
           <polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/>
           <polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/>
@@ -2828,10 +2847,9 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   );
 }
 
-// Real Quote Check pricing tiers -- must stay in sync with QuotePaywallModal's
-// actual prices ($2.99 / $9.99 / $14.99 / $9.99 per month) and with
-// computeCost()'s per-quote cost figure in the edge functions. If either
-// changes, update both places.
+// Quote Check pricing tiers -- kept for cost/revenue modeling in this tab
+// only. These figures are hypothetical -- "what this would earn if pricing
+// were live" -- not real revenue right now.
 const QC_PRICING_TIERS = [
   {key:"single", name:"1 check", price:2.99, quotesPerUnit:1},
   {key:"five", name:"5 checks", price:9.99, quotesPerUnit:5},
@@ -2946,6 +2964,282 @@ function ProfitTrackerTab(){
         <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.6}}>
           Profit basis: ${QC_COST_PER_QUOTE} USD cost per quote check (current intro API pricing) × checks actually delivered per tier -- e.g. a "5 checks" bundle costs 5× that per unit sold. CAD figures use the same fixed {USD_TO_CAD} snapshot rate already used above in Cost over time, not a live rate.
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Unit Economics tab ────────────────────────────────────────────────────
+// Free / shared / paid checks and their modeled API cost, driven by an
+// adjustable cost-per-check, plus a live-editable free-check daily cap.
+// ALL numbers here come from the admin-gated fn_admin_economics RPC
+// (aggregate-only, no PII) except the "logged" API spend, which reuses the
+// same real api_usage_log the Revenue tab already reads. Real vs estimated is
+// labelled explicitly — revenue is ESTIMATED (Stripe isn't wired yet).
+const ECON_WINDOWS = [["today","Today"],["7d","Last 7 days"],["30d","Last 30 days"]];
+// Pack prices are treated as USD, matching the existing Profit tab convention
+// (tier.price * count = USD, then × USD_TO_CAD for the CAD estimate).
+const PRICE_BY_CREDITS = {1:2.99, 5:9.99, 10:14.99, 25:9.99};
+
+function estRevenueUsd(purchasesByDelta){
+  if(!purchasesByDelta) return 0;
+  let sum=0;
+  for(const [delta,n] of Object.entries(purchasesByDelta)){
+    const d=Number(delta);
+    // Known tier price if the credit grant matches a pack; otherwise fall back
+    // to a per-credit proxy ($9.99 / 5 credits) so an unexpected grant size
+    // still contributes a sensible (clearly estimated) figure rather than $0.
+    const price = PRICE_BY_CREDITS[d] ?? d*(9.99/5);
+    sum += price*Number(n||0);
+  }
+  return sum;
+}
+
+function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoading, onSetCap, onRefresh}){
+  const {C}=useAdminTheme();
+
+  const [costPerCheck,setCostPerCheck]=useState(()=>{
+    try{ const v=Number(localStorage.getItem("lc_admin_cost_per_check")); return v>0?v:0.10; }catch{ return 0.10; }
+  });
+  function updateCpc(v){
+    const n=Math.max(0,Number(v)||0);
+    setCostPerCheck(n);
+    try{ localStorage.setItem("lc_admin_cost_per_check",String(n)); }catch{}
+  }
+
+  const status=econ?.free_check_status||null;
+  const [capInput,setCapInput]=useState("");
+  const [savingCap,setSavingCap]=useState(false);
+  useEffect(()=>{ if(status&&status.limit_per_day!=null) setCapInput(String(status.limit_per_day)); },[status?.limit_per_day]);
+
+  async function saveCap(){
+    setSavingCap(true);
+    await onSetCap(capInput);
+    setSavingCap(false);
+  }
+
+  // Real logged API spend (USD), windowed the same calendar-day way the RPC
+  // windows the counts, so "logged vs modeled" is an apples-to-apples compare.
+  const now=Date.now();
+  const startOfToday=new Date(); startOfToday.setHours(0,0,0,0);
+  const loggedCost=(win)=>{
+    let since;
+    if(win==="today") since=startOfToday.getTime();
+    else if(win==="7d") since=startOfToday.getTime()-6*86400000;
+    else since=startOfToday.getTime()-29*86400000;
+    return (apiUsage||[]).filter(u=>new Date(u.created_at).getTime()>=since)
+      .reduce((s,u)=>s+(Number(u.cost_usd)||0),0);
+  };
+
+  const fmtUsd=(n)=>`$${(Number(n)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const cad=(usd)=>`$${((Number(usd)||0)*USD_TO_CAD).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})} CAD`;
+
+  // Per-window derived economics.
+  function derive(win){
+    const w=econ?.windows?.[win]||{};
+    const free=Number(w.free_checks||0);
+    const shared=Number(w.gift_received_n||0);   // shared checks actually redeemed
+    const paid=Number(w.quote_check_n||0);       // signed-in credit spends
+    const totalChecks=free+shared+paid;
+    const freeCost=free*costPerCheck;
+    const sharedCost=shared*costPerCheck;
+    const paidCost=paid*costPerCheck;
+    const modeledSpend=totalChecks*costPerCheck;
+    const revenue=estRevenueUsd(w.purchases_by_delta);
+    const grossMargin=revenue-paidCost;              // paid checks vs their own cost
+    const netAfterSubsidy=revenue-modeledSpend;      // revenue minus ALL check cost (incl. free/shared subsidy)
+    return {
+      free, shared, paid, totalChecks,
+      freeCost, sharedCost, paidCost, modeledSpend,
+      revenue, grossMargin, netAfterSubsidy,
+      giftSent:Number(w.gift_sent_n||0),
+      purchaseN:Number(w.purchase_n||0),
+      logged:loggedCost(win),
+    };
+  }
+  const cols=ECON_WINDOWS.map(([win,label])=>({win,label,d:derive(win)}));
+
+  const cardStyle={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  const th={textAlign:"right",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 12px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4,whiteSpace:"nowrap"};
+  const td={textAlign:"right",padding:"12px",borderBottom:`1px solid ${C.line}`,fontFamily:"monospace",fontSize:13};
+  const RealTag=()=><span style={{fontSize:9,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>REAL</span>;
+  const EstTag=()=><span style={{fontSize:9,fontWeight:800,color:C.butterInk,background:C.butter+"55",borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>EST.</span>;
+
+  if(econLoading){
+    return <AdminEmpty>Loading unit economics…</AdminEmpty>;
+  }
+  if(econError||!econ){
+    return (
+      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+        <div style={{fontWeight:800,marginBottom:6}}>Couldn't load unit economics.</div>
+        <div>{econError||"No data returned."}</div>
+        <div style={{marginTop:8,color:C.inkFaint}}>
+          This RPC is admin-gated. Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260730_admin_economics.sql</code> is applied and your login email is listed in <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>admin_config.admin_emails</code>.
+        </div>
+        <button onClick={onRefresh} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>UNIT ECONOMICS</div>
+        <button onClick={onRefresh} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Calendar-day windows (DB timezone). Check counts and purchases are <b style={{color:C.tealInk}}>real</b> (from the credit ledger + free-check tally); modeled $ figures multiply those counts by the cost-per-check below. Revenue is <b style={{color:C.butterInk}}>estimated</b> from purchase grants — there's no Stripe billing yet. Pack prices are treated as USD (matching the Profit tab); CAD shown at the fixed {USD_TO_CAD} snapshot rate.
+      </div>
+
+      {/* Controls: cost-per-check */}
+      <div style={{...cardStyle,marginBottom:14,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:6}}>Cost per check <span style={{color:C.inkFaint,fontWeight:600}}>(USD — drives every modeled $ figure)</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:18,fontWeight:800,color:C.inkFaint}}>$</span>
+            <input type="number" min="0" step="0.01" value={costPerCheck}
+              onChange={e=>updateCpc(e.target.value)}
+              style={{width:120,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:16,fontWeight:700,outline:"none"}}/>
+            <span style={{fontSize:12,color:C.inkFaint}}>≈ {cad(costPerCheck)} each</span>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:C.inkFaint,maxWidth:340,lineHeight:1.5}}>
+          A modeling assumption you set, saved on this device. Use it to fill the gap where real API cost isn't logged (the PDF path doesn't write to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code>).
+        </div>
+      </div>
+
+      {/* Free-check breaker status + editable cap */}
+      <div style={{...cardStyle,marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Free-check breaker <RealTag/></div>
+          <div style={{fontSize:12,color:C.inkFaint}}>anonymous free checks used today</div>
+        </div>
+        {(()=>{
+          const used=Number(status?.used||0);
+          const lim=Number(status?.limit_per_day||0);
+          const pct=lim>0?Math.min(100,Math.round((used/lim)*100)):0;
+          const atCap=lim>0&&used>=lim;
+          return (
+            <>
+              <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
+                <span style={{fontSize:30,fontWeight:800,color:atCap?C.coralInk:C.ink,fontFamily:"monospace"}}>{used.toLocaleString()}</span>
+                <span style={{fontSize:16,color:C.inkFaint}}>/ {lim<=0?"disabled":lim.toLocaleString()}</span>
+                {atCap&&<span style={{fontSize:11,fontWeight:800,color:C.coralInk,background:C.coralBg,borderRadius:5,padding:"2px 7px"}}>AT CAPACITY</span>}
+              </div>
+              <div style={{background:C.paper2,borderRadius:5,height:8,overflow:"hidden",marginBottom:16}}>
+                <div style={{width:`${pct}%`,height:"100%",background:atCap?C.coral:C.teal}}/>
+              </div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Daily free-check cap</div>
+                  <input type="number" min="0" step="1" value={capInput}
+                    onChange={e=>setCapInput(e.target.value)}
+                    style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
+                </div>
+                <button onClick={saveCap} disabled={savingCap||capInput===String(lim)}
+                  style={{background:(savingCap||capInput===String(lim))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(lim))?"default":"pointer"}}>
+                  {savingCap?"Saving…":"Save cap"}
+                </button>
+                <div style={{fontSize:11,color:C.inkFaint,maxWidth:300,lineHeight:1.5}}>
+                  Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.free_checks_per_day</code>. 0 disables anonymous free checks entirely.
+                </div>
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
+      {/* Checks matrix */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflowX:"auto",marginBottom:20}}>
+        <table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+          <thead>
+            <tr>
+              <th style={{...th,textAlign:"left"}}>METRIC</th>
+              {cols.map(c=><th key={c.win} style={th}>{c.label.toUpperCase()}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              {label:"Free checks", sub:"anonymous · free", tag:"real", count:c=>c.free, cost:c=>c.freeCost},
+              {label:"Shared checks", sub:"gift redeemed · free", tag:"real", count:c=>c.shared, cost:c=>c.sharedCost},
+              {label:"Paid checks", sub:"signed-in credit spends", tag:"real", count:c=>c.paid, cost:c=>c.paidCost},
+            ].map(row=>(
+              <tr key={row.label}>
+                <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>{row.label}{row.tag==="real"?<RealTag/>:<EstTag/>}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>{row.sub}</div>
+                </td>
+                {cols.map(c=>(
+                  <td key={c.win} style={{...td,color:C.ink}}>
+                    <div style={{fontWeight:800,fontSize:15}}>{row.count(c.d).toLocaleString()}</div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{fmtUsd(row.cost(c.d))} <span style={{opacity:0.7}}>modeled</span></div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {/* Estimated revenue */}
+            <tr style={{background:C.paper2}}>
+              <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. revenue<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>from purchase grants</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td}}>
+                  <div style={{fontWeight:800,fontSize:15,color:C.ink}}>{fmtUsd(c.d.revenue)}</div>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{c.d.purchaseN} purchase{c.d.purchaseN===1?"":"s"} · {cad(c.d.revenue)}</div>
+                </td>
+              ))}
+            </tr>
+            {/* Gross margin on paid */}
+            <tr>
+              <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. gross margin<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − paid-check cost</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td}}>
+                  <div style={{fontWeight:800,fontSize:15,color:c.d.grossMargin>=0?C.tealInk:C.coralInk}}>{fmtUsd(c.d.grossMargin)}</div>
+                </td>
+              ))}
+            </tr>
+            {/* Net after free/shared subsidy */}
+            <tr>
+              <td style={{padding:"12px"}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. net after subsidy<EstTag/></div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − ALL check cost</div>
+              </td>
+              {cols.map(c=>(
+                <td key={c.win} style={{...td,borderBottom:"none"}}>
+                  <div style={{fontWeight:800,fontSize:15,color:c.d.netAfterSubsidy>=0?C.tealInk:C.coralInk}}>{fmtUsd(c.d.netAfterSubsidy)}</div>
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* API spend: logged (real, partial) vs modeled */}
+      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:8}}>API SPEND · LOGGED vs MODELED</div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.6,maxWidth:760}}>
+        <b style={{color:C.tealInk}}>Logged</b> is the real cost written to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code> — but only the URL analyze function logs it; the <b>PDF path doesn't</b>, so this <b>undercounts</b>. <b style={{color:C.butterInk}}>Modeled</b> = every check (free + shared + paid) × cost-per-check, a fuller estimate.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+        {cols.map(c=>(
+          <div key={c.win} style={cardStyle}>
+            <div style={{fontSize:12,color:C.inkFaint,marginBottom:8}}>{c.label}</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
+              <span style={{fontSize:11,fontWeight:800,color:C.tealInk}}>LOGGED{apiUsageLoading?"…":""}</span>
+              <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.logged)}</span>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+              <span style={{fontSize:11,fontWeight:800,color:C.butterInk}}>MODELED</span>
+              <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.modeledSpend)}</span>
+            </div>
+            <div style={{fontSize:11,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:8}}>
+              {c.d.totalChecks.toLocaleString()} check{c.d.totalChecks===1?"":"s"} total ({c.d.free}f · {c.d.shared}s · {c.d.paid}p)
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -3145,13 +3439,396 @@ function VisitorMap({pageViews}){
   );
 }
 
+// ── Give a check tab ──────────────────────────────────────────────────────
+// Owner tool: mint single-use, tap-to-redeem free-check links to hand a
+// friend/family (…/quote-check?gift=CODE). Daily-capped (admin_daily_share_cap,
+// default 10, editable here). All server-authoritative via admin-gated RPCs
+// (fn_admin_create_gift / _list_gifts / _revoke_gift / _set_share_cap) from
+// 20260731_admin_share_gifts.sql. No PII shown — status + timestamps only.
+function GiveCheckTab(){
+  const {C}=useAdminTheme();
+  const [data,setData]=useState(null);   // {cap, used_today, remaining_today, codes:[]}
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [minting,setMinting]=useState(false);
+  const [copied,setCopied]=useState(null); // code just copied
+  const [capInput,setCapInput]=useState("");
+  const [savingCap,setSavingCap]=useState(false);
+  const [grantEmail,setGrantEmail]=useState("");
+  const [grantCount,setGrantCount]=useState("10");
+  const [granting,setGranting]=useState(false);
+  const [grantMsg,setGrantMsg]=useState(null); // {ok:boolean, text}
+  async function grantCredits(){
+    const email=(grantEmail||"").trim(), n=Math.round(Number(grantCount)||0);
+    if(!email||n<1){ setGrantMsg({ok:false,text:"Enter an email and a number of checks."}); return; }
+    setGranting(true); setGrantMsg(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_grant_credits",{p_email:email,p_count:n});
+      if(error) throw error;
+      const c=d?.credits||n;
+      const where=d?.target==="account"?`added to ${email}${d.balance!=null?` (balance now ${d.balance})`:""}`:`held for ${email} — lands the moment they sign in`;
+      setGrantMsg({ok:true,text:`${c} free check${c===1?"":"s"} ${where}.`});
+      setGrantEmail("");
+    }catch(e){ setGrantMsg({ok:false,text:e.message||"Couldn't grant those checks."}); }
+    finally{ setGranting(false); }
+  }
+
+  const origin = (typeof window!=="undefined" && window.location?.origin) || "https://lotcheck.ca";
+  const linkFor = (code)=>`${origin}/quote-check?gift=${code}`;
+
+  async function load(){
+    setLoading(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_list_gifts",{p_limit:30});
+      if(error) throw error;
+      setData(d||null);
+      if(d&&d.cap!=null) setCapInput(String(d.cap));
+    }catch(e){
+      console.warn("⚠️ fn_admin_list_gifts failed (run 20260731_admin_share_gifts.sql, and confirm your login is in admin_config.admin_emails):",e.message);
+      setErr(e.message||"Couldn't load your gift links."); setData(null);
+    }finally{ setLoading(false); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function mint(){
+    setMinting(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_create_gift");
+      if(error) throw error;
+      await load();
+      if(d&&d.code){ // auto-copy the fresh link so it's ready to paste into a text
+        try{ await navigator.clipboard.writeText(linkFor(d.code)); setCopied(d.code); setTimeout(()=>setCopied(null),2200); }catch{}
+      }
+    }catch(e){
+      setErr(e.message||"Couldn't create a link.");
+    }finally{ setMinting(false); }
+  }
+
+  async function copyLink(code){
+    try{ await navigator.clipboard.writeText(linkFor(code)); setCopied(code); setTimeout(()=>setCopied(null),2200); }
+    catch{ setErr("Couldn't copy — select the link and copy manually."); }
+  }
+
+  async function revoke(code){
+    setErr(null);
+    const {error}=await supabase.rpc("fn_admin_revoke_gift",{p_code:code});
+    if(error){ setErr(error.message||"Couldn't cancel that link."); return; }
+    load();
+  }
+
+  async function saveCap(){
+    setSavingCap(true); setErr(null);
+    const {error}=await supabase.rpc("fn_admin_set_share_cap",{p_value:Math.round(Number(capInput)||0)});
+    if(error){ setErr("Couldn't update the daily cap: "+error.message); setSavingCap(false); return; }
+    await load(); setSavingCap(false);
+  }
+
+  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  const remaining=Number(data?.remaining_today||0);
+  const cap=Number(data?.cap||0);
+  const used=Number(data?.used_today||0);
+  const canMint=remaining>0 && !minting;
+  const codes=data?.codes||[];
+  const statusStyle=(s)=> s==="redeemed"
+      ? {color:C.tealInk,bg:C.tealBg,label:"Redeemed"}
+    : s==="revoked"
+      ? {color:C.inkFaint,bg:C.paper2,label:"Cancelled"}
+      : {color:C.butterInk,bg:C.butter+"55",label:"Active"};
+
+  if(loading) return <AdminEmpty>Loading your gift links…</AdminEmpty>;
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>GIVE A FREE CHECK</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Mint a single-use link to hand a friend or family a free Quote Check. Text them the link — they tap it, sign in, and the check lands on their account. A leaked or forwarded link can't be reused. Capped per day (editable below).
+      </div>
+
+      {err&&(
+        <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.coralInk,marginBottom:14,lineHeight:1.5}}>{err}</div>
+      )}
+
+      {/* Mint control + today's allowance */}
+      <div style={{...card,marginBottom:14,display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Left to give today</div>
+          <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+            <span style={{fontSize:32,fontWeight:900,color:remaining>0?C.ink:C.coralInk,fontFamily:"monospace"}}>{remaining}</span>
+            <span style={{fontSize:15,color:C.inkFaint}}>/ {cap}</span>
+          </div>
+        </div>
+        <button onClick={mint} disabled={!canMint}
+          style={{background:canMint?C.teal:C.inkFaint,border:"none",borderRadius:12,padding:"13px 22px",color:"#fff",fontSize:14,fontWeight:800,cursor:canMint?"pointer":"default"}}>
+          {minting?"Creating…":"Create free-check link"}
+        </button>
+        {remaining<=0&&<div style={{fontSize:12,color:C.coralInk,fontWeight:700}}>Daily limit reached — resets tomorrow, or raise the cap below.</div>}
+        {copied&&<div style={{fontSize:12,color:C.tealInk,fontWeight:800}}>Link copied — paste it into a text</div>}
+      </div>
+
+      {/* Links list */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:16}}>
+        {codes.length===0?(
+          <div style={{padding:"22px 18px",fontSize:13,color:C.inkFaint,textAlign:"center"}}>No links yet — create one above.</div>
+        ):codes.map((c)=>{
+          const st=statusStyle(c.status);
+          const active=c.status==="active";
+          return (
+            <div key={c.code} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"12px 16px",borderBottom:`1px solid ${C.line}`}}>
+              <span style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:C.ink,letterSpacing:1}}>{c.code}</span>
+              <span style={{fontSize:11,fontWeight:800,color:st.color,background:st.bg,borderRadius:5,padding:"2px 8px"}}>{st.label}</span>
+              <span style={{flex:"1 1 120px",fontSize:11,color:C.inkFaint,fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{linkFor(c.code)}</span>
+              {active&&(
+                <>
+                  <button onClick={()=>copyLink(c.code)} style={{background:copied===c.code?C.tealBg:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:copied===c.code?C.tealInk:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{copied===c.code?"Copied":"Copy link"}</button>
+                  <button onClick={()=>revoke(c.code)} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.inkFaint,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Cancel</button>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Editable daily cap */}
+      <div style={{...card,display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Free checks I can give per day</div>
+          <input type="number" min="0" step="1" value={capInput} onChange={e=>setCapInput(e.target.value)}
+            style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
+        </div>
+        <button onClick={saveCap} disabled={savingCap||capInput===String(cap)}
+          style={{background:(savingCap||capInput===String(cap))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(cap))?"default":"pointer"}}>
+          {savingCap?"Saving…":"Save cap"}
+        </button>
+        <div style={{fontSize:11,color:C.inkFaint,maxWidth:320,lineHeight:1.5}}>
+          Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.admin_daily_share_cap</code>. Cancelling an unredeemed link frees its slot back.
+        </div>
+      </div>
+
+      {/* Grant free checks directly to an email (comp a customer / tester) */}
+      <div style={{...card,marginTop:10}}>
+        <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>Grant free checks to an email</div>
+        <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>Adds free Quote Checks straight to an account. If they already have one, it's credited now; if not, it waits and lands the moment they sign in with that email.</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input type="email" placeholder="person@email.com" value={grantEmail} onChange={e=>{setGrantEmail(e.target.value);if(grantMsg)setGrantMsg(null);}}
+            style={{flex:"1 1 220px",minWidth:180,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:14,outline:"none"}}/>
+          <input type="number" min="1" max="100" step="1" value={grantCount} onChange={e=>setGrantCount(e.target.value)} aria-label="Number of checks"
+            style={{width:84,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:14,fontWeight:700,outline:"none"}}/>
+          <button onClick={grantCredits} disabled={granting}
+            style={{background:granting?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:granting?"default":"pointer",whiteSpace:"nowrap"}}>
+            {granting?"Granting…":"Grant"}
+          </button>
+        </div>
+        {grantMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:700,color:grantMsg.ok?C.tealInk:C.coralInk}}>{grantMsg.text}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── MSRP Alerts tab ───────────────────────────────────────────────────────
+// The demand "folders": every waitlist signup grouped by make (with a city
+// breakdown), drill-down to the buyer list. This is the Dealer Bridge's
+// inventory ([[alerts-are-bridge-inventory]]) — owner-only. Reads the RLS-locked
+// msrp_alert_subscription via the admin-gated fn_admin_alert_folders RPC.
+// The owner's dispatch console: enter one at/below-MSRP car a dealer is offering,
+// see how many CONFIRMED buyers it matches (make + city), and send them the alert.
+// fn_admin_push_candidate records the car + returns the match count; the
+// alert-dispatch edge fn emails the matched buyers and logs each send (dedupe).
+function PushCarPanel({C,onDispatched}){
+  const blank={make:"",model:"",year:"",city:"",province:"AB",price:"",below:false,dealer:"",note:""};
+  const [f,setF]=useState(blank);
+  const [open,setOpen]=useState(false);
+  const [cand,setCand]=useState(null);      // {id,matches} after matching
+  const [busy,setBusy]=useState("");         // "match" | "send" | ""
+  const [msg,setMsg]=useState(null);         // {kind,text}
+  const set=(k)=>(e)=>{ setF(s=>({...s,[k]:e.target.type==="checkbox"?e.target.checked:e.target.value})); setCand(null); setMsg(null); };
+
+  async function match(){
+    setMsg(null);
+    if(!f.make.trim()||!f.city.trim()){ setMsg({kind:"bad",text:"Make and city are required."}); return; }
+    setBusy("match");
+    const {data,error}=await supabase.rpc("fn_admin_push_candidate",{
+      p_make:f.make.trim(), p_model:f.model.trim()||null, p_year:f.year?+f.year:null,
+      p_city:f.city.trim(), p_province:f.province.trim()||"AB",
+      p_price:f.price?+f.price:null, p_below:f.below, p_dealer:f.dealer.trim()||null, p_note:f.note.trim()||null,
+    });
+    setBusy("");
+    if(error){ setMsg({kind:"bad",text:error.message||"Couldn't record that car."}); return; }
+    setCand({id:data.id,matches:data.matches});
+  }
+
+  async function send(){
+    if(!cand?.id) return;
+    setBusy("send"); setMsg(null);
+    try{
+      const {data,error}=await supabase.functions.invoke("alert-dispatch",{body:{candidate_id:cand.id}});
+      if(error||!data?.ok) throw new Error(data?.error||error?.message||"Dispatch failed.");
+      setMsg({kind:"ok",text:`Sent ${data.sent} alert${data.sent===1?"":"s"}${data.failed?`, ${data.failed} failed`:""}.`});
+      setCand(null); setF(blank); onDispatched&&onDispatched();
+    }catch(e){ setMsg({kind:"bad",text:e.message||"Dispatch failed. Is the alert-dispatch function deployed + RESEND_API_KEY set?"}); }
+    setBusy("");
+  }
+
+  const inp={background:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 10px",color:C.ink,fontSize:12.5,fontWeight:600,width:"100%",boxSizing:"border-box"};
+  const lab={fontSize:10,fontWeight:800,color:C.inkFaint,letterSpacing:.4,display:"block",marginBottom:4,textTransform:"uppercase"};
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:16,marginBottom:16}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+        <div style={{fontSize:13,fontWeight:900,color:C.ink}}>📣 Push a car → alert matching buyers</div>
+        <span style={{fontSize:11,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
+      </div>
+      {!open && <div style={{fontSize:11,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
+      {open && <>
+        <div style={{fontSize:11,color:C.inkFaint,margin:"8px 0 14px",lineHeight:1.6,maxWidth:720}}>
+          <b style={{color:C.inkSoft}}>The process:</b> a signup emails the buyer a confirm link → they click it (now “confirmed”). When you enter an at/below-MSRP car below, step 1 shows how many confirmed buyers match; step 2 emails them and logs each send so no one is emailed twice for the same car.
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+          <div><label style={lab}>Make *</label><input style={inp} value={f.make} onChange={set("make")} placeholder="Toyota"/></div>
+          <div><label style={lab}>Model</label><input style={inp} value={f.model} onChange={set("model")} placeholder="RAV4"/></div>
+          <div><label style={lab}>Year</label><input style={inp} value={f.year} onChange={set("year")} placeholder="2025" inputMode="numeric"/></div>
+          <div><label style={lab}>City *</label><input style={inp} value={f.city} onChange={set("city")} placeholder="Calgary"/></div>
+          <div><label style={lab}>Province</label><input style={inp} value={f.province} onChange={set("province")} placeholder="AB"/></div>
+          <div><label style={lab}>Price (CAD)</label><input style={inp} value={f.price} onChange={set("price")} placeholder="41990" inputMode="numeric"/></div>
+          <div><label style={lab}>Dealer</label><input style={inp} value={f.dealer} onChange={set("dealer")} placeholder="ABC Toyota"/></div>
+          <div style={{gridColumn:"1/-1"}}><label style={lab}>Note (internal)</label><input style={inp} value={f.note} onChange={set("note")} placeholder="e.g. demo unit, in stock this week"/></div>
+        </div>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.inkSoft,fontWeight:700,margin:"12px 0 4px",cursor:"pointer"}}>
+          <input type="checkbox" checked={f.below} onChange={set("below")} style={{accentColor:C.teal}}/> This car is <b>below</b> MSRP (not just at it)
+        </label>
+        {msg && <div style={{fontSize:12,fontWeight:700,margin:"10px 0 2px",color:msg.kind==="ok"?C.tealInk:C.coralInk}}>{msg.text}</div>}
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}>
+          <button onClick={match} disabled={busy==="match"} style={{background:C.card,border:`1px solid ${C.teal}`,borderRadius:9,padding:"9px 16px",color:C.tealInk,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="match"?"Matching…":"1 · Match buyers"}</button>
+          {cand && (cand.matches>0
+            ? <button onClick={send} disabled={busy==="send"} style={{background:C.teal,border:"none",borderRadius:9,padding:"9px 18px",color:"#fff",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="send"?"Sending…":`2 · Send ${cand.matches} alert${cand.matches===1?"":"s"}`}</button>
+            : <span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>No confirmed buyers match this make + city yet.</span>)}
+        </div>
+      </>}
+    </div>
+  );
+}
+
+function AlertFoldersTab(){
+  const {C}=useAdminTheme();
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  const [openMake,setOpenMake]=useState(null);
+
+  async function load(){
+    setLoading(true); setErr(null);
+    try{
+      const {data:d,error}=await supabase.rpc("fn_admin_alert_folders",{p_limit:2000});
+      if(error) throw error;
+      setData(d||null);
+    }catch(e){
+      console.warn("⚠️ fn_admin_alert_folders failed (run 20260731_admin_alert_folders.sql; confirm your login is in admin_config.admin_emails):",e.message);
+      setErr(e.message||"Couldn't load the alert folders."); setData(null);
+    }finally{ setLoading(false); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  const thLabel=(t,pct)=> t==="at_msrp"?"At MSRP":t==="below_msrp"?"Below MSRP":t==="pct_below"?`${pct||5}%+ under`:t||"—";
+  const fmtDate=(s)=>{ try{ return new Date(s).toISOString().slice(0,10); }catch{ return ""; } };
+
+  // Group rows client-side into make folders (+ per-city counts + the list).
+  const folders=(()=>{
+    const rows=data?.rows||[]; const m=new Map();
+    for(const r of rows){
+      const mk=r.make||"—";
+      if(!m.has(mk)) m.set(mk,{make:mk,list:[],cities:new Map()});
+      const f=m.get(mk); f.list.push(r);
+      const c=r.city||"—"; f.cities.set(c,(f.cities.get(c)||0)+1);
+    }
+    return [...m.values()].map(f=>({...f,cities:[...f.cities.entries()].sort((a,b)=>b[1]-a[1])}))
+      .sort((a,b)=>b.list.length-a.list.length);
+  })();
+
+  function exportCsv(f){
+    const rows=[["email","make","model","year","city","province","alert_when","status","signed_up"],
+      ...f.list.map(r=>[r.email,r.make,r.model,r.year,r.city,r.province,thLabel(r.threshold,r.pct),r.status,fmtDate(r.created_at)])];
+    const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
+    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+    const a=document.createElement("a"); a.href=url; a.download=`msrp-alerts-${f.make.toLowerCase().replace(/[^a-z0-9]+/g,"-")}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
+
+  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
+  if(loading) return <AdminEmpty>Loading MSRP alert folders…</AdminEmpty>;
+  if(err) return (
+    <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+      <div style={{fontWeight:800,marginBottom:6}}>Couldn't load the alert folders.</div><div>{err}</div>
+      <div style={{marginTop:8,color:C.inkFaint}}>Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260731_admin_alert_folders.sql</code> is applied.</div>
+      <button onClick={load} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>MSRP ALERT FOLDERS</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+      </div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+        Every waitlist signup, filed by make — the Dealer Bridge's demand inventory. <b style={{color:C.inkSoft}}>{data?.total||0}</b> total signup{(data?.total||0)===1?"":"s"}. Owner-only; buyers are never handed to a dealer without a separate, explicit consent.
+      </div>
+
+      <PushCarPanel C={C} onDispatched={load}/>
+
+      {folders.length===0?(
+        <AdminEmpty icon="📭">No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {folders.map(f=>{
+            const open=openMake===f.make;
+            return (
+              <div key={f.make} style={card}>
+                <div onClick={()=>setOpenMake(open?null:f.make)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",flexWrap:"wrap"}}>
+                  <div style={{fontSize:16,fontWeight:900,color:C.ink,minWidth:120}}>{f.make}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"3px 11px"}}>{f.list.length} buyer{f.list.length===1?"":"s"}</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
+                    {f.cities.slice(0,4).map(([c,n])=><span key={c} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:6,padding:"2px 8px"}}>{c} · {n}</span>)}
+                  </div>
+                  <button onClick={(e)=>{e.stopPropagation();exportCsv(f);}} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 11px",color:C.inkSoft,fontSize:11.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>Export CSV</button>
+                  <span style={{fontSize:11,color:C.inkFaint}}>{open?"▲":"▼"}</span>
+                </div>
+                {open&&(
+                  <div style={{marginTop:12,borderTop:`1px solid ${C.line}`,overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:12.5}}>
+                      <thead><tr>{["Email","Model","Year","City","Alert when","Status","Signed up"].map(h=>(
+                        <th key={h} style={{textAlign:"left",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
+                      <tbody>{f.list.map((r,i)=>(
+                        <tr key={i}>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink,fontWeight:700,fontFamily:"monospace",fontSize:12}}>{r.email}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink}}>{r.model||"—"}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.year||"—"}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.city||"—"}{r.province?`, ${r.province}`:""}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:11,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}>{r.status==="confirmed"
+                            ? <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px"}}>✓ Confirmed</span>
+                            : <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:5,padding:"2px 7px"}}>Waitlist</span>}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:11}}>{fmtDate(r.created_at)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
   const [tab,setTab]=useState("overview");
 
-  const [leads,setLeads]=useState([]);
-  const [leadsLoading,setLeadsLoading]=useState(true);
+  const [reportLeads,setReportLeads]=useState([]);
+  const [reportLeadsLoading,setReportLeadsLoading]=useState(true);
   const [pageViews,setPageViews]=useState([]);
   const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
@@ -3171,6 +3848,11 @@ function AdminPanel(){
   const [rejectedListings,setRejectedListings]=useState([]);
   const [reviewLoading,setReviewLoading]=useState(true);
 
+  // Unit Economics: one admin-gated RPC snapshot of aggregate-only figures.
+  const [econ,setEcon]=useState(null);
+  const [econLoading,setEconLoading]=useState(true);
+  const [econError,setEconError]=useState(null);
+
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{
       setSession(data.session);
@@ -3183,22 +3865,22 @@ function AdminPanel(){
   },[]);
 
   useEffect(()=>{
-    if(!session){ setLeads([]); return; }
+    if(!session){ setReportLeads([]); return; }
     let cancelled=false;
-    async function fetchLeads(){
-      setLeadsLoading(true);
+    async function fetchReportLeads(){
+      setReportLeadsLoading(true);
       try{
-        const {data,error}=await supabase.from("leads").select("*").order("created_at",{ascending:false}).limit(500);
+        const {data,error}=await supabase.from("quote_report_leads").select("*").order("created_at",{ascending:false}).limit(500);
         if(error) throw error;
-        if(!cancelled) setLeads(data||[]);
+        if(!cancelled) setReportLeads(data||[]);
       }catch(err){
-        console.warn("⚠️ leads fetch failed:",err.message);
-        if(!cancelled) setLeads([]);
+        console.warn("⚠️ report leads fetch failed:",err.message);
+        if(!cancelled) setReportLeads([]);
       }finally{
-        if(!cancelled) setLeadsLoading(false);
+        if(!cancelled) setReportLeadsLoading(false);
       }
     }
-    fetchLeads();
+    fetchReportLeads();
     return()=>{cancelled=true;};
   },[session]);
 
@@ -3208,7 +3890,7 @@ function AdminPanel(){
     async function fetchViews(){
       setViewsLoading(true);
       try{
-        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source, city, country, latitude, longitude").order("created_at",{ascending:true}).limit(50000);
+        const {data,error}=await supabase.from("page_views").select("created_at, visitor_id, referrer_source, city, country, latitude, longitude, device").order("created_at",{ascending:true}).limit(50000);
         if(error) throw error;
         if(!cancelled) setPageViews(data||[]);
       }catch(err){
@@ -3274,9 +3956,40 @@ function AdminPanel(){
   }
   useEffect(()=>{ if(session) fetchReview(); else { setReviewListings([]); setRejectedListings([]); } },[session]);
 
-  async function updateLeadStatus(id,status){
-    const {error}=await supabase.from("leads").update({status}).eq("id",id);
-    if(!error) setLeads(prev=>prev.map(l=>l.id===id?{...l,status}:l));
+  async function fetchEcon(){
+    setEconLoading(true); setEconError(null);
+    try{
+      const {data,error}=await supabase.rpc("fn_admin_economics");
+      if(error) throw error;
+      setEcon(data||null);
+    }catch(err){
+      console.warn("⚠️ fn_admin_economics failed (did you run 20260730_admin_economics.sql, and is your login in admin_config.admin_emails?):",err.message);
+      setEcon(null);
+      setEconError(err.message||"Couldn't load economics.");
+    }finally{
+      setEconLoading(false);
+    }
+  }
+  useEffect(()=>{ if(session) fetchEcon(); else { setEcon(null); setEconError(null); } },[session]);
+
+  // Live-adjust the anonymous free-check daily cap via the admin-gated update
+  // RPC, then re-pull the snapshot so the breaker card reflects the new limit.
+  async function setFreeCap(value){
+    const {data,error}=await supabase.rpc("fn_admin_set_free_checks_per_day",{p_value:Math.round(Number(value)||0)});
+    if(error){ alert("Couldn't update the free-check cap: "+error.message); return null; }
+    await fetchEcon();
+    return data;
+  }
+
+  function exportReportLeadsCsv(){
+    const rows=[["email","source","created_at"],...reportLeads.map(l=>[l.email,l.source||"",l.created_at])];
+    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob=new Blob([csv],{type:"text/csv"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=`lotcheck-report-emails-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function saveDealer(form){
@@ -3412,6 +4125,12 @@ function AdminPanel(){
     trafficSources[src]=(trafficSources[src]||0)+1;
   });
   const sortedSources=Object.entries(trafficSources).sort((a,b)=>b[1]-a[1]);
+  // Device / OS breakdown (iPhone vs Android vs Desktop) — captured server-side
+  // in /api/track-visit from the User-Agent. Rows before this shipped have no
+  // device, shown as "Unknown (before tracking)".
+  const trafficDevices={};
+  pageViews.forEach(v=>{ const d=v.device||"Unknown (before tracking)"; trafficDevices[d]=(trafficDevices[d]||0)+1; });
+  const sortedDevices=Object.entries(trafficDevices).sort((a,b)=>b[1]-a[1]);
 
   const themeState=useThemeState();
   const {C}=themeState;
@@ -3436,8 +4155,6 @@ function AdminPanel(){
   });
   const avgDaysOnMarket=daysOnMarketValues.length?Math.round(daysOnMarketValues.reduce((a,b)=>a+b,0)/daysOnMarketValues.length):null;
   const bucketedListings=bucketByTime(firstSeenTimestamps,listingsGranularity);
-  const byLeadType={};
-  leads.forEach(l=>{ byLeadType[l.lead_type]=(byLeadType[l.lead_type]||0)+1; });
 
   return(
     <AdminThemeContext.Provider value={themeState}>
@@ -3461,6 +4178,9 @@ function AdminPanel(){
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
+          <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
+          <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
+          <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -3552,6 +4272,32 @@ function AdminPanel(){
               </div>
 
               <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>What visitors are on</div>
+                {sortedDevices.every(([d])=>d==="Unknown (before tracking)")?(
+                  <div style={{color:C.inkFaint,fontSize:13,lineHeight:1.6}}>
+                    Device tracking just went live — iPhone / Android / Desktop will fill in from here forward.
+                  </div>
+                ):(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {sortedDevices.map(([d,count])=>{
+                      const pct=Math.round((count/pageViews.length)*100);
+                      return(
+                        <div key={d}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                            <span style={{color:C.ink,fontWeight:700}}>{d==="iOS"?"iPhone / iPad (iOS)":d}</span>
+                            <span style={{color:C.inkFaint}}>{count.toLocaleString()} · {pct}%</span>
+                          </div>
+                          <div style={{background:C.paper2,borderRadius:4,height:6,overflow:"hidden"}}>
+                            <div style={{width:`${pct}%`,height:"100%",background:d==="iOS"?C.teal:d==="Android"?C.butterInk:d==="Desktop"?C.ink:C.inkFaint}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visitors are located</div>
                 <VisitorMap pageViews={pageViews}/>
               </div>
@@ -3573,8 +4319,8 @@ function AdminPanel(){
               <div style={{fontSize:12,color:C.inkFaint}}>Provinces covered</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{leads.length}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Total leads received</div>
+              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{reportLeads.length}</div>
+              <div style={{fontSize:12,color:C.inkFaint}}>Report emails captured</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
@@ -3643,43 +4389,30 @@ function AdminPanel(){
             </div>
           </div>
 
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-            LEADS · {leadsLoading?"loading…":`${leads.length} total`}
-            {!leadsLoading&&leads.length>0&&` · ${Object.entries(byLeadType).map(([t,c])=>`${c} ${t}`).join(" · ")}`}
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+            <span>REPORT EMAILS · {reportLeadsLoading?"loading…":`${reportLeads.length} total`}</span>
+            {!reportLeadsLoading&&reportLeads.length>0&&(
+              <button onClick={exportReportLeadsCsv}
+                style={{fontSize:11,fontWeight:700,letterSpacing:0,padding:"5px 12px",borderRadius:6,cursor:"pointer",background:"transparent",border:`1px solid ${C.line}`,color:C.inkSoft}}>
+                Export CSV
+              </button>
+            )}
           </div>
-          {leadsLoading?(
-            <div style={{color:C.inkFaint,fontSize:13}}>Loading leads…</div>
-          ):leads.length===0?(
+          {reportLeadsLoading?(
+            <div style={{color:C.inkFaint,fontSize:13}}>Loading report emails…</div>
+          ):reportLeads.length===0?(
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"24px",textAlign:"center",color:C.inkFaint}}>
-              No leads yet. They'll show up here the moment someone submits Connect, Test Drive, or an appraisal request on the live site.
+              No report emails yet. They'll show up here the moment someone uses "Email me this report" on a Quote Check.
             </div>
           ):(
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-              {leads.map(l=>(
-                <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,flexWrap:"wrap",gap:8}}>
-                    <div>
-                      <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,marginRight:8}}>{l.lead_type}</span>
-                      <strong style={{color:C.ink}}>{l.name}</strong>
-                    </div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+              {reportLeads.map(l=>(
+                <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <strong style={{color:C.ink}}>{l.email}</strong>
+                    {l.source&&<div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>Re: {l.source}</div>}
                   </div>
-                  <div style={{fontSize:13,color:C.inkSoft,marginBottom:6}}>
-                    {l.phone&&<span>{l.phone}</span>}{l.phone&&l.email&&<span> · </span>}{l.email&&<span>{l.email}</span>}
-                  </div>
-                  {l.details?.listing_name&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>Re: {l.details.listing_name}</div>}
-                  {l.lead_type==="appraisal"&&<div style={{fontSize:12,color:C.inkFaint,marginBottom:4}}>{l.details.year} {l.details.make} {l.details.model} · {l.details.km?Number(l.details.km).toLocaleString():"?"} km · est. ${l.details.estimate_mid?.toLocaleString()}</div>}
-                  <div style={{display:"flex",gap:6,marginTop:8}}>
-                    {["new","contacted","closed"].map(s=>(
-                      <button key={s} onClick={()=>updateLeadStatus(l.id,s)}
-                        style={{fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
-                          background:l.status===s?C.teal:"transparent",
-                          border:`1px solid ${l.status===s?C.teal:C.line}`,
-                          color:l.status===s?"#fff":C.inkFaint}}>
-                        {s}
-                      </button>
-                    ))}
-                  </div>
+                  <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
                 </div>
               ))}
             </div>
@@ -3706,6 +4439,9 @@ function AdminPanel(){
 
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
         {tab==="profit" && <ProfitTrackerTab/>}
+        {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
+        {tab==="gifts" && <GiveCheckTab/>}
+        {tab==="alerts" && <AlertFoldersTab/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
@@ -3756,105 +4492,35 @@ function IsoScanVisual({C, speed="idle"}){
   );
 }
 
-// ── Quote Check paywall -- shown once the free first check is used up.
-// Pay-per-use bundles are the default/recommended path (matches how people
-// actually shop for a car: a short, intense burst of checks around one
-// purchase, not an ongoing habit) -- the $9.99/mo option is offered as an
-// alternative for the smaller set of people who genuinely expect to check
-// many quotes over time (family helping multiple relatives shop, etc.),
-// not the default.
-//
-// No real payment is processed -- same honest "simulated processing" stopgap
-// already used by UnlockModal elsewhere in this file. Real Stripe
-// integration is a separate task; this is the UI + local credit-tracking
-// layer that a real checkout would plug into later.
-function QuotePaywallModal({C, onClose, onPurchased}){
-  const [step,setStep]=useState("choose"); // choose | processing | done
-  const [purchased,setPurchased]=useState(null); // {label, detail}
+// Quote Check credits are enforced server-side (Phase 3): 1 anonymous free
+// check per device, then sign-in; signed-in checks draw on server-authoritative
+// personal credits, with an HTTP 402 {error:"out_of_credits"} opening the paywall.
 
-  async function buy(kind, credits, label, detail){
-    setStep("processing");
-    await new Promise(r=>setTimeout(r,1200));
-    if(kind==="bundle") grantBundleCredits(credits);
-    else activateQcSubscription();
-    setPurchased({label, detail});
-    setStep("done");
-  }
-
-  const cardStyle={
-    background:C.card,border:`1.5px solid ${C.line}`,borderRadius:18,
-    padding:"16px 18px",marginBottom:12,
-  };
-  const priceBtn={
-    width:"100%",background:C.ink,border:"none",borderRadius:12,padding:"12px 0",
-    color:C.paper,fontWeight:1000,fontSize:14,cursor:"pointer",
-  };
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:C.paper,borderRadius:22,padding:24,width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto",boxSizing:"border-box"}}>
-        {step==="done"?(
-          <div style={{textAlign:"center",padding:"12px 0"}}>
-            <div style={{fontSize:44,marginBottom:10}}>✓</div>
-            <div style={{fontSize:17,fontWeight:1000,color:C.ink,marginBottom:6}}>{purchased?.label}</div>
-            <div style={{fontSize:13,color:C.inkFaint,marginBottom:20}}>{purchased?.detail}</div>
-            <button onClick={()=>onPurchased()} style={priceBtn}>Continue to your check →</button>
-          </div>
-        ):step==="processing"?(
-          <div style={{textAlign:"center",padding:"32px 0"}}>
-            <IsoScanVisual C={C} speed="active"/>
-            <div style={{color:C.ink,fontWeight:1000,marginTop:4}}>Processing…</div>
-          </div>
-        ):(
-          <>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-              <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>You've used your free check</div>
-              <button onClick={onClose} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-            </div>
-            <div style={{fontSize:13,color:C.inkSoft,marginBottom:18,lineHeight:1.5}}>Pick whichever fits how you're shopping -- most people checking one or two quotes want pay-per-check, not a subscription.</div>
-
-            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`}}>
-              <div style={{fontSize:11,fontWeight:1000,color:C.tealInk,letterSpacing:0.5,marginBottom:4}}>RECOMMENDED · PAY PER CHECK</div>
-              <div style={{fontSize:12,color:C.inkSoft,marginBottom:14}}>No commitment -- credits never expire.</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                <button onClick={()=>buy("bundle",1,"1 check unlocked","Good for a single dealer quote.")} style={{...priceBtn,background:C.card,color:C.ink,border:`2px solid ${C.line}`}}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$2.99</div>
-                  <div style={{fontSize:10,fontWeight:700,color:C.inkFaint}}>1 check</div>
-                </button>
-                <button onClick={()=>buy("bundle",5,"5 checks unlocked","Good for comparing several dealers.")} style={priceBtn}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$9.99</div>
-                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>5 checks</div>
-                </button>
-                <button onClick={()=>buy("bundle",10,"10 checks unlocked","Plenty for a full shopping round.")} style={{...priceBtn,background:C.coral,color:"#3a1409"}}>
-                  <div style={{fontSize:15,fontWeight:1000}}>$14.99</div>
-                  <div style={{fontSize:10,fontWeight:700,opacity:0.85}}>10 checks</div>
-                </button>
-              </div>
-            </div>
-
-            <div style={{display:"flex",alignItems:"center",gap:12,margin:"16px 0"}}>
-              <div style={{flex:1,height:1,background:C.line}}/>
-              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR</div>
-              <div style={{flex:1,height:1,background:C.line}}/>
-            </div>
-
-            <div style={cardStyle}>
-              <div style={{fontSize:11,fontWeight:1000,color:C.inkFaint,letterSpacing:0.5,marginBottom:4}}>SUBSCRIBE</div>
-              <div style={{fontSize:12,color:C.inkSoft,marginBottom:12,lineHeight:1.5}}>Shopping for a while, or checking quotes for family? {QC_SUB_QUOTA} checks over 30 days.</div>
-              <button onClick={()=>buy("sub",0,"Subscription active",`${QC_SUB_QUOTA} checks available for the next 30 days.`)} style={{...priceBtn,background:"transparent",color:C.ink,border:`2px solid ${C.ink}`}}>
-                $9.99 -- {QC_SUB_QUOTA} checks / 30 days
-              </button>
-            </div>
-
-            <div style={{fontSize:10,color:C.inkFaint,marginTop:14,lineHeight:1.5,textAlign:"center"}}>
-              Preview pricing -- no real payment is processed yet. This tracks locally to this browser, not a real account.
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
+// Progressive "analyzing" status messages. The edge function doesn't
+// stream progress back, so these are TIME-BASED, not real milestones --
+// they exist to make a genuinely slow scan (a URL scan is ~30-60s, since
+// it live-scrapes the dealer page and, on payment-first listings, also
+// cross-checks the manufacturer's site) FEEL like active work instead of
+// a frozen spinner. The `at` values are seconds of elapsed time, tuned to
+// the real backend phases: dealer-page fetch, first analysis, then the
+// manufacturer-MSRP fallback. Each message just needs to still be true if
+// the scan finishes early -- so they describe the pipeline generically,
+// never claim a specific step "is done." URL and file/photo scans get
+// different sequences because a file scan skips the slow live-scrape and
+// manufacturer steps entirely.
+const URL_SCAN_STAGES = [
+  { at: 0,  text: "Opening the dealer's listing…" },
+  { at: 6,  text: "Reading the pricing and fine print…" },
+  { at: 16, text: "Analyzing MSRP, fees, and financing…" },
+  { at: 30, text: "Cross-checking MSRP with the manufacturer…" },
+  { at: 46, text: "Putting your report together…" },
+];
+const FILE_SCAN_STAGES = [
+  { at: 0,  text: "Reading the document…" },
+  { at: 5,  text: "Pulling out MSRP, price, and add-ons…" },
+  { at: 14, text: "Checking the warranty terms…" },
+  { at: 22, text: "Putting your report together…" },
+];
 
 // ── Financing breakdown ───────────────────────────────────────────────────
 // Pure amortization off the quoted price. Nothing here is fetched from a
@@ -3884,8 +4550,50 @@ function amortPayment(principal, annualPct, per, termMonths){
   return principal * i / (1 - Math.pow(1 + i, -n));
 }
 
+// Traffic-light banding (ported from financing-examples-15.html):
+//   green  if apr <= benchmark + 0.25
+//   amber  if apr <= benchmark + 2
+//   red    beyond
+// Benchmark is the manufacturer APR (new) or BoC+2.5 (used); when it can't be
+// determined (no manufacturer rate on a new car / BoC not loaded on a used
+// car) we return null = neutral, so no green/amber/red claim is fabricated.
+function bandOf(apr, benchmark){
+  if(benchmark == null || !Number.isFinite(apr)) return null;
+  if(apr <= benchmark + 0.25) return "g";
+  if(apr <= benchmark + 2)    return "a";
+  return "r";
+}
+// Heatmap tertiles over a 0..1 relative-interest position. Greener = cheaper.
+function heatOf(t){ return t < 0.34 ? "g" : (t < 0.67 ? "a" : "r"); }
+
 function FinancingBreakdown({ analysis, C, cardStyle }){
-  const price = Number(analysis?.quotedPrice) || 0;
+  // ── Price-verification gate ──────────────────────────────────────────────
+  // The financing math is only as trustworthy as the price it runs on. A
+  // listing whose real price we couldn't extract must NEVER present MSRP-based
+  // payments as if they were the listing's actual payments -- a confidently-
+  // wrong payment number is a trust failure. We therefore track the price's
+  // SOURCE and render differently for each:
+  //   'listing' -> analysis.quotedPrice is a verified listing price. Normal.
+  //   'msrp'    -> only an MSRP is known. ESTIMATE MODE: a loud warning, the
+  //                hero relabelled "from MSRP", never the word "listed", and an
+  //                editable price so the buyer can enter the real number.
+  //   'none'    -> no price at all. Prompt for one; don't render the matrix.
+  // A price the USER types is treated as confirmed ('user'): it recomputes the
+  // whole card and drops the warning, but is deliberately NOT written back to
+  // analysis.quotedPrice, so the verified-only overprice-vs-MSRP flag (which
+  // keys off analysis.quotedPrice) stays off for an unverified number.
+  const quotedPrice = Number(analysis?.quotedPrice) || 0;
+  const msrpVal = Number(analysis?.msrp) || 0;
+  const baseSource = quotedPrice > 0 ? "listing" : msrpVal > 0 ? "msrp" : "none";
+  const [priceStr, setPriceStr] = useState(baseSource === "msrp" ? String(msrpVal) : "");
+  const [priceConfirmed, setPriceConfirmed] = useState(false);
+  const enteredPrice = Number(priceStr) || 0;
+  // Effective price + source that everything below renders from.
+  let priceSource, price;
+  if (baseSource === "listing") { priceSource = "listing"; price = quotedPrice; }
+  else if (priceConfirmed && enteredPrice > 0) { priceSource = "user"; price = enteredPrice; }
+  else if (baseSource === "msrp") { priceSource = "msrp"; price = msrpVal; }
+  else { priceSource = "none"; price = 0; }
   const disclosedRate = Number(analysis?.financing?.rate) || null;
   const mfr = analysis?.financeRates?.manufacturer || null;
   const mfrRate = mfr?.apr != null ? Number(mfr.apr) : null;
@@ -3898,11 +4606,26 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const leaseTerm = lease?.termMonths || null;
   const disclosedTerm = Number(analysis?.financing?.termMonths) || null;
   const disclosedFreq = analysis?.financing?.paymentFrequency || null;
+  // New-vs-used: main keys new/used on analysis.vehicleCondition==="new". A
+  // manufacturer advertised/promo rate is a NEW-vehicle offer, so on a used
+  // vehicle it's a labelled reference, never this car's applicable rate.
+  const isNew = analysis?.vehicleCondition === "new";
+  // How far THIS dealer's disclosed APR sits above the manufacturer's
+  // advertised rate (only meaningful when both exist) -- drives the markup
+  // warning below, same threshold/math as main's "Financing examples" card.
+  const spread = (dealerRate != null && mfrRate != null) ? (dealerRate - mfrRate) : null;
   // Freshness of the manufacturer rate data (finance_rate_catalog /
-  // lease_rate_catalog effective_date). Refreshed daily by the rates job, so
-  // buyers can see how current the advertised rate we're comparing against is.
+  // lease_rate_catalog effective_date). Refreshed daily by the rates job.
   const fmtDate = s => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||"")); const MO=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]; return m ? `${MO[+m[2]-1]} ${+m[3]}, ${m[1]}` : s; };
   const ratesAsOf = [mfr?.effectiveDate, lease?.effectiveDate].filter(Boolean).sort().pop() || null;
+
+  // The quote's term/down anchor the hero payment and the highlighted grid
+  // cell. analysis carries no disclosed down-payment, so the quote row is $0.
+  const quoteTerm = FIN_TERMS.includes(disclosedTerm) ? disclosedTerm : 60;
+  const quoteDown = 0;
+
+  const reduceMotion = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion:reduce)").matches : false;
 
   const defaultRate = dealerRate || mfrRate || 6.99;
   const rateIsReal = dealerRate != null || mfrRate != null;
@@ -3931,156 +4654,1465 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
     return () => { alive = false; };
   }, []);
 
-  if(!(price > 0)) return null;
+  // Hero payment (quote term/down, current rate & frequency) with a
+  // reduced-motion-safe count-up.
+  const Pq = Math.max(0, price - quoteDown);
+  const heroPay = aprValid ? amortPayment(Pq, apr, freq.per, quoteTerm) : 0;
+  const [shownPay, setShownPay] = useState(heroPay);
+  const prevPayRef = useRef(heroPay);
+  useEffect(() => {
+    if(reduceMotion){ setShownPay(heroPay); prevPayRef.current = heroPay; return; }
+    let raf, t0 = null; const from = prevPayRef.current;
+    const step = ts => {
+      t0 = t0 || ts; const k = Math.min(1, (ts - t0) / 480); const e = 1 - Math.pow(1 - k, 3);
+      setShownPay(from + (heroPay - from) * e);
+      if(k < 1) raf = requestAnimationFrame(step); else prevPayRef.current = heroPay;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [heroPay, reduceMotion]);
 
+  // Card entrance fade-in + subtle pointer tilt (both reduced-motion-safe).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const [tilt, setTilt] = useState("");
+  // Progressive disclosure: the payment + rate comparison + key markup warning
+  // stay visible (the collapsed summary); the full down-payment x term matrix,
+  // "what we'd do", lease detail, and disclosures live behind this toggle.
+  // Default collapsed; the expand animation is skipped under reduced-motion.
+  const [expanded, setExpanded] = useState(false);
+  const onTilt = e => {
+    if(reduceMotion) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+    setTilt(`rotateY(${(px * 2.4).toFixed(2)}deg) rotateX(${(-py * 2.4).toFixed(2)}deg)`);
+  };
+  const clearTilt = () => setTilt("");
+
+  // No early null-return on a missing price anymore: 'none' mode renders a
+  // price prompt (below) instead of silently disappearing.
+
+  const money = n => `$${Math.round(n).toLocaleString("en-CA")}`;
   const downs = FIN_DOWN.filter(d => d < price);
-  const money = n => `$${Math.round(n).toLocaleString()}`;
 
-  // Illustrative total interest for the caption: 60-mo (or disclosed) term,
-  // $0 down, at the current rate.
-  const refTerm = FIN_TERMS.includes(disclosedTerm) ? disclosedTerm : 60;
-  const refPer = 12; // express total interest on a monthly basis
-  const refPay = aprValid ? amortPayment(price, apr, refPer, refTerm) : 0;
-  const refInterest = refPay > 0 ? refPay * refTerm - price : 0;
+  // Traffic-light triad mapped to the theme-aware brand palette so it reads on
+  // the report's light / dark / outdoor themes (green->teal, amber->butter,
+  // red->coral -- the app's established good/caution/bad coding). Blue
+  // (#3b82f6, already used elsewhere in the app) is reserved for interactive
+  // accents only: the active frequency toggle and the quote-cell outline.
+  const TL = {
+    g: { fg:C.tealInk,   bg:C.tealBg,   bd:C.teal   },
+    a: { fg:C.butterInk, bg:C.butterBg, bd:C.butter },
+    r: { fg:C.coralInk,  bg:C.coralBg,  bd:C.coral  },
+  };
+  const BLUE = "#3b82f6";
+  const bandLabel = b => b === "g" ? "Good rate" : b === "a" ? "Average rate" : b === "r" ? "High rate" : "Rate";
+  const freqSuffix = { monthly:"/mo", biweekly:"/2wk", weekly:"/wk" }[freq.key] || "/mo";
 
-  const chip = { border:`1px solid ${C.line}`, borderRadius:12, padding:"8px 12px", flex:"1 1 120px", minWidth:110 };
-  const th = { padding:"7px 8px", fontSize:11, fontWeight:800, color:C.inkFaint, textAlign:"right", whiteSpace:"nowrap" };
-  const td = { padding:"8px 8px", fontSize:13, color:C.ink, textAlign:"right", fontWeight:700, whiteSpace:"nowrap" };
+  // Benchmark for the dealer/hero band: the manufacturer APR (new) or BoC+2.5
+  // (used). null when it can't be determined -> neutral, never fabricated.
+  const bocRate = (boc && boc !== "error") ? boc.rate : null;
+  const benchmark = isNew ? mfrRate : (bocRate != null ? bocRate + 2.5 : null);
+  const heroBand = aprValid ? bandOf(apr, benchmark) : null;
+  const heroTL = heroBand ? TL[heroBand] : null;
+  const dealerBand = dealerRate != null ? bandOf(dealerRate, benchmark) : null;
+  const dealerTL = dealerBand ? TL[dealerBand] : null;
+
+  // LEASE (Phase 1 -- rates only, no lease payment figures; those need
+  // residual/advertised-payment data we don't yet capture). analysis exposes
+  // only leaseRates.manufacturer (the advertised/manufacturer lease APR) --
+  // there is NO dealer/listing-stated lease APR (no leaseRates.dealer analog
+  // of financeRates.dealer), so the lease view is one-sided. The read below is
+  // forward-compatible: if a leaseRates.dealer ever appears, the two-sided
+  // comparison renders automatically.
+  const leaseDealerRate = analysis?.leaseRates?.dealer?.apr != null ? Number(analysis.leaseRates.dealer.apr) : null;
+  const leaseTwoSided = leaseDealerRate != null && leaseRate != null;
+  // Band benchmark: the manufacturer lease APR when we're banding a *separate*
+  // dealer lease rate against it (two-sided); otherwise BoC+2.5 (same external
+  // benchmark the finance used-vehicle path uses) so a single advertised lease
+  // rate still gets a real green/amber/red reading rather than being compared
+  // to itself. null -> neutral, never fabricated.
+  const leaseBenchmark = leaseTwoSided ? leaseRate : (bocRate != null ? bocRate + 2.5 : null);
+  const leaseRateToBand = leaseTwoSided ? leaseDealerRate : leaseRate;
+  // On a USED vehicle a manufacturer lease is a NEW-car promo -> reference
+  // only, not this car's applicable rate (mirrors the finance guard), so no
+  // applicable band is presented in that case.
+  const leaseApplicable = isNew || leaseTwoSided;
+  const leaseBand = (leaseApplicable && leaseRateToBand != null) ? bandOf(leaseRateToBand, leaseBenchmark) : null;
+  const leaseTL = leaseBand ? TL[leaseBand] : null;
+  const leaseSpread = leaseTwoSided ? (leaseDealerRate - leaseRate) : null;
+
+  // Phase-2 lease PAYMENT. Two mutually-exclusive catalog shapes:
+  //  - manufacturer.payment (source 'advertised'): a FIXED advertised example
+  //    for the scraped dealer's own vehicle -- shown as a reference, NEVER
+  //    recomputed for the user.
+  //  - manufacturer.lease (source 'computed'): residual %, apr, term -> the
+  //    payment is computed HERE on the USER's own price/msrp.
+  const leaseAdvertised = lease?.payment?.source === "advertised" ? lease.payment : null;
+  const leaseComputed = lease?.lease?.source === "computed" ? lease.lease : null;
+  const userMsrp = Number(analysis?.msrp) || null;
+  // Residual-based monthly lease payment for the USER's vehicle (validated
+  // formula, within ~1.65% of a real advertised payment). residualValue =
+  // residualPct x the USER's msrp; capCost = the USER's price minus the down
+  // ($0-down here, matching the hero, so capCost = price). The catalog's
+  // scraped cap_cost/down_payment/selling_price are deliberately NOT used.
+  // No msrp -> no computed payment (a residual can't be honestly derived).
+  let leaseComputedPayment = null;
+  if (leaseApplicable && leaseComputed && userMsrp) {
+    const lterm = leaseComputed.term || leaseTerm || 48;
+    const residualValue = leaseComputed.residualPct * userMsrp;
+    const capCost = Math.max(0, price - quoteDown);
+    const depreciation = (capCost - residualValue) / lterm;
+    const rent = (capCost + residualValue) * (leaseComputed.apr / 2400);
+    const amount = depreciation + rent;
+    if (amount > 0 && Number.isFinite(amount)) {
+      leaseComputedPayment = { amount, term: lterm, annualKm: leaseComputed.annualKm ?? leaseKm, residualPct: leaseComputed.residualPct, apr: leaseComputed.apr };
+    }
+  }
+
+  // Recommendation ("What we'd do") -- tailored bullets, ported from the
+  // reference design's logic and wired to the resolved rates.
+  const monthlyPay = a => amortPayment(Pq, a, 12, quoteTerm);
+  const mpQt = aprValid ? monthlyPay(apr) : 0;
+  const mpShorter = aprValid ? amortPayment(Pq, apr, 12, Math.max(24, quoteTerm > 36 ? quoteTerm - 12 : 24)) : 0;
+  const shorter = quoteTerm > 36 ? quoteTerm - 12 : 24;
+  const intNow = mpQt > 0 ? mpQt * quoteTerm - Pq : 0;
+  const dInt = intNow - (mpShorter * shorter - Pq);
+  const dPayMo = mpShorter - mpQt;
+  const bullets = [];
+  let recHead = "What we'd do";
+  if(aprValid){
+    if(isNew && mfrRate != null && apr - mfrRate > 0.1){
+      const dMfr = (mpQt - monthlyPay(mfrRate)) * quoteTerm;
+      bullets.push(<><b>Ask for {analysis.make}'s {mfrRate}%.</b> The dealer's {apr}% costs ~{money(dMfr)} more over {quoteTerm} months.</>);
+    } else if(isNew && mfrRate != null){
+      recHead = "✓ This one looks fair";
+      bullets.push(<><b>Dealer is offering the advertised rate</b> — no markup to negotiate.</>);
+    } else if(!isNew){
+      if(bocRate != null){
+        const preRate = Math.max(bocRate + 1.5, mfrRate ?? 0);
+        const dPre = (mpQt - monthlyPay(preRate)) * quoteTerm;
+        bullets.push(<><b>Get pre-approved first.</b> {apr}% is {(apr - bocRate).toFixed(1)} pts over the Bank of Canada rate; ~{preRate.toFixed(1)}% would save ~{money(dPre)} over {quoteTerm} months.</>);
+      } else {
+        bullets.push(<><b>Get pre-approved before you sign.</b> Used-car APRs vary widely by lender and credit — a competing pre-approval is your leverage.</>);
+      }
+    }
+    if(dInt > 150) bullets.push(<><b>A shorter term saves interest.</b> {quoteTerm} mo pays {money(intNow)} in interest; {shorter} mo is +{money(dPayMo)}/mo but −{money(dInt)} overall.</>);
+    if(!isNew && mfrRate != null) bullets.push(<><b>{analysis.make}'s rate is a new-car promo</b> — it doesn't apply here; negotiate the number above.</>);
+  }
+  const recColor = heroTL ? heroTL.fg : C.inkSoft;
+
+  // Heatmap grid: shade each cell green->amber->red by its total interest
+  // relative to the min/max across the visible grid. Greener = cheaper.
+  const cellData = downs.map(d => FIN_TERMS.map(t => {
+    const P = price - d;
+    const m = (aprValid && P > 0) ? amortPayment(P, apr, freq.per, t) : 0;
+    const n = (t / 12) * freq.per;
+    const interest = m > 0 ? m * n - P : 0;
+    return { d, t, P, m, interest };
+  }));
+  const allInterest = cellData.flat().filter(c => c.P > 0).map(c => c.interest);
+  const mn = allInterest.length ? Math.min(...allInterest) : 0;
+  const mx = allInterest.length ? Math.max(...allInterest) : 0;
+
+  const vehLine = [analysis?.year, analysis?.make, analysis?.model].filter(Boolean).join(" ");
+  const heroReady = mounted || reduceMotion;
+
+  // 'none' mode: no price at all -- never fabricate a payment matrix off
+  // nothing. Prompt for the real price; entering it flips to user-confirmed
+  // ('user' source) and the full breakdown renders on the next pass.
+  if (priceSource === "none") {
+    return (
+      <div style={{...cardStyle}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+        {vehLine && <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>{vehLine}{analysis?.vehicleCondition?` · ${analysis.vehicleCondition}`:""}</div>}
+        <div style={{fontSize:12.5,color:C.inkSoft,marginTop:10,lineHeight:1.55}}>
+          We couldn't find this vehicle's price, so there's nothing to base a payment on yet. Enter the price to see your financing breakdown.
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"8px 12px"}}>
+            <span style={{color:C.inkFaint,fontSize:15}}>$</span>
+            <input type="number" inputMode="numeric" min="0" placeholder="e.g. 32,000" value={priceStr}
+              onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+              style={{width:120,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,outline:"none"}}/>
+          </div>
+          <span style={{fontSize:12,color:C.inkFaint}}>The vehicle's price before tax.</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={cardStyle}>
-      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:4}}>💳 Financing breakdown</div>
-      <div style={{fontSize:12,color:C.inkFaint,marginBottom:14}}>
-        Estimated payments on the {money(price)} price. Enter your real approved rate to make these exact.
-      </div>
-
-      {/* Rate comparison -- only real anchors are shown */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}}>
-        {dealerRate != null && (
-          <div style={{...chip,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-            <div style={{fontSize:11,color:C.coralInk,fontWeight:800}}>On your quote</div>
-            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{dealerRate}%</div>
-            <div style={{fontSize:10,color:C.inkFaint}}>dealer / lender APR</div>
+    <div style={{ perspective: reduceMotion ? undefined : 1400 }} onMouseMove={onTilt} onMouseLeave={clearTilt}>
+      <div style={{
+        ...cardStyle,
+        transform: tilt || undefined,
+        transformStyle: "preserve-3d",
+        opacity: heroReady ? 1 : 0,
+        translate: heroReady ? "0 0" : "0 16px",
+        transition: reduceMotion ? "none" : "transform .18s cubic-bezier(.16,1,.3,1), opacity .5s ease, translate .5s cubic-bezier(.16,1,.3,1)",
+      }}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+            <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>
+              {vehLine ? `${vehLine} · ` : ""}
+              {priceSource === "msrp"
+                ? <>estimated from the <b style={{color:C.inkSoft}}>{money(price)}</b> MSRP</>
+                : priceSource === "user"
+                ? <>based on the price you entered <b style={{color:C.inkSoft}}>{money(price)}</b></>
+                : <>based on the listed price <b style={{color:C.inkSoft}}>{money(price)}</b></>}
+              {analysis?.vehicleCondition ? ` · ${analysis.vehicleCondition}` : ""}
+              {priceSource === "listing" && analysis?.quotedPriceSource === "sm360_feed" && (
+                <span style={{color:C.tealInk,fontWeight:700}}> · verified from dealer listing</span>
+              )}
+            </div>
           </div>
-        )}
-        {mfrRate != null && (
-          <div style={{...chip,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-            <div style={{fontSize:11,color:C.tealInk,fontWeight:800}}>{analysis.make||"Manufacturer"} advertised{mfr?.promo?" · promo":""}</div>
-            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{mfrRate}%</div>
-            <div style={{fontSize:10,color:C.inkFaint}}>{mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"manufacturer rate"}</div>
+        </div>
+
+        {/* HERO: the payment leads, with the editable APR as the hero control.
+            Glow + band pill are traffic-light coloured by how the rate compares
+            to its benchmark (manufacturer when new, BoC+2.5 when used). */}
+        <div style={{
+          marginTop:14, borderRadius:16, padding:"16px 18px",
+          display:"flex", alignItems:"center", justifyContent:"space-between", gap:16, flexWrap:"wrap",
+          background: heroTL ? heroTL.bg : C.paper2,
+          border: `1px solid ${heroTL ? heroTL.bd : C.line}`,
+          boxShadow: (heroTL && !reduceMotion) ? `0 0 34px -12px ${heroTL.bd}` : "none",
+          transition: reduceMotion ? "none" : "box-shadow .4s ease, border-color .4s ease, background .4s ease",
+        }}>
+          <div>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>{priceSource === "msrp" ? "Estimated payment (from MSRP)" : "Your estimated payment"}</div>
+            <div style={{fontSize:40,fontWeight:800,letterSpacing:-1.5,lineHeight:1,marginTop:5,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {aprValid ? money(shownPay) : "—"}<span style={{fontSize:14,color:C.inkFaint,fontWeight:600,letterSpacing:0}}>{aprValid ? freqSuffix : ""}</span>
+            </div>
+            <div style={{fontSize:12,color:C.inkFaint,marginTop:7}}>at {aprValid ? apr : "—"}% · {money(quoteDown)} down · {quoteTerm} months</div>
+            {heroBand && (
+              <div style={{display:"inline-block",fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:20,marginTop:9,background:heroTL.bg,color:heroTL.fg}}>{bandLabel(heroBand)}</div>
+            )}
           </div>
-        )}
-        {leaseRate != null && (
-          <div style={{...chip,background:C.butterBg,border:`1px solid ${C.butter}55`}}>
-            <div style={{fontSize:11,color:C.butterInk,fontWeight:800}}>{analysis.make||"Manufacturer"} lease</div>
-            <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{leaseRate}%</div>
-            <div style={{fontSize:10,color:C.inkFaint}}>{leaseTerm?`${leaseTerm}mo`:"lease rate"}{leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}</div>
-          </div>
-        )}
-        <div style={chip}>
-          <div style={{fontSize:11,color:C.inkSoft,fontWeight:800}}>Bank of Canada</div>
-          {boc === null ? (
-            <div style={{fontSize:18,fontWeight:1000,color:C.inkFaint}}>…</div>
-          ) : boc === "error" ? (
-            <a href="https://www.bankofcanada.ca/rates/interest-rates/canadian-interest-rates/" target="_blank" rel="noopener noreferrer"
-               style={{fontSize:13,fontWeight:800,color:C.teal,textDecoration:"none"}}>see current rate →</a>
-          ) : (
-            <>
-              <div style={{fontSize:18,fontWeight:1000,color:C.ink}}>{boc.rate}%</div>
-              <div style={{fontSize:10,color:C.inkFaint}}>policy rate · as of {boc.date}</div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {!rateIsReal && (
-        <div style={{fontSize:12,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
-          Your quote didn't disclose a financing rate, so the table below uses a rate you can edit.
-          The Bank of Canada rate is the benchmark lenders price off — your car-loan APR sits above it.
-          Ask the dealer for their exact APR.
-        </div>
-      )}
-
-      {/* Controls: rate + frequency */}
-      <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end",marginBottom:12}}>
-        <div>
-          <div style={{fontSize:11,color:C.inkFaint,fontWeight:800,marginBottom:4}}>Rate to calculate with (APR %)</div>
-          <input
-            type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
-            onChange={e => setApr(e.target.value)}
-            style={{width:110,background:C.paper,border:`2px solid ${aprValid?C.line:C.coral}`,borderRadius:10,padding:"9px 12px",color:C.ink,fontSize:15,fontWeight:800,outline:"none",boxSizing:"border-box"}}
-          />
-        </div>
-        <div style={{display:"inline-flex",gap:4,background:C.paper2,borderRadius:10,padding:4}}>
-          {FIN_FREQS.map(f => (
-            <button key={f.key} onClick={() => setFreqKey(f.key)}
-              style={{background:freqKey===f.key?C.teal:"transparent",color:freqKey===f.key?"#fff":C.inkSoft,border:"none",borderRadius:7,padding:"7px 12px",fontSize:12,fontWeight:800,cursor:"pointer"}}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Payment matrix: rows = down payment, cols = term */}
-      <div style={{overflowX:"auto",margin:"0 -4px"}}>
-        <table style={{borderCollapse:"collapse",width:"100%",minWidth:340}}>
-          <thead>
-            <tr>
-              <th style={{...th,textAlign:"left"}}>Down ↓ / Term →</th>
-              {FIN_TERMS.map(t => (
-                <th key={t} style={{...th,background:t===disclosedTerm?C.tealBg:"transparent",borderRadius:t===disclosedTerm?"6px 6px 0 0":0}}>{t} mo</th>
+          <div style={{display:"flex",flexDirection:"column",gap:7,alignItems:"flex-end"}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your rate (edit)</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${aprValid ? C.line : C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+              <input type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
+                onChange={e => setApr(e.target.value)}
+                style={{width:70,background:"transparent",border:0,color:C.ink,fontSize:19,fontWeight:700,textAlign:"right",outline:"none"}}/>
+              <span style={{color:C.inkFaint,fontSize:14}}>%</span>
+            </div>
+            <div style={{display:"inline-flex",gap:4,background:C.paper2,borderRadius:10,padding:3}}>
+              {FIN_FREQS.map(f => (
+                <button key={f.key} onClick={() => setFreqKey(f.key)}
+                  style={{background:freqKey===f.key?BLUE:"transparent",color:freqKey===f.key?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"5px 11px",fontSize:12,fontWeight:800,cursor:"pointer",transition:reduceMotion?"none":"background .18s"}}>
+                  {f.label}
+                </button>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {downs.map((d,ri) => (
-              <tr key={d}>
-                <td style={{padding:"8px 8px",fontSize:12,fontWeight:800,color:C.inkSoft,textAlign:"left",borderTop:`1px solid ${C.line}`,whiteSpace:"nowrap"}}>
-                  {d === 0 ? "$0 (full price)" : `${money(d)} down`}
-                </td>
-                {FIN_TERMS.map(t => {
-                  const pay = aprValid ? amortPayment(price - d, apr, freq.per, t) : 0;
-                  return (
-                    <td key={t} style={{...td,borderTop:`1px solid ${C.line}`,color:t===disclosedTerm?C.tealInk:C.ink,background:t===disclosedTerm?C.tealBg:"transparent"}}>
-                      {aprValid ? money(pay) : "—"}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div style={{fontSize:12,color:C.inkFaint,marginTop:6}}>Payment shown <b>{freq.label.toLowerCase()}</b>{disclosedTerm?` · your quote's ${disclosedTerm}-mo term is highlighted`:""}.</div>
-
-      {aprValid && refInterest > 0 && (
-        <div style={{fontSize:12,color:C.inkSoft,marginTop:10,lineHeight:1.5}}>
-          At {apr}% over {refTerm} months with $0 down, you'd pay about <b>{money(refInterest)}</b> in interest on top of the {money(price)} price.
-        </div>
-      )}
-
-      {analysis.financingCheck?.checked && analysis.financingCheck.note && (
-        <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
-          <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
-            {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+            </div>
           </div>
-          <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
         </div>
-      )}
 
-      {ratesAsOf && (
-        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,display:"flex",alignItems:"center",gap:6}}>
-          <span>🕑</span>
-          <span>Manufacturer {leaseRate!=null&&mfrRate!=null?"finance & lease ":mfrRate!=null?"finance ":"lease "}rates as of <b>{fmtDate(ratesAsOf)}</b>, from {analysis.make||"the maker"}'s advertised rates — refreshed daily.</span>
+        {/* ESTIMATE MODE (source 'msrp'): the listing's real price wasn't
+            confirmed, so everything below is computed off MSRP. Loud, unmissable
+            warning + an editable price. Typing a real price flips the card to
+            user-confirmed and drops this banner. Never call an MSRP "listed". */}
+        {priceSource === "msrp" && (
+          <div style={{marginTop:14,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12.5,color:C.coralInk,fontWeight:800,lineHeight:1.55}}>
+              ⚠ We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:12,fontWeight:700,color:C.coralInk}}>Actual listing price:</span>
+              <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+                <span style={{color:C.inkFaint,fontSize:14}}>$</span>
+                <input type="number" inputMode="numeric" min="0" value={priceStr}
+                  onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                  style={{width:110,background:"transparent",border:0,color:C.ink,fontSize:18,fontWeight:700,textAlign:"right",outline:"none"}}/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* User-confirmed price (source 'user'): the buyer typed a real price,
+            so the card recomputed off it and the estimate warning is gone. Keep
+            the field visible so they can correct it. */}
+        {priceSource === "user" && (
+          <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,color:C.inkSoft}}>Using the price you entered:</span>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"5px 9px"}}>
+              <span style={{color:C.inkFaint,fontSize:13}}>$</span>
+              <input type="number" inputMode="numeric" min="0" value={priceStr}
+                onChange={e=>{setPriceStr(e.target.value);setPriceConfirmed(true);}}
+                style={{width:100,background:"transparent",border:0,color:C.ink,fontSize:16,fontWeight:700,textAlign:"right",outline:"none"}}/>
+            </div>
+          </div>
+        )}
+
+        {/* ── COLLAPSED SUMMARY ────────────────────────────────────────────
+            The rate comparison (on-your-quote vs manufacturer vs Bank of
+            Canada) and the key markup warning stay visible above the toggle,
+            per the approved condensed layout. The full payment matrix, the
+            "what we'd do" recommendation, lease detail, and all disclosures
+            move behind the expander below. */}
+
+        {/* Rate anchors -- only real ones; each coloured by its own band */}
+        <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:14}}>
+          {dealerRate != null && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:dealerTL?dealerTL.bg:C.paper2,border:`1px solid ${dealerTL?dealerTL.bd:C.line}`}}>
+              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>On your quote</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:dealerTL?dealerTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>{dealerRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{dealerBand?bandLabel(dealerBand).toLowerCase():"dealer / lender APR"}</div>
+            </div>
+          )}
+          {mfrRate != null && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:isNew?C.tealBg:"transparent",border:isNew?`1px solid ${C.teal}`:`1px dashed ${C.line}`,opacity:isNew?1:.72}}>
+              <div style={{fontSize:10.5,color:isNew?C.tealInk:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{analysis.make||"Manufacturer"} {isNew?`advertised${mfr?.promo?" · promo":""}`:"new-car"}</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:isNew?C.tealInk:C.inkSoft,fontVariantNumeric:"tabular-nums"}}>{mfrRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{isNew?(mfr?.effectiveDate?`as of ${mfr.effectiveDate}`:"best available"):"reference only"}</div>
+            </div>
+          )}
+          {/* LEASE APR (Phase 1: rates only). Two-sided (dealer-lease vs
+              manufacturer-lease, with spread) only if a dealer/listing lease
+              APR is ever present; today analysis has only the advertised
+              manufacturer lease rate, so this renders one clearly-labelled,
+              band-coloured chip. On used, the manufacturer lease is a NEW-car
+              promo -> reference only (dashed, no applicable band). */}
+          {leaseTwoSided && (
+            <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:leaseTL?leaseTL.bg:C.paper2,border:`1px solid ${leaseTL?leaseTL.bd:C.line}`}}>
+              <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Lease · on your quote</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>{leaseDealerRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseBand?bandLabel(leaseBand).toLowerCase():"dealer lease APR"}</div>
+            </div>
+          )}
+          {leaseRate != null && (
+            <div style={{
+              borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",
+              background: leaseApplicable ? (leaseTL?leaseTL.bg:C.paper2) : "transparent",
+              border: leaseApplicable ? `1px solid ${leaseTL?leaseTL.bd:C.line}` : `1px dashed ${C.line}`,
+              opacity: leaseApplicable ? 1 : .72,
+            }}>
+              <div style={{fontSize:10.5,color:leaseApplicable&&leaseTL?leaseTL.fg:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>{leaseTwoSided?`${analysis.make||"Manufacturer"} lease`:`${analysis.make||"Advertised"} ${isNew?"advertised lease":"new-car lease"}`}</div>
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:leaseApplicable?(leaseTL?leaseTL.fg:C.ink):C.inkSoft,fontVariantNumeric:"tabular-nums"}}>{leaseRate}%</div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{leaseApplicable&&!leaseTwoSided&&leaseBand?`${bandLabel(leaseBand).toLowerCase()} · `:""}{!leaseApplicable?"reference only":`${leaseTerm?`${leaseTerm}mo`:"lease rate"}${leaseKm?` · ${leaseKm.toLocaleString()} km/yr`:""}`}</div>
+            </div>
+          )}
+          <div style={{borderRadius:13,padding:"8px 12px",minWidth:108,flex:"1 1 120px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:10.5,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Bank of Canada</div>
+            {boc === null ? (
+              <div style={{fontSize:16,fontWeight:800,marginTop:2,color:C.inkFaint}}>…</div>
+            ) : boc === "error" ? (
+              <a href="https://www.bankofcanada.ca/rates/interest-rates/canadian-interest-rates/" target="_blank" rel="noopener noreferrer"
+                 style={{fontSize:13,fontWeight:800,color:BLUE,textDecoration:"none"}}>see current rate →</a>
+            ) : (
+              <>
+                <div style={{fontSize:16,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{boc.rate}%</div>
+                <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>policy rate · as of {boc.date}</div>
+              </>
+            )}
+          </div>
         </div>
-      )}
 
-      <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
-        Estimate only. Financed amount = price − down payment; excludes tax, fees, trade-in, and any manufacturer promo. Actual payments depend on the APR and term you're approved for.
+        {/* Dealer-vs-manufacturer markup warning -- same gate (new vehicle,
+            spread > 0.1%) and extra-cost math (both APRs amortized over 60 mo
+            on the price, difference of totals) as main's card. Kept in the
+            collapsed summary as the key warning. */}
+        {isNew && spread != null && spread > 0.1 && (()=>{
+          const pd = price*(dealerRate/1200)/(1-Math.pow(1+dealerRate/1200,-60));
+          const pm = price*(mfrRate/1200)/(1-Math.pow(1+mfrRate/1200,-60));
+          const extra = Math.round((pd-pm)*60);
+          return (
+            <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+            </div>
+          );
+        })()}
+
+        {/* Expand/collapse control for the full breakdown. Reduced-motion-safe:
+            the chevron rotation and the grid-rows reveal both drop their
+            transition when the user prefers reduced motion. */}
+        <button onClick={()=>setExpanded(v=>!v)} aria-expanded={expanded}
+          style={{width:"100%",marginTop:14,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:12,color:C.ink,font:"inherit",fontWeight:800,fontSize:13,padding:"11px 14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          <span>{expanded?"Hide the full breakdown":"Explore down payment & term — every scenario"}</span>
+          <span style={{transform:expanded?"rotate(180deg)":"none",transition:reduceMotion?"none":"transform .3s ease",lineHeight:1}}>▾</span>
+        </button>
+
+        {/* ── EXPANDED DETAIL (default collapsed) ──────────────────────────── */}
+        <div style={{display:"grid",gridTemplateRows:expanded?"1fr":"0fr",transition:reduceMotion?"none":"grid-template-rows .35s ease",overflow:"hidden"}}>
+          <div style={{minHeight:0,overflow:"hidden"}}>
+            <div style={{paddingTop:16}}>
+
+        {/* Heatmap: down payment x term, shaded by relative total interest */}
+        <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:0,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
+        <div style={{overflowX:"auto",margin:"0 -4px"}}>
+          <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>Down \ term</th>
+                {FIN_TERMS.map(t => (
+                  <th key={t} style={{textAlign:"right",color:C.inkFaint,fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:.3,padding:"6px 5px"}}>{t} mo</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cellData.map((row,ri) => (
+                <tr key={downs[ri]}>
+                  <td style={{textAlign:"left",color:C.inkSoft,fontWeight:700,padding:"6px 5px",whiteSpace:"nowrap"}}>{downs[ri]===0?"$0":money(downs[ri])}</td>
+                  {row.map(cell => {
+                    const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
+                    const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
+                    const hTL = h ? TL[h] : null;
+                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
+                    return (
+                      <td key={cell.t} style={{
+                        textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
+                        background: hTL ? hTL.bg : "transparent",
+                        outline: isQuote ? `2px solid ${BLUE}` : "none", outlineOffset:-2,
+                      }}>
+                        {aprValid && cell.P > 0 ? (
+                          <>
+                            <div style={{fontWeight:700,color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(cell.m)}</div>
+                            <div style={{fontSize:10,color:hTL?hTL.fg:C.inkFaint,fontVariantNumeric:"tabular-nums"}}>{money(cell.interest)}</div>
+                          </>
+                        ) : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>
+          Top number is the {freq.label.toLowerCase()} payment; below it is the total interest. Cell shade = relative total interest across this grid; <span style={{color:BLUE,fontWeight:800}}>blue outline</span> = your quote's {quoteTerm}-mo term.
+        </div>
+
+        {/* New-vs-used guard: on a USED vehicle the manufacturer's advertised
+            rate is a NEW-car offer, flagged reference-only (main's exact copy). */}
+        {mfrRate != null && !isNew && (
+          <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+            Reference only: {analysis.make} advertises this on a NEW {analysis.make}. This vehicle is USED, so it doesn't apply — used-car financing is set by the dealer/lender and is usually higher.
+          </div>
+        )}
+
+        {/* Recommendation: what we'd do, bullets coloured by the rate's band */}
+        {bullets.length > 0 && (
+          <div style={{marginTop:14,borderRadius:14,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:12.5,fontWeight:800,color:C.ink}}>{recHead}</div>
+            <ul style={{margin:"8px 0 0",padding:0,listStyle:"none",display:"flex",flexDirection:"column",gap:6}}>
+              {bullets.map((b,i) => (
+                <li key={i} style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,display:"flex",gap:8}}>
+                  <span style={{color:recColor,fontWeight:900}}>→</span>
+                  <span>{b}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* LEASE markup warning (forward-compatible): only when a dealer/listing
+            lease APR exists alongside the manufacturer lease rate on a new
+            vehicle. Mirrors the finance spread treatment, rate-only (no lease
+            extra-cost dollar figure). */}
+        {leaseTwoSided && isNew && leaseSpread != null && leaseSpread > 0.1 && (
+          <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (COMPUTED track: Ford/Nissan etc). Residual-
+            based estimate on the USER's own price/msrp -- assumptions visible.
+            Only when applicable (never presented as this car's rate on a used
+            vehicle) and only when we have the user's msrp to derive a residual. */}
+        {leaseComputedPayment && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:leaseTL?leaseTL.bg:C.tealBg,border:`1px solid ${leaseTL?leaseTL.bd:C.teal}55`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Estimated lease payment</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:leaseTL?leaseTL.fg:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseComputedPayment.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              Residual-based on your {money(price)} price at {leaseComputedPayment.apr}% · {(leaseComputedPayment.residualPct*100).toFixed(0)}% residual of {money(userMsrp)} MSRP · {leaseComputedPayment.term} mo{leaseComputedPayment.annualKm?` · ${leaseComputedPayment.annualKm.toLocaleString()} km/yr`:""} · $0 down.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              Estimate from the manufacturer's residual and lease rate applied to your vehicle — excludes tax, fees, and any lease incentives. Confirm the residual and money factor with the dealer.
+            </div>
+          </div>
+        )}
+
+        {/* Phase-2 lease payment (ADVERTISED track: BMW/Mercedes/Infiniti/GM).
+            A FIXED advertised example for the scraped dealer's vehicle -- shown
+            as a reference, NOT recomputed for the user's price. Suppressed on a
+            used vehicle (new-car advertised promo doesn't apply). */}
+        {leaseAdvertised && leaseAdvertised.amount != null && leaseApplicable && (
+          <div style={{marginTop:12,borderRadius:12,padding:"12px 14px",background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.5}}>Dealer's advertised lease example</div>
+            <div style={{fontSize:24,fontWeight:800,marginTop:2,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
+              {money(leaseAdvertised.amount)}<span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>/mo</span>
+              {leaseAdvertised.withTax != null && <span style={{fontSize:12,color:C.inkFaint,fontWeight:600}}> · {money(leaseAdvertised.withTax)}/mo w/ tax</span>}
+            </div>
+            <div style={{fontSize:11.5,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+              {analysis.make}'s advertised example{leaseAdvertised.sellingPrice!=null?` for a ${money(leaseAdvertised.sellingPrice)} vehicle`:""}{leaseAdvertised.term?` · ${leaseAdvertised.term} mo`:""}{leaseAdvertised.annualKm?` · ${leaseAdvertised.annualKm.toLocaleString()} km/yr`:""}{leaseRate!=null?` · at ${leaseRate}%`:""}.
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>
+              A fixed advertised figure — not recomputed for your {money(price)} vehicle. Your payment depends on the negotiated price, down payment, and term.
+            </div>
+          </div>
+        )}
+
+        {/* One-sided lease note: analysis carries only the advertised lease
+            rate, so there's no dealer-lease rate to compare against. Keep it
+            honest -- say so, and don't invent a second number. */}
+        {leaseRate != null && !leaseTwoSided && (
+          <div style={{fontSize:12,color:C.inkSoft,marginTop:12,lineHeight:1.5,padding:"8px 10px",background:C.paper,border:`1px dashed ${C.line}`,borderRadius:10}}>
+            {isNew
+              ? <>Lease shown is {analysis.make}'s advertised lease APR. A side-by-side lease comparison — your dealer's lease rate vs this — needs a lease rate stated on the listing.</>
+              : <>{analysis.make}'s lease rate is a new-car promo, shown for reference — it doesn't apply to a used vehicle. A side-by-side lease comparison needs a lease rate stated on the listing.</>}
+          </div>
+        )}
+
+        {!rateIsReal && (
+          <div style={{fontSize:12,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+            Your quote didn't disclose a financing rate, so the numbers use a rate you can edit above.
+            The Bank of Canada rate is the benchmark lenders price off — your car-loan APR sits above it.
+          </div>
+        )}
+
+        {analysis.financingCheck?.checked && analysis.financingCheck.note && (
+          <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
+            <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
+              {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+            </div>
+            <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
+          </div>
+        )}
+
+        {ratesAsOf && (
+          <div style={{fontSize:11,color:C.inkFaint,marginTop:12,display:"flex",alignItems:"center",gap:6}}>
+            <span>🕑</span>
+            <span>Manufacturer {leaseRate!=null&&mfrRate!=null?"finance & lease ":mfrRate!=null?"finance ":"lease "}rates as of <b>{fmtDate(ratesAsOf)}</b>, from {analysis.make||"the maker"}'s advertised rates — refreshed daily.</span>
+          </div>
+        )}
+
+        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+          Estimate only. Financed amount = price − down payment; excludes tax, fees, trade-in, and any manufacturer promo. Actual payments depend on the APR and term you're approved for.
+        </div>
+
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+// ── Magic-link sign-in modal ──────────────────────────────────────────────────
+// Passwordless (OTP) sign-in for the public app. Sends a one-time sign-in link
+// to the entered email via supabase.auth.signInWithOtp; the link returns the
+// user to /quote-check, where detectSessionInUrl establishes the session. Themed
+// with the QuoteCheckPage palette (C) so it matches whatever mode the page is in
+// (dark/light/outdoor), reusing the app's .lc-modal-overlay backdrop. This only
+// requests the link -- session creation happens on the redirect back.
+// Small envelope glyph shared by the sign-in hero + success animation. Pure
+// SVG (no emoji) so it stays crisp and takes the stroke colour of whatever
+// chip it sits on.
+function SignInEnvelope({size=22, stroke="#fff", width=2}){
+  return (
+    <svg width={size} height={Math.round(size*0.72)} viewBox="0 0 24 17" fill="none" aria-hidden="true">
+      <rect x="1" y="1.2" width="22" height="14.6" rx="2.6" stroke={stroke} strokeWidth={width}/>
+      <path d="M2.4 3.2 12 10l9.6-6.8" stroke={stroke} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// LotCheck-style isometric hero for the sign-in form: a tilted violet runway
+// down which one-time-link chips advance forward toward the viewer, aiming at
+// a glowing teal destination line (the inbox). Matches the app's IsoScanVisual
+// idiom (perspective + rotateX(52deg) tilt + translateZ) and the referral/MSRP
+// 3D language (violet #8b5cf6 / teal #4fd8c4 glass, forward-moving chips).
+// Motion is CSS-only; prefers-reduced-motion parks each chip on its inline
+// resting frame (a static isometric stack) via the QC_CSS media query.
+function SignInLinkHero(){
+  const V="#8b5cf6", VL="#a78bfa", TB="#4fd8c4";
+  const face={
+    position:"absolute",width:46,height:32,margin:"-16px 0 0 -23px",borderRadius:9,
+    transform:"rotateX(-52deg)",display:"grid",placeItems:"center",
+    background:`linear-gradient(150deg, ${VL}, ${V})`,
+    boxShadow:`0 12px 24px -8px ${V}99, inset 0 1px 0 rgba(255,255,255,.4)`,
+  };
+  // Each chip: a moving wrapper (animated) + a billboarded face. The inline
+  // transform is the reduced-motion resting frame; the animation overrides it
+  // while running.
+  const chips=[
+    {"--x":"-9px", delay:"0s",    rest:"translate3d(-9px,-30px,8px)"},
+    {"--x":"6px",  delay:"0.8s",  rest:"translate3d(6px,0px,30px)"},
+    {"--x":"-3px", delay:"1.6s",  rest:"translate3d(-3px,30px,50px)"},
+  ];
+  return (
+    <div style={{height:104,perspective:600,perspectiveOrigin:"50% 40%",position:"relative",margin:"2px 0 6px"}}>
+      <div style={{position:"absolute",inset:0,transformStyle:"preserve-3d",transform:"translateY(8px) rotateX(52deg)"}}>
+        {/* isometric floor grid */}
+        <div style={{
+          position:"absolute",left:"50%",top:"46%",width:200,height:150,margin:"-75px 0 0 -100px",
+          background:"linear-gradient(rgba(139,92,246,.16) 1px,transparent 1px) 0 0/28px 28px,"
+            +"linear-gradient(90deg,rgba(139,92,246,.16) 1px,transparent 1px) 0 0/28px 28px",
+          WebkitMaskImage:"radial-gradient(circle at 50% 46%,#000 30%,transparent 74%)",
+          maskImage:"radial-gradient(circle at 50% 46%,#000 30%,transparent 74%)",
+        }}/>
+        {/* glowing teal destination line (the inbox the link is headed to) */}
+        <div className="lc-si-line" style={{
+          position:"absolute",left:"50%",top:"63%",width:118,height:4,margin:"-2px 0 0 -59px",borderRadius:3,
+          background:`linear-gradient(90deg,transparent,${TB},transparent)`,
+          boxShadow:`0 0 14px ${TB}`,animation:"lc-si-glow 2.4s ease-in-out infinite",
+        }}/>
+        {/* forward-advancing link chips */}
+        {chips.map((c,i)=>(
+          <div key={i} className="lc-si-chip" style={{
+            position:"absolute",left:"50%",top:"46%",width:0,height:0,opacity:1,
+            transform:c.rest, "--x":c["--x"],
+            animation:"lc-si-advance 2.4s linear infinite", animationDelay:c.delay,
+          }}>
+            <div style={face}><SignInEnvelope size={20}/></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Success ("link sent") 3D element: a teal envelope that flies forward once,
+// growing and rising toward the camera -- reinforcing "your link is on its
+// way." Reduced motion parks it on the arrived frame (its inline transform).
+function SignInSentHero(){
+  const restFrame="translate3d(0px,24px,58px) scale(1)"; // final = arrived frame
+  return (
+    <div style={{height:96,perspective:620,perspectiveOrigin:"50% 42%",position:"relative",margin:"0 0 4px"}}>
+      <div style={{position:"absolute",inset:0,transformStyle:"preserve-3d",transform:"translateY(6px) rotateX(52deg)"}}>
+        {/* two speed lines on the runway to sell the forward launch */}
+        {[-16,16].map((x,i)=>(
+          <div key={i} className="lc-si-line" style={{
+            position:"absolute",left:"50%",top:"50%",width:3,height:70,margin:"-35px 0 0 -1.5px",
+            transform:`translate3d(${x}px,0px,0px)`,borderRadius:3,
+            background:"linear-gradient(rgba(79,216,196,.55),transparent)",
+            animation:"lc-si-glow 1.4s ease-in-out infinite",animationDelay:i?"0.2s":"0s",
+          }}/>
+        ))}
+        <div className="lc-si-env" style={{
+          position:"absolute",left:"50%",top:"42%",width:0,height:0,opacity:1,transform:restFrame,
+          animation:"lc-si-fly 1.15s cubic-bezier(.4,0,.2,1) forwards",
+        }}>
+          <div style={{
+            position:"absolute",width:66,height:46,margin:"-23px 0 0 -33px",borderRadius:12,
+            transform:"rotateX(-52deg)",display:"grid",placeItems:"center",
+            background:"linear-gradient(150deg,#5ff0d6,#2bb39c)",
+            boxShadow:"0 16px 30px -8px rgba(79,216,196,.6), inset 0 1px 0 rgba(255,255,255,.45)",
+          }}>
+            <SignInEnvelope size={30} stroke="#06342e" width={2.1}/>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Disposable / temporary-email domains. Free personal credit is no longer minted
+// on signup (see fn_grant_signup), so this is not the primary farming defense —
+// it just keeps obvious throwaway inboxes out of the magic-link flow. Small,
+// hand-kept list of the common ones rather than an exhaustive service.
+const DISPOSABLE_EMAIL_DOMAINS=new Set([
+  "mailinator.com","guerrillamail.com","guerrillamail.info","sharklasers.com",
+  "10minutemail.com","10minutemail.net","tempmail.com","temp-mail.org","tempmail.net",
+  "tempmailo.com","yopmail.com","yopmail.fr","throwawaymail.com","getnada.com",
+  "nada.email","trashmail.com","trashmail.de","dispostable.com","maildrop.cc",
+  "mailnesia.com","fakeinbox.com","mohmal.com","emailondeck.com","mytemp.email",
+  "spam4.me","moakt.com","tempr.email","discard.email","getairmail.com",
+]);
+
+// Normalize an email for comparison/dedupe: lowercase + trim, and for Gmail
+// (gmail.com / googlemail.com) strip the +tag and dots in the local part, since
+// Gmail treats those as the same inbox. NOTE: Supabase Auth stores its own copy
+// of the email, so this is mainly for future client-side dedupe — the real
+// multi-account farming defense is the share-only signup grant, not this.
+export function normalizeEmail(email){
+  const raw=(email||"").trim().toLowerCase();
+  const at=raw.lastIndexOf("@");
+  if(at<0) return raw;
+  let local=raw.slice(0,at);
+  const domain=raw.slice(at+1);
+  if(domain==="gmail.com"||domain==="googlemail.com"){
+    local=local.split("+")[0].replace(/\./g,"");
+  }
+  return local+"@"+domain;
+}
+
+function isDisposableEmail(email){
+  const at=(email||"").trim().toLowerCase().lastIndexOf("@");
+  if(at<0) return false;
+  const domain=(email||"").trim().toLowerCase().slice(at+1);
+  return DISPOSABLE_EMAIL_DOMAINS.has(domain);
+}
+
+function SignInModal({C, cardStyle, onClose, notice}){
+  const [email,setEmail]=useState("");
+  const [phase,setPhase]=useState("form"); // form | sending | sent | error
+  const [errMsg,setErrMsg]=useState("");
+
+  function validEmail(v){
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v||"").trim());
+  }
+
+  async function sendLink(){
+    const addr=email.trim();
+    if(!validEmail(addr)){
+      setPhase("error");
+      setErrMsg("That doesn't look like a valid email address.");
+      return;
+    }
+    if(isDisposableEmail(addr)){
+      setPhase("error");
+      setErrMsg("Please use a permanent email address.");
+      return;
+    }
+    setErrMsg("");
+    setPhase("sending");
+    try{
+      const {error}=await supabase.auth.signInWithOtp({
+        email:addr,
+        options:{emailRedirectTo:window.location.origin+"/quote-check"},
+      });
+      if(error){
+        setPhase("error");
+        setErrMsg(error.message||"Couldn't send the sign-in link. Please try again.");
+        return;
+      }
+      setPhase("sent");
+    }catch(err){
+      setPhase("error");
+      setErrMsg("Couldn't reach the sign-in service. Check your connection and try again.");
+    }
+  }
+
+  const inputStyle={
+    width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,
+    padding:"12px 14px",color:C.ink,fontSize:15,outline:"none",boxSizing:"border-box",
+  };
+
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{...cardStyle,width:"100%",maxWidth:420,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:16,fontWeight:1000,color:C.ink}}>Sign in to LotCheck</div>
+          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,cursor:"pointer",lineHeight:1,display:"grid",placeItems:"center",padding:2}}>
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+
+        {notice&&phase!=="sent"&&(
+          <div style={{background:C.tealBg,border:`1px solid ${C.teal}55`,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13,color:C.tealInk,fontWeight:700,lineHeight:1.5}}>
+            {notice}
+          </div>
+        )}
+
+        {phase==="sent"?(
+          <div style={{textAlign:"center",padding:"0 0 4px"}}>
+            <SignInSentHero/>
+            <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>Check your inbox</div>
+            <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
+              We sent a sign-in link to <span style={{fontWeight:800,color:C.ink}}>{email.trim()}</span>. Open it on this device to finish signing in.
+            </div>
+            <button onClick={onClose} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,fontSize:14,cursor:"pointer"}}>Got it</button>
+          </div>
+        ):(
+          <>
+            <SignInLinkHero/>
+            <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:14}}>
+              Enter your email and we'll send you a one-time sign-in link. No password needed.
+            </div>
+            <input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="you@email.com"
+              value={email}
+              onChange={e=>{setEmail(e.target.value);if(phase==="error")setPhase("form");}}
+              onKeyDown={e=>{if(e.key==="Enter"&&phase!=="sending")sendLink();}}
+              style={inputStyle}
+            />
+            {phase==="error"&&(
+              <div style={{fontSize:12,color:C.coralInk,marginTop:8,fontWeight:700}}>{errMsg}</div>
+            )}
+            <button
+              onClick={sendLink}
+              disabled={phase==="sending"}
+              style={{width:"100%",marginTop:14,background:phase==="sending"?C.inkFaint:C.teal,border:"none",borderRadius:12,padding:"14px 0",color:"#fff",fontSize:15,fontWeight:800,cursor:phase==="sending"?"default":"pointer",opacity:phase==="sending"?0.8:1}}>
+              {phase==="sending"?"Sending…":"Email me a sign-in link →"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Quote Check paywall ─────────────────────────────────────────────────
+// Opened when a signed-in user is out of credits (the edge function returns
+// HTTP 402 {error:"out_of_credits"}). Shows the three packs. Real Stripe
+// checkout is a later phase, so every Buy button is disabled / "Coming soon" --
+// this is display-only, it never grants credits client-side. Styled to match
+// SignInModal (same lc-modal-overlay + cardStyle + QC theme colours).
+function QuotePaywallModal({C, cardStyle, onClose}){
+  const packs=[
+    {name:"Free",       price:"$0",     checks:"1 check",   share:"+1 to share", note:"Your current plan", best:false},
+    {name:"5 checks",   price:"$9.99",  checks:"5 checks",  share:"+1 to share", note:null,               best:false},
+    {name:"10 checks",  price:"$14.99", checks:"10 checks", share:"+2 to share", note:null,               best:true},
+  ];
+  return(
+    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{...cardStyle,width:"100%",maxWidth:460,margin:16,marginBottom:16,boxShadow:C.cardShadow,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        <style>{`
+          /* Solid, bold, BRIGHT letters (fully legible) with a scanner nod:
+             the ISBN line + a thin sweeping beam — no stripe-clipping of text. */
+          .fx-barcode{
+            position:relative; display:inline-block;
+            font-family:'Nunito',system-ui,-apple-system,sans-serif;
+            font-weight:900; font-size:21px; line-height:1.15; letter-spacing:.005em;
+            color:var(--fx-ink);
+            text-shadow:0 0 18px color-mix(in srgb, var(--fx-ink) 45%, transparent);
+            padding-bottom:14px;
+          }
+          .fx-barcode::before{
+            content:"9 780316 668111";
+            position:absolute; top:100%; left:0; margin-top:-10px;
+            font-family:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+            font-size:9px; letter-spacing:.26em; white-space:nowrap;
+            color:color-mix(in srgb, var(--fx-ink) 62%, transparent);
+          }
+          .fx-barcode::after{
+            content:""; position:absolute; top:-8%; bottom:26%; left:-3%; width:2px;
+            background:var(--fx-beam); opacity:.9;
+            box-shadow:0 0 8px var(--fx-beam), 0 0 18px var(--fx-beam);
+            animation:fx-barcode-scan 2s ease-in-out infinite alternate;
+          }
+          @keyframes fx-barcode-scan{ 0%{left:-3%} 100%{left:101%} }
+          @media (prefers-reduced-motion:reduce){ .fx-barcode::after{ animation:none; opacity:.4 } }
+        `}</style>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div className="fx-barcode" style={{"--fx-ink":C.teal,"--fx-beam":C.tealInk||C.teal||"#4fd8c4"}}>You're out of checks</div>
+          <button onClick={onClose} aria-label="Close" style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
+          Top up to keep checking quotes. Every pack includes a couple of shareable checks to send a friend.
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {packs.map((p,i)=>(
+            <div key={i} style={{
+              position:"relative",display:"flex",alignItems:"center",gap:12,
+              background:p.best?C.tealBg:C.paper2,
+              border:`${p.best?"2px":"1px"} solid ${p.best?C.teal:C.line}`,
+              borderRadius:14,padding:"14px 16px",
+            }}>
+              {p.best&&(
+                <div style={{position:"absolute",top:-10,right:14,background:C.teal,color:"#fff",fontSize:10,fontWeight:800,letterSpacing:.4,padding:"3px 8px",borderRadius:999}}>BEST VALUE</div>
+              )}
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontSize:15,fontWeight:900,color:C.ink}}>{p.checks}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:C.tealInk}}>{p.share}</span>
+                </div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.note||`${p.price} one-time`}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:18,fontWeight:900,color:C.ink,marginBottom:6}}>{p.price}</div>
+                <button disabled aria-disabled="true"
+                  style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:10,padding:"7px 14px",color:C.inkFaint,fontSize:12,fontWeight:800,cursor:"not-allowed",whiteSpace:"nowrap"}}>
+                  {p.name==="Free"?"Current plan":"Coming soon"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:C.inkFaint,textAlign:"center",marginTop:14,lineHeight:1.5}}>
+          Paid packs aren't live yet — checkout is coming soon.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
+// MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
+// uploaded to Supabase Storage or saved anywhere -- the file is read in the
+// browser, sent once to the edge function for analysis, and discarded.
+// Collapsible "show details" wrapper: the caller renders the section's
+// headline/summary (always visible); this tucks the long detail behind a tap so
+// a thorough report stays short by default. Owns its state -> safe to reuse many
+// times on one report (recall detail, fee line items, review highlights).
+function DetailToggle({C, moreLabel, lessLabel, children, defaultOpen=false}){
+  const [open,setOpen]=useState(defaultOpen);
+  return (
+    <div>
+      <button onClick={()=>setOpen(o=>!o)} aria-expanded={open}
+        style={{marginTop:10,background:"transparent",border:`1px solid ${C.line}`,borderRadius:9,padding:"7px 13px",color:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:7}}>
+        {open?(lessLabel||"Hide details"):(moreLabel||"Show details")}
+        <span style={{fontSize:9,display:"inline-block",transform:open?"rotate(180deg)":"none",transition:"transform .15s"}}>▼</span>
+      </button>
+      {open&&<div style={{marginTop:4}}>{children}</div>}
+    </div>
+  );
+}
+
+// ── Self-contained share link ───────────────────────────────────────────────
+// The report is packed into the URL FRAGMENT (never sent to a server, never
+// stored) so a shared link reconstructs the report entirely client-side —
+// keeping LotCheck's "analyzed once, never stored" promise literally true. A
+// compact field subset keeps the link short; long recall summaries are dropped
+// (the flip-book shows systems + dates only).
+function encodeReport(a){
+  const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
+    qp:a.quotedPrice,ms:a.msrp,
+    fin:a.financing?{p:a.financing.paymentAmount,f:a.financing.paymentFrequency,r:a.financing.rate,t:a.financing.termMonths}:null,
+    fr:a.financeRates?{d:a.financeRates.dealer?.apr??null,m:a.financeRates.manufacturer?.apr??null}:null,
+    rc:a.recalls?.checked?{n:a.recalls.count,it:(a.recalls.items||[]).slice(0,6).map(x=>({s:x.system,d:x.date}))}:null,
+    ao:(a.addOns||[]).map(x=>({n:x.name,p:x.price,vd:x.verdict||(x.flagged?"flagged":"standard")})),
+    tf:a.totalFlaggedCost,
+    ds:a.dealerSentiment?{r:a.dealerSentiment.rating,c:a.dealerSentiment.reviewCount,h:(a.dealerSentiment.highlights||[]).slice(0,3).map(x=>({r:x.rating,t:x.text}))}:null,
+    lv:a.leverageScore?{s:a.leverageScore.score,n:a.leverageScore.note}:null,
+    sw:a.standardWarranty?.coverage?{c:a.standardWarranty.coverage}:null,
+    sm:a.summary};
+  try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+  catch{ return ""; }
+}
+function decodeReport(s){
+  try{
+    const b=s.replace(/-/g,"+").replace(/_/g,"/");
+    const c=JSON.parse(decodeURIComponent(escape(atob(b))));
+    return {vehicle:c.v,year:c.y,make:c.mk,model:c.md,trim:c.tr,dealerName:c.dn,dealerCity:c.dc,vehicleCondition:c.cond,
+      quotedPrice:c.qp,msrp:c.ms,
+      financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
+      financeRates:c.fr?{dealer:c.fr.d!=null?{apr:c.fr.d}:null,manufacturer:c.fr.m!=null?{apr:c.fr.m}:null}:null,
+      recalls:c.rc?{checked:true,count:c.rc.n,items:(c.rc.it||[]).map(x=>({system:x.s,date:x.d})),source:"Transport Canada VRDB"}:null,
+      addOns:(c.ao||[]).map(x=>({name:x.n,price:x.p,verdict:x.vd})),
+      totalFlaggedCost:c.tf,
+      dealerSentiment:c.ds?{rating:c.ds.r,reviewCount:c.ds.c,highlights:(c.ds.h||[]).map(x=>({rating:x.r,text:x.t})),dealerName:c.dn}:null,
+      leverageScore:c.lv?{score:c.lv.s,note:c.lv.n,computed:true}:null,
+      standardWarranty:c.sw?{coverage:c.sw.c}:null,
+      summary:c.sm,__shared:true};
+  }catch{ return null; }
+}
+
+// ── Report flip-book ("Report view") ────────────────────────────────────────
+// Presents the report as a two-page magazine spread you flip through (arrows /
+// ← → keys), instead of a long scroll. Pages are built DYNAMICALLY from the
+// analysis so variable content (0 vs many recalls, short/long fee lists) never
+// breaks a fixed layout — a page only appears when it has real data. Its own
+// "printed report" palette (paper + violet/teal), independent of the app theme.
+// The real LotCheck logo (isometric gate + car) as a reusable mark — same art
+// as the site header. Rendered via innerHTML so the raw SVG polygons drop in
+// without JSX conversion. Used on the report cover + end page.
+const LOGO_INNER=`<polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/>`;
+function RealLogo({width=40}){ return <svg width={width} height={Math.round(width*182/320)} viewBox="-145 -44 320 182" aria-hidden="true" dangerouslySetInnerHTML={{__html:LOGO_INNER}}/>; }
+
+// Three presentations of the SAME audit data, toggled in-place: #24 deck
+// (one card at a time, natural height), #17 heatmap (the 10-point audit as a
+// grid, hot = flagged), #18 sidebar (rail + wide panel). A VERDICT cover leads;
+// EVIDENCE (signature + Internet Archive snapshot) and SAY-THIS close it. Money
+// items glow cyan. Email + copy-link live in here so these views are self-serve.
+function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend }){
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
+
+  const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
+  const fr = score != null ? score / 10 : 0;
+  const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
+  const rno = a.reportId || "LC-—";
+  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
+  const verifyHref = (typeof verifyLinkFor === "function") ? verifyLinkFor(a) : null;
+
+  const CY = "#22d3ee", TEAL = "#10b981", ROSE = "#f43f5e", AMBER = "#fbbf24", TX = "#e2e8f0", MUT = "#64748b", MUT2 = "#94a3b8", BORD = "#1e293b";
+  const mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  const flagged = (a.addOns || []).filter((x) => x.verdict === "flagged");
+  const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
+  const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
+  const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
+  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap", cursor: "pointer" };
+
+  const [vCopied, setVCopied] = useState(false);
+  const sourceUrl = a.sourceUrl || a.listingUrl || null;
+  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
+  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2999/" + sourceUrl : null; // far-future ts -> latest capture (not the calendar)
+  const listingShot = a.listingShot || null;
+  useEffect(() => { if (!sourceUrl) return; try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) {} }, [sourceUrl]);
+
+  const Chip = ({ txt, tone }) => { const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2; const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)"; return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>; };
+  const KV = ({ k, v, c }) => (<div><div style={{ color: MUT, fontSize: 11, fontFamily: mono }}>{k}</div><div style={{ fontSize: 24, fontWeight: 700, color: c || "#fff", fontFamily: mono, marginTop: 4 }}>{v}</div></div>);
+  const Simple = ({ big, c, note }) => (<div><div style={{ fontSize: 20, fontWeight: 800, fontFamily: mono, color: c || "#fff" }}>{big}</div>{note && <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>{note}</div>}</div>);
+
+  const verdictBody = (
+    <div style={{ textAlign: "center" }}>
+      {score != null ? (<>
+        <div style={{ position: "relative", width: 200, maxWidth: "100%", margin: "0 auto" }}>
+          <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
+            <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
+            <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
+            <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}><line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" /></g>
+            <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
+          </svg>
+        </div>
+        <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
+        <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
+      </>) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available.</div>}
+      {(qp || ms) > 0 && <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}</div>}
+      <div style={{ marginTop: 14 }}>
+        {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
+        {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
+      </div>
+      {a.summary && <div style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 14, textAlign: "left" }}>{a.summary}</div>}
+    </div>
+  );
+
+  // ── the canonical 10-point audit — always 10, each with its result + body ──
+  const P = [];
+  // 1 Price vs MSRP
+  P.push({ title: "Price vs MSRP", tone: !priceVerified ? "flag" : (!ms ? "muted" : delta > 0 ? "flag" : "pass"), v: (qp && ms) ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (priceVerified ? "—" : "UNVERIFIED"),
+    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : delta > 0 ? ROSE : TEAL }}>{(qp && ms) ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{(qp && ms) ? ` vs ${money(ms)} MSRP` : ""} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} /><KV k={a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} /></div>{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
+  // 2 Recalls
+  { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
+    let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
+    else if (r.count > 0) body = <div><div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{r.count} open recall{r.count > 1 ? "s" : ""}</div>{(r.items || []).slice(0, 4).map((it, i) => (<div key={i} style={{ padding: "9px 0", borderTop: `1px solid ${BORD}` }}><div style={{ fontSize: 13, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>{it.summary && <div style={{ fontSize: 12, color: MUT2, marginTop: 3, lineHeight: 1.5 }}>{it.summary}</div>}</div>))}<div style={{ fontSize: 11, color: MUT, marginTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div></div>;
+    else if (r.confirmed === false) body = <Simple big="Couldn't confirm this exact model" c={AMBER} note="Not an all-clear — check open recalls by VIN at Transport Canada before you sign." />;
+    else body = <Simple big="✓ No open recalls found" c={TEAL} note="Transport Canada's registry shows none for this year/make/model." />;
+    P.push({ title: "Transport Canada recalls", tone, v, body }); }
+  // 3 Add-ons & fees
+  { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : "NONE LISTED";
+    const body = (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? "🔻 " : ""}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
+    P.push({ title: "Add-ons & fee audit", tone, v, body }); }
+  // 4 Financing APR
+  { const dr = a.financeRates?.dealer?.apr, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
+    const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" }; const tone = high ? "flag" : dr != null ? "muted" : "muted"; const v = dr != null ? dr + "%" + (high ? " HIGH" : "") : "NOT SHOWN";
+    const body = (dr != null || a.financing?.paymentAmount) ? <div>{a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}{dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}{high ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div> : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}</div> : <Simple big="Not shown" c={MUT2} note="No financing rate was quoted." />;
+    P.push({ title: "Financing APR", tone, v, body }); }
+  // 5 Financing math
+  { const fc = a.financingCheck; const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : "muted"; const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : "NOT CHECKED";
+    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up") : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || "The advertised payment, price, rate and term were cross-checked."} /> }); }
+  // 6 Odometer
+  { const o = a.odometerCheck; const isNew = a.vehicleCondition === "new"; const tone = o?.checked ? (o.flag ? "flag" : "pass") : "muted"; const v = o?.checked ? Number(o.km).toLocaleString() + " km" + (o.flag ? " FLAG" : "") : (isNew ? "N/A (NEW)" : "NOT ON QUOTE");
+    P.push({ title: "Odometer", tone, v, body: <Simple big={o?.checked ? Number(o.km).toLocaleString() + " km" : (isNew ? "N/A — new vehicle" : "Not on quote")} c={o?.flag ? ROSE : "#fff"} note={o?.note || (isNew ? "New vehicles carry delivery-only mileage." : "No odometer reading was on this quote.")} /> }); }
+  // 7 VIN
+  { const vc = a.vinCheck; const tone = vc?.present ? (vc.valid ? "pass" : "flag") : "muted"; const v = vc?.present ? (vc.valid ? "VALID" : "CHECK PATTERN") : "NOT ON QUOTE";
+    P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : "⚠ VIN doesn't validate") : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
+  // 8 EV / PHEV rebate
+  { const ev = a.evapRebate; const tone = ev?.eligible ? "pass" : "muted"; const gas = !(a.fuelType === "BEV" || a.fuelType === "PHEV"); const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : gas ? "N/A (GAS)" : "—");
+    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : gas ? "N/A — gas vehicle" : "—")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : "Federal/provincial EV incentives don't apply here.")} /> }); }
+  // 9 Included warranty
+  { const w = a.standardWarranty; const tone = w?.coverage ? "pass" : "muted"; const v = w?.coverage ? "INCLUDED" : "NOT SHOWN";
+    P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
+  // 10 Dealer reputation
+  { const d = a.dealerSentiment; const tone = d?.rating ? (Number(d.rating) >= 4 ? "pass" : "muted") : "muted"; const v = d?.rating ? Number(d.rating).toFixed(1) + "★ / " + Number(d.reviewCount || 0).toLocaleString() : "NOT FOUND";
+    const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : <Simple big="Not found" c={MUT2} note="No public Google reviews were located for this dealer." />;
+    P.push({ title: "Dealer reputation", tone, v, body }); }
+
+  const pointItems = P.slice(0, 10).map((p, i) => ({ key: "p" + i, title: p.title, tone: p.tone, v: p.v, glow: p.tone === "flag", point: true, body: p.body }));
+
+  const evidenceItem = { key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
+      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
+      {listingShot && <img src={listingShot} alt="Listing at report time" style={{ width: "100%", borderRadius: 10, border: `1px solid ${BORD}` }} />}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
+        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
+        {verifyHref && <button onClick={() => { try { navigator.clipboard.writeText(verifyHref).then(() => { setVCopied(true); setTimeout(() => setVCopied(false), 2000); }).catch(() => {}); } catch (e) {} }} style={linkBtn}>{vCopied ? "Verify link copied \u2713" : "Copy verify link"}</button>}
+      </div>
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.</div>
+    </div>
+  )};
+
+  const cs = a.counterScript;
+  const sayItem = (cs && Array.isArray(cs.moves) && cs.moves.length) ? { key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: <div>{cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}</div> } : null;
+
+  // Days on lot — motivated-seller leverage from the dealer's OWN inventory
+  // data (SM360 daysInInventory/dateEntry; later our observation network).
+  // Uiverse-style 3D striped card (imtausef) with the traffic-light system:
+  // ≤30 green · 31–89 amber · 90–119 red · 120+ blinking red. Only rendered
+  // when real data exists — never estimated.
+  let daysLotItem = null;
+  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
+    const d = Number(a.daysOnLot.days);
+    const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
+    const dolState = d >= 120 ? "blink" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
+    const ACC = dolState === "green" ? "#8ed500" : dolState === "amber" ? "#ffb020" : "#ff3b5c";
+    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
+    const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const bulb = (on, color, blink) => (
+      <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none", animation: on && blink ? "lcDolBlink 0.9s step-end infinite" : "none" }} />
+    );
+    daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        <style>{`
+          @keyframes lcDolBlink { 50% { opacity: 0.15; box-shadow: none; } }
+          .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
+          .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
+            background: linear-gradient(135deg, #0000 18.75%, #f3f3f3 0 31.25%, #0000 0),
+              repeating-linear-gradient(45deg, #f3f3f3 -6.25% 6.25%, #141414 0 18.75%);
+            background-size: 60px 60px; background-position: 0 0, 0 0; background-color: #141414;
+            width: 100%; position: relative;
+            box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
+          .lc-dol-card:hover { background-position: -100px 100px, -100px 100px; transform: rotate3d(0.5, 1, 0, 22deg); }
+          .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
+          .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
+          .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
+          .lc-dol-chip { cursor: default; margin-top: 1rem; display: inline-block; font-weight: 900; font-size: 9px;
+            text-transform: uppercase; color: ${ACC}; background: #141414; padding: 0.5rem 0.7rem; transform: translate3d(0,0,20px); }
+          .lc-dol-datebox { position: absolute; top: 26px; right: 26px; height: 62px; width: 62px; background: #141414;
+            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2;
+            ${dolState === "blink" ? "animation: lcDolBlink 0.9s step-end infinite;" : ""} }
+          .lc-dol-logo { position: absolute; top: 8px; left: 10px; transform: translate3d(0,0,80px); z-index: 2; }
+          .lc-dol-light { position: absolute; top: 96px; right: 34px; background: #141414; border: 1px solid #2a2a2a;
+            border-radius: 999px; padding: 5px 4px; transform: translate3d(0,0,70px); z-index: 2; }
+        `}</style>
+        <div className="lc-dol-parent">
+          <div className="lc-dol-card">
+            <div className="lc-dol-logo"><LogoMark size={34} /></div>
+            <div className="lc-dol-datebox">
+              {sinceD ? (<>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 9, fontWeight: 700 }}>{M3[sinceD.getMonth()]} {sinceD.getFullYear()}</span>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 20, fontWeight: 900 }}>{sinceD.getDate()}</span>
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 7, fontWeight: 700, letterSpacing: ".08em" }}>FIRST SEEN</span>
+              </>) : (
+                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 18, fontWeight: 900, marginTop: 10 }}>{d}d</span>
+              )}
+            </div>
+            <div className="lc-dol-light">
+              {bulb(dolState === "red" || dolState === "blink", "#ff3b5c", dolState === "blink")}
+              {bulb(dolState === "amber", "#ffb020", false)}
+              {bulb(dolState === "green", "#8ed500", false)}
+            </div>
+            <div className="lc-dol-content">
+              <span className="lc-dol-title">{d.toLocaleString()} DAYS ON LOT</span>
+              <div className="lc-dol-text">
+                {dolMonths ? `About ${dolMonths} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
+                {d >= 90
+                  ? " Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage."
+                  : d >= 31
+                    ? " A month-plus on the lot — worth asking what they'll do on price to move it."
+                    : " Recently listed — limited sitting-time leverage on this unit."}
+              </div>
+              <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    )};
+  }
+
+  const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
+  const items = [verdictItem, ...pointItems, ...(daysLotItem ? [daysLotItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+
+  const [idx, setIdx] = useState(0);
+  const [sel, setSel] = useState(0);
+  const [selP, setSelP] = useState(0);
+  const N = items.length;
+  const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
+  useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
+  const touchX = useRef(null);
+
+  const toneColor = (c) => c.cosmic ? CY : c.tone === "flag" ? ROSE : c.tone === "pass" ? TEAL : MUT2;
+  const cardBox = (c) => ({ borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
+  const navBtn = (side) => ({ position: "absolute", [side]: -6, top: 90, zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
+  const Head = ({ c, n }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}><span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span>{n && <span style={{ fontSize: 11, fontFamily: mono, color: MUT }}>{n}</span>}</div>);
+  const vb = (v, label) => <button key={v} onClick={() => onView && onView(v)} style={{ background: view === v ? CY : "transparent", color: view === v ? "#04222b" : MUT2, border: "none", borderRadius: 8, padding: "6px 11px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{label}</button>;
+
+  return (
+    <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX, maxWidth: 1120, margin: "0 auto" }}>
+      <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+        <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("score", "Scorecard")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
+        {emailStatus === "sent"
+          ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
+          : <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="email" placeholder="you@email.com — email the PDF" value={emailInput || ""} onChange={(e) => { setEmailInput && setEmailInput(e.target.value); if (emailErr && setEmailErr) setEmailErr(""); }} disabled={emailStatus === "sending"} style={{ width: 210, maxWidth: "48vw", background: "#020617", border: `1px solid ${emailErr ? ROSE : BORD}`, borderRadius: 9, padding: "8px 11px", color: TX, fontSize: 12.5, outline: "none", boxSizing: "border-box" }} />
+              <button onClick={onSend} disabled={emailStatus === "sending"} style={{ background: CY, border: "none", borderRadius: 9, padding: "8px 15px", color: "#04222b", fontWeight: 800, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap" }}>{emailStatus === "sending" ? "Sending…" : "Send email"}</button>
+            </div>}
+      </div>
+      {emailErr && <div style={{ fontSize: 11.5, color: ROSE, textAlign: "right", marginBottom: 6 }}>{emailErr}</div>}
+
+      {view === "deck" && (<>
+        <div style={{ position: "relative" }} onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (touchX.current == null) return; const dx = e.changedTouches[0].clientX - touchX.current; if (dx < -40) go(1); else if (dx > 40) go(-1); touchX.current = null; }}>
+          <button onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous card" style={{ ...navBtn("left"), opacity: idx === 0 ? .3 : 1 }}>‹</button>
+          <div style={{ padding: "0 30px" }}>
+            <div key={idx} style={{ animation: "rvIn .3s ease" }}>
+              <div style={cardBox(items[idx])}><Head c={items[idx]} n={`${String(idx + 1).padStart(2, "0")} / ${String(N).padStart(2, "0")}`} /><div>{items[idx].body}</div></div>
+            </div>
+          </div>
+          <button onClick={() => go(1)} disabled={idx === N - 1} aria-label="Next card" style={{ ...navBtn("right"), opacity: idx === N - 1 ? .3 : 1 }}>›</button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>{items.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}</div>
+        <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or ← →  ·  card {idx + 1} of {N}</div>
+      </>)}
+
+      {view === "sidebar" && (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
+          <div style={{ flex: "0 0 190px", minWidth: 150, display: "flex", flexDirection: "column", gap: 5 }}>
+            {items.map((c, i) => (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: sel === i ? "rgba(15,23,42,.85)" : "transparent", border: `1px solid ${sel === i ? (c.glow ? CY : BORD) : "transparent"}`, borderRadius: 10, padding: "9px 11px", color: sel === i ? "#fff" : MUT2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>))}
+          </div>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}><div style={cardBox(items[sel])}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
+        </div>
+      )}
+
+      {view === "heatmap" && (<>
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The 10-point verification — hot squares are flagged</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
+          {pointItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
+        </div>
+        <div style={{ marginTop: 14 }}><div style={cardBox(pointItems[selP])}><Head c={pointItems[selP]} n={`point ${selP + 1} / 10`} /><div>{pointItems[selP].body}</div></div></div>
+      </>)}
+
+            {view === "hud" && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ ...cardBox({ cosmic: true }), flex: "1 1 230px", minWidth: 220, alignItems: "center", textAlign: "center", padding: 18 }}>
+              <div style={{ ...klabel, alignSelf: "flex-start" }}>Negotiation leverage</div>
+              {score != null ? (
+                <div style={{ width: 168, maxWidth: "100%" }}>
+                  <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
+                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
+                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
+                    <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}><line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" /></g>
+                    <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
+                  </svg>
+                  <div style={{ fontSize: 34, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -8 }}>{score.toFixed(1)}<span style={{ fontSize: 14, color: MUT }}>/10</span></div>
+                </div>
+              ) : <div style={{ padding: "20px 0", color: MUT }}>No score</div>}
+            </div>
+            <div style={{ flex: "2 1 320px", minWidth: 280, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(132px,1fr))", gap: 10 }}>
+              {[["Price vs MSRP", pointItems[0].v, pointItems[0].tone], ["Watch-outs", flagged.length ? flagged.length + " flagged" : "None", flagged.length ? "flag" : "pass"], ["Recalls", pointItems[1].v, pointItems[1].tone], ["Dealer", pointItems[9].v, pointItems[9].tone]].map(([l, v, t], i) => (
+                <div key={i} style={{ background: "rgba(15,23,42,.5)", border: `1px solid ${t === "flag" ? CY : BORD}`, borderRadius: 12, padding: 14, boxShadow: t === "flag" ? `0 0 0 1px ${CY}, 0 0 16px ${CY}44` : "none" }}>
+                  <div style={{ fontSize: 10.5, color: MUT, fontFamily: mono, textTransform: "uppercase", letterSpacing: ".06em" }}>{l}</div>
+                  <div style={{ fontSize: 17, fontWeight: 800, fontFamily: mono, color: t === "flag" ? ROSE : t === "pass" ? TEAL : "#fff", marginTop: 6, wordBreak: "break-word" }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {pointItems.filter((p) => p.tone === "flag").length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
+              {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+            </div>
+          )}
+          <div style={cardBox({ tone: "muted" })}>
+            <div style={{ ...klabel, marginBottom: 10 }}>10-point verification</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
+              {pointItems.map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), boxShadow: p.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
+            {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
+            <div style={cardBox(evidenceItem)}><Head c={evidenceItem} /><div>{evidenceItem.body}</div></div>
+          </div>
+        </div>
+      )}
+
+            {view === "score" && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ ...cardBox({ cosmic: true }), alignItems: "center", textAlign: "center", padding: 24 }}>
+            <div style={{ fontSize: 56, fontWeight: 800, fontFamily: mono, color: scoreColor, lineHeight: 1 }}>{score != null ? score.toFixed(1) : "—"}<span style={{ fontSize: 20, color: MUT }}>/10</span></div>
+            <div style={{ ...klabel, marginTop: 8 }}>Negotiation leverage{score != null ? ` · ${score >= 7 ? "strong" : score >= 4 ? "fair" : "weak"}` : ""}</div>
+            {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}</div>}
+            {a.summary && <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 12, textAlign: "left", maxWidth: 660 }}>{a.summary}</div>}
+          </div>
+          {pointItems.filter((p) => p.tone === "flag").length > 0 ? (
+            <div>
+              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {pointItems.filter((p) => p.tone === "flag").length} thing{pointItems.filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
+                {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...cardBox({ tone: "pass" }), textAlign: "center" }}><div style={{ fontSize: 15, fontWeight: 800, color: TEAL }}>✓ Nothing flagged — this one checks out</div></div>
+          )}
+          <div style={cardBox({ tone: "muted" })}>
+            <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
+              {pointItems.filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+            </div>
+          </div>
+          {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
+        </div>
+      )}
+
+      {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
+    </div>
+  );
+}
+
+function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
+  const [cur,setCur]=useState(0);
+  const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
+  const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
+  const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
+  const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
+  const vehName=a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||"Vehicle";
+  const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"}, fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
+
+  // Build the page list — only pages backed by real data.
+  const P=[];
+  P.push({t:"cover"});
+  if(qp||ms) P.push({t:"deal"});
+  if(a.financing?.paymentAmount||a.financeRates?.dealer||a.financeRates?.manufacturer) P.push({t:"fin"});
+  if(a.recalls?.checked) P.push({t:"recalls"});
+  if(feeItems.length) P.push({t:"fees"});
+  if(a.dealerSentiment?.rating) P.push({t:"rep"});
+  if(a.leverageScore||a.summary) P.push({t:"bottom"});
+  if(P.length%2) P.push({t:"blank"});
+  const leaves=[]; for(let i=0;i<P.length;i+=2) leaves.push([P[i],P[i+1]]);
+  const N=leaves.length;
+  useEffect(()=>{
+    const h=(e)=>{ if(e.key==="ArrowRight"&&cur<N)setCur(cur+1); if(e.key==="ArrowLeft"&&cur>0)setCur(cur-1); };
+    window.addEventListener("keydown",h); return ()=>window.removeEventListener("keydown",h);
+  },[cur,N]);
+
+  const Page=({p,side})=>{
+    if(!p||p.t==="blank") return <div className="rfb-pg" style={{background:"#123f3a"}}/>;
+    const num=<div className={`rfb-pn ${side}`}>{p.t==="cover"?"":String(P.indexOf(p)+1).padStart(2,"0")}</div>;
+    if(p.t==="cover") return (
+      <div className="rfb-pg rfb-cover">
+        <div><div className="rfb-brand"><RealLogo width={38}/>LotCheck</div>
+          <div className="rfb-ct">Quote Check Report</div>
+          <div className="rfb-veh">{a.year} {a.make}<br/>{a.model}</div>
+          <div className="rfb-dl">{[a.trim,a.dealerName,a.dealerCity].filter(Boolean).join(" · ")}</div></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+          <div className="rfb-seal">◈ Verified{a.vehicleCondition?` · ${a.vehicleCondition}`:""}</div>
+        </div>
+      </div>);
+    if(p.t==="deal") return (<div className="rfb-pg">{num}
+      <div className="rfb-k">The deal</div>
+      <h2 className="rfb-h2">{delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"}</h2>
+      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">the dealer's all-in price</div></div>}
+      {ms>0&&<div className="rfb-stat"><div className="rfb-lab">Verified MSRP</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}</div>}
+      <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
+    </div>);
+    if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=a.financeRates?.dealer?.apr, mRate=a.financeRates?.manufacturer?.apr;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Financing</div>
+      <h2 className="rfb-h2">{dRate&&mRate&&dRate>mRate?`Rate is ${(dRate-mRate).toFixed(2)}% over ${a.make}'s`:"Payment breakdown"}</h2>
+      {fin?.paymentAmount&&fin?.paymentFrequency&&<div className="rfb-stat"><div className="rfb-lab">On your quote</div><div className="rfb-big">{money(fin.paymentAmount)}<span style={{fontSize:16,color:"#9a94b4"}}>{fSuf[fin.paymentFrequency]}</span></div><div className="rfb-sub">{r?`${r}% APR · `:""}{fin.termMonths?`${fin.termMonths} months`:""}</div></div>}
+      <div className="rfb-rows">
+        {dRate!=null&&<div className="rfb-r"><span className="rfb-n">This dealer</span><span className="rfb-v bad">{dRate}%</span></div>}
+        {mRate!=null&&<div className="rfb-r"><span className="rfb-n">{a.make} advertised</span><span className="rfb-v">{mRate}%</span></div>}
+      </div>
+      {dRate&&mRate&&dRate>mRate&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Worth pushing back</div><div className="rfb-wt">{(dRate-mRate).toFixed(2)}% above {a.make}'s advertised rate — ask them to match the manufacturer rate.</div></div>}
+    </div>); }
+    if(p.t==="recalls"){ const r=a.recalls;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Safety</div>
+      <h2 className="rfb-h2">{r.count>0?`${r.count} open recall${r.count>1?"s":""}`:"No open recalls"}</h2>
+      {r.count>0?<>
+        <div className="rfb-why"><div className="rfb-wh">Why you're seeing this</div><div className="rfb-wt">Open safety-recall campaigns <b>Transport Canada</b> publishes for this year/make/model — read live from the federal Vehicle Recall Database. Government data, not our opinion. Confirm by <b>VIN</b> with the dealer.</div></div>
+        <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
+        <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
+      </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
+    </div>); }
+    if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
+      <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
+      <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div className="rfb-r" key={i}><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>)}</div>
+      <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Add-ons total</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
+    </div>);
+    if(p.t==="rep"){ const d=a.dealerSentiment;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Reputation</div>
+      <h2 className="rfb-h2">{d.dealerName||"This dealer"}</h2>
+      <div className="rfb-stat"><div className="rfb-lab">Google reviews</div><div className="rfb-big">{Number(d.rating).toFixed(1)}<span style={{fontSize:16,color:"#9a94b4"}}> · {Number(d.reviewCount||0).toLocaleString()}</span></div></div>
+      <div className="rfb-rows">{(d.highlights||[]).slice(0,3).map((h,i)=><div className="rfb-r" key={i}><span className="rfb-n">★{h.rating} · {h.text}</span></div>)}</div>
+      <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>Public Google reviews — snippets shown, linked to source.</div>
+    </div>); }
+    if(p.t==="bottom"){ const lv=a.leverageScore;
+      return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f0eafc)"}}>{num}<div className="rfb-k">Bottom line</div>
+      <h2 className="rfb-h2">{lv?`Leverage ${lv.score} / 10`:"The bottom line"}</h2>
+      {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">Computed only from the verified findings — not an opinion.</div></div>}
+      {a.summary&&<div className="rfb-lede" style={{marginTop:6}}>{a.summary}</div>}
+    </div>); }
+    return <div className="rfb-pg"/>;
+  };
+
+  return (
+    <div className="rfb-wrap" style={{color:ink||"#241f3a"}}>
+      <style>{RFB_CSS}</style>
+      <div className="rfb-bar">
+        <button className="rfb-exit" onClick={onExit}>‹ Scroll view</button>
+        <div className="rfb-count">{cur===0?"Cover":(cur===N?"End":`Spread ${cur} / ${N-1}`)}</div>
+        <button className="rfb-share" onClick={onShare}>{copied?"Link copied":"Copy share link"}</button>
+      </div>
+      <div className="rfb-book">
+        <div className="rfb-base l"><div className="rfb-inside"><div className="rfb-vmark">LotCheck · Verified</div></div></div>
+        <div className="rfb-base r"><div className="rfb-end"><div style={{marginBottom:14}}><RealLogo width={52}/></div><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Analyzed once, never stored</div></div></div>
+        {leaves.map((lf,i)=>(
+          <div className={`rfb-leaf ${i<cur?"flipped":""}`} key={i} style={{zIndex:i<cur?i:N-i}}>
+            <div className="rfb-face front"><Page p={lf[0]} side="r"/></div>
+            <div className="rfb-face back"><Page p={lf[1]} side="l"/></div>
+          </div>
+        ))}
+      </div>
+      <div className="rfb-ctr">
+        <button className="rfb-nav" onClick={()=>cur>0&&setCur(cur-1)} disabled={cur===0} aria-label="Previous">‹</button>
+        <button className="rfb-nav" onClick={()=>cur<N&&setCur(cur+1)} disabled={cur===N} aria-label="Next">›</button>
+      </div>
+      {shared&&<div className="rfb-shared">Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
+    </div>
+  );
+}
+
+const RFB_CSS=`
+  .rfb-wrap{display:flex;flex-direction:column;align-items:center;padding:8px 0 24px}
+  .rfb-bar{display:flex;align-items:center;gap:12px;width:100%;max-width:860px;margin-bottom:14px;flex-wrap:wrap}
+  .rfb-exit,.rfb-share{background:transparent;border:1px solid rgba(120,110,160,.55);border-radius:10px;padding:8px 14px;font:inherit;font-weight:800;font-size:13px;color:inherit;cursor:pointer}
+  .rfb-share{margin-left:auto;background:#6d4bd8;border-color:#6d4bd8;color:#fff}
+  .rfb-count{font-family:'JetBrains Mono',monospace;font-size:12px;opacity:.7}
+  .rfb-book{position:relative;width:min(860px,96vw);height:min(560px,68vh);perspective:2400px;box-shadow:0 40px 60px -30px rgba(0,0,0,.45)}
+  .rfb-base{position:absolute;top:0;bottom:0;width:50%;overflow:hidden}
+  .rfb-base.l{left:0;border-radius:10px 4px 4px 10px}.rfb-base.r{right:0;border-radius:4px 10px 10px 4px}
+  .rfb-inside{position:absolute;inset:0;background:linear-gradient(135deg,#123f3a,#171235);display:grid;place-items:center}
+  .rfb-vmark{font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.3em;color:rgba(127,224,211,.4);text-transform:uppercase;font-size:12px;transform:rotate(-90deg);white-space:nowrap}
+  .rfb-end{position:absolute;inset:0;background:linear-gradient(150deg,#171235,#123f3a);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px}
+  .rfb-mk2{width:40px;height:40px;border-radius:11px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);margin-bottom:14px}
+  .rfb-end h3{font-family:'Space Grotesk';font-weight:700;font-size:21px;margin:0 0 8px}
+  .rfb-end p{color:#c9c2ee;font-size:13px;margin:0;max-width:24ch;line-height:1.5}
+  .rfb-fine{color:#6f68a0;font-size:11px;margin-top:14px}
+  .rfb-leaf{position:absolute;top:0;right:0;width:50%;height:100%;transform-origin:left center;transform-style:preserve-3d;transition:transform .95s cubic-bezier(.2,.72,.2,1)}
+  .rfb-leaf.flipped{transform:rotateY(-180deg)}
+  .rfb-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;background:#fbf7ef}
+  .rfb-face.front{border-radius:4px 10px 10px 4px;box-shadow:inset 22px 0 40px -30px rgba(0,0,0,.35)}
+  .rfb-face.back{transform:rotateY(180deg);border-radius:10px 4px 4px 10px;box-shadow:inset -22px 0 40px -30px rgba(0,0,0,.35)}
+  .rfb-pg{position:absolute;inset:0;padding:32px 30px;display:flex;flex-direction:column;color:#241f3a;font-family:'Nunito',sans-serif}
+  .rfb-k{font-size:10.5px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;color:#6d4bd8}
+  .rfb-h2{font-family:'Space Grotesk';font-weight:700;font-size:23px;margin:6px 0 14px;line-height:1.12}
+  .rfb-pn{position:absolute;bottom:16px;font-size:10px;font-weight:800;color:#9a94b4;letter-spacing:.1em}
+  .rfb-pn.l{left:30px}.rfb-pn.r{right:30px}
+  .rfb-stat{margin-bottom:13px}.rfb-lab{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9a94b4}
+  .rfb-big{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:29px;line-height:1.1}
+  .rfb-sub{font-size:12px;color:#5d5878;margin-top:2px}
+  .rfb-tag{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px}
+  .rfb-tag.bad{background:#fbe7e2;color:#d6533f}
+  .rfb-rows{border-top:1px solid #e7e0d2;margin-top:4px}
+  .rfb-r{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #e7e0d2;font-size:12.5px}
+  .rfb-n{color:#241f3a;font-weight:700}.rfb-v{font-family:'JetBrains Mono';font-weight:800;white-space:nowrap}.rfb-v.bad{color:#d6533f}
+  .rfb-why{margin-top:12px;background:#fbe7e2;border:1px solid #eec3b8;border-radius:12px;padding:10px 12px}
+  .rfb-why.warn{background:#fbf0d8;border-color:#e9d29a}
+  .rfb-wh{font-size:12px;font-weight:1000;color:#d6533f;margin-bottom:4px}
+  .rfb-wt{font-size:11.5px;color:#241f3a;line-height:1.5;font-weight:600}
+  .rfb-lede{font-size:13px;color:#5d5878;line-height:1.55}
+  .rfb-cover{background:linear-gradient(150deg,#171235,#241a52 55%,#123f3a);color:#fff;justify-content:space-between;padding:38px 32px}
+  .rfb-brand{display:flex;align-items:center;gap:11px;font-weight:1000;font-size:22px}
+  .rfb-mk{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);box-shadow:0 6px 20px rgba(0,0,0,.4)}
+  .rfb-ct{font-family:'Space Grotesk';font-weight:700;font-size:14px;letter-spacing:.24em;text-transform:uppercase;color:#7fe0d3;margin-top:24px}
+  .rfb-veh{font-family:'Space Grotesk';font-weight:700;font-size:28px;line-height:1.12;margin:8px 0 6px}
+  .rfb-dl{color:#c9c2ee;font-size:12.5px}
+  .rfb-seal{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(127,224,211,.5);border-radius:999px;padding:7px 14px;font-size:11px;font-weight:800;color:#7fe0d3;text-transform:capitalize}
+  .rfb-ctr{display:flex;gap:14px;margin-top:18px}
+  .rfb-nav{width:44px;height:44px;border-radius:50%;border:1px solid rgba(120,110,160,.55);background:rgba(120,110,160,.18);color:inherit;font-size:20px;cursor:pointer}
+  .rfb-nav:disabled{opacity:.3;cursor:default}
+  .rfb-shared{font-size:11px;opacity:.6;margin-top:12px}
+  @media(max-width:640px){.rfb-pg{padding:22px 18px}.rfb-h2{font-size:19px}.rfb-big{font-size:25px}}
+`;
 
 // ── Dispute-proof report identity (Option A: self-authenticating, NOTHING
 // stored). The report ID is a fingerprint of the report's own contents +
@@ -4113,6 +6145,7 @@ function canonicalReport(a){
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
+    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
     summary:a.summary||null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
@@ -4121,8 +6154,21 @@ function canonicalReport(a){
 // Stamp issuedAt + reportId onto a fresh analysis. Non-fatal: if crypto is
 // unavailable (very old/insecure context), fall back to a plain timestamp id
 // so the report still renders — it just isn't cryptographically verifiable.
+//
+// issuedAt is set by the SERVER (analyze-quote / analyze-listing-url stamp it
+// from the trusted server clock) and preferred here, so a user changing their
+// device clock cannot alter the report's issued date — which is fingerprinted
+// into the report ID. We only fall back to the local clock when the server
+// didn't provide one (older responses / non-server paths). See make-it-
+// dispute-proof.
 async function finalizeReport(analysis){
-  const issuedAt = new Date().toISOString();
+  // The server (analyze-quote / analyze-listing-url) already finalizes the
+  // report — it stamps issuedAt, computes the ID + payload, and SIGNS them.
+  // Trust that verbatim: the signature is over the server's exact canonical
+  // bytes, so recomputing here would break it. Only compute client-side when
+  // the server didn't (older responses / local demos) — that path is unsigned.
+  if(analysis?.verifyPayload && analysis?.reportId) return analysis;
+  const issuedAt = analysis?.issuedAt || new Date().toISOString();
   const withTime = {...analysis, issuedAt};
   try{
     const str = JSON.stringify(canonicalReport(withTime));
@@ -4135,471 +6181,439 @@ async function finalizeReport(analysis){
 function verifyBaseUrl(){
   try{ return (window.location.origin||"https://lotcheck.ca"); }catch{ return "https://lotcheck.ca"; }
 }
-// Build the shareable verify link. Carries BOTH the self-contained payload (d)
-// and the claimed report id — the verify page recomputes the id from d and
-// compares it to this claimed id, so an altered payload is provably caught.
+// Build the shareable verify link. Carries the self-contained payload (d), the
+// claimed report id, and — when the report was signed — the signature (s) +
+// key id (k). /verify recomputes the id AND checks the signature.
 function verifyLinkFor(a){
   if(!a||!a.verifyPayload) return null;
   const id=a.reportId?`&id=${encodeURIComponent(a.reportId)}`:"";
-  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}`;
+  const s=a.sig?`&s=${encodeURIComponent(a.sig)}`:"";
+  const k=a.keyId?`&k=${encodeURIComponent(a.keyId)}`:"";
+  return `${verifyBaseUrl()}/verify?d=${a.verifyPayload}${id}${s}${k}`;
 }
+
+// ── Report signing (provenance). Public keys only — safe to ship. Each report
+// carries a keyId so keys can rotate; keep retired public keys here so old
+// links keep verifying. Private key lives only on the server.
+const REPORT_PUBLIC_KEYS = {
+  k1: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErEpWm/YsbAN9i9RkuGAPDadAp8BJ+i3j7V1WVUtvsQgmBN04hEQksYdyUksotL6LYOrPAnRkpqh6DXmMlTI7FA==",
+};
+function b64urlToBytes(s){ s=s.replace(/-/g,"+").replace(/_/g,"/"); while(s.length%4)s+="="; const bin=atob(s); const arr=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i); return arr; }
+// Verify an ECDSA P-256 signature over the payload bytes with the named public
+// key. Returns true only on a cryptographically valid signature from LotCheck.
+async function verifyReportSignature(payloadB64url, sigB64url, keyId){
+  try{
+    const pubB64 = REPORT_PUBLIC_KEYS[keyId];
+    if(!pubB64 || !sigB64url) return false;
+    const spki = Uint8Array.from(atob(pubB64), c=>c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("spki", spki, {name:"ECDSA",namedCurve:"P-256"}, false, ["verify"]);
+    return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, key, b64urlToBytes(sigB64url), b64urlToBytes(payloadB64url));
+  }catch(e){ return false; }
+}
+// Verify a signature directly over payload BYTES (the decompressed canonical).
+async function verifyReportSignatureBytes(payloadBytes, sigB64url, keyId){
+  try{
+    const pubB64 = REPORT_PUBLIC_KEYS[keyId];
+    if(!pubB64 || !sigB64url) return false;
+    const spki = Uint8Array.from(atob(pubB64), c=>c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("spki", spki, {name:"ECDSA",namedCurve:"P-256"}, false, ["verify"]);
+    return await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"}, key, b64urlToBytes(sigB64url), payloadBytes);
+  }catch(e){ return false; }
+}
+// Verify payloads are gzip-compressed (so the QR stays scannable). Detect the
+// gzip magic header and inflate; legacy uncompressed payloads pass through
+// unchanged, so old report links still verify.
+async function maybeGunzip(bytes){
+  try{
+    if(bytes.length>=2 && bytes[0]===0x1f && bytes[1]===0x8b && typeof DecompressionStream!=="undefined"){
+      const ds=new DecompressionStream("gzip");
+      const w=ds.writable.getWriter(); w.write(bytes); w.close();
+      const ab=await new Response(ds.readable).arrayBuffer();
+      return new Uint8Array(ab);
+    }
+  }catch(e){ /* fall through to raw */ }
+  return bytes;
+}
+
+// ── Unique visual signature ("LotCheck seal"). A guilloché rosette whose exact
+// shape is DERIVED from the report's ECDSA signature (falls back to reportId),
+// so every report's seal is different and none can be reproduced without our
+// private key — alter any figure and the signature (and the seal) changes. The
+// generator is byte-identical to the one in the email edge function so the seal
+// matches on-screen, on the PDF, and on /verify.
+function sealSeed(s){ let h=2166136261>>>0; const str=String(s||"lotcheck"); for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619)>>>0; } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+function guillocheRings(seed,cx,cy,R,steps){
+  const rnd=mulberry32(seed);
+  const petal=4+Math.floor(rnd()*7), fine=16+Math.floor(rnd()*26), ph=rnd()*6.28318;
+  const a1=R*(0.10+rnd()*0.13), a2=R*(0.04+rnd()*0.07);
+  const ring=(scale,off)=>{ let d=""; const n=steps||600; for(let i=0;i<=n;i++){ const t=i/n*6.28318; const rr=R*scale+a1*Math.sin(petal*t+ph)+a2*Math.sin(fine*t); const x=cx+(rr+off)*Math.cos(t), y=cy+(rr+off)*Math.sin(t); d+=(i?"L":"M")+x.toFixed(1)+" "+y.toFixed(1)+" "; } return d; };
+  return [ring(1,0),ring(1,2.4),ring(0.66,0),ring(0.66,1.9)];
+}
+function Seal({seed,size=120,gid,ink="#eafff6"}){
+  const S=size, cx=S/2, cy=S/2, R=S*0.34;
+  const rings=guillocheRings(seed,cx,cy,R,700);
+  const id=gid||("sg"+seed);
+  return (
+    <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} aria-hidden="true">
+      <defs><radialGradient id={id}><stop offset="0" stopColor="#5dcaa5"/><stop offset="0.6" stopColor="#8b7be6"/><stop offset="1" stopColor="#6d3bd6"/></radialGradient></defs>
+      {/* certificate frame — makes it read as a proper stamp/seal */}
+      <circle cx={cx} cy={cy} r={S*0.47} fill="none" stroke="#8b7be6" strokeWidth={S*0.012} opacity="0.9"/>
+      <circle cx={cx} cy={cy} r={S*0.43} fill="none" stroke="#5dcaa5" strokeWidth={S*0.006} opacity="0.8"/>
+      {rings.map((d,i)=><path key={i} d={d} fill="none" stroke={`url(#${id})`} strokeWidth={i%2?0.5:0.75} opacity={i%2?0.55:0.95}/>)}
+      <circle cx={cx} cy={cy} r={R*0.30} fill="none" stroke="#8b7be6" strokeWidth="0.8" opacity="0.7"/>
+      <text x={cx} y={cy+3.5} textAnchor="middle" fontFamily="ui-monospace,Menlo,Consolas,monospace" fontSize={S*0.09} fontWeight="700" fill={ink}>LC</text>
+    </svg>
+  );
+}
+// ── Verification shield (replaces the padlock). state: "idle" | "ok" | "bad".
+// When "ok" the shield fills and the check draws in; "bad" shows an X. CSS
+// keyframes (shFill/shDraw/shCheck) are injected by the host page's <style>.
+function Shield({state="idle",size=64}){
+  const col=state==="ok"?"#34d399":state==="bad"?"#f0997b":"#8b7be6";
+  const bg=state==="ok"?"#0f6e56":state==="bad"?"#7a2417":"#2a2740";
+  const P="M50 6 L90 22 L90 58 C90 90 72 106 50 114 C28 106 10 90 10 58 L10 22 Z";
+  const cls=state==="ok"?"sh-anim":"";
+  return (
+    <svg className={cls} width={size} height={size*1.2} viewBox="0 0 100 120" aria-hidden="true">
+      <defs><clipPath id={"scl"+state}><path d={P}/></clipPath></defs>
+      <path d={P} fill={bg} opacity="0.5"/>
+      <g clipPath={`url(#scl${state})`}><rect className="sh-fill" x="0" y="0" width="100" height="120" fill={col} opacity="0.32"/></g>
+      <path className="sh-outline" d={P} fill="none" stroke={col} strokeWidth="4" strokeDasharray="420"/>
+      {state==="bad"
+        ? <path d="M36 44 L64 76 M64 44 L36 76" stroke="#fff" strokeWidth="7" strokeLinecap="round" fill="none"/>
+        : state==="idle"
+        ? <g><rect x="40" y="52" width="20" height="18" rx="3" fill="none" stroke="#cfc9f5" strokeWidth="4"/><path d="M43 52 v-6 a7 7 0 0 1 14 0 v6" fill="none" stroke="#cfc9f5" strokeWidth="4"/></g>
+        : <path className="sh-check" d="M34 60 L46 74 L70 40" fill="none" stroke="#eafff6" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>}
+    </svg>
+  );
+}
+const SHIELD_CSS=`
+  .sh-fill{transform:translateY(60px)}
+  .sh-anim .sh-fill{animation:shFill 3.6s ease-in-out infinite}
+  @keyframes shFill{0%,8%{transform:translateY(60px)}42%,92%{transform:translateY(0)}100%{transform:translateY(60px)}}
+  .sh-anim .sh-outline{animation:shDraw 3.6s ease-in-out infinite}
+  @keyframes shDraw{0%{stroke-dashoffset:420}30%,100%{stroke-dashoffset:0}}
+  .sh-anim .sh-check{stroke-dasharray:80;animation:shCheck 3.6s ease-in-out infinite}
+  @keyframes shCheck{0%,45%{stroke-dashoffset:80;opacity:0}55%{opacity:1}62%,92%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:80;opacity:0}}
+  @media(prefers-reduced-motion:reduce){.sh-fill{transform:translateY(0)!important}.sh-anim *{animation:none!important}}`;
 
 // ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
 // the report's ID + figures. Purely client-side; nothing is fetched or stored.
 function VerifyPage(){
   const [state,setState]=useState({phase:"loading"});
+  const [input,setInput]=useState("");
+  const [hint,setHint]=useState("");
+  async function runVerify(d,id,s,k){
+    setState({phase:"loading"});
+    try{
+      if(!d){ setState({phase:"empty"}); return; }
+      // Payload is gzip-compressed (falls back to raw for legacy links). Inflate
+      // to the canonical string, then hash + verify the signature over those
+      // exact bytes — the same bytes the server signed.
+      const canonBytes=await maybeGunzip(b64urlToBytes(d));
+      const str=new TextDecoder().decode(canonBytes);
+      const obj=JSON.parse(str);
+      const rid=makeReportId(await sha256Hex(str));   // recomputed from the link
+      const signed=!!(s&&k);
+      const sigValid=signed?await verifyReportSignatureBytes(canonBytes,s,k):false;
+      // Provenance (strongest): a valid signature proves LotCheck issued it AND
+      // nothing changed. Integrity (fallback): unsigned -> only id-match.
+      const phase=signed?(sigValid?"signed":"altered"):(id?(id===rid?"ok":"altered"):"unclaimed");
+      setState({phase,id:rid,claimed:id,obj,signed,sigValid,sig:s});
+    }catch(e){ setState({phase:"bad"}); }
+  }
+  useEffect(()=>{ const q=new URLSearchParams(window.location.search); runVerify(q.get("d"),q.get("id"),q.get("s"),q.get("k")); },[]);
+  function verifyFromInput(){
+    const raw=(input||"").trim(); if(!raw){ setHint("Paste the verify link from your LotCheck report, or scan the QR on the PDF."); return; }
+    let d=null,id=null,s=null,k=null;
+    try{ const u=new URL(raw); d=u.searchParams.get("d"); id=u.searchParams.get("id"); s=u.searchParams.get("s"); k=u.searchParams.get("k"); }
+    catch{ try{ const qs=raw.includes("?")?raw.slice(raw.indexOf("?")+1):raw; const p=new URLSearchParams(qs); d=p.get("d"); id=p.get("id"); s=p.get("s"); k=p.get("k"); }catch{} }
+    if(!d){
+      // No payload to verify. The most common mistake: pasting the report ID
+      // (e.g. LC-5369-4D9), which is a one-way fingerprint — nothing is stored
+      // to look it up. Point the user to the full verify link / QR instead.
+      const looksLikeId=/^LC[-\s]?[0-9A-Z]{3,4}[-\s]?[0-9A-Z]{2,4}$/i.test(raw);
+      setHint(looksLikeId
+        ? "That's the report ID — it can't be checked on its own (nothing is stored to look it up). Use the “Copy verify link” button on your report, or scan the QR on the emailed PDF. The link looks like lotcheck.ca/verify?d=…"
+        : "That doesn't look like a LotCheck verify link. Paste the full link — it starts with lotcheck.ca/verify?d=… — or scan the QR on the PDF.");
+      return;
+    }
+    setHint("");
+    runVerify(d,id,s,k);
+  }
+
+  const P=state.phase;
+  const authentic=P==="signed"||P==="ok", isBad=P==="altered"||P==="bad";
+  // Dark/bright toggle — synced to the site-wide lc-theme key, colors identical
+  // to the MSRP Alerts / Price Index tokens so Verify matches the rest of the site.
+  const [vTheme,setVTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
+  const toggleVTheme=()=>{ const n=vTheme==="dark"?"light":"dark"; setVTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
+  const vdark=vTheme==="dark";
+  const T=vdark?{
+    pageBg:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
+    navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6", cyan:"#3ae0ff", eyebrow:"#8b83de", heading:"#fff",
+    card:"rgba(255,255,255,.03)", cardBd:"rgba(255,255,255,.08)", rowBd:"rgba(255,255,255,.08)", inputBg:"rgba(255,255,255,.06)", inputBd:"rgba(255,255,255,.14)",
+  }:{
+    pageBg:"#f5f7fa", text:"#141c28", soft:"#5a6577", faint:"#8590a0",
+    navBg:"rgba(253,254,255,.82)", navBorder:"rgba(22,32,52,.1)", logoText:"#141c28", link:"#5a6577", cyan:"#0d8fb0", eyebrow:"#6f57e6", heading:"#141c28",
+    card:"rgba(255,255,255,.72)", cardBd:"rgba(22,32,52,.1)", rowBd:"rgba(22,32,52,.1)", inputBg:"rgba(255,255,255,.92)", inputBd:"rgba(22,32,52,.16)",
+  };
+  const mono='ui-monospace,"SF Mono",Menlo,Consolas,monospace';
+  const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
+  const idText=state.id||"LC-••••-•••";
+  const seal=authentic?{bg:"#0f6e56",bd:"#34d399",gl:P==="signed"?"🔏":"✓"}:isBad?{bg:"#7a2417",bd:"#f0997b",gl:"✕"}:{bg:"#2a2740",bd:"#7f77dd",gl:"🔒"};
+  // Whole-card edge flashes green when the report verifies, red when it fails.
+  const edgeBorder=authentic?"#10b981":isBad?"#f43f5e":T.cardBd;
+  const edgeAnim=authentic?"vEdgeOk 1.15s ease-out 3 forwards":isBad?"vEdgeBad 1.15s ease-out 3 forwards":"none";
+  const css=`
+  @keyframes vFloat{0%,100%{transform:translateY(0) rotateX(8deg) rotateY(-9deg)}50%{transform:translateY(-9px) rotateX(8deg) rotateY(-9deg)}}
+  @keyframes vSweep{0%{top:-10%;opacity:0}12%{opacity:1}88%{opacity:1}100%{top:108%;opacity:0}}
+  @keyframes vSeal{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1);opacity:1}}
+  @keyframes vRing{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+  @keyframes vGrid{0%{background-position:0 0}100%{background-position:0 26px}}
+  @keyframes vEdgeOk{0%{box-shadow:0 0 0 1px rgba(16,185,129,.4),0 0 12px 2px rgba(16,185,129,.25)}50%{box-shadow:0 0 0 2.5px #10b981,0 0 44px 9px rgba(16,185,129,.6)}100%{box-shadow:0 0 0 1.5px rgba(16,185,129,.5),0 0 22px 4px rgba(16,185,129,.32)}}
+  @keyframes vEdgeBad{0%{box-shadow:0 0 0 1px rgba(244,63,94,.4),0 0 12px 2px rgba(244,63,94,.25)}50%{box-shadow:0 0 0 2.5px #f43f5e,0 0 44px 9px rgba(244,63,94,.6)}100%{box-shadow:0 0 0 1.5px rgba(244,63,94,.5),0 0 22px 4px rgba(244,63,94,.32)}}
+  .lc-gate-car{animation:lcGateDrive 4s linear infinite}
+  @keyframes lcGateDrive{0%{transform:translate(-95px,-47px);opacity:0}10%{opacity:1}50%{transform:translate(0,0)}90%{opacity:1}100%{transform:translate(95px,47px);opacity:0}}
+  .lc-gate-window{animation:lcGateFlash 4s linear infinite}
+  @keyframes lcGateFlash{0%,40%{opacity:.22}50%{opacity:.68}60%,100%{opacity:.22}}
+  @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.vedge,.lc-gate-car,.lc-gate-window{animation:none!important}}
+  @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
+  @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
+  .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
+  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
+
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+  return (
+    <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
+        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:16}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
+          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          </div>
+          <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?"☀":"☾"}</button>
+          <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+      <div style={{padding:"28px 18px",display:"flex",justifyContent:"center"}}>
+      <div style={{width:"100%",maxWidth:920}}>
+        <div style={{color:T.eyebrow,fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:700,marginBottom:14,fontFamily:mono}}>LotCheck · Verify</div>
+        <div className="vgc vedge" style={{display:"grid",gridTemplateColumns:"1.05fr .95fr",background:T.card,border:`1px solid ${edgeBorder}`,borderRadius:18,overflow:"hidden",boxShadow:vdark?"none":"0 20px 50px rgba(51,48,90,.12)",animation:edgeAnim}}>
+
+          <div style={{position:"relative",minHeight:340,padding:22,display:"flex",flexDirection:"column",justifyContent:"flex-end",borderRight:`1px solid ${T.cardBd}`,overflow:"hidden",background:vdark?"transparent":"linear-gradient(180deg,#141238,#0e0b1c)"}}>
+            <div className="vgridK" style={{position:"absolute",left:"-25%",right:"-25%",bottom:0,height:"55%",backgroundImage:"linear-gradient(rgba(52,211,153,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(139,131,222,.16) 1px,transparent 1px)",backgroundSize:"26px 26px",transform:"perspective(420px) rotateX(60deg)",transformOrigin:"bottom",WebkitMaskImage:"linear-gradient(to top,#000 5%,transparent 78%)",maskImage:"linear-gradient(to top,#000 5%,transparent 78%)",animation:"vGrid 3.4s linear infinite"}}/>
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+              <svg viewBox="-145 -44 320 182" aria-hidden="true" style={{width:"78%",maxWidth:300,filter:`drop-shadow(0 24px 44px ${seal.bd}44)`}}>
+                <polygon points="0,-36 170,49 30,119 -140,34" fill="rgb(184,222,184)"/><polygon points="-140,48 30,133 30,119 -140,34" fill="rgb(160,203,160)"/><polygon points="170,63 30,133 30,119 170,49" fill="rgb(136,172,136)"/><polygon points="-50,5 100,80 52,104 -98,29" fill="#D9DBEF"/><polygon points="-4,-26 8,-20 -4,-14 -16,-20" fill="rgb(182,171,228)"/><polygon points="-16,22 -4,28 -4,-14 -16,-20" fill="rgb(158,145,210)"/><polygon points="8,22 -4,28 -4,-14 8,-20" fill="rgb(135,124,179)"/><polygon points="-72,8 -60,14 -72,20 -84,14" fill="rgb(182,171,228)"/><polygon points="-84,56 -72,62 -72,20 -84,14" fill="rgb(158,145,210)"/><polygon points="-60,56 -72,62 -72,20 -60,14" fill="rgb(135,124,179)"/><polygon points="1,-38.5 11,-33.5 -77,10.5 -87,5.5" fill="rgb(194,184,235)"/><polygon points="-87,16.5 -77,21.5 -77,10.5 -87,5.5" fill="rgb(172,160,218)"/><polygon points="11,-22.5 -77,21.5 -77,10.5 11,-33.5" fill="rgb(146,136,185)"/><g className="lc-gate-window"><polygon points="6,17 -82,61 -82,17 6,-27" fill="rgba(47,167,154,.22)"/></g><g className="lc-gate-car"><polygon points="-13,33.5 40,60 13,73.5 -40,47" fill="rgba(51,48,90,.10)"/><polygon points="-12,25 34,48 12,59 -34,36" fill="rgb(244,150,130)"/><polygon points="-34,44 12,67 12,59 -34,36" fill="rgb(227,123,100)"/><polygon points="34,56 12,67 12,59 34,48" fill="rgb(193,104,85)"/><polygon points="-5,23.5 17,34.5 1,42.5 -21,31.5" fill="rgb(244,150,130)"/><polygon points="-21,39.5 1,50.5 1,42.5 -21,31.5" fill="rgb(227,123,100)"/><polygon points="17,42.5 1,50.5 1,42.5 17,34.5" fill="rgb(193,104,85)"/><polygon points="17,42.5 1,50.5 1,43.5 17,35.5" fill="#E6F4F6"/><polygon points="-18,40 -1,48.5 -1,43.5 -18,35" fill="#DDEDF2"/><polygon points="-25,43.5 -18,47 -22,49 -29,45.5" fill="rgb(98,93,130)"/><polygon points="-29,50.5 -22,54 -22,49 -29,45.5" fill="rgb(64,59,100)"/><polygon points="-18,52 -22,54 -22,49 -18,47" fill="rgb(55,50,85)"/><polygon points="1,56.5 8,60 4,62 -3,58.5" fill="rgb(98,93,130)"/><polygon points="-3,63.5 4,67 4,62 -3,58.5" fill="rgb(64,59,100)"/><polygon points="8,65 4,67 4,62 8,60" fill="rgb(55,50,85)"/><polygon points="30,55 25,57.5 25,54.5 30,52" fill="#FFF3C9"/></g>
+              </svg>
+            </div>
+            <div key={P} style={{position:"absolute",right:14,bottom:44,zIndex:3,filter:`drop-shadow(0 0 16px ${seal.bd}66)`,animation:"vSeal 1s ease-out both"}}><Shield state={authentic?"ok":isBad?"bad":"idle"} size={56}/></div>
+            <div style={{position:"relative",zIndex:2,display:"inline-flex",alignItems:"center",gap:7,fontSize:11,fontWeight:700,color:"#5dcaa5",background:"rgba(52,211,153,.12)",border:"1px solid rgba(52,211,153,.35)",borderRadius:8,padding:"6px 11px",alignSelf:"flex-start"}}>Tamper-proof · nothing stored</div>
+          </div>
+
+          <div style={{padding:"24px 22px",color:T.text}}>
+            {P==="loading"&&<div style={{color:T.soft,fontSize:14}}>Verifying…</div>}
+            {(P==="empty"||P==="bad")&&(<>
+              <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:T.eyebrow,fontWeight:700}}>Verify</div>
+              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:T.heading}}>Is this LotCheck report real?</div>
+              <div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the verify link, or scan the QR on any LotCheck PDF — we recompute its fingerprint and check the signature, nothing stored. The report ID on its own can't be checked (there's nothing stored to look it up)."}</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:T.inputBg,border:`1px solid ${hint?"rgba(240,153,123,.6)":T.inputBd}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:T.text,outline:"none",boxSizing:"border-box"}}/>
+                <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
+              </div>
+              {hint
+                ? <div style={{marginTop:11,fontSize:12,lineHeight:1.55,color:"#c0532f",background:"rgba(240,153,123,.14)",border:"1px solid rgba(240,153,123,.4)",borderRadius:9,padding:"9px 11px"}}>{hint}</div>
+                : <div style={{marginTop:12,fontSize:11.5,color:T.faint}}>Paste the link, or scan the QR on the printed report — the report ID alone can’t be checked.</div>}
+            </>)}
+            {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
+              const o=state.obj||{};
+              const issued=o.issuedAt?new Date(o.issuedAt):null;
+              const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
+              const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
+              const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
+              return (<div>
+                <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:6}}>
+                  <span style={{width:24,height:24,borderRadius:999,background:accent,color:"#0e0b1c",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900}}>{authentic?"✓":isBad?"✕":"?"}</span>
+                  <div style={{fontSize:18,fontWeight:800,color:T.heading}}>{title}</div>
+                </div>
+                <div style={{fontSize:12.5,color:T.soft,lineHeight:1.6,marginBottom:12}}>
+                  {P==="signed"&&<>Valid LotCheck signature over <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Could only have been issued by LotCheck, and not one figure has changed.</>}
+                  {P==="ok"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>, matching the claimed ID. Every figure below is unaltered.</>}
+                  {P==="altered"&&state.signed&&<>The signature is <b style={{color:"#d6533f"}}>not valid</b> for these contents — altered after signing, or not from LotCheck. Don't trust the figures.</>}
+                  {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#d6533f"}}>{state.id}</b>. A figure was changed after issue.</>}
+                  {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
+                </div>
+                {P==="signed"&&state.sig&&(
+                  <div style={{display:"flex",alignItems:"center",gap:12,margin:"2px 0 14px",padding:"10px 12px",background:vdark?"rgba(127,119,221,.08)":"rgba(111,87,230,.08)",border:`1px solid ${vdark?"rgba(127,119,221,.25)":"rgba(111,87,230,.28)"}`,borderRadius:10}}>
+                    <div style={{flex:"none"}}><Seal seed={sealSeed(state.sig)} size={66} gid="vseal"/></div>
+                    <div style={{fontSize:11.5,color:T.soft,lineHeight:1.5}}>This report's <b style={{color:T.eyebrow}}>unique seal</b> — drawn from its signature. No other report has it, and it can't be reproduced without LotCheck's key.</div>
+                  </div>
+                )}
+                <div style={{background:vdark?"rgba(255,255,255,.04)":"rgba(255,255,255,.6)",border:`1px solid ${T.cardBd}`,borderRadius:12,padding:"14px 16px"}}>
+                  <div style={{fontSize:15,fontWeight:700,color:T.heading}}>{o.vehicle||"Vehicle"}</div>
+                  <div style={{fontSize:12.5,color:T.soft,fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
+                  {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
+                  {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?"#34d399":T.soft}/>}
+                  {delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
+                  {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
+                </div>
+                <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+              </div>);
+            })()}
+          </div>
+        </div>
+        <p style={{color:T.faint,fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
+        <a href="/real" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:700,color:T.eyebrow,textDecoration:"none"}}>Worried about fakes? How to spot a real LotCheck report →</a>
+      </div>
+      </div>
+    </div>
+  );
+}
+
+function QuoteCheckPage(){
+  // Current signed-in user (magic-link). Single source of truth via the shared
+  // hook; null when logged out. Drives the header entry point and the
+  // result-first sign-in prompt below. No gating/enforcement here (Phase 2).
+  const user=useSupabaseUser();
+  const [showSignIn,setShowSignIn]=useState(false);
+  // Optional nudge shown inside SignInModal — set when an anonymous user hits
+  // the global free-check breaker (HTTP 429 free_limit_reached), cleared on close.
+  const [signInNotice,setSignInNotice]=useState(null);
+  // Phase 4 credits. Balance is server-authoritative -- read from fn_my_credits
+  // on load / auth change and refreshed from each check's `credits.personal`;
+  // never computed client-side. `freeUsed` gates the single anonymous free
+  // check via a per-device localStorage flag. `showPaywall` opens on HTTP 402.
+  const [balance,setBalance]=useState(null); // {personal, shareable} | null (signed-out or not yet loaded)
+  const [freeUsed,setFreeUsed]=useState(isFreeCheckUsed);
+  const [showPaywall,setShowPaywall]=useState(false);
+  // Gift-link redemption (…/quote-check?gift=CODE). The code is stashed in
+  // localStorage on arrival so it survives the magic-link sign-in round-trip
+  // (which returns to /quote-check WITHOUT the query param), then redeemed the
+  // moment a session exists. giftClaim drives the banner: pending -> waiting for
+  // sign-in; success/already/error -> outcome message.
+  const [giftPending,setGiftPending]=useState(null); // the code, or null
+  const [giftClaim,setGiftClaim]=useState(null);     // {status:"success"|"already"|"error", msg} | null
   useEffect(()=>{
+    try{
+      const url=new URL(window.location.href);
+      const g=url.searchParams.get("gift");
+      if(g){
+        localStorage.setItem("lc_pending_gift", g.trim().toUpperCase());
+        url.searchParams.delete("gift");
+        window.history.replaceState({}, "", url.pathname+url.search+url.hash);
+      }
+      const stashed=localStorage.getItem("lc_pending_gift");
+      if(stashed) setGiftPending(stashed);
+    }catch{}
+  },[]);
+  // Redeem as soon as we have both a signed-in user and a pending code.
+  useEffect(()=>{
+    if(!user||!giftPending) return;
+    let active=true;
     (async()=>{
       try{
-        const q=new URLSearchParams(window.location.search);
-        const d=q.get("d");
-        if(!d){ setState({phase:"empty"}); return; }
-        const str=b64urlDecode(d);
-        const obj=JSON.parse(str);
-        const id=makeReportId(await sha256Hex(str));          // recomputed from the link
-        const claimed=q.get("id");                             // id the report claims to be
-        // If the link states which id it should be, we can prove a match/mismatch.
-        // If it doesn't, we can only show the computed id for the reader to compare.
-        const phase = claimed ? (claimed===id ? "ok" : "altered") : "unclaimed";
-        setState({phase,id,claimed,obj});
-      }catch(e){ setState({phase:"bad"}); }
+        const {data,error}=await supabase.rpc("fn_redeem_gift",{p_code:giftPending});
+        if(!active) return;
+        if(error){
+          const m=/already used/i.test(error.message)?"This link was already used."
+                 :/not valid/i.test(error.message)?"This link isn't valid."
+                 :/cancelled/i.test(error.message)?"This link was cancelled."
+                 :"Couldn't claim this free check.";
+          setGiftClaim({status:"error",msg:m});
+        }else{
+          if(data&&typeof data.personal==="number") setBalance(prev=>({personal:data.personal,shareable:prev?.shareable??0}));
+          setGiftClaim({status:data?.already?"already":"success",msg:data?.already?"You've already claimed this check.":"Free check added to your account."});
+        }
+      }catch(e){
+        if(active) setGiftClaim({status:"error",msg:"Couldn't claim this free check."});
+      }finally{
+        try{ localStorage.removeItem("lc_pending_gift"); }catch{}
+        if(active) setGiftPending(null);
+      }
     })();
-  },[]);
-  const INK="#1E1C19",SOFT="#5c584f",TEAL="#17756B",CORAL="#A63C25",PAPER="#F9F6EC",HAIR="#e6e0d2";
-  const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
-  const wrap={minHeight:"100vh",background:PAPER,color:INK,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",justifyContent:"center",padding:"40px 20px"};
-  const box={width:"100%",maxWidth:640};
-  const mono={fontFamily:'ui-monospace,"SF Mono",Menlo,Consolas,monospace'};
-  if(state.phase==="loading") return <div style={wrap}><div style={box}>Verifying…</div></div>;
-  if(state.phase==="empty"||state.phase==="bad") return (
-    <div style={wrap}><div style={box}>
-      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
-      <h1 style={{fontSize:26,margin:"14px 0"}}>{state.phase==="bad"?"This link couldn't be verified":"Nothing to verify"}</h1>
-      <p style={{color:SOFT,fontSize:15,lineHeight:1.6}}>{state.phase==="bad"?"The report data in this link is incomplete or was altered, so its fingerprint doesn't compute. Ask for the original report link from LotCheck.":"Open the verification link printed on a LotCheck report to check it here."}</p>
-    </div></div>
-  );
-  const o=state.obj;
-  const issued=o.issuedAt?new Date(o.issuedAt):null;
-  const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
-  const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"10px 0",borderTop:`1px solid ${HAIR}`}}><span>{t}</span><span style={{...mono,fontWeight:700,color:c||INK,whiteSpace:"nowrap"}}>{v}</span></div>);
-  return (
-    <div style={wrap}><div style={box}>
-      <div style={{...mono,fontSize:13,letterSpacing:".08em",color:SOFT,textTransform:"uppercase"}}>LotCheck · Report Verification</div>
-      {(()=>{
-        const P=state.phase;
-        const badge=P==="ok"?{bg:TEAL,sym:"✓"}:P==="altered"?{bg:CORAL,sym:"!"}:{bg:"#8a7f66",sym:"?"};
-        const title=P==="ok"?"Authentic report":P==="altered"?"This report was altered":"Confirm the report ID";
-        return (
-          <>
-            <div style={{display:"flex",alignItems:"center",gap:10,margin:"16px 0 4px"}}>
-              <span style={{display:"inline-flex",width:26,height:26,borderRadius:999,background:badge.bg,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700}}>{badge.sym}</span>
-              <h1 style={{fontSize:26,margin:0}}>{title}</h1>
-            </div>
-            {P==="ok"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>, which matches the ID this report claims. Every figure below is unaltered — changing any number would change this ID.</p>}
-            {P==="altered"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This report claims to be <b style={{...mono,color:INK}}>{state.claimed}</b>, but its current contents actually produce <b style={{...mono,color:CORAL}}>{state.id}</b>. A figure was changed after the report was issued — do not trust the numbers below. Ask for the original link from LotCheck.</p>}
-            {P==="unclaimed"&&<p style={{color:SOFT,fontSize:15,lineHeight:1.6,marginTop:6}}>This link's contents produce report ID <b style={{...mono,color:INK}}>{state.id}</b>. Check that this exactly matches the ID printed on the report you received — if it does, every figure below is genuine and unaltered.</p>}
-          </>
-        );
-      })()}
-      <div style={{background:"#fff",border:`1px solid ${HAIR}`,borderRadius:14,padding:"20px 22px",marginTop:18}}>
-        <div style={{fontSize:20,fontWeight:700}}>{o.vehicle||"Vehicle"}</div>
-        <div style={{color:SOFT,fontSize:14,fontStyle:"italic",marginBottom:6}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · issued ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
-        {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
-        {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?TEAL:SOFT}/>}
-        {delta!==0&&<Row t="Price vs MSRP" v={`${delta<0?money(-delta)+" under":money(delta)+" over"}`} c={delta<=0?TEAL:CORAL}/>}
-        {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
-        {o.recalls&&<Row t="Transport Canada recalls" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?CORAL:(o.recalls.confirmed===false?SOFT:TEAL)}/>}
-        {o.finance&&o.finance.dealer!=null&&<Row t="Financing APR (dealer)" v={`${o.finance.dealer}%`}/>}
-        {o.reputation&&<Row t="Dealer reputation" v={`${o.reputation.rating.toFixed(1)}★ / ${o.reputation.reviews.toLocaleString()}`}/>}
-      </div>
-      <p style={{color:SOFT,fontSize:12.5,lineHeight:1.6,marginTop:16}}>LotCheck does not store your report. This page recomputes its fingerprint live from the link — we keep no copy. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google, and the price to the quote that was submitted.</p>
-    </div></div>
-  );
-}
-
-// #24 "swipe card stack" — the on-screen report as a stepped deck: one section
-// per card, navigable by swipe / ← → / dots, with the money items (flagged
-// add-ons, high APR, open recalls, the "say this" script) carrying the cosmic
-// cyan glow. A dark cosmic VERDICT cover card leads, an EVIDENCE card closes the
-// audit (tamper-evident signature + independent Internet Archive snapshot so a
-// dealer editing the page later can't dispute what it said). Stores nothing.
-function HudReport({ analysis, analysisSource, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend, onReset }){
-  const a = analysis;
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
-
-  const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + v.toLocaleString("en-CA"); };
-  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
-  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
-  const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
-  const f = score != null ? score / 10 : 0;
-  const CIRC = 314.159, fillOffset = CIRC * (1 - f), needleDeg = -90 + f * 180;
-  const rno = a.reportId || (() => { const s = (a.vehicle || "") + (a.dealerName || ""); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return "LC-" + (1000 + (h % 9000)); })();
-  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
-  const verifyHref = verifyLinkFor(a);
-
-  const CY = "#22d3ee", TEAL = "#10b981", ROSE = "#f43f5e", AMBER = "#fbbf24", TX = "#e2e8f0", MUT = "#64748b", MUT2 = "#94a3b8", BORD = "#1e293b";
-  const mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
-  const flagged = (a.addOns || []).filter((x) => x.verdict === "flagged");
-  const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
-  const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
-  const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
-  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap" };
-
-  // Evidence / provenance
-  const sourceUrl = a.sourceUrl || a.listingUrl || null;
-  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
-  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2*/" + sourceUrl : null;
-
-  // Fire an independent Internet Archive snapshot of the listing at report time
-  // (fire-and-forget, no-cors) so the original page is preserved by a neutral
-  // third party if the dealer later edits it. We still store nothing ourselves.
-  useEffect(() => {
-    if (analysisSource !== "listing" || !sourceUrl) return;
-    try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) { /* best-effort */ }
-  }, [analysisSource, sourceUrl]);
-
-  const Chip = ({ txt, tone }) => {
-    const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2;
-    const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)";
-    return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>;
-  };
-  const KV = ({ k, v, c }) => (<div><div style={{ color: MUT, fontSize: 11, fontFamily: mono }}>{k}</div><div style={{ fontSize: 24, fontWeight: 700, color: c || "#fff", fontFamily: mono, marginTop: 4 }}>{v}</div></div>);
-
-  // ── build the deck (only cards that have data) ──
-  const cards = [];
-
-  // 0 · VERDICT (dark cosmic cover)
-  cards.push({ key: "verdict", title: "The verdict", cosmic: true, body: (
-    <div style={{ textAlign: "center" }}>
-      {score != null ? (
-        <>
-          <div style={{ position: "relative", width: 200, maxWidth: "100%", margin: "0 auto" }}>
-            <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
-              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
-              <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
-              <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}>
-                <line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" />
-              </g>
-              <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
-            </svg>
-          </div>
-          <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
-          <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
-        </>
-      ) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available for this quote.</div>}
-      {(qp || ms) > 0 && (
-        <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>
-          {qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}
-        </div>
-      )}
-      <div style={{ marginTop: 14 }}>
-        {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
-        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
-        {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
-        {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
-        {a.financingCheck?.checked && a.financingCheck.consistent && <Chip txt="✓ Math checks" tone="pass" />}
-      </div>
-      {a.summary && <div style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 14, textAlign: "left" }}>{a.summary}</div>}
-    </div>
-  )});
-
-  // 1 · PRICE
-  cards.push({ key: "price", title: "Price vs MSRP", tone: !priceVerified ? "flag" : (delta > 0 ? "flag" : "pass"), glow: false, body: (
-    <div>
-      <div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : (delta > 0 ? ROSE : TEAL) }}>
-        {(qp && ms) ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}
-      </div>
-      <div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{(qp && ms) ? ` vs ${money(ms)} MSRP` : ""} · {priceVerified ? "price verified" : "price not verified"}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
-        <KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} />
-        <KV k={a.msrpBasis === "starting_at" ? "MSRP · STARTING AT" : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} />
-      </div>
-      {a.allInPricing && a.allInPricing.body && (
-        <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>
-          Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.
-        </div>
-      )}
-      {a.msrpInflation && a.msrpInflation.dealerStated && (
-        <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>
-          ⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.
-        </div>
-      )}
-    </div>
-  )});
-
-  // 1b · FIRST SEEN (days on lot) — motivated-seller leverage from the dealer's
-  // own inventory data. Uiverse-style 3D striped card (imtausef) adapted to the
-  // traffic-light system: ≤30 green · 31–89 amber · 90–119 red · 120+ blinking
-  // red. Only rendered when real data exists — never estimated.
-  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
-    const d = Number(a.daysOnLot.days);
-    const months = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
-    const state = d >= 120 ? "blink" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
-    const ACC = state === "green" ? "#8ed500" : state === "amber" ? "#ffb020" : "#ff3b5c";
-    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
-    const MONTHS3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    const bulb = (on, color, blink) => (
-      <span style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto",
-        background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none",
-        animation: on && blink ? "lcDolBlink 0.9s step-end infinite" : "none" }} />
-    );
-    cards.push({ key: "dayslot", title: d >= 90 ? "⚠ First seen · days on lot" : "First seen · days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
-      <div style={{ display: "flex", justifyContent: "center" }}>
-        <style>{`
-          @keyframes lcDolBlink { 50% { opacity: 0.15; box-shadow: none; } }
-          .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
-          .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
-            background: linear-gradient(135deg, #0000 18.75%, #f3f3f3 0 31.25%, #0000 0),
-              repeating-linear-gradient(45deg, #f3f3f3 -6.25% 6.25%, #141414 0 18.75%);
-            background-size: 60px 60px; background-position: 0 0, 0 0; background-color: #141414;
-            width: 100%; position: relative;
-            box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
-          .lc-dol-card:hover { background-position: -100px 100px, -100px 100px; transform: rotate3d(0.5, 1, 0, 22deg); }
-          .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
-          .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
-          .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
-          .lc-dol-chip { cursor: default; margin-top: 1rem; display: inline-block; font-weight: 900; font-size: 9px;
-            text-transform: uppercase; color: ${ACC}; background: #141414; padding: 0.5rem 0.7rem; transform: translate3d(0,0,20px); }
-          .lc-dol-datebox { position: absolute; top: 26px; right: 26px; height: 62px; width: 62px; background: #141414;
-            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2;
-            ${state === "blink" ? "animation: lcDolBlink 0.9s step-end infinite;" : ""} }
-          .lc-dol-logo { position: absolute; top: 8px; left: 10px; transform: translate3d(0,0,80px); z-index: 2; }
-          .lc-dol-light { position: absolute; top: 96px; right: 34px; background: #141414; border: 1px solid #2a2a2a;
-            border-radius: 999px; padding: 5px 4px; transform: translate3d(0,0,70px); z-index: 2; }
-        `}</style>
-        <div className="lc-dol-parent">
-          <div className="lc-dol-card">
-            <div className="lc-dol-logo"><LogoMark size={34} /></div>
-            <div className="lc-dol-datebox">
-              {sinceD ? (<>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 9, fontWeight: 700 }}>{MONTHS3[sinceD.getMonth()]} {sinceD.getFullYear()}</span>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 20, fontWeight: 900 }}>{sinceD.getDate()}</span>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 7, fontWeight: 700, letterSpacing: ".08em" }}>FIRST SEEN</span>
-              </>) : (
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 18, fontWeight: 900, marginTop: 10 }}>{d}d</span>
-              )}
-            </div>
-            <div className="lc-dol-light">
-              {bulb(state === "red" || state === "blink", "#ff3b5c", state === "blink")}
-              {bulb(state === "amber", "#ffb020", false)}
-              {bulb(state === "green", "#8ed500", false)}
-            </div>
-            <div className="lc-dol-content">
-              <span className="lc-dol-title">{d.toLocaleString()} DAYS ON LOT</span>
-              <div className="lc-dol-text">
-                {months ? `About ${months} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
-                {d >= 90
-                  ? " Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage."
-                  : d >= 31
-                    ? " A month-plus on the lot — worth asking what they'll do on price to move it."
-                    : " Recently listed — limited sitting-time leverage on this unit."}
-              </div>
-              <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    )});
-  }
-
-  // 2 · ADD-ONS
-  if ((a.addOns || []).length) cards.push({ key: "addons", title: flagged.length ? "⚠ Flagged add-ons" : (analysisSource === "listing" ? "Discounts & conditions" : "Add-ons & fees"), tone: flagged.length ? "flag" : "muted", glow: flagged.length > 0, body: (
-    <div>
-      {flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}
-      {(a.addOns || []).map((x, i) => (
-        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}>
-          <div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? "🔻 " : ""}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div>
-          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div>
-        </div>
-      ))}
-    </div>
-  )});
-
-  // 3 · FINANCING
-  if (a.financeRates?.dealer) {
-    const high = a.financeRates.manufacturer && a.financeRates.dealer.apr - a.financeRates.manufacturer.apr > 0.1;
-    const price = qp || ms || 0;
-    let extra = null;
-    if (high && price) { const rd = a.financeRates.dealer.apr / 1200, rm = a.financeRates.manufacturer.apr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
-    cards.push({ key: "finance", title: "Financing APR", tone: high ? "flag" : "muted", glow: high, body: (
-      <div>
-        <div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff" }}>{a.financeRates.dealer.apr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>
-        {high
-          ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(a.financeRates.dealer.apr - a.financeRates.manufacturer.apr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {a.financeRates.manufacturer.apr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div>
-          : (a.financeRates.manufacturer ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {a.financeRates.manufacturer.apr}% on new.</div> : null)}
-      </div>
-    )});
-  }
-
-  // 4 · RECALLS
-  if (a.recalls?.checked) {
-    if (a.recalls.count > 0) cards.push({ key: "recalls", title: "⚠ Recalls · Transport Canada", tone: "flag", glow: true, body: (
-      <div>
-        <div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{a.recalls.count} open recall{a.recalls.count > 1 ? "s" : ""}</div>
-        {(a.recalls.items || []).slice(0, 4).map((it, i) => (
-          <div key={i} style={{ padding: "9px 0", borderTop: `1px solid ${BORD}` }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>
-            {it.summary && <div style={{ fontSize: 12, color: MUT2, marginTop: 3, lineHeight: 1.5 }}>{it.summary}</div>}
-          </div>
-        ))}
-        <div style={{ fontSize: 11, color: MUT, marginTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div>
-      </div>
-    )});
-    else if (a.recalls.count === 0 && a.recalls.confirmed === false) cards.push({ key: "recalls", title: "Recalls · couldn't confirm", tone: "muted", glow: false, body: (
-      <div><div style={{ fontSize: 15, fontWeight: 800, color: AMBER }}>Couldn't confirm this exact model</div><div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 8, lineHeight: 1.6 }}>This is <b>not</b> an all-clear — check open recalls directly by VIN at Transport Canada before you sign.</div></div>
-    )});
-    else cards.push({ key: "recalls", title: "Recalls · Transport Canada", tone: "pass", glow: false, body: (
-      <div style={{ fontSize: 18, fontWeight: 800, color: TEAL }}>✓ No open recalls found</div>
-    )});
-  }
-
-  // 5 · QUICK CHECKS
-  const checks = [];
-  if (a.vinCheck?.present) checks.push([a.vinCheck.valid ? "✓" : "⚠", `VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + a.vinCheck.vin : ""}`, a.vinCheck.valid]);
-  if (a.odometerCheck?.checked) checks.push([a.odometerCheck.flag ? "⚠" : "✓", `Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`, !a.odometerCheck.flag]);
-  if (a.financingCheck?.checked) checks.push([a.financingCheck.consistent ? "✓" : "⚠", `Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`, a.financingCheck.consistent]);
-  if (a.standardWarranty?.coverage) checks.push(["✓", `Included warranty: ${a.standardWarranty.coverage}`, true]);
-  if (a.evapRebate?.eligible) checks.push(["✓", `EV rebate ${money(a.evapRebate.total)} eligible`, true]);
-  else if (a.evapRebate?.ineligibleReason) checks.push(["•", `EV rebate: ${a.evapRebate.ineligibleReason}`, null]);
-  if (checks.length) { const anyFlag = checks.some((c) => c[2] === false); cards.push({ key: "checks", title: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: anyFlag, body: (
-    <div>{checks.map((c, i) => (<div key={i} style={{ display: "flex", gap: 10, padding: "7px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", fontSize: 13.5, lineHeight: 1.5 }}><span style={{ color: c[2] === false ? ROSE : c[2] ? TEAL : MUT2 }}>{c[0]}</span><span style={{ color: "#e2e8f0" }}>{c[1]}</span></div>))}</div>
-  )}); }
-
-  // 6 · DEALER REPUTATION
-  if (a.dealerSentiment && (a.dealerSentiment.rating || (a.dealerSentiment.highlights || []).length)) cards.push({ key: "rep", title: "Dealer reputation", tone: "muted", glow: false, body: (
-    <div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>{a.dealerSentiment.rating ? `★ ${Number(a.dealerSentiment.rating).toFixed(1)}` : "—"}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{a.dealerSentiment.reviewCount ? ` · ${Number(a.dealerSentiment.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>
-      {(a.dealerSentiment.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}
-    </div>
-  )});
-
-  // 7 · EVIDENCE (dispute-proof)
-  cards.push({ key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
-      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
-        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
-      </div>
-      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
-        LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.
-      </div>
-    </div>
-  )});
-
-  // 8 · SAY THIS (capstone, glows)
-  const cs = a.counterScript;
-  if (cs && Array.isArray(cs.moves) && cs.moves.length) cards.push({ key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: (
-    <div>{cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}</div>
-  )});
-
-  // ── deck controls ──
-  const [idx, setIdx] = useState(0);
-  const N = cards.length;
-  const clamp = (n) => Math.max(0, Math.min(N - 1, n));
-  const go = (d) => setIdx((i) => clamp(i + d));
-  useEffect(() => { const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N]);
-  const touchX = useRef(null);
-
-  const cardBox = (c) => ({ minHeight: 344, borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
-  const navBtn = (side) => ({ position: "absolute", [side]: -6, top: "50%", transform: "translateY(-50%)", zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, lineHeight: "34px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
-
-  return (
-    <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX }}>
-      <style>{`@keyframes hudUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}`}</style>
-
-      {/* header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", borderBottom: "1px solid rgba(34,211,238,.2)", paddingBottom: 14, marginBottom: 8, gap: 14, flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", letterSpacing: "-.02em" }}>REPORT <span style={{ color: CY }}>{rno}</span></div>
-          <div style={{ fontSize: 11, color: MUT, letterSpacing: ".16em", textTransform: "uppercase", marginTop: 4 }}>{analysisSource === "listing" ? "Listing analysis" : "Quote analysis"} {"·"} {a.vehicle || "Your quote"}</div>
-        </div>
-        <div style={{ padding: "5px 13px", borderRadius: 999, background: "rgba(8,51,68,.3)", border: `1px solid ${priceVerified ? "rgba(34,211,238,.3)" : "rgba(244,63,94,.35)"}`, color: priceVerified ? CY : ROSE, fontSize: 11, fontFamily: mono, whiteSpace: "nowrap" }}>STATUS: {priceVerified ? "VERIFIED" : "PRICE UNVERIFIED"}</div>
-      </div>
-      <div style={{ fontSize: 11, color: MUT, fontFamily: mono, marginBottom: 16 }}>{issued ? `Issued ${issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : "Self-verifying report"} {"·"} tamper-evident</div>
-
-      {/* deck viewport */}
-      <div style={{ position: "relative" }} onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (touchX.current == null) return; const dx = e.changedTouches[0].clientX - touchX.current; if (dx < -40) go(1); else if (dx > 40) go(-1); touchX.current = null; }}>
-        <button onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous card" style={{ ...navBtn("left"), opacity: idx === 0 ? .35 : 1 }}>‹</button>
-        <div style={{ overflow: "hidden", borderRadius: 16 }}>
-          <div style={{ display: "flex", transform: `translateX(-${idx * 100}%)`, transition: "transform .38s cubic-bezier(.4,0,.2,1)" }}>
-            {cards.map((c, i) => (
-              <div key={c.key} style={{ flex: "0 0 100%", minWidth: 0, boxSizing: "border-box", padding: "0 1px" }} aria-hidden={i !== idx}>
-                <div style={cardBox(c)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}>
-                    <span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span>
-                    <span style={{ fontSize: 11, fontFamily: mono, color: MUT, whiteSpace: "nowrap" }}>{String(i + 1).padStart(2, "0")} / {String(N).padStart(2, "0")}</span>
-                  </div>
-                  <div style={{ flex: 1 }}>{c.body}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <button onClick={() => go(1)} disabled={idx === N - 1} aria-label="Next card" style={{ ...navBtn("right"), opacity: idx === N - 1 ? .35 : 1 }}>›</button>
-      </div>
-
-      {/* dots + counter */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>
-        {cards.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Go to card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}
-      </div>
-      <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or use ← →  ·  card {idx + 1} of {N}</div>
-
-      {/* actions: email + reset */}
-      <div style={{ marginTop: 18, borderRadius: 16, padding: 18, border: `1px solid ${BORD}`, background: "rgba(15,23,42,.4)" }}>
-        <div style={{ ...klabel, marginBottom: 12 }}>Email me this report (PDF)</div>
-        {emailStatus === "sent" ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, color: TEAL, fontWeight: 700, fontSize: 14 }}>{"✓"} Sent to {emailInput.trim()}</div>
-        ) : (
-          <>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input type="email" placeholder="you@email.com" value={emailInput} onChange={(e) => { setEmailInput(e.target.value); if (emailErr) setEmailErr(""); }} disabled={emailStatus === "sending"} style={{ flex: "1 1 200px", background: "#020617", border: `1px solid ${emailErr ? ROSE : BORD}`, borderRadius: 10, padding: "11px 14px", color: TX, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-              <button onClick={onSend} disabled={emailStatus === "sending"} style={{ background: CY, border: "none", borderRadius: 10, padding: "11px 20px", color: "#04222b", fontWeight: 800, fontSize: 14, cursor: emailStatus === "sending" ? "default" : "pointer", whiteSpace: "nowrap" }}>{emailStatus === "sending" ? "Sending…" : "Send"}</button>
-            </div>
-            {emailErr && <div style={{ fontSize: 12, color: ROSE, marginTop: 8 }}>{emailErr}</div>}
-            <div style={{ fontSize: 11, color: MUT, marginTop: 8 }}>Used once to send this report, then not kept.</div>
-          </>
-        )}
-      </div>
-
-      <button onClick={onReset} style={{ width: "100%", marginTop: 16, background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: 13, color: TX, fontWeight: 700, cursor: "pointer" }}>Check another quote</button>
-    </div>
-  );
-}
-
-// ── Quote Check: upload a dealer quote PDF, get an AI-read breakdown of
-// MSRP vs quoted price, flagged add-ons, and warranty analysis. Nothing is
-// uploaded to Supabase Storage or saved anywhere -- the file is read in the
-// browser, sent once to the edge function for analysis, and discarded.
-function QuoteCheckPage(){
+    return ()=>{ active=false; };
+  },[user,giftPending]);
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   const [analysis,setAnalysis]=useState(null);
-  // Tracks which analysis path produced the current `analysis` object. Only
-  // "quote" (uploaded document/photo) is produced now — URL/listing analysis
-  // was removed (scraping third-party listing sites conflicts with their ToS;
-  // buyers upload their own screenshot/quote instead). The "listing" branches
-  // downstream are harmless legacy and simply never fire.
-  const [analysisSource,setAnalysisSource]=useState(null); // "quote"
+  // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
+  // "Report view"). `sharedReport` is true when the analysis was reconstructed
+  // from a self-contained share link (#r=...), never fetched or stored.
+  const [reportView,setReportView]=useState("deck");
+  const [sharedReport,setSharedReport]=useState(false);
+  const [linkCopied,setLinkCopied]=useState(false);
+  // On mount, reconstruct a shared report entirely client-side from the URL
+  // fragment — nothing hits a server, nothing is stored (keeps "never stored").
+  useEffect(()=>{
+    try{
+      const m=(window.location.hash||"").match(/[#&]r=([^&]+)/);
+      if(m){
+        const rep=decodeReport(m[1]);
+        if(rep){ setAnalysis(rep); setAnalysisSource("listing"); setStatus("done"); setReportView("flip"); setSharedReport(true);
+          window.history.replaceState({},"",window.location.pathname); }
+      }
+    }catch{}
+  },[]);
+  const copyShareLink=async()=>{
+    if(!analysis) return;
+    const url=window.location.origin+"/quote-check#r="+encodeReport(analysis);
+    try{ await navigator.clipboard.writeText(url); setLinkCopied(true); setTimeout(()=>setLinkCopied(false),2200); }
+    catch{ setLinkCopied(false); }
+  };
+  // Tracks which analysis path produced the current `analysis` object --
+  // "quote" (uploaded document/photo) or "listing" (pasted dealer URL).
+  // Some copy below (the flagged-items banner especially) means something
+  // different depending on the source: a flagged fee on a formal quote is
+  // money being taken from the buyer, but a flagged condition on a listing
+  // is usually a rebate/discount that might not apply -- money that MIGHT
+  // not come to the buyer, not money being extracted. Same verdict schema,
+  // opposite real-world meaning, so the wording needs to match the source.
+  const [analysisSource,setAnalysisSource]=useState(null); // "quote" | "listing"
   const [errorMsg,setErrorMsg]=useState("");
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
+  const [urlInput,setUrlInput]=useState("");
+  const [payFreq,setPayFreq]=useState("weekly"); // weekly | biweekly | monthly -- for the payment breakdown card
+
+  // Fire-and-forget dealer-sentiment lookup, called after EITHER analysis
+  // path (quote upload or listing URL) once analysis.dealerName is known.
+  // Deliberately not awaited at the call site -- the rest of the report
+  // renders immediately via setStatus("done"), and this card just fills
+  // in a moment later once the separate lookup finishes, same pattern as
+  // any other progressive enhancement. Never blocks, never shows an
+  // error -- a buyer should never know this lookup even happened if it
+  // fails; the card just doesn't appear.
+  const fetchDealerSentiment=async(dealerName,dealerCity)=>{
+    if(!dealerName) return;
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/get-dealer-sentiment",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
+        },
+        body:JSON.stringify({dealerName,dealerCity}),
+      });
+      const data=await res.json();
+      if(!res.ok||data.error||!data.dealerSentiment) return;
+      setAnalysis(prev=>prev?{...prev,dealerSentiment:data.dealerSentiment}:prev);
+    }catch{
+      // Silent by design -- see comment above.
+    }
+  };
   const fileInputRef=useRef(null);
-  // Paywall state -- pendingAction holds the file the user was trying to
-  // upload when the gate blocked them, so it can resume automatically once
-  // they've unlocked access, rather than making them re-select their file
-  // after "paying."
-  const [showPaywall,setShowPaywall]=useState(false);
-  const [pendingAction,setPendingAction]=useState(null); // {type:"file",file}
-  // True only for the single attempt that runs immediately after a
-  // purchase. If THAT attempt fails, the person just paid and hit the same
-  // wall they paid to get past -- that's a materially different, worse
-  // moment than an ordinary failed attempt, and needs to say so explicitly
-  // (their credit is untouched -- see consumeQuoteCredit, only called on
-  // real success) and hand them a fallback that doesn't depend on the same
-  // thing that just failed.
-  const [justPurchased,setJustPurchased]=useState(false);
+  // Which method the most recent attempt actually used -- set the moment an
+  // attempt starts, regardless of whether it succeeds, so an error state
+  // always knows precisely what to suggest instead (a failed URL attempt
+  // should point at upload, since that doesn't depend on a third-party site
+  // being scrapable at all -- a failed upload needs different guidance).
+  const [lastAttemptType,setLastAttemptType]=useState(null); // "file" | "url"
+  const [lastFile,setLastFile]=useState(null); // the actual File object from the most recent upload -- needed to re-run a refresh on the file path, since handleFile only ever received it as a function argument before now, not from state
 
   // Email-a-copy state -- separate from the main analyze flow so a failed
   // email send never wipes out the report the person can already see on
@@ -4607,18 +6621,29 @@ function QuoteCheckPage(){
   const [emailInput,setEmailInput]=useState("");
   const [emailStatus,setEmailStatus]=useState("idle");
   const [emailErr,setEmailErr]=useState("");
-  const [linkCopied,setLinkCopied]=useState(false);
-  // Self-contained shareable proof link: the report packed into the URL, decoded
-  // 100% client-side at /verify — nothing is stored (keeps "analyzed once, never
-  // stored"). The report ID is a fingerprint of the contents, so any altered
-  // figure changes it → tamper-evident. See make-it-dispute-proof.
-  function copyShareLink(){
+  const [verifyCopied,setVerifyCopied]=useState(false);
+  const [scriptCopied,setScriptCopied]=useState(false);
+  function copyCounterScript(){
+    const cs=analysis?.counterScript; if(!cs?.moves?.length) return;
+    const text=cs.moves.map((m,i)=>`${i+1}. ${m.say}`).join("\n");
+    try{ navigator.clipboard.writeText(text).then(()=>{setScriptCopied(true);setTimeout(()=>setScriptCopied(false),2200);}); }catch(e){}
+  }
+
+  // Native VIN history removed — VinAudit subscription cancelled. History is
+  // handled via the CARFAX hand-off; a new provider can slot in here later.
+
+  // Copy the tamper-evident VERIFY link (payload + claimed id) to the clipboard.
+  // Distinct from copyShareLink above, which copies the "#r=" full-report link:
+  // this one goes to /verify and proves the figures are unaltered. Nothing is
+  // stored server-side — the link itself is the whole record.
+  function copyVerifyLink(){
     const url=verifyLinkFor(analysis);
     if(!url) return;
     try{
-      navigator.clipboard.writeText(url).then(()=>{setLinkCopied(true);setTimeout(()=>setLinkCopied(false),2200);});
+      navigator.clipboard.writeText(url).then(()=>{setVerifyCopied(true);setTimeout(()=>setVerifyCopied(false),2200);});
     }catch(e){ /* clipboard blocked — link is still shown for manual copy */ }
   }
+
   function isValidEmail(v){
     // Deliberately simple -- catches typos ("bob@gmailcom") without the
     // false-negative risk of a stricter regex rejecting a real address.
@@ -4633,6 +6658,18 @@ function QuoteCheckPage(){
     }
     setEmailErr("");
     setEmailStatus("sending");
+    // The on-screen EVAP rebate card is computed client-side, so attach the
+    // computed rebate to the payload so the emailed report includes it too.
+    let emailAnalysis=analysis;
+    try{
+      if(analysis&&analysis.year&&analysis.make&&analysis.model){
+        const evapListMatch=getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0});
+        const eft=evapListMatch?.fuel||analysis.fuelType;
+        if(eft==="BEV"||eft==="PHEV"){
+          emailAnalysis={...analysis,evapRebate:getRebate("AB",eft,{year:analysis.year,make:analysis.make,model:analysis.model,condition:analysis.vehicleCondition,km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0})};
+        }
+      }
+    }catch{}
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
         method:"POST",
@@ -4641,7 +6678,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({email,analysis,verifyUrl:verifyLinkFor(analysis)||undefined}),
+        body:JSON.stringify({email,analysis:emailAnalysis,reportUrl:(window.location.origin+"/quote-check#r="+encodeReport(analysis)),verifyUrl:verifyLinkFor(analysis)||undefined}),
       });
       const data=await res.json();
       if(!res.ok||data.error){
@@ -4650,6 +6687,14 @@ function QuoteCheckPage(){
         return;
       }
       setEmailStatus("sent");
+      // Fire-and-forget capture -- logs the email for admin follow-up now
+      // that a real send has succeeded. A failed insert here should never
+      // surface as an error to the person; they already have their report
+      // either way, this is purely so it's not lost on Vic's end too.
+      supabase.from("quote_report_leads").insert({
+        email,
+        source: analysisSource==="listing" ? (urlInput.trim()||null) : (fileName||null),
+      }).then(({error})=>{ if(error) console.warn("⚠️ quote_report_leads insert failed:",error.message); });
     }catch(err){
       setEmailStatus("error");
       setEmailErr("Couldn't reach the email service. Check your connection and try again.");
@@ -4669,37 +6714,83 @@ function QuoteCheckPage(){
   const QC_LIGHT={
     ink:"#33305A", inkSoft:"#5B5885", inkFaint:"#706D96",
     paper:"#FBF5EC", paper2:"#F5EEE1", card:"#FFFFFF",
-    line:"rgba(51,48,90,.12)",
+    line:"rgba(51,48,90,.12)", borderWidth:"1px", cardShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
     teal:"#2FA79A", tealInk:"#17756B", tealBg:"#E3F4F1",
     coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
     butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
   };
+  // Dark = the cosmic palette from the MSRP Notifier page: near-black indigo
+  // chrome + cyan hero accent. Coral (flags) and butter (caution) stay warm so
+  // the color-coding still reads. Light/outdoor modes are unchanged.
   const QC_DARK={
-    ink:"#EDEBF7", inkSoft:"#B9B6D6", inkFaint:"#8D89B8",
-    paper:"#15121F", paper2:"#1C1830", card:"#211C34",
-    line:"rgba(237,235,247,.14)",
-    teal:"#2FA79A", tealInk:"#5FD8CB", tealBg:"rgba(47,167,154,.18)",
+    ink:"#eaf0ff", inkSoft:"#c7cee6", inkFaint:"#9aa2c4",
+    paper:"#080a1c", paper2:"#0f1228", card:"#15163a",
+    line:"rgba(150,170,255,.16)", borderWidth:"1px", cardShadow:"0 20px 60px -20px rgba(0,0,0,.6)",
+    teal:"#3ae0ff", tealInk:"#8fe9ff", tealBg:"rgba(58,224,255,.14)",
     coral:"#F2836B", coralInk:"#FF9E85", coralBg:"rgba(242,131,107,.18)",
     butter:"#F5C95C", butterInk:"#F5C95C", butterBg:"rgba(245,201,92,.18)",
+  };
+  // Outdoor/bright: for viewing on a phone in direct sunlight, where the
+  // usual cream paper and mid-tone teal/coral wash out badly against
+  // glare. Pure white paper and near-black ink maximize contrast; teal
+  // and coral are darkened and more saturated than the standard palette
+  // so the color-coding (principal vs. interest, verified vs. flagged)
+  // stays legible even when ambient light flattens subtle hue
+  // differences. No soft box-shadow here -- shadows are exactly the kind
+  // of low-contrast cue that disappears in bright glare, so a visibly
+  // bolder border does the job of defining the card edge instead.
+  const QC_OUTDOOR={
+    ink:"#141127", inkSoft:"#3A3660", inkFaint:"#514C82",
+    paper:"#FFFFFF", paper2:"#F1F1EC", card:"#FFFFFF",
+    line:"rgba(20,17,39,.22)", borderWidth:"1.5px", cardShadow:"none",
+    teal:"#0E7A6C", tealInk:"#0A5A50", tealBg:"#D9F0EB",
+    coral:"#C8431F", coralInk:"#8F2E12", coralBg:"#FBE1D6",
+    butter:"#B8860B", butterInk:"#6B4E08", butterBg:"#F5E8C8",
   };
   // Same key and same fallback logic as the homepage's inline head script:
   // explicit "dark" wins, otherwise fall back to the OS preference -- so a
   // first-time visitor who lands directly on /quote-check (never having
   // touched the homepage toggle) still gets a theme that matches their
-  // system, not a hardcoded default.
+  // system, not a hardcoded default. "outdoor" is a third saved value now,
+  // but only ever reached by explicit user choice below -- there's no OS
+  // media feature for "in bright sunlight," so a first-time visitor with
+  // nothing saved still only ever falls back to dark or light.
   const [qcTheme,setQcTheme]=useState(()=>{
     try{
       const saved=localStorage.getItem("lc-theme");
-      if(saved) return saved==="dark"?"dark":"light";
+      if(saved==="dark"||saved==="outdoor") return saved;
+      if(saved==="light") return "light";
       return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
     }catch{ return "light"; }
   });
-  function toggleQcTheme(){
-    const next=qcTheme==="dark"?"light":"dark";
+  function setQcThemeAndPersist(next){
     setQcTheme(next);
     try{ localStorage.setItem("lc-theme",next); }catch{}
   }
-  const C=qcTheme==="dark"?QC_DARK:QC_LIGHT;
+  const C=qcTheme==="dark"?QC_DARK:qcTheme==="outdoor"?QC_OUTDOOR:QC_LIGHT;
+
+  // 5-star reviews green, 3-star amber, 1-star red -- with 4 and 2 filled
+  // in sensibly on the same gradient (existing teal/butter/coral palette,
+  // matching the pattern already used elsewhere for score buckets).
+  function ratingColor(r){
+    if(r>=4) return C.tealInk;
+    if(r===3) return C.butterInk;
+    return C.coralInk;
+  }
+
+  // Backend now returns a bigger pool (6-8) of individual, rating-tagged
+  // review highlights instead of 2-4 fixed thematic bullets -- this picks
+  // a random subset of them to actually display. Re-samples whenever a
+  // NEW dealerSentiment payload arrives (a fresh report, a refresh, or
+  // checking a different vehicle at the same dealer), so the card feels
+  // alive across checks instead of showing the exact same lines every
+  // time, while staying stable while someone's actually reading one.
+  const sampledHighlights=useMemo(()=>{
+    const pool=analysis?.dealerSentiment?.highlights||[];
+    if(pool.length<=4) return pool;
+    const shuffled=[...pool].sort(()=>Math.random()-0.5);
+    return shuffled.slice(0,4);
+  },[analysis?.dealerSentiment]);
 
   // JPEG/PNG/WEBP go straight through -- HEIC/HEIF (the default format for
   // iPhone camera photos) needs converting first, since neither browsers
@@ -4716,8 +6807,64 @@ function QuoteCheckPage(){
     return HEIC_EXTENSIONS.some(ext=>lower.endsWith(ext));
   }
 
+  // Load the server-authoritative balance whenever auth changes. Signed-out ->
+  // no balance (the header chip falls back to the free-check state). Signed-in ->
+  // call fn_my_credits (RLS-scoped to the caller). Handles both a single-object
+  // and a single-row-array return shape defensively.
+  useEffect(()=>{
+    let active=true;
+    if(!user){ setBalance(null); return; }
+    supabase.rpc("fn_my_credits").then(({data,error})=>{
+      if(!active||error||!data) return;
+      const row=Array.isArray(data)?data[0]:data;
+      if(!row) return;
+      setBalance({personal:Number(row.personal)||0,shareable:Number(row.shareable)||0});
+    });
+    return ()=>{ active=false; };
+  },[user]);
+
+  // Builds the fetch headers for the two analyze edge functions. `apikey` is
+  // always the anon key. The Bearer is the signed-in user's access token when a
+  // session exists (so the edge function runs its credit path), otherwise the
+  // anon key (the free/anonymous path -- behaves exactly as before Phase 4).
+  const buildAnalyzeHeaders=async()=>{
+    let bearer=SB_ANON_KEY;
+    if(user){
+      try{
+        const {data}=await supabase.auth.getSession();
+        if(data.session?.access_token) bearer=data.session.access_token;
+      }catch{}
+    }
+    return {
+      "Content-Type":"application/json",
+      "apikey":SB_ANON_KEY,
+      "Authorization":`Bearer ${bearer}`,
+    };
+  };
+
+  // Applies the outcome of a successful check: refresh the displayed balance
+  // from the server's `credits.personal` (signed-in), or burn the anonymous
+  // free check (signed-out). Server stays the source of truth either way.
+  const applyCheckSuccess=(data)=>{
+    if(data&&data.credits&&typeof data.credits.personal==="number"){
+      setBalance(prev=>({personal:data.credits.personal,shareable:prev?.shareable??0}));
+    }
+    if(!user){ markFreeCheckUsed(); setFreeUsed(true); }
+  };
+
+  // Gate an analyze attempt before any work runs. Signed-in -> always proceed
+  // (the server enforces via 402). Anonymous -> proceed only if the free check
+  // hasn't been used; otherwise open the sign-in modal instead of running.
+  // Returns true if the caller may proceed.
+  const gateAttempt=()=>{
+    if(user) return true;
+    if(isFreeCheckUsed()){ setShowSignIn(true); return false; }
+    return true;
+  };
+
   const handleFile=async(file)=>{
     if(!file) return;
+    if(!gateAttempt()) return;
     const heic=isHeic(file);
     if(!heic&&!ACCEPTED_TYPES.includes(file.type)){
       setStatus("error");
@@ -4729,12 +6876,9 @@ function QuoteCheckPage(){
       setErrorMsg(`That file is a bit large (${(file.size/1024/1024).toFixed(1)}MB) — please try a photo under ${MAX_FILE_SIZE_MB}MB. A single clear photo of the quote works better than a scan of every page.`);
       return;
     }
-    if(!getQuoteCheckAccess().allowed){
-      setPendingAction({type:"file",file});
-      setShowPaywall(true);
-      return;
-    }
     setFileName(file.name);
+    setLastFile(file);
+    setLastAttemptType("file");
     setStatus("analyzing");
     setErrorMsg("");
 
@@ -4763,14 +6907,28 @@ function QuoteCheckPage(){
 
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
         method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-          "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
-        },
+        headers:await buildAnalyzeHeaders(),
         body:JSON.stringify({fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
       });
 
+      // Out of credits -> not an analysis failure. Return to idle and open the
+      // paywall instead of the error card.
+      if(res.status===402){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
+      }
+      // Anonymous free-check breaker tripped (global daily cap). Not an analysis
+      // failure and distinct from out_of_credits (a signed-in user at 0). Nudge
+      // to sign in + buy a pack, since paid checks aren't limited by the breaker.
+      if(res.status===429){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="free_limit_reached"){
+          setStatus("idle");
+          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setShowSignIn(true);
+          return;
+        }
+      }
       const data=await res.json();
       if(!res.ok||data.error){
         setStatus("error");
@@ -4779,13 +6937,141 @@ function QuoteCheckPage(){
       }
       setAnalysis(await finalizeReport(data.analysis));
       setAnalysisSource("quote");
-      consumeQuoteCredit();
-      setJustPurchased(false);
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
+      applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
       setStatus("error");
       setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
     }
+  };
+
+  function isValidUrl(v){
+    try{ const u=new URL(v.trim()); return u.protocol==="http:"||u.protocol==="https:"; }catch{ return false; }
+  }
+
+  // Advance the time-based progress line while a scan runs. The clock
+  // restarts whenever a new scan begins (status -> "analyzing"); the
+  // interval is torn down on status change / unmount so no stray timer
+  // outlives the scan. Purely cosmetic -- it never gates the real result,
+  // which still lands via setStatus("done") from the fetch above.
+  useEffect(()=>{
+    if(status!=="analyzing") return;
+    const stages=lastAttemptType==="url"?URL_SCAN_STAGES:FILE_SCAN_STAGES;
+    setScanMsg(stages[0].text);
+    const t0=Date.now();
+    const id=setInterval(()=>{
+      const elapsed=(Date.now()-t0)/1000;
+      let text=stages[0].text;
+      for(const s of stages){ if(elapsed>=s.at) text=s.text; }
+      setScanMsg(text);
+    },500);
+    return ()=>clearInterval(id);
+  },[status,lastAttemptType]);
+
+  // Hybrid policy: LotCheck reads DEALER-OWN sites only. These third-party
+  // listing marketplaces/aggregators are blocked (their ToS bar automated
+  // access — Century 21 v. Zoocasa); the edge function enforces the same list
+  // server-side. Buyers use the dealer's own link or upload a screenshot.
+  const AGGREGATOR_HOSTS=["autotrader.ca","autotrader.com","cargurus.ca","cargurus.com","kijiji.ca","kijijiautos.ca","ebay.ca","ebay.com","facebook.com","fb.com","carfax.ca","carfax.com","clutch.ca","carpages.ca","cars.com","truecar.com","carvana.com"];
+  function isAggregatorUrl(raw){
+    let host; try{ host=new URL(raw.trim()).hostname.toLowerCase().replace(/^www\./,""); }catch{ return false; }
+    return AGGREGATOR_HOSTS.some(d=>host===d||host.endsWith("."+d));
+  }
+
+  const handleUrlAnalyze=async()=>{
+    const url=urlInput.trim();
+    if(!isValidUrl(url)){
+      setStatus("error");
+      setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
+      return;
+    }
+    // Blocked marketplaces: don't even call the function — steer to a dealer
+    // link or upload. (Server-side enforcement lives in the edge function too.)
+    if(isAggregatorUrl(url)){
+      setLastAttemptType("url");
+      setStatus("error");
+      setErrorMsg("That's a listing marketplace (AutoTrader, CarGurus, Kijiji, eBay, or Facebook). We can't check those by link — paste the dealer's own website link for the same vehicle, or upload a screenshot of the listing instead.");
+      return;
+    }
+    if(!gateAttempt()) return;
+    setFileName(new URL(url).hostname);
+    setLastAttemptType("url");
+    setStatus("analyzing");
+    setErrorMsg("");
+
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
+        method:"POST",
+        headers:await buildAnalyzeHeaders(),
+        body:JSON.stringify({url}),
+      });
+
+      // Out of credits -> not an analysis failure. Return to idle and open the
+      // paywall instead of the error card.
+      if(res.status===402){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="out_of_credits"){ setStatus("idle"); setShowPaywall(true); return; }
+      }
+      // Anonymous free-check breaker tripped (global daily cap). Not an analysis
+      // failure and distinct from out_of_credits (a signed-in user at 0). Nudge
+      // to sign in + buy a pack, since paid checks aren't limited by the breaker.
+      if(res.status===429){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="free_limit_reached"){
+          setStatus("idle");
+          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setShowSignIn(true);
+          return;
+        }
+      }
+      // The listing couldn't be read (JS-rendered / bot-protected dealer site,
+      // no price found). NOT charged. Steer to the photo/PDF upload, which reads
+      // the real quote reliably — don't dump an empty "report" on the buyer.
+      if(res.status===422){
+        let body={}; try{ body=await res.json(); }catch{}
+        if(body.error==="unreadable_listing"){
+          // Existing error card already shows an "Upload a screenshot instead →"
+          // CTA for url attempts; the message tells them they weren't charged.
+          setStatus("error");
+          setErrorMsg(body.message||"We couldn't read the price on this dealer listing. Upload a screenshot or PDF of the quote instead — you haven't been charged.");
+          return;
+        }
+        if(body.error==="aggregator_not_supported"){
+          // Server-side backstop for a marketplace link (the client normally
+          // blocks these pre-flight via isAggregatorUrl).
+          setStatus("error");
+          setErrorMsg(body.message||"That listing marketplace can't be checked by link — paste the dealer's own website link, or upload a screenshot instead.");
+          return;
+        }
+      }
+      const data=await res.json();
+      if(!res.ok||data.error){
+        setStatus("error");
+        setErrorMsg(data.error||"Something went wrong analyzing that listing.");
+        return;
+      }
+      setAnalysis(await finalizeReport({ ...data.analysis, sourceUrl: url, capturedAt: new Date().toISOString() }));
+      setAnalysisSource("listing");
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
+      applyCheckSuccess(data);
+      setStatus("done");
+    }catch(err){
+      setStatus("error");
+      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
+    }
+  };
+
+  // Re-runs the exact same analysis that was last attempted, whether that
+  // was a file upload or a pasted URL -- lets someone retry in place
+  // (e.g. if MSRP/financing came back empty due to a transient fetch
+  // issue) without needing to re-paste a URL or re-pick a file. Does
+  // nothing if there's no prior attempt to repeat, or one is already in
+  // flight.
+  const handleRefresh=()=>{
+    if(status==="analyzing"||!lastAttemptType) return;
+    if(lastAttemptType==="url") handleUrlAnalyze();
+    else if(lastAttemptType==="file"&&lastFile) handleFile(lastFile);
   };
 
   const reset=()=>{
@@ -4794,7 +7080,7 @@ function QuoteCheckPage(){
     setAnalysisSource(null);
     setErrorMsg("");
     setFileName("");
-    setJustPurchased(false);
+    setUrlInput("");
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -4856,6 +7142,41 @@ function QuoteCheckPage(){
       76%,85% { opacity:1; transform:translateY(0); }
       89%,100%{ opacity:0; transform:translateY(-6px); }
     }
+    /* Sign-in modal hero: link chips advance down the runway toward the
+       viewer (translateY moves along the tilted floor, translateZ lifts it
+       off the floor toward the camera) then recycle -- always forward. Each
+       chip runs the same loop on a stagger so the stream never stalls. */
+    @keyframes lc-si-advance {
+      0%   { opacity:0; transform:translate3d(var(--x,0px),-62px,0px); }
+      14%  { opacity:1; }
+      80%  { opacity:1; }
+      100% { opacity:0; transform:translate3d(var(--x,0px),60px,54px); }
+    }
+    /* Sign-in success: the envelope flies forward once (grows + rises toward
+       the camera) -- "your link is on its way." forwards-fills to its arrived
+       frame. */
+    @keyframes lc-si-fly {
+      0%   { opacity:0; transform:translate3d(0px,-26px,0px) scale(.55); }
+      35%  { opacity:1; }
+      100% { opacity:1; transform:translate3d(0px,24px,58px) scale(1); }
+    }
+    /* Soft pulse on the destination line the chips advance toward. */
+    @keyframes lc-si-glow {
+      0%,100% { opacity:.32; }
+      50%     { opacity:.72; }
+    }
+    /* Reduced motion: park every sign-in animation on its resting frame
+       (each element carries an inline transform that reads as a static
+       isometric composition when the animation is off). */
+    @media (prefers-reduced-motion: reduce) {
+      .lc-si-chip, .lc-si-env, .lc-si-line { animation: none !important; }
+    }
+    /* Narrow phones: the top-bar controls (theme switch + credits chip +
+       sign-in) can't stay pinned right on their own wrapped line without
+       overflowing, so let them span the full row and wrap internally. */
+    @media (max-width:560px) {
+      .qc-topbar-controls { width:100%; margin-left:0 !important; justify-content:flex-start; }
+    }
   `;
 
   // Five example findings the scan demo cycles through -- a representative
@@ -4871,29 +7192,209 @@ function QuoteCheckPage(){
 
   const cardStyle={
     background:C.card,borderRadius:26,padding:20,marginBottom:16,
-    border:`1px solid ${C.line}`,boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
+    border:`${C.borderWidth} solid ${C.line}`,boxShadow:C.cardShadow,
   };
+
+  // Whether this report's addOns should be framed as real costs (fees) vs.
+  // discounts/conditions. Prefers each item's own `kind` field, which the
+  // edge function now supplies -- a URL/listing analysis can genuinely
+  // contain real fees (e.g. Honda Safe & Secure on a "payment-first"
+  // listing), so the old assumption of "listing = always discounts" was
+  // wrong and mislabeled a real $749 fee as a "conditional saving" on a
+  // live example. Falls back to the old analysisSource-based guess only
+  // when no item carries `kind` at all (older cached responses, or the
+  // analyze-quote path, which doesn't use this field since its add-ons
+  // are always genuine fees already labeled correctly).
+  const addOnsHaveKind=analysis?.addOns?.some(a=>a.kind==="fee"||a.kind==="discount");
+  const addOnsAreFees=addOnsHaveKind?analysis.addOns.some(a=>a.kind==="fee"):analysisSource!=="listing";
 
   return(
     <>
       <style>{GLOBAL_CSS}</style>
       <style>{QC_CSS}</style>
-      <div style={{minHeight:"100dvh",background:C.paper,padding:"24px 16px",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
-        <div style={{maxWidth:640,margin:"0 auto"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
-            <LogoMark size={34}/>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:1000,fontSize:18,color:C.ink}}>LotCheck Quote Check</div>
-              <div style={{fontSize:12,color:C.inkSoft}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+      <div style={{minHeight:"100dvh",background:qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper,backgroundColor:qcTheme==="dark"?"#05060f":undefined,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+        {/* Full-width site nav -- the same tabs as the rest of LotCheck, so the
+            Quote Check page reads as part of the site, not a detached tool. The
+            theme toggle, credits chip and Sign in live on its right side. */}
+        <nav aria-label="Main" style={{position:"sticky",top:0,zIndex:50,background:qcTheme==="dark"?"rgba(10,10,22,.72)":C.paper,backdropFilter:qcTheme==="dark"?"blur(12px)":"none",WebkitBackdropFilter:qcTheme==="dark"?"blur(12px)":"none",borderBottom:`1px solid ${C.line}`}}>
+          <div style={{maxWidth:1180,margin:"0 auto",display:"flex",alignItems:"center",gap:14,padding:"11px 16px",flexWrap:"wrap"}}>
+            <a href="/" aria-label="LotCheck home" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",flexShrink:0}}>
+              <LogoMark size={45}/>
+              <span style={{fontWeight:1000,fontSize:19,color:C.ink}}>LotCheck</span>
+            </a>
+            <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
+              {[
+                ["/live-price-index","MSRP Price Index"],
+                ["/alberta","Alberta Dealers Map"],
+                ["/#how","How it works"],
+                ["/#pipeline","10-point lane"],
+                ["/#report","Sample report"],
+                ["/#what","What LotCheck does"],
+                ["/msrp-alerts","MSRP Notifier"],
+              ].map(([href,label])=>(
+                <a key={href} href={href}
+                  style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.paper2;e.currentTarget.style.color=C.ink;}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color=C.inkSoft;}}>
+                  {label}
+                </a>
+              ))}
             </div>
-            <button onClick={toggleQcTheme} aria-label={qcTheme==="dark"?"Switch to bright mode":"Switch to dark mode"}
-              style={{width:38,height:38,borderRadius:999,border:`2px solid ${C.ink}`,background:"transparent",color:C.ink,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:16}}>
-              {qcTheme==="dark"?"☀️":"🌙"}
-            </button>
+            <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
+            {lastAttemptType&&(
+              <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
+                title="Re-run this report from scratch"
+                style={{display:"flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:10,background:C.paper2,border:`1px solid ${C.line}`,color:C.inkSoft,cursor:status==="analyzing"?"default":"pointer",opacity:status==="analyzing"?0.5:1,flexShrink:0,fontSize:15}}>
+                🔄
+              </button>
+            )}
+            <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
+              {[
+                ["dark","Dark",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>
+                  </svg>
+                )],
+                ["light","Light",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"/>
+                    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+                  </svg>
+                )],
+                ["outdoor","Outdoor",(
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5" fill="currentColor"/>
+                    <path d="M12 1v3M12 20v3M1 12h3M20 12h3M4 4l2 2M18 18l2 2M20 4l-2 2M6 18l-2 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                )],
+              ].map(([k,label,icon])=>(
+                <button key={k} onClick={()=>setQcThemeAndPersist(k)} aria-label={`Switch to ${k} mode`}
+                  style={{display:"inline-flex",alignItems:"center",gap:5,background:qcTheme===k?C.tealBg:"transparent",color:qcTheme===k?C.tealInk:C.inkSoft,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  {icon}
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Credits chip (Phase 4). Signed-in -> server balance ("{n} quotes
+                left", amber when low). Signed-out -> the one free check, or a
+                subtle nudge to sign in once it's spent. Display-only. */}
+            {(()=>{
+              if(user){
+                if(balance===null) return null; // balance not loaded yet -> show nothing rather than a wrong number
+                const low=balance.personal<=2;
+                return(
+                  <span title={`${balance.personal} personal quote${balance.personal===1?"":"s"} left${balance.shareable?` · ${balance.shareable} to share`:""}`}
+                    style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",
+                      color:low?C.butterInk:C.inkSoft,background:low?C.butterBg:C.paper2,border:`1px solid ${low?C.butter+"55":C.line}`}}>
+                    {balance.personal} quote{balance.personal===1?"":"s"} left
+                  </span>
+                );
+              }
+              if(!freeUsed) return(
+                <span style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  1 free check
+                </span>
+              );
+              return(
+                <button onClick={()=>setShowSignIn(true)}
+                  style={{fontSize:12,fontWeight:700,whiteSpace:"nowrap",flexShrink:0,borderRadius:999,padding:"6px 12px",color:C.inkFaint,background:"transparent",border:`1px solid ${C.line}`,cursor:"pointer"}}>
+                  Sign in for more
+                </button>
+              );
+            })()}
+
+            {/* Auth entry point. Logged out -> a "Sign in" button that opens the
+                magic-link modal. Logged in -> an email chip + Sign out. Phase 2:
+                no gating anywhere, this is purely account presence. */}
+            {user?(
+              <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                <span title={user.email} style={{maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:12,fontWeight:800,color:C.ink,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"6px 12px"}}>
+                  {user.email}
+                </span>
+                <button onClick={()=>supabase.auth.signOut()} aria-label="Sign out"
+                  style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Sign out
+                </button>
+              </div>
+            ):(
+              <button onClick={()=>setShowSignIn(true)}
+                style={{background:C.teal,border:"none",borderRadius:10,padding:"8px 16px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                Sign in
+              </button>
+            )}
+            </div>
           </div>
+        </nav>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"24px 16px"}}>
+          <div style={{marginBottom:24}}>
+            <div style={{fontWeight:1000,fontSize:22,color:C.ink}}>LotCheck Quote Check</div>
+            <div style={{fontSize:13,color:C.inkSoft,marginTop:2}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+          </div>
+
+          {/* Gift-link claim banner: someone arrived via …/quote-check?gift=CODE */}
+          {(giftPending&&!user)&&(
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:C.tealBg,border:`1px solid ${C.teal}66`,borderRadius:16,padding:"14px 18px",marginBottom:18}}>
+              <div style={{flex:"1 1 240px",minWidth:0}}>
+                <div style={{fontWeight:900,color:C.tealInk,fontSize:15}}>A free Quote Check is waiting for you</div>
+                <div style={{fontSize:12.5,color:C.inkSoft,marginTop:3,lineHeight:1.5}}>Sign in to claim it — one tap, no card needed. It lands on your account instantly.</div>
+              </div>
+              <button onClick={()=>setShowSignIn(true)}
+                style={{background:C.teal,border:"none",borderRadius:10,padding:"11px 20px",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                Sign in to claim
+              </button>
+            </div>
+          )}
+          {giftClaim&&(
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",
+                background:giftClaim.status==="error"?C.coralBg:C.tealBg,
+                border:`1px solid ${(giftClaim.status==="error"?C.coral:C.teal)}66`,
+                borderRadius:16,padding:"14px 18px",marginBottom:18}}>
+              <div style={{flex:"1 1 240px",minWidth:0,fontWeight:800,fontSize:14,
+                color:giftClaim.status==="error"?C.coralInk:C.tealInk}}>
+                {giftClaim.status==="success"&&"You're all set — "}{giftClaim.msg}
+              </div>
+              <button onClick={()=>setGiftClaim(null)} aria-label="Dismiss"
+                style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"7px 14px",color:C.inkSoft,fontSize:13,fontWeight:700,cursor:"pointer",flexShrink:0}}>Got it</button>
+            </div>
+          )}
 
           {status==="idle"&&(
             <>
+            {/* PRIMARY: paste a DEALER-OWN listing link (hybrid). Third-party
+                aggregators/marketplaces (AutoTrader, CarGurus, Kijiji, eBay,
+                Facebook) are blocked client-side (isAggregatorUrl) AND in the
+                edge function, pending legal sign-off — see Century 21 v. Zoocasa. */}
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`2px solid ${C.teal}`,borderRadius:22,padding:"22px 22px",boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)"}}>
+              <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:800,letterSpacing:.4,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"4px 11px",marginBottom:10}}>🔗 Fastest way</div>
+              <div style={{color:C.ink,fontWeight:1000,fontSize:18,marginBottom:6}}>Paste a dealer's website link</div>
+              <div style={{fontSize:13,color:C.inkSoft,marginBottom:14,lineHeight:1.5}}>We open the live dealer page and read the price, fees, financing and specs — even on sites that load the price with scripts. Use the <strong>dealer's own website</strong>.</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <input
+                  type="url"
+                  placeholder="https://dealer-site.com/inventory/..."
+                  value={urlInput}
+                  onChange={e=>setUrlInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
+                  style={{flex:"1 1 240px",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"13px 16px",color:C.ink,fontSize:15,outline:"none",boxSizing:"border-box"}}
+                />
+                <button onClick={handleUrlAnalyze}
+                  style={{background:C.teal,border:"none",borderRadius:10,padding:"13px 26px",color:"#fff",fontWeight:800,fontSize:15,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Analyze →
+                </button>
+              </div>
+              <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                <span aria-hidden="true">🚫</span>
+                <span><strong>Don't use listing marketplaces</strong> — AutoTrader, CarGurus, Kijiji, eBay, or Facebook Marketplace links aren't supported here. Paste the dealer's own site, or upload a screenshot instead.</span>
+              </div>
+            </div>
+
+            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
+              <div style={{flex:1,height:1,background:C.line}}/>
+              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR UPLOAD A QUOTE</div>
+              <div style={{flex:1,height:1,background:C.line}}/>
+            </div>
+
             <div
               onDragOver={e=>{e.preventDefault();setDragOver(true);}}
               onDragLeave={()=>setDragOver(false)}
@@ -4933,7 +7434,7 @@ function QuoteCheckPage(){
 
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
               {[
-                {n:"1",label:"Upload or paste",desc:"Drop a file, click to browse, or paste (Ctrl+V / Cmd+V) a screenshot"},
+                {n:"1",label:"Upload your quote",desc:"Drop a file, click to browse, or paste a screenshot (Ctrl+V / Cmd+V)"},
                 {n:"2",label:"We read it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
                 {n:"3",label:"See what's real",desc:"True MSRP, flagged add-ons, and any EVAP rebate you qualify for"},
               ].map((s,i)=>(
@@ -4952,61 +7453,355 @@ function QuoteCheckPage(){
           {status==="analyzing"&&(
             <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
               <IsoScanVisual C={C} speed="active"/>
-              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Reading {fileName}…</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>Checking MSRP, add-ons, and warranty terms</div>
+              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>{lastAttemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}</div>
+              <div style={{color:C.inkFaint,fontSize:13,transition:"opacity .2s"}}>{scanMsg||"Checking MSRP, add-ons, and warranty terms"}</div>
+              {lastAttemptType==="url"&&(
+                <div style={{color:C.inkFaint,fontSize:11,marginTop:10,opacity:.75}}>Reading a live dealer page can take up to a minute — hang tight.</div>
+              )}
             </div>
           )}
 
-          {status==="error"&&justPurchased&&(
-            <div style={{...cardStyle,background:C.tealBg,border:`1.5px solid ${C.teal}55`,padding:"28px 24px",textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:10}}>✓</div>
-              <div style={{color:C.tealInk,fontWeight:1000,marginBottom:6}}>Your credit is safe</div>
-              <div style={{fontSize:13,color:C.inkSoft,marginBottom:16,lineHeight:1.6}}>
-                This attempt wasn't charged -- nothing is deducted from your purchase unless a report actually comes back. {errorMsg}
-              </div>
-              <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try a different photo →</button>
-            </div>
-          )}
-
-          {status==="error"&&!justPurchased&&(
+          {status==="error"&&(
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
               <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
               <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
-              <button onClick={reset} style={{marginTop:8,background:C.ink,border:"none",borderRadius:999,padding:"10px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try again</button>
+              {lastAttemptType==="url"?(
+                <>
+                  <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
+                    Dealer sites occasionally can't be read automatically. Uploading a screenshot of the same page works even when the link doesn't, since it never depends on the dealer's site cooperating.
+                  </div>
+                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
+                  <div>
+                    <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
+                  </div>
+                </>
+              ):(
+                <button onClick={reset} style={{marginTop:8,background:C.ink,border:"none",borderRadius:999,padding:"10px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Try again</button>
+              )}
             </div>
           )}
 
-          {/* Dark HUD report kept (disabled) — shipping the light report + trust layer first; the HUD reskin is a later polish. */}
-          {false&&status==="done"&&analysis&&(
-            <HudReport
-              analysis={analysis} analysisSource={analysisSource}
-              emailInput={emailInput} setEmailInput={setEmailInput}
-              emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr}
-              onSend={sendReportEmail} onReset={reset}
-            />
-          )}
-          {status==="done"&&analysis&&(
+          {status==="done"&&analysis&&(()=>{
+            // ── Shared report computations (used by the summary hero tiles and
+            //    the grouped Rebates & conditions card below). Every value is
+            //    derived from real analysis fields -- nothing fabricated. ──
+            // EVAP: mirror the card's own gate/logic exactly so the hero tile
+            // and the Rebates card always agree (lifted out of the card's old
+            // inline IIFE so both can read the same result).
+            const evapListMatch=analysis.year&&analysis.make&&analysis.model
+              ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
+              :null;
+            const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
+            const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
+            const evapShow=!!(analysis.year&&analysis.make&&analysis.model
+              &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"));
+            const rebate=evapShow?getRebate("AB",effectiveFuelType,{
+              year:analysis.year,make:analysis.make,model:analysis.model,
+              condition:analysis.vehicleCondition,
+              km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
+            }):null;
+            // Watch-outs tile: a COUNT of the report's own flagged items
+            // (recalls, odometer flag, invalid VIN, flagged add-ons) -- a
+            // factual tally of what's flagged below, never an invented rating.
+            let watchOuts=0;
+            if(analysis.recalls?.checked&&analysis.recalls.count>0) watchOuts+=analysis.recalls.count;
+            if(analysis.odometerCheck?.flag) watchOuts+=1;
+            if(analysis.vinCheck?.present&&!analysis.vinCheck.valid) watchOuts+=1;
+            if(analysis.addOns?.length) watchOuts+=analysis.addOns.filter(a=>(a.verdict||(a.flagged?"flagged":"standard"))==="flagged").length;
+            // Summary tiles -- factual figures only (no verdict chip). Built
+            // adaptively: only tiles backed by real data render.
+            const tiles=[];
+            const qPrice=Number(analysis.quotedPrice)||0;
+            const mPrice=Number(analysis.msrp)||0;
+            if(qPrice>0) tiles.push({label:"Price",value:`$${qPrice.toLocaleString()}`,sub:"quoted, before tax"});
+            else if(mPrice>0) tiles.push({label:"Price (MSRP)",value:`$${mPrice.toLocaleString()}`,sub:"quote didn't show a price"});
+            // Payment tile: prefer the dealer's DISCLOSED payment; otherwise a
+            // bi-weekly ESTIMATE, shown only on a verified listing price with a
+            // real rate -- never off an MSRP fallback, consistent with the
+            // financing card's price-verification gate.
+            (()=>{
+              const fr=analysis.financing?.paymentFrequency;
+              const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
+              const fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
+              if(analysis.financing?.paymentAmount&&fr){
+                tiles.push({label:fLbl[fr]||"Payment",value:`$${Math.round(analysis.financing.paymentAmount).toLocaleString()}`,valueSuffix:fSuf[fr]||"",sub:`${analysis.financing.rate?`${analysis.financing.rate}% · `:""}disclosed on quote`});
+                return;
+              }
+              const rate=analysis.financeRates?.dealer?.apr??analysis.financing?.rate??analysis.financeRates?.manufacturer?.apr??null;
+              if(qPrice>0&&rate!=null){
+                const termRaw=Number(analysis.financing?.termMonths)||0;
+                const term=FIN_TERMS.includes(termRaw)?termRaw:60;
+                const biw=amortPayment(qPrice,Number(rate),26,term);
+                if(biw>0) tiles.push({label:"Bi-weekly est.",value:`$${Math.round(biw).toLocaleString()}`,valueSuffix:"/2wk",sub:`${rate}% · ${term} mo · $0 down`});
+              }
+            })();
+            if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
+            tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
+            const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
+            const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
+            // Flip-book "Report view" replaces the scroll body when selected.
+            if(reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
+            if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
+            // 3-way view toggle (scroll / report / orrery), active state highlighted.
+            const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
+            const viewToggle=(
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
+                <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
+                  {vBtn("deck","Deck")}{vBtn("score","Scorecard")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                </div>
+                <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
+              </div>
+            );
+            // 3D Orrery view — the deal as a navigable hologram (real WebGL).
+            if(reportView==="orrery") return (
+              <div>
+                {viewToggle}
+                <DealOrrery analysis={analysis} height={540}/>
+                <div style={{fontSize:12,color:C.inkFaint,textAlign:"center",marginTop:8,lineHeight:1.5}}>Drag to orbit · scroll to zoom. Your quote is the core; fees orbit it (bigger = pricier), <b style={{color:C.coralInk}}>flagged fees glow red</b>, and the teal ring is MSRP.</div>
+              </div>
+            );
+            return (
             <div>
+              {viewToggle}
+              {/* Result-first sign-in invitation. Non-blocking: the full report
+                  renders below regardless. Only shown to logged-out visitors --
+                  once signed in it disappears. No paywall, no enforcement
+                  (Phase 2 is auth primitives only). */}
+              {!user&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,boxShadow:"none",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+                  <div style={{fontSize:26,flexShrink:0}}>🔖</div>
+                  <div style={{flex:"1 1 200px",minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:800,color:C.ink,marginBottom:2}}>Sign in to save this report and run more checks</div>
+                    <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>Keep a copy in your account and pick up where you left off — takes a few seconds, no password.</div>
+                  </div>
+                  <button onClick={()=>setShowSignIn(true)}
+                    style={{background:C.teal,border:"none",borderRadius:10,padding:"10px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}>
+                    Sign in →
+                  </button>
+                </div>
+              )}
+
+              {/* ── Summary hero: the vehicle, then a row of factual tiles
+                     (price, payment, rebate, watch-out count). Figures only --
+                     no verdict chip (house rule). Tiles are built adaptively
+                     above; 2-4 render depending on what real data exists. ── */}
               <div style={cardStyle}>
-                <div style={{fontSize:13,color:C.inkFaint,marginBottom:4}}>{analysis.vehicle||"Vehicle"}</div>
-                <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-                  <div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>MSRP</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
-                  </div>
-                  <div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>Quoted price</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
-                  </div>
+                <div style={{fontSize:20,fontWeight:1000,color:C.ink,letterSpacing:-.3,lineHeight:1.15}}>{vehName}</div>
+                {metaBits.length>0&&<div style={{fontSize:12.5,color:C.inkSoft,marginTop:4}}>{metaBits.join(" · ")}</div>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:16}}>
+                  {tiles.map((t,i)=>(
+                    <div key={i} style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 13px"}}>
+                      <div style={{fontSize:10.5,textTransform:"uppercase",letterSpacing:.7,color:C.inkFaint,fontWeight:800}}>{t.label}</div>
+                      <div style={{fontSize:19,fontWeight:1000,marginTop:3,letterSpacing:-.3,color:t.flag?C.butterInk:C.ink}}>{t.value}{t.valueSuffix&&<span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>{t.valueSuffix}</span>}</div>
+                      {t.sub&&<div style={{fontSize:11,color:C.inkSoft,marginTop:2}}>{t.sub}</div>}
+                    </div>
+                  ))}
                 </div>
               </div>
 
+              {/* Feed-fallback notice: the dealer page itself couldn't be read,
+                  so this report was built from the dealer's SM360 inventory
+                  feed. Surface that honestly so the buyer knows fees/financing
+                  from the page aren't included here. */}
+              {analysis.source==="sm360_feed_fallback"&&(
+                <div style={{...cardStyle,background:C.butterBg,border:`1px solid ${C.butter}55`,boxShadow:"none"}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}>Built from the dealer's inventory feed</div>
+                  <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.sourceNote||"The dealer's listing page couldn't be loaded, so this report was built from the dealer's own inventory feed. Itemized fees and the page's financing terms aren't included -- confirm them with the dealer."}</div>
+                </div>
+              )}
+
+              {/* TL;DR -- the "Bottom line", promoted from the very bottom of the
+                  report to the top as its summary. Same analysis.summary text as
+                  before, unchanged. */}
+              {analysis.summary&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,borderLeft:`3px solid ${C.teal}`}}>
+                  <div style={{fontSize:12,fontWeight:800,color:C.tealInk,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>Bottom line</div>
+                  <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
+                </div>
+              )}
+
               {/* Financing breakdown -- payment matrix (down payment x term x
                   frequency) computed purely from the quoted price, plus the
-                  real rate anchors (quote / manufacturer catalog / live Bank of
-                  Canada). Directly answers the "finance breakdown was missing"
-                  gap. Renders itself null when there's no quoted price. */}
+                  real rate anchors (quote / manufacturer finance & lease
+                  catalog / live Bank of Canada) and the payment-reconciliation
+                  (financingCheck) note. This is the single financing UI --
+                  replaces the earlier "Financing examples" card. Renders itself
+                  null when there's no quoted price. Now condensed: a summary
+                  with the full matrix behind an expander. */}
               <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
+
+              {/* ── Detail cards in a 2-column grid on desktop, collapsing to a
+                     single column on mobile. auto-fit + minmax does the collapse
+                     with no media query; rowGap:0 defers vertical rhythm to each
+                     card's own marginBottom (from cardStyle). ── */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
+
+              {/* MSRP on its own -- just the manufacturer's number, nothing
+                  else mixed into this card. The comparison against what the
+                  buyer is actually being asked to pay lives in the Quoted
+                  price card right below, colored against this figure. */}
+              <div style={cardStyle}>
+                <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>MSRP</div>
+                <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
+              </div>
+
+              {/* Quoted price colored against MSRP: teal/green at-or-under
+                  MSRP, coral/red over it. hasMsrpCompare guards against
+                  coloring when either number is missing (e.g. MSRP wasn't
+                  on the quote) -- no color claim without both values. */}
+              {(()=>{
+                const hasMsrpCompare=!!(analysis.msrp&&analysis.quotedPrice);
+                const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
+                const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
+                const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
+                return (
+                  <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:{})}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price</div>
+                    <div style={{fontSize:22,fontWeight:1000,color:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
+                    {hasMsrpCompare&&(
+                      <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
+                        {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ── Verification checks (the real 10-point results) rendered
+                  from the edge function's structured output: leverage,
+                  recalls, odometer, VIN, financing math. Each card only
+                  appears when its check ran, and reuses the same teal=good /
+                  coral=concern language as the price cards above. ── */}
+
+              {/* Independent used-market value (provider-agnostic, auto when a
+                  VIN is present + a market-value provider is live). Buyer-side
+                  value anchor — NOT the dealer's trade-in number. Source label
+                  comes from the data so it stays accurate as providers change. */}
+              {analysis.marketValue&&analysis.marketValue.average!=null&&(()=>{
+                const mv=analysis.marketValue;
+                const asking=Number(analysis.quotedPrice)||0;
+                const avg=Number(mv.average);
+                const delta=(asking&&avg)?asking-avg:0;
+                const good=delta<=0;
+                return (
+                  <div style={{...cardStyle,background:good?C.tealBg:C.coralBg,border:`1px solid ${(good?C.teal:C.coral)}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · {mv.source||"independent"}</div>
+                    <div style={{fontSize:18,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.1}}>
+                      {(asking&&avg)?`Asking is ${delta<=0?`$${Math.abs(delta).toLocaleString()} under`:`$${delta.toLocaleString()} over`} market`:`Market average $${avg.toLocaleString()}`}
+                    </div>
+                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{(mv.comps||mv.count)?`, from ${Number(mv.comps||mv.count).toLocaleString()} recent listings`:""}. This is the independent market value — not the dealer's trade-in number.
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {analysis.leverageScore?.computed&&(
+                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
+                  <div style={{fontSize:28,fontWeight:1000,color:C.ink,lineHeight:1}}>{analysis.leverageScore.score}<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> /10</span></div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
+                </div>
+              )}
+
+              {analysis.recalls&&(()=>{
+                const r=analysis.recalls;
+                if(!r.checked) return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.5}}>Couldn't reach the recall registry just now — you can check directly at Transport Canada before you sign.</div>
+                  </div>
+                );
+                if(r.count===0) return (
+                  <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:15,fontWeight:800,color:C.tealInk}}>✓ No open recalls found</div>
+                  </div>
+                );
+                const yr=(dt)=>{const y=new Date(dt).getFullYear();return isNaN(y)?"":` · ${y}`;};
+                return (
+                  <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
+                    <div style={{fontSize:20,fontWeight:1000,color:C.coralInk}}>{r.count} open recall{r.count>1?"s":""}</div>
+                    {/* Why-this-shows explainer -- pre-empts a dealer's "that's not
+                        true" dispute by grounding the recalls in public government
+                        data and pointing to VIN confirmation. Deliberately bold and
+                        high-contrast so it isn't missed. */}
+                    <div style={{marginTop:10,background:C.paper2,border:`1.5px solid ${C.coral}66`,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{fontSize:13,fontWeight:1000,color:C.coralInk,marginBottom:6,letterSpacing:0.2}}>Why you're seeing this</div>
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,fontWeight:700}}>
+                        These are open safety-recall campaigns <b>Transport Canada</b> has published for this vehicle's <b>year, make and model</b> — read live from the official federal <b>Vehicle Recall Database</b>. This is public government data, not LotCheck's opinion. Recalls are issued per model, so the dealer can confirm by <b>VIN</b> whether this exact vehicle is affected or has already had the free remedy done — ask them to show the VIN's recall status in writing before you sign.
+                      </div>
+                    </div>
+                    <DetailToggle C={C} moreLabel={`Show ${r.count} recall detail${r.count>1?"s":""}`} lessLabel="Hide recall details">
+                      {(r.items||[]).slice(0,4).map((it,i)=>(
+                        <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
+                          <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
+                          {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
+                        </div>
+                      ))}
+                    </DetailToggle>
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>Recalls are repaired free of charge — {r.sourceUrl?<a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>confirm the fix status</a>:"confirm the fix status"} with the dealer before you sign.</div>
+                  </div>
+                );
+              })()}
+
+              {analysis.odometerCheck?.checked&&(
+                <div style={{...cardStyle,...(analysis.odometerCheck.flag?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Odometer</div>
+                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?" ⚠":""}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.odometerCheck.note}</div>
+                </div>
+              )}
+
+              {analysis.vinCheck?.present&&(
+                <div style={{...cardStyle,...(analysis.vinCheck.valid?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>VIN check{analysis.vinCheck.vin?` · ${analysis.vinCheck.vin}`:""}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":"⚠ VIN doesn't validate"}</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.vinCheck.reason}</div>
+                </div>
+              )}
+
+              {/* Dealer sentiment: what public Google reviews say about
+                  THIS dealer, read for the patterns that actually predict
+                  a good/bad buying experience (financing transparency,
+                  communication, service honesty) -- the same signals
+                  real industry review analysis finds drive buyer
+                  satisfaction more than star rating alone. Always free
+                  and buyer-facing per Vic's call -- this is deliberately
+                  NOT a paid dealer product, since a dealer paying LotCheck
+                  for their own reputation summary would undercut the
+                  buyer-first positioning the whole platform is built on.
+                  Requires analysis.dealerSentiment from the edge function
+                  -- {dealerName, rating, reviewCount,
+                  highlights:[{rating,text}], sourceUrl}. Shows a random
+                  sample of up to 4 from the backend's pool of 6-8 (see
+                  sampledHighlights above) so the card varies across
+                  checks instead of showing identical content every time
+                  someone checks a different vehicle at the same dealer. */}
+              {analysis.dealerSentiment&&(
+                <div style={cardStyle}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:6}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What customers say about {analysis.dealerSentiment.dealerName}</div>
+                    {!!analysis.dealerSentiment.rating&&(
+                      <div style={{fontSize:12,color:C.inkFaint,whiteSpace:"nowrap"}}>
+                        ★ {analysis.dealerSentiment.rating.toFixed(1)}{analysis.dealerSentiment.reviewCount?` · ${analysis.dealerSentiment.reviewCount.toLocaleString()} reviews`:""}
+                      </div>
+                    )}
+                  </div>
+                  <DetailToggle C={C} moreLabel={`Show ${sampledHighlights.length} review highlight${sampledHighlights.length>1?"s":""}`} lessLabel="Hide highlights">
+                    {sampledHighlights.map((h,i)=>(
+                      <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                        <span style={{color:ratingColor(h.rating),fontWeight:800,fontSize:12,lineHeight:"20px",whiteSpace:"nowrap"}}>★{h.rating}</span>
+                        <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{h.text}</span>
+                      </div>
+                    ))}
+                  </DetailToggle>
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>
+                    Based on public Google reviews{analysis.dealerSentiment.sourceUrl&&(<> — <a href={analysis.dealerSentiment.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>see all reviews</a></>)}
+                  </div>
+                </div>
+              )}
 
               {/* Standard/included manufacturer warranty -- NOT an upsell
                   product (that's the separate "warranty" section further
@@ -5022,117 +7817,447 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* EVAP rebate check -- only rendered when the quote reads as a new
-                  BEV/PHEV, since telling someone with a regular gas car "not
-                  eligible" is just noise. Reuses getRebate()/getEVAP() directly
-                  (defined elsewhere in this same file) against the structured
-                  year/make/model/fuelType/vehicleCondition fields the edge
-                  function now extracts -- same EVAP logic already used and
-                  verified for live listings, not a separate reimplementation.
-                  Province is hardcoded to "AB" since LotCheck is Alberta-only
-                  right now; revisit if that ever changes. */}
-              {analysis.vehicleCondition==="new"&&analysis.year&&analysis.make&&analysis.model
-               &&(analysis.fuelType==="BEV"||analysis.fuelType==="PHEV")&&(()=>{
-                const rebate=getRebate("AB",analysis.fuelType,{
-                  year:analysis.year,make:analysis.make,model:analysis.model,
-                  km:0,price:analysis.quotedPrice||analysis.msrp||0,
-                });
-                return(
-                  <div style={{...cardStyle,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
-                    <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
-                      {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
+              {/* Used vehicles: how much of the ORIGINAL manufacturer warranty is
+                  left, estimated from the verified catalog terms + model year +
+                  odometer. Labelled ESTIMATED (the clock starts at the in-service
+                  date, which we approximate with the model year). */}
+              {analysis.remainingWarranty&&(analysis.remainingWarranty.basic||analysis.remainingWarranty.powertrain)&&(()=>{
+                const rw=analysis.remainingWarranty;
+                const anyActive=(rw.basic&&rw.basic.active)||(rw.powertrain&&rw.powertrain.active);
+                const Term=({label,t})=>{
+                  if(!t) return null;
+                  const parts=[];
+                  if(t.active){
+                    parts.push(`~${t.yearsLeft} yr`);
+                    if(t.kmUnlimited) parts.push("unlimited km");
+                    else if(t.odometerKnown&&t.kmLeft!=null) parts.push(`${Number(t.kmLeft).toLocaleString()} km`);
+                  }
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+                      <span style={{fontSize:13,color:C.ink}}>{label} <span style={{color:C.inkFaint}}>({t.term})</span></span>
+                      <span style={{fontSize:13,fontWeight:800,color:t.active?C.tealInk:C.coralInk,whiteSpace:"nowrap"}}>{t.active?`${parts.join(" / ")} left`:"Expired"}</span>
                     </div>
-                    {rebate.eligible?(
-                      <>
-                        <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
-                        <div style={{fontSize:12,color:C.inkSoft}}>
-                          ${rebate.federal.toLocaleString()} federal
-                          {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
-                          {rebate.note&&` — ${rebate.note}`}
-                        </div>
-                      </>
-                    ):(
-                      <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
+                  );
+                };
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${anyActive?C.teal+"55":C.line}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Factory warranty remaining</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>ESTIMATED</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:2}}>Based on the {rw.modelYear} model year{rw.odometerKm!=null?` and ${Number(rw.odometerKm).toLocaleString()} km`:""}{rw.make?` · ${rw.make}`:""}.</div>
+                    <Term label="Basic / comprehensive" t={rw.basic}/>
+                    <Term label="Powertrain" t={rw.powertrain}/>
+                    <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.55,marginTop:8}}>
+                      Coverage ends at whichever comes first — years or kilometres. Estimated from the model year; the clock actually starts on the in-service date, so confirm it on the VIN/CARFAX report{rw.odometerKm==null?" (the odometer wasn't listed, so this is time-based only)":""}.
+                    </div>
+                    {rw.sourceUrl&&<a href={rw.sourceUrl} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:6}}>Manufacturer's official terms ↗</a>}
+                  </div>
+                );
+              })()}
+
+              {/* Native VIN history removed (VinAudit cancelled). The CARFAX
+                  hand-off above is the history path; a new provider can slot in
+                  behind the same card later. */}
+
+              {/* ── Rebates & conditions ─────────────────────────────────────
+                  Groups the EVAP rebate check, any advertised conditional
+                  savings, and the itemized discounts/add-ons into ONE card per
+                  the approved layout. Each inner block keeps its own
+                  conditional, colour semantics, and honesty copy -- nothing is
+                  dropped or restated.
+
+                  EVAP note (unchanged rationale): the rebate status is shown for
+                  ANY BEV/PHEV, new or used, since for a real EV that status is
+                  information a buyer wants; only gas/diesel are hidden.
+                  effectiveFuelType/evapShow/rebate/fuelMismatch are computed once
+                  at the top of this report from the curated EVAP_LIST (a source
+                  of truth the page's own fuelType label isn't -- a stale
+                  inventory "Gas" read must not hide a real EV rebate) and reused
+                  by both the hero tile and this card so they always agree. ── */}
+              {/* S3 — "What you'll really pay": reconcile the selling price up to
+                  the real out-the-door, splitting unavoidable fees from removable
+                  dealer add-ons so the buyer sees exactly how much markup they
+                  can decline. See dealer-tactics-safeguards.md (S3). */}
+              {analysis.reconciliation&&(()=>{
+                const r=analysis.reconciliation;
+                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const removable=Number(r.addonsTotal)||0, feesT=Number(r.feesTotal)||0, added=Number(r.addedOnTop)||0;
+                if(!added&&r.sellingPrice==null) return null;
+                const names=(r.addons||[]).map(a=>a.name).filter(Boolean);
+                const Row=({label,val,sub,tone,strong})=>(
+                  <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"8px 0",borderTop:`1px solid ${C.line}`}}>
+                    <div><div style={{fontSize:13,fontWeight:strong?800:600,color:C.ink}}>{label}</div>{sub&&<div style={{fontSize:11,color:C.inkFaint,marginTop:1}}>{sub}</div>}</div>
+                    <div style={{fontSize:strong?16:14,fontWeight:strong?1000:800,color:tone==="coral"?C.coralInk:C.ink,whiteSpace:"nowrap"}}>{val}</div>
+                  </div>
+                );
+                return (
+                  <div style={cardStyle}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What you'll really pay</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>OUT-THE-DOOR</span>
+                    </div>
+                    {r.sellingPrice!=null&&<Row label="Selling price" val={m(r.sellingPrice)}/>}
+                    {feesT>0&&<Row label="Unavoidable fees" sub="doc, registration, freight, tax" val={`+ ${m(feesT)}`}/>}
+                    {removable>0&&<Row label="Dealer add-ons — removable" sub="negotiable · you can decline these" val={`+ ${m(removable)}`} tone="coral"/>}
+                    {r.realPreTax!=null&&<Row label="Real price, before tax" val={m(r.realPreTax)} strong/>}
+                    {removable>0&&(
+                      <div style={{marginTop:10,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:11,padding:"11px 13px",fontSize:12.5,color:C.ink,lineHeight:1.55}}>
+                        <b style={{color:C.coralInk}}>${removable.toLocaleString()}</b> of this quote is <b>removable dealer add-ons</b>{names.length?` (${names.slice(0,3).join(", ")}${names.length>3?"…":""})`:""}. They're negotiable — ask to have them taken off before you sign.
+                      </div>
                     )}
                   </div>
                 );
               })()}
 
-              {analysis.totalFlaggedCost>0&&(
-                <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                  {analysisSource==="listing"?(
-                    <>
-                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                        <FlagWaveIcon size={15}/>
-                        <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
+              {/* S11 — financing-contingent-discount trap. Frames the counter-
+                  question and quantifies the trade-off when rate data is present.
+                  See dealer-tactics-safeguards.md (S11). */}
+              {analysis.financingTrap&&(()=>{
+                const t=analysis.financingTrap;
+                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const trap=t.mode==="quantified"&&t.isTrap;
+                const bg=trap?C.coralBg:C.butterBg, br=trap?C.coral:C.butter, ink=trap?C.coralInk:C.butterInk;
+                return (
+                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
+                      <FlagWaveIcon size={15}/>
+                      <div style={{fontSize:13,fontWeight:800,color:ink}}>{trap?"Financing trap — the discount may cost you":"Discount vs. financing — ask before you sign"}</div>
+                    </div>
+                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:8}}>
+                      {t.mode==="quantified"?(trap
+                        ? <>This <b>{m(t.discount)} discount</b> may be tied to dealer financing. If so, financing at <b>{t.dealerApr}%</b> instead of the <b>{t.promoApr}%</b> promo adds about <b style={{color:C.coralInk}}>{m(t.extraInterest)}</b> in interest over {t.term} months — <b>more than the discount</b>. You'd net <b style={{color:C.coralInk}}>lose {m(Math.abs(t.net))}</b>.</>
+                        : <>This <b>{m(t.discount)} discount</b> beats the higher rate here: financing at {t.dealerApr}% vs the {t.promoApr}% promo adds about {m(t.extraInterest)}, so the discount still nets you about <b style={{color:C.tealInk}}>{m(t.net)}</b> — but confirm you can keep the promo rate.</>)
+                      : <>This discount may be offered <b>"in lieu of special financing"</b> — meaning you might not also get the low promo APR. A higher rate can quietly erase a discount over the life of the loan.</>}
+                    </div>
+                    <div style={{fontSize:12.5,color:ink,fontWeight:800,background:"#fff8",borderRadius:9,padding:"9px 12px"}}>
+                      Ask: "Is this price in lieu of special financing? Can I get the discount <i>and</i> the promo APR?"
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* S12 — doc-fee vs jurisdiction benchmark. Fail-safe: only renders
+                  when the server had a backed benchmark. See dealer-tactics-
+                  safeguards.md (S12). */}
+              {analysis.docFeeCheck&&(()=>{
+                const d=analysis.docFeeCheck;
+                const m=(n)=>`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
+                const clean=d.kind==="within_cap";
+                const bg=clean?C.tealBg:C.butterBg, br=clean?C.teal:C.butter, ink=clean?C.tealInk:C.butterInk;
+                return (
+                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
+                    <div style={{fontSize:13,fontWeight:800,color:ink,marginBottom:6}}>
+                      {clean?"✓ Doc fee in line":"Doc fee — worth questioning"}
+                    </div>
+                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6}}>
+                      {d.kind==="allin"&&<>Your <b>{m(d.docFee)} doc/admin fee</b> — {d.jurisdiction} requires <b>all-in advertised pricing</b> ({d.body}), so this should already be <b>inside the advertised price</b>. Ask why it's separate.</>}
+                      {d.kind==="over_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is about <b style={{color:C.coralInk}}>{m(d.overBy)} above</b> {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). It's negotiable — push back.</>}
+                      {d.kind==="over_norm"&&<>{d.jurisdiction} doesn't cap doc fees, and your <b>{m(d.docFee)}</b> is at the high end ({d.note}). Negotiable — ask them to reduce it.</>}
+                      {d.kind==="within_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is within {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). Nothing to flag here.</>}
+                    </div>
+                    <a href={d.source} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:7}}>Source ↗</a>
+                  </div>
+                );
+              })()}
+
+              {/* Counter-script — the actionable capstone: exactly what to say to
+                  get a better deal, aggregated from every safeguard above.
+                  Green-when-clean if there's nothing to push on. */}
+              {analysis.counterScript?.moves?.length>0&&(()=>{
+                const cs=analysis.counterScript;
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${(cs.clean?C.teal:C.tealInk)}55`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>{cs.clean?"Say this to confirm":"What to say — your counter-script"}</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>USE ON THE CALL</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5,marginBottom:10}}>
+                      {cs.clean
+                        ?"This deal looks straight — no add-ons or traps flagged. Just lock in the number:"
+                        :"Read these to the dealer, in order. Every line comes from a finding above — say them and hold."}
+                    </div>
+                    <div>
+                      {cs.moves.map((mv,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,padding:"9px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                          <span style={{flexShrink:0,width:20,height:20,borderRadius:999,background:C.tealBg,color:C.tealInk,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</span>
+                          <div style={{fontSize:13.5,color:C.ink,lineHeight:1.5}}>{mv.say}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={copyCounterScript} style={{marginTop:12,width:"100%",background:scriptCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{scriptCopied?"✓ Copied — paste it into your notes":"Copy script"}</button>
+                  </div>
+                );
+              })()}
+
+              {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
+                <div style={cardStyle}>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
+
+                  {evapShow&&(
+                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
+                      <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
+                        {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
                       </div>
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
-                    </>
-                  ):(
-                    <>
-                      <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                        <FlagWaveIcon size={15}/>
-                        <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
-                      </div>
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
-                    </>
+                      {fuelMismatch&&(
+                        <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
+                          This page's own fuel-type label said "{analysis.fuelType}", but our verified records for this exact year/make/model show it's actually a {evapListMatch.fuel} -- using the verified value here.
+                        </div>
+                      )}
+                      {rebate.eligible?(
+                        <>
+                          <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
+                          <div style={{fontSize:12,color:C.inkSoft}}>
+                            ${rebate.federal.toLocaleString()} federal
+                            {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
+                            {rebate.note&&` — ${rebate.note}`}
+                          </div>
+                        </>
+                      ):(
+                        <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {analysis.totalFlaggedCost>0&&(
+                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
+                      {!addOnsAreFees?(
+                        <>
+                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                            <FlagWaveIcon size={15}/>
+                            <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
+                          </div>
+                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
+                        </>
+                      ):(
+                        <>
+                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
+                            <FlagWaveIcon size={15}/>
+                            <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
+                          </div>
+                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {analysis.addOns?.length>0&&(
+                    <div>
+                      <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
+                      <DetailToggle C={C} moreLabel={`Show all ${analysis.addOns.length} line item${analysis.addOns.length>1?"s":""}`} lessLabel="Hide line items">
+                      {analysis.addOns.map((a,i)=>{
+                        // verdict: "good" (genuine buyer benefit), "flagged"
+                        // (worth questioning), or "standard" (a mandatory,
+                        // unremarkable pass-through shown plainly).
+                        const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
+                        const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
+                        return (
+                          <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
+                                {v==="good"&&<span>✓</span>}
+                                {v==="flagged"&&<FlagPyramidIcon size={13}/>}
+                                <span>{a.name}</span>
+                              </div>
+                              <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                            </div>
+                            <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
+                          </div>
+                        );
+                      })}
+                      </DetailToggle>
+                      {/* Subtotal -- only for genuine fees, never discounts/
+                          conditions. When kind data exists, sums only the
+                          fee-kind items so a mixed report doesn't fold a
+                          discount into a pure cost total. */}
+                      {addOnsAreFees&&(()=>{
+                        const feeItems=addOnsHaveKind?analysis.addOns.filter(a=>a.kind==="fee"):analysis.addOns;
+                        if(!feeItems.length) return null;
+                        return (
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
+                            <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
+                            <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   )}
                 </div>
               )}
 
-              {analysis.addOns?.length>0&&(
-                <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>{analysisSource==="listing"?"Discounts & conditions":"Add-ons & fees"}</div>
-                  {analysis.addOns.map((a,i)=>{
-                    // verdict: "good" (genuine buyer benefit -- a fair/legit
-                    // rate, a real discount), "flagged" (worth questioning),
-                    // or "standard" (a mandatory, unremarkable pass-through
-                    // like tax/registration -- neither a win nor a problem,
-                    // shown plainly so it isn't mislabeled as a "positive").
-                    const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
-                    const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
-                    return (
-                      <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
-                            {v==="good"&&<span>✓</span>}
-                            {v==="flagged"&&<FlagPyramidIcon size={13}/>}
-                            <span>{a.name}</span>
-                          </div>
-                          <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString()}</div>
+              {/* Payment breakdown: weekly / bi-weekly / monthly equivalents,
+                  plus how much of each payment is interest (finance) or
+                  lease charge (lease) vs principal/depreciation.
+                  Requires analysis.financing from the edge function --
+                  {type, termMonths, totalObligation, totalCostOfCredit} --
+                  which doesn't exist in the schema yet as of this write, so
+                  this renders nothing until that's added. All three
+                  frequencies are derived from the SAME disclosed
+                  totalObligation (re-sliced across a different number of
+                  equal installments), not a re-derived amortization
+                  schedule -- so it always ties back to a real number the
+                  dealer already put on the page, e.g. the 260 weekly
+                  payments in the Calgary Honda Civic example checks out
+                  exactly: $27,952.60 / 260 = $107.51. IMPORTANT for whoever
+                  wires up the edge function: totalObligation and
+                  totalCostOfCredit must be on the SAME tax basis (both
+                  pre-tax, ideally) or this percentage split is comparing
+                  apples to oranges -- capture that explicitly rather than
+                  assuming.
+
+                  2026-07-22 fix: confirmed live on a real listing (Toyota
+                  bZ, Macleod Trail Toyota) that this card was rendering
+                  NOTHING even though the dealer's page disclosed a real
+                  payment amount, frequency, and rate -- because that page
+                  uses an interactive finance calculator with no committed
+                  term shown, so termMonths/totalObligation both come back
+                  null while paymentAmount/paymentFrequency/rate are known.
+                  That's a common, legitimate real-world shape (not a
+                  parsing failure), so this now has two paths: full data
+                  gets the original weekly/biweekly/monthly toggle with the
+                  principal/interest bar; partial data (payment+frequency
+                  only) gets a simpler, honest card showing just what's
+                  disclosed, with a clear note about what the dealer hasn't
+                  committed to yet -- never silently hides the card just
+                  because the page only gives a partial picture. */}
+              {analysis.financing?.paymentAmount&&analysis.financing?.paymentFrequency&&(()=>{
+                const f=analysis.financing;
+                const hasFullData=!!(f.termMonths&&f.totalObligation);
+                const freqLabel={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
+                const freqSuffix={weekly:"week",biweekly:"2 weeks",monthly:"month"};
+                const chargeWord=f.type==="lease"?"lease charge":"interest";
+
+                if(!hasFullData){
+                  // Partial data: show exactly what the dealer disclosed,
+                  // in the frequency THEY stated it in -- no conversion,
+                  // since converting to a different frequency requires
+                  // termMonths, which isn't known here. Styled to feel as
+                  // deliberate and complete as the full card -- a confirmed-
+                  // data badge on what IS real, and the disclosure as a
+                  // proper amber callout (same pattern as the EV rebate
+                  // check card) instead of thin gray afterthought text --
+                  // without inventing the missing term/total to fill space.
+                  return (
+                    <div style={cardStyle}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                        <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>
+                          Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
                         </div>
-                        <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
+                        <div style={{fontSize:11,fontWeight:800,color:C.tealInk,background:C.tealBg,padding:"3px 10px",borderRadius:999}}>rate confirmed</div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}>
+                        <div style={{fontSize:32,fontWeight:1000,color:C.ink}}>${f.paymentAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                        <div style={{fontSize:13,color:C.inkFaint}}>/{freqSuffix[f.paymentFrequency]||f.paymentFrequency}</div>
+                      </div>
+                      {!!f.rate&&(<div style={{fontSize:13,color:C.inkSoft,marginBottom:14}}>at <span style={{fontWeight:800,color:C.ink}}>{f.rate}% APR</span></div>)}
+                      <div style={{background:C.butterBg,border:`1px solid ${C.butter}55`,borderRadius:14,padding:"12px 14px"}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}>⚡ Term and total cost not shown</div>
+                        <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>
+                          This dealer's page uses an interactive calculator with no default term selected, so only the payment and rate above are confirmed. Ask for the exact term and total cost in writing before relying on this payment figure.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
 
-              {analysis.warranty?.offered&&(
-                <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:8}}>Warranty / protection plan</div>
-                  <div style={{color:C.ink,fontSize:14,marginBottom:4}}>{analysis.warranty.offered}{analysis.warranty.price?` — $${analysis.warranty.price.toLocaleString()}`:""}</div>
-                  <div style={{fontSize:12,color:C.inkFaint}}>{analysis.warranty.assessment}</div>
-                </div>
-              )}
+                const termMonths=f.termMonths;
+                const totalObligation=f.totalObligation;
+                const totalInterest=f.totalCostOfCredit||0;
+                const periodsPerYear={weekly:52,biweekly:26,monthly:12};
+                const periodsFor=freq=>termMonths*(periodsPerYear[freq]/12);
+                const paymentFor=freq=>totalObligation/periodsFor(freq);
+                const interestFor=freq=>totalInterest/periodsFor(freq);
+                const payment=paymentFor(payFreq);
+                const interest=interestFor(payFreq);
+                const principal=Math.max(payment-interest,0);
+                const interestPct=payment>0?Math.round((interest/payment)*100):0;
+                return (
+                  <div style={cardStyle}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
+                      Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
+                    </div>
+                    <div style={{display:"flex",gap:6,marginBottom:14}}>
+                      {["weekly","biweekly","monthly"].map(k=>(
+                        <button key={k} onClick={()=>setPayFreq(k)}
+                          style={{background:payFreq===k?C.tealBg:"transparent",color:payFreq===k?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                          {freqLabel[k]}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:10}}>
+                      <div style={{fontSize:26,fontWeight:1000,color:C.ink}}>${payment.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+                      <div style={{fontSize:12,color:C.inkFaint}}>/{freqSuffix[payFreq]}</div>
+                    </div>
+                    {totalInterest>0&&(
+                      <>
+                        <div style={{display:"flex",height:10,borderRadius:999,overflow:"hidden",marginBottom:8}}>
+                          <div style={{width:`${100-interestPct}%`,background:C.teal}}/>
+                          <div style={{width:`${interestPct}%`,background:C.coral}}/>
+                        </div>
+                        <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:12,color:C.inkSoft,marginBottom:10}}>
+                          <div><span style={{color:C.tealInk,fontWeight:800}}>${principal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> principal{f.type==="lease"?"/depreciation":""}</div>
+                          <div><span style={{color:C.coralInk,fontWeight:800}}>${interest.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> {chargeWord} ({interestPct}%)</div>
+                        </div>
+                      </>
+                    )}
+                    <div style={{fontSize:12,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:10}}>
+                      {termMonths} months total &middot; ${totalObligation.toLocaleString()} total obligation{f.totalObligationTaxIncluded&&" (tax included)"}{totalInterest>0&&` \u00b7 $${totalInterest.toLocaleString()} total ${chargeWord}`}
+                    </div>
+                  </div>
+                );
+              })()}
 
-              <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:8}}>Bottom line</div>
-                <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
-              </div>
+              {analysis.warranty?.offered&&(()=>{
+                // A SOLD extended warranty / protection plan is always an optional
+                // add-on. Flag it as such and, when we know the free coverage this
+                // vehicle already carries, put the two side by side so the buyer
+                // has the leverage to decline or negotiate. Neutral + factual:
+                // no "overpriced"/"ripoff" language (see neutral-factual-language,
+                // defamation-proof-and-compliant).
+                const w=analysis.warranty;
+                const sw=analysis.standardWarranty;
+                const isNew=analysis.vehicleCondition==="new";
+                const price=w.price?`$${Number(w.price).toLocaleString()}`:null;
+                return (
+                  <div style={{...cardStyle,border:`1px solid ${C.butter}`,background:C.butterBg}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Extended warranty / protection plan</div>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.butterInk,background:C.butter+"66",borderRadius:5,padding:"2px 8px",letterSpacing:.3}}>⚠ OPTIONAL ADD-ON</span>
+                    </div>
+                    <div style={{color:C.ink,fontSize:15,fontWeight:800,marginBottom:6}}>{w.offered}{price?` — ${price}`:""}</div>
+                    {isNew&&sw?.coverage?(
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
+                        You already get <b>{sw.coverage}</b> at no cost on this new {analysis.make||"vehicle"}{sw.verified?" — verified against the manufacturer's official Canadian terms":""}. This plan is <b>optional and negotiable</b>: you can decline it, and extended coverage can usually be bought later or from another provider.
+                      </div>
+                    ):(
+                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
+                        This is an <b>optional add-on</b>. Confirm whether the original manufacturer warranty is still active first (it usually runs from the in-service date, not the sale date) — extended coverage is negotiable and can be declined or purchased later.
+                      </div>
+                    )}
+                    {w.assessment&&<div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5}}>{w.assessment}</div>}
+                  </div>
+                );
+              })()}
+
+              </div>{/* ── end detail grid ── */}
 
               {analysis.reportId&&(
                 <div style={cardStyle}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>🔒 Verify &amp; share this report</div>
-                    <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>🔒 Verify &amp; share this report{analysis.sig&&<span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>🔏 SIGNED</span>}</div>
+                      <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint,marginTop:3}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                    </div>
+                    {(analysis.sig||analysis.reportId)&&<div style={{flex:"none",textAlign:"center"}}><Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={62} gid="rseal" ink="#33305a"/><div style={{fontSize:8.5,fontWeight:700,letterSpacing:.5,color:C.inkFaint,marginTop:1}}>UNIQUE SEAL</div></div>}
                   </div>
                   <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
-                    This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end.
+                    {analysis.sig
+                      ? "This report is cryptographically signed by LotCheck — anyone can confirm it genuinely came from us and that not one figure was altered. Every number cites a source you can re-check, and nothing is stored on our end."
+                      : "This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end."}
                   </div>
                   {analysis.verifyPayload&&(
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button onClick={copyShareLink} style={{flex:"1 1 180px",background:linkCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{linkCopied?"✓ Link copied":"Copy shareable link"}</button>
+                      <button onClick={copyVerifyLink} style={{flex:"1 1 180px",background:verifyCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{verifyCopied?"✓ Link copied":"Copy shareable link"}</button>
                       <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{flex:"1 1 150px",textAlign:"center",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"9px 16px",color:C.tealInk,fontWeight:800,fontSize:14,textDecoration:"none",boxSizing:"border-box"}}>Verify this report ↗</a>
                     </div>
                   )}
@@ -5169,27 +8294,392 @@ function QuoteCheckPage(){
 
               <button onClick={reset} style={{width:"100%",background:C.ink,border:"none",borderRadius:999,padding:"13px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Check another quote</button>
             </div>
-          )}
+            );
+          })()}
 
           <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
             LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.
           </div>
         </div>
       </div>
-      {showPaywall&&(
-        <QuotePaywallModal
-          C={C}
-          onClose={()=>{setShowPaywall(false);setPendingAction(null);}}
-          onPurchased={()=>{
-            setShowPaywall(false);
-            const action=pendingAction;
-            setPendingAction(null);
-            setJustPurchased(true);
-            if(action?.type==="file") handleFile(action.file);
-          }}
-        />
-      )}
+      {showSignIn&&<SignInModal C={C} cardStyle={cardStyle} notice={signInNotice} onClose={()=>{setShowSignIn(false);setSignInNotice(null);}}/>}
+      {showPaywall&&<QuotePaywallModal C={C} cardStyle={cardStyle} onClose={()=>setShowPaywall(false)}/>}
     </>
+  );
+}
+
+// Trust page (/real): turns the cryptographic signing into user-facing brand
+// protection — how to tell a genuine, verifiable LotCheck report from a fake.
+// VinAudit can only post a "beware" banner; we can prove authenticity, so this
+// page teaches the one-scan check. Nav on top per the site-wide rule.
+function TrustPage(){
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+  const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
+  const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
+  @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
+  .tnav-links a:hover{color:#fff!important}`+SHIELD_CSS;
+  return (
+    <div style={{minHeight:"100vh",background:"radial-gradient(120% 90% at 30% 8%,#221f3a 0%,#161327 55%,#0e0b1c 100%)",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif",color:"#e9e6f5"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <nav style={{position:"sticky",top:0,zIndex:300,background:"rgba(14,11,28,.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
+        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
+          <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {NAV.map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
+          </div>
+          <a href="/quote-check" className="tnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+
+      <div style={{maxWidth:720,margin:"0 auto",padding:"28px 18px"}}>
+        <div style={{background:"radial-gradient(120% 90% at 30% 8%,#221f3a,#0e0b1c)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:24}}>
+          <div style={{fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:800,color:"#7f77dd",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>LotCheck · Trust</div>
+          <div style={{fontSize:26,fontWeight:800,color:"#fff",margin:"8px 0 6px"}}>Is it a real LotCheck report?</div>
+          <div style={{fontSize:14.5,color:"#b6b1d6",lineHeight:1.6}}>Every genuine LotCheck report proves itself. Scammers can copy a look — they can't copy the math. Here's the 10-second check.</div>
+          <div style={{marginTop:16,display:"flex",gap:12,alignItems:"center",background:"rgba(52,211,153,.1)",border:"1px solid rgba(52,211,153,.3)",borderRadius:12,padding:"14px 16px"}}>
+            <div style={{flex:"none"}}><Shield state="ok" size={52}/></div>
+            <div style={{fontSize:13.5,lineHeight:1.55,color:"#dffff2"}}>The one rule: scan the QR (or open the verify link) — it must open <b style={{color:"#5dcaa5"}}>lotcheck.ca/verify</b> and show a green <b style={{color:"#5dcaa5"}}>“Signed &amp; authentic”</b> seal. No green check = not a real LotCheck report.</div>
+          </div>
+        </div>
+
+        <div className="tsteps" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,margin:"18px 0"}}>
+          {[["1","Find the QR code at the bottom of the PDF, or the verify link in your email."],["2","Scan it. It opens lotcheck.ca/verify and re-checks the report live."],["3","Green “Signed & authentic” = real. Red or no result = fake or altered."]].map(([n,t])=>(
+            <div key={n} style={card}>
+              <div style={{width:24,height:24,borderRadius:"50%",background:"#2FA79A",color:"#fff",fontWeight:900,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>{n}</div>
+              <p style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,margin:0}}>{t}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="tcols" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          <div style={{...card,background:"rgba(127,119,221,.08)",borderColor:"rgba(127,119,221,.3)"}}>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#a99ff0"}}>🔒 Why a fake can't pass</h3>
+            <ul style={{margin:0,padding:0}}>
+              {["Each report is cryptographically signed with a key only LotCheck holds — can't be forged.","The report ID is a fingerprint of its contents — change one figure and it stops matching.","The check runs on our site with our public key — a copycat site can't fake a pass.","We store nothing — the proof travels inside the link."].map((t,i)=>(
+                <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0}}>·</span>{t}</li>
+              ))}
+            </ul>
+          </div>
+          <div style={{...card,background:"rgba(240,153,123,.08)",borderColor:"rgba(240,153,123,.3)"}}>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#f0b79b"}}>⚠ Red flags of a fake</h3>
+            <ul style={{margin:0,padding:0}}>
+              {["Won't verify at lotcheck.ca/verify — or has no QR/link at all.","Shows a “verified” result on some other website.","Report ID fails or shows “altered.”","Came from a look-alike domain (the real site is lotcheck.ca).","Asks you to pay on an unfamiliar site."].map((t,i)=>(
+                <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0,color:"#f0997b"}}>›</span>{t}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div style={{marginTop:20,textAlign:"center"}}>
+          <a href="/verify" style={{display:"inline-block",background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:15,textDecoration:"none",padding:"13px 26px",borderRadius:11}}>Verify a report now →</a>
+          <div style={{fontSize:11.5,color:"#8b86ad",marginTop:9}}>Nothing is stored. The check runs from the report's own link.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MSRP Alerts page (concept #11 "Cosmic Weather Station") ───────────────────
+// A React route (/msrp-alerts) that replaces the old static live-price-index
+// widget. The 3D planet is decorative; the copy stays an HONEST WAITLIST — live
+// price tracking isn't running yet, so we never imply an alert will fire. Submits
+// to the same SECURITY DEFINER RPC fn_alert_subscribe (CASL consent required;
+// anon can insert, never read). [[nothing-published-without-verification]],
+// [[alerts-are-bridge-inventory]] (signups file by make+city into demand folders).
+// Top new models sold in Canada (trucks, SUVs, sedans, minivans, EVs) — the cars
+// a buyer is most likely to want an MSRP alert on. year=2026 model-year default.
+// Full A-Z Canadian lineup (2027 model year) — mainstream, luxury, exotic, EV,
+// PHEV. Grouped by make (alphabetical). Obvious non-real entries from the source
+// directory (e.g. Bentley "Torcal", a revived BMW "i3") were dropped so a dealer
+// can actually match every option.
+const MAL_VEHICLE_MAP={
+  Acura:["Integra","TLX","MDX","RDX","ZDX"],
+  "Alfa Romeo":["Giulia","Stelvio","Tonale"],
+  "Aston Martin":["Vantage","DB12","DBX707"],
+  Audi:["A4","A5","Q3","Q4 e-tron","Q5","Q6 e-tron","Q7","Q8","Q8 e-tron"],
+  Bentley:["Continental GT","Flying Spur","Bentayga"],
+  BMW:["3 Series","5 Series","X1","X3","X5","X7","i4","iX","iX3"],
+  Buick:["Encore GX","Envista","Envision","Enclave"],
+  Cadillac:["CT5","XT4","XT5","XT6","Escalade","Escalade IQ","Lyriq","Optiq","Celestiq"],
+  Chevrolet:["Trax","Trailblazer","Equinox","Equinox EV","Blazer","Blazer EV","Traverse","Tahoe","Suburban","Colorado","Silverado 1500","Silverado EV","Bolt EV","Corvette"],
+  Chrysler:["Pacifica","Pacifica PHEV","Grand Caravan"],
+  Dodge:["Hornet","Durango","Charger","Charger Daytona EV"],
+  Ferrari:["Roma","296 GTB","12Cilindri","Purosangue","F80"],
+  Fiat:["500e"],
+  Ford:["Maverick","Ranger","F-150","F-150 Lightning","Super Duty","Escape","Edge","Explorer","Bronco Sport","Bronco","Expedition","Mustang","Mustang Mach-E"],
+  Genesis:["G70","G80","G90","GV60","GV70","GV80","GV80 Coupe"],
+  GMC:["Terrain","Acadia","Canyon","Sierra 1500","Sierra EV","Yukon","Hummer EV"],
+  Honda:["Civic","Accord","HR-V","CR-V","Passport","Pilot","Ridgeline","Odyssey","Prologue"],
+  Hyundai:["Venue","Kona","Kona Electric","Tucson","Santa Fe","Palisade","Elantra","Sonata","Santa Cruz","Ioniq 5","Ioniq 6","Ioniq 9"],
+  Infiniti:["QX50","QX60","QX80"],
+  Jaguar:["F-Pace","I-Pace"],
+  Jeep:["Compass","Wrangler","Wrangler 4xe","Grand Cherokee","Grand Cherokee 4xe","Gladiator","Wagoneer","Grand Wagoneer","Wagoneer S","Recon"],
+  Kia:["Soul","Seltos","Sportage","Sorento","Telluride","Forte","K5","Carnival","Niro","EV3","EV6","EV9"],
+  Lamborghini:["Revuelto","Temerario","Urus SE"],
+  "Land Rover":["Range Rover","Range Rover Sport","Range Rover Velar","Range Rover Evoque","Range Rover Electric","Defender","Discovery"],
+  Lexus:["UX","NX","RX","TX","GX","ES","IS","RZ"],
+  Lincoln:["Corsair","Nautilus","Aviator","Navigator"],
+  Lotus:["Emira","Eletre","Emeya"],
+  Maserati:["Grecale","GranTurismo","MC20"],
+  Mazda:["Mazda3","CX-30","CX-5","CX-50","CX-70","CX-90","MX-5"],
+  McLaren:["Artura","750S"],
+  "Mercedes-Benz":["GLA","GLB","GLC","GLC EV","GLE","GLS","G-Class","C-Class","E-Class","EQB","EQE","EQS"],
+  MINI:["Cooper","Countryman"],
+  Mitsubishi:["RVR","Eclipse Cross","Outlander","Outlander PHEV"],
+  Nissan:["Versa","Sentra","Altima","Kicks","Rogue","Murano","Pathfinder","Armada","Frontier","Titan","Leaf","Ariya"],
+  Polestar:["Polestar 2","Polestar 3","Polestar 4"],
+  Porsche:["Macan","Macan Electric","Cayenne","911","Panamera","Taycan"],
+  Ram:["1500","1500 REV","Ramcharger","2500","3500","ProMaster"],
+  Rivian:["R1T","R1S"],
+  "Rolls-Royce":["Ghost","Phantom","Cullinan","Spectre"],
+  Subaru:["Impreza","Crosstrek","Forester","Outback","Legacy","Ascent","WRX","BRZ","Solterra"],
+  Tesla:["Model 3","Model Y","Model S","Model X","Cybertruck"],
+  Toyota:["Corolla","Corolla Cross","Camry","Prius","RAV4","RAV4 Prime","Highlander","Grand Highlander","4Runner","Tacoma","Tundra","Sequoia","Sienna","C-HR","Crown","bZ","GR86","Supra"],
+  Volkswagen:["Jetta","Golf GTI","Golf R","Taos","Tiguan","Atlas","Atlas Cross Sport","ID.4","ID.Buzz"],
+  Volvo:["XC40","XC40 Recharge","XC60","XC90","S60","C40","EX30","EX90"],
+};
+const MAL_VEHICLES=Object.entries(MAL_VEHICLE_MAP).flatMap(([make,models])=>models.map((model)=>({label:`2027 ${make} ${model}`,make,model,year:2027})));
+
+// Alberta municipalities that have new-car dealerships. Major metros first, then
+// alphabetical, so a buyer can find their town. All province "AB".
+const MAL_CITIES=(()=>{const c=[
+  "Calgary","Edmonton","Red Deer","Lethbridge","Medicine Hat","Fort McMurray","Grande Prairie",
+  "Airdrie","St. Albert","Sherwood Park","Spruce Grove","Leduc","Camrose","Lloydminster","Cochrane",
+  "Okotoks","Fort Saskatchewan","Wetaskiwin","Lacombe","Sylvan Lake","Brooks","Cold Lake","Canmore",
+  "High River","Stony Plain","Drayton Valley","Hinton","Edson","Whitecourt","Peace River","Drumheller",
+  "Olds","Ponoka","Wainwright","Vegreville","Stettler","Rocky Mountain House","Bonnyville","Slave Lake",
+  "Taber","Strathmore","Innisfail","Westlock","Barrhead","St. Paul","Vermilion","Claresholm","Pincher Creek",
+  "Cardston","Provost",
+];return c.map(city=>({label:`${city}, AB`,city,province:"AB"}));})();
+const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+
+function MsrpAlertsPage(){
+  const [tilt,setTilt]=useState(23);
+  const [dens,setDens]=useState(9);          // slider 0–20; density = dens/10
+  const [veh,setVeh]=useState(0);
+  const [city,setCity]=useState(0);
+  const [email,setEmail]=useState("");
+  const [thr,setThr]=useState("at_msrp");
+  const [consent,setConsent]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [done,setDone]=useState(false);
+  const [emailed,setEmailed]=useState(false);   // did the confirmation email actually send?
+  const [err,setErr]=useState("");
+
+  const climate = dens<5?"Clear — near MSRP":dens<12?"Cloudy — small markup":"Stormy — over sticker";
+
+  // Dark/bright toggle — shares the site-wide "lc-theme" key so it stays in sync
+  // with Quote Check / the Price Index. Defaults to the OS preference.
+  // Only "dark" is dark; light + outdoor both map to the bright theme, so landing
+  // here from any Quote Check / Price Index mode reads consistently.
+  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
+  const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
+  const dark=theme==="dark";
+  // Colors mirror the MSRP Price Index tokens exactly (dark: cosmic + #3ae0ff;
+  // light: #f5f7fa bg, #0d8fb0 cyan, #141c28 ink) so the two pages never diverge.
+  // Starry in both modes (cosmic scene). Dark = deep night; "light" = a lighter
+  // blue-twilight sky — both keep white stars visible and light, readable text.
+  const T = dark ? {
+    pageBg:"radial-gradient(ellipse at bottom,#1b2735 0%,#090a0f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
+    navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6",
+    panelBg:"rgba(16,18,38,.6)", panelBorder:"rgba(150,170,255,.22)", panel2Bg:"rgba(16,18,38,.5)", panel2Border:"rgba(150,170,255,.2)",
+    inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
+    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
+  } : {
+    pageBg:"radial-gradient(ellipse at bottom,#26324f 0%,#0e1424 100%)", text:"#eef2fb", soft:"#c3cbe0", faint:"#8f99b4",
+    navBg:"rgba(14,20,36,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#c3cbe0",
+    panelBg:"rgba(20,26,48,.58)", panelBorder:"rgba(150,170,255,.24)", panel2Bg:"rgba(20,26,48,.48)", panel2Border:"rgba(150,170,255,.2)",
+    inputBg:"rgba(12,16,32,.55)", inputBorder:"rgba(150,170,255,.26)", segBg:"rgba(12,16,32,.5)", segBorder:"rgba(150,170,255,.2)",
+    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#0b1220", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
+  };
+
+  async function submit(){
+    setErr("");
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())){ setErr("Enter a valid email so we can reach you."); return; }
+    if(!consent){ setErr("Please tick the box so we're allowed to email you."); return; }
+    setBusy(true);
+    const v=MAL_VEHICLES[veh], c=MAL_CITIES[city];
+    const body={ email:email.trim(), make:v.make, model:v.model, year:v.year,
+      province:c.province, city:c.city, threshold:thr, pct:null, consent:true };
+    // Preferred path: the alert-subscribe edge fn records the row AND sends the
+    // CASL confirmation email. If it's unreachable, fall back to the anon RPC so
+    // the signup is never lost — the buyer just won't get a confirm email (no SPOF).
+    let ok=false, sentEmail=false;
+    try{
+      const {data,error}=await supabase.functions.invoke("alert-subscribe",{body});
+      if(!error && data && data.ok){ ok=true; sentEmail=!!data.emailed; }
+      else if(data && data.error){ setErr("Couldn't save that — "+data.error); }
+    }catch(_){ /* fall through to RPC */ }
+    if(!ok){
+      const {error}=await supabase.rpc("fn_alert_subscribe",{
+        p_email:email.trim(), p_make:v.make, p_model:v.model, p_year:v.year,
+        p_province:c.province, p_city:c.city, p_threshold:thr, p_pct:null, p_consent:true,
+      });
+      if(!error){ ok=true; }
+      else if(!err){ setErr("Couldn't save that — "+(error.message||"please try again.")); }
+    }
+    setBusy(false);
+    if(ok){ setEmailed(sentEmail); setDone(true); setErr(""); }
+  }
+
+  const css=`
+    .mal-hero h1{font-size:clamp(30px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:14px 0 10px;font-weight:800;
+      background:${T.heroGrad};-webkit-background-clip:text;background-clip:text;color:transparent}
+    .mal select,.mal input[type=email]{width:100%;background:${T.inputBg};color:${T.text};border:1px solid ${T.inputBorder};
+      border-radius:11px;padding:10px 11px;font:600 13px/1.1 inherit;outline:none;box-sizing:border-box}
+    .mal select:focus,.mal input[type=email]:focus{border-color:${T.cyan}}
+    .mal input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;background:${T.rangeTrack};outline:none}
+    .mal input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:${T.cyan};box-shadow:0 0 12px ${T.cyan};cursor:pointer;border:2px solid ${T.thumbBorder}}
+    .mal-seg{display:flex;gap:6px}
+    .mal-seg button{flex:1;background:${T.segBg};border:1px solid ${T.segBorder};color:${T.faint};border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
+    .mal-seg button.on{border-color:${T.cyan};color:${T.cyan};background:${dark?"rgba(58,224,255,.08)":"rgba(14,138,168,.10)"}}
+    .mal-col{scrollbar-width:none;-ms-overflow-style:none}
+    .mal-col::-webkit-scrollbar{display:none}
+    .mal-navlinks{scrollbar-width:none;-ms-overflow-style:none}
+    .mal-navlinks::-webkit-scrollbar{display:none}
+    @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
+    @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
+    @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}
+    .mal-stars{position:absolute;inset:0;overflow:hidden;z-index:0;pointer-events:none}
+    .mal-star{position:absolute;top:0;left:0;background:transparent;animation-name:malStar;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
+    @keyframes malStar{from{transform:translateY(0)}to{transform:translateY(-2000px)}}
+    @media(prefers-reduced-motion:reduce){.mal-star{animation:none}}`;
+
+  // Generate the three star layers once (stable across re-renders) — a
+  // box-shadow starfield scrolling upward behind the planet, in both themes.
+  const [starLayers,setStarLayers]=useState([]);
+  useEffect(()=>{
+    let t;
+    const build=()=>{
+      // Cover the FULL current viewport width (TVs, wide monitors, browser
+      // zoom-out). Density scales with width so phones stay light.
+      const W=Math.max(window.innerWidth,document.documentElement.clientWidth,360);
+      const gen=(n)=>{const a=[];const cnt=Math.max(1,Math.round(n*W/2000));for(let i=0;i<cnt;i++)a.push(`${Math.random()*W|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
+      setStarLayers([{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}]);
+    };
+    build();
+    const onR=()=>{clearTimeout(t);t=setTimeout(build,200);};  // rebuild on resize/zoom/rotate
+    window.addEventListener("resize",onR);
+    return ()=>{clearTimeout(t);window.removeEventListener("resize",onR);};
+  },[]);
+
+  return (
+    <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
+      <style dangerouslySetInnerHTML={{__html:css}}/>
+      <div className="mal-stars" aria-hidden="true">
+        {starLayers.flatMap((L,i)=>[
+          <div key={i+"a"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur}}/>,
+          <div key={i+"b"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur,top:2000}}/>,
+        ])}
+      </div>
+      <PlanetAlerts tilt={tilt} density={dens/10} theme={theme}/>
+
+      <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
+        <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
+          <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
+            {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          </div>
+          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?"☀":"☾"}</button>
+          <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+        </div>
+      </nav>
+
+      <div className="mal-col" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:"50%",transform:"translateY(-50%)",width:"min(400px,90vw)",maxHeight:"calc(100vh - 92px)",overflowY:"auto",zIndex:10,display:"flex",flexDirection:"column"}}>
+      <div className="mal-hero" style={{marginBottom:16}}>
+        <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:T.cyan,textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
+        <h1>The moment it's at MSRP, you'll know.</h1>
+        <p style={{fontSize:15,lineHeight:1.6,color:T.soft,maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
+      </div>
+
+      <div className="mal" style={{width:"100%",padding:18,borderRadius:20,boxSizing:"border-box",
+        background:T.panelBg,border:`1px solid ${T.panelBorder}`,backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:dark?"0 20px 60px rgba(0,0,0,.5)":"0 20px 50px rgba(51,48,90,.14)"}}>
+        {done ? (
+          <div style={{textAlign:"center",padding:"6px 4px"}}>
+            <div style={{fontSize:26,marginBottom:8,color:T.cyan}}>✦</div>
+            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>{emailed?"Check your email to confirm.":"You're on the waitlist."}</div>
+            <div style={{fontSize:13,color:T.soft,lineHeight:1.5}}>
+              {emailed
+                ? <>We sent a confirmation link for the {MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} in {MAL_CITIES[city].city}. Click it and you're set — that one click is what lets us email you. Live tracking rolls out across Alberta soon.</>
+                : <>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</>}
+            </div>
+            <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:`1px solid ${T.panelBorder}`,color:T.faint,borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
+          </div>
+        ) : (
+          <>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Vehicle</label>
+              <select value={veh} onChange={e=>setVeh(+e.target.value)}>{Object.keys(MAL_VEHICLE_MAP).map((mk)=>(
+                <optgroup key={mk} label={mk}>{MAL_VEHICLES.map((v,i)=>v.make===mk?<option key={i} value={i}>{v.model}</option>:null)}</optgroup>
+              ))}</select></div>
+            <div style={{display:"flex",gap:8,marginBottom:11}}>
+              <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>City</label>
+                <select value={city} onChange={e=>setCity(+e.target.value)}>{MAL_CITIES.map((c,i)=><option key={i} value={i}>{c.label}</option>)}</select></div>
+            </div>
+            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Alert me when it's</label>
+              <div className="mal-seg">
+                <button className={thr==="at_msrp"?"on":""} onClick={()=>setThr("at_msrp")}>At MSRP</button>
+                <button className={thr==="below_msrp"?"on":""} onClick={()=>setThr("below_msrp")}>Below MSRP</button>
+              </div></div>
+            <div style={{marginBottom:12}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Email</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/></div>
+            <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:11.5,color:T.faint,lineHeight:1.4,cursor:"pointer",marginBottom:12}}>
+              <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} style={{marginTop:2,accentColor:T.cyan}}/>
+              <span>Email me when MSRP tracking launches for this car in my city. I can unsubscribe anytime. No spam.</span></label>
+            {err && <div style={{fontSize:12,color:"#e05a3c",marginBottom:9}}>{err}</div>}
+            <button onClick={submit} disabled={busy} style={{width:"100%",border:"none",borderRadius:12,padding:12,font:"800 14px inherit",color:"#04121a",cursor:busy?"default":"pointer",opacity:busy?.7:1,
+              background:"linear-gradient(100deg,#3ae0ff,#b090ff)",boxShadow:"0 8px 26px rgba(58,224,255,.35)"}}>{busy?"Joining…":"Notify me when it hits MSRP"}</button>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:11}}>
+              <span style={{font:"800 9.5px/1 ui-monospace,monospace",letterSpacing:".08em",textTransform:"uppercase",color:T.cyan,border:`1px solid ${T.cyan}`,borderRadius:999,padding:"5px 8px"}}>Waitlist</span>
+              <small style={{fontSize:11.5,color:T.faint,lineHeight:1.4}}>Live price tracking isn't running yet — join to be first when it launches in Alberta.</small>
+            </div>
+          </>
+        )}
+      </div>
+      </div>
+
+      <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:T.faint,letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
+    </div>
+  );
+}
+
+// The CASL double-opt-in landing page. The confirmation email links here with
+// ?token=<uuid>; we call fn_alert_confirm (anon; the token IS the auth) which
+// flips the row 'waitlist' -> 'confirmed'. Only confirmed rows are ever alerted.
+function AlertConfirmPage(){
+  const [state,setState]=useState("working");   // working | ok | bad
+  const [veh,setVeh]=useState("");
+  useEffect(()=>{
+    const token=new URLSearchParams(window.location.search).get("token");
+    if(!token){ setState("bad"); return; }
+    (async()=>{
+      const {data,error}=await supabase.rpc("fn_alert_confirm",{p_token:token});
+      if(!error && data && data.ok){
+        setVeh([data.make,data.model].filter(Boolean).join(" ")+(data.city?" · "+data.city:""));
+        setState("ok");
+      }else setState("bad");
+    })();
+  },[]);
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,
+      background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,sans-serif",color:"#eaf0ff"}}>
+      <div style={{maxWidth:440,textAlign:"center",background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",borderRadius:20,padding:"34px 28px",backdropFilter:"blur(16px)"}}>
+        <div style={{font:"800 11px/1 ui-monospace,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase",marginBottom:14}}>LotCheck · MSRP Alerts</div>
+        {state==="working" && <div style={{fontSize:15,color:"#c7cee6"}}>Confirming…</div>}
+        {state==="ok" && <>
+          <div style={{fontSize:34,marginBottom:10}}>✦</div>
+          <h1 style={{fontSize:24,fontWeight:800,margin:"0 0 10px"}}>You're confirmed.</h1>
+          <p style={{fontSize:14.5,lineHeight:1.6,color:"#c7cee6",margin:"0 0 8px"}}>{veh?<>We'll email you when a <b style={{color:"#fff"}}>{veh}</b> is offered at or below MSRP.</>:"Your MSRP alert is active."}</p>
+          <p style={{fontSize:12.5,color:"#8a92b4",margin:"0 0 20px"}}>Live tracking is rolling out city by city in Alberta — you're in line.</p>
+          <a href="/quote-check" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Check a quote now →</a>
+        </>}
+        {state==="bad" && <>
+          <div style={{fontSize:34,marginBottom:10}}>⚠️</div>
+          <h1 style={{fontSize:22,fontWeight:800,margin:"0 0 10px"}}>That link didn't work.</h1>
+          <p style={{fontSize:14,lineHeight:1.6,color:"#c7cee6",margin:"0 0 20px"}}>The confirmation link may have expired or already been used. You can sign up again in a moment.</p>
+          <a href="/msrp-alerts" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Back to MSRP Alerts</a>
+        </>}
+      </div>
+    </div>
   );
 }
 
@@ -5203,7 +8693,10 @@ export default function App(){
     <>
       {path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/verify") ? <VerifyPage/>
+        : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
+        : path.startsWith("/alert-confirm") ? <AlertConfirmPage/>
+        : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
@@ -5283,7 +8776,7 @@ function LotCheckApp(){
         <LiveBackground/>
         <header className="lc-header">
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
-            <LogoMark size={32}/>
+            <LogoMark size={48}/>
             <div style={{minWidth:0}}>
               <div style={{fontWeight:800,fontSize:16,letterSpacing:"-0.5px",lineHeight:1}}>LotCheck</div>
               <div style={{fontSize:9,color:"#334155",fontStyle:"italic",whiteSpace:"nowrap"}}>Did you LotCheck it?</div>
