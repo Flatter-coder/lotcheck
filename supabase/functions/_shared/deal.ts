@@ -148,6 +148,11 @@ export function buildCounterScript(analysis: any): CounterScript {
   // S19 — a first "no discount" from a BDC/salesperson isn't the floor; the price
   // comes from whoever runs the desk. Get it in writing from them.
   moves.push({ topic: "In writing", say: `Please send the full out-the-door total in writing — from whoever actually sets the price (the desk/sales manager). A first "no" from the front desk isn't the final number.` });
+  // S30 — worksheet ≠ bill of sale. Real case: a signed worksheet + $1,000
+  // deposit was treated by the regulator as "still in negotiation," so a
+  // $2,400 pickup-day increase stood. The price only becomes real on a signed
+  // bill of sale carrying the VIN. Always-on closing warning, factual framing.
+  moves.push({ topic: "Bill of sale", say: `A worksheet is not a bill of sale — regulators have treated signed worksheets WITH deposits as "still negotiating," and buyers have eaten pickup-day price increases. Don't consider the price final until it's on a signed bill of sale with this exact VIN.` });
   return { moves, clean };
 }
 
