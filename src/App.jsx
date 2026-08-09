@@ -5867,6 +5867,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
   const items = [verdictItem, ...pointItems, ...(daysLotItem ? [daysLotItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
@@ -5926,9 +5927,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       {view === "heatmap" && (<>
         <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The 10-point verification — hot squares are flagged</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
-          {pointItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
+          {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
         </div>
-        <div style={{ marginTop: 14 }}><div style={cardBox(pointItems[selP])}><Head c={pointItems[selP]} n={`point ${selP + 1} / 10`} /><div>{pointItems[selP].body}</div></div></div>
+        <div style={{ marginTop: 14 }}><div style={cardBox(heatItems[Math.min(selP, heatItems.length - 1)])}><Head c={heatItems[Math.min(selP, heatItems.length - 1)]} n={`point ${Math.min(selP, heatItems.length - 1) + 1} / ${heatItems.length}`} /><div>{heatItems[Math.min(selP, heatItems.length - 1)].body}</div></div></div>
       </>)}
 
             {view === "hud" && (
@@ -5980,14 +5981,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={{ ...cardBox({ cosmic: true }), alignItems: "center", textAlign: "center", padding: 24 }}>
             <div style={{ fontSize: 56, fontWeight: 800, fontFamily: mono, color: scoreColor, lineHeight: 1 }}>{score != null ? score.toFixed(1) : "—"}<span style={{ fontSize: 20, color: MUT }}>/10</span></div>
             <div style={{ ...klabel, marginTop: 8 }}>Negotiation leverage{score != null ? ` · ${score >= 7 ? "strong" : score >= 4 ? "fair" : "weak"}` : ""}</div>
-            {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{(qp && ms) ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : ""}</div>}
+            {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
             {a.summary && <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 12, textAlign: "left", maxWidth: 660 }}>{a.summary}</div>}
           </div>
-          {pointItems.filter((p) => p.tone === "flag").length > 0 ? (
+          {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 0 ? (
             <div>
-              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {pointItems.filter((p) => p.tone === "flag").length} thing{pointItems.filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
+              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length} thing{[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-                {pointItems.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+                {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
               </div>
             </div>
           ) : (
@@ -5996,7 +5997,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={cardBox({ tone: "muted" })}>
             <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
-              {pointItems.filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
             </div>
           </div>
           {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
@@ -6048,13 +6049,14 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
           <div className="rfb-seal">◈ Verified{a.vehicleCondition?` · ${a.vehicleCondition}`:""}</div>
         </div>
       </div>);
-    if(p.t==="deal") return (<div className="rfb-pg">{num}
+    if(p.t==="deal"){ const exactFb = ms>0 && a.msrpBasis!=="starting_at";
+      return (<div className="rfb-pg">{num}
       <div className="rfb-k">The deal</div>
-      <h2 className="rfb-h2">{delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"}</h2>
+      <h2 className="rfb-h2">{exactFb?(delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"):(ms>0?`Base MSRP from ${money(ms)}`:(qp>0?`Asking ${money(qp)}`:"The deal"))}</h2>
       {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">the dealer's all-in price</div></div>}
-      {ms>0&&<div className="rfb-stat"><div className="rfb-lab">Verified MSRP</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}</div>}
+      {ms>0&&<div className="rfb-stat"><div className="rfb-lab">{exactFb?"Verified MSRP":"MSRP · starting at"}</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{exactFb&&delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}{!exactFb&&<div className="rfb-sub">base model — this unit's options are extra</div>}</div>}
       <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
-    </div>);
+    </div>); }
     if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=a.financeRates?.dealer?.apr, mRate=a.financeRates?.manufacturer?.apr;
       return (<div className="rfb-pg">{num}<div className="rfb-k">Financing</div>
       <h2 className="rfb-h2">{dRate&&mRate&&dRate>mRate?`Rate is ${(dRate-mRate).toFixed(2)}% over ${a.make}'s`:"Payment breakdown"}</h2>
@@ -7702,8 +7704,9 @@ function QuoteCheckPage(){
                   buyer is actually being asked to pay lives in the Quoted
                   price card right below, colored against this figure. */}
               <div style={cardStyle}>
-                <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>MSRP</div>
+                <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>{analysis.msrpBasis==="starting_at"?`MSRP · starting at${analysis.msrpYear&&analysis.msrpYear!==analysis.year?` (${analysis.msrpYear} MY)`:""}`:analysis.msrpTrim?`MSRP · ${String(analysis.msrpTrim).toUpperCase()}`:"MSRP"}</div>
                 <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
+                {analysis.msrpBasis==="starting_at"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>}
               </div>
 
               {/* Quoted price colored against MSRP: teal/green at-or-under
@@ -7711,18 +7714,26 @@ function QuoteCheckPage(){
                   coloring when either number is missing (e.g. MSRP wasn't
                   on the quote) -- no color claim without both values. */}
               {(()=>{
-                const hasMsrpCompare=!!(analysis.msrp&&analysis.quotedPrice);
+                // Over/under-MSRP claims require an EXACT trim MSRP. A
+                // "starting_at" floor (base trim / adjacent MY) is a reference,
+                // not this unit's sticker — an option-loaded car above the base
+                // floor is NOT "over MSRP", so the compare stays neutral.
+                const msrpExactScroll=!!(analysis.msrp&&analysis.msrpBasis!=="starting_at");
+                const hasMsrpCompare=!!(msrpExactScroll&&analysis.quotedPrice);
                 const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
                 const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
                 const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
                 return (
                   <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:{})}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price</div>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price{analysis.allInPricing?" · all-in":""}</div>
                     <div style={{fontSize:22,fontWeight:1000,color:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
                     {hasMsrpCompare&&(
                       <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
                         {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
                       </div>
+                    )}
+                    {!hasMsrpCompare&&analysis.msrp&&analysis.quotedPrice&&(
+                      <div style={{fontSize:12,fontWeight:700,color:C.inkSoft,marginTop:4}}>base MSRP from ${Number(analysis.msrp).toLocaleString()} — options extra, no over/under claim</div>
                     )}
                   </div>
                 );
@@ -7764,6 +7775,29 @@ function QuoteCheckPage(){
                   <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
                 </div>
               )}
+
+              {/* Days on lot — the motivated-seller clock, from the dealer's OWN
+                  inventory data (never estimated). Traffic-light: ≤30 green ·
+                  31–89 amber · 90+ red. Same data as the deck's First Seen card. */}
+              {analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0&&(()=>{
+                const d=Number(analysis.daysOnLot.days);
+                const hot=d>=90, warm=d>=31&&d<90;
+                const bg=hot?C.coralBg:warm?undefined:C.tealBg;
+                const bd=hot?C.coral:warm?"#ffb020":C.teal;
+                const inkC=hot?C.coralInk:warm?C.ink:C.tealInk;
+                const months=d>=60?(d/30.4).toFixed(1).replace(/\.0$/,""):null;
+                return (
+                  <div style={{...cardStyle,...(bg?{background:bg}:{}),border:`1px solid ${bd}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Days on lot · {analysis.daysOnLot.sourceLabel||"dealer inventory data"}</div>
+                    <div style={{fontSize:28,fontWeight:1000,color:inkC,lineHeight:1}}>{d.toLocaleString()} days{months?<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> · ~{months} months</span>:null}</div>
+                    {analysis.daysOnLot.since&&<div style={{fontSize:12,fontWeight:700,color:C.inkSoft,marginTop:4}}>First seen {analysis.daysOnLot.since}</div>}
+                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
+                      This is how long this exact car has sat unsold — counted by the dealer's own inventory system, not our guess. Dealers pay interest on unsold stock every week, so the longer it sits, the more motivated they are.{" "}
+                      {hot?"At this age, you're doing them a favour by buying it — negotiate like it.":warm?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"This one is fresh, so sitting-time won't move the price much yet."}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {analysis.recalls&&(()=>{
                 const r=analysis.recalls;

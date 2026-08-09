@@ -141,7 +141,9 @@ function coverCard(a: any): string {
   if (a.vinCheck?.present && a.vinCheck.valid) chips.push(coverChip("✓ VIN valid", "ok"));
   if (a.financingCheck?.checked && a.financingCheck.consistent) chips.push(coverChip("✓ Math checks", "ok"));
   const right = hasCmp
-    ? `<div style="font-size:15px;font-weight:900;color:${over ? "#fca5a5" : "#5eead4"};">${diff === 0 ? "= at MSRP" : over ? "▲ " + money(diff) + " over" : "▼ " + money(diff) + " under"} MSRP</div>`
+    ? (a.msrpBasis === "starting_at"
+      ? `<div style="font-size:13px;font-weight:800;color:#c9c6e8;">base MSRP from ${money(a.msrp)} — options extra</div>`
+      : `<div style="font-size:15px;font-weight:900;color:${over ? "#fca5a5" : "#5eead4"};">${diff === 0 ? "= at MSRP" : over ? "▲ " + money(diff) + " over" : "▼ " + money(diff) + " under"} MSRP</div>`)
     : (pv ? "" : `<div style="font-size:12px;color:#fca5a5;">price unverified</div>`);
   return `<div style="background:#211f3d;border-radius:18px;padding:20px;margin-bottom:14px;color:#fff;">
     <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#a7a3d0;font-weight:800;">The verdict${a.reportId ? " · " + escapeHtml(a.reportId) : ""}</div>
@@ -255,6 +257,17 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
   if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
 
+  // 5b -- Days on lot (motivated-seller clock, dealer's own inventory data)
+  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
+    const d = Math.round(Number(a.daysOnLot.days));
+    const hot = d >= 90, warm = d >= 31 && d < 90;
+    const dolC = hot ? "#A63C25" : warm ? "#8a6a12" : "#17756B";
+    deck.push({ label: "Days on lot", tone: hot ? "flag" : warm ? "muted" : "pass", glow: hot, body:
+      `<div style="font-size:18px;font-weight:900;color:${dolC};">${d.toLocaleString()} days on the lot</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${a.daysOnLot.since ? "First seen " + escapeHtml(a.daysOnLot.since) + " · " : ""}${escapeHtml(a.daysOnLot.sourceLabel || "dealer inventory data")}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
+  }
+
   // 6 -- Dealer reputation (compact)
   const ds = a.dealerSentiment;
   if (ds && (ds.rating || (ds.highlights || []).length)) {
@@ -332,8 +345,10 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (qp > 0);
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
-  if (ms && pv && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
-  else if (ms && pv && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
+  const msrpExactTp = ms > 0 && a.msrpBasis !== "starting_at";
+  if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
+  else if (ms && pv && msrpExactTp && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
+  else if (ms && !msrpExactTp) P.push({ t: "Price vs MSRP", v: "FROM " + money(ms), tone: "muted" }); // base "starting at" floor - no over/under claim
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
@@ -574,7 +589,7 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
   Tat(priceVerified ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
   y = figTop - 58;
-  if (delta) {
+  if (delta && a.msrpBasis !== "starting_at") {
     const label = (delta > 0 ? "+" + money(delta) + " OVER MSRP" : money(Math.abs(delta)) + " UNDER MSRP");
     T(label, { size: 11, font: sansB, color: delta > 0 ? CORAL : TEAL });
     if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label, 11); Tat("(vs catalog MSRP - listing price not yet verified)", y - 11, { x: M + wl + 6, size: 8.5, font: sans, color: FAINT }); }
