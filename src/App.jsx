@@ -7697,7 +7697,28 @@ function QuoteCheckPage(){
                      single column on mobile. auto-fit + minmax does the collapse
                      with no media query; rowGap:0 defers vertical rhythm to each
                      card's own marginBottom (from cardStyle). ── */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
+              {/* Uiverse-inspired stacked-card motion (shlomo20), adapted for a
+                  data report: cards rest slightly tilted and straighten + lift
+                  on hover with the three Uiverse gradient palettes as glow +
+                  top-edge accents. The literal 254x190 fanned stack can't hold
+                  report data and the tone colors (teal=good/coral=flag) carry
+                  meaning, so the design's MOTION language is applied while the
+                  card interiors stay readable + semantic. */}
+              <style>{`
+                .lcq-cards > div { position: relative; transition: transform .5s ease-out, box-shadow .5s ease-out; will-change: transform; }
+                .lcq-cards > div:nth-child(odd) { transform: perspective(905px) rotateZ(-1.3deg); }
+                .lcq-cards > div:nth-child(even) { transform: perspective(905px) rotateZ(1.1deg); }
+                .lcq-cards > div:hover { transform: perspective(1000px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) translateY(-6px) scale(1.015); z-index: 4; }
+                .lcq-cards > div::after { content: ""; position: absolute; top: 0; left: 18px; right: 18px; height: 3px; border-radius: 0 0 6px 6px; opacity: .85; pointer-events: none; }
+                .lcq-cards > div:nth-child(3n+1)::after { background: linear-gradient(90deg, #FF0055 0%, #000066 100%); }
+                .lcq-cards > div:nth-child(3n+2)::after { background: linear-gradient(90deg, #fa00ff 0%, #01f998 99%); }
+                .lcq-cards > div:nth-child(3n)::after { background: linear-gradient(90deg, #c0f901 0%, #fa00ff 100%); }
+                .lcq-cards > div:nth-child(3n+1):hover { box-shadow: 0 22px 44px -14px rgba(255,0,85,.45), 0 8px 20px -10px rgba(0,0,102,.4); }
+                .lcq-cards > div:nth-child(3n+2):hover { box-shadow: 0 22px 44px -14px rgba(250,0,255,.4), 0 8px 20px -10px rgba(1,249,152,.35); }
+                .lcq-cards > div:nth-child(3n):hover { box-shadow: 0 22px 44px -14px rgba(192,249,1,.35), 0 8px 20px -10px rgba(250,0,255,.4); }
+                @media (prefers-reduced-motion: reduce) { .lcq-cards > div, .lcq-cards > div:hover { transform: none; } }
+              `}</style>
+              <div className="lcq-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
 
               {/* MSRP on its own -- just the manufacturer's number, nothing
                   else mixed into this card. The comparison against what the
