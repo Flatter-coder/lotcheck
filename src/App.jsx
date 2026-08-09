@@ -5574,7 +5574,13 @@ function encodeReport(a){
     ds:a.dealerSentiment?{r:a.dealerSentiment.rating,c:a.dealerSentiment.reviewCount,h:(a.dealerSentiment.highlights||[]).slice(0,3).map(x=>({r:x.rating,t:x.text}))}:null,
     lv:a.leverageScore?{s:a.leverageScore.score,n:a.leverageScore.note}:null,
     sw:a.standardWarranty?.coverage?{c:a.standardWarranty.coverage}:null,
-    sm:a.summary};
+    sm:a.summary,
+    rid:a.reportId||null,ia:a.issuedAt||null,vp:a.verifyPayload||null,sg:a.sig||null,kid:a.keyId||null,
+    dol:a.daysOnLot?{d:a.daysOnLot.days,s:a.daysOnLot.since||null,sl:a.daysOnLot.sourceLabel||null}:null,
+    pd:a.priceDisclosure||null,mb:a.msrpBasis||null,mt:a.msrpTrim||null,my:a.msrpYear||null,
+    ai:a.allInPricing?{b:a.allInPricing.body}:null,
+    cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
+    sh:a.listingShotSha256||null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
 }
@@ -5592,7 +5598,13 @@ function decodeReport(s){
       dealerSentiment:c.ds?{rating:c.ds.r,reviewCount:c.ds.c,highlights:(c.ds.h||[]).map(x=>({rating:x.r,text:x.t})),dealerName:c.dn}:null,
       leverageScore:c.lv?{score:c.lv.s,note:c.lv.n,computed:true}:null,
       standardWarranty:c.sw?{coverage:c.sw.c}:null,
-      summary:c.sm,__shared:true};
+      summary:c.sm,
+      reportId:c.rid||null,issuedAt:c.ia||null,verifyPayload:c.vp||null,sig:c.sg||null,keyId:c.kid||null,
+      daysOnLot:c.dol?{days:c.dol.d,since:c.dol.s||null,sourceLabel:c.dol.sl||null,source:"dealer_platform_feed"}:null,
+      priceDisclosure:c.pd||null,msrpBasis:c.mb||null,msrpTrim:c.mt||null,msrpYear:c.my||null,
+      allInPricing:c.ai?{body:c.ai.b}:null,
+      counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
+      listingShotSha256:c.sh||null,__shared:true};
   }catch{ return null; }
 }
 
@@ -5785,7 +5797,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
       {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
-      {listingShot && <img src={listingShot} alt="Listing at report time" style={{ width: "100%", borderRadius: 10, border: `1px solid ${BORD}` }} />}
+      {listingShot && <img src={listingShot} alt="Listing at report time" style={{ width: "100%", borderRadius: 10, border: `1px solid ${shotSealOk === false ? ROSE : BORD}` }} />}
+      {a.listingShotSha256 && (
+        <div style={{ fontSize: 11, fontFamily: mono, lineHeight: 1.5, color: shotSealOk === false ? ROSE : shotSealOk ? TEAL : MUT2 }}>
+          {shotSealOk === false
+            ? "This photo does NOT match the fingerprint sealed in the signature -- it was altered."
+            : `Photo sealed in the signature · SHA-256 ${String(a.listingShotSha256).slice(0, 12)}...${shotSealOk ? " · verified, matches this image" : ""} -- what the page looked like at report time, tamper-evident.`}
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
         {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
@@ -5879,6 +5898,22 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
   const [selP, setSelP] = useState(0);
+  // #14 photo proof lock: recompute the displayed screenshot's SHA-256 in the
+  // browser and compare against the hash sealed in the signature.
+  const [shotSealOk, setShotSealOk] = useState(null); // true | false | null (no photo / not checkable)
+  useEffect(() => {
+    if (!(a.listingShot && a.listingShotSha256)) { setShotSealOk(null); return; }
+    (async () => {
+      try {
+        const b64 = String(a.listingShot).split(",")[1] || "";
+        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dig = await crypto.subtle.digest("SHA-256", bytes);
+        const hex = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        setShotSealOk(hex === a.listingShotSha256);
+      } catch { setShotSealOk(null); }
+    })();
+  }, [a.listingShot, a.listingShotSha256]);
   const N = items.length;
   const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
   useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
@@ -6215,6 +6250,7 @@ function canonicalReport(a){
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
     marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
     summary:a.summary||null,
+    shot:a.listingShotSha256||null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };

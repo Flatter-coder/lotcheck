@@ -137,6 +137,23 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     const parsed = firstJsonObject(text);
     if (!parsed) return null;
     parsed.extractionMethod = "scrapfly_render_vision";
+    // #14 listing-photo proof lock: keep the rendered screenshot ON the report
+    // and seal its SHA-256 into the signed canonical (report-sign.ts reads
+    // listingShotSha256). Proves what the page looked like at that moment --
+    // the direct counter to "that screenshot could be fake". Size-capped so a
+    // giant full-page render never bloats the response/cache; the HASH is
+    // computed over exactly the bytes we attach.
+    try {
+      if (rendered.screenshotB64 && rendered.screenshotB64.length < 1_500_000) {
+        const bin = atob(rendered.screenshotB64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dig = await crypto.subtle.digest("SHA-256", bytes);
+        parsed.listingShot = `data:${rendered.screenshotMime || "image/jpeg"};base64,${rendered.screenshotB64}`;
+        parsed.listingShotSha256 = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        parsed.listingShotAt = new Date().toISOString();
+      }
+    } catch { /* photo lock is best-effort -- never sink the rescue */ }
     return parsed;
   } catch (e) {
     console.warn("rescueListingViaScrapfly error:", (e as Error)?.message);
@@ -152,7 +169,7 @@ export function mergeRescued(analysis: any, rescued: any): void {
   for (const k of preferKeys) {
     if ((analysis[k] == null || Number(analysis[k]) <= 0) && Number(rescued[k]) > 0) analysis[k] = rescued[k];
   }
-  const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary"];
+  const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {
     if ((analysis[k] == null || analysis[k] === "") && rescued[k] != null && rescued[k] !== "") analysis[k] = rescued[k];
   }

@@ -37,6 +37,9 @@ export function canonicalReport(a: any): any {
     reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
     marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null } : null,
     summary: a.summary || null,
+    // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
+    // signed canonical -- alter the image and the seal breaks.
+    shot: a.listingShotSha256 || null,
     issuedAt: a.issuedAt || null,
   };
 }
