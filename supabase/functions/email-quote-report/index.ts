@@ -346,7 +346,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (qp > 0);
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
   const msrpExactTp = ms > 0 && a.msrpBasis !== "starting_at";
-  if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
+  if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
+  else if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
   else if (ms && pv && msrpExactTp && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
   else if (ms && !msrpExactTp) P.push({ t: "Price vs MSRP", v: "FROM " + money(ms), tone: "muted" }); // base "starting at" floor - no over/under claim
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
@@ -388,6 +389,7 @@ function pointExplain(t: string, a: any): string | null {
   const exact = ms > 0 && a.msrpBasis !== "starting_at";
   switch (t) {
     case "Price vs MSRP":
+      if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
       if (qp && ms && exact) return delta > 0
         ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(delta)} more than sticker - anything over sticker is pure negotiation room.`

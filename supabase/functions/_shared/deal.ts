@@ -82,6 +82,16 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (analysis?.financingTrap) {
     moves.push({ topic: "Financing", say: `Is this price "in lieu of special financing"? I want the discount AND the promo APR — not one or the other.` });
   }
+  // S28 — price-gating ("Contact Us For Price"). The dealer deliberately
+  // withholds the number to force a lead capture where their salespeople run
+  // the conversation. Detection comes from the page's own call-to-action text
+  // (priceDisclosure = "contact_for_price"), so the claim is literally true.
+  // The buyer's move: refuse to negotiate blind — demand the all-in number in
+  // writing first, anchored to the manufacturer's MSRP when we have it.
+  if (analysis?.priceDisclosure === "contact_for_price" && !(num(analysis?.quotedPrice) > 0)) {
+    const anchor = num(analysis?.msrp);
+    moves.push({ topic: "Hidden price", say: `Your listing doesn't show a price — it says to contact you. I don't negotiate blind: please send your full all-in price in writing before I come in.${anchor ? ` For reference, ${analysis?.make || "the manufacturer"}'s MSRP for this model starts at ${money(anchor)} — I'll be comparing your number against that.` : ""}` });
+  }
   // S27 — days on lot (motivated-seller). Only from real dealer-platform /
   // observed data, never estimated; ≥30 days is when carrying cost starts to
   // bite and the line lands. The buyer is quoting the dealer's own inventory

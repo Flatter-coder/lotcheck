@@ -5624,6 +5624,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // an option-loaded car above the base floor is NOT "over MSRP".
   const msrpExact = ms > 0 && a.msrpBasis !== "starting_at";
   const deltaOk = !!(qp && ms && msrpExact);
+  // "Contact Us For Price" — the page deliberately withholds the number
+  // (detected from the page's own call-to-action text). A tactic, not a miss.
+  const priceGated = !qp && a.priceDisclosure === "contact_for_price";
   const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
@@ -5679,8 +5682,8 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // ── the canonical 10-point audit — always 10, each with its result + body ──
   const P = [];
   // 1 Price vs MSRP
-  P.push({ title: "Price vs MSRP", tone: !priceVerified ? "flag" : (!ms ? "muted" : (deltaOk ? (delta > 0 ? "flag" : "pass") : "muted")), v: deltaOk ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (ms ? "FROM " + money(ms) : (priceVerified ? "—" : "UNVERIFIED")),
-    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: !priceVerified ? ROSE : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "")} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} /><KV k={a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} /></div>{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
+  P.push({ title: "Price vs MSRP", tone: priceGated ? "flag" : !priceVerified ? "flag" : (!ms ? "muted" : (deltaOk ? (delta > 0 ? "flag" : "pass") : "muted")), v: priceGated ? "HIDDEN BY DEALER" : deltaOk ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (ms ? "FROM " + money(ms) : (priceVerified ? "—" : "UNVERIFIED")),
+    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: (priceGated || !priceVerified) ? ROSE : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{priceGated ? "Hidden by the dealer" : deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "")} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} /><KV k={a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (priceVerified ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={priceVerified ? "#fff" : MUT2} /></div>{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
   // 2 Recalls
   { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
     let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
@@ -5722,7 +5725,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // from the same verified fields the card shows, never free-styled, so the
   // explanation can't drift from the evidence (claims-must-stay-backed).
   const explainFor = {
-    "Price vs MSRP": !qp
+    "Price vs MSRP": priceGated
+      ? `The dealer chose not to publish a price — the page says "contact us" instead. That's a lead-capture tactic: they want you on the phone, where their salespeople control the conversation.${ms ? ` Your anchor is ${a.make || "the manufacturer"}'s MSRP, starting at ${money(ms)}.` : ""} Don't negotiate blind — get their full all-in price in writing before you visit.`
+      : !qp
       ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
       : deltaOk
         ? (delta > 0
@@ -7766,10 +7771,16 @@ function QuoteCheckPage(){
                 const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
                 const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
                 const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
+                const gated=!analysis.quotedPrice&&analysis.priceDisclosure==="contact_for_price";
                 return (
-                  <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:{})}}>
+                  <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:gated?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
                     <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price{analysis.allInPricing?" · all-in":""}</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:"Not found"}</div>
+                    <div style={{fontSize:22,fontWeight:1000,color:gated?C.coralInk:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:gated?"Hidden by the dealer":"Not found"}</div>
+                    {gated&&(
+                      <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
+                        The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
+                      </div>
+                    )}
                     {hasMsrpCompare&&(
                       <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
                         {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
