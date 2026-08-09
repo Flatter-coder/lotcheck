@@ -6613,6 +6613,9 @@ function QuoteCheckPage(){
   // from a self-contained share link (#r=...), never fetched or stored.
   const [reportView,setReportView]=useState("deck");
   const [sharedReport,setSharedReport]=useState(false);
+  // Authenticity of an OPENED shared report: "valid" | "invalid" | null
+  // (null = no signature to check / crypto unavailable — say "fingerprint only").
+  const [sharedAuth,setSharedAuth]=useState(null);
   const [linkCopied,setLinkCopied]=useState(false);
   // On mount, reconstruct a shared report entirely client-side from the URL
   // fragment — nothing hits a server, nothing is stored (keeps "never stored").
@@ -6622,7 +6625,16 @@ function QuoteCheckPage(){
       if(m){
         const rep=decodeReport(m[1]);
         if(rep){ setAnalysis(rep); setAnalysisSource("listing"); setStatus("done"); setReportView("flip"); setSharedReport(true);
-          window.history.replaceState({},"",window.location.pathname); }
+          window.history.replaceState({},"",window.location.pathname);
+          // Check the seal: the report carries its own ECDSA signature; verify
+          // it right here with our public key so the recipient sees a live
+          // authenticity verdict on top of the FULL report.
+          if(rep.verifyPayload&&rep.sig&&rep.keyId){
+            verifyReportSignature(rep.verifyPayload,rep.sig,rep.keyId)
+              .then((ok)=>setSharedAuth(ok?"valid":"invalid"))
+              .catch(()=>setSharedAuth(null));
+          }
+        }
       }
     }catch{}
   },[]);
@@ -6705,7 +6717,12 @@ function QuoteCheckPage(){
   // this one goes to /verify and proves the figures are unaltered. Nothing is
   // stored server-side — the link itself is the whole record.
   function copyVerifyLink(){
-    const url=verifyLinkFor(analysis);
+    // ONE link: the self-contained share link — it reconstructs the ENTIRE
+    // report client-side AND carries the signature, so the recipient sees the
+    // whole report under an authenticity banner (not the bare-fingerprint
+    // /verify summary, which stays available as the secondary "check the seal"
+    // link). Nothing stored server-side — the proof travels inside the link.
+    const url=window.location.origin+"/quote-check#r="+encodeReport(analysis);
     if(!url) return;
     try{
       navigator.clipboard.writeText(url).then(()=>{setVerifyCopied(true);setTimeout(()=>setVerifyCopied(false),2200);});
@@ -7609,8 +7626,27 @@ function QuoteCheckPage(){
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
             // Flip-book "Report view" replaces the scroll body when selected.
-            if(reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/>;
-            if(reportView==="flip") return <ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/>;
+            // Authenticity banner for OPENED shared links — sits above the full
+            // report in every view, so "verify" = see the whole report + verdict.
+            const sharedBanner = sharedReport ? (
+              <div style={{...cardStyle, background: sharedAuth==="invalid"?C.coralBg:C.tealBg, border:`1px solid ${(sharedAuth==="invalid"?C.coral:C.teal)}55`, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+                {(analysis.sig||analysis.reportId)&&<Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={44} gid="shseal" ink={sharedAuth==="invalid"?C.coralInk:C.tealInk}/>}
+                <div style={{flex:"1 1 240px",minWidth:0}}>
+                  <div style={{fontSize:14.5,fontWeight:900,color:sharedAuth==="invalid"?C.coralInk:C.tealInk}}>
+                    {sharedAuth==="invalid"?"Seal broken — this copy was altered":sharedAuth==="valid"?"Authentic LotCheck report":"Shared LotCheck report"}
+                  </div>
+                  <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,marginTop:2}}>
+                    {sharedAuth==="invalid"
+                      ?"This copy does not match what LotCheck issued — at least one figure was changed after signing. Ask the sender for the original link."
+                      :sharedAuth==="valid"
+                        ?`Signed by LotCheck${analysis.issuedAt?` on ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""} — not one figure has been changed since. The full report is below.`
+                        :`Report ${analysis.reportId||""} — the ID is a fingerprint of its contents; the full report is below.`}
+                  </div>
+                </div>
+              </div>
+            ) : null;
+            if(reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
+            if(reportView==="flip") return <div>{sharedBanner}<ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/></div>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
@@ -7625,6 +7661,7 @@ function QuoteCheckPage(){
             if(reportView==="orrery") return (
               <div>
                 {viewToggle}
+                {sharedBanner}
                 <DealOrrery analysis={analysis} height={540}/>
                 <div style={{fontSize:12,color:C.inkFaint,textAlign:"center",marginTop:8,lineHeight:1.5}}>Drag to orbit · scroll to zoom. Your quote is the core; fees orbit it (bigger = pricier), <b style={{color:C.coralInk}}>flagged fees glow red</b>, and the teal ring is MSRP.</div>
               </div>
@@ -7632,6 +7669,7 @@ function QuoteCheckPage(){
             return (
             <div>
               {viewToggle}
+              {sharedBanner}
               {/* Result-first sign-in invitation. Non-blocking: the full report
                   renders below regardless. Only shown to logged-out visitors --
                   once signed in it disappears. No paywall, no enforcement
@@ -8392,29 +8430,41 @@ function QuoteCheckPage(){
 
               {analysis.reportId&&(
                 <div style={cardStyle}>
+                  {/* 3D animated lock — the icon IS the meaning (no emojis):
+                      the shackle drops closed on mount, the whole lock tilts in
+                      3D on hover. Same visual language as the site's 3D logo. */}
+                  <style>{`
+                    @keyframes lcLockClose { 0% { transform: translateY(-5px); } 60% { transform: translateY(1px); } 100% { transform: translateY(0); } }
+                    .lc-lock3d { width: 30px; height: 34px; position: relative; flex: none; perspective: 300px; }
+                    .lc-lock3d .sh { position: absolute; top: 0; left: 6px; width: 18px; height: 15px; border: 3.5px solid ${C.tealInk}; border-bottom: none; border-radius: 10px 10px 0 0; animation: lcLockClose .8s cubic-bezier(.34,1.4,.5,1) both; }
+                    .lc-lock3d .bd { position: absolute; bottom: 0; left: 0; width: 30px; height: 21px; border-radius: 6px; background: linear-gradient(150deg, ${C.teal}, ${C.tealInk}); box-shadow: inset -3px -3px 6px rgba(0,0,0,.25), 0 4px 8px -3px rgba(0,0,0,.35); }
+                    .lc-lock3d .kh { position: absolute; bottom: 7px; left: 13px; width: 4px; height: 8px; border-radius: 3px; background: rgba(255,255,255,.85); }
+                    .lc-lock3d:hover { transform: rotate3d(.5, 1, 0, 24deg); transition: transform .4s ease-out; }
+                  `}</style>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>🔒 Verify &amp; share this report{analysis.sig&&<span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>🔏 SIGNED</span>}</div>
-                      <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint,marginTop:3}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
+                      <div className="lc-lock3d"><span className="sh"/><span className="bd"/><span className="kh"/></div>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:15,fontWeight:900,color:C.ink}}>This report is locked</div>
+                        <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint,marginTop:2}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                      </div>
                     </div>
-                    {(analysis.sig||analysis.reportId)&&<div style={{flex:"none",textAlign:"center"}}><Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={62} gid="rseal" ink="#33305a"/><div style={{fontSize:8.5,fontWeight:700,letterSpacing:.5,color:C.inkFaint,marginTop:1}}>UNIQUE SEAL</div></div>}
+                    {(analysis.sig||analysis.reportId)&&<div style={{flex:"none",textAlign:"center"}}><Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={62} gid="rseal" ink="#33305a"/><div style={{fontSize:8.5,fontWeight:700,letterSpacing:.5,color:C.inkFaint,marginTop:1}}>ITS SEAL</div></div>}
                   </div>
-                  <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.55,margin:"6px 0 12px"}}>
-                    {analysis.sig
-                      ? "This report is cryptographically signed by LotCheck — anyone can confirm it genuinely came from us and that not one figure was altered. Every number cites a source you can re-check, and nothing is stored on our end."
-                      : "This ID is a fingerprint of the report's contents — change any figure and it changes, so it's tamper-evident. Every number cites a source you can re-check, and nothing is stored on our end."}
+                  <div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.55,margin:"8px 0 12px"}}>
+                    If anyone changes a single number, the seal breaks. Share the link — whoever opens it sees the full report and can check it's genuine.
                   </div>
                   {analysis.verifyPayload&&(
-                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                      <button onClick={copyVerifyLink} style={{flex:"1 1 180px",background:verifyCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{verifyCopied?"✓ Link copied":"Copy shareable link"}</button>
-                      <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{flex:"1 1 150px",textAlign:"center",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"9px 16px",color:C.tealInk,fontWeight:800,fontSize:14,textDecoration:"none",boxSizing:"border-box"}}>Verify this report ↗</a>
+                    <div>
+                      <button onClick={copyVerifyLink} style={{width:"100%",background:verifyCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{verifyCopied?"Link copied":"Copy the link"}</button>
+                      <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:8,fontSize:12,color:C.inkFaint,textDecoration:"underline"}}>or check this report's seal yourself</a>
                     </div>
                   )}
                 </div>
               )}
 
               <div style={cardStyle}>
-                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>📧 Email me this report</div>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Email me this report</div>
                 {emailStatus==="sent"?(
                   <div style={{display:"flex",alignItems:"center",gap:8,color:C.tealInk,fontWeight:700,fontSize:14}}>
                     <span>✓</span> Sent to {emailInput.trim()}
