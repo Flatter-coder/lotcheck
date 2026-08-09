@@ -110,7 +110,7 @@ export function buildCounterScript(analysis: any): CounterScript {
   // Suppressed when the doc-fee move already challenged a separate fee (avoids a
   // duplicate all-in line). See dealer-tactics-safeguards.md.
   const ai = analysis?.allInPricing;
-  if (ai && ai.body && !(df && df.kind === "allin")) {
+  if (ai && ai.body && !(df && df.kind === "allin") && !moves.some((m) => m.topic === "All-in price")) {
     moves.push({ topic: `All-in (${ai.body})`, say: `${ai.body} all-in advertising means the posted price is the full price — the only things that can be added at signing are GST, licensing, and insurance. Ask them to confirm in writing there are no other mandatory fees.` });
   }
   // S16 — finance office pre-empt. GAP / protection products get re-pitched in
