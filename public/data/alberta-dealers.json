@@ -1,7 +1,7 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-08-01",
-  "totalDealers": 403,
+  "generatedAt": "2026-08-10",
+  "totalDealers": 404,
   "cities": [
     {
       "name": "Calgary",
@@ -31,7 +31,7 @@
     },
     {
       "name": "Edmonton",
-      "count": 86,
+      "count": 87,
       "sample": [
         "Car Corner Inc.",
         "Alberta Honda",
@@ -41,6 +41,8 @@
         "DriveNation West Edmonton",
         "Northgate Chevrolet Buick GMC",
         "Dawson Motors",
+        "GMC",
+        "Buick",
         "Platinum Fine Cars",
         "Koch Ford",
         "Amigo's Car Sales",
@@ -50,9 +52,7 @@
         "European Auto Tinting",
         "Matrix Motors YEG",
         "Dubsport",
-        "Ay Motor Dealership",
-        "Off Whyte",
-        "Fort Road Motors"
+        "Ay Motor Dealership"
       ]
     },
     {
@@ -67,7 +67,7 @@
         "Wheaton Chevrolet of Red Deer",
         "Kipp Scott GMC Cadillac Buick",
         "Red Deer Nissan",
-        "Red Deer Dodge",
+        "Go Dodge Red Deer",
         "Gary Moe Hyundai",
         "Kia Red Deer",
         "Cam Clark Ford",
