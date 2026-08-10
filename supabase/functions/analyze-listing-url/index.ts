@@ -2470,6 +2470,44 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // Last resort: full Scrapfly render + vision. The page blocked every
+      // text path (scrape, platform feed, JSON-LD) -- exactly the case the
+      // residential-proxy render exists for. Only fires here, after all three
+      // cheaper paths failed, so normal scans never pay for it.
+      if (scrapflyEnabled()) {
+        try {
+          const renderOnly: any = { sourceUrl: url };
+          const rescued = await rescueListingViaScrapfly(url, {
+            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+            budgetMs: Math.max(1_000, Math.min(80_000, REQUEST_DEADLINE - Date.now())),
+          });
+          if (rescued) mergeRescued(renderOnly, rescued);
+          if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle) {
+            await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
+            await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
+            await finalizeServerSide(renderOnly);
+            try {
+              await supabase
+                .from("listing_analysis_cache")
+                .upsert({ url, analysis: renderOnly, created_at: new Date().toISOString() }, { onConflict: "url" });
+            } catch (err) {
+              console.warn("Cache write failed (render fallback):", err);
+            }
+            await logUsage({ success: true, errorMessage: `page-load failed, served Scrapfly render fallback` });
+            console.log(`Served Scrapfly render fallback for ${url} after full page-load failure (${nimbleResult.errBody}).`);
+            const credits = await captureCredit(holdId);
+            holdId = null;
+            return new Response(
+              JSON.stringify(credits
+                ? { analysis: renderOnly, source: "scrapfly_render_fallback", credits }
+                : { analysis: renderOnly, source: "scrapfly_render_fallback" }),
+              { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+            );
+          }
+          console.warn(`Scrapfly render fallback produced no usable data for ${url}.`);
+        } catch (e) { console.warn("Scrapfly render fallback threw (ignored):", (e as Error)?.message); }
+      }
+
       // Not an SM360 listing (or its feed was also unreachable / the unit isn't
       // in the feed): keep today's behaviour exactly.
       await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody}` });
