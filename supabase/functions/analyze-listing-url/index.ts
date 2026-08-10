@@ -1579,6 +1579,7 @@ async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<vo
     // listing even when the LLM's markdown view missed the CTA text.
     if (!(Number(analysis.quotedPrice) > 0)
         && (!analysis.priceDisclosure || analysis.priceDisclosure === "not_shown")
+        && (html.match(/\$\s?\d{2,3},\d{3}/g) || []).length === 0
         && /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i.test(html)) {
       analysis.priceDisclosure = "contact_for_price";
       console.log("Convertus gating backstop: page text shows a contact-for-price CTA.");
@@ -2014,7 +2015,11 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
     // Deterministic price-gating detection: the page's own CTA text, read
     // straight from the HTML -- no LLM involved on this path. Only claimed when
     // no price was found (a priced page merely offering e-price forms isn't gated).
-    const gated = v.price == null && /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i.test(html);
+    // "Hidden by the dealer" requires the CTA to REPLACE the price. If the page
+    // code also carries plausible price figures, WE failed to read it — that is
+    // "not_shown", never a gating accusation (truthfulness > drama).
+    const pageHasPriceFigures = (html.match(/\$\s?\d{2,3},\d{3}/g) || []).length > 0;
+    const gated = v.price == null && !pageHasPriceFigures && /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i.test(html);
     const analysis: any = {
       vehicle: vehicleStr,
       year: v.year, make: v.make, model: v.model, trim: v.trim,
@@ -2426,6 +2431,19 @@ Deno.serve(async (req: Request) => {
       // feed fallback have already failed, so pages that load are unaffected.
       const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
       if (jsonLdFallback) {
+        // The structured data often lacks the price the RENDERED page displays.
+        // With Scrapfly armed, run the vision rescue here too (this path used
+        // to return early and skip it — the Okotoks $112,995 vanished that way).
+        if (!(Number(jsonLdFallback.quotedPrice) > 0) && scrapflyEnabled()) {
+          try {
+            const rescued = await rescueListingViaScrapfly(url, {
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+              budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
+            });
+            if (rescued) mergeRescued(jsonLdFallback, rescued);
+            if (Number(jsonLdFallback.quotedPrice) > 0 && jsonLdFallback.priceDisclosure === "contact_for_price") jsonLdFallback.priceDisclosure = "advertised";
+          } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
+        }
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
         await finalizeServerSide(jsonLdFallback);
@@ -2687,6 +2705,7 @@ Deno.serve(async (req: Request) => {
             analysis.msrpInflation = { dealerStated: rescuedMsrp, manufacturer: Number(analysis.msrp), overBy: Math.round(rescuedMsrp - Number(analysis.msrp)) };
             analysis.counterScript = buildCounterScript(analysis);
           }
+          if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
           gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
           console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
         }
