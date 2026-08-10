@@ -5580,6 +5580,7 @@ function encodeReport(a){
     pd:a.priceDisclosure||null,mb:a.msrpBasis||null,mt:a.msrpTrim||null,my:a.msrpYear||null,
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
+    dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     sh:a.listingShotSha256||null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
@@ -5604,6 +5605,7 @@ function decodeReport(s){
       priceDisclosure:c.pd||null,msrpBasis:c.mb||null,msrpTrim:c.mt||null,msrpYear:c.my||null,
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
+      disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
       listingShotSha256:c.sh||null,__shared:true};
   }catch{ return null; }
 }
@@ -5810,6 +5812,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
         {verifyHref && <button onClick={() => { try { navigator.clipboard.writeText(verifyHref).then(() => { setVCopied(true); setTimeout(() => setVCopied(false), 2000); }).catch(() => {}); } catch (e) {} }} style={linkBtn}>{vCopied ? "Verify link copied \u2713" : "Copy verify link"}</button>}
       </div>
+      {a.disclaimerCheck && (
+        <div style={{ borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: AMBER, fontWeight: 800, marginBottom: 6 }}>The dealer's own fine print — captured</div>
+          <div style={{ fontSize: 12, color: MUT2, lineHeight: 1.55, fontStyle: "italic" }}>"{String(a.disclaimerCheck.text).slice(0, 420)}{String(a.disclaimerCheck.text).length > 420 ? "…" : ""}"</div>
+          <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
+        </div>
+      )}
       <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.</div>
     </div>
   )};
@@ -7901,6 +7910,17 @@ function QuoteCheckPage(){
                   <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
                   <div style={{fontSize:28,fontWeight:1000,color:C.ink,lineHeight:1}}>{analysis.leverageScore.score}<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> /10</span></div>
                   <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
+                </div>
+              )}
+
+              {/* Fine print — the dealer's own disclaimer, captured as evidence.
+                  AMVIC has ruled disclaimers don't exempt all-in pricing, so the
+                  hatch language is the dealer's posture on record. */}
+              {analysis.disclaimerCheck&&(
+                <div style={{...cardStyle,background:C.butterBg,border:`1px solid ${C.butter}66`}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>The dealer's own fine print · captured at scan time</div>
+                  <div style={{fontSize:12,color:C.inkSoft,fontStyle:"italic",lineHeight:1.5}}>"{String(analysis.disclaimerCheck.text).slice(0,380)}{String(analysis.disclaimerCheck.text).length>380?"…":""}"</div>
+                  <div style={{fontSize:12.5,color:C.ink,lineHeight:1.55,marginTop:8}}>{analysis.disclaimerCheck.note}</div>
                 </div>
               )}
 

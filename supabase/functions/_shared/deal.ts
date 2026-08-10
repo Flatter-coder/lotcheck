@@ -82,6 +82,15 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (analysis?.financingTrap) {
     moves.push({ topic: "Financing", say: `Is this price "in lieu of special financing"? I want the discount AND the promo APR — not one or the other.` });
   }
+  // S35 — disclaimer escape hatch. The page's own fine print hedges the
+  // advertised price; in an all-in province the regulator has ruled such
+  // disclaimers are not a defence. The buyer quotes the dealer's own words.
+  const dchk = analysis?.disclaimerCheck;
+  if (dchk && (dchk.escapeHatch || dchk.contradiction)) {
+    moves.push({ topic: "Fine print", say: dchk.contradiction
+      ? `Your website's fine print says prices include all fees AND that they may not — both can't be true. Which applies to this car? Put the answer, and the all-in price, in writing.`
+      : `Your website's fine print says the advertised price "may change" or "can't be guaranteed" — so confirm it: send me this car's exact all-in price in writing today${analysis?.allInPricing?.body ? `, as ${analysis.allInPricing.body}'s all-in rule requires` : ""}.` });
+  }
   // S28 — price-gating ("Contact Us For Price"). The dealer deliberately
   // withholds the number to force a lead capture where their salespeople run
   // the conversation. Detection comes from the page's own call-to-action text
