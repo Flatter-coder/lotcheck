@@ -78,7 +78,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-10a";
+const CACHE_VER = "2026-08-10b";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2459,15 +2459,21 @@ Deno.serve(async (req: Request) => {
         // The structured data often lacks the price the RENDERED page displays.
         // With Scrapfly armed, run the vision rescue here too (this path used
         // to return early and skip it — the Okotoks $112,995 vanished that way).
+        let jlRenderConfirmedGated = false;
         if (!(Number(jsonLdFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
+            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0);
             if (rescued) mergeRescued(jsonLdFallback, rescued);
             if (Number(jsonLdFallback.quotedPrice) > 0 && jsonLdFallback.priceDisclosure === "contact_for_price") jsonLdFallback.priceDisclosure = "advertised";
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
+        }
+        // Same accusation gate as the main path: unconfirmed -> our miss, not their tactic.
+        if (jsonLdFallback.priceDisclosure === "contact_for_price" && !(Number(jsonLdFallback.quotedPrice) > 0) && !jlRenderConfirmedGated) {
+          jsonLdFallback.priceDisclosure = "not_shown";
         }
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
@@ -2740,12 +2746,14 @@ Deno.serve(async (req: Request) => {
     // field a text scrape drops on JS/Cloudflare pages, and a catalog-filled MSRP
     // must NOT suppress it (else the report shows an MSRP but no deal). Fully
     // fail-safe: any failure returns null and we fall through as before.
+    let renderConfirmedGated = false; // vision saw the rendered page and found NO price
     if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
       try {
         const rescued = await rescueListingViaScrapfly(url, {
           systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
+        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0);
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
@@ -2773,6 +2781,16 @@ Deno.serve(async (req: Request) => {
           console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
         }
       } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
+    }
+
+    // ACCUSATION GATE (class fix): "contact for price" may stand ONLY when the
+    // rendered page was actually inspected and confirmed price-less. A garbled
+    // text scrape and a genuinely hidden price are indistinguishable without
+    // that look -- and we never accuse on ambiguity. Unconfirmed -> "not_shown".
+    if (analysis.priceDisclosure === "contact_for_price" && !(Number(analysis.quotedPrice) > 0) && !renderConfirmedGated) {
+      console.log("Downgrading unconfirmed contact_for_price claim to not_shown.");
+      analysis.priceDisclosure = "not_shown";
+      analysis.counterScript = buildCounterScript(analysis);
     }
 
     if (!gotPricing) {
