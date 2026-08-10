@@ -2626,6 +2626,16 @@ Deno.serve(async (req: Request) => {
     // the SM360 feed already provided it, or the URL isn't that shape).
     await captureConvertusDaysOnLot(url, analysis);
 
+    // Independent evidence: ask the Internet Archive to preserve the listing.
+    // Server-side + fire-and-forget (the client's no-cors attempt can fail
+    // silently; this one runs from the edge reliably). Never awaited on the
+    // request path, never fails the scan.
+    try {
+      const saveReq = fetch("https://web.archive.org/save/" + url, { headers: { "User-Agent": "LotCheck evidence archiver (lotcheck.ca)" } }).then(() => {}).catch(() => {});
+      const rt: any = (globalThis as any).EdgeRuntime;
+      if (rt?.waitUntil) rt.waitUntil(saveReq);
+    } catch { /* best-effort */ }
+
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback

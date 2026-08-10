@@ -5864,7 +5864,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
         </div>
       )}
-      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.</div>
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.
+        <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
+      </div>
     </div>
   )};
 
