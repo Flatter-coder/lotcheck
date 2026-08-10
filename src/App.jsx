@@ -4454,6 +4454,51 @@ function AdminPanel(){
 // (slow, ambient loop) and the "analyzing" loading state (faster, more
 // active loop) -- one consistent visual instead of a flat emoji for the
 // real moment a file is actually being read.
+// Upload-zone visual — Uiverse "Nawsome" rings adapted to LotCheck: counter-
+// rotating verification rings orbiting the buyer's quote (document at centre).
+// Meaning-matched per the no-emoji/3D rule: rings = the checks running around
+// the document. speed="active" doubles rotation while an analysis runs.
+// Hover fans the ring layers out in 3D (the Nawsome signature). Reduced-motion
+// parks everything on a static frame.
+function RingsScanVisual({C, speed="idle"}){
+  const f = speed==="active" ? 0.5 : 1; // active = twice as fast
+  return (
+    <div className="lc-rings" style={{position:"relative",width:210,height:210,margin:"0 auto",transformStyle:"preserve-3d",display:"flex",justifyContent:"center",alignItems:"center"}}>
+      <style>{`
+        @keyframes lcRings16 { to { transform: rotate(360deg); } }
+        .lc-rings svg { position: absolute; transition: .5s; transform-origin: center; width: 210px; height: 210px; fill: none; }
+        .lc-rings svg#lcr-out2 { animation: lcRings16 ${7*f}s ease-in-out infinite alternate; }
+        .lc-rings svg#lcr-out3 { animation: lcRings16 ${3*f}s ease-in-out infinite alternate; }
+        .lc-rings svg#lcr-in1, .lc-rings svg#lcr-in3 { animation: lcRings16 ${4*f}s ease-in-out infinite alternate; }
+        .lc-rings:hover svg { transform: rotate(-80deg) skew(30deg) translateX(calc(16px * var(--i))) translateY(calc(-12px * var(--i))); }
+        .lc-rings:hover svg#lcr-center { transform: rotate(-30deg) translateX(16px) translateY(-2px); }
+        @media (prefers-reduced-motion: reduce) { .lc-rings svg { animation: none !important; } .lc-rings:hover svg { transform: none !important; } }
+      `}</style>
+      <svg id="lcr-out2" viewBox="0 0 220 220" style={{"--i":2}}>
+        <circle cx="110" cy="110" r="100" stroke={C.line} strokeWidth="2" strokeDasharray="24 14"/>
+        <circle cx="110" cy="110" r="100" stroke={C.teal+"55"} strokeWidth="6" strokeDasharray="4 64"/>
+      </svg>
+      <svg id="lcr-out3" viewBox="0 0 220 220" style={{"--i":1.5}}>
+        <circle cx="110" cy="110" r="86" stroke={C.teal} strokeWidth="2.5" strokeDasharray="60 105" strokeLinecap="round"/>
+      </svg>
+      <svg id="lcr-in1" viewBox="0 0 220 220" style={{"--i":1}}>
+        <circle cx="110" cy="110" r="70" stroke="#7c6cf0" strokeWidth="2" strokeDasharray="10 18"/>
+      </svg>
+      <svg id="lcr-in3" viewBox="0 0 220 220" style={{"--i":0.5}}>
+        <circle cx="110" cy="110" r="56" stroke={C.teal} strokeWidth="1.6" strokeDasharray="2 12" opacity=".8"/>
+        <circle cx="110" cy="110" r="44" stroke={C.line} strokeWidth="1.2"/>
+      </svg>
+      <svg id="lcr-center" viewBox="0 0 220 220" style={{"--i":0}}>
+        <rect x="88" y="80" width="44" height="60" rx="7" fill="#f7f4ea"/>
+        <rect x="96" y="92" width="28" height="4" rx="2" fill="#d9d4c2"/>
+        <rect x="96" y="102" width="20" height="4" rx="2" fill="#d9d4c2"/>
+        <rect x="96" y="112" width="28" height="4" rx="2" fill={C.teal}/>
+        <rect x="96" y="122" width="16" height="4" rx="2" fill="#d9d4c2"/>
+      </svg>
+    </div>
+  );
+}
+
 function IsoScanVisual({C, speed="idle"}){
   const floatDur = speed==="active" ? 2.2 : 3.6;
   const sweepDur = speed==="active" ? 1.3 : 2.8;
@@ -7537,7 +7582,7 @@ function QuoteCheckPage(){
                 boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
               }}
             >
-              <IsoScanVisual C={C} speed="idle"/>
+              <RingsScanVisual C={C} speed="idle"/>
 
               <div style={{position:"relative",height:24,margin:"8px 0 14px"}}>
                 {EXAMPLES.map((ex,i)=>(
@@ -7582,7 +7627,7 @@ function QuoteCheckPage(){
 
           {status==="analyzing"&&(
             <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
-              <IsoScanVisual C={C} speed="active"/>
+              <RingsScanVisual C={C} speed="active"/>
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>{lastAttemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}</div>
               <div style={{color:C.inkFaint,fontSize:13,transition:"opacity .2s"}}>{scanMsg||"Checking MSRP, add-ons, and warranty terms"}</div>
               {lastAttemptType==="url"&&(
