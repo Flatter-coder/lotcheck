@@ -39,6 +39,7 @@ const ROGUE = [
 const LANDCRUISER = [
   { trim: "1958",    msrp: 75450, fuel_type: "Hybrid" },
   { trim: "Cruiser", msrp: 84240, fuel_type: "Hybrid" },
+  { trim: "Premium Package", msrp: 90615, fuel_type: "Hybrid" },
 ];
 
 // Single-row (base) models — must still resolve to their one figure.
@@ -89,6 +90,7 @@ const CASES = [
   ["Land Cruiser 1958", LANDCRUISER, { trim: "1958", fuelType: "Hybrid" }, 75450],
   ["Land Cruiser Cruiser trim", LANDCRUISER, { trim: "Cruiser", fuelType: "Hybrid" }, 84240],
   ["Land Cruiser, no trim -> honest starting-at", LANDCRUISER, { fuelType: "Hybrid" }, 75450],
+  ["Land Cruiser Premium Package", LANDCRUISER, { trim: "Premium Package", fuelType: "Hybrid" }, 90615],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
