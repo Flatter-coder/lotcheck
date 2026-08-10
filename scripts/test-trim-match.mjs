@@ -35,6 +35,12 @@ const ROGUE = [
   { trim: "Platinum",   msrp: 46298, fuel_type: "Gas", drivetrain: "AWD" },
 ];
 
+// 2027 Land Cruiser — returned to Canada; toyota.ca trims (Vic-provided capture).
+const LANDCRUISER = [
+  { trim: "1958",    msrp: 75450, fuel_type: "Hybrid" },
+  { trim: "Cruiser", msrp: 84240, fuel_type: "Hybrid" },
+];
+
 // Single-row (base) models — must still resolve to their one figure.
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
@@ -79,6 +85,10 @@ const CASES = [
   ["Rogue Platinum", ROGUE, { trim: "Platinum AWD", fuelType: "Gas" }, 46298],
   ["Rogue, no trim signal -> honest starting-at base", ROGUE,
     { fuelType: "Gas" }, 34598],
+
+  ["Land Cruiser 1958", LANDCRUISER, { trim: "1958", fuelType: "Hybrid" }, 75450],
+  ["Land Cruiser Cruiser trim", LANDCRUISER, { trim: "Cruiser", fuelType: "Hybrid" }, 84240],
+  ["Land Cruiser, no trim -> honest starting-at", LANDCRUISER, { fuelType: "Hybrid" }, 75450],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
