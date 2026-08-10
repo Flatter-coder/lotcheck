@@ -7641,6 +7641,16 @@ function QuoteCheckPage(){
 
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
               <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes a couple of seconds to analyze</div>
+              {/* Scope, answered before it's asked: LotCheck covers every
+                  condition — the #1 user question ("is this for new or used?")
+                  should never need asking. Chips, not fine print. */}
+              <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:12}}>
+                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>Works with</span>
+                {["New","Demo","Certified","Used"].map(c=>(
+                  <span key={c} style={{fontSize:11.5,fontWeight:800,color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}44`,borderRadius:999,padding:"3px 10px"}}>{c}</span>
+                ))}
+                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>— listings & quotes</span>
+              </div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
