@@ -844,7 +844,7 @@
 </div>
 
 <div class="foot">
-  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (29 makes) on the catalog's real daily cadence; <b>markup %</b> comes from real scraped dealer listings compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>pricing-mention rate</b> is genuine AI analysis of review text ("fees", "pricing"). The <b>Reviews vs MSRP</b> is drawn from the same real inputs — each dealer's <b>Google review score &amp; count</b> from <span class="mono">get-dealer-sentiment</span> plotted against its <b>scraped-listing markup vs <span class="mono">msrp_catalog</span></b>; only the drifting motion is a simulated review stream for this preview. None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
+  ◆ <b>Demo visualization — all values simulated for design preview.</b> In production: the LMI is computed from LotCheck's verified <b>msrp_catalog</b> (33 makes) on the catalog's real daily cadence; <b>markup %</b> will come from dealers' own advertised prices — read from their public listings when the market pipeline goes live — compared against <b>msrp_catalog</b>; dealer <b>ratings &amp; reviews</b> come from the app's real Google reviews pipeline (<span class="mono">get-dealer-sentiment</span>); and the <b>pricing-mention rate</b> is genuine AI analysis of review text ("fees", "pricing"). The <b>Reviews vs MSRP</b> is drawn from the same real inputs — each dealer's <b>Google review score &amp; count</b> from <span class="mono">get-dealer-sentiment</span> plotted against its <b>advertised-price markup vs <span class="mono">msrp_catalog</span></b>; only the drifting motion is a simulated review stream for this preview. None of it is fabricated. Dealer names shown here are fictional placeholders and are not attached to any real business's rating data.
 </div>
 
 <div class="backbar bottom">
@@ -1136,7 +1136,7 @@
           '<div class="lb">'+
             '<div class="lb-head"><span>Dealer</span><span>Markup&nbsp;·&nbsp;Rating</span></div>'+
             rows+
-            '<div class="lb-note">Red = high markup with low review scores. Green = high markup with high review scores. Sample data — production joins scraped listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
+            '<div class="lb-note">Red = high markup with low review scores. Green = high markup with high review scores. Sample data — production joins dealers' advertised listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
           '</div>';
       }
       var chgHtml = s.chg ? '<span class="chgn '+(s.chg>=0?"up":"down")+'">'+pct(s.chg)+'</span>' : '';
