@@ -6542,7 +6542,7 @@ function VerifyPage(){
   .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
   return (
     <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
@@ -7406,6 +7406,7 @@ function QuoteCheckPage(){
                 ["/#report","Sample report"],
                 ["/#what","What LotCheck does"],
                 ["/msrp-alerts","MSRP Notifier"],
+                ["/verify","Verify report"],
               ].map(([href,label])=>(
                 <a key={href} href={href}
                   style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}
@@ -8571,7 +8572,7 @@ function QuoteCheckPage(){
 // VinAudit can only post a "beware" banner; we can prove authenticity, so this
 // page teaches the one-scan check. Nav on top per the site-wide rule.
 function TrustPage(){
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
   const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
   const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
   @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
@@ -8709,7 +8710,7 @@ const MAL_CITIES=(()=>{const c=[
   "Taber","Strathmore","Innisfail","Westlock","Barrhead","St. Paul","Vermilion","Claresholm","Pincher Creek",
   "Cardston","Provost",
 ];return c.map(city=>({label:`${city}, AB`,city,province:"AB"}));})();
-const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify","/verify"]];
+const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
 
 function MsrpAlertsPage(){
   const [tilt,setTilt]=useState(23);

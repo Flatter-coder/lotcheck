@@ -1468,16 +1468,22 @@ async function fetchListingContent(url: string): Promise<{ data: any; driver: st
 // Best-effort and fully defensive: bounded pagination, a hard timeout, and any
 // failure leaves analysis.quotedPrice untouched (no fabrication). Generic to
 // ANY SM360 host, not hardcoded to tazaparkvw.
-function parseSm360Listing(url: string): { origin: string; locale: string; vehicleId: number } | null {
+function parseSm360Listing(url: string): { origin: string; locale: string; vehicleId: number; section: string } | null {
   try {
     const u = new URL(url);
-    if (!/\/new-inventory\//i.test(u.pathname)) return null;
+    // Both lots ride the same feed shape: {origin}/{locale}/{section}/api/listing.
+    // A USED listing (/used-inventory/) previously fell through entirely -- the
+    // Calgary BMW 2024 X5 case: price/odometer/days-on-lot all present in the
+    // used feed but never read.
+    const sec = u.pathname.match(/\/(new|used)-inventory\//i);
+    if (!sec) return null;
+    const section = sec[1].toLowerCase() + "-inventory";
     // The id token is the unit's vehicleId, as an `id<digits>` slug segment.
     const m = u.pathname.match(/id(\d{4,})(?![0-9])/i);
     if (!m) return null;
     const localeSeg = u.pathname.match(/^\/(en|fr)\//i);
     const locale = localeSeg ? localeSeg[1].toLowerCase() : "en";
-    return { origin: u.origin, locale, vehicleId: Number(m[1]) };
+    return { origin: u.origin, locale, vehicleId: Number(m[1]), section };
   } catch {
     return null;
   }
@@ -1488,11 +1494,12 @@ async function fetchSm360Page(
   locale: string,
   page: number,
   timeoutMs: number,
+  section = "new-inventory",
 ): Promise<{ vehicles: any[]; numberOfPages: number } | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${origin}/${locale}/new-inventory/api/listing?page=${page}`, {
+    const res = await fetch(`${origin}/${locale}/${section}/api/listing?page=${page}`, {
       headers: {
         // Same header set proven against the SM360 feed in sm360-stack.mjs.
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -1608,7 +1615,7 @@ function captureSm360Extras(v: any, analysis: any): void {
 async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void> {
   const parsed = parseSm360Listing(url);
   if (!parsed) return;
-  const { origin, locale, vehicleId } = parsed;
+  const { origin, locale, vehicleId, section } = parsed;
   const PAGE_TIMEOUT_MS = 8_000;
   const MAX_PAGES = 25; // hard ceiling regardless of what pagination claims
 
@@ -1621,7 +1628,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
 
     let pages = 1;
     for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
-      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS, section);
       if (!res) {
         console.warn(`SM360 resolver: page ${page} fetch failed for ${origin}; aborting resolver.`);
         return;
@@ -1709,7 +1716,7 @@ function sm360FuelType(v: any): string | null {
 async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
   const parsed = parseSm360Listing(url);
   if (!parsed) return null;
-  const { origin, locale, vehicleId } = parsed;
+  const { origin, locale, vehicleId, section } = parsed;
   const PAGE_TIMEOUT_MS = 8_000;
   const MAX_PAGES = 25;
 
@@ -1717,7 +1724,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
     let pages = 1;
     let match: any = null;
     for (let page = 1; page <= pages && page <= MAX_PAGES; page++) {
-      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS);
+      const res = await fetchSm360Page(origin, locale, page, PAGE_TIMEOUT_MS, section);
       if (!res) {
         console.warn(`SM360 fallback: page ${page} fetch failed for ${origin}; aborting fallback.`);
         return null;
