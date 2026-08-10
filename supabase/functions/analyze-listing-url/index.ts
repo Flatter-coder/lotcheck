@@ -51,7 +51,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
-import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled } from "../_shared/scrapfly.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot } from "../_shared/scrapfly.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -2395,6 +2395,7 @@ Deno.serve(async (req: Request) => {
       const fallback = await buildSm360FallbackAnalysis(url);
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
+        await attachSealedScreenshot(url, fallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
         await finalizeServerSide(fallback);
         try {
           await supabase
@@ -2426,6 +2427,7 @@ Deno.serve(async (req: Request) => {
       const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
       if (jsonLdFallback) {
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
+        await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
         await finalizeServerSide(jsonLdFallback);
         try {
           await supabase
@@ -2705,6 +2707,10 @@ Deno.serve(async (req: Request) => {
         { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
+
+    // #14 on every scan: sealed screenshot before signing (hash rides in the canonical).
+
+    await attachSealedScreenshot(url, analysis, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
 
     await finalizeServerSide(analysis);
 

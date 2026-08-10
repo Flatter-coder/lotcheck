@@ -80,6 +80,57 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
   }
 }
 
+// Per-scan sealed screenshot via Scrapfly's dedicated Screenshot API
+// ($0.009 / 60 credits per shot on the Discovery plan) -- far cheaper than a
+// full ASP scrape, used to put a hash-sealed "what the page looked like"
+// photo on EVERY report (#14 on every scan, Vic-approved 2026-08-09).
+// Returns { b64, mime } or null. Fail-safe: any error -> null, never throws.
+export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string } | null> {
+  if (!SCRAPFLY_API_KEY) return null;
+  try {
+    const u = new URL("https://api.scrapfly.io/screenshot");
+    u.searchParams.set("key", SCRAPFLY_API_KEY);
+    u.searchParams.set("url", url);
+    u.searchParams.set("format", "jpg");
+    u.searchParams.set("capture", "fullpage");
+    u.searchParams.set("rendering_wait", "3000");
+    u.searchParams.set("auto_scroll", "true");
+    u.searchParams.set("country", "ca");
+    const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
+    if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
+    const ct = res.headers.get("content-type") || "";
+    if (!/image\//i.test(ct)) { console.warn("captureListingScreenshot non-image response:", ct); return null; }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length < 5_000) return null; // too small to be a real page shot
+    const b64 = base64FromBytes(bytes);
+    if (b64.length > 1_500_000) { console.warn("captureListingScreenshot too large, skipping attach:", b64.length); return null; }
+    const mime = /png/i.test(ct) ? "image/png" : "image/jpeg";
+    return { b64, mime };
+  } catch (e) {
+    console.warn("captureListingScreenshot error:", (e as Error)?.message);
+    return null;
+  }
+}
+
+// Attach a sealed screenshot to the analysis when it doesn't already carry one
+// (the vision rescue may have provided it). Hash computed over exactly the
+// attached bytes; MUST run before finalizeServerSide so the hash gets signed.
+export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000): Promise<void> {
+  try {
+    if (!analysis || analysis.listingShot || !SCRAPFLY_API_KEY) return;
+    const shot = await captureListingScreenshot(url, budgetMs);
+    if (!shot) return;
+    const bin = atob(shot.b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const dig = await crypto.subtle.digest("SHA-256", bytes);
+    analysis.listingShot = `data:${shot.mime};base64,${shot.b64}`;
+    analysis.listingShotSha256 = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    analysis.listingShotAt = new Date().toISOString();
+    console.log(`Sealed screenshot attached (${bytes.length} bytes, sha ${analysis.listingShotSha256.slice(0, 12)}).`);
+  } catch { /* best-effort -- never sink the scan */ }
+}
+
 // Very small HTML -> text reducer (fallback input when there's no screenshot).
 function htmlToText(html: string): string {
   return html
