@@ -75,6 +75,10 @@ const CLAUDE_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 // responses and avoids re-paying for a Nimble scrape + Claude call. 6h
 // balances freshness against hit rate.
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// Bump on ANY logic change that affects report content. Cached rows written
+// by an older version are treated as misses and re-scanned -- this replaces
+// the manual "DELETE FROM listing_analysis_cache" step after every deploy.
+const CACHE_VER = "2026-08-10a";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2369,7 +2373,9 @@ Deno.serve(async (req: Request) => {
         .select("analysis, created_at")
         .eq("url", url)
         .maybeSingle();
-      if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
+      if (cached?.analysis && cached.analysis._cacheVer !== CACHE_VER) {
+        console.log(`Cache entry for ${url} is from an older code version (${cached.analysis._cacheVer || "untagged"}) -- rescanning.`);
+      } else if (cached?.analysis && (Date.now() - new Date(cached.created_at).getTime()) < CACHE_TTL_MS) {
         const ageS = Math.round((Date.now() - new Date(cached.created_at).getTime()) / 1000);
         console.log(`Cache HIT for ${url} (age ${ageS}s) -- returning cached analysis, no scrape.`);
         // Guardrail: an empty cached entry (no price/MSRP) is not a report --
@@ -2424,7 +2430,7 @@ Deno.serve(async (req: Request) => {
         try {
           await supabase
             .from("listing_analysis_cache")
-            .upsert({ url, analysis: fallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+            .upsert({ url, analysis: { ...fallback, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
         } catch (err) {
           console.warn("Cache write failed (SM360 fallback):", err);
         }
@@ -2469,7 +2475,7 @@ Deno.serve(async (req: Request) => {
         try {
           await supabase
             .from("listing_analysis_cache")
-            .upsert({ url, analysis: jsonLdFallback, created_at: new Date().toISOString() }, { onConflict: "url" });
+            .upsert({ url, analysis: { ...jsonLdFallback, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
         } catch (err) {
           console.warn("Cache write failed (JSON-LD fallback):", err);
         }
@@ -2504,7 +2510,7 @@ Deno.serve(async (req: Request) => {
             try {
               await supabase
                 .from("listing_analysis_cache")
-                .upsert({ url, analysis: renderOnly, created_at: new Date().toISOString() }, { onConflict: "url" });
+                .upsert({ url, analysis: { ...renderOnly, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
             } catch (err) {
               console.warn("Cache write failed (render fallback):", err);
             }
@@ -2804,7 +2810,7 @@ Deno.serve(async (req: Request) => {
     try {
       await supabase
         .from("listing_analysis_cache")
-        .upsert({ url, analysis, created_at: new Date().toISOString() }, { onConflict: "url" });
+        .upsert({ url, analysis: { ...analysis, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
     } catch (err) {
       console.warn("Cache write failed:", err);
     }
