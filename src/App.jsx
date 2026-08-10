@@ -7740,35 +7740,14 @@ function QuoteCheckPage(){
               <div style={cardStyle}>
                 <div style={{fontSize:20,fontWeight:1000,color:C.ink,letterSpacing:-.3,lineHeight:1.15}}>{vehName}</div>
                 {metaBits.length>0&&<div style={{fontSize:12.5,color:C.inkSoft,marginTop:4}}>{metaBits.join(" · ")}</div>}
-                {/* Uiverse pastel stat tiles (kushalyadavweb): the four pastel
-                    fills + matching label colors cycle across however many
-                    tiles exist; hover scales the tile up (the design's
-                    signature), overflow stays visible so it pops over
-                    neighbours. Values render in dark ink for contrast on the
-                    pastel fills (data must stay readable). */}
-                <style>{`
-                  .lcq-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 16px; overflow: visible; }
-                  .lcq-tile { border-radius: 10px; padding: 13px 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; transition: all 350ms ease-in-out; position: relative; }
-                  .lcq-tile:hover { transform: scale(1.35); z-index: 6; box-shadow: 0 14px 30px -10px rgba(0,0,0,.35); }
-                  @media (prefers-reduced-motion: reduce) { .lcq-tile:hover { transform: none; } }
-                  .lcq-tile .lcq-ico { font-size: 26px; line-height: 1; margin-bottom: 7px; }
-                  .lcq-tile .lcq-qty { font-size: 25px; font-weight: 600; color: #1c1633; letter-spacing: -.4px; line-height: 1.05; }
-                  .lcq-tile .lcq-txt { font-size: 12px; font-weight: 600; margin-top: 3px; }
-                  .lcq-tile .lcq-sub { font-size: 10px; font-weight: 600; color: rgba(28,22,51,.55); margin-top: 3px; line-height: 1.35; }
-                `}</style>
-                <div className="lcq-tiles">
-                  {tiles.map((t,i)=>{
-                    const BG=["#c7c7ff","#ffd8be","#a9ecbf","#f3bbe1"], TX=["rgba(149,149,255,1)","rgba(252,161,71,1)","rgba(66,193,110,1)","rgba(220,91,183,1)"];
-                    const ico=/price|msrp/i.test(t.label)?"💵":/weekly|monthly|payment/i.test(t.label)?"🗓️":/rebate/i.test(t.label)?"⚡":/days on lot/i.test(t.label)?"⏱️":/watch/i.test(t.label)?(t.flag?"⚠️":"✅"):"📋";
-                    return (
-                      <div key={i} className="lcq-tile" style={{background:BG[i%4]}}>
-                        <div className="lcq-ico">{ico}</div>
-                        <div className="lcq-qty">{t.value}{t.valueSuffix&&<span style={{fontSize:13,fontWeight:600,color:"rgba(28,22,51,.6)"}}>{t.valueSuffix}</span>}</div>
-                        <div className="lcq-txt" style={{color:TX[i%4]}}>{t.label}</div>
-                        {t.sub&&<div className="lcq-sub">{t.sub}</div>}
-                      </div>
-                    );
-                  })}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginTop:16}}>
+                  {tiles.map((t,i)=>(
+                    <div key={i} style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:14,padding:"11px 13px"}}>
+                      <div style={{fontSize:10.5,textTransform:"uppercase",letterSpacing:.7,color:C.inkFaint,fontWeight:800}}>{t.label}</div>
+                      <div style={{fontSize:19,fontWeight:1000,marginTop:3,letterSpacing:-.3,color:t.flag?C.butterInk:C.ink}}>{t.value}{t.valueSuffix&&<span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>{t.valueSuffix}</span>}</div>
+                      {t.sub&&<div style={{fontSize:11,color:C.inkSoft,marginTop:2}}>{t.sub}</div>}
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -7807,28 +7786,7 @@ function QuoteCheckPage(){
                      single column on mobile. auto-fit + minmax does the collapse
                      with no media query; rowGap:0 defers vertical rhythm to each
                      card's own marginBottom (from cardStyle). ── */}
-              {/* Uiverse-inspired stacked-card motion (shlomo20), adapted for a
-                  data report: cards rest slightly tilted and straighten + lift
-                  on hover with the three Uiverse gradient palettes as glow +
-                  top-edge accents. The literal 254x190 fanned stack can't hold
-                  report data and the tone colors (teal=good/coral=flag) carry
-                  meaning, so the design's MOTION language is applied while the
-                  card interiors stay readable + semantic. */}
-              <style>{`
-                .lcq-cards > div { position: relative; transition: transform .5s ease-out, box-shadow .5s ease-out; will-change: transform; }
-                .lcq-cards > div:nth-child(odd) { transform: perspective(905px) rotateZ(-1.3deg); }
-                .lcq-cards > div:nth-child(even) { transform: perspective(905px) rotateZ(1.1deg); }
-                .lcq-cards > div:hover { transform: perspective(1000px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) translateY(-6px) scale(1.015); z-index: 4; }
-                .lcq-cards > div::after { content: ""; position: absolute; top: 0; left: 18px; right: 18px; height: 3px; border-radius: 0 0 6px 6px; opacity: .85; pointer-events: none; }
-                .lcq-cards > div:nth-child(3n+1)::after { background: linear-gradient(90deg, #FF0055 0%, #000066 100%); }
-                .lcq-cards > div:nth-child(3n+2)::after { background: linear-gradient(90deg, #fa00ff 0%, #01f998 99%); }
-                .lcq-cards > div:nth-child(3n)::after { background: linear-gradient(90deg, #c0f901 0%, #fa00ff 100%); }
-                .lcq-cards > div:nth-child(3n+1):hover { box-shadow: 0 22px 44px -14px rgba(255,0,85,.45), 0 8px 20px -10px rgba(0,0,102,.4); }
-                .lcq-cards > div:nth-child(3n+2):hover { box-shadow: 0 22px 44px -14px rgba(250,0,255,.4), 0 8px 20px -10px rgba(1,249,152,.35); }
-                .lcq-cards > div:nth-child(3n):hover { box-shadow: 0 22px 44px -14px rgba(192,249,1,.35), 0 8px 20px -10px rgba(250,0,255,.4); }
-                @media (prefers-reduced-motion: reduce) { .lcq-cards > div, .lcq-cards > div:hover { transform: none; } }
-              `}</style>
-              <div className="lcq-cards" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
 
               {/* MSRP on its own -- just the manufacturer's number, nothing
                   else mixed into this card. The comparison against what the
