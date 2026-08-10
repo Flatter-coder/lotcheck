@@ -1568,14 +1568,21 @@ async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<vo
     const html = await fetchDirectHtml(url, 12_000);
     if (!html) return;
     const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
-    if (!m) return;
-    const since = m[1];
-    const t = Date.parse(since + "T00:00:00Z");
-    if (!Number.isFinite(t)) return;
-    const days = Math.floor((Date.now() - t) / 86_400_000);
-    if (days <= 0 || days > 3650) return;
-    analysis.daysOnLot = { days, since, source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
-    console.log(`Convertus days-on-lot: ${days} days (date_on_lot ${since}).`);
+    const since = m ? m[1] : null;
+    const t = since ? Date.parse(since + "T00:00:00Z") : NaN;
+    const days = Number.isFinite(t) ? Math.floor((Date.now() - t) / 86_400_000) : 0;
+    if (days > 0 && days <= 3650) {
+      analysis.daysOnLot = { days, since, source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
+      console.log(`Convertus days-on-lot: ${days} days (date_on_lot ${since}).`);
+    }
+    // Gating backstop: the raw page HTML is ground truth for a price-gated
+    // listing even when the LLM's markdown view missed the CTA text.
+    if (!(Number(analysis.quotedPrice) > 0)
+        && (!analysis.priceDisclosure || analysis.priceDisclosure === "not_shown")
+        && /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i.test(html)) {
+      analysis.priceDisclosure = "contact_for_price";
+      console.log("Convertus gating backstop: page text shows a contact-for-price CTA.");
+    }
   } catch { /* best-effort — never sink the scan */ }
 }
 
@@ -2648,7 +2655,16 @@ Deno.serve(async (req: Request) => {
         });
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
+          const hadTrim = !!analysis.trim;
           mergeRescued(analysis, rescued);
+          // The rescue can recover identity the text pass missed (trim, VIN).
+          // A catalog "starting_at" floor picked WITHOUT that identity is stale
+          // -- drop it so enrich re-resolves with the full signals (fixes the
+          // Rock Creek case: base-S floor survived even after the rescue
+          // learned the real trim, because the !msrp guard skipped the lookup).
+          if (!hadTrim && analysis.trim && analysis.msrpSource === "catalog" && analysis.msrpBasis === "starting_at") {
+            delete analysis.msrp; delete analysis.msrpSource; delete analysis.msrpBasis; delete analysis.msrpTrim; delete analysis.msrpYear;
+          }
           await enrichAnalysis(analysis, REQUEST_DEADLINE);
           // Screenshot showed a dealer MSRP above the manufacturer catalog figure ->
           // inflated-sticker tactic. Anchor stays the TRUE catalog MSRP; record the
