@@ -2083,6 +2083,13 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   // read) is tried first; only on a miss does the ~30s manufacturer scrape run.
   // The request deadline is threaded through so this expensive step self-skips
   // when there isn't enough budget left to finish before the platform ceiling.
+  // INVARIANT (class fix, Okotoks false-claim family): if we captured an
+  // asking price, the page by definition advertised one -- a "contact for
+  // price" claim can never stand next to it, whichever path produced either.
+  if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") {
+    analysis.priceDisclosure = "advertised";
+  }
+
   if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
     // VIN -> drivetrain (free, NHTSA): the strongest trim-disambiguation signal.
     const vinDrive = await decodeVinDrive(analysis.vin);
@@ -2132,6 +2139,7 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       analysis.msrpSource = "catalog";
       analysis.msrpBasis = ref.basis;
       if (ref.trim) analysis.msrpTrim = ref.trim;
+      if (ref.sourceUrl) analysis.msrpSourceUrl = ref.sourceUrl; // provenance link for the report
       analysis.msrpInflation = { dealerStated: stated, manufacturer: ref.msrp, overBy: Math.round(stated - ref.msrp) };
     }
   }
@@ -2735,7 +2743,7 @@ Deno.serve(async (req: Request) => {
           // Rock Creek case: base-S floor survived even after the rescue
           // learned the real trim, because the !msrp guard skipped the lookup).
           if (!hadTrim && analysis.trim && analysis.msrpSource === "catalog" && analysis.msrpBasis === "starting_at") {
-            delete analysis.msrp; delete analysis.msrpSource; delete analysis.msrpBasis; delete analysis.msrpTrim; delete analysis.msrpYear;
+            delete analysis.msrp; delete analysis.msrpSource; delete analysis.msrpBasis; delete analysis.msrpTrim; delete analysis.msrpYear; delete analysis.msrpSourceUrl;
           }
           await enrichAnalysis(analysis, REQUEST_DEADLINE);
           // Screenshot showed a dealer MSRP above the manufacturer catalog figure ->
