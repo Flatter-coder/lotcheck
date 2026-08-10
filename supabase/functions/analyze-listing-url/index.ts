@@ -1553,6 +1553,32 @@ function captureSm360DaysOnLot(v: any, analysis: any): void {
   console.log(`SM360 days-on-lot: ${Math.round(days)} days (since ${since ?? "?"}).`);
 }
 
+// Convertus/"vehicles"-platform days-on-lot: those VDPs (kramermazda,
+// fishcreeknissancalgary, toyotanorthwestedmonton, ...) embed the dealer's own
+// inventory record in the page JSON, including "date_on_lot" (verified live:
+// exactly ONE occurrence per VDP = the subject vehicle; Kramer CX-90
+// 2026-03-25, Fish Creek Rogue 2025-11-01). Reads it with the hardened direct
+// fetch — one extra free HTTP call, only for the /vehicles/ URL shape, and only
+// when no daysOnLot was captured yet (the SM360 feed path wins when present).
+async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<void> {
+  try {
+    if (analysis?.daysOnLot) return;
+    let u: URL; try { u = new URL(url); } catch { return; }
+    if (!/\/vehicles\/\d{4}\//i.test(u.pathname)) return;
+    const html = await fetchDirectHtml(url, 12_000);
+    if (!html) return;
+    const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
+    if (!m) return;
+    const since = m[1];
+    const t = Date.parse(since + "T00:00:00Z");
+    if (!Number.isFinite(t)) return;
+    const days = Math.floor((Date.now() - t) / 86_400_000);
+    if (days <= 0 || days > 3650) return;
+    analysis.daysOnLot = { days, since, source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
+    console.log(`Convertus days-on-lot: ${days} days (date_on_lot ${since}).`);
+  } catch { /* best-effort — never sink the scan */ }
+}
+
 // Dealer financing from the SM360 feed's paymentOptions.finance.term — the
 // dealer's own advertised APR/term/payment for THIS unit (page scrapes often
 // miss it; the feed always carries it when the dealer publishes payments).
@@ -1968,6 +1994,16 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       return null;
     }
     const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    // Convertus days-on-lot straight from the html we already hold.
+    let dol: any = null;
+    try {
+      const dm = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
+      if (dm) {
+        const dt = Date.parse(dm[1] + "T00:00:00Z");
+        const dd = Math.floor((Date.now() - dt) / 86_400_000);
+        if (Number.isFinite(dt) && dd > 0 && dd <= 3650) dol = { days: dd, since: dm[1], source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
+      }
+    } catch { /* best-effort */ }
     // Deterministic price-gating detection: the page's own CTA text, read
     // straight from the HTML -- no LLM involved on this path. Only claimed when
     // no price was found (a priced page merely offering e-price forms isn't gated).
@@ -1982,6 +2018,7 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       quotedPrice: v.price,
       quotedPriceSource: v.price != null ? "structured_data" : null,
       priceDisclosure: v.price != null ? "advertised" : (gated ? "contact_for_price" : "not_shown"),
+      daysOnLot: dol,
       standardWarranty: null,
       addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
       source: "structured_data_fallback",
@@ -2577,6 +2614,10 @@ Deno.serve(async (req: Request) => {
     // overriding whatever the generic extractor did or didn't find. Best-
     // effort: on any failure it leaves analysis.quotedPrice untouched.
     await resolveSm360QuotedPrice(url, analysis);
+
+    // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
+    // the SM360 feed already provided it, or the URL isn't that shape).
+    await captureConvertusDaysOnLot(url, analysis);
 
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
