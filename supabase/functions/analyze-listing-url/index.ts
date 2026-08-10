@@ -79,7 +79,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-10c";
+const CACHE_VER = "2026-08-10d";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2485,7 +2485,7 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0);
+            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
             if (rescued) mergeRescued(jsonLdFallback, rescued);
             if (Number(jsonLdFallback.quotedPrice) > 0 && jsonLdFallback.priceDisclosure === "contact_for_price") jsonLdFallback.priceDisclosure = "advertised";
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
@@ -2777,7 +2777,9 @@ Deno.serve(async (req: Request) => {
           systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
-        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0);
+        // Confirmation means the vision pass READ the rendered page and itself
+        // reported the gating -- an empty/failed read is not confirmation.
+        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
