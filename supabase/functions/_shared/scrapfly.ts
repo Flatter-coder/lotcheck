@@ -115,10 +115,13 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
 // Attach a sealed screenshot to the analysis when it doesn't already carry one
 // (the vision rescue may have provided it). Hash computed over exactly the
 // attached bytes; MUST run before finalizeServerSide so the hash gets signed.
-export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000): Promise<void> {
+export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<{ b64: string; mime: string } | null>): Promise<void> {
   try {
     if (!analysis || analysis.listingShot || !SCRAPFLY_API_KEY) return;
-    const shot = await captureListingScreenshot(url, budgetMs);
+    // A pre-started capture (kicked off at the top of the scan, running in
+    // parallel with extraction) beats a fresh one started after the scan has
+    // burned the request budget -- the late start was why shots kept missing.
+    const shot = await (pre ?? captureListingScreenshot(url, budgetMs));
     if (!shot) return;
     const bin = atob(shot.b64);
     const bytes = new Uint8Array(bin.length);

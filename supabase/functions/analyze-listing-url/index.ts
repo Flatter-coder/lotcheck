@@ -51,7 +51,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
-import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot } from "../_shared/scrapfly.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -2398,6 +2398,13 @@ Deno.serve(async (req: Request) => {
       console.warn("Cache read failed (continuing with fresh scan):", err);
     }
 
+    // Start the sealed-screenshot capture NOW, in parallel with the whole scan,
+    // so it gets the full request duration instead of the seconds left after
+    // extraction. Fire-and-forget until the attach point; errors resolve null.
+    const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
+      ? captureListingScreenshot(url, 90_000).catch(() => null)
+      : Promise.resolve(null);
+
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
       console.error("Nimble extract failed after all attempts:", nimbleResult.errBody);
@@ -2412,7 +2419,7 @@ Deno.serve(async (req: Request) => {
       const fallback = await buildSm360FallbackAnalysis(url);
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
-        await attachSealedScreenshot(url, fallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
+        await attachSealedScreenshot(url, fallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
         await finalizeServerSide(fallback);
         try {
           await supabase
@@ -2457,7 +2464,7 @@ Deno.serve(async (req: Request) => {
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
         }
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
-        await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
+        await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
         await finalizeServerSide(jsonLdFallback);
         try {
           await supabase
@@ -2492,7 +2499,7 @@ Deno.serve(async (req: Request) => {
           if (rescued) mergeRescued(renderOnly, rescued);
           if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle) {
             await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
-            await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
+            await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
             await finalizeServerSide(renderOnly);
             try {
               await supabase
@@ -2779,7 +2786,7 @@ Deno.serve(async (req: Request) => {
 
     // #14 on every scan: sealed screenshot before signing (hash rides in the canonical).
 
-    await attachSealedScreenshot(url, analysis, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())));
+    await attachSealedScreenshot(url, analysis, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
 
     await finalizeServerSide(analysis);
 
