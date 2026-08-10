@@ -40,6 +40,15 @@ export function canonicalReport(a: any): any {
     // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
     // signed canonical -- alter the image and the seal breaks.
     shot: a.listingShotSha256 || null,
+    // Full-report verify: everything the report claims travels in the signed
+    // payload so /verify can display it all (compact keys keep the QR small).
+    vin: a.vin || null,
+    odo: num(a.odometerKm),
+    dol: a.daysOnLot && Number(a.daysOnLot.days) > 0 ? { d: Math.round(Number(a.daysOnLot.days)), s: a.daysOnLot.since || null } : null,
+    pd: a.priceDisclosure || null,
+    basis: a.msrpBasis ? { b: a.msrpBasis, t: a.msrpTrim || null, y: a.msrpYear || null } : null,
+    allIn: a.allInPricing?.body || null,
+    disc: a.disclaimerCheck ? { e: !!a.disclaimerCheck.escapeHatch, x: !!a.disclaimerCheck.contradiction } : null,
     issuedAt: a.issuedAt || null,
   };
 }

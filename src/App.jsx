@@ -6305,6 +6305,13 @@ function canonicalReport(a){
     marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
     summary:a.summary||null,
     shot:a.listingShotSha256||null,
+    vin:a.vin||null,
+    odo:num(a.odometerKm),
+    dol:a.daysOnLot&&Number(a.daysOnLot.days)>0?{d:Math.round(Number(a.daysOnLot.days)),s:a.daysOnLot.since||null}:null,
+    pd:a.priceDisclosure||null,
+    basis:a.msrpBasis?{b:a.msrpBasis,t:a.msrpTrim||null,y:a.msrpYear||null}:null,
+    allIn:a.allInPricing?.body||null,
+    disc:a.disclaimerCheck?{e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };
@@ -6613,11 +6620,41 @@ function VerifyPage(){
                 <div style={{background:vdark?"rgba(255,255,255,.04)":"rgba(255,255,255,.6)",border:`1px solid ${T.cardBd}`,borderRadius:12,padding:"14px 16px"}}>
                   <div style={{fontSize:15,fontWeight:700,color:T.heading}}>{o.vehicle||"Vehicle"}</div>
                   <div style={{fontSize:12.5,color:T.soft,fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
-                  {o.price&&(o.price.asking||o.price.msrp)&&<Row t="Asking price" v={o.price.asking?money(o.price.asking):"Not shown"}/>}
-                  {o.price?.msrp&&<Row t={o.price.verified?"MSRP (verified)":"Catalog MSRP"} v={money(o.price.msrp)} c={o.price.verified?"#34d399":T.soft}/>}
-                  {delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>
+                  {o.price?.msrp&&<Row t={o.basis?.b==="starting_at"?`MSRP · starting at${o.basis?.y?` (${o.basis.y} MY)`:""}`:(o.basis?.t?`MSRP · ${String(o.basis.t).toUpperCase()}`:(o.price.verified?"MSRP (verified)":"Catalog MSRP"))} v={money(o.price.msrp)} c={o.price.verified?"#34d399":T.soft}/>}
+                  {delta!==0&&o.basis?.b!=="starting_at"&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  <Row t="VIN" v={o.vin||"Not published — ask the dealer"} c={o.vin?undefined:T.soft}/>
+                  {o.odo!=null&&<Row t="Odometer" v={`${Number(o.odo).toLocaleString()} km`}/>}
+                  {o.dol&&<Row t="Days on lot" v={`${Number(o.dol.d).toLocaleString()} days${o.dol.s?` · since ${o.dol.s}`:""}`} c={o.dol.d>=90?"#f0997b":o.dol.d>=31?"#eab308":"#34d399"}/>}
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
+                  {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
+                  {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
+                  {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
+                  {o.marketValue&&o.marketValue.avg!=null&&<Row t={`Market value · ${o.marketValue.source||"independent"}`} v={money(o.marketValue.avg)}/>}
+                  {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
+                  {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
+                  {o.shot&&<Row t="Listing photo" v={`Sealed · ${String(o.shot).slice(0,10)}…`} c="#34d399"/>}
+                  {(o.addOns||[]).length>0&&(
+                    <div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:9,marginTop:2}}>
+                      <div style={{fontSize:12,color:T.soft,marginBottom:4,fontWeight:700}}>Add-ons & line items</div>
+                      {(o.addOns||[]).slice(0,8).map((x,i)=>(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"3px 0",fontSize:12.5}}>
+                          <span style={{color:x.verdict==="flagged"?"#f0997b":T.soft}}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span>
+                          <span style={{fontFamily:mono,color:T.text}}>{money(x.price)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {o.recalls&&(o.recalls.items||[]).length>0&&(
+                    <div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:9,marginTop:2}}>
+                      <div style={{fontSize:12,color:T.soft,marginBottom:4,fontWeight:700}}>Open recalls</div>
+                      {(o.recalls.items||[]).slice(0,6).map((it,i)=>(
+                        <div key={i} style={{fontSize:12.5,color:"#f0997b",padding:"2px 0"}}>{it.system||"Recall"}{it.date&&!Number.isNaN(new Date(it.date).getFullYear())?` · ${new Date(it.date).getFullYear()}`:""}</div>
+                      ))}
+                    </div>
+                  )}
+                  {o.summary&&<div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:10,marginTop:4,fontSize:12.5,color:T.soft,lineHeight:1.6,fontStyle:"italic"}}>{o.summary}</div>}
                 </div>
                 <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
               </div>);
