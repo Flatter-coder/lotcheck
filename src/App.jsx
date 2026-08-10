@@ -6013,6 +6013,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
   const [selP, setSelP] = useState(0);
+  const [btab, setBtab] = useState("deal"); // bento view's active tab
   const N = items.length;
   const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
   useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
@@ -6029,7 +6030,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("deck", "Deck")}{vb("score", "Scorecard")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("bento", "Bento")}{vb("deck", "Deck")}{vb("score", "Scorecard")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
           ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
@@ -6053,6 +6054,34 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>{items.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}</div>
         <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or ← →  ·  card {idx + 1} of {N}</div>
       </>)}
+
+      {view === "bento" && (() => {
+        // Variant 9 (Vic-picked, 2026-08-10): one compact grid, four tabs as
+        // lenses — THE DEAL (verdict + all 10 points, never-empty honoured),
+        // LEVERAGE, EVIDENCE, SAY THIS. Replaces the long scroll as default.
+        const tabs = [["deal", "THE DEAL"], ["lev", "LEVERAGE"], ["evid", "EVIDENCE"], ["say", "SAY THIS"]];
+        const tabBtn = ([id, label]) => (<button key={id} onClick={() => setBtab(id)} style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.4, fontWeight: 800, padding: "7px 14px", borderRadius: 999, border: `1px solid ${btab === id ? CY : BORD}`, background: btab === id ? CY : "transparent", color: btab === id ? "#04222b" : MUT2, cursor: "pointer" }}>{label}</button>);
+        const cell = (c, span) => c ? (<div key={c.key} style={{ ...cardBox(c), ...(span ? { gridColumn: "1 / -1" } : {}) }}><Head c={c} n={c.v != null ? String(c.v) : undefined} /><div>{c.body}</div></div>) : null;
+        const grid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", marginTop: 4 };
+        const levCards = [...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : [])];
+        const finePrint = (a.disclaimerCheck && a.disclaimerCheck.text) ? {
+          key: "fineprint", title: "The dealer's fine print — captured verbatim",
+          tone: (a.disclaimerCheck.escapeHatch || a.disclaimerCheck.contradiction) ? "flag" : "muted",
+          glow: false,
+          body: (<div><div style={{ fontSize: 12, color: MUT2, fontStyle: "italic", lineHeight: 1.55 }}>"{String(a.disclaimerCheck.text).slice(0, 420)}"</div>{a.disclaimerCheck.note && <div style={{ fontSize: 12, color: TX, marginTop: 8, lineHeight: 1.5 }}>{a.disclaimerCheck.note}</div>}</div>),
+        } : null;
+        return (<div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 12px" }}>{tabs.map(tabBtn)}</div>
+          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{pointItems.map((c) => cell(c))}</div>}
+          {btab === "lev" && (levCards.length
+            ? <div style={grid}>{levCards.map((c) => cell(c, levCards.length === 1))}</div>
+            : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13, lineHeight: 1.6 }}>No sitting-time or trade-in leverage surfaced on this listing — the price case on THE DEAL tab is your leverage.</div>)}
+          {btab === "evid" && <div style={grid}>{cell(evidenceItem, !finePrint)}{cell(finePrint)}</div>}
+          {btab === "say" && (sayItem
+            ? <div style={grid}>{cell(sayItem, true)}</div>
+            : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13 }}>No counter-script moves were generated for this report.</div>)}
+        </div>);
+      })()}
 
       {view === "sidebar" && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
@@ -6794,7 +6823,7 @@ function QuoteCheckPage(){
   // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
   // "Report view"). `sharedReport` is true when the analysis was reconstructed
   // from a self-contained share link (#r=...), never fetched or stored.
-  const [reportView,setReportView]=useState("deck");
+  const [reportView,setReportView]=useState("bento"); // tabbed bento grid (variant 9) — the scroll stays as the "full story" view
   const [sharedReport,setSharedReport]=useState(false);
   // Authenticity of an OPENED shared report: "valid" | "invalid" | null
   // (null = no signature to check / crypto unavailable — say "fingerprint only").
@@ -7840,14 +7869,14 @@ function QuoteCheckPage(){
                 </div>
               </div>
             ) : null;
-            if(reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
+            if(reportView==="bento"||reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
             if(reportView==="flip") return <div>{sharedBanner}<ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/></div>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("deck","Deck")}{vBtn("score","Scorecard")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                  {vBtn("bento","Bento")}{vBtn("deck","Deck")}{vBtn("score","Scorecard")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
