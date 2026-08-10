@@ -1,0 +1,22 @@
+# Manually-triggered maintenance: reset the free-check TESTING counters so
+# verification scans aren't blocked by the 3/day-per-IP cap. Fixed SQL only —
+# no inputs — and runs through Supabase's Management API with the same
+# SUPABASE_ACCESS_TOKEN the deploy workflow uses.
+name: Reset test limits
+
+on:
+  workflow_dispatch:
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset free-check counters (today only)
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"DELETE FROM free_check_ip_daily WHERE day = current_date; UPDATE free_check_daily SET count = 0 WHERE day = current_date;"}'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
