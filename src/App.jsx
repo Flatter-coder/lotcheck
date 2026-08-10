@@ -6676,7 +6676,10 @@ function VerifyPage(){
                   )}
                   {o.summary&&<div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:10,marginTop:4,fontSize:12.5,color:T.soft,lineHeight:1.6,fontStyle:"italic"}}>{o.summary}</div>}
                 </div>
-                <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{marginTop:12,background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+                <div style={{display:"flex",gap:10,marginTop:12,flexWrap:"wrap"}}>
+                  <button onClick={()=>{if(window.history.length>1)window.history.back();else window.location.href="/quote-check";}} style={{background:T.eyebrow,border:"none",color:"#0b0b14",borderRadius:9,padding:"8px 16px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Back to report</button>
+                  <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+                </div>
               </div>);
             })()}
           </div>
@@ -8659,6 +8662,7 @@ function TrustPage(){
       </nav>
 
       <div style={{maxWidth:720,margin:"0 auto",padding:"28px 18px"}}>
+        <button onClick={()=>{if(window.history.length>1)window.history.back();else window.location.href="/";}} style={{background:"transparent",border:"1px solid rgba(255,255,255,.14)",color:"#b6b1d6",borderRadius:9,padding:"7px 14px",fontSize:12.5,fontWeight:700,cursor:"pointer",marginBottom:14}}>← Back</button>
         <div style={{background:"radial-gradient(120% 90% at 30% 8%,#221f3a,#0e0b1c)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:24}}>
           <div style={{fontSize:11,letterSpacing:"2px",textTransform:"uppercase",fontWeight:800,color:"#7f77dd",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>LotCheck · Trust</div>
           <div style={{fontSize:26,fontWeight:800,color:"#fff",margin:"8px 0 6px"}}>Is it a real LotCheck report?</div>
