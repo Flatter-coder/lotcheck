@@ -5861,7 +5861,24 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
       {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
-      {listingShot && <img src={listingShot} alt="Listing at report time" style={{ width: "100%", borderRadius: 10, border: `1px solid ${shotSealOk === false ? ROSE : BORD}` }} />}
+      {listingShot && (
+        <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
+          {/* Collapsed proof: a small window onto the capture, not a page dump.
+              The full image opens on demand (blob URL — browsers block direct
+              data: navigation). The evidence is the HASH in the signature; the
+              picture is there for when it matters, not to dominate the card. */}
+          <div style={{ flex: "none", width: 120, height: 90, overflow: "hidden", borderRadius: 8, border: `1px solid ${shotSealOk === false ? ROSE : BORD}`, background: "#fff" }}>
+            <img src={listingShot} alt="Listing at report time" style={{ width: "100%", objectFit: "cover", objectPosition: "top" }} />
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 6 }}>
+            <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}>Full-page capture of the listing, taken when this report was generated.</div>
+            <button onClick={() => { try { const b64 = String(listingShot).split(",")[1] || ""; const mime = (String(listingShot).match(/^data:([^;]+)/) || [])[1] || "image/jpeg"; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const u = URL.createObjectURL(new Blob([bytes], { type: mime })); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60_000); } catch (e) {} }}
+              style={{ alignSelf: "flex-start", background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: CY, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              View full capture ↗
+            </button>
+          </div>
+        </div>
+      )}
       {a.listingShotSha256 && (
         <div style={{ fontSize: 11, fontFamily: mono, lineHeight: 1.5, color: shotSealOk === false ? ROSE : shotSealOk ? TEAL : MUT2 }}>
           {shotSealOk === false
