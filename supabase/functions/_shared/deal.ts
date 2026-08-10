@@ -110,6 +110,14 @@ export function buildCounterScript(analysis: any): CounterScript {
     const stretch = dol >= 90 ? `over ${Math.floor(dol / 30)} months` : `${dol} days`;
     moves.push({ topic: "Days on lot", say: `This unit has been on your lot ${stretch}${analysis?.daysOnLot?.since ? ` (listed ${analysis.daysOnLot.since})` : ""} — every week it sits costs you money. What can you do on price today to move it?` });
   }
+  // S36 -- trade-in instant-offer widget (capture + claw-back). The listing
+  // embeds a "value your trade" appraisal tool anchored to wholesale data; the
+  // number is non-binding lead capture, and the trade line is where a visible
+  // discount gets clawed back. Fires only when the widget was actually detected.
+  const tiw = analysis?.tradeInWidget;
+  if (tiw && tiw.detected) {
+    moves.push({ topic: "Trade-in", say: `If I trade in: we settle this vehicle's price first, then I want your trade offer in writing on its own line — not one blended payment. ${tiw.vendor ? `Your ${tiw.vendor} tool quotes` : "Those instant-offer tools quote"} the wholesale side of the market, so I'll be comparing against retail listings for my car.` });
+  }
   const df = analysis?.docFeeCheck;
   if (df) {
     if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.` });

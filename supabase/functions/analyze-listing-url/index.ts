@@ -52,6 +52,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
+import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -78,7 +79,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-10b";
+const CACHE_VER = "2026-08-10c";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1567,6 +1568,22 @@ function captureSm360DaysOnLot(v: any, analysis: any): void {
 // 2026-03-25, Fish Creek Rogue 2025-11-01). Reads it with the hardened direct
 // fetch — one extra free HTTP call, only for the /vehicles/ URL shape, and only
 // when no daysOnLot was captured yet (the SM360 feed path wins when present).
+// S36 -- trade-in instant-offer widget detection (dealer-tactics-safeguards.md).
+// Deterministic marker match on page text/HTML: AccuTrade (Cox/Manheim),
+// TradePending, KBB ICO, CBB, or a generic "value your trade" tool. Purely
+// factual ("this listing embeds X") so the report's coach copy is dispute-proof.
+async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null): Promise<void> {
+  try {
+    if (!analysis || analysis.tradeInWidget) return;
+    let hit = matchTradeInWidget(textHint || "");
+    if (!hit) {
+      const html = await fetchDirectHtml(url, 8_000);
+      if (html) hit = matchTradeInWidget(html);
+    }
+    if (hit) { analysis.tradeInWidget = hit; console.log(`Trade-in widget detected (${hit.vendor || "generic"}).`); }
+  } catch { /* best-effort, never sinks the scan */ }
+}
+
 async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;
@@ -2004,6 +2021,7 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
     const html = await fetchDirectHtml(url, 15_000);
     if (!html) { console.log(`JSON-LD fallback: direct fetch returned nothing for ${url}.`); return null; }
     const v = extractJsonLdVehicle(html);
+    const tiwHit = matchTradeInWidget(html);
     if (!v || (v.price == null && !v.year && !v.model)) {
       console.log(`JSON-LD fallback: no usable schema.org Vehicle/Offer in ${url}.`);
       return null;
@@ -2456,6 +2474,7 @@ Deno.serve(async (req: Request) => {
       // feed fallback have already failed, so pages that load are unaffected.
       const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
       if (jsonLdFallback) {
+        await detectTradeInWidget(url, jsonLdFallback); // S36 (fetch is cached upstream at the CDN, cheap)
         // The structured data often lacks the price the RENDERED page displays.
         // With Scrapfly armed, run the vision rescue here too (this path used
         // to return early and skip it — the Okotoks $112,995 vanished that way).
@@ -2714,6 +2733,11 @@ Deno.serve(async (req: Request) => {
     // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
     // the SM360 feed already provided it, or the URL isn't that shape).
     await captureConvertusDaysOnLot(url, analysis);
+
+    // S36: flag embedded trade-in instant-offer widgets (checks the scraped
+    // text first; falls back to one direct fetch), then refresh the script.
+    await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null);
+    if (analysis.tradeInWidget) analysis.counterScript = buildCounterScript(analysis);
 
     // Independent evidence: ask the Internet Archive to preserve the listing.
     // Server-side + fire-and-forget (the client's no-cors attempt can fail

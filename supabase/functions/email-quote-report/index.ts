@@ -268,6 +268,14 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
   }
 
+  // 5c -- Trade-in instant-offer widget (S36): name the mechanism, coach the split
+  if (a.tradeInWidget && a.tradeInWidget.detected) {
+    const tv = a.tradeInWidget.vendor ? escapeHtml(a.tradeInWidget.vendor) : "";
+    deck.push({ label: "Trade-in tool on this listing", tone: "muted", glow: false, body:
+      `<div style="font-size:15px;font-weight:900;color:#33305A;">This dealer runs an instant trade-in appraisal widget${tv ? " (" + tv + ")" : ""}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Its number is anchored to the wholesale side of the market (what dealers pay each other), it's non-binding, and it appears in exchange for your contact and vehicle details. If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment; and check retail listings for your own car before disclosing anything.</div>` });
+  }
+
   // 6 -- Dealer reputation (compact)
   const ds = a.dealerSentiment;
   if (ds && (ds.rating || (ds.highlights || []).length)) {
@@ -650,6 +658,17 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
         ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. A month-plus of sitting is real carrying cost - reasonable grounds to ask for a better price."
         : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. This one is fresh, so sitting-time won't move the price much yet.",
       { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- TRADE-IN TOOL (S36) — wholesale-anchored widget on the listing ----
+  if (a.tradeInWidget && a.tradeInWidget.detected) {
+    need(70);
+    kicker("TRADE-IN TOOL ON THIS LISTING");
+    T(`Instant trade-in appraisal widget${a.tradeInWidget.vendor ? ` (${a.tradeInWidget.vendor})` : ""}`, { size: 13, font: serifB, color: INK }); y -= 18;
+    para("Its number is anchored to the wholesale side of the market (what dealers pay each other), it is non-binding, and it appears in exchange for your contact and vehicle details.", { size: 9, color: SOFT, lead: 4 });
+    advance(2);
+    para("If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line - never one blended payment; and check retail listings for your own car before disclosing anything.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }
 

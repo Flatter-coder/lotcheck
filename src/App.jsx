@@ -5626,6 +5626,7 @@ function encodeReport(a){
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
+    tw:a.tradeInWidget&&a.tradeInWidget.detected?{v:a.tradeInWidget.vendor||null}:null,
     sh:a.listingShotSha256||null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
@@ -5651,6 +5652,7 @@ function decodeReport(s){
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
+      tradeInWidget:c.tw?{detected:true,vendor:c.tw.v||null}:null,
       listingShotSha256:c.sh||null,__shared:true};
   }catch{ return null; }
 }
@@ -5981,9 +5983,32 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : [])];
+  // S36 — trade-in instant-offer widget on the listing. Factual detection
+  // (AccuTrade/TradePending/KBB ICO/CBB/generic) + the decoupling coach; the
+  // counter-script "Trade-in" move ships from the server alongside it.
+  let tradeInItem = null;
+  if (a.tradeInWidget && a.tradeInWidget.detected) {
+    const tv = a.tradeInWidget.vendor;
+    tradeInItem = { key: "tradein", title: "Trade-in tool on this listing", tone: "muted", v: tv || "detected", body: (
+      <div>
+        <div style={{ fontSize: 13.5, color: "#e2e8f0", lineHeight: 1.6 }}>
+          This listing embeds {tv ? <b>{tv}</b> : <b>a “value your trade” tool</b>} — an instant trade-in appraisal widget.
+          The number it shows is anchored to the <b>wholesale</b> side of the market (what dealers pay each other),
+          it is non-binding, and it appears in exchange for your contact and vehicle details.
+        </div>
+        <div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 10, lineHeight: 1.65 }}>
+          <div><b style={{ color: TEAL }}>1.</b> Settle this vehicle's price first — the trade comes after, never blended into one payment.</div>
+          <div><b style={{ color: TEAL }}>2.</b> Get the trade offer in writing, on its own line of the bill of sale.</div>
+          <div><b style={{ color: TEAL }}>3.</b> Know your own number first — check retail listings for your car before disclosing anything.</div>
+        </div>
+        <ExplainBox txt={`The "value your trade" button on this dealer's site runs an appraisal tool${tv ? ` (${tv})` : ""} that quotes what dealers pay at wholesale — usually thousands below what your car sells for at retail. It also isn't a promise: the number routinely drops at the in-person inspection. Treat it as the dealer's opening bid, keep it separate from the price of the car you're buying, and come armed with your own retail comparison.`} />
+      </div>
+    )};
+  }
+
+  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(daysLotItem ? [daysLotItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  const items = [verdictItem, ...pointItems, ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -6111,7 +6136,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={cardBox({ tone: "muted" })}>
             <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
-              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
             </div>
           </div>
           {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
@@ -6141,6 +6166,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   if(a.recalls?.checked) P.push({t:"recalls"});
   if(feeItems.length) P.push({t:"fees"});
   if(a.dealerSentiment?.rating) P.push({t:"rep"});
+  if((Number(a.daysOnLot?.days)||0)>0||a.tradeInWidget?.detected) P.push({t:"lev"});
   if(a.leverageScore||a.summary) P.push({t:"bottom"});
   if(P.length%2) P.push({t:"blank"});
   const leaves=[]; for(let i=0;i<P.length;i+=2) leaves.push([P[i],P[i+1]]);
@@ -6189,6 +6215,13 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
         <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
         <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
       </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
+    </div>); }
+    if(p.t==="lev"){ const d=Math.round(Number(a.daysOnLot?.days)||0); const tiw=a.tradeInWidget;
+      return (<div className="rfb-pg">{num}<div className="rfb-k">Leverage</div>
+      <h2 className="rfb-h2">{d>0?`${d.toLocaleString()} days on the lot`:"Trade-in tool on this listing"}</h2>
+      {d>0&&<div className="rfb-stat"><div className="rfb-lab">Days on lot{a.daysOnLot.since?` · first seen ${a.daysOnLot.since}`:""}</div><div className="rfb-big" style={{color:d>=90?"#e0503c":d>=31?"#c78a1e":"#159e8f"}}>{d.toLocaleString()} days</div><div className="rfb-sub">{a.daysOnLot.sourceLabel||"dealer inventory data"} — the dealer's own clock, not our guess</div></div>}
+      {d>0&&<div className="rfb-lede" style={{fontSize:12}}>{d>=90?"Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage.":d>=31?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"Recently listed — limited sitting-time leverage on this unit."}</div>}
+      {tiw?.detected&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Trade-in tool on this listing{tiw.vendor?` · ${tiw.vendor}`:""}</div><div className="rfb-wt">Its instant number is the <b>wholesale</b> side of the market (what dealers pay each other) and it's non-binding. Settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment.</div></div>}
     </div>); }
     if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
       <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
@@ -7783,6 +7816,7 @@ function QuoteCheckPage(){
             })();
             if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
             if(analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0) tiles.push({label:"Days on lot",value:Number(analysis.daysOnLot.days).toLocaleString(),sub:analysis.daysOnLot.since?`first seen ${analysis.daysOnLot.since}`:"dealer inventory data",flag:Number(analysis.daysOnLot.days)>=90});
+            if(analysis.tradeInWidget&&analysis.tradeInWidget.detected) tiles.push({label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",sub:"wholesale-anchored — keep it a separate written line",flag:false});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
@@ -8021,6 +8055,19 @@ function QuoteCheckPage(){
                   </div>
                 );
               })()}
+
+              {/* S36 — trade-in instant-offer widget: name the mechanism, coach the
+                  decoupling play. Same data as the deck's Trade-in card. */}
+              {analysis.tradeInWidget&&analysis.tradeInWidget.detected&&(
+                <div style={cardStyle}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Trade-in tool on this listing{analysis.tradeInWidget.vendor?` · ${analysis.tradeInWidget.vendor}`:""}</div>
+                  <div style={{fontSize:15,fontWeight:900,color:C.ink,lineHeight:1.35}}>This dealer runs an instant trade-in appraisal widget</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
+                    Its number is anchored to the wholesale side of the market (what dealers pay each other), it's non-binding, and it appears in exchange for your contact and vehicle details.
+                    If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment; and check retail listings for your own car before disclosing anything.
+                  </div>
+                </div>
+              )}
 
               {analysis.recalls&&(()=>{
                 const r=analysis.recalls;
