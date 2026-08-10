@@ -5707,6 +5707,23 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
   const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2999/" + sourceUrl : null; // far-future ts -> latest capture (not the calendar)
   const listingShot = a.listingShot || null;
+  // #14 photo proof lock: recompute the displayed screenshot's SHA-256 in the
+  // browser and compare against the hash sealed in the signature.
+  const [shotSealOk, setShotSealOk] = useState(null); // true | false | null (no photo / not checkable)
+  useEffect(() => {
+    if (!(a.listingShot && a.listingShotSha256)) { setShotSealOk(null); return; }
+    (async () => {
+      try {
+        const b64 = String(a.listingShot).split(",")[1] || "";
+        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dig = await crypto.subtle.digest("SHA-256", bytes);
+        const hex = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        setShotSealOk(hex === a.listingShotSha256);
+      } catch { setShotSealOk(null); }
+    })();
+  }, [a.listingShot, a.listingShotSha256]);
+
   useEffect(() => { if (!sourceUrl) return; try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) {} }, [sourceUrl]);
 
   const Chip = ({ txt, tone }) => { const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2; const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)"; return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>; };
@@ -5954,22 +5971,6 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
   const [selP, setSelP] = useState(0);
-  // #14 photo proof lock: recompute the displayed screenshot's SHA-256 in the
-  // browser and compare against the hash sealed in the signature.
-  const [shotSealOk, setShotSealOk] = useState(null); // true | false | null (no photo / not checkable)
-  useEffect(() => {
-    if (!(a.listingShot && a.listingShotSha256)) { setShotSealOk(null); return; }
-    (async () => {
-      try {
-        const b64 = String(a.listingShot).split(",")[1] || "";
-        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const dig = await crypto.subtle.digest("SHA-256", bytes);
-        const hex = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-        setShotSealOk(hex === a.listingShotSha256);
-      } catch { setShotSealOk(null); }
-    })();
-  }, [a.listingShot, a.listingShotSha256]);
   const N = items.length;
   const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
   useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
