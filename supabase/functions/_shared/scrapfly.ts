@@ -87,29 +87,47 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
 // Returns { b64, mime } or null. Fail-safe: any error -> null, never throws.
 export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string } | null> {
   if (!SCRAPFLY_API_KEY) return null;
-  try {
-    const u = new URL("https://api.scrapfly.io/screenshot");
-    u.searchParams.set("key", SCRAPFLY_API_KEY);
-    u.searchParams.set("url", url);
-    u.searchParams.set("format", "jpg");
-    u.searchParams.set("capture", "fullpage");
-    u.searchParams.set("rendering_wait", "3000");
-    u.searchParams.set("auto_scroll", "true");
-    u.searchParams.set("country", "ca");
-    const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
-    if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
-    const ct = res.headers.get("content-type") || "";
-    if (!/image\//i.test(ct)) { console.warn("captureListingScreenshot non-image response:", ct); return null; }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length < 5_000) return null; // too small to be a real page shot
-    const b64 = base64FromBytes(bytes);
-    if (b64.length > 1_500_000) { console.warn("captureListingScreenshot too large, skipping attach:", b64.length); return null; }
-    const mime = /png/i.test(ct) ? "image/png" : "image/jpeg";
-    return { b64, mime };
-  } catch (e) {
-    console.warn("captureListingScreenshot error:", (e as Error)?.message);
-    return null;
+  const started = Date.now();
+  const shoot = async (fullpage: boolean, ms: number): Promise<{ b64: string; mime: string } | "too_large" | null> => {
+    try {
+      const u = new URL("https://api.scrapfly.io/screenshot");
+      u.searchParams.set("key", SCRAPFLY_API_KEY);
+      u.searchParams.set("url", url);
+      u.searchParams.set("format", "jpg");
+      if (fullpage) u.searchParams.set("capture", "fullpage");
+      u.searchParams.set("rendering_wait", "3000");
+      u.searchParams.set("auto_scroll", "true");
+      u.searchParams.set("country", "ca");
+      const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
+      if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
+      const ct = res.headers.get("content-type") || "";
+      if (!/image\//i.test(ct)) { console.warn("captureListingScreenshot non-image response:", ct); return null; }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.length < 5_000) return null; // too small to be a real page shot
+      const b64 = base64FromBytes(bytes);
+      if (b64.length > 1_500_000) { console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} too large (${b64.length})`); return "too_large"; }
+      const mime = /png/i.test(ct) ? "image/png" : "image/jpeg";
+      return { b64, mime };
+    } catch (e) {
+      console.warn("captureListingScreenshot error:", (e as Error)?.message);
+      return null;
+    }
+  };
+  // Full page first (best evidence). Long dealer pages can blow the size cap
+  // (Okotoks: 2.5MB) -- degrade to a viewport shot of the top of the listing
+  // (price + vehicle visible, always small) instead of losing the photo
+  // entirely. The pricing fine print is separately captured verbatim as text,
+  // so the bottom-of-page evidence survives the degrade.
+  const first = await shoot(true, budgetMs);
+  if (first && first !== "too_large") return first;
+  if (first === "too_large") {
+    const left = budgetMs - (Date.now() - started);
+    if (left > 4_000) {
+      const second = await shoot(false, left);
+      return second && second !== "too_large" ? second : null;
+    }
   }
+  return null;
 }
 
 // Attach a sealed screenshot to the analysis when it doesn't already carry one
