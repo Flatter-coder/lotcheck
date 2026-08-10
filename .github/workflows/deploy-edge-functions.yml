@@ -20,7 +20,13 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
-      - name: Deploy all edge functions
-        run: supabase functions deploy --project-ref debigtyjhjamipooajhk
+      - name: Deploy all edge functions (retries ride out flaky CDN 522s)
+        run: |
+          for i in 1 2 3; do
+            supabase functions deploy --project-ref debigtyjhjamipooajhk && exit 0
+            echo "Deploy attempt $i failed; retrying in 25s..."
+            sleep 25
+          done
+          exit 1
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
