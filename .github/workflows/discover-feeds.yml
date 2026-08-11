@@ -1,0 +1,63 @@
+# Dealer feed discovery — run from the Actions tab, no local setup.
+#
+# The service-role key is already a repo secret, so this runs without anyone
+# copying a credential onto a laptop. That is the point: the fewer places that
+# key exists, the better.
+#
+# Defaults are deliberately safe — source=amvic, write=false. A run with
+# write=false probes and reports and touches nothing, so it is always safe to
+# press the button and read the log first.
+#
+# Cadence: manual. Dealership rosters and website platforms change slowly, so
+# monthly is plenty; there is no schedule here on purpose.
+name: Discover dealer feeds
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Candidate list to probe"
+        type: choice
+        options: [amvic, osm]
+        default: amvic
+      write:
+        description: "Seed confirmed dealers into dealer_source (leave off to just look)"
+        type: boolean
+        default: false
+      limit:
+        description: "Probe only the first N hosts (blank = all)"
+        type: string
+        default: ""
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Discover
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS="--source ${{ inputs.source }} --out discovered-feeds.json"
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          if [ "${{ inputs.write }}" = "true" ]; then ARGS="$ARGS --write"; fi
+          echo "Running: node scripts/discover-dealer-feeds.mjs $ARGS"
+          node scripts/discover-dealer-feeds.mjs $ARGS
+      # The full list is worth keeping even when we don't seed — it is the record
+      # of which dealers were reachable on the day, which is how you tell a
+      # platform migration apart from a crawler regression later.
+      - name: Save the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovered-feeds
+          path: discovered-feeds.json
+          if-no-files-found: warn
+          retention-days: 90
