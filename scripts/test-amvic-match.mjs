@@ -18,6 +18,13 @@ const ROWS = [
   // Deliberate near-duplicates: the ambiguity guard must refuse to choose.
   { name: "CALGARY AUTO SALES INC.", trade_name: "N/A", city: "Calgary", facility_status: "Issued" },
   { name: "CALGARY AUTO SALES LTD.", trade_name: "N/A", city: "Calgary", facility_status: "Cancelled by Registrar" },
+  // Real shape (2026-08-11): ONE business, TWO registry records, same status.
+  // Refusing these meant real dealers silently got no licence card.
+  { name: "ADVANTAGE FORD SALES LTD.", trade_name: "N/A", city: "CALGARY", facility_status: "Issued", registration_number: "B2037619", expiry_date: "Feb-28-2027" },
+  { name: "ADVANTAGE FORD SALES LTD.", trade_name: "N/A", city: "CALGARY", facility_status: "Issued", registration_number: "B2037619", expiry_date: "Feb-28-2027" },
+  // Same NAME but CONFLICTING status -> the answer is genuinely in doubt.
+  { name: "TWIN PEAKS MOTORS LTD.", trade_name: "N/A", city: "Airdrie", facility_status: "Issued" },
+  { name: "TWIN PEAKS MOTORS LTD.", trade_name: "N/A", city: "Airdrie", facility_status: "Cancelled by Registrar" },
 ];
 
 const CASES = [
@@ -29,6 +36,7 @@ const CASES = [
   ["Expired dealer with live website", { dealerName: "North American EV", dealerCity: "Mountain View County" }, "North American EV Inc"],
   ["Website host clinches it", { dealerName: "Okotoks Toyota", website: "https://www.okotokstoyota.ca/new/inventory/x.html" }, "OKOTOKS TOYOTA LTD."],
   ["Punctuation + ampersand noise", { dealerName: "Kramer Mazda", dealerCity: "Calgary" }, "KRAMER MAZDA LTD."],
+  ["Duplicate records, same status -> still matches", { dealerName: "Advantage Ford", dealerCity: "Calgary, AB" }, "ADVANTAGE FORD SALES LTD."],
 
   // --- must NOT match (these are the defamation guards) ---
   ["Single generic token", { dealerName: "Auto", dealerCity: "Calgary" }, null],
@@ -37,6 +45,7 @@ const CASES = [
   ["Empty name", { dealerName: "", dealerCity: "Calgary" }, null],
   ["City alone is not identity", { dealerName: "Calgary", dealerCity: "Calgary" }, null],
   ["Brand alone is not a dealer", { dealerName: "Toyota", dealerCity: "Okotoks" }, null],
+  ["Duplicate records, CONFLICTING status -> refuse", { dealerName: "Twin Peaks Motors", dealerCity: "Airdrie" }, null],
 ];
 
 let pass = 0, fail = 0;

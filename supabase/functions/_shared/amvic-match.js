@@ -72,16 +72,25 @@ export function matchLicensee(rows, sig) {
   const strongTokens = tokens(name).length >= 2;
   if (best.score < 0.72 || !strongTokens) return null;
 
-  // Ambiguity guard: if a second record scores nearly as well, we do not know
-  // which business this is -- say so rather than guess (a wrong licence status
-  // attached to the wrong dealer is exactly the claim we must never make).
-  const others = rows
-    .filter((r) => r !== best.row)
-    .map((r) => Math.max(nameScore(name, r.name || ""), r.trade_name && r.trade_name !== "N/A" ? nameScore(name, r.trade_name) : 0));
-  const runnerUp = others.length ? Math.max(...others) : 0;
-  if (best.score - runnerUp < 0.1) return null;
+  // Ambiguity guard. The thing that actually matters is whether the ANSWER is
+  // in doubt, not whether two rows look alike: a registry commonly holds
+  // several records for one business (extra locations, renewals), and refusing
+  // those made us silently skip real dealers -- Advantage Ford has two
+  // identical "ADVANTAGE FORD SALES LTD." rows, both Issued, and we reported
+  // nothing (2026-08-11). So: find the near-ties, and only refuse when they
+  // disagree about who the business is or what its status is.
+  const scoreOf = (r) => Math.max(nameScore(name, r.name || ""), r.trade_name && r.trade_name !== "N/A" ? nameScore(name, r.trade_name) : 0);
+  const contenders = rows.filter((r) => r === best.row || best.score - scoreOf(r) < 0.1);
+  const sameBusiness = (a, b) => normName(a.name || a.trade_name || "") === normName(b.name || b.trade_name || "");
+  const conflicted = contenders.some((r) => !sameBusiness(r, best.row) || classifyStatus(r.facility_status) !== classifyStatus(best.row.facility_status));
+  if (conflicted) return null;
 
-  return { row: best.row, confidence: Number(best.score.toFixed(2)), basis: "name" };
+  // Same business, same status across every contender -- pick the most useful
+  // record: the one whose city matches, else the one that expires latest.
+  const rank = (r) => (city && normName(r.city || "").includes(city) ? 2 : 0) + (r.expiry_date ? 1 : 0);
+  const chosen = contenders.slice().sort((a, b) => rank(b) - rank(a))[0] || best.row;
+
+  return { row: chosen, confidence: Number(best.score.toFixed(2)), basis: contenders.length > 1 ? "name (multiple records agree)" : "name" };
 }
 
 /** Classify the regulator's verbatim status into a report tone. */
