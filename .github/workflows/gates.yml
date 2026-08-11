@@ -1,0 +1,38 @@
+# Regression gates — the two deterministic checks that must hold on every push.
+#
+#   test:invariants  Pure gates over the analysis object (_shared/invariants.ts):
+#                    price-disclosure consistency, the accusation gate, VIN check
+#                    integrity, MSRP basis + provenance. These are the rules that
+#                    keep a report from making a claim it can't back.
+#   check:copy       Forbidden and count-pinned claims in shipped copy: paused
+#                    regulatory-status language, scrape vocabulary, absolute
+#                    accuracy promises, and the two condition-bound claims
+#                    ("never stored", "10-point") whose truth depends on a
+#                    system state that can change.
+#
+# Both are offline and take milliseconds — no network, no clock, no secrets, and
+# no npm install, because neither uses a dependency. There is no reason for this
+# workflow to be slow or flaky, so a red run always means a real regression.
+#
+# NOT included: test:recalls. It queries Transport Canada live, so putting it on
+# every push would hammer a government API and make the signal weather-dependent.
+# Run it by hand when touching recall code (it self-SKIPs when TC is unreachable).
+name: Gates
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"      # --experimental-strip-types runs the .ts suite directly
+      - name: Invariants (analysis object)
+        run: npm run test:invariants
+      - name: Copy compliance (shipped claims)
+        run: npm run check:copy

@@ -13,7 +13,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The gates run again HERE, not just in the Gates workflow, because a parallel
+  # advisory check doesn't stop anything -- a red gate and a green deploy would
+  # race, and the deploy would win. `needs: gates` makes a failing invariant or a
+  # non-compliant claim block the push to production outright. They're offline
+  # and take seconds, so the cost of running them twice is nil.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm run test:invariants
+      - run: npm run check:copy
+
   deploy:
+    needs: gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
