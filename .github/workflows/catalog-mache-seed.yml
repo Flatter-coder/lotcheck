@@ -1,0 +1,30 @@
+# One-shot: seed Ford Canada's published 2026 Mustang Mach-E model-line prices.
+#
+# Why by hand: the Mach-E line is exactly where a dealer-stated sticker went
+# unchallenged (Advantage Ford stated $66,015 against Ford's advertised
+# "Starting at $47,638" for Premium), and our catalog held only a single base
+# row. These are the figures ford.ca publishes on its Models page, stored as
+# "starting at" reference points -- NOT exact trim prices, because ford.ca
+# labels them "Starting at" and a specific unit's drivetrain/options sit above
+# them. The starting_at basis keeps the report from making any over/under-MSRP
+# claim from them; they exist to give the buyer a manufacturer anchor.
+name: Seed Mach-E model prices (one-shot)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Insert Ford Canada Mach-E starting prices
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @- <<'JSON'
+          {"query":"insert into msrp_catalog (year, make, model, trim, msrp, fuel_type, source_url) values (2026,'Ford','Mustang Mach-E','Select',45778,'BEV','https://www.ford.ca/suvs/mach-e/models/'),(2026,'Ford','Mustang Mach-E','Premium',47638,'BEV','https://www.ford.ca/suvs/mach-e/models/'),(2026,'Ford','Mustang Mach-E','GT',62878,'BEV','https://www.ford.ca/suvs/mach-e/models/'),(2026,'Ford','Mustang Mach-E','Rally',67993,'BEV','https://www.ford.ca/suvs/mach-e/models/') on conflict (year, make, model, trim) do update set msrp = excluded.msrp, source_url = excluded.source_url; delete from listing_analysis_cache; select trim, msrp from msrp_catalog where model = 'Mustang Mach-E' order by msrp;"}
+          JSON
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

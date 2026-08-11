@@ -68,7 +68,10 @@ export function buildCounterScript(analysis: any): CounterScript {
   // Also require an EXACT trim basis: a "starting_at" floor (base trim / adjacent
   // model year) is NOT this unit's MSRP — an option-loaded car above the base
   // floor is not "over MSRP", and saying so at the table would be wrong.
-  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100 && analysis?.msrpBasis !== "starting_at") {
+  // Only a VERIFIED exact-trim MSRP earns a price move. A base-model floor
+  // ("starting_at") or the dealer's own stated sticker ("dealer_stated") is not
+  // a manufacturer figure, and quoting one at the desk would be indefensible.
+  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100 && analysis?.msrpBasis === "exact") {
     // S14 — one dealer's price isn't "the market"; the market is real deals across dealers.
     moves.push({ topic: "Price", say: `This is about ${money(qp - msrp)} over MSRP (${money(msrp)}). "Market value" is set by real deals across many dealers, not one store's number — I'd need this at MSRP to move forward.` });
   }

@@ -362,7 +362,7 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (qp > 0);
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
-  const msrpExactTp = ms > 0 && a.msrpBasis !== "starting_at";
+  const msrpExactTp = ms > 0 && a.msrpBasis === "exact";
   if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
   else if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
   else if (ms && pv && msrpExactTp && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
@@ -403,7 +403,7 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
 function pointExplain(t: string, a: any): string | null {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
-  const exact = ms > 0 && a.msrpBasis !== "starting_at";
+  const exact = ms > 0 && a.msrpBasis === "exact";
   switch (t) {
     case "Price vs MSRP":
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
@@ -608,7 +608,7 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
   Tat(priceVerified ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
   y = figTop - 58;
-  if (delta && a.msrpBasis !== "starting_at") {
+  if (delta && a.msrpBasis === "exact") {
     const label = (delta > 0 ? "+" + money(delta) + " OVER MSRP" : money(Math.abs(delta)) + " UNDER MSRP");
     T(label, { size: 11, font: sansB, color: delta > 0 ? CORAL : TEAL });
     if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label, 11); Tat("(vs catalog MSRP - listing price not yet verified)", y - 11, { x: M + wl + 6, size: 8.5, font: sans, color: FAINT }); }

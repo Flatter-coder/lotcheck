@@ -82,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11c";
+const CACHE_VER = "2026-08-11d";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -645,7 +645,7 @@ function computeLeverageScore(analysis: any): void {
   // "starting_at" floor (base trim / adjacent MY) says nothing about THIS
   // unit's sticker — an option-loaded car above the base floor isn't "over
   // MSRP", so it must not add leverage or a basis line.
-  if (msrp && quoted && analysis.msrpBasis !== "starting_at") {
+  if (msrp && quoted && analysis.msrpBasis === "exact") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
@@ -2069,6 +2069,17 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
         analysis.msrpSource = "manufacturer_site";
       }
     }
+  }
+
+  // Provenance for an MSRP that came from the LISTING itself. Until this label
+  // existed, a dealer's own sticker figure was rendered exactly like a verified
+  // manufacturer MSRP -- Advantage Ford stated $66,015 on a Mach-E Premium that
+  // Ford Canada advertises from $47,638, and the report turned that into
+  // "$5,023 UNDER MSRP", amplifying the dealer's discount claim for them
+  // (2026-08-11). An unverified number must never read as a verified one.
+  if (analysis.msrp && !analysis.msrpSource) {
+    analysis.msrpSource = "listing";
+    analysis.msrpBasis = "dealer_stated";
   }
 
   // Dealer-stated vs manufacturer MSRP — an inflated sticker is a real tactic
