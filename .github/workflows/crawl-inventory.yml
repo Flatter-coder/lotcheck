@@ -1,0 +1,47 @@
+# Alberta inventory crawl — our own VIN dataset, from dealers' own public feeds.
+#
+# THE CRON IS DELIBERATELY COMMENTED OUT. A per-buyer URL read (what production
+# does today, on a buyer's instruction, one page) and a standing nightly bulk
+# crawl are different activities, and the second is part of what is currently
+# with counsel — see legal-brief-url-listing-scraping.md and
+# legal-brief-ppr-amvic-access.md. Until that comes back, this runs only when a
+# human presses the button.
+#
+# To enable after sign-off: uncomment the schedule block, and add the
+# legal_rule + legal_control rows recording what cleared it.
+#
+# Cost: free. GitHub-hosted runner, a few hundred JSON fetches, no vendor.
+name: Crawl Alberta inventory
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Fetch feeds but write nothing"
+        type: boolean
+        default: true
+  # schedule:
+  #   - cron: "0 11 * * *"   # 5am Calgary — after dealers' overnight inventory sync
+  #   ENABLE ONLY AFTER LEGAL SIGN-OFF (see header)
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"      # --experimental-strip-types: the crawler imports validateVin from the edge functions' shared module
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Crawl
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            node --experimental-strip-types scripts/crawl-alberta-inventory.mjs
+          else
+            node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run
+          fi

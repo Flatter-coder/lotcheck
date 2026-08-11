@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "test:recalls": "node --experimental-strip-types supabase/functions/_shared/recalls.test.ts",
     "test:invariants": "node --experimental-strip-types supabase/functions/_shared/invariants.test.ts",
-    "check:copy": "node scripts/check-copy-compliance.mjs"
+    "check:copy": "node scripts/check-copy-compliance.mjs",
+    "crawl:dry": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run",
+    "crawl": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
