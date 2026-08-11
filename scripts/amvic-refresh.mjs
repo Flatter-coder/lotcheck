@@ -93,8 +93,14 @@ function statusBreakdown(rows) {
 }
 
 async function main() {
-  const rows = await fetchAll();
+  let rows = await fetchAll();
   if (rows.length < 1000) throw new Error(`Refusing to publish a suspiciously small snapshot (${rows.length} rows) — the live table keeps its previous data.`);
+
+  // A record with neither a legal nor a trade name can never be matched to a
+  // dealer, so it is noise -- drop it rather than store an unusable row.
+  const usable = rows.filter((f) => (f.name && String(f.name).trim()) || (f.tradeName && f.tradeName !== "N/A"));
+  if (usable.length !== rows.length) console.log(`Skipped ${rows.length - usable.length} records with no usable name.`);
+  rows = usable;
 
   const counts = statusBreakdown(rows);
   const issued = Object.entries(counts).filter(([k]) => /issued/i.test(k)).reduce((s, [, v]) => s + v, 0);

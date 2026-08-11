@@ -18,7 +18,7 @@
 
 create table if not exists amvic_licensees (
   id                  text primary key,          -- AMVIC/Thentia record id
-  name                text not null,             -- legal name
+  name                text,                      -- legal name (NULL in some records -- trade name only)
   trade_name          text,                      -- "N/A" is common in the source
   registration_number text,                      -- e.g. B2035585 — exact-match key when available
   facility_status     text,                      -- VERBATIM: "Issued" | "Expired - Required to Reapply" | ...
@@ -39,6 +39,10 @@ create table if not exists amvic_licensees (
   city_key            text,
   synced_at           timestamptz not null default now()
 );
+
+-- Some registry records carry only a trade name; an older revision of this
+-- table declared name NOT NULL and rejected them mid-load.
+alter table amvic_licensees alter column name drop not null;
 
 create index if not exists amvic_name_key_idx  on amvic_licensees (name_key);
 create index if not exists amvic_trade_key_idx on amvic_licensees (trade_key);
