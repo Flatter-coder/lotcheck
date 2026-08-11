@@ -48,9 +48,16 @@ const OVERPASS = [
 ];
 const QUERY = '[out:json][timeout:90];area["ISO3166-2"="CA-AB"]->.ab;nwr["shop"="car"](area.ab);out center tags;';
 const ROUNDS = 4;
-const CONCURRENCY = 4;
-const BATCH_PAUSE_MS = 500;
-const PROBE_TIMEOUT_MS = 12_000;
+// Every candidate is a DIFFERENT host, and we hit each one once or twice, so
+// the politeness that matters is per-host, not global — raising concurrency
+// doesn't lean on anyone harder. The first full run managed only ~5s/host at
+// 4-wide, which would blow the job timeout on a real candidate list.
+const CONCURRENCY = 10;
+const BATCH_PAUSE_MS = 250;
+// A dealer feed that takes 12s to answer is one we could never crawl nightly
+// anyway, so a slow host is a "no" for our purposes. Dead hosts dominated the
+// wall clock at the old timeout.
+const PROBE_TIMEOUT_MS = 5_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -131,6 +138,18 @@ async function tryConvertus(host) {
   return null;
 }
 
+// Shape written to --out, both mid-run and at the end. `probed` makes a partial
+// file self-describing: you can see it covered 300 of 800 rather than guessing
+// whether 2 hits means a thin province or a killed job.
+function snapshot(results) {
+  return {
+    generatedAt: new Date().toISOString().slice(0, 10),
+    probed: results.length,
+    sm360: results.filter((r) => r.platform === "sm360"),
+    convertus: results.filter((r) => r.platform === "convertus"),
+  };
+}
+
 async function probe(cand) {
   try {
     const sm = await trySM360(cand.host);
@@ -160,11 +179,22 @@ async function candidatesFromAmvic() {
   if (!url || !key) { console.error("--source amvic needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"); process.exit(1); }
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(url, key);
-  const { data, error } = await supabase
-    .from("amvic_licensees").select("name,trade_name,city,website,facility_status")
-    .not("website", "is", null);
-  if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
-  const all = data || [];
+  // MUST paginate. PostgREST caps a response at 1000 rows by default, and the
+  // first run of this hit that cap exactly — 21,866 licensees in the table,
+  // 1000 returned, treated as the whole province. An arbitrary 1/20th slice
+  // reported 0 SM360 dealers, which read like a real finding rather than a
+  // truncated query. A silent cap is worse than an error.
+  const all = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("amvic_licensees").select("name,trade_name,city,website,facility_status,facility_type")
+      .not("website", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
+    all.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
   const rows = all.filter((r) => /issued/i.test(r.facility_status || ""));
   const byStatus = new Map();
   for (const r of all) { const k = r.facility_status || "(none)"; byStatus.set(k, (byStatus.get(k) || 0) + 1); }
@@ -172,7 +202,15 @@ async function candidatesFromAmvic() {
   for (const [k, n] of [...byStatus.entries()].sort((a, b) => b[1] - a[1])) console.log(`   ${String(n).padStart(4)}  ${k}`);
   console.log(`Probing the ${rows.length} with an Issued licence.`);
   if (!rows.length) { console.error("No Issued licensees found — check facility_status values before assuming there are none."); process.exit(1); }
-  return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: data?.length ?? 0 };
+  // AMVIC licenses salespeople and body shops too, not just dealerships, so
+  // most of this list will never have an inventory feed. Print the type mix so
+  // a later run can filter to the types that matter instead of spending probe
+  // budget on autobody shops.
+  const byType = new Map();
+  for (const r of rows) { const k = r.facility_type || "(none)"; byType.set(k, (byType.get(k) || 0) + 1); }
+  console.log("Facility types among Issued licensees with a website:");
+  for (const [k, n] of [...byType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) console.log(`   ${String(n).padStart(4)}  ${k}`);
+  return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: all.length };
 }
 
 async function candidatesFromOsm() {
@@ -200,14 +238,22 @@ async function main() {
   console.log(`${candidates.length} distinct usable hosts (source: ${SOURCE}).`);
   if (LIMIT) { candidates = candidates.slice(0, LIMIT); console.log(`--limit ${LIMIT}: probing a sample.`); }
 
+  // Results are flushed to disk as we go. The first full run took 16 minutes for
+  // 198 hosts and the file was only written at the very end — a job timeout
+  // would have killed it with nothing to show and no way to tell how far it
+  // got. Partial results beat no results, always.
   const results = [];
+  const flush = () => { if (OUT) { try { writeFileSync(OUT, JSON.stringify(snapshot(results), null, 2)); } catch { /* keep probing */ } } };
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
     const batch = candidates.slice(i, i + CONCURRENCY);
     results.push(...await Promise.all(batch.map(probe)));
-    process.stdout.write(`\r  probed ${Math.min(i + CONCURRENCY, candidates.length)}/${candidates.length}`);
+    const done = Math.min(i + CONCURRENCY, candidates.length);
+    process.stdout.write(`\r  probed ${done}/${candidates.length}`);
+    if (done % 100 < CONCURRENCY) flush();
     if (i + CONCURRENCY < candidates.length) await sleep(BATCH_PAUSE_MS);
   }
   console.log("");
+  flush();
 
   const sm360 = results.filter((r) => r.platform === "sm360");
   const convertus = results.filter((r) => r.platform === "convertus");
@@ -223,7 +269,7 @@ async function main() {
   const estimated = sm360.reduce((n, r) => n + (r.pages || 1) * (r.page1 || 24), 0);
   console.log(`\nEstimated units reachable from SM360 dealers alone: ~${estimated.toLocaleString()}`);
 
-  if (OUT) { writeFileSync(OUT, JSON.stringify({ generatedAt: new Date().toISOString().slice(0, 10), sm360, convertus }, null, 2)); console.log(`\nSaved -> ${OUT}`); }
+  if (OUT) { flush(); console.log(`\nSaved -> ${OUT}`); }
 
   if (!WRITE) { console.log("\n(no --write: nothing added to dealer_source)"); return; }
 
