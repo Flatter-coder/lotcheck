@@ -274,6 +274,16 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;line-height:1.5;">The asking price is <b>all-in</b> (${escapeHtml(a.allInPricing.body)}), while a published MSRP normally <b>excludes freight &amp; PDI</b> (typically $2,000-$2,600). Part of the gap above is that freight - ask for freight and PDI as their own line.</div>` });
   }
 
+  // 5b0b -- used vehicles: price when new, or an honest reason there is none
+  if (a.msrpBasis === "original_when_new" && a.originalMsrp) {
+    deck.push({ label: "MSRP when new", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${money(a.originalMsrp.msrp)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">What this ${escapeHtml(String(a.originalMsrp.year || a.year || ""))} ${escapeHtml(a.model || "vehicle")} cost new. Context only - it is not a sticker to measure a used asking price against, so no over/under-MSRP claim is made.</div>` });
+  } else if (a.msrpUnavailable) {
+    deck.push({ label: "MSRP when new", tone: "muted", glow: false, body:
+      `<div style="font-size:12.5px;color:#33305A;line-height:1.5;">${escapeHtml(a.msrpUnavailable.note)}</div>` });
+  }
+
   // 5b1 -- dealer-stated MSRP + the manufacturer's published anchor
   if (a.msrpBasis === "dealer_stated" && Number(a.msrp) > 0) {
     const ref = a.msrpReference;

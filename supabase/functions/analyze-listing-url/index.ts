@@ -55,6 +55,7 @@ import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedSc
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
+import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -82,7 +83,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11f";
+const CACHE_VER = "2026-08-11g";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2064,12 +2065,36 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       if (catMsrp.year && catMsrp.year !== analysis.year) analysis.msrpYear = catMsrp.year; // adjacent-MY reference, surfaced honestly
       if (catMsrp.sourceUrl) analysis.msrpSourceUrl = catMsrp.sourceUrl; // provenance link for the report
       if (catMsrp.priceBasis) analysis.msrpPriceBasis = catMsrp.priceBasis;   // incl_freight | excl_freight
+      // A USED car's catalog match is the price when it was NEW. That is useful
+      // context ("this cost $X new") but it is NOT a sticker to measure today's
+      // asking price against -- a 2014 truck is not "$35,000 under MSRP". Mark
+      // it so every over/under claim stays switched off.
+      const isUsed = String(analysis.vehicleCondition || "").toLowerCase() === "used"
+        || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
+      if (isUsed) {
+        analysis.originalMsrp = { msrp: catMsrp.msrp, trim: catMsrp.trim || null, year: catMsrp.year || analysis.year, sourceUrl: catMsrp.sourceUrl || null };
+        analysis.msrpBasis = "original_when_new";
+      }
     } else {
       const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
       if (mfrMsrp) {
         analysis.msrp = mfrMsrp;
         analysis.msrpSource = "manufacturer_site";
       }
+    }
+  }
+
+  // Used vehicles with no catalog row for their model year: the honest answer
+  // is that we don't hold original MSRPs that far back, plus the ask that gets
+  // the buyer the real number. Never leave the point blank (report-never-empty).
+  {
+    const used = String(analysis.vehicleCondition || "").toLowerCase() === "used"
+      || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
+    if (used && !(Number(analysis.msrp) > 0)) {
+      analysis.msrpUnavailable = {
+        reason: "used_original_msrp_not_held",
+        note: `We don't hold the original ${analysis.year || ""} MSRP for this model, so no new-price comparison is made. Ask the seller for the original window sticker or build sheet — it lists the MSRP and the options actually fitted.`,
+      };
     }
   }
 
@@ -2704,6 +2729,18 @@ Deno.serve(async (req: Request) => {
     // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
     // the SM360 feed already provided it, or the URL isn't that shape).
     await captureConvertusDaysOnLot(url, analysis);
+
+    // Advertised-APR backstop. The dealer's own rate was missing from 4 of 10
+    // reports in the benchmark even where the page printed it, because only the
+    // SM360 feed and the LLM pass supplied it. Deterministic, finance-context
+    // only, and it never overwrites a rate we already have.
+    if (!(Number(analysis.financing?.rate) > 0) && typeof pageContent === "string") {
+      const hit = extractAdvertisedApr(pageContent);
+      if (hit) {
+        analysis.financing = { ...(analysis.financing || {}), rate: hit.apr, source: "page_text" };
+        console.log(`Advertised APR read from page text: ${hit.apr}%`);
+      }
+    }
 
     // S36: flag embedded trade-in instant-offer widgets (checks the scraped
     // text first; falls back to one direct fetch), then refresh the script.
