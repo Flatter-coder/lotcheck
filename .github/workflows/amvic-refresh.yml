@@ -1,0 +1,22 @@
+# Weekly snapshot of AMVIC's public licensee registry (check #11).
+# Uses the SUPABASE_ACCESS_TOKEN secret the deploy workflow already has —
+# no new credentials. Polite: one paginated pass, 400ms between pages, weekly.
+name: AMVIC registry refresh
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"      # Mondays 09:17 UTC (~03:17 MT)
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Pull registry and publish snapshot
+        run: node scripts/amvic-refresh.mjs
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

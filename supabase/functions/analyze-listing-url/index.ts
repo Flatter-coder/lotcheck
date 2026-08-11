@@ -53,6 +53,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
+import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -61,6 +62,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
+import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -79,7 +81,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-10d";
+const CACHE_VER = "2026-08-10e";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -423,42 +425,9 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
   }
 }
 
-// VIN pattern validity check -- a real, deterministic verification with no
-// external data and zero false-positive risk. A North American VIN carries
-// its own ISO 3779 check digit in position 9, computed from the other 16
-// characters; a valid VIN's check digit always reconciles, so a mismatch
-// means a typo/transposition on the listing (or a fabricated VIN). Also
-// enforces the format rules (17 chars, and I/O/Q are never used). Returns a
-// structured result the report can surface as "VIN pattern valid".
-function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: string; reason?: string } {
-  if (typeof vinRaw !== "string" || !vinRaw.trim()) return { present: false };
-  const vin = vinRaw.trim().toUpperCase().replace(/\s+/g, "");
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
-    const reason = vin.length !== 17
-      ? `A VIN must be 17 characters; this one is ${vin.length}.`
-      : `This VIN contains a letter (I, O, or Q) that VINs never use -- likely a mis-read.`;
-    return { present: true, valid: false, vin, reason };
-  }
-  const translit: Record<string, number> = {
-    A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
-    "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
-  };
-  const weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
-  let sum = 0;
-  for (let i = 0; i < 17; i++) sum += translit[vin[i]] * weights[i];
-  const rem = sum % 11;
-  const expected = rem === 10 ? "X" : String(rem);
-  const actual = vin[8];
-  const valid = actual === expected;
-  return {
-    present: true,
-    valid,
-    vin,
-    reason: valid
-      ? "VIN check digit validates -- the number is internally consistent."
-      : `VIN check digit doesn't validate (position 9 is "${actual}", should be "${expected}") -- likely a typo or transposed character on the listing. Worth confirming the exact VIN with the dealer.`,
-  };
-}
+// VIN pattern validity check now lives in _shared/invariants.ts, alongside the
+// invariant that keeps analysis.vinCheck in sync with analysis.vin. It used to
+// be a byte-identical copy in this file AND in analyze-quote.
 
 // Open-recall lookup against Transport Canada's live Vehicle Recalls
 // Database (VRDB) -- the real federal registry, queried at report time,
@@ -1572,6 +1541,53 @@ function captureSm360DaysOnLot(v: any, analysis: any): void {
 // Deterministic marker match on page text/HTML: AccuTrade (Cox/Manheim),
 // TradePending, KBB ICO, CBB, or a generic "value your trade" tool. Purely
 // factual ("this listing embeds X") so the report's coach copy is dispute-proof.
+// Check #11 -- AMVIC dealer-licence verification (Alberta). Reads our weekly
+// snapshot of the regulator's public licensee registry (amvic_licensees) and
+// attaches the VERBATIM status when -- and only when -- the match is confident.
+//
+// In a live sample of the registry only ~54% of listings were "Issued": the
+// value here is catching the expired/suspended/cancelled ones whose websites
+// are still up. Fail-safe in BOTH directions: a lookup miss is never an
+// all-clear, and a non-match is never an accusation (it renders as "couldn't
+// confirm -- verify at AMVIC yourself").
+async function checkDealerLicence(analysis: any): Promise<void> {
+  try {
+    if (!analysis || analysis.dealerLicence) return;
+    const name = String(analysis.dealerName || "").trim();
+    if (!name) return;
+    // CA-AB provider (locale-abstraction-rule: other provinces plug their own
+    // registry in behind this same dealerLicence field -- OMVIC, VSA, etc.).
+    const city = String(analysis.dealerCity || "");
+
+    // Candidate fetch: the most distinctive token of the dealer name, so a
+    // single indexed query returns a small set for the matcher to judge.
+    const toks = amvicNorm(name).split(" ").filter((t: string) => t.length > 2);
+    if (!toks.length) return;
+    const probe = toks.sort((a: string, b: string) => b.length - a.length)[0];
+    const { data, error } = await supabase
+      .from("amvic_licensees")
+      .select("name, trade_name, city, facility_status, registration_number, expiry_date, website")
+      .or(`name_key.ilike.%${probe}%,trade_key.ilike.%${probe}%`)
+      .limit(60);
+    if (error) { console.warn("AMVIC lookup failed:", error.message); return; }
+    if (!data || !data.length) return;
+
+    const hit = matchLicensee(data, { dealerName: name, dealerCity: city, website: analysis.sourceUrl || "" });
+    if (!hit) { console.log(`AMVIC: no confident match for "${name}" -- reporting unverified.`); return; }
+    analysis.dealerLicence = {
+      status: hit.row.facility_status || null,      // regulator's own wording, verbatim
+      state: classifyStatus(hit.row.facility_status),
+      legalName: hit.row.name || null,
+      licenceNumber: hit.row.registration_number || null,
+      expiryDate: hit.row.expiry_date || null,
+      confidence: hit.confidence,
+      source: "AMVIC public registry",
+      checkedAt: new Date().toISOString(),
+    };
+    console.log(`AMVIC: ${name} -> ${hit.row.facility_status} (${hit.row.registration_number || "no reg#"}, conf ${hit.confidence}).`);
+  } catch (e) { console.warn("checkDealerLicence threw (ignored):", (e as Error)?.message); }
+}
+
 async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null): Promise<void> {
   try {
     if (!analysis || analysis.tradeInWidget) return;
@@ -2105,12 +2121,10 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   // read) is tried first; only on a miss does the ~30s manufacturer scrape run.
   // The request deadline is threaded through so this expensive step self-skips
   // when there isn't enough budget left to finish before the platform ceiling.
-  // INVARIANT (class fix, Okotoks false-claim family): if we captured an
-  // asking price, the page by definition advertised one -- a "contact for
-  // price" claim can never stand next to it, whichever path produced either.
-  if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") {
-    analysis.priceDisclosure = "advertised";
-  }
+  // ASSERT (mid-pipeline). No render-check context is passed, so the price-
+  // gating accusation gate deliberately stays dormant here -- a later Scrapfly
+  // rescue may still recover the price. See invariants.ts.
+  assertInvariants(analysis);
 
   if (!analysis.msrp && analysis.year && analysis.make && analysis.model) {
     // VIN -> drivetrain (free, NHTSA): the strongest trim-disambiguation signal.
@@ -2177,6 +2191,7 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
   { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; } // S25 (all-in label + safeguard)
   { const dc = assessDisclaimer(analysis); if (dc) analysis.disclaimerCheck = dc; }             // S35 (fine print = our evidence)
+  await checkDealerLicence(analysis);                                                          // #11 AMVIC licence (Alberta)
   analysis.counterScript = buildCounterScript(analysis);                                       // counter-script (last)
 }
 
@@ -2487,13 +2502,11 @@ Deno.serve(async (req: Request) => {
             });
             jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
             if (rescued) mergeRescued(jsonLdFallback, rescued);
-            if (Number(jsonLdFallback.quotedPrice) > 0 && jsonLdFallback.priceDisclosure === "contact_for_price") jsonLdFallback.priceDisclosure = "advertised";
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
         }
-        // Same accusation gate as the main path: unconfirmed -> our miss, not their tactic.
-        if (jsonLdFallback.priceDisclosure === "contact_for_price" && !(Number(jsonLdFallback.quotedPrice) > 0) && !jlRenderConfirmedGated) {
-          jsonLdFallback.priceDisclosure = "not_shown";
-        }
+        // ASSERT (render check done). Same gates as the main path, from the
+        // same definitions -- this branch used to carry its own copies.
+        assertInvariants(jsonLdFallback, { priceRenderChecked: true, renderConfirmed: jlRenderConfirmedGated });
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
         await finalizeServerSide(jsonLdFallback);
@@ -2802,21 +2815,24 @@ Deno.serve(async (req: Request) => {
             analysis.msrpInflation = { dealerStated: rescuedMsrp, manufacturer: Number(analysis.msrp), overBy: Math.round(rescuedMsrp - Number(analysis.msrp)) };
             analysis.counterScript = buildCounterScript(analysis);
           }
-          if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
           gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
           console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
         }
       } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
     }
 
-    // ACCUSATION GATE (class fix): "contact for price" may stand ONLY when the
-    // rendered page was actually inspected and confirmed price-less. A garbled
-    // text scrape and a genuinely hidden price are indistinguishable without
-    // that look -- and we never accuse on ambiguity. Unconfirmed -> "not_shown".
-    if (analysis.priceDisclosure === "contact_for_price" && !(Number(analysis.quotedPrice) > 0) && !renderConfirmedGated) {
-      console.log("Downgrading unconfirmed contact_for_price claim to not_shown.");
-      analysis.priceDisclosure = "not_shown";
-      analysis.counterScript = buildCounterScript(analysis);
+    // ASSERT (render check done). The accusation gate lives in invariants.ts
+    // now: "contact for price" may stand ONLY when the rendered page was
+    // actually inspected and confirmed price-less, because a garbled text
+    // scrape and a genuinely hidden price are indistinguishable without that
+    // look -- and we never accuse on ambiguity.
+    {
+      const inv = assertInvariants(analysis, { priceRenderChecked: true, renderConfirmed: renderConfirmedGated });
+      // A downgraded claim invalidates the price-gating move in the script that
+      // enrichAnalysis already built, so rebuild it.
+      if (inv.repaired.includes("PRICE_NOT_ACCUSED_UNCONFIRMED")) {
+        analysis.counterScript = buildCounterScript(analysis);
+      }
     }
 
     if (!gotPricing) {

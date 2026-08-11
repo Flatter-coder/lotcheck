@@ -118,6 +118,13 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (tiw && tiw.detected) {
     moves.push({ topic: "Trade-in", say: `If I trade in: we settle this vehicle's price first, then I want your trade offer in writing on its own line — not one blended payment. ${tiw.vendor ? `Your ${tiw.vendor} tool quotes` : "Those instant-offer tools quote"} the wholesale side of the market, so I'll be comparing against retail listings for my car.` });
   }
+  // #11 -- AMVIC licence status. Only fires on a confident registry match and
+  // quotes the regulator's own wording; a valid licence produces no move (it is
+  // reassurance, not leverage). Never an accusation -- the buyer asks.
+  const lic = analysis?.dealerLicence;
+  if (lic && lic.status && (lic.state === "expired" || lic.state === "closed" || lic.state === "action")) {
+    moves.push({ topic: "Dealer licence", say: `AMVIC's public registry currently shows this business${lic.legalName ? ` (${lic.legalName})` : ""} as "${lic.status}"${lic.expiryDate ? `, expiry ${lic.expiryDate}` : ""}. Before any deposit, please confirm your current AMVIC licence number and status in writing.` });
+  }
   const df = analysis?.docFeeCheck;
   if (df) {
     if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.` });

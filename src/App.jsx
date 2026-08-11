@@ -5627,6 +5627,7 @@ function encodeReport(a){
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     tw:a.tradeInWidget&&a.tradeInWidget.detected?{v:a.tradeInWidget.vendor||null}:null,
+    lic:a.dealerLicence&&a.dealerLicence.status?{s:a.dealerLicence.status,st:a.dealerLicence.state,n:a.dealerLicence.legalName||null,no:a.dealerLicence.licenceNumber||null,e:a.dealerLicence.expiryDate||null}:null,
     sh:a.listingShotSha256||null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
@@ -5653,6 +5654,7 @@ function decodeReport(s){
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
       tradeInWidget:c.tw?{detected:true,vendor:c.tw.v||null}:null,
+      dealerLicence:c.lic?{status:c.lic.s,state:c.lic.st,legalName:c.lic.n||null,licenceNumber:c.lic.no||null,expiryDate:c.lic.e||null,source:"AMVIC public registry"}:null,
       listingShotSha256:c.sh||null,__shared:true};
   }catch{ return null; }
 }
@@ -6006,9 +6008,35 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : [])];
+  // #11 — AMVIC dealer licence. Only rendered on a confident registry match;
+  // the status is the regulator's own wording, verbatim. A valid licence is
+  // quiet reassurance; expired/closed/suspended is a real flag with the ask.
+  let licItem = null;
+  if (a.dealerLicence && a.dealerLicence.status) {
+    const L = a.dealerLicence, st = L.state;
+    const good = st === "valid";
+    const label = good ? "Dealer licence · AMVIC verified" : "⚠ Dealer licence · AMVIC";
+    licItem = { key: "licence", title: label, tone: good ? "pass" : "flag", glow: !good, v: good ? "Valid" : (L.status || "Check"), body: (
+      <div>
+        <div style={{ fontSize: 22, fontWeight: 1000, color: good ? TEAL : ROSE, lineHeight: 1.15 }}>{L.status}</div>
+        <div style={{ fontSize: 12, color: MUT2, marginTop: 6, lineHeight: 1.55 }}>
+          {L.legalName ? <>Registry record: <b style={{ color: "#e2e8f0" }}>{L.legalName}</b>. </> : null}
+          {L.licenceNumber ? <>Licence {L.licenceNumber}. </> : null}
+          {L.expiryDate ? <>Expiry {L.expiryDate}. </> : null}
+          Source: AMVIC's public licensee registry.
+        </div>
+        {!good && <div style={{ fontSize: 12.5, color: "#e2e8f0", marginTop: 8, lineHeight: 1.55 }}>Ask them to confirm their current AMVIC licence number and status <b>in writing before any deposit</b>.</div>}
+        <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Check it yourself on AMVIC's registry ↗</a>
+        <ExplainBox txt={good
+          ? `AMVIC is Alberta's regulator — every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads "${L.status}", which is what you want to see. Nothing to do.`
+          : `AMVIC is Alberta's regulator, and its public registry currently lists this business as "${L.status}". That does not always mean they can't sell you a car — records lag and businesses reapply — but it is the regulator's own wording, and it is worth clearing up before money changes hands. Ask for their current licence number in writing, then check it yourself on AMVIC's site.`} />
+      </div>
+    )};
+  }
+
+  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(licItem ? [licItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  const items = [verdictItem, ...pointItems, ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -6072,7 +6100,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         } : null;
         return (<div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 12px" }}>{tabs.map(tabBtn)}</div>
-          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{pointItems.map((c) => cell(c))}</div>}
+          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{licItem ? cell(licItem) : null}{pointItems.map((c) => cell(c))}</div>}
           {btab === "lev" && (levCards.length
             ? <div style={grid}>{levCards.map((c) => cell(c, levCards.length === 1))}</div>
             : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13, lineHeight: 1.6 }}>No sitting-time or trade-in leverage surfaced on this listing — the price case on THE DEAL tab is your leverage.</div>)}
@@ -6165,7 +6193,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={cardBox({ tone: "muted" })}>
             <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
-              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
+              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(licItem ? [licItem] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
             </div>
           </div>
           {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
@@ -7846,6 +7874,7 @@ function QuoteCheckPage(){
             if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
             if(analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0) tiles.push({label:"Days on lot",value:Number(analysis.daysOnLot.days).toLocaleString(),sub:analysis.daysOnLot.since?`first seen ${analysis.daysOnLot.since}`:"dealer inventory data",flag:Number(analysis.daysOnLot.days)>=90});
             if(analysis.tradeInWidget&&analysis.tradeInWidget.detected) tiles.push({label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",sub:"wholesale-anchored — keep it a separate written line",flag:false});
+            if(analysis.dealerLicence&&analysis.dealerLicence.status) tiles.push({label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,sub:analysis.dealerLicence.licenceNumber?`licence ${analysis.dealerLicence.licenceNumber}`:"AMVIC public registry",flag:analysis.dealerLicence.state!=="valid"});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
@@ -8081,6 +8110,22 @@ function QuoteCheckPage(){
                       This is how long this exact car has sat unsold — counted by the dealer's own inventory system, not our guess. Dealers pay interest on unsold stock every week, so the longer it sits, the more motivated they are.{" "}
                       {hot?"At this age, you're doing them a favour by buying it — negotiate like it.":warm?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"This one is fresh, so sitting-time won't move the price much yet."}
                     </div>
+                  </div>
+                );
+              })()}
+
+              {/* #11 — AMVIC dealer licence, verbatim from the regulator's registry. */}
+              {analysis.dealerLicence&&analysis.dealerLicence.status&&(()=>{
+                const L=analysis.dealerLicence, good=L.state==="valid";
+                return (
+                  <div style={{...cardStyle,...(good?{}:{background:C.coralBg}),border:`1px solid ${(good?C.teal:C.coral)}55`}}>
+                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Dealer licence · AMVIC public registry</div>
+                    <div style={{fontSize:20,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.2}}>{L.status}</div>
+                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
+                      {L.legalName?`Registry record: ${L.legalName}. `:""}{L.licenceNumber?`Licence ${L.licenceNumber}. `:""}{L.expiryDate?`Expiry ${L.expiryDate}. `:""}
+                      {good?"That's the status you want to see.":"Ask them to confirm their current AMVIC licence number and status in writing before any deposit."}
+                    </div>
+                    <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noopener noreferrer" style={{fontSize:11.5,color:C.tealInk,fontWeight:800,marginTop:8,display:"inline-block"}}>Check it yourself on AMVIC's registry ↗</a>
                   </div>
                 );
               })()}

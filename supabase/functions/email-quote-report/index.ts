@@ -268,6 +268,15 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
   }
 
+  // 5b2 -- AMVIC dealer licence (#11): the regulator's own status, verbatim.
+  if (a.dealerLicence && a.dealerLicence.status) {
+    const L = a.dealerLicence, good = L.state === "valid";
+    deck.push({ label: "Dealer licence - AMVIC", tone: good ? "pass" : "flag", glow: !good, body:
+      `<div style="font-size:18px;font-weight:900;color:${good ? "#17756B" : "#A63C25"};">${escapeHtml(L.status)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${L.legalName ? escapeHtml(L.legalName) + " &middot; " : ""}${L.licenceNumber ? "Licence " + escapeHtml(L.licenceNumber) + " &middot; " : ""}AMVIC public registry</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${good ? "AMVIC is Alberta's regulator and its registry currently shows this business as licensed - that's what you want to see." : "AMVIC's registry currently shows this status. Ask the dealer to confirm their current licence number and status in writing before any deposit, and check it yourself at amvic.org."}</div>` });
+  }
+
   // 5c -- Trade-in instant-offer widget (S36): name the mechanism, coach the split
   if (a.tradeInWidget && a.tradeInWidget.detected) {
     const tv = a.tradeInWidget.vendor ? escapeHtml(a.tradeInWidget.vendor) : "";
@@ -657,6 +666,21 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
       : d >= 31
         ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. A month-plus of sitting is real carrying cost - reasonable grounds to ask for a better price."
         : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. This one is fresh, so sitting-time won't move the price much yet.",
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
+  if (a.dealerLicence && a.dealerLicence.status) {
+    const L = a.dealerLicence, good = L.state === "valid";
+    need(70);
+    kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY");
+    T(String(L.status), { size: 14, font: serifB, color: good ? INK : CORAL }); y -= 19;
+    para(`${L.legalName ? L.legalName + " - " : ""}${L.licenceNumber ? "licence " + L.licenceNumber + " - " : ""}${L.expiryDate ? "expiry " + L.expiryDate + " - " : ""}source: AMVIC public licensee registry.`, { size: 9, color: SOFT, lead: 4 });
+    advance(2);
+    para(good
+      ? "AMVIC is Alberta's regulator; every business selling vehicles in the province must hold a licence. This dealer's registry entry currently reads as licensed."
+      : "AMVIC's registry currently shows this status for the matched business. Records can lag and businesses do reapply, so this is not a verdict - but ask for the current licence number and status in writing before any deposit, and verify it yourself on AMVIC's public search.",
       { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }

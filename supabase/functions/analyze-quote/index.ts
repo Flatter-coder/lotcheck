@@ -56,6 +56,7 @@ import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
+import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -491,6 +492,13 @@ Deno.serve(async (req: Request) => {
     // Counter-script — aggregate every safeguard's "say this" (runs LAST).
     analysis.counterScript = buildCounterScript(analysis);
 
+    // ASSERT — deterministic gates, immediately before signing. This path had
+    // NO invariant coverage at all until now: the checks existed only as inline
+    // `if` blocks on the listing path, so an uploaded quote never got them.
+    // No render check happens here (there's no page to render), so the
+    // price-gating accusation gate stays out of scope. See invariants.ts.
+    assertInvariants(analysis);
+
     // Server-authoritative identity: stamps issuedAt from the trusted server
     // clock (so a device-clock change can't alter the date), computes the
     // report ID + verify payload, and SIGNS them (ECDSA P-256) when the signing
@@ -755,34 +763,9 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
 // uploaded quote gets the same 10-point treatment as a pasted URL. Each is
 // self-contained and unit-tested on the listing side. ──────────────────────
 
-// VIN pattern validity (ISO 3779 check digit + format rules). Deterministic.
-function validateVin(vinRaw: any): { present: boolean; valid?: boolean; vin?: string; reason?: string } {
-  if (typeof vinRaw !== "string" || !vinRaw.trim()) return { present: false };
-  const vin = vinRaw.trim().toUpperCase().replace(/\s+/g, "");
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
-    const reason = vin.length !== 17
-      ? `A VIN must be 17 characters; this one is ${vin.length}.`
-      : `This VIN contains a letter (I, O, or Q) that VINs never use -- likely a mis-read.`;
-    return { present: true, valid: false, vin, reason };
-  }
-  const translit: Record<string, number> = {
-    A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9,
-    "0":0,"1":1,"2":2,"3":3,"4":4,"5":5,"6":6,"7":7,"8":8,"9":9,
-  };
-  const weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
-  let sum = 0;
-  for (let i = 0; i < 17; i++) sum += translit[vin[i]] * weights[i];
-  const rem = sum % 11;
-  const expected = rem === 10 ? "X" : String(rem);
-  const actual = vin[8];
-  const valid = actual === expected;
-  return {
-    present: true, valid, vin,
-    reason: valid
-      ? "VIN check digit validates -- the number is internally consistent."
-      : `VIN check digit doesn't validate (position 9 is "${actual}", should be "${expected}") -- likely a typo or transposed character. Worth confirming the exact VIN with the dealer.`,
-  };
-}
+// VIN pattern validity (ISO 3779 check digit + format rules) now lives in
+// _shared/invariants.ts. It used to be a byte-identical copy in this file AND
+// in analyze-listing-url, so a correction to one silently missed the other.
 
 // HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
 // trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
