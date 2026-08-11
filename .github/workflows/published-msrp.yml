@@ -1,0 +1,41 @@
+# Weekly capture of manufacturers' OWN published "Starting at" prices.
+#
+# The build-&-price APIs return figures that are not the advertised sticker
+# (Toyota is $653.08 under it and ends in .92; GM comes back on half-dollars),
+# and those corrupted ~17% of the catalog on 2026-08-11. This job reads the
+# price the manufacturer prints on its own page and stores the page URL with
+# it, so every figure in a report is one the buyer can open and check.
+#
+# Needs the SCRAPFLY_API_KEY repo secret (same key as the edge functions use).
+name: Published MSRP capture
+
+on:
+  schedule:
+    - cron: "41 8 * * 2"     # Tuesdays, after the Monday catalog refresh
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/test-published-price.mjs
+      - name: Capture published prices
+        run: node scripts/scrape-published-msrp.mjs
+        env:
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Invalidate cached reports
+        if: success()
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"delete from listing_analysis_cache;"}'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

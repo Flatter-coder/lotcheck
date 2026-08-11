@@ -43,10 +43,28 @@ function gateMsrpRows(rows, make) {
   return kept;
 }
 
-async function replaceRows(table, rows, make, { fatal = true } = {}) {
+async function replaceRows(table, rows, make, { fatal = true, upsert = false } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
+  // An empty scrape must NEVER wipe good data. Delete-then-insert with zero
+  // rows silently emptied a table whenever a source went down or a caller
+  // passed only one of the three row sets.
+  if (!rows.length) { console.log(`  ${table} (${make}): nothing scraped — existing rows left untouched.`); return; }
   try {
+    // Upsert mode: published-price rows are keyed and re-captured weekly, so
+    // they merge in place rather than delete-then-insert.
+    if (upsert) {
+      for (let i = 0; i < rows.length; i += 500) {
+        const ins = await fetch(`${url}/rest/v1/${table}?on_conflict=year,make,model,trim`, {
+          method: "POST",
+          headers: { ...headers, Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(rows.slice(i, i + 500)),
+        });
+        if (!ins.ok) throw new Error(`UPSERT ${table} -> HTTP ${ins.status}: ${await ins.text()}`);
+      }
+      console.log(`  ${table} (${make}): upserted ${rows.length} published rows.`);
+      return;
+    }
     // Match the make case-INSENSITIVELY: a scraper that changes its MAKE
     // constant casing (Mini -> MINI) otherwise orphans the entire old lineup,
     // which then lives forever as duplicate rows (observed 2026-08-11).
@@ -104,7 +122,7 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
   // CATALOG_RATES_ONLY=1 (daily job) or per-scraper via opts.ratesOnly (e.g. a
   // dealer-feed rate source layered on top of another make's MSRP source).
   const ratesOnly = opts.ratesOnly || process.env.CATALOG_RATES_ONLY === "1";
-  if (!ratesOnly) await replaceRows("msrp_catalog", msrpRows, make);
+  if (!ratesOnly) await replaceRows("msrp_catalog", msrpRows, make, { upsert: !!opts.upsert });
   else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
   await replaceRows("finance_rate_catalog", financeRows, make);
   await replaceRows("lease_rate_catalog", leaseRows, make, { fatal: false });
