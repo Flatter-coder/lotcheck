@@ -187,12 +187,15 @@ async function replaceRows(table, rows, makeName, { fatal = true } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   try {
+    // Match the make case-INSENSITIVELY: a scraper that changes its MAKE
+    // constant casing (Mini -> MINI) otherwise orphans the entire old lineup,
+    // which then lives forever as duplicate rows (observed 2026-08-11).
     // Provenance wins: rows carrying a source_url were verified by hand against
     // the manufacturer's own published page. A scraper refresh must never wipe
     // them (it did, on 2026-08-11, replacing toyota.ca-sourced Land Cruiser
     // MSRPs with calculated prices under internal trim codes).
     const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
-    const del = await fetch(`${url}/rest/v1/${table}?make=eq.${encodeURIComponent(makeName)}${guard}`, { method: "DELETE", headers });
+    const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(makeName)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
     for (let i = 0; i < rows.length; i += 500) {
       const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });

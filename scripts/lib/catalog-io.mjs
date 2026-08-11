@@ -23,11 +23,38 @@ export function inferFuelFromName(name) {
   return null;
 }
 
+// Quality gate shared by EVERY make (the Toyota/Lexus stack learned this the
+// hard way on 2026-08-11: it stored `vehicleStartPrice`, a calculated
+// fee-inclusive figure, as if it were the published MSRP -- every value ended
+// in .92 -- and ~17% of the catalog became fiction). A published Canadian MSRP
+// is a whole-dollar figure, so a fractional value proves the source handed us a
+// computed price. Reject rather than store; a missing row is recoverable, a
+// wrong MSRP is a wrong claim in a buyer's report.
+function gateMsrpRows(rows, make) {
+  const kept = [], rejected = [];
+  for (const r of rows) {
+    const v = Number(r?.msrp);
+    if (!Number.isFinite(v) || v <= 0 || !Number.isInteger(v)) rejected.push(r);
+    else kept.push(r);
+  }
+  if (rejected.length) {
+    console.warn(`  quality gate: dropped ${rejected.length}/${rows.length} ${make} MSRP rows with non-integer prices (calculated, not published) -- e.g. ${rejected.slice(0, 3).map(r => `${r.model} ${r.trim ?? ""} ${r.msrp}`).join("; ")}`);
+  }
+  return kept;
+}
+
 async function replaceRows(table, rows, make, { fatal = true } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   try {
-    const del = await fetch(`${url}/rest/v1/${table}?make=eq.${encodeURIComponent(make)}`, { method: "DELETE", headers });
+    // Match the make case-INSENSITIVELY: a scraper that changes its MAKE
+    // constant casing (Mini -> MINI) otherwise orphans the entire old lineup,
+    // which then lives forever as duplicate rows (observed 2026-08-11).
+    // Provenance wins: rows carrying a source_url were verified by hand against
+    // the manufacturer's own published page (Land Cruiser, Mach-E). A scraper
+    // refresh must never wipe them -- exactly what happened on 2026-08-11.
+    const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
+    const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
     for (let i = 0; i < rows.length; i += 500) {
       const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
@@ -56,6 +83,7 @@ export function dedupeBy(rows, keyFn, lowerField) {
 }
 
 export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }, opts = {}) {
+  msrpRows = gateMsrpRows(msrpRows, make);
   msrpRows = dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp");
   financeRows = dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr");
   if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {

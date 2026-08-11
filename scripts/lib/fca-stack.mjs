@@ -115,7 +115,10 @@ async function replaceRows(table, rows, make, { fatal = true } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   try {
-    const del = await fetch(`${url}/rest/v1/${table}?make=eq.${encodeURIComponent(make)}`, { method: "DELETE", headers });
+    // Verified rows (source_url) are hand-checked against the manufacturer's
+    // own page and must survive a scraper refresh -- see catalog-io.mjs.
+    const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
+    const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
     for (let i = 0; i < rows.length; i += 500) {
       const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });

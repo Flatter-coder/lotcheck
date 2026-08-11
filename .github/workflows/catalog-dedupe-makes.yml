@@ -1,0 +1,23 @@
+# One-shot: drop the orphaned "Mini" lineup left behind when the scraper's MAKE
+# constant changed casing to "MINI". The delete-then-insert refresh matched the
+# make exactly, so the old casing could never be cleaned up and both lineups
+# were being returned as lookup candidates. The writers now match
+# case-insensitively, so this can't recur.
+name: Catalog dedupe makes (one-shot)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drop orphaned lower-case Mini rows
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"delete from msrp_catalog where make = '"'"'Mini'"'"' and source_url is null; delete from listing_analysis_cache; select make, count(*) from msrp_catalog where make ilike '"'"'mini'"'"' group by make;"}'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
