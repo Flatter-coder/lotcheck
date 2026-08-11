@@ -24,8 +24,34 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
  *   2. a direct Scrapfly call, when SCRAPFLY_API_KEY happens to be in the
  *      environment (local debugging).
  */
+// The service-role key stored in CI can go stale when the project rotates its
+// keys (ours did: CI's copy dated 2026-07-01 no longer matched what the edge
+// function read, and every call came back forbidden). Ask the Management API
+// for the CURRENT key instead, using the access token CI already holds -- so a
+// rotation fixes itself instead of failing a week later.
+let cachedKey = null;
+async function currentServiceKey() {
+  if (cachedKey) return cachedKey;
+  const token = process.env.SUPABASE_ACCESS_TOKEN;
+  const ref = (process.env.SUPABASE_URL || "").match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
+  if (token && ref) {
+    try {
+      const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/api-keys`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const keys = await res.json();
+        const hit = (Array.isArray(keys) ? keys : []).find((k) => /service_role|secret/i.test(k?.name || k?.type || ""));
+        if (hit?.api_key) { cachedKey = hit.api_key; return cachedKey; }
+      }
+    } catch { /* fall back below */ }
+  }
+  cachedKey = process.env.SUPABASE_SERVICE_ROLE_KEY || null;
+  return cachedKey;
+}
+
 export async function renderPage(url, { key = process.env.SCRAPFLY_API_KEY, budgetMs = 60_000 } = {}) {
-  const sbUrl = process.env.SUPABASE_URL, sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const sbUrl = process.env.SUPABASE_URL, sbKey = await currentServiceKey();
   if (!key && sbUrl && sbKey) {
     const res = await fetch(`${sbUrl.replace(/\/$/, "")}/functions/v1/render-page`, {
       method: "POST",

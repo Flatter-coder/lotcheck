@@ -29,6 +29,9 @@ jobs:
           SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Lets the job resolve the CURRENT service key at run time, so a key
+          # rotation doesn't silently break this a week later.
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       - name: Invalidate cached reports
         if: success()
         run: |
