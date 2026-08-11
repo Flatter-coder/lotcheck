@@ -47,7 +47,11 @@ async function main() {
         const fin = await fetchFinance(year, salesCode, finCache);
         await sleep(90);
         const freight = fin?.freight || 0;
-        const msrp = advPrice > 0 ? advPrice - freight : 0; // strip freight/PDI to get MSRP
+        // VW publishes an advertised price that INCLUDES freight/PDI; subtracting
+        // it yields a conventional MSRP. That makes these rows explicitly
+        // excl_freight (stamped at write time), so a report comparing them to an
+        // all-in advertised price can say what the difference contains.
+        const msrp = advPrice > 0 ? advPrice - freight : 0;
         const trim = (t.trimline || "").trim() || null;
         if (msrp > 0) msrpRows.push({ year, make: MAKE, model, trim, msrp, fuel_type: inferFuelFromName(`${model} ${trim || ""}`) || (/\bid\.?\d?\b|buzz/i.test(model) ? "BEV" : null), fetched_at: new Date().toISOString() });
         // rate ladders (model-level; VW rates are set per sales_code but stored per model)
@@ -65,6 +69,6 @@ async function main() {
     }
   }
   console.log(`[${MAKE}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows });
+  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasis: "excl_freight" });
 }
 main().catch(e => { console.error(e); process.exit(1); });

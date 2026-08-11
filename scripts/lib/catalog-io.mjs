@@ -84,6 +84,11 @@ export function dedupeBy(rows, keyFn, lowerField) {
 
 export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }, opts = {}) {
   msrpRows = gateMsrpRows(msrpRows, make);
+  // Stamp the freight/PDI convention when the scraper knows it (see
+  // supabase/migrations/20260811_msrp_price_basis.sql). Silence is honest:
+  // an unstamped row makes the report show the freight caveat rather than
+  // imply a precision we don't have.
+  if (opts.priceBasis) msrpRows = msrpRows.map(r => ({ price_basis: opts.priceBasis, ...r }));
   msrpRows = dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp");
   financeRows = dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr");
   if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {

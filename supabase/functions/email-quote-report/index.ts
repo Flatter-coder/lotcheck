@@ -268,6 +268,12 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
   }
 
+  // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
+  if (a.msrpBasis === "exact" && a.allInPricing?.body && a.msrpPriceBasis !== "incl_freight" && Number(a.msrp) > 0 && Number(a.quotedPrice) > Number(a.msrp) + 100) {
+    deck.push({ label: "Basis note - freight & PDI", tone: "muted", glow: false, body:
+      `<div style="font-size:12.5px;color:#33305A;line-height:1.5;">The asking price is <b>all-in</b> (${escapeHtml(a.allInPricing.body)}), while a published MSRP normally <b>excludes freight &amp; PDI</b> (typically $2,000-$2,600). Part of the gap above is that freight - ask for freight and PDI as their own line.</div>` });
+  }
+
   // 5b1 -- dealer-stated MSRP + the manufacturer's published anchor
   if (a.msrpBasis === "dealer_stated" && Number(a.msrp) > 0) {
     const ref = a.msrpReference;

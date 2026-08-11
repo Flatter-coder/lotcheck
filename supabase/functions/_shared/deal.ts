@@ -75,6 +75,14 @@ export function buildCounterScript(analysis: any): CounterScript {
     // S14 — one dealer's price isn't "the market"; the market is real deals across dealers.
     moves.push({ topic: "Price", say: `This is about ${money(qp - msrp)} over MSRP (${money(msrp)}). "Market value" is set by real deals across many dealers, not one store's number — I'd need this at MSRP to move forward.` });
   }
+  // Basis note: an all-in advertised price includes freight & PDI; a published
+  // MSRP normally does not. Part of any "over MSRP" gap is therefore freight,
+  // and the buyer should see it itemized rather than argue about a number that
+  // isn't comparing like with like.
+  if (analysis?.msrpBasis === "exact" && analysis?.allInPricing?.body && analysis?.msrpPriceBasis !== "incl_freight" && qp != null && msrp != null && msrp > 0 && qp > msrp + 100) {
+    moves.push({ topic: "Freight & PDI", say: `Your advertised price is all-in and ${analysis?.make || "the manufacturer"}'s MSRP normally excludes freight and PDI — so show me freight and PDI as their own line, and what's left after that.` });
+  }
+
   // S26 — inflated-MSRP tactic. The dealer's advertised MSRP is padded above the
   // manufacturer's real MSRP so the "saving" looks bigger. Name it with the real
   // number so the discount is measured against the true sticker (dispute-proof).

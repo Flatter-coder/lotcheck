@@ -82,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11e";
+const CACHE_VER = "2026-08-11f";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -834,7 +834,7 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
 // scripts/test-trim-match.mjs — run it after ANY change to the matcher.
 // Returns { msrp, trim, basis } where basis is "exact" (trim pinned) or
 // "starting_at" (honest floor, never a guess dressed as exact).
-interface CatalogMsrp { msrp: number; trim: string | null; basis: "exact" | "starting_at"; year?: number; sourceUrl?: string | null; }
+interface CatalogMsrp { msrp: number; trim: string | null; basis: "exact" | "starting_at"; year?: number; sourceUrl?: string | null; priceBasis?: string | null; }
 async function lookupCatalogMsrp(
   year: number,
   make: string,
@@ -852,7 +852,7 @@ async function lookupCatalogMsrp(
     let data: any[] | null = null;
     const full = await supabase
       .from("msrp_catalog")
-      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url")
+      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url, price_basis")
       .in("year", years)
       .ilike("make", make)
       .ilike("model", model)
@@ -901,7 +901,8 @@ async function lookupCatalogMsrp(
     // Provenance: the manufacturer page/release the figure came from (when the
     // row carries it) -- lets the report link the MSRP to its source.
     const srcRow = rows.find((r: any) => r.trim === (picked as any).trim && r.source_url) || rows.find((r: any) => r.source_url);
-    const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear, sourceUrl: srcRow?.source_url || null };
+    const pbRow = rows.find((r: any) => r.trim === (picked as any).trim && r.price_basis) || rows.find((r: any) => r.price_basis);
+    const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear, sourceUrl: srcRow?.source_url || null, priceBasis: pbRow?.price_basis || null };
     // An adjacent-year figure is a reference, never an exact sticker for THIS
     // model year — force the honest "starting_at" basis.
     if (rowYear !== year) out.basis = "starting_at";
@@ -2062,6 +2063,7 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       if (catMsrp.trim) analysis.msrpTrim = catMsrp.trim;
       if (catMsrp.year && catMsrp.year !== analysis.year) analysis.msrpYear = catMsrp.year; // adjacent-MY reference, surfaced honestly
       if (catMsrp.sourceUrl) analysis.msrpSourceUrl = catMsrp.sourceUrl; // provenance link for the report
+      if (catMsrp.priceBasis) analysis.msrpPriceBasis = catMsrp.priceBasis;   // incl_freight | excl_freight
     } else {
       const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
       if (mfrMsrp) {
