@@ -143,8 +143,18 @@ async function probe(cand) {
   }
 }
 
-// The regulator's own roster of licensed Alberta dealers. Only ACTIVE licensees
-// with a website are worth probing — a lapsed licence means the lot is gone.
+// The regulator's own roster of licensed Alberta dealers.
+//
+// facility_status holds AMVIC's OWN string, verbatim — "Issued" is the valid
+// one, not "Active". Filtering on /active/i (as this did first) matches nothing
+// and returns an empty candidate list that looks exactly like "no licensed
+// dealer has a website." Allowlist the good status; count and report the rest
+// rather than dropping them silently.
+//
+// Only ~54% of records are Issued. Note that a lapsed licensee can still be
+// running a live website (the migration for this table found 65 of them) — we
+// do not crawl those for inventory, but the mismatch is itself worth surfacing
+// to a buyer somewhere else.
 async function candidatesFromAmvic() {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) { console.error("--source amvic needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"); process.exit(1); }
@@ -154,8 +164,14 @@ async function candidatesFromAmvic() {
     .from("amvic_licensees").select("name,trade_name,city,website,facility_status")
     .not("website", "is", null);
   if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
-  const rows = (data || []).filter((r) => !r.facility_status || /active/i.test(r.facility_status));
-  console.log(`${data?.length ?? 0} AMVIC licensees with a website, ${rows.length} active.`);
+  const all = data || [];
+  const rows = all.filter((r) => /issued/i.test(r.facility_status || ""));
+  const byStatus = new Map();
+  for (const r of all) { const k = r.facility_status || "(none)"; byStatus.set(k, (byStatus.get(k) || 0) + 1); }
+  console.log(`${all.length} AMVIC licensees with a website. Status breakdown:`);
+  for (const [k, n] of [...byStatus.entries()].sort((a, b) => b[1] - a[1])) console.log(`   ${String(n).padStart(4)}  ${k}`);
+  console.log(`Probing the ${rows.length} with an Issued licence.`);
+  if (!rows.length) { console.error("No Issued licensees found — check facility_status values before assuming there are none."); process.exit(1); }
   return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: data?.length ?? 0 };
 }
 
