@@ -6831,7 +6831,8 @@ function QuoteCheckPage(){
         const {data,error}=await supabase.rpc("fn_redeem_gift",{p_code:giftPending});
         if(!active) return;
         if(error){
-          const m=/already used/i.test(error.message)?"This link was already used."
+          const m=/already claimed a free/i.test(error.message)?"You've already had a free check on this account."
+                 :/already used/i.test(error.message)?"This link was already used."
                  :/not valid/i.test(error.message)?"This link isn't valid."
                  :/cancelled/i.test(error.message)?"This link was cancelled."
                  :"Couldn't claim this free check.";
