@@ -56,6 +56,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
+import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -83,7 +84,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11g";
+const CACHE_VER = "2026-08-11h";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2109,12 +2110,11 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
     analysis.msrpBasis = "dealer_stated";
   }
 
-  // Dealer-stated vs manufacturer MSRP — an inflated sticker is a real tactic
-  // (pad the MSRP so an advertised "saving" looks bigger than it is). When the
-  // LISTING itself supplied the MSRP (not our own catalog), cross-check it against
-  // the catalog's manufacturer MSRP. If the dealer's number is materially higher,
-  // anchor to the TRUE manufacturer figure and record the inflation so the report
-  // can show both and name the tactic — dispute-proof, never misleading.
+  // The listing stated an MSRP: cross-check it against the manufacturer catalog.
+  // An EXACT trim match outranks the dealer's claim in BOTH directions -- their
+  // number is unverifiable, ours links to the manufacturer's own page. A padded
+  // sticker is additionally named as a tactic. A "starting at" floor never
+  // displaces their figure; it rides alongside as a reference.
   if (analysis.msrp && analysis.msrpSource !== "catalog" && analysis.msrpSource !== "manufacturer_site"
       && analysis.year && analysis.make && analysis.model) {
     const vinDrive = await decodeVinDrive(analysis.vin);
@@ -2123,33 +2123,22 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       quotedPrice: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null,
       drivetrain: analysis.drivetrain ?? null, vinDrive,
     });
-    const stated = Number(analysis.msrp);
-    // Even when we can't pin the exact trim (so no inflation claim is possible),
-    // the manufacturer's published starting price is a fact the buyer should
-    // have next to the dealer's number. Ford advertises the Mach-E Premium from
-    // $47,638; a dealer stating $66,015 may be perfectly legitimate once AWD,
-    // extended range and options are added -- but the buyer deserves to see
-    // both figures and ask what makes up the difference.
-    if (ref && ref.msrp > 0 && analysis.msrpBasis === "dealer_stated") {
-      analysis.msrpReference = {
-        msrp: ref.msrp,
-        trim: ref.trim || null,
-        basis: ref.basis,
-        sourceUrl: ref.sourceUrl || null,
-        make: analysis.make || null,
-      };
-    }
-    // Only call inflation against an EXACT trim match — comparing a dealer's
-    // trim-specific MSRP to a "starting at" floor would flag honest stickers.
-    if (ref && ref.basis === "exact" && stated > ref.msrp * 1.03 && stated - ref.msrp > 800) {
-      analysis.dealerStatedMsrp = stated;
-      analysis.msrp = ref.msrp;          // anchor Price-vs-MSRP to the true manufacturer MSRP
-      analysis.msrpSource = "catalog";
-      analysis.msrpBasis = ref.basis;
-      if (ref.trim) analysis.msrpTrim = ref.trim;
-      if (ref.sourceUrl) analysis.msrpSourceUrl = ref.sourceUrl; // provenance link for the report
-      analysis.msrpInflation = { dealerStated: stated, manufacturer: ref.msrp, overBy: Math.round(stated - ref.msrp) };
-    }
+    // Who wins is decided in one place now (see _shared/msrp-authority.js):
+    // an EXACT trim match from the manufacturer catalog is the MSRP, whichever
+    // direction the dealer's number points. It used to override only when the
+    // dealer inflated, so a dealer-stated figure silently became the report's
+    // MSRP in every other case.
+    const decided = resolveMsrpAuthority({ statedMsrp: Number(analysis.msrp), ref, make: analysis.make || null });
+    analysis.msrp = decided.msrp;
+    analysis.msrpBasis = decided.basis;
+    analysis.msrpSource = decided.source;
+    if (decided.trim) analysis.msrpTrim = decided.trim; else if (decided.basis !== "dealer_stated") delete analysis.msrpTrim;
+    if (decided.sourceUrl) analysis.msrpSourceUrl = decided.sourceUrl;
+    if (decided.priceBasis) analysis.msrpPriceBasis = decided.priceBasis;
+    if (decided.dealerStatedMsrp) analysis.dealerStatedMsrp = decided.dealerStatedMsrp;
+    if (decided.inflation) analysis.msrpInflation = decided.inflation;
+    if (decided.reference) analysis.msrpReference = decided.reference;
+
   }
 
   computeFinancingCheck(analysis);
