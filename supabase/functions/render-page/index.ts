@@ -7,7 +7,7 @@
 //
 // LOCKED DOWN, deliberately -- an open render endpoint is an open proxy and a
 // way to burn our Scrapfly credits:
-//   * service-role bearer token required (constant-time compared)
+//   * service-role JWT required (role claim; signature verified by Supabase)
 //   * host allowlist: manufacturer sites only, nothing else renders
 //   * POST only, one URL per call
 
@@ -31,6 +31,17 @@ function isServiceRole(token: string): boolean {
     return claims?.role === "service_role";
   } catch { return false; }
 }
+
+// Manufacturer domains whose own published prices we read. Nothing else is
+// renderable through this endpoint -- notably no dealer sites, so it can never
+// become a general-purpose scraping proxy or a way to burn Scrapfly credits.
+const ALLOWED_HOSTS = [
+  "www.chevrolet.ca", "www.gmc.ca", "www.buick.ca", "www.cadillaccanada.ca",
+  "www.ford.ca", "www.lincolncanada.com",
+  "www.toyota.ca", "www.lexus.ca",
+  "www.nissan.ca", "www.hyundaicanada.com", "www.kia.ca", "www.mazda.ca",
+  "www.honda.ca", "www.subaru.ca", "www.volkswagen.ca", "www.bmw.ca",
+];
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
