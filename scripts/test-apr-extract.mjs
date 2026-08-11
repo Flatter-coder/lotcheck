@@ -25,6 +25,12 @@ const CASES = [
   ["tax percentages", "GST of 5% applies to the purchase price", null],
   ["implausible rate", "Financing at 99% APR", null],
   ["nothing at all", "2026 Ford Escape. Call for details.", null],
+  // REAL false positive from a live page (2026-08-11): CSS colour values inside
+  // a <style> block were read as a 0% APR on a listing that advertises no rate.
+  ["CSS inside style tags is not a rate", `<style>.a{color:rgba(0,0,0,0.09)} .b{width:100%}</style><div>Financing available O.A.C.</div>`, null],
+  ["JS inside script tags is not a rate", `<script>var o={opacity:0.09,scale:"00%"};// financing</script><p>Finance your purchase today</p>`, null],
+  ["leading-zero artifacts rejected", "Purchase financing 00% APR 09% APR", null],
+  ["but a genuine 0% promo still reads", "<div>Purchase financing at 0% APR for 48 months</div>", 0],
 ];
 
 let pass = 0, fail = 0;

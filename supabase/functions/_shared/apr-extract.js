@@ -18,7 +18,15 @@ const FINANCE_CTX = /(financ\w*|purchase\s+financ\w*|apr|annual\s+percentage\s+r
 // Words that mean the nearby rate is NOT a straight purchase-finance rate.
 const DISQUALIFY = /(lease|leasing|cash\s*back|line\s+of\s+credit|credit\s+card|deposit|down\s*payment|trade|insurance|gst|tax)/i;
 
-const clean = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+// Strip script/style CONTENT, not just tags. CSS and JS are full of numbers
+// that look like percentages ("rgba(0,0,0,0.09)", "width:100%"), and reading
+// one as an APR put a false "0%" on a real listing (2026-08-11).
+const clean = (s) => String(s || "")
+  .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+  .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+  .replace(/<[^>]*>/g, " ")
+  .replace(/&nbsp;/g, " ")
+  .replace(/\s+/g, " ");
 
 /**
  * @param {string} text  page text or HTML
@@ -39,7 +47,9 @@ export function extractAdvertisedApr(text) {
 
   const candidates = [];
   // A percentage with financing context within ~60 chars either side.
-  const re = /(\d{1,2}(?:\.\d{1,2})?)\s*%/g;
+  // A leading zero ("00%", "09%") is never how a rate is written -- it is a
+  // CSS/JS artifact. Require either a single 0, or a non-zero leading digit.
+  const re = /\b(0|0\.\d{1,2}|[1-9]\d?(?:\.\d{1,2})?)\s*%/g;
   let m;
   while ((m = re.exec(t)) !== null) {
     const apr = Number(m[1]);
