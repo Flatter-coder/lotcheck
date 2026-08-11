@@ -36,6 +36,9 @@ create table if not exists public.dealer_source (
   id                   bigint generated always as identity primary key,
   host                 text not null unique,          -- 'https://www.tazaparkvw.com' (origin only, no path)
   platform             text not null check (platform in ('sm360','convertus','other')),
+  -- Convertus needs the dealer's `cp` id (the page's inventoryId) to address its
+  -- feed. SM360 addresses by host alone, so this stays null there.
+  platform_id          text,
   name                 text,
   city                 text,
   province             text not null default 'AB',
@@ -62,6 +65,11 @@ create table if not exists public.vehicle_listing (
   trim               text,
   condition          text check (condition in ('new','used')),
   odometer_km        integer,
+  -- msrp is the manufacturer figure where the feed states one (Convertus does on
+  -- new). list/sale are what the DEALER is asking, so msrp - sale_price is a
+  -- discount off sticker, which is a different claim from a markdown off their
+  -- own earlier price. Kept in its own column so the two never get conflated.
+  msrp               numeric,
   list_price         numeric,
   sale_price         numeric,
   -- THEIRS: from the dealer's own inventory system.
@@ -130,13 +138,13 @@ begin
     if v_id is null then
       insert into vehicle_listing (
         dealer_id, vin, stock_no, year, make, model, trim, condition, odometer_km,
-        list_price, sale_price, date_entry, days_in_inventory,
+        msrp, list_price, sale_price, date_entry, days_in_inventory,
         certified, demo, damaged, status
       ) values (
         p_dealer_id, r->>'vin', nullif(r->>'stock_no',''),
         (r->>'year')::int, nullif(r->>'make',''), nullif(r->>'model',''), nullif(r->>'trim',''),
         nullif(r->>'condition',''), (r->>'odometer_km')::int,
-        (r->>'list_price')::numeric, (r->>'sale_price')::numeric,
+        (r->>'msrp')::numeric, (r->>'list_price')::numeric, (r->>'sale_price')::numeric,
         (r->>'date_entry')::date, (r->>'days_in_inventory')::int,
         (r->>'certified')::boolean, (r->>'demo')::boolean, (r->>'damaged')::boolean,
         nullif(r->>'status','')
@@ -155,6 +163,7 @@ begin
         trim = coalesce(nullif(r->>'trim',''), trim),
         condition = coalesce(nullif(r->>'condition',''), condition),
         odometer_km = coalesce((r->>'odometer_km')::int, odometer_km),
+        msrp = coalesce((r->>'msrp')::numeric, msrp),
         list_price = (r->>'list_price')::numeric,
         sale_price = (r->>'sale_price')::numeric,
         date_entry = coalesce((r->>'date_entry')::date, date_entry),

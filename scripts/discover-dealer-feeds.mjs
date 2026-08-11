@@ -118,7 +118,13 @@ async function tryConvertus(host) {
       if (!r.ok) continue;
       const html = await r.text();
       if (!/convertus-vms|convertus\.rocks/i.test(html)) continue;
-      const m = html.match(/["']?cp["']?\s*[:=]\s*["']?(\d{2,6})/i);
+      // The dealer's cp is the page's inventoryId. Confirmed live against three
+      // Alberta dealers 2026-08-11 — the older bare-`cp` pattern matched nothing
+      // on any of them, which is why earlier probes all reported cp=?.
+      const m = html.match(/inventory[_-]?id["']?\s*[:=]\s*["']?(\d{2,8})/i)
+             || html.match(/[?&]cp=(\d{2,8})/)
+             || html.match(/["']cp["']\s*:\s*["']?(\d{2,8})/)
+             || html.match(/dealer[_-]?id["']?\s*[:=]\s*["']?(\d{2,8})/i);
       return { platform: "convertus", cp: m ? m[1] : null };
     } catch { /* next path */ }
   }
@@ -194,8 +200,8 @@ async function main() {
   for (const r of sm360.sort((a, b) => (b.pages || 0) - (a.pages || 0))) {
     console.log(`  ${r.host.padEnd(42)} ${String(r.withVin).padStart(2)}/${r.page1} VINs on p1 · ~${r.pages} pages · ${r.name ?? ""}`);
   }
-  console.log(`\n── Convertus (detected, not yet crawlable): ${convertus.length} ──`);
-  for (const r of convertus) console.log(`  ${r.host.padEnd(42)} cp=${r.cp ?? "?"} · ${r.name ?? ""}`);
+  console.log(`\n── Convertus (crawlable when cp resolves): ${convertus.length} ──`);
+  for (const r of convertus) console.log(`  ${r.host.padEnd(42)} cp=${r.cp ?? "NOT FOUND — not seedable"} · ${r.name ?? ""}`);
   console.log(`\n── no feed detected: ${results.length - sm360.length - convertus.length} ──`);
 
   const estimated = sm360.reduce((n, r) => n + (r.pages || 1) * (r.page1 || 24), 0);
@@ -209,10 +215,16 @@ async function main() {
   if (!url || !key) { console.error("--write needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"); process.exit(1); }
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(url, key);
-  // Only SM360 hosts that actually returned VINs get seeded. A confirmed feed
-  // that carries no VIN is not something the crawler can use.
-  const seed = sm360.filter((r) => r.withVin > 0)
-    .map((r) => ({ host: r.host, platform: "sm360", name: r.name, city: r.city, province: "AB" }));
+  // Only hosts that returned something the crawler can actually use get seeded:
+  // SM360 must have produced VINs, and Convertus must have yielded a cp — without
+  // it the feed is unaddressable, so seeding one would just create a nightly
+  // no-op that looks like coverage.
+  const seed = [
+    ...sm360.filter((r) => r.withVin > 0)
+      .map((r) => ({ host: r.host, platform: "sm360", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new-inventory", "used-inventory"] })),
+    ...convertus.filter((r) => r.cp)
+      .map((r) => ({ host: r.host, platform: "convertus", platform_id: r.cp, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+  ];
   if (!seed.length) { console.log("nothing to seed"); return; }
   const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }

@@ -40,6 +40,11 @@ const FETCH_TIMEOUT_MS = 20_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const num = (x) => { const v = Number(x); return Number.isFinite(v) ? v : null; };
+// Feeds use 0 to mean "not stated" for prices and day counts — a real Ford
+// F-150 came back with asking_price 0 and days_on_lot 0. Storing those as
+// literal zeros would put a free car and a same-day arrival in the dataset and
+// poison every average built on it. Absent is absent.
+const pos = (x) => { const v = Number(x); return Number.isFinite(v) && v > 0 ? v : null; };
 
 // SM360 hands back epoch milliseconds. Anything outside a sane window is a
 // system default, not a real date, and must not become a days-on-lot claim.
@@ -54,8 +59,8 @@ function entryDate(ms) {
 function normalizeSm360(v, section) {
   const check = validateVin(v?.serialNo);
   if (!check.present || !check.valid) return null;
-  const list = num(v?.listPrice);
-  const sale = num(v?.salePrice);
+  const list = pos(v?.listPrice);
+  const sale = pos(v?.salePrice);
   return {
     vin: check.vin,
     stock_no: v?.stockNo ?? null,
@@ -65,6 +70,7 @@ function normalizeSm360(v, section) {
     trim: v?.trim?.name ?? null,
     condition: section === "new-inventory" ? "new" : (v?.newVehicle === true ? "new" : "used"),
     odometer_km: num(v?.odometer),
+    msrp: null,                          // SM360's listing feed states no MSRP
     list_price: list,
     // Some feeds omit salePrice when there is no markdown; fall back to list so
     // "cut to date" reads 0 rather than looking like a giveaway.
@@ -76,6 +82,101 @@ function normalizeSm360(v, section) {
     damaged: v?.severelyDamagedVehicle === true,
     status: v?.vehicleStatus ?? null,
   };
+}
+
+// ── Convertus ───────────────────────────────────────────────────────────────
+// A WordPress plugin (convertus-vms) that proxies to vms.prod.convertus.rocks.
+// The API host 403s a direct hit, so the dealer's own site is the way in — the
+// same route scripts/lib/convertus-stack.mjs already uses for rate catalogs.
+// Addressed by the dealer's `cp` id (the page's inventoryId), stored in
+// dealer_source.platform_id.
+//
+// Confirmed live 2026-08-11 against two Alberta dealers: 76/76 valid VINs, and
+// days_on_lot present on 99 of 100 units.
+//
+// DELIBERATELY IGNORED: invoice_price and wholesale_price. The names promise
+// dealer cost; the data does not deliver it — on Denham Ford's new lot
+// invoice_price is populated on every unit and simply mirrors msrp
+// ($40,889 vs $40,889). Presenting that as "the dealer's invoice" would be a
+// fabricated claim of exactly the kind the report exists to catch. If we ever
+// want a cost anchor it has to be sourced, not inferred from a field name.
+const CVT_PAGE = 50;
+const cvtEndpoint = (cp, pg, sc) =>
+  `https://vms.prod.convertus.rocks/api/filtering/?cp=${cp}&ln=en&pg=${pg}&pc=${CVT_PAGE}&dc=false&qs=&im=&svs=&sc=${sc}` +
+  `&v1=&st=&ai=&oem=&dp=&in_transit=true&in_stock=true&on_order=true&sn=&view=grid` +
+  `&pnpi=msrp&pnpm=none&pnpf=inte&pupi=msrp&pupm=none&pupf=inte&nnpi=none&nnpm=none&nnpf=none&nupi=none&nupm=none&nupf=none&po=`;
+
+async function fetchConvertusPage(host, cp, pg, sc) {
+  const url = `${host}/wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php` +
+    `?endpoint=${encodeURIComponent(cvtEndpoint(cp, pg, sc))}&action=vms_data`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, "X-Requested-With": "XMLHttpRequest", Referer: `${host}/vehicles/${sc}/` },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let d = await res.json();
+  if (d?.data) d = d.data;
+  return d;
+}
+
+// Convertus reports days_on_lot but no entry DATE, so we derive one by
+// subtracting. That is arithmetic on the dealer's own number, not our estimate —
+// but it inherits their precision, so it can only ever be a day-resolution floor.
+function entryFromDays(days) {
+  const n = pos(days);
+  if (n == null || n > 3650) return null;
+  return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+}
+
+function normalizeConvertus(v, sc) {
+  const check = validateVin(v?.vin);
+  if (!check.present || !check.valid) return null;
+  const strip = (s) => (typeof s === "string" ? s.replace(/<[^>]*>/g, "").trim() : null) || null;
+  const asking = pos(v?.asking_price);
+  const final = pos(v?.final_price) ?? pos(v?.internet_price) ?? asking;
+  const msrp = pos(v?.msrp);
+  return {
+    vin: check.vin,
+    stock_no: v?.stock_number ?? null,
+    year: num(v?.year),
+    make: v?.make ?? null,
+    model: v?.model ?? null,
+    trim: strip(v?.search_trim) ?? strip(v?.trim),
+    condition: sc === "new" ? "new" : "used",
+    odometer_km: num(v?.odometer),
+    msrp,
+    list_price: asking ?? final,
+    sale_price: final ?? asking,
+    date_entry: entryFromDays(v?.days_on_lot),
+    days_in_inventory: pos(v?.days_on_lot),
+    certified: v?.certified === true || v?.certified === 1 || v?.certified === "1",
+    demo: v?.demo === true || v?.demo === 1 || v?.demo === "1",
+    damaged: null,                       // Convertus states no equivalent — null, never false
+    status: v?.in_transit ? "IN_TRANSIT" : (v?.on_order ? "ON_ORDER" : "FOR_SALE"),
+  };
+}
+
+async function crawlConvertus(host, cp, sc) {
+  const rows = [];
+  let total = CVT_PAGE, pg = 1, partial = false;
+  while ((pg - 1) * CVT_PAGE < total && pg <= PAGE_CAP) {
+    let d;
+    try {
+      d = await fetchConvertusPage(host, cp, pg, sc);
+    } catch (e) {
+      if (pg === 1) throw e;
+      console.warn(`    page ${pg} failed (${e.message}) — keeping ${rows.length} rows, stopping`);
+      partial = true;
+      break;
+    }
+    total = num(d?.summary?.total_vehicles) ?? total;
+    const results = d?.results || [];
+    if (!results.length) break;
+    for (const v of results) { const row = normalizeConvertus(v, sc); if (row) rows.push(row); }
+    pg++;
+    if ((pg - 1) * CVT_PAGE < total) await sleep(REQUEST_DELAY_MS);
+  }
+  return { rows, partial };
 }
 
 async function fetchPage(host, section, page) {
@@ -123,10 +224,11 @@ async function main() {
 
   if (DRY) {
     dealers = HOST_ARG
-      ? [{ id: 0, host: HOST_ARG, name: HOST_ARG, sections: ["new-inventory", "used-inventory"] }]
+      ? [{ id: 0, host: HOST_ARG, name: HOST_ARG, platform: "sm360", sections: ["new-inventory", "used-inventory"] }]
       : [
-          { id: 0, host: "https://www.tazaparkvw.com", name: "Taza Park Volkswagen", sections: ["used-inventory"] },
-          { id: 0, host: "https://www.infinitinorthcalgary.ca", name: "Infiniti North Calgary", sections: ["used-inventory"] },
+          { id: 0, host: "https://www.tazaparkvw.com", name: "Taza Park Volkswagen", platform: "sm360", sections: ["used-inventory"] },
+          { id: 0, host: "https://www.denhamford.ca", name: "Denham Ford", platform: "convertus", platform_id: "1285", sections: ["new", "used"] },
+          { id: 0, host: "https://www.northhillmazda.com", name: "North Hill Mazda", platform: "convertus", platform_id: "2246", sections: ["used"] },
         ];
     console.log(`DRY RUN — fetching live feeds, writing nothing.\n`);
   } else {
@@ -135,8 +237,8 @@ async function main() {
     const { createClient } = await import("@supabase/supabase-js");
     supabase = createClient(url, key);
     const { data, error } = await supabase
-      .from("dealer_source").select("id,host,name,sections,platform")
-      .eq("active", true).eq("platform", "sm360");
+      .from("dealer_source").select("id,host,name,sections,platform,platform_id")
+      .eq("active", true).in("platform", ["sm360", "convertus"]);
     if (error) { console.error("could not read dealer_source:", error.message); process.exit(1); }
     dealers = data || [];
   }
@@ -148,10 +250,18 @@ async function main() {
     const seen = [];
     let failed = false, partial = false;
 
-    for (const section of d.sections || ["new-inventory", "used-inventory"]) {
+    // Each platform names its sections differently: SM360 uses the URL segment
+    // (new-inventory), Convertus uses the sc= param value (new).
+    const isCvt = d.platform === "convertus";
+    const sections = d.sections?.length ? d.sections : (isCvt ? ["new", "used"] : ["new-inventory", "used-inventory"]);
+    if (isCvt && !d.platform_id) { console.warn(`    skipped: convertus dealer with no platform_id (cp)`); totals.failed++; totals.dealers++; continue; }
+
+    for (const section of sections) {
       let result;
       try {
-        result = await crawlSection(d.host, section);
+        result = isCvt
+          ? await crawlConvertus(d.host, d.platform_id, section)
+          : await crawlSection(d.host, section);
       } catch (e) {
         console.warn(`    ${section}: FAILED (${e.message})`);
         failed = true;
@@ -164,7 +274,10 @@ async function main() {
       if (DRY) {
         for (const r of result.rows.slice(0, 3)) {
           const cut = (r.list_price ?? 0) - (r.sale_price ?? 0);
-          console.log(`      ${r.vin}  ${r.year} ${r.make} ${r.model} ${r.trim ?? ""} · ${r.days_in_inventory}d since ${r.date_entry ?? "?"} · $${r.list_price}${cut > 0 ? ` -> $${r.sale_price} (cut $${cut})` : ""}`);
+          const offMsrp = r.msrp && r.sale_price ? r.msrp - r.sale_price : 0;
+          const days = r.days_in_inventory != null ? `${r.days_in_inventory}d since ${r.date_entry ?? "?"}` : "days not stated";
+          const price = r.sale_price != null ? `$${r.sale_price}` : "price not stated";
+          console.log(`      ${r.vin}  ${r.year} ${r.make} ${r.model} ${(r.trim ?? "").slice(0, 28)} · ${days} · ${price}${cut > 0 ? ` (cut $${cut} off own list)` : ""}${offMsrp > 0 ? ` ($${offMsrp} off $${r.msrp} MSRP)` : ""}`);
         }
         seen.push(...result.rows.map((r) => r.vin));
         continue;
