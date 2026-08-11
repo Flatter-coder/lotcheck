@@ -54,6 +54,7 @@ import { finalizeServerSide } from "../_shared/report-sign.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
+import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -81,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-10e";
+const CACHE_VER = "2026-08-11a";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1945,93 +1946,6 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
 // @graph arrays and a top-level array of nodes. Returns normalized fields, or
 // null if no usable vehicle node is present. Never throws.
-function extractJsonLdVehicle(html: string): {
-  year: number | null; make: string | null; model: string | null; trim: string | null;
-  vin: string | null; odometerKm: number | null; price: number | null; currency: string | null;
-  condition: string | null; dealerName: string | null; dealerCity: string | null;
-} | null {
-  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
-    .map((m) => m[1].trim());
-  if (blocks.length === 0) return null;
-
-  const nodes: any[] = [];
-  for (const b of blocks) {
-    try {
-      const parsed = JSON.parse(b);
-      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.["@graph"]) ? parsed["@graph"] : [parsed]);
-      for (const n of arr) if (n && typeof n === "object") nodes.push(n);
-    } catch { /* one malformed block never sinks the rest */ }
-  }
-
-  const typeOf = (n: any): string[] => {
-    const t = n?.["@type"];
-    return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
-  };
-  const isVehicle = (n: any) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
-  const firstOffer = (n: any): any => {
-    const o = n?.offers;
-    if (!o) return null;
-    return Array.isArray(o) ? (o[0] ?? null) : o;
-  };
-  const priceFrom = (offer: any): number | null => {
-    if (!offer) return null;
-    const cand = offer.price ?? offer.lowPrice ?? offer?.priceSpecification?.price;
-    const num = Number(String(cand ?? "").replace(/[^0-9.]/g, ""));
-    return Number.isFinite(num) && num > 0 ? num : null;
-  };
-
-  let node: any = null; let offer: any = null; let price: number | null = null;
-  for (const n of nodes) {
-    if (!isVehicle(n)) continue;
-    const o = firstOffer(n);
-    const p = priceFrom(o);
-    if (p != null) { node = n; offer = o; price = p; break; } // best: a priced vehicle node
-    if (!node) { node = n; offer = o; } // weak fallback: a vehicle node with no price
-  }
-  if (!node) return null;
-  if (price == null) price = priceFrom(offer);
-
-  const str = (v: any): string | null =>
-    (typeof v === "string" && v.trim()) ? v.trim()
-      : (v && typeof v.name === "string" && v.name.trim()) ? v.name.trim() : null;
-  const titleCase = (s: string | null) => s ? s.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase()) : s;
-
-  const yearRaw = node.vehicleModelDate ?? node.modelDate ?? node.productionDate ?? node.releaseDate;
-  const ym = String(yearRaw ?? "").match(/\b(19|20)\d{2}\b/);
-  const year = ym ? Number(ym[0]) : null;
-
-  const make = titleCase(str(node.brand) || str(node.manufacturer));
-  const model = str(node.model) || str(node.name);
-  const trim = titleCase(str(node.vehicleConfiguration) || str(node.trim) || str(node.vehicleModelConfiguration));
-
-  const vinRaw = typeof node.vehicleIdentificationNumber === "string" ? node.vehicleIdentificationNumber.trim().toUpperCase() : "";
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
-
-  let odometerKm: number | null = null;
-  const odo = node.mileageFromOdometer;
-  if (odo != null) {
-    const v = Number(typeof odo === "object" ? odo.value : odo);
-    if (Number.isFinite(v) && v >= 0) {
-      const unit = String(typeof odo === "object" ? (odo.unitCode || odo.unitText || "") : "").toUpperCase();
-      odometerKm = /SMI|MILE/.test(unit) ? Math.round(v * 1.60934) : Math.round(v);
-    }
-  }
-
-  const cond = String(node.itemCondition || offer?.itemCondition || "").toLowerCase();
-  let condition: string | null = /new/.test(cond) ? "new" : (/used|refurb/.test(cond) ? "used" : null);
-  if (condition == null && odometerKm != null) condition = odometerKm <= 100 ? "new" : "used";
-
-  const currency = str(offer?.priceCurrency);
-  const seller = offer?.seller || node?.seller;
-  const addr = seller?.address;
-  const locality = str(addr?.addressLocality);
-  const region = str(addr?.addressRegion);
-  const dealerCity = locality ? (region ? `${locality}, ${region}` : locality) : null;
-
-  if (!year && !make && !model && price == null) return null;
-  return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
-}
-
 async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
   try {
     const html = await fetchDirectHtml(url, 15_000);
@@ -2444,6 +2358,16 @@ Deno.serve(async (req: Request) => {
       ? captureListingScreenshot(url, 90_000).catch(() => null)
       : Promise.resolve(null);
 
+    // Structured-data safety net, started NOW instead of only after the scrape
+    // fails. Many dealer platforms (EDealer, Convertus, ...) serve a complete
+    // schema.org Vehicle/Offer node -- price, VIN, odometer, dealer -- to a
+    // plain browser-shaped GET in well under a second. Racing it alongside the
+    // scrape costs one cheap request and means a slow or failing scrape can
+    // never starve the fallback of budget (advantageford.ca, 2026-08-11: the
+    // scrape burned the clock and the buyer got a dead end while the page was
+    // handing out the price the whole time). Errors resolve to null.
+    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url).catch(() => null);
+
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
       console.error("Nimble extract failed after all attempts:", nimbleResult.errBody);
@@ -2487,7 +2411,8 @@ Deno.serve(async (req: Request) => {
       // browser-UA fetch even when Nimble is walled. Build a structured-only
       // report from that. Only runs after BOTH the page scrape and the SM360
       // feed fallback have already failed, so pages that load are unaffected.
-      const jsonLdFallback = await buildJsonLdFallbackAnalysis(url);
+      // Prefer the copy we started at t=0; only re-fetch if it came back empty.
+      const jsonLdFallback = (await earlyJsonLd) || (await buildJsonLdFallbackAnalysis(url));
       if (jsonLdFallback) {
         await detectTradeInWidget(url, jsonLdFallback); // S36 (fetch is cached upstream at the CDN, cheap)
         // The structured data often lacks the price the RENDERED page displays.
@@ -2834,6 +2759,26 @@ Deno.serve(async (req: Request) => {
         analysis.counterScript = buildCounterScript(analysis);
       }
     }
+
+    // Gap-fill from the structured-data read: the scrape sometimes lands the
+    // vehicle but misses the price or VIN that schema.org states outright.
+    // Never overwrites a value the scrape already found.
+    try {
+      const early = await earlyJsonLd;
+      if (early) {
+        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (early as any)[k];
+          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
+          if (missing && alt != null && alt !== "") {
+            (analysis as any)[k] = alt;
+            console.log(`Gap-filled ${k} from structured data.`);
+          }
+        }
+        if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
+        gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+      }
+    } catch { /* the safety net must never sink the scan */ }
 
     if (!gotPricing) {
       await logUsage({ success: false, errorMessage: "unreadable_listing (no price/MSRP extracted)" });
