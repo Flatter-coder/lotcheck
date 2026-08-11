@@ -50,4 +50,5 @@ jobs:
         with:
           node-version: "22"
       - name: ${{ matrix.name }} rates
+        continue-on-error: true
         run: node scripts/${{ matrix.script }}
