@@ -268,6 +268,16 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
   }
 
+  // 5b1 -- dealer-stated MSRP + the manufacturer's published anchor
+  if (a.msrpBasis === "dealer_stated" && Number(a.msrp) > 0) {
+    const ref = a.msrpReference;
+    deck.push({ label: "MSRP - as stated by the dealer", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${money(a.msrp)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is the figure the dealer states on their own page. We could not verify it against ${escapeHtml(a.make || "the manufacturer")}'s published price, so no over/under-MSRP claim is made from it.` +
+      (ref && ref.msrp > 0 ? ` For reference, ${escapeHtml(ref.make || "the manufacturer")} publishes this model${ref.trim ? " (" + escapeHtml(ref.trim) + ")" : ""} from <b>${money(ref.msrp)}</b> - ask which options account for the difference.` : "") +
+      `</div>` });
+  }
+
   // 5b2 -- AMVIC dealer licence (#11): the regulator's own status, verbatim.
   if (a.dealerLicence && a.dealerLicence.status) {
     const L = a.dealerLicence, good = L.state === "valid";

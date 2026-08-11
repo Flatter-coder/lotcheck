@@ -82,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11d";
+const CACHE_VER = "2026-08-11e";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2097,6 +2097,21 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       drivetrain: analysis.drivetrain ?? null, vinDrive,
     });
     const stated = Number(analysis.msrp);
+    // Even when we can't pin the exact trim (so no inflation claim is possible),
+    // the manufacturer's published starting price is a fact the buyer should
+    // have next to the dealer's number. Ford advertises the Mach-E Premium from
+    // $47,638; a dealer stating $66,015 may be perfectly legitimate once AWD,
+    // extended range and options are added -- but the buyer deserves to see
+    // both figures and ask what makes up the difference.
+    if (ref && ref.msrp > 0 && analysis.msrpBasis === "dealer_stated") {
+      analysis.msrpReference = {
+        msrp: ref.msrp,
+        trim: ref.trim || null,
+        basis: ref.basis,
+        sourceUrl: ref.sourceUrl || null,
+        make: analysis.make || null,
+      };
+    }
     // Only call inflation against an EXACT trim match — comparing a dealer's
     // trim-specific MSRP to a "starting at" floor would flag honest stickers.
     if (ref && ref.basis === "exact" && stated > ref.msrp * 1.03 && stated - ref.msrp > 800) {
