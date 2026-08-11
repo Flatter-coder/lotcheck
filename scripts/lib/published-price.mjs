@@ -36,13 +36,21 @@ async function currentServiceKey() {
   const ref = (process.env.SUPABASE_URL || "").match(/https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1];
   if (token && ref) {
     try {
-      const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/api-keys`, {
+      // reveal=true: without it the Management API returns MASKED key values,
+      // which then silently fail the function's comparison.
+      const res = await fetch(`https://api.supabase.com/v1/projects/${ref}/api-keys?reveal=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const keys = await res.json();
-        const hit = (Array.isArray(keys) ? keys : []).find((k) => /service_role|secret/i.test(k?.name || k?.type || ""));
-        if (hit?.api_key) { cachedKey = hit.api_key; return cachedKey; }
+        const list = Array.isArray(keys) ? keys : [];
+        const hit = list.find((k) => /service_role|secret/i.test(`${k?.name || ""} ${k?.type || ""}`)) || null;
+        const val = hit?.api_key || hit?.secret || null;
+        if (val && !/\*/.test(val)) {
+          console.log(`  (auth: using ${hit.name || hit.type} from the Management API, ...${String(val).slice(-6)})`);
+          cachedKey = val; return cachedKey;
+        }
+        console.warn(`  (auth: Management API returned ${list.length} keys, none usable: ${list.map(k => k?.name || k?.type).join(", ")})`);
       }
     } catch { /* fall back below */ }
   }
