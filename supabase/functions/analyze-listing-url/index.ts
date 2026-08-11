@@ -82,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11a";
+const CACHE_VER = "2026-08-11b";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1568,7 +1568,10 @@ async function checkDealerLicence(analysis: any): Promise<void> {
     const { data, error } = await supabase
       .from("amvic_licensees")
       .select("name, trade_name, city, facility_status, registration_number, expiry_date, website")
-      .or(`name_key.ilike.%${probe}%,trade_key.ilike.%${probe}%`)
+      // PostgREST wildcard is `*`, not `%`: a raw % inside an or() filter is a
+      // URL escape character and the request is rejected outright (HTTP 1101),
+      // so every licence lookup silently found nothing. Verified 2026-08-11.
+      .or(`name_key.ilike.*${probe}*,trade_key.ilike.*${probe}*`)
       .limit(60);
     if (error) { console.warn("AMVIC lookup failed:", error.message); return; }
     if (!data || !data.length) return;
