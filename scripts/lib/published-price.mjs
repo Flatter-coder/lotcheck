@@ -139,7 +139,11 @@ export function extractStartingPrices(html, { model = null, otherModels = [] } =
     // ("Small SUV Encore GX $34,192" on the Envista page), and storing those
     // under the target model would be simply wrong. Drop them.
     const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    const isOther = trim && otherModels.some((m) => norm(m) && norm(m) !== norm(model) && norm(trim).includes(norm(m)));
+    // Check the RAW window too, not just the cleaned trim: "Compact SUV
+    // Envision $48,342" cleans down to nothing when the name is long or odd,
+    // and an unnamed row then slips past as if it were this model's base price.
+    const hay = norm(`${trim || ""} ${before}`);
+    const isOther = otherModels.some((m) => norm(m) && norm(m) !== norm(model) && hay.includes(norm(m)));
     if (isOther) continue;
     // "Equinox $40,042" on the Equinox page is the model's starting price, not
     // a trim called Equinox.
