@@ -670,25 +670,28 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <div class="chg up" id="lmiChg">&nbsp;</div>
       <div class="scope-lbl" id="scopeLbl"></div>
       <p class="lede">Where Alberta new-vehicle sticker prices sit today, tracked across
-        <b><span id="makeCount">—</span> makes</b>. The index reads dealer listings against verified MSRP — so a rising line
-        means the market is pushing <b>above</b> manufacturer pricing.</p>
+        <b><span id="makeCount">—</span> makes</b> of verified manufacturer pricing. The chart puts MSRP on a fixed
+        line and shows what Alberta dealers are actually asking against it — <b>above</b> sticker or <b>below</b>.</p>
       <p class="basis-note">MSRP is set nationally by manufacturers. What is Alberta-specific is what
         dealers here actually ask against it.</p>
     </div>
 
     <!-- CHART -->
     <section>
-      <h2>The index <span class="n">preview shape · not a real series</span></h2>
-      <p class="basis-note" style="margin:0 0 14px">The headline and the figures below are read live from LotCheck’s
-        verified MSRP catalogue. This chart is not: an index over time needs Alberta dealer listings to compare
-        against MSRP, and that collection has not started. The line is a placeholder shape, not history.</p>
+      <h2>Alberta market vs MSRP <span class="n">asking price against sticker</span></h2>
+      <p class="basis-note" style="margin:0 0 14px">The green line is manufacturer MSRP — the reference point.
+        Alberta asking prices are drawn against it: <b style="color:var(--down)">red above</b> means dealers are asking
+        over sticker, <b style="color:var(--up)">green below</b> means under. New vehicles only, since used listings
+        rarely state an MSRP to compare against.</p>
       <div class="ctrls">
-        <div class="rng" id="rng"></div>
+        <!-- Range buttons removed: they selected a window of a simulated series.
+             A real window needs listing price history, which starts accruing
+             once the crawl runs. -->
         <button class="matrix-btn" id="matrixBtn"><span class="sq"></span>Reviews vs MSRP</button>
       </div>
       <div class="legend" id="legend">
-        <span class="lg lmi"><i></i>LMI</span>
-        <button class="lg frust off" id="frustToggle" type="button"><i></i>Pricing-mention rate</button>
+        <span class="lg" style="color:var(--up)"><i style="background:var(--up)"></i>MSRP baseline</span>
+        <span class="lg" style="color:var(--down)"><i style="background:var(--down)"></i>Alberta asking above sticker</span>
       </div>
       <div class="chartwrap" id="chartwrap">
         <svg class="chart" id="chart" viewBox="0 0 720 236" preserveAspectRatio="none"></svg>
@@ -1038,6 +1041,52 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     return pts.map((p,i)=> (i? "L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)).join(" ");
   }
 
+  // ── MSRP-baseline chart ───────────────────────────────────────────────────
+  // The question a buyer has is "am I being asked more or less than sticker?",
+  // so MSRP is a fixed green line at the centre and the market is drawn as its
+  // distance from that line: red above (paying over), green below (under).
+  //
+  // Bidirectional deliberately. The crawler's first real read had every new
+  // vehicle asking BELOW MSRP, and a chart that can only render "over" would
+  // tell a buyer to brace for a markup when they should be negotiating a
+  // discount.
+  //
+  // Draws the baseline even with no data — the reference line is true whether
+  // or not we have listings yet, and an empty chart that shows the scale reads
+  // as "not collected" rather than "broken".
+  function drawMsrpChart(dev){
+    var svg=document.getElementById("chart");
+    var mid=H/2, SPAN=12;                       // ±12% fills the plot
+    var y=function(pct){ return mid - Math.max(-SPAN,Math.min(SPAN,pct))*(mid-16)/SPAN; };
+    var g='';
+
+    // gridlines at ±4/8%, unlabelled, so the eye has a scale
+    [-8,-4,4,8].forEach(function(p){
+      g+='<line x1="0" y1="'+y(p)+'" x2="'+W+'" y2="'+y(p)+'" stroke="var(--ink)" stroke-opacity=".06" stroke-width="1"/>';
+    });
+
+    if(dev && dev.enough){
+      var band=Math.abs(y(dev.p75)-y(dev.p25));
+      var over=dev.median>0;
+      var col=over?"var(--down)":"var(--up)";   // over sticker = bad for the buyer
+      g+='<rect x="0" y="'+Math.min(y(dev.p25),y(dev.p75))+'" width="'+W+'" height="'+Math.max(band,2)+'" fill="'+col+'" fill-opacity=".13"/>'+
+         '<line x1="0" y1="'+y(dev.median)+'" x2="'+W+'" y2="'+y(dev.median)+'" stroke="'+col+'" stroke-width="2.4"/>'+
+         '<text x="'+(W-8)+'" y="'+(y(dev.median)+(over?-8:16))+'" text-anchor="end" fill="'+col+'" font-size="13" font-weight="600">'+
+           (dev.median>0?"+":"")+dev.median.toFixed(1)+'% vs MSRP · '+dev.n+' listings</text>';
+    }
+
+    // the MSRP reference line, always last so nothing paints over it
+    g+='<line x1="0" y1="'+mid+'" x2="'+W+'" y2="'+mid+'" stroke="var(--up)" stroke-width="2" stroke-dasharray="6 4"/>'+
+       '<text x="8" y="'+(mid-8)+'" fill="var(--up)" font-size="12" font-weight="600" letter-spacing=".5">MSRP · manufacturer baseline</text>';
+
+    if(!dev || !dev.enough){
+      var n=dev?dev.n:0, need=dev?dev.min:25;
+      g+='<text x="'+(W/2)+'" y="'+(mid+34)+'" text-anchor="middle" fill="var(--dim)" font-size="13">'+
+         'Awaiting Alberta listings — '+n+' of '+need+' needed before a market reading is published</text>';
+    }
+    svg.innerHTML=g;
+  }
+
   function drawChart(animate){
     var svg=document.getElementById("chart");
     var s=scopedSeries();
@@ -1142,15 +1191,13 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     matrixOn=!matrixOn;
     this.classList.toggle("on",matrixOn);
     setMatrixCaptions(matrixOn);
-    if(matrixOn) drawMatrix(true); else drawChart(true);
+    if(matrixOn) drawMatrix(true); else drawMsrpChart(lastDev);
   });
 
-  // pricing-mention toggle (default off)
-  document.getElementById("frustToggle").addEventListener("click",function(){
-    frustOn=!frustOn;
-    this.classList.toggle("off",!frustOn);
-    if(!matrixOn) drawChart(true);
-  });
+  // The pricing-mention toggle is gone with the simulated series it overlaid.
+  // Its listener went too: getElementById on a removed node returns null, and
+  // .addEventListener on null throws — which is precisely how this page died
+  // the first time (one bad line takes the whole IIFE with it).
 
   function countUp(el, target, kind){
     if(reduce){ el.textContent=fmt(target,kind); return; }
@@ -1272,7 +1319,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       scopeLbl.textContent="Manufacturer MSRP across "+catalog.makes+" makes · dealer-asking index goes live with Alberta listings";
       scopeLbl.classList.add("show");
     }
-    if(!matrixOn) drawChart(true);
+    if(!matrixOn) drawMsrpChart(lastDev);
   }
 
   // ---- powertrain breakdown tiles (clickable -> drawer) ----
@@ -1316,12 +1363,20 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   scrim.addEventListener("click",closeDrawer);
   document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawer(); });
 
-  // ---- range buttons ----
-  ["1D","1W","1M","1Y"].forEach((r,i)=>{var b=document.createElement("button");b.textContent=r;if(i===2)b.className="on";
-    b.onclick=function(){document.querySelectorAll("#rng button").forEach(x=>x.className="");b.className="on";};document.getElementById("rng").appendChild(b);});
+  // Range buttons removed with the simulated series — see the markup comment.
+  // They selected a window over data that did not exist.
 
   // ---- init ----
-  renderTicker(); renderSide(); renderChips(); renderPt(); drawChart(true);
+  // Baseline first so the chart is never blank, then the real reading if we
+  // have enough listings to publish one.
+  var lastDev=null;
+  renderTicker(); renderSide(); renderChips(); renderPt(); drawMsrpChart(null);
+
+  fetch("https://debigtyjhjamipooajhk.supabase.co/rest/v1/rpc/fn_alberta_msrp_deviation",
+        { method:"POST", headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON, "Content-Type":"application/json" }, body:"{}" })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){ if(d){ lastDev=d; drawMsrpChart(d); } })
+    .catch(function(e){ console.warn("deviation read failed:", e.message); });
   var lmiEl=document.getElementById("lmi");
 
   // The hero reports a REAL figure: the median MSRP across every trim we have
@@ -1394,7 +1449,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var slope = series[N-1]-series[N-4];
     var nf = 42 + slope*9 + (rnd()-0.5)*10;
     frust.push(Math.max(6,Math.min(96,nf))); frust.shift();
-    updateChart();
+    // updateChart() removed: it advanced a simulated series every few seconds.
+    // The MSRP baseline chart shows a real reading (or an honest empty state)
+    // and only changes when the underlying listings do.
     if(matrixOn) updateMatrix();
     // The hero and the change indicator are NOT touched here any more. This
     // used to tick the headline every ~4s off a random walk — invented movement
