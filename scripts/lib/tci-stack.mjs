@@ -129,6 +129,7 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   console.log(`[${makeName}] series to scrape: ${series.length}${filterSeries ? ` (filtered to ${filterSeries})` : ""}`);
 
   const msrpRows = [], financeRows = [], leaseRows = [];
+  const skipped = { noGrade: 0, fractional: 0 };
 
   for (const s of series) {
     const fuel = inferFuel(s.name, s.tag);
@@ -142,9 +143,18 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
         const pkg = (Array.isArray(pkgs) && (pkgs.find(p => p.basePackage) || pkgs[0])) || null;
         const msrp = pkg?.vehicleStartPrice?.amount;
         if (!msrp) continue;
+        // A published MSRP is a whole dollar figure. Fractional values mean the
+        // API handed us a CALCULATED price (fees/levies folded in) rather than
+        // the advertised sticker -- the exact bug that put $83,586.92 on a
+        // Land Cruiser whose real MSRP is $90,615. Never store those.
+        if (!Number.isInteger(Number(msrp))) { skipped.fractional++; continue; }
         const grade = await fetchGrade(host, brandFolder, s.seriesCode, year, modelCode);
         await sleep(100);
-        msrpRows.push({ year, make: makeName, model: s.name, trim: grade || modelCode, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+        // NEVER fall back to modelCode: internal codes ("BX", "WX", "HI") are not
+        // Canadian marketing trims, can't be matched to a listing, and shipped
+        // as real trim names once (2026-08-11 Land Cruiser regression).
+        if (!grade) { skipped.noGrade++; continue; }
+        msrpRows.push({ year, make: makeName, model: s.name, trim: grade, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
       }
 
       const rates = await fetchRates(host, brand, s.seriesCode, year);
@@ -162,6 +172,7 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   }
 
   console.log(`[${makeName}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
+  if (skipped.noGrade || skipped.fractional) console.log(`  quality gate rejected: ${skipped.noGrade} missing-grade, ${skipped.fractional} fractional-price`);
   // A grade can appear under two modelCodes (same year/model/trim) — collapse to
   // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
   return {
@@ -176,7 +187,12 @@ async function replaceRows(table, rows, makeName, { fatal = true } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   try {
-    const del = await fetch(`${url}/rest/v1/${table}?make=eq.${encodeURIComponent(makeName)}`, { method: "DELETE", headers });
+    // Provenance wins: rows carrying a source_url were verified by hand against
+    // the manufacturer's own published page. A scraper refresh must never wipe
+    // them (it did, on 2026-08-11, replacing toyota.ca-sourced Land Cruiser
+    // MSRPs with calculated prices under internal trim codes).
+    const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
+    const del = await fetch(`${url}/rest/v1/${table}?make=eq.${encodeURIComponent(makeName)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
     for (let i = 0; i < rows.length; i += 500) {
       const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });

@@ -1,0 +1,30 @@
+# One-shot repair for the 2026-08-11 msrp_catalog corruption.
+#
+# What happened: scripts/lib/tci-stack.mjs read Toyota's build-&-price
+# `vehicleStartPrice` (a CALCULATED, fee-inclusive figure — hence every value
+# ending in .92) instead of the published MSRP, wrote internal model codes
+# ("BX", "WX", "HI") as trim names whenever the grade lookup failed, and its
+# delete-then-insert wiped hand-verified rows that carried source_url
+# provenance. ~17% of the catalog was affected, all Toyota.
+#
+# The scraper guards are fixed in code; this job repairs the stored data.
+name: Catalog repair (one-shot)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge calculated-price rows and restore verified Land Cruiser MSRPs
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @- <<'JSON'
+          {"query":"delete from msrp_catalog where msrp is not null and msrp <> round(msrp); insert into msrp_catalog (year, make, model, trim, msrp, fuel_type, source_url) values (2027,'Toyota','Land Cruiser','1958',75450,'Hybrid','https://www.toyota.ca/en/vehicles/land-cruiser/models-specifications/'),(2027,'Toyota','Land Cruiser','Cruiser',84240,'Hybrid','https://www.toyota.ca/en/vehicles/land-cruiser/models-specifications/'),(2027,'Toyota','Land Cruiser','Premium Package',90615,'Hybrid','https://www.toyota.ca/en/vehicles/land-cruiser/models-specifications/') on conflict (year, make, model, trim) do update set msrp = excluded.msrp, source_url = excluded.source_url; select count(*) as remaining_fractional from msrp_catalog where msrp is not null and msrp <> round(msrp);"}
+          JSON
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
