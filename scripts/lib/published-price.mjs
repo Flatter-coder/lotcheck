@@ -14,9 +14,30 @@
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
-/** Render a page (JS executed, lazy content scrolled into view) and return HTML. */
+/**
+ * Render a page (JS executed, lazy content scrolled into view) and return HTML.
+ *
+ * Two routes, in order:
+ *   1. the `render-page` edge function, which holds the Scrapfly key in
+ *      Supabase -- so the key lives in ONE place instead of being copied into
+ *      GitHub Actions as a second secret to rotate and leak;
+ *   2. a direct Scrapfly call, when SCRAPFLY_API_KEY happens to be in the
+ *      environment (local debugging).
+ */
 export async function renderPage(url, { key = process.env.SCRAPFLY_API_KEY, budgetMs = 60_000 } = {}) {
-  if (!key) throw new Error("SCRAPFLY_API_KEY is not set — cannot render published-price pages");
+  const sbUrl = process.env.SUPABASE_URL, sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key && sbUrl && sbKey) {
+    const res = await fetch(`${sbUrl.replace(/\/$/, "")}/functions/v1/render-page`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: sbKey, Authorization: `Bearer ${sbKey}` },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(budgetMs + 40_000),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j.html) throw new Error(`render-page: ${j.error || "HTTP " + res.status}`);
+    return j.html;
+  }
+  if (!key) throw new Error("no render route: set SCRAPFLY_API_KEY, or SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to use the render-page function");
   const u = new URL("https://api.scrapfly.io/scrape");
   u.searchParams.set("key", key);
   u.searchParams.set("url", url);
