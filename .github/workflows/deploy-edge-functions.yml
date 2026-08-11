@@ -33,9 +33,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Authenticate the CLI-release lookup: unauthenticated GitHub API calls
+      # are rate-limited per runner IP, and a busy day of deploys exhausted it
+      # ("Failed to resolve latest Supabase CLI release: rate limit exceeded"),
+      # failing the deploy before our own retry loop could help.
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Deploy all edge functions (retries ride out flaky CDN 522s)
         run: |
           for i in 1 2 3; do
