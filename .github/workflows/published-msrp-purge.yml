@@ -1,0 +1,24 @@
+# One-shot: drop the first published-capture run's rows before re-capturing.
+# That run stored heading text as trim names ("Price RS", "Vehicle Details 2025
+# Enclave") and cross-linked models from the page ("Small SUV Encore GX" on the
+# Envista page). The extractor now strips nav chrome and discards other models;
+# this clears what the first pass wrote so the re-run starts clean. The
+# hand-verified toyota.ca / ford.ca rows are kept.
+name: Purge first published capture (one-shot)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete capture rows, keep hand-verified ones
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"delete from msrp_catalog where source_url is not null and source_url not like '"'"'%toyota.ca%'"'"' and source_url not like '"'"'%ford.ca/suvs/mach-e%'"'"'; delete from listing_analysis_cache; select count(*) as remaining_published from msrp_catalog where source_url is not null;"}'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

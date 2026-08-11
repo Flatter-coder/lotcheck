@@ -96,7 +96,22 @@ const strip = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g,
  * configurator total for whatever options happen to be selected — reading it
  * as an MSRP is the same mistake that started all this.
  */
-export function extractStartingPrices(html) {
+// Words that appear around a price on these pages but are never part of a trim
+// name: nav chrome, section headings, body-style labels, model years.
+const NOISE = /^(price|prices|view|inventory|learn|more|models?|model|vehicle|details|detail|drive|driven|choose|your|also|like|explore|build|compare|starting|from|new|the|all|small|compact|mid-?size|full-?size|suv|suvs|truck|trucks|car|cars|electric|remarkably|20\d{2})$/i;
+
+function cleanTrim(raw) {
+  let words = String(raw || "").split(/\s+/).filter(Boolean);
+  // Strip noise from the FRONT (headings precede the card) and the back.
+  while (words.length && NOISE.test(words[0])) words.shift();
+  while (words.length && NOISE.test(words[words.length - 1])) words.pop();
+  // A real trim is short. Anything longer is a sentence we misread.
+  if (!words.length || words.length > 3) return null;
+  const out = words.join(" ");
+  return /^[A-Za-z0-9][A-Za-z0-9 .\-+]{0,26}$/.test(out) ? out : null;
+}
+
+export function extractStartingPrices(html, { model = null, otherModels = [] } = {}) {
   if (!html) return [];
   const text = strip(html);
   const out = [];
@@ -104,32 +119,46 @@ export function extractStartingPrices(html) {
   const re = /(starting\s+at|starting\s+from|from)\s*:?\s*\$\s?([0-9]{2,3},[0-9]{3})(?:\.\d{2})?/gi;
   let m, prevEnd = 0;
   while ((m = re.exec(text)) !== null) {
+    const windowStart = prevEnd;
+    prevEnd = re.lastIndex;   // advance FIRST: a dropped row must still move the
+                              // window, or the next card inherits this text
     const price = Number(m[2].replace(/,/g, ""));
     if (!Number.isInteger(price) || price < 10_000 || price > 500_000) continue;
     // The trim name is the nearest preceding capitalised fragment; keep it
     // short and reject sentence-like text so we never store prose as a trim.
     // Bound the search to text since the PREVIOUS price, so one card's name can
     // never be concatenated onto the next ("LS RS Activ").
-    let before = text.slice(Math.max(prevEnd, m.index - 110), m.index);
+    let before = text.slice(Math.max(windowStart, m.index - 110), m.index);
     // Strip the PREVIOUS card's price labels, or they mask this card's name
     // ("... As configured: $46,188* RS" must yield "RS", not nothing).
     before = before.replace(/(starting\s+at|starting\s+from|from|as\s+configured)\s*:?\s*\$\s?[0-9,]+(?:\.\d{2})?\*?/gi, " ")
                    .replace(/[|•·—–*]/g, " ").replace(/\s+/g, " ").trim();
-    const tail = before.match(/([A-Z][A-Za-z0-9.\-+]*(?: [A-Z0-9][A-Za-z0-9.\-+]*){0,3})\s*$/);
-    const cand = tail ? tail[1].trim() : "";
-    const trim = cand && cand.length <= 28 && cand.split(" ").length <= 4 ? cand : null;
-    out.push({ trim, msrp: price });
-    prevEnd = re.lastIndex;
+    const tail = before.match(/([A-Za-z0-9][A-Za-z0-9.\-+]*(?: [A-Za-z0-9][A-Za-z0-9.\-+]*){0,4})\s*$/);
+    const trim = cleanTrim(tail ? tail[1] : "");
+    // Cross-model contamination: these pages cross-link the rest of the lineup
+    // ("Small SUV Encore GX $34,192" on the Envista page), and storing those
+    // under the target model would be simply wrong. Drop them.
+    const norm = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const isOther = trim && otherModels.some((m) => norm(m) && norm(m) !== norm(model) && norm(trim).includes(norm(m)));
+    if (isOther) continue;
+    // "Equinox $40,042" on the Equinox page is the model's starting price, not
+    // a trim called Equinox.
+    const finalTrim = trim && model && norm(trim) === norm(model) ? null : trim;
+    out.push({ trim: finalTrim, msrp: price });
   }
   // Same trim twice (repeated cards) -> keep the lowest, matching how the rest
   // of the catalog dedupes to the advertised "starting" figure.
   const byTrim = new Map();
   for (const r of out) {
-    const k = r.trim || `__untrimmed_${r.msrp}`;
+    const k = r.trim ? r.trim.toLowerCase() : `__untrimmed_${r.msrp}`;
     const prev = byTrim.get(k);
     if (!prev || r.msrp < prev.msrp) byTrim.set(k, r);
   }
-  return [...byTrim.values()];
+  // A nameless row at the same price as a named one is the same car seen twice
+  // (the hero block above the trim cards) -- keep the named one.
+  const named = [...byTrim.values()].filter((r) => r.trim);
+  const namedPrices = new Set(named.map((r) => r.msrp));
+  return [...byTrim.values()].filter((r) => r.trim || !namedPrices.has(r.msrp));
 }
 
 /** Turn extracted pairs into msrp_catalog rows. */

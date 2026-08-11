@@ -58,7 +58,11 @@ async function main() {
   for (const t of targets) {
     try {
       const html = await renderPage(t.url);
-      const pairs = extractStartingPrices(html);
+      // Pass the rest of the make's lineup so cross-linked models on the page
+      // ("Small SUV Encore GX $34,192" on the Envista page) are discarded.
+      const otherModels = TARGETS.filter(x => x.make === t.make).map(x => x.model)
+        .concat(["Enclave", "Envision", "Envista", "Encore GX", "OPTIQ", "VISTIQ", "Escalade", "Silverado EV", "Equinox EV", "Blazer EV"]);
+      const pairs = extractStartingPrices(html, { model: t.model, otherModels });
       if (!pairs.length) {
         empty++;
         console.warn(`  ${t.make} ${t.model}: rendered but no "starting at" price found — page layout may have changed.`);
