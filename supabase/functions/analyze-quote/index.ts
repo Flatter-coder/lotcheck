@@ -10,7 +10,7 @@
 //             from its own training knowledge -- that's a fact, and facts
 //             should come from a real source, not a guess.
 //   Step 2 -- We look up the REAL MSRP in our own msrp_catalog table (built
-//             from VinAudit manufacturer data). This is the verification
+//             from official manufacturer data). This is the verification
 //             step. If the dealer wrote a different "MSRP" on the quote
 //             itself, we flag the mismatch -- real negotiation leverage.
 //   Step 3 -- We assemble the final `analysis` object in EXACTLY the shape
@@ -466,9 +466,9 @@ Deno.serve(async (req: Request) => {
     const analysis = buildAnalysis(extracted, msrpLookup);
     await applyVerifiedWarranty(analysis);
     await applyRemainingWarranty(analysis);
-    // Auto market value (best-effort, live mode only, cheap). Gives used cars a
-    // real value anchor instead of the synthetic estimate. No-op until
-    // VINAUDIT_MODE=live + a VIN is present.
+    // Auto market value (best-effort). Gives used cars a real value anchor
+    // instead of the synthetic estimate. Inert until MARKETVALUE_PROVIDER is
+    // set to a real provider and a VIN is present.
     if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
     analysis.vinCheck = validateVin(analysis.vin);
     if (analysis.year && analysis.make && analysis.model) {
@@ -534,7 +534,7 @@ Deno.serve(async (req: Request) => {
 
 // Looks up msrp_catalog for the exact year/make/model/trim, relaxing the
 // match step by step. Never throws -- if the table is empty or missing
-// (e.g. before the VinAudit backfill has run), every quote just falls back
+// (e.g. before the catalog backfill has run), every quote just falls back
 // to "not_found" instead of breaking the whole feature. The moment real
 // rows land in msrp_catalog, this starts returning verified hits
 // automatically, no code changes needed.
@@ -549,16 +549,15 @@ Deno.serve(async (req: Request) => {
 // paperwork error.
 //
 // Piggybacks on msrp_catalog (same table used by lookupVerifiedMsrp
-// below, extended with a fuel_type column) -- one VinAudit/Black Book
-// backfill populates both. Matches on year+make+model only (not trim),
+// below, extended with a fuel_type column) -- one catalog backfill
+// populates both. Matches on year+make+model only (not trim),
 // since fuel type is a model-level fact for the overwhelming majority of
 // vehicles, not a trim-level one.
 //
 // Mutates extracted.fuelType in place and sets fuelTypeVerified -- falls
 // back to whatever Claude read off the document when there's no catalog
-// match, which is every case right now since the catalog has no rows
-// until the VinAudit backfill runs (pending, September). Never throws,
-// never blocks the report.
+// match, so a make whose fuel_type column hasn't been backfilled yet
+// degrades quietly. Never throws, never blocks the report.
 async function applyVerifiedFuelType(extracted: any): Promise<void> {
   if (!extracted || !extracted.year || !extracted.make || !extracted.model) return;
   try {

@@ -6,8 +6,14 @@
 // rewrite (locale-abstraction-rule), and no single provider can gate the roadmap
 // (no-single-point-of-failure).
 //
-//   MARKETVALUE_PROVIDER  ->  marketcheck | vinaudit | cbb | none
-//                             (default: vinaudit — preserves today's behaviour)
+//   MARKETVALUE_PROVIDER  ->  marketcheck | cbb | none   (default: none)
+//
+// A provider is allowed here ONLY if it cannot be turned off by the people we
+// audit. A vendor that also sells to dealers is a kill switch held by the other
+// side of the table: the better LotCheck works, the stronger their incentive to
+// have us cut off, and by then we would be dependent. VinAudit was removed on
+// 2026-08-11 for exactly that reason (plus service quality) and must not come
+// back. See vendor-capture-risk / zero-to-one-buyer-side-moat.
 //
 // EVERY provider normalizes to the same MarketValue shape the report already
 // consumes. On ANY error, thin coverage, or missing key -> returns null, and the
@@ -15,8 +21,6 @@
 // provider can't back the value with enough comps, that's null, not a guess
 // (price-verification-gate / make-it-dispute-proof).
 // ============================================================================
-
-import { fetchMarketValue as vinauditMarketValue } from "./vinaudit.ts";
 
 export interface MarketValue {
   average: number | null;
@@ -38,7 +42,10 @@ export interface MarketCtx {
 }
 
 const env = (k: string): string | undefined => (globalThis as any).Deno?.env?.get(k);
-const PROVIDER = (): string => (env("MARKETVALUE_PROVIDER") || "vinaudit").toLowerCase();
+// Defaults to "none" -> fetchMarketValue returns null and the report omits the
+// module. Behaviour-identical to the old "vinaudit" default, which was itself a
+// no-op unless a second switch was flipped.
+const PROVIDER = (): string => (env("MARKETVALUE_PROVIDER") || "none").toLowerCase();
 
 // Minimum comps required to DISPLAY a value. Below this we return null rather
 // than show a low-confidence number as authoritative. Tunable per provider.
@@ -120,8 +127,6 @@ export async function fetchMarketValue(
     switch (PROVIDER()) {
       case "marketcheck":
         return await marketcheckValue(vin, mileage ?? null, ctx);
-      case "vinaudit":
-        return await vinauditMarketValue(vin, mileage);
       case "cbb":
         // TODO: Canadian Black Book adapter (CA value anchor) — add when/if we
         // sign the CBB feed. Inert for now.

@@ -389,14 +389,13 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
 //
 // Piggybacks on msrp_catalog (same table already planned for MSRP
 // verification, extended with a fuel_type column) rather than a separate
-// table -- one VinAudit/Black Book backfill populates both. Matches on
+// table -- one catalog backfill populates both. Matches on
 // year+make+model only (not trim) since fuel type is a model-level fact,
 // not a trim-level one, for the overwhelming majority of vehicles.
 //
 // Falls back to whatever the page extraction said when there's no
-// catalog match -- which is EVERY case right now, since the catalog
-// itself has no rows until the VinAudit backfill runs (pending,
-// September). Never throws, never blocks the report either way.
+// catalog match, so a make whose fuel_type column hasn't been backfilled
+// yet degrades quietly. Never throws, never blocks the report either way.
 async function applyVerifiedFuelType(analysis: any): Promise<void> {
   if (!analysis || !analysis.year || !analysis.make || !analysis.model) return;
   try {
@@ -2020,7 +2019,8 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   await applyVerifiedWarranty(analysis);
   await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
-  // Auto market value (best-effort, live mode only). No-op until VINAUDIT_MODE=live.
+  // Auto market value (best-effort). Inert until MARKETVALUE_PROVIDER is set to
+  // a real provider; returns null and the report omits the module.
   if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
   analysis.vinCheck = validateVin(analysis.vin);
   // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->

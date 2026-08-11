@@ -60,6 +60,29 @@ everything except `/api/*` rewrites to `/app.html`.
 - `app.html` references `/icon-152.png` (apple-touch-icon) but `public/` only
   ships icon-96/192/512, so that one icon 404s.
 
+## Vendor policy (hard rule)
+
+**Never depend on a vendor whose other customers are dealers, OEMs, or
+dealer-facing marketplaces.** Before proposing any vendor, ask: *who else pays
+them, and would LotCheck's success threaten that revenue?* If the answer is
+dealers, it is a no — regardless of price, coverage, or data quality.
+
+A shared vendor is a kill switch held by the people LotCheck is built to
+counter. Dealers can ask that vendor to cut us off, and the vendor weighs one
+buyer-side startup against a book of dealer accounts. The incentive gets
+**stronger the better LotCheck works** — and by the time it is exercised we are
+already dependent, so the damage lands at maximum leverage against us. That is
+an adversary with a motive, not an availability risk.
+
+- Vendors are allowed as **swappable plumbing only** (page render/fetch), never
+  as a data backbone. Anything that is the *substance* of a report is built
+  in-house.
+- Prefer sources nobody can revoke for commercial reasons: public registries the
+  buyer can access themselves, official manufacturer data, government APIs, and
+  our own crawl of dealers' public listings.
+- **VinAudit is permanently rejected** (removed 2026-08-11). Do not reintroduce
+  it or propose it.
+
 ## Conventions
 
 - Locale is Canadian (`en-CA`); copy, pricing, and rebate logic are
