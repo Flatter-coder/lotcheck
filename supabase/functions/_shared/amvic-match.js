@@ -72,25 +72,47 @@ export function matchLicensee(rows, sig) {
   const strongTokens = tokens(name).length >= 2;
   if (best.score < 0.72 || !strongTokens) return null;
 
-  // Ambiguity guard. The thing that actually matters is whether the ANSWER is
-  // in doubt, not whether two rows look alike: a registry commonly holds
-  // several records for one business (extra locations, renewals), and refusing
-  // those made us silently skip real dealers -- Advantage Ford has two
-  // identical "ADVANTAGE FORD SALES LTD." rows, both Issued, and we reported
-  // nothing (2026-08-11). So: find the near-ties, and only refuse when they
-  // disagree about who the business is or what its status is.
+  // SUPERSEDED RECORDS -- the most dangerous failure this matcher can have.
+  //
+  // Dealerships change hands, and the registry KEEPS the old operator's record
+  // under the same storefront name. Fish Creek Nissan has three: a 2014 record
+  // under a numbered company ("Closed - Voluntarily"), a 2019 one, and the
+  // CURRENT operator's licence (Issued to 2027) filed under the combined trade
+  // name "FISH CREEK NISSAN/CALGARY N MOTORS LP". Scoring on name alone picks
+  // the dead 2014 record -- an exact string match -- and we told a buyer that a
+  // licensed, operating dealer was closed (2026-08-11). That is precisely the
+  // false, damaging claim this module exists to prevent.
+  //
+  // The rule: a storefront that holds a CURRENT licence is licensed. Old
+  // records for the same storefront are history, not evidence. Combined trade
+  // names mean token overlap alone misses the live record, so treat any row
+  // whose name CONTAINS the dealer's name as referring to the same storefront.
+  const q = normName(name);
+  const mentionsQuery = (r) => {
+    const legal = normName(r.name || "");
+    const trade = r.trade_name && r.trade_name !== "N/A" ? normName(r.trade_name) : "";
+    return (legal && legal.includes(q)) || (trade && trade.includes(q));
+  };
   const scoreOf = (r) => Math.max(nameScore(name, r.name || ""), r.trade_name && r.trade_name !== "N/A" ? nameScore(name, r.trade_name) : 0);
-  const contenders = rows.filter((r) => r === best.row || best.score - scoreOf(r) < 0.1);
-  const sameBusiness = (a, b) => normName(a.name || a.trade_name || "") === normName(b.name || b.trade_name || "");
-  const conflicted = contenders.some((r) => !sameBusiness(r, best.row) || classifyStatus(r.facility_status) !== classifyStatus(best.row.facility_status));
-  if (conflicted) return null;
+  const aliases = rows.filter((r) => r === best.row || scoreOf(r) >= 0.72 || mentionsQuery(r));
 
-  // Same business, same status across every contender -- pick the most useful
-  // record: the one whose city matches, else the one that expires latest.
   const rank = (r) => (city && normName(r.city || "").includes(city) ? 2 : 0) + (r.expiry_date ? 1 : 0);
-  const chosen = contenders.slice().sort((a, b) => rank(b) - rank(a))[0] || best.row;
+  const live = aliases.filter((r) => classifyStatus(r.facility_status) === "valid");
+  if (live.length) {
+    // Report the current licence. The card prints the legal name and licence
+    // number alongside it, so the buyer can see exactly whose record this is.
+    const chosen = live.slice().sort((a, b) => rank(b) - rank(a))[0];
+    return { row: chosen, confidence: Number(best.score.toFixed(2)), basis: aliases.length > 1 ? "current licence (supersedes older records)" : "name" };
+  }
 
-  return { row: chosen, confidence: Number(best.score.toFixed(2)), basis: contenders.length > 1 ? "name (multiple records agree)" : "name" };
+  // No live licence anywhere under this name. Every alias says "not currently
+  // licensed"; report the most recent such record rather than the oldest.
+  const byRecency = aliases.slice().sort((a, b) => {
+    const t = (r) => Date.parse(r.expiry_date || "") || 0;
+    return (t(b) - t(a)) || (rank(b) - rank(a));
+  });
+  const chosen = byRecency[0] || best.row;
+  return { row: chosen, confidence: Number(best.score.toFixed(2)), basis: aliases.length > 1 ? "most recent record" : "name" };
 }
 
 /** Classify the regulator's verbatim status into a report tone. */

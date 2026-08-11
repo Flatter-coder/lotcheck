@@ -82,7 +82,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11b";
+const CACHE_VER = "2026-08-11c";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1585,6 +1585,8 @@ async function checkDealerLicence(analysis: any): Promise<void> {
       licenceNumber: hit.row.registration_number || null,
       expiryDate: hit.row.expiry_date || null,
       confidence: hit.confidence,
+      basis: hit.basis,                            // e.g. "current licence (supersedes older records)"
+      tradeName: hit.row.trade_name && hit.row.trade_name !== "N/A" ? hit.row.trade_name : null,
       source: "AMVIC public registry",
       checkedAt: new Date().toISOString(),
     };
