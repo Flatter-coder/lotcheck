@@ -6,10 +6,16 @@
 // looks healthy, the dataset quietly has a hole, and nobody finds out. So the
 // seed grows only by confirmation, never by inference.
 //
-// WHERE CANDIDATES COME FROM. OpenStreetMap already gives us every shop=car in
-// Alberta, and the Overpass query update-alberta-dealers.mjs runs has always
-// asked for `out center tags` — meaning the `website` tag has been coming back
-// and being discarded. This picks it up. Free, no vendor, no new dependency.
+// WHERE CANDIDATES COME FROM. Two sources, both already ours:
+//   --source osm   (default) OpenStreetMap shop=car in Alberta. The Overpass
+//                  query update-alberta-dealers.mjs runs has always asked for
+//                  `out center tags`, so the `website` tag has been coming back
+//                  and being discarded. This picks it up. No DB needed.
+//   --source amvic amvic_licensees.website — the REGULATOR'S list of licensed
+//                  Alberta dealers, already refreshed weekly by
+//                  scripts/amvic-refresh.mjs. Authoritative and far more
+//                  complete than OSM, which had a website for only 131 of 466.
+//                  Needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
 //
 // WHAT IT PROBES. SM360 (the JSON listing feed the crawler reads) and Convertus
 // (detected, not yet crawlable — recorded so we know the size of the prize).
@@ -20,7 +26,8 @@
 // plenty — dealership rosters and platforms change slowly).
 //
 // Run (from repo root):
-//   node scripts/discover-dealer-feeds.mjs                      # probe, report, write nothing
+//   node scripts/discover-dealer-feeds.mjs                      # probe OSM, report, write nothing
+//   node scripts/discover-dealer-feeds.mjs --source amvic       # probe the regulator's roster instead
 //   node scripts/discover-dealer-feeds.mjs --out found.json     # also save the results
 //   node scripts/discover-dealer-feeds.mjs --write              # upsert confirmed SM360 hosts into dealer_source
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
@@ -28,6 +35,7 @@ import { writeFileSync } from "node:fs";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
+const SOURCE = (ARG("--source", "osm") || "osm").toLowerCase();
 const LIMIT = Number(ARG("--limit", "0")) || 0;
 const OUT = ARG("--out");
 
@@ -129,20 +137,45 @@ async function probe(cand) {
   }
 }
 
-async function main() {
+// The regulator's own roster of licensed Alberta dealers. Only ACTIVE licensees
+// with a website are worth probing — a lapsed licence means the lot is gone.
+async function candidatesFromAmvic() {
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) { console.error("--source amvic needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"); process.exit(1); }
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(url, key);
+  const { data, error } = await supabase
+    .from("amvic_licensees").select("name,trade_name,city,website,facility_status")
+    .not("website", "is", null);
+  if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
+  const rows = (data || []).filter((r) => !r.facility_status || /active/i.test(r.facility_status));
+  console.log(`${data?.length ?? 0} AMVIC licensees with a website, ${rows.length} active.`);
+  return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: data?.length ?? 0 };
+}
+
+async function candidatesFromOsm() {
   console.log("Fetching Alberta shop=car from OpenStreetMap...");
   const osm = await fetchOverpass();
   const elements = osm?.elements || [];
+  const rows = elements.map((el) => {
+    const t = el?.tags || {};
+    return { website: t.website || t["contact:website"] || t.url, name: t.name || null, city: t["addr:city"] || null };
+  });
+  console.log(`${elements.length} OSM dealers.`);
+  return { rows, total: elements.length };
+}
+
+async function main() {
+  const { rows } = SOURCE === "amvic" ? await candidatesFromAmvic() : await candidatesFromOsm();
 
   const byHost = new Map();
-  for (const el of elements) {
-    const t = el?.tags || {};
-    const host = toOrigin(t.website || t["contact:website"] || t.url);
+  for (const r of rows) {
+    const host = toOrigin(r.website);
     if (!host || byHost.has(host)) continue;
-    byHost.set(host, { host, name: t.name || null, city: t["addr:city"] || null });
+    byHost.set(host, { host, name: r.name || null, city: r.city || null });
   }
   let candidates = [...byHost.values()];
-  console.log(`${elements.length} OSM dealers, ${candidates.length} with a usable website tag.`);
+  console.log(`${candidates.length} distinct usable hosts (source: ${SOURCE}).`);
   if (LIMIT) { candidates = candidates.slice(0, LIMIT); console.log(`--limit ${LIMIT}: probing a sample.`); }
 
   const results = [];
