@@ -12,7 +12,34 @@
 //   * POST only, one URL per call
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY") || "";
-const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+// Supabase deprecated SUPABASE_SERVICE_ROLE_KEY in favour of secret keys, so
+// the value CI sends and the value this function reads can legitimately differ.
+// Accept the token if it matches ANY configured privileged key; a comma/JSON
+// list (SUPABASE_SECRET_KEYS) is split so each entry is checked.
+const KEY_VARS = ["SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SECRET_KEYS", "SUPABASE_SECRET_KEY", "SB_SECRET_KEY"];
+function privilegedKeys(): string[] {
+  const out: string[] = [];
+  for (const name of KEY_VARS) {
+    const raw = (Deno.env.get(name) || "").trim();
+    if (!raw) continue;
+    if (raw.startsWith("[") || raw.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(raw);
+        for (const v of (Array.isArray(parsed) ? parsed : Object.values(parsed))) {
+          const k = typeof v === "string" ? v : (v as any)?.api_key || (v as any)?.key;
+          if (typeof k === "string" && k.length > 20) out.push(k.trim());
+        }
+        continue;
+      } catch { /* fall through to plain split */ }
+    }
+    for (const k of raw.split(/[,\s]+/)) if (k.length > 20) out.push(k.trim());
+  }
+  return out;
+}
+function configuredNames(): string[] {
+  return KEY_VARS.filter((n) => (Deno.env.get(n) || "").trim().length > 0);
+}
 
 // Manufacturer domains whose own published prices we read. Nothing else is
 // renderable through this endpoint -- notably no dealer sites, so it can never
@@ -44,8 +71,11 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405, headers: CORS });
 
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  if (!SERVICE_ROLE || !sameSecret(token, SERVICE_ROLE)) {
-    return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { ...CORS, "Content-Type": "application/json" } });
+  const keys = privilegedKeys();
+  if (!keys.length || !keys.some((k) => sameSecret(token, k))) {
+    // Names only, never values -- enough to diagnose a key-rotation mismatch
+    // without turning an auth failure into a credential leak.
+    return new Response(JSON.stringify({ error: "forbidden", configured: configuredNames() }), { status: 403, headers: { ...CORS, "Content-Type": "application/json" } });
   }
   if (!SCRAPFLY_API_KEY) {
     return new Response(JSON.stringify({ error: "SCRAPFLY_API_KEY not configured" }), { status: 503, headers: { ...CORS, "Content-Type": "application/json" } });
