@@ -158,6 +158,10 @@
   .report-head .chg{margin-top:16px}
   .lede{font-size:17px;line-height:1.65;color:var(--dim);margin-top:22px;max-width:62ch}
   .lede b{color:var(--ink);font-weight:600}
+  /* Basis note: MSRP is a national figure, the Alberta part is what dealers here
+     ask against it. Small, but it has to be on the page for the Alberta label to
+     be literally true. */
+  .basis-note{font-size:12px;line-height:1.55;color:var(--dim);opacity:.72;margin-top:10px;max-width:62ch}
   /* section headings with a hairline rule, magazine style */
   .report h2{font-size:13px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);
     font-weight:600;padding-bottom:12px;border-bottom:1px solid var(--hair-strong);margin-bottom:20px;
@@ -578,6 +582,12 @@
   }
 </style>
 <script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
+<script>
+/* Public anon key — safe in a page by design (RLS-protected, read-only). Hoisted
+   here so the catalog reader below can use it: the copy further down lives in a
+   later script block that has not executed yet when the index first paints. */
+window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
+</script>
 </head>
 <body>
 <div class="starfield" id="starfield" aria-hidden="true"></div>
@@ -643,10 +653,10 @@
         </g>
       </svg>
     </div>
-    <div><h1>MSRP Live Index</h1><div class="sub">LotCheck · Canadian new-vehicle pricing</div></div>
+    <div><h1>MSRP Live Index</h1><div class="sub">LotCheck · Alberta new-vehicle pricing</div></div>
   </div>
   <div class="badges">
-    <span class="pill demo">Demo data · preview</span>
+    <span class="pill demo">Live MSRP catalog · index preview</span>
     <span class="clock mono" id="clock">--:--:--</span>
   </div>
 </header>
@@ -659,14 +669,19 @@
       <div class="idx mono" id="lmi">0.00</div>
       <div class="chg up" id="lmiChg">&nbsp;</div>
       <div class="scope-lbl" id="scopeLbl"></div>
-      <p class="lede">Where Canadian new-vehicle sticker prices sit today, tracked across
-        <b>29 makes</b>. The index reads dealer listings against verified MSRP — so a rising line
+      <p class="lede">Where Alberta new-vehicle sticker prices sit today, tracked across
+        <b><span id="makeCount">—</span> makes</b>. The index reads dealer listings against verified MSRP — so a rising line
         means the market is pushing <b>above</b> manufacturer pricing.</p>
+      <p class="basis-note">MSRP is set nationally by manufacturers. What is Alberta-specific is what
+        dealers here actually ask against it.</p>
     </div>
 
     <!-- CHART -->
     <section>
-      <h2>The index <span class="n">1M view</span></h2>
+      <h2>The index <span class="n">preview shape · not a real series</span></h2>
+      <p class="basis-note" style="margin:0 0 14px">The headline and the figures below are read live from LotCheck’s
+        verified MSRP catalogue. This chart is not: an index over time needs Alberta dealer listings to compare
+        against MSRP, and that collection has not started. The line is a placeholder shape, not history.</p>
       <div class="ctrls">
         <div class="rng" id="rng"></div>
         <button class="matrix-btn" id="matrixBtn"><span class="sq"></span>Reviews vs MSRP</button>
@@ -890,7 +905,51 @@
     if(matrixOn) drawMatrix(false); else drawChart(false);
   });
 
-  // ---- data model (demo) ----
+  // ---- REAL data: msrp_catalog ------------------------------------------
+  // 831 verified trims across 31 makes, read live from the same catalog the
+  // report uses to verify a dealer's MSRP claim. Public read via the anon key,
+  // RLS-protected, no server needed.
+  //
+  // WHAT IS AND IS NOT REAL HERE. The hero, the make/trim counts and the median
+  // are computed from these rows — real, checkable, ours. The index-over-time
+  // and the dealer markup are NOT: both are dealer-listings-vs-MSRP, and the
+  // listings table is empty until the Alberta crawl runs. Those stay visibly
+  // labelled rather than filled with invented numbers.
+  var CATALOG_URL = "https://debigtyjhjamipooajhk.supabase.co/rest/v1/msrp_catalog"
+    + "?select=make,msrp,year&limit=5000";
+  var catalog = { rows: [], makes: 0, trims: 0, median: null, loaded: false };
+
+  function summarize(rows){
+    var priced = rows.filter(function(r){ return Number(r.msrp) > 0; });
+    var prices = priced.map(function(r){ return Number(r.msrp); }).sort(function(a,b){ return a-b; });
+    return {
+      rows: priced,
+      makes: new Set(priced.map(function(r){ return r.make; }).filter(Boolean)).size,
+      trims: priced.length,
+      // Median, not mean: the catalog leans premium/EV because of which
+      // manufacturer sites we have backfilled, and a mean would carry that
+      // skew into a headline number.
+      median: prices.length ? prices[Math.floor(prices.length/2)] : null,
+      byMake: makeMedians(priced),
+      loaded: true,
+    };
+  }
+
+  // Median MSRP per make, richest coverage first. Makes with too few verified
+  // trims are dropped rather than shown as a "median" of two cars.
+  function makeMedians(rows){
+    var g={};
+    rows.forEach(function(r){ if(r.make) (g[r.make]=g[r.make]||[]).push(Number(r.msrp)); });
+    return Object.keys(g).map(function(k){
+      var v=g[k].sort(function(a,b){return a-b;});
+      return { make:k, n:v.length, median:v[Math.floor(v.length/2)] };
+    }).filter(function(m){ return m.n >= 5; })
+      .sort(function(a,b){ return b.n-a.n; });
+  }
+
+  // ---- index-over-time: simulated shape, NOT a real series ----------------
+  // Kept so the chart has a form to draw, but the hero no longer reports it and
+  // the chart is labelled. Replaced by a real series once listings exist.
   var lmi={val:148.72, day:+0.34};
 
   // POWERTRAIN taxonomy (the app's real 4-type classification) — all four present incl. PHEV
@@ -901,10 +960,14 @@
     {key:"BEV",    label:"BEV",              price:61340, chg:-1.12, factor:1.058}
   ];
 
+  // Placeholders only — overwritten by the real catalog before first render.
+  // The old "widest markup" tile is gone: it was dealer-vs-manufacturer, which
+  // needs listings we do not have yet, and it rendered a leaderboard of
+  // fictional dealer names.
   var side=[
-    {name:"Avg new MSRP", val:47180, kind:"$", sub:"across 29 makes", chg:+0.21, id:"avg"},
-    {name:"Widest markup", val:8.2, kind:"%", sub:"dealer vs mfr, 90d", chg:+0.4, id:"markup"},
-    {name:"Makes tracked", val:29, kind:"n", sub:"auto-refresh daily", chg:0, id:"makes"}
+    {name:"Makes tracked",    val:0, kind:"n", sub:"verified manufacturer pricing", chg:0, id:"makes"},
+    {name:"Trims verified",   val:0, kind:"n", sub:"official MSRP, model years 2025–27", chg:0, id:"trims"},
+    {name:"Median new MSRP",  val:0, kind:"$", sub:"across verified trims", chg:0, id:"median"}
   ];
 
   // ---- fictional dealers (illustrative sample) ----
@@ -1091,10 +1154,14 @@
 
   function countUp(el, target, kind){
     if(reduce){ el.textContent=fmt(target,kind); return; }
-    var t0=null, dur=850, from=0;
+    var t0=null, dur=850, from=0, done=false;
     function step(ts){t0=t0||ts; var k=Math.min(1,(ts-t0)/dur), e=1-Math.pow(1-k,3);
-      el.textContent=fmt(from+(target-from)*e, kind); if(k<1)requestAnimationFrame(step);}
+      el.textContent=fmt(from+(target-from)*e, kind); if(k<1)requestAnimationFrame(step); else done=true;}
     requestAnimationFrame(step);
+    // rAF does not run in a hidden tab, so a page opened in a background tab
+    // would sit showing the placeholder 0. The animation is decoration; the
+    // number is the point. If the frames have not arrived, just show the value.
+    setTimeout(function(){ if(!done) el.textContent=fmt(target,kind); }, dur+400);
   }
   function fmt(v,kind){ return kind==="$"?money(v):kind==="%"?v.toFixed(1)+"%":kind==="n"?Math.round(v):v.toFixed(2); }
   // gentle tint flash — eases back to neutral over .8s (no saturated blink)
@@ -1106,8 +1173,20 @@
   // ---- ticker ----
   var tItems=[["GAS",142.4,.14],["HYBRID",144.6,.24],["PHEV",156.9,-.31],["BEV",168.9,-1.12],
     ["PICKUP",156.2,.42],["SUV",149.8,-.18],["SEDAN",131.4,.11],["COMPACT",122.7,-.05],["LUXURY",172.3,.29],["MINIVAN",139.2,.07]];
+  // The ticker carried simulated index values with invented daily movement —
+  // fabricated numbers in the most prominent strip on the page. It now shows
+  // the real median MSRP per make from the catalog. No change figure, because
+  // we have no price history to compute one from yet.
   function renderTicker(){
-    var html=tItems.map(t=>{var cl=t[2]>=0?"up":"down";return '<span class="ti"><b>'+t[0]+'</b> <span class="v mono">'+t[1].toFixed(1)+'</span> <span class="'+cl+' mono">'+pct(t[2])+'</span></span>';}).join("");
+    var html;
+    if(catalog.loaded && catalog.byMake && catalog.byMake.length){
+      html=catalog.byMake.map(function(m){
+        return '<span class="ti"><b>'+m.make.toUpperCase()+'</b> <span class="v mono">'+money(m.median)+'</span> '+
+               '<span class="mono" style="opacity:.5">'+m.n+' trims</span></span>';
+      }).join("");
+    } else {
+      html='<span class="ti"><b>LOADING VERIFIED MSRP…</b></span>';
+    }
     document.getElementById("track").innerHTML=html+html;
   }
 
@@ -1136,7 +1215,7 @@
           '<div class="lb">'+
             '<div class="lb-head"><span>Dealer</span><span>Markup&nbsp;·&nbsp;Rating</span></div>'+
             rows+
-            '<div class="lb-note">Red = high markup with low review scores. Green = high markup with high review scores. Sample data — production joins dealers' advertised listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
+            '<div class="lb-note">Red = high markup with low review scores. Green = high markup with high review scores. Sample data — production joins dealers’ advertised listings to <span class="mono">msrp_catalog</span> and the reviews pipeline.</div>'+
           '</div>';
       }
       var chgHtml = s.chg ? '<span class="chgn '+(s.chg>=0?"up":"down")+'">'+pct(s.chg)+'</span>' : '';
@@ -1177,22 +1256,21 @@
       t.classList.toggle("active", !!on);
       t.classList.toggle("dim", !!(key && t.dataset.pt!==key));
     });
-    // hero re-scope
-    var lmiEl=document.getElementById("lmi");
-    var chgEl=document.getElementById("lmiChg");
+    // The hero is REAL (median verified MSRP) and must survive a chip click.
+    // This used to re-scope it by multiplying the simulated index by a per-
+    // powertrain factor, which both overwrote the real number and invented a
+    // scoped one. Powertrain scoping of the hero is off until fuel_type
+    // coverage supports it: it is set on 214 of 831 trims and the mix is 105
+    // BEV to 25 Gas, so a per-powertrain median would report our backfill order,
+    // not the market. Chips still drive the tiles and the chart.
     var scopeLbl=document.getElementById("scopeLbl");
     if(key){
       var p=powertrains.find(x=>x.key===key);
-      countUp(lmiEl, lmi.val*p.factor, "2");
-      chgEl.className="chg "+(p.chg>=0?"up":"down");
-      chgEl.innerHTML=(p.chg>=0?"▲ ":"▼ ")+pct(p.chg)+" today";
-      scopeLbl.textContent="Scoped to "+p.label;
+      scopeLbl.textContent="Tiles scoped to "+p.label+" · headline stays all "+catalog.makes+" makes";
       scopeLbl.classList.add("show");
-    }else{
-      countUp(lmiEl, lmi.val, "2");
-      chgEl.className="chg "+(lmi.day>=0?"up":"down");
-      chgEl.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
-      scopeLbl.classList.remove("show"); scopeLbl.textContent="";
+    }else if(catalog.loaded){
+      scopeLbl.textContent="Manufacturer MSRP across "+catalog.makes+" makes · dealer-asking index goes live with Alberta listings";
+      scopeLbl.classList.add("show");
     }
     if(!matrixOn) drawChart(true);
   }
@@ -1245,9 +1323,43 @@
   // ---- init ----
   renderTicker(); renderSide(); renderChips(); renderPt(); drawChart(true);
   var lmiEl=document.getElementById("lmi");
-  countUp(lmiEl, lmi.val, "2");
-  document.getElementById("lmiChg").className="chg "+(lmi.day>=0?"up":"down");
-  document.getElementById("lmiChg").innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
+
+  // The hero reports a REAL figure: the median MSRP across every trim we have
+  // verified. It is not the dealer-vs-MSRP index — that one needs Alberta
+  // listings and stays unreported until it can be computed rather than guessed.
+  function paintReal(){
+    document.querySelector(".report-head .kicker").textContent =
+      "Median new-vehicle MSRP · " + catalog.trims.toLocaleString("en-CA") + " verified trims";
+    countUp(lmiEl, catalog.median, "$");
+    var mc=document.getElementById("makeCount"); if(mc) mc.textContent=catalog.makes;
+    var chg=document.getElementById("lmiChg");
+    chg.className="chg"; chg.innerHTML="&nbsp;";      // no real series yet, so no movement is claimed
+    var sc=document.getElementById("scopeLbl");
+    if(sc){ sc.textContent="Manufacturer MSRP across "+catalog.makes+" makes · dealer-asking index goes live with Alberta listings"; sc.classList.add("show"); }
+    side[0].val=catalog.makes; side[1].val=catalog.trims; side[2].val=catalog.median;
+    renderSide();
+    // The init pass counted up the tiles while they still held placeholder
+    // zeros, and renderSide() has just replaced those nodes — so the fresh ones
+    // need their own count-up or they sit at 0 forever.
+    document.querySelectorAll("#side .val[data-t]").forEach(function(el){ countUp(el, +el.dataset.t, el.dataset.k); });
+    renderTicker();   // swap the placeholder strip for real per-make medians
+  }
+
+  fetch(CATALOG_URL, { headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON } })
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(rows){
+      catalog = summarize(rows || []);
+      // Never render a headline off a suspiciously thin read — an empty or
+      // partial response must not become "$0 median". Say so instead.
+      if(!catalog.loaded || !catalog.median || catalog.trims < 50) throw new Error("thin catalog read ("+catalog.trims+" trims)");
+      paintReal();
+    })
+    .catch(function(e){
+      console.warn("catalog read failed:", e.message);
+      lmiEl.textContent="—";
+      var sc=document.getElementById("scopeLbl");
+      if(sc){ sc.textContent="Couldn’t reach the MSRP catalog — reload to try again"; sc.classList.add("show"); }
+    });
   document.querySelectorAll(".val[data-t]").forEach(el=>countUp(el, +el.dataset.t, el.dataset.k));
   document.querySelectorAll(".price[data-t]").forEach(el=>countUp(el, +el.dataset.t, "$"));
 
@@ -1284,15 +1396,14 @@
     frust.push(Math.max(6,Math.min(96,nf))); frust.shift();
     updateChart();
     if(matrixOn) updateMatrix();
-    // hero number reflects current scope
-    var f=scopeFactor();
-    lmiEl.textContent=(lmi.val*f).toFixed(2); flash(lmiEl, d>=0);
-    if(!scope){
-      var chg=document.getElementById("lmiChg"); chg.className="chg "+(lmi.day>=0?"up":"down");
-      chg.innerHTML=(lmi.day>=0?"▲ ":"▼ ")+pct(lmi.day)+" today";
-    }
+    // The hero and the change indicator are NOT touched here any more. This
+    // used to tick the headline every ~4s off a random walk — invented movement
+    // in the most prominent number on the page. The hero now holds a real
+    // median from msrp_catalog and stays put until that catalog changes.
     // ticker jitter
-    tItems.forEach(t=>{t[2]=Math.max(-2.5,Math.min(2.5,t[2]+(rnd()-0.5)*0.14)); t[1]=Math.max(100,t[1]+(rnd()-0.5)*0.2);}); renderTicker();
+    // Ticker jitter removed — it randomly walked the per-segment numbers every
+    // few seconds. The ticker now reports real per-make medians, which do not
+    // move between catalog refreshes, so there is nothing to animate.
     // powertrain tiles
     document.querySelectorAll("#ptGrid .pt").forEach((el,i)=>{
       var p=powertrains[i]; var dd=(rnd()-0.5)*80; p.price=Math.max(20000,p.price+dd); p.chg=Math.max(-2.5,Math.min(2.5,p.chg+(rnd()-0.5)*0.1));
