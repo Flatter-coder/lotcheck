@@ -34,7 +34,13 @@ const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -
 // harder to defend than one that says who it is and where to complain — and if
 // a dealer chooses to block it, that is a signal we want to receive.
 const UA = "LotCheckBot/1.0 (+https://lotcheck.ca/about; buyer-side vehicle price verification)";
-const PAGE_CAP = 40;          // per section; 24 units/page -> ~960 units
+// Per section. City GM's new inventory alone is 60 pages, so the old cap of 40
+// silently truncated about a third of the largest lot in the seed — and a big
+// lot is exactly where days-on-lot leverage lives, so that is the worst place
+// to lose coverage. 150 pages is ~3,600 units at 24/page, comfortably past any
+// real Alberta dealer, and the cap stays only as a runaway-pagination backstop.
+// Hitting it still marks the crawl partial, which suppresses delisting.
+const PAGE_CAP = 150;
 const REQUEST_DELAY_MS = 800; // between page fetches, per dealer
 const FETCH_TIMEOUT_MS = 20_000;
 
@@ -236,11 +242,16 @@ async function main() {
     if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (or pass --dry-run)"); process.exit(1); }
     const { createClient } = await import("@supabase/supabase-js");
     supabase = createClient(url, key);
-    const { data, error } = await supabase
+    let q = supabase
       .from("dealer_source").select("id,host,name,sections,platform,platform_id")
       .eq("active", true).in("platform", ["sm360", "convertus"]);
+    // --host re-crawls ONE dealer. Useful after raising a limit or fixing an
+    // adapter: no reason to re-walk seven healthy lots to re-read the eighth.
+    if (HOST_ARG) q = q.eq("host", HOST_ARG);
+    const { data, error } = await q;
     if (error) { console.error("could not read dealer_source:", error.message); process.exit(1); }
     dealers = data || [];
+    if (HOST_ARG && !dealers.length) { console.error(`no active dealer matches --host ${HOST_ARG}`); process.exit(1); }
   }
 
   let totals = { dealers: 0, rows: 0, new: 0, priced: 0, delisted: 0, failed: 0 };
