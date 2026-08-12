@@ -45,6 +45,8 @@ jobs:
         run: npm run test:reconciliation
       - name: Model identity (an EV never inherits a gas MSRP)
         run: npm run test:model-identity
+      - name: MSRP authority (no unfounded sticker accusations)
+        run: npm run test:msrp-authority
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
       - name: Stacked incentives (real captured dealer pages)
