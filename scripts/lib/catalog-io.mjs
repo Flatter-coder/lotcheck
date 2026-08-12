@@ -87,24 +87,49 @@ async function replaceRows(table, rows, make, { fatal = true, upsert = false } =
     // drop the scraped duplicate. Then dedupe within the batch too, so two
     // configs resolving to one grade name can't collide with each other either.
     if (table === "msrp_catalog") {
-      let kept = new Set();
+      const keyOf = (r) => `${r.year}|${String(r.model ?? "")}|${String(r.trim ?? "")}`;
+
+      // Two configurations can resolve to one grade name; keep the first.
+      const seen = new Set();
+      const beforeBatch = rows.length;
+      rows = rows.filter((r) => (seen.has(keyOf(r)) ? false : (seen.add(keyOf(r)), true)));
+      if (beforeBatch !== rows.length) {
+        console.log(`  ${table} (${make}): collapsed ${beforeBatch - rows.length} duplicate key(s) within the batch.`);
+      }
+
+      // The DELETE above spares hand-verified rows (source_url set) so a
+      // scraper can never wipe work done by hand. That protection is meant for
+      // keys the scraper CANNOT produce — it was never meant to freeze a price
+      // the manufacturer has since changed. A 2026 Mustang Mach-E Premium sat
+      // at a hand-entered $47,638 while ford.ca published $49,990, and because
+      // the verified row survived every refresh it kept winning the lookup and
+      // was reported as an EXACT trim MSRP: a stale figure wearing the badge of
+      // the most authoritative one we have.
+      //
+      // So: where this run carries a manufacturer figure for the same key, the
+      // live number supersedes and the stale row is removed. Where it does not,
+      // the verified row is left exactly as protected as before.
       try {
-        const keyRes = await fetch(`${url}/rest/v1/${table}?select=year,model,trim&make=ilike.${encodeURIComponent(make)}`, { headers });
-        if (keyRes.ok) {
-          for (const r of await keyRes.json()) kept.add(`${r.year}|${String(r.model ?? "")}|${String(r.trim ?? "")}`);
+        const res = await fetch(`${url}/rest/v1/${table}?select=id,year,model,trim,msrp&make=ilike.${encodeURIComponent(make)}`, { headers });
+        if (res.ok) {
+          const wanted = new Set(rows.map(keyOf));
+          // A trim-less row is a "starting at" summary for the model-year. Once
+          // this run republishes that model-year's real trim ladder the summary
+          // is stale by construction — Ford's own base moved $45,778 -> $47,990
+          // while the old floor sat underneath it — so it goes too.
+          const republished = new Set(rows.map((r) => `${r.year}|${String(r.model ?? "")}`));
+          const stale = (await res.json()).filter((r) =>
+            wanted.has(keyOf(r)) ||
+            (r.trim == null && republished.has(`${r.year}|${String(r.model ?? "")}`)));
+          for (const r of stale) {
+            const d = await fetch(`${url}/rest/v1/${table}?id=eq.${r.id}`, { method: "DELETE", headers });
+            if (!d.ok && d.status !== 404) console.warn(`  ⚠️ could not supersede ${keyOf(r)} (HTTP ${d.status}).`);
+          }
+          if (stale.length) {
+            console.log(`  ${table} (${make}): superseded ${stale.length} preserved row(s) with this run's manufacturer figures — e.g. ${stale.slice(0, 3).map((r) => `${r.model} ${r.trim ?? ""} was $${r.msrp}`).join("; ")}.`);
+          }
         }
       } catch { /* best-effort: a failed probe must not block the refresh */ }
-      const before = rows.length;
-      const seen = new Set();
-      rows = rows.filter((r) => {
-        const k = `${r.year}|${String(r.model ?? "")}|${String(r.trim ?? "")}`;
-        if (kept.has(k) || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-      if (before !== rows.length) {
-        console.log(`  ${table} (${make}): skipped ${before - rows.length} row(s) already held by a verified or duplicate key.`);
-      }
     }
 
     for (let i = 0; i < rows.length; i += 500) {

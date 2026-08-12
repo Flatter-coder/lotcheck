@@ -23,6 +23,12 @@ const HDRS = {
 
 // Model params are Ford's marketing names (verified 2026-07-26 from shop.ford.ca).
 // Refresh from the showroom tiles if the lineup changes.
+// Ford's build-&-price API is queried by SHORT name ("Mach-E"), but dealer
+// listings and buyers use the full nameplate ("Mustang Mach-E"). Storing the
+// short name split the same car across two catalog models with two different
+// prices, and the lookup matched the stale one. Query short, store canonical.
+export const FORD_MODEL_ALIASES = { "Mach-E": "Mustang Mach-E" };
+
 export const FORD_MODELS = ["Escape", "Explorer", "Expedition", "Mustang", "Mach-E", "Bronco", "Bronco Sport", "Maverick", "Ranger", "F-150", "Super Duty", "Transit"];
 export const LINCOLN_MODELS = ["Corsair", "Nautilus", "Aviator", "Navigator"];
 
@@ -52,10 +58,11 @@ export async function run(cfg) {
       const msrp = Number(s?.Pricing?.MSRP) || Number(s?.Pricing?.BaseMSRP);
       const trim = (s.name || "").toString().replace(/[®™]/g, "").trim() || null;
       if (!(msrp > 0)) continue;
-      const key = `${year}|${model}|${trim}`;
+      const storedModel = (cfg.aliases && cfg.aliases[model]) || model;
+      const key = `${year}|${storedModel}|${trim}`;
       const prev = byTrim.get(key);
       if (!prev || msrp < prev.msrp) byTrim.set(key, {
-        year, make: cfg.make, model, trim, msrp,
+        year, make: cfg.make, model: storedModel, trim, msrp,
         fuel_type: inferFuelFromName(`${model} ${trim || ""}`) || (/mach-e|lightning|e-transit/i.test(`${model} ${trim}`) ? "BEV" : null),
         fetched_at: new Date().toISOString(),
       });
