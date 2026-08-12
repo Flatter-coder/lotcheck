@@ -12,6 +12,8 @@
     "check:copy": "node scripts/check-copy-compliance.mjs",
     "check:parity": "node scripts/check-report-parity.mjs",
     "check:undef": "node scripts/check-undefined-identifiers.mjs",
+    "test:trim": "node scripts/test-trim-match.mjs",
+    "test:msrp-authority": "node scripts/test-msrp-authority.mjs",
     "test:incentives": "node scripts/test-incentive-extract.mjs",
     "test:finance-contingent": "node scripts/test-finance-contingent.mjs",
     "live:finance-contingent": "node scripts/live-check-finance-contingent.mjs",

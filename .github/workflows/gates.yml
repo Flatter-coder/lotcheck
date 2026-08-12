@@ -43,6 +43,14 @@ jobs:
         run: npm run check:copy
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
+      # The two MSRP suites guard the same defect from both ends: trim-match
+      # decides whether a catalog row may be called "exact", msrp-authority
+      # decides whether an over-MSRP gap may be called inflation. Both existed
+      # and neither ran anywhere, which is how the Mach-E accusation shipped.
+      - name: Trim match (catalog row -> the right trim, honestly labelled)
+        run: npm run test:trim
+      - name: MSRP authority (inflation callout thresholds)
+        run: npm run test:msrp-authority
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)

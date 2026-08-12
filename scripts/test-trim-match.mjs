@@ -43,6 +43,27 @@ const LANDCRUISER = [
 ];
 
 // Single-row (base) models — must still resolve to their one figure.
+// Ford's real Mach-E shape: one row per trim, drivetrain NOT pinned — AWD and
+// extended range are priced as options above the trim.
+const MACHE = [
+  { trim: "Select",  msrp: 44990, fuel_type: "BEV" },
+  { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
+  { trim: "GT",      msrp: 69990, fuel_type: "BEV" },
+];
+// The same lineup from a catalog that DOES pin drivetrain — exact stays exact.
+const MACHE_AWD = [
+  { trim: "Premium", msrp: 49990, fuel_type: "BEV", drivetrain: "RWD" },
+  { trim: "Premium", msrp: 56990, fuel_type: "BEV", drivetrain: "AWD" },
+  { trim: "GT",      msrp: 69990, fuel_type: "BEV", drivetrain: "AWD" },
+];
+// The realistic scrape shape: Ford markets the GT as AWD-standard so the
+// scraper captures "GT AWD", while Premium is captured plain. ONE row pins a
+// drivetrain, which is enough to defeat a "does ANY row pin config" test.
+const MACHE_MIXED = [
+  { trim: "Select",  msrp: 44990, fuel_type: "BEV" },
+  { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
+  { trim: "GT AWD",  msrp: 69990, fuel_type: "BEV" },
+];
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
 const CX90PH  = [{ trim: null, msrp: 49999, fuel_type: "PHEV" }];
@@ -92,18 +113,61 @@ const CASES = [
   ["Land Cruiser, no trim -> honest starting-at", LANDCRUISER, { fuelType: "Hybrid" }, 75450],
   ["Land Cruiser Premium Package", LANDCRUISER, { trim: "Premium Package", fuelType: "Hybrid" }, 90615],
 
+  // CONFIG-BLIND CATALOG — the Mach-E regression (see msrp-exact-must-pin-config).
+  // Ford publishes ONE row per Mach-E trim; AWD and extended range are options
+  // above it. A Premium AWD listing matched "Premium" at $49,990 and was
+  // labelled exact, which downstream became a $13,018 inflation accusation
+  // against a named dealer. The catalog cannot express drivetrain at all here,
+  // so the honest answer is starting_at.
+  //
+  // NOTE on the $66,015 shape: it happened to come back starting_at even before
+  // the fix, because the asking price sat nearest the GT and the price tiebreak
+  // deadlocked GT against Premium. That was luck, not a guard — every other
+  // shape of the same listing below returned "exact" on the shipped code. A
+  // regression case written only around $66,015 would have pinned nothing.
+  ["Mach-E Premium AWD, no price signal", MACHE,
+    { trim: "Premium", drivetrain: "AWD", fuelType: "BEV" }, 49990, "starting_at"],
+  ["Mach-E Premium AWD, price near the matched trim", MACHE,
+    { trim: "Premium", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 52990 }, 49990, "starting_at"],
+  ["Mach-E Premium, drivetrain from VIN decode only", MACHE,
+    { trim: "Premium", vinDrive: "AWD", fuelType: "BEV" }, 49990, "starting_at"],
+  ["Mach-E, drivetrain only inside the trim string", MACHE,
+    { trim: "Premium AWD", fuelType: "BEV" }, 49990, "starting_at"],
+  ["Mach-E Premium AWD at $66,015 (the reported listing)", MACHE,
+    { trim: "Premium", drivetrain: "AWD", vinDrive: "AWD", fuelType: "BEV", quotedPrice: 66015 },
+    49990, "starting_at"],
+  ["Mach-E with no drivetrain stated -> exact is fine", MACHE,
+    { trim: "Premium", fuelType: "BEV" }, 49990, "exact"],
+  ["Catalog that DOES pin drivetrain still returns exact", MACHE_AWD,
+    { trim: "Premium", drivetrain: "AWD", fuelType: "BEV" }, 56990, "exact"],
+
+  // MIXED CATALOG — one row pins a drivetrain, the rest don't. Scoring gave the
+  // drivetrain match (+4) more weight than the trim name (+2) and nothing at all
+  // for a trim name that CONFLICTS, so a Premium AWD listing picked the "GT AWD"
+  // row and returned $69,990 labelled exact — the wrong trim, confidently.
+  ["Mach-E Premium AWD vs mixed catalog -> right trim, honest label", MACHE_MIXED,
+    { trim: "Premium", drivetrain: "AWD", fuelType: "BEV" }, 49990, "starting_at"],
+  ["Mach-E GT AWD vs mixed catalog -> GT row confirms config, exact", MACHE_MIXED,
+    { trim: "GT", drivetrain: "AWD", fuelType: "BEV" }, 69990, "exact"],
+
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
   ["Lexus RZ (single base row, trim present)", RZ, { trim: "AWD Luxury", fuelType: "BEV" }, 59990],
   ["Mazda CX-90 PHEV (single base row)", CX90PH, { trim: "GT AWD", fuelType: "PHEV" }, 49999],
 ];
 
+// A 5th tuple element asserts BASIS as well as value. The harness only ever
+// checked the number, which is why the Mach-E defect shipped: the MSRP it
+// returned was a real Ford price — it was the "exact" LABEL on it that caused
+// a $13,018 accusation against a named dealer.
 let pass = 0, fail = 0;
-for (const [label, rows, sig, expected] of CASES) {
+for (const [label, rows, sig, expected, wantBasis] of CASES) {
   let got = null, basis = null;
   try { const r = pickTrimMsrp(rows, sig); got = r && r.msrp; basis = r && r.basis; } catch (e) { got = "THREW: " + e.message; }
-  const ok = Array.isArray(expected) ? expected.includes(got) : got === expected;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${label}\n        expected ${expected}, got ${got}${basis ? ` (${basis})` : ""}`);
+  const valueOk = Array.isArray(expected) ? expected.includes(got) : got === expected;
+  const basisOk = !wantBasis || basis === wantBasis;
+  const ok = valueOk && basisOk;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}\n        expected ${expected}${wantBasis ? " / " + wantBasis : ""}, got ${got}${basis ? ` (${basis})` : ""}`);
   ok ? pass++ : fail++;
 }
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
