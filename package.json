@@ -10,6 +10,11 @@
     "test:recalls": "node --experimental-strip-types supabase/functions/_shared/recalls.test.ts",
     "test:invariants": "node --experimental-strip-types supabase/functions/_shared/invariants.test.ts",
     "check:copy": "node scripts/check-copy-compliance.mjs",
+    "check:parity": "node scripts/check-report-parity.mjs",
+    "check:undef": "node scripts/check-undefined-identifiers.mjs",
+    "test:incentives": "node scripts/test-incentive-extract.mjs",
+    "test:finance-contingent": "node scripts/test-finance-contingent.mjs",
+    "live:finance-contingent": "node scripts/live-check-finance-contingent.mjs",
     "crawl:dry": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run",
     "crawl": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs"
   },
@@ -23,6 +28,8 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.7",
+    "@babel/traverse": "^7.29.7",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.0.0",

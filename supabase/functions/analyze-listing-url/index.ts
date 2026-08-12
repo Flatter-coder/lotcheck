@@ -56,6 +56,8 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
+import { detectFinanceContingent } from "../_shared/finance-contingent.js";
+import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
@@ -84,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11h";
+const CACHE_VER = "2026-08-11j";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1953,9 +1955,12 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
 // @graph arrays and a top-level array of nodes. Returns normalized fields, or
 // null if no usable vehicle node is present. Never throws.
-async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
+async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<string | null>): Promise<any | null> {
   try {
-    const html = await fetchDirectHtml(url, 15_000);
+    // Reuse the caller's in-flight fetch when it supplied one, so the direct
+    // read of the page happens ONCE per scan and can serve several consumers
+    // (schema.org facts, embedded incentives) instead of one fetch each.
+    const html = sharedHtml ? await sharedHtml : await fetchDirectHtml(url, 15_000);
     if (!html) { console.log(`JSON-LD fallback: direct fetch returned nothing for ${url}.`); return null; }
     const v = extractJsonLdVehicle(html);
     const tiwHit = matchTradeInWidget(html);
@@ -1993,6 +1998,11 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
       quotedPriceSource: v.price != null ? "structured_data" : null,
       priceDisclosure: v.price != null ? "advertised" : (gated ? "contact_for_price" : "not_shown"),
       daysOnLot: dol,
+      // Both of these were read off the same html above. tradeInWidget used to
+      // be computed here and then dropped on the floor, so the S36 flag went
+      // missing on every fallback-path report.
+      tradeInWidget: tiwHit,
+      financeContingent: detectFinanceContingent(html),
       standardWarranty: null,
       addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
       source: "structured_data_fallback",
@@ -2005,6 +2015,58 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
     console.warn("buildJsonLdFallbackAnalysis threw:", err);
     return null;
   }
+}
+
+// Hand the page's OWN structured data to Claude alongside the scraped text.
+//
+// WHY. These same facts are already gap-filled into the analysis AFTER Claude
+// runs, so the numbers on the report were right — but the narrative wasn't.
+// Claude only ever saw the scraped text, so when a dealer page rendered its
+// price into schema.org markup but not into readable prose, Claude correctly
+// reported that it found no price and told the buyer to go ask the dealer,
+// while the gap-fill quietly populated quotedPrice underneath. The buyer got a
+// report showing $39,890 next to a summary saying no price was disclosed.
+// Measured 2026-08-11 on a live Kramer Mazda listing (schema.org Offer said
+// $39,890; the summary said "no price ... present to extract").
+//
+// Fixing the class means Claude must not be able to claim a fact is absent
+// when we can already see it. The fetch is a plain browser-shaped GET started
+// in parallel far upstream, so by this point it has almost always resolved;
+// the race below caps the wait so a slow dealer can never stall the scan on a
+// safety net. Facts are labelled as authoritative, not as a hint — they are
+// read from the page's machine-readable markup, which is stronger evidence
+// than prose, and they are exactly what the gap-fill would apply anyway.
+async function structuredFactsBlock(early: Promise<any | null>): Promise<string> {
+  let d: any = null;
+  try {
+    d = await Promise.race([
+      early,
+      new Promise((r) => setTimeout(() => r(null), 1_500)),
+    ]);
+  } catch { d = null; }
+  if (!d) return "";
+
+  const facts: string[] = [];
+  const price = Number(d.quotedPrice);
+  if (price > 0) facts.push(`- Advertised price: $${price.toLocaleString("en-CA")}`);
+  if (d.vin) facts.push(`- VIN: ${d.vin}`);
+  if (d.vehicle) facts.push(`- Vehicle: ${d.vehicle}`);
+  const odo = Number(d.odometerKm);
+  if (Number.isFinite(odo) && odo >= 0) facts.push(`- Odometer: ${odo.toLocaleString("en-CA")} km`);
+  if (d.vehicleCondition) facts.push(`- Condition: ${d.vehicleCondition}`);
+  if (d.dealerName) facts.push(`- Dealer: ${d.dealerName}`);
+  if (!facts.length) return "";
+
+  console.log(`Structured facts passed to Claude: ${facts.length} field(s).`);
+  return (
+    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup embedded in the page source).\n` +
+    `These values are machine-read directly from the page and are authoritative. Some dealer platforms put ` +
+    `them ONLY in the markup, so they may not appear in the extracted text above — that does NOT mean the ` +
+    `page withheld them.\n\n${facts.join("\n")}\n\n` +
+    `Use these values in your output, and never state or imply that one of them is missing, undisclosed, or ` +
+    `not shown on the page. If the extracted text disagrees with a value here, say so plainly in the summary ` +
+    `so the buyer can check it — do not silently pick one.\n---`
+  );
 }
 
 // Shared downstream enrichment, run identically by BOTH the normal page-scrape
@@ -2182,7 +2244,7 @@ Extract the following as a single JSON object, with EXACTLY these fields and no 
   "dealerName": string | null,    // the dealership's business name as it would appear on Google (e.g. "Macleod Trail Toyota", "Calgary Honda") -- usually near the top of the page or in an "Available at..." line. Do NOT include the city/location as part of this field; that's a separate concern.
   "dealerCity": string | null,    // the city (and province if visible, e.g. "Calgary, AB") the dealership operates in. Needed to disambiguate common dealer names -- there are many "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
   "msrp": number | null,          // the manufacturer's suggested retail price, before any options, fees, or discounts. Often NOT shown as a standalone price tag -- many dealer sites, especially "payment-first" listings with no separate sticker price displayed anywhere, only state it inside a dense lease/finance legal disclosure paragraph, in a pattern like "Lease payments include: MSRP ($32,300.00), [paint/option] ($550.00), Freight and PDI ($1,830.00), ...". Read fine-print/legal disclosure text carefully for this pattern -- do not restrict your search to prominent, large-font prices.
-  "quotedPrice": number | null,   // the actual all-in selling price being charged before tax, whichever direction it moves relative to MSRP. This is usually one of: (a) a discounted advertised price below MSRP (sometimes labeled "Market Value" or similar), OR (b) on a payment-first listing with no advertised discount, the full selling price/net cap cost AFTER dealer-installed options and fees are added ON TOP of MSRP -- sometimes labeled "Lease Price", "Selling Price", "Cap Cost", or similar in fine print. Do NOT leave this null just because there's no discount -- if the page discloses a total price for the deal at all, even one higher than MSRP because of added fees, that IS the quotedPrice.
+  "quotedPrice": number | null,   // the actual all-in selling price being charged before tax, whichever direction it moves relative to MSRP. This is usually one of: (a) a discounted advertised price below MSRP (sometimes labeled "Market Value" or similar), OR (b) on a payment-first listing with no advertised discount, the full selling price/net cap cost AFTER dealer-installed options and fees are added ON TOP of MSRP -- sometimes labeled "Lease Price", "Selling Price", "Cap Cost", or similar in fine print. Do NOT leave this null just because there's no discount -- if the page discloses a total price for the deal at all, even one higher than MSRP because of added fees, that IS the quotedPrice. PRECEDENCE WHEN A PAGE SHOWS MORE THAN ONE PRICE (this is common and it decides the whole report, so apply it strictly): rule (b) is a FALLBACK for pages that show no standalone cash price at all -- it is NOT a choice between two numbers. If the page states a standalone advertised cash/asking price anywhere (a headline price, a "Cash Price", a "Price" field, the browser tab title, or the page's own structured data), THAT is the quotedPrice, even when a Finance or Lease tab elsewhere on the same page shows a HIGHER figure for the same car. A finance/lease-tab number is a capitalized cost for a specific financing structure, not the cash asking price, so it must never displace a standalone cash price. Confirmed real: a listing advertised a "Cash Price" of $50,308 while its Finance tab showed a "Carter Cash Price" of $53,745 -- $50,308 is the quotedPrice, and the $53,745 belongs in addOns/summary as an unexplained finance-only markup for the buyer to challenge. When you do see two such figures, always name BOTH in the summary and say which one you treated as the asking price, so the buyer can check you.
   "priceDisclosure": "advertised" | "contact_for_price" | "not_shown",
   "pricingDisclaimer": string | null,  // VERBATIM excerpt (max 600 characters) of the page's pricing fine-print/disclaimer text, when present -- the small print about pricing accuracy, e.g. "cannot guarantee the accuracy", "prices subject to change without notice", "does not constitute an offer", "errors and omissions", all-in/fee-inclusion statements. Copy the actual words from the page; never compose or summarize. null when the page carries no such text.  // HOW the page handles price: "advertised" = a real number is published; "contact_for_price" = the page DELIBERATELY withholds the price and asks the shopper to call/email/submit a form instead (text like "Contact Us For Price", "Call for Price", "Get E-Price", "Unlock This Price", "Get Today's Price" IN PLACE of a number); "not_shown" = no price appears and no such call-to-action replaces it. Only use "contact_for_price" when the page genuinely gates the price behind contact -- this powers a transparency note shown to the buyer, so it must be literally true from the page text.
   "standardWarranty": {           // the FREE manufacturer warranty that comes with a new vehicle -- NOT a purchased add-on. Only fill this in for a "new" vehicleCondition; null for used. Listing pages rarely state this explicitly -- use the manufacturer's actual known standard coverage for this make if it isn't shown on the page.
@@ -2413,7 +2475,15 @@ Deno.serve(async (req: Request) => {
     // never starve the fallback of budget (advantageford.ca, 2026-08-11: the
     // scrape burned the clock and the buyer got a dead end while the page was
     // handing out the price the whole time). Errors resolve to null.
-    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url).catch(() => null);
+    // ONE direct read of the page source, shared by every consumer that needs
+    // raw HTML. Nimble is asked for `formats: ["markdown"]` only, so
+    // nimbleData.data.html is ALWAYS undefined — an earlier version of the
+    // stacked-incentive reader hung off that field and therefore never
+    // executed even once in production, despite passing 18/18 against a saved
+    // copy of the very page it was written for. Anything needing real HTML
+    // must come through here.
+    const directHtml: Promise<string | null> = fetchDirectHtml(url, 15_000).catch(() => null);
+    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
 
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
@@ -2636,7 +2706,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyJsonLd)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -2731,10 +2801,59 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // S37: is the advertised price conditional on financing WITH the dealer?
+    // Reads the page text first, then the raw html (the clause usually lives in
+    // the fine print, which the text pass sometimes drops). The buyer paying
+    // cash or bringing their own bank approval is the one this costs, and today
+    // nothing on the report tells them. Deterministic and evidence-carrying —
+    // see finance-contingent.js. Never sinks the scan.
+    try {
+      const fc = detectFinanceContingent(typeof pageContent === "string" ? pageContent : "")
+        || (typeof rawHtml === "string" ? detectFinanceContingent(rawHtml) : null);
+      if (fc) {
+        analysis.financeContingent = fc;
+        console.log(`Finance-contingent price: ${fc.reasons.join("; ")}`);
+      }
+    } catch (err) { console.warn("Finance-contingent read failed (non-fatal):", err); }
+
+    // Stacked-incentive backstop. EDealer-family pages carry their advertised
+    // offers in an embedded JSON blob rather than in prose, so the LLM pass
+    // reads the sticker and reports "no discount" while the page's own title
+    // advertises the post-incentive price. Measured 2026-08-11: a Jack Carter
+    // Bolt listing hid $7,062 across a $2,300 dealer-payee delivery allowance
+    // and a $4,762 eligibility-gated federal EVAP rebate. That spread is the
+    // buyer's leverage, so a miss here is the costliest kind of miss we make.
+    // Additive and deduped by name: never displaces a line the page stated
+    // plainly and the LLM already read.
+    try {
+      // Reads the SHARED direct fetch, not Nimble's payload — see the note at
+      // directHtml. `rawHtml` is a mirage: Nimble only ever returns markdown.
+      const incHtml = await directHtml;
+      const inc = typeof incHtml === "string" ? extractCashIncentives(incHtml) : null;
+      if (inc) {
+        const existing = Array.isArray(analysis.addOns) ? analysis.addOns : [];
+        const seen = new Set(existing.map((r: any) => String(r?.name || "").trim().toLowerCase()));
+        const fresh = incentivesToAddOns(inc).filter((r) => !seen.has(r.name.trim().toLowerCase()));
+        if (fresh.length) {
+          analysis.addOns = [...existing, ...fresh];
+          console.log(`Stacked incentives: +${fresh.length} discount line(s), $${inc.totalIncentives} total.`);
+        }
+        // NOT recorded here: the page's advertised-after-incentives figure
+        // ($43,246 on the listing above). It belongs on the report — it is the
+        // number the dealer markets and the buyer arrives believing — but a new
+        // field has to ship to EVERY view in the same change (scroll + deck /
+        // heatmap / sidebar + PDF + email), and adding one that only the JSON
+        // carries is the exact defect this pass is fixing. The offers
+        // themselves flow through addOns, which every view already renders, so
+        // the $7,062 reaches the buyer today; the headline figure is a
+        // deliberate follow-up, not an oversight.
+      }
+    } catch (err) { console.warn("Stacked-incentive read failed (non-fatal):", err); }
+
     // S36: flag embedded trade-in instant-offer widgets (checks the scraped
     // text first; falls back to one direct fetch), then refresh the script.
     await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null);
-    if (analysis.tradeInWidget) analysis.counterScript = buildCounterScript(analysis);
+    if (analysis.tradeInWidget || analysis.financeContingent) analysis.counterScript = buildCounterScript(analysis);
 
     // Independent evidence: ask the Internet Archive to preserve the listing.
     // Server-side + fire-and-forget (the client's no-cors attempt can fail

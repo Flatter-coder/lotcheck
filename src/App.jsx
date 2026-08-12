@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext, createContext, useMemo } from "react";
+import { useState, useEffect, useRef, useContext, createContext, useMemo, Component } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
@@ -833,6 +833,43 @@ function getEVAP(l){
     const eModel = e.model.toLowerCase();
     return lModel.includes(eModel) || eModel.includes(lModel);
   }) || null;
+}
+
+// Single source of truth for the EVAP rebate on a Quote Check report.
+//
+// The server never sends an `evapRebate` field -- the rebate is derived on the
+// client from the EVAP list plus the analysis. That derivation used to be
+// inlined in two places (the scroll view and the emailed-report payload), and
+// the 10-point panel instead read `analysis.evapRebate`, a field nothing ever
+// populates. Result: on a BEV, the scroll view and the email showed the real
+// rebate while the deck/heatmap/sidebar rendered a dead "—". Measured
+// 2026-08-11 on three live BEV listings (bZ4X, Bolt, Equinox EV) -- all three
+// showed "—" on the panel, and the Jack Carter page was openly advertising a
+// $4,762 federal rebate at the time.
+//
+// Every surface that renders the rebate goes through this function. Adding a
+// new view means calling it, not re-deriving it.
+function resolveEvap(a){
+  const none = { show:false, rebate:null, effectiveFuelType:a?.fuelType || null, fuelMismatch:false, listMatch:null };
+  if(!a || !a.year || !a.make || !a.model) return none;
+  let listMatch = null;
+  try{ listMatch = getEVAP({ year:a.year, make:a.make, model:a.model, km:0 }); }catch{ listMatch = null; }
+  // Our verified list wins over the page's own fuel-type label -- dealer pages
+  // mislabel drivetrains, and the mismatch is surfaced to the buyer.
+  const effectiveFuelType = listMatch?.fuel || a.fuelType;
+  const fuelMismatch = !!listMatch && !!a.fuelType && a.fuelType !== listMatch.fuel;
+  const show = effectiveFuelType === "BEV" || effectiveFuelType === "PHEV";
+  if(!show) return { show:false, rebate:null, effectiveFuelType, fuelMismatch, listMatch };
+  return {
+    show:true,
+    rebate: getRebate("AB", effectiveFuelType, {
+      year:a.year, make:a.make, model:a.model,
+      condition:a.vehicleCondition,
+      km:a.odometerKm || 0,
+      price:a.quotedPrice || a.msrp || 0,
+    }),
+    effectiveFuelType, fuelMismatch, listMatch,
+  };
 }
 
 const DEMO_LISTINGS=[
@@ -5608,6 +5645,59 @@ function DetailToggle({C, moreLabel, lessLabel, children, defaultOpen=false}){
 // keeping LotCheck's "analyzed once, never stored" promise literally true. A
 // compact field subset keeps the link short; long recall summaries are dropped
 // (the flip-book shows systems + dates only).
+// Does this report have a sticker precise enough to make an over/under-MSRP
+// claim? Only an EXACT trim figure qualifies: a "starting_at" floor (base trim
+// or adjacent model year) is a reference, and an option-loaded car sitting above
+// it is NOT "over MSRP". Three surfaces re-derived this rule independently, and
+// the scroll view's copy referenced its variable from outside the scope that
+// declared it -- a ReferenceError that took the ENTIRE scroll view down for
+// every report, silently, because an undefined identifier is not a build error.
+// One definition now; check:parity pins it there.
+function isExactMsrp(a){ return !!(a && Number(a.msrp) > 0 && a.msrpBasis === "exact"); }
+
+// Containment for the report render. A single throwing card used to take the
+// ENTIRE page to a white screen -- twice, from the same cause (an identifier
+// referenced one scope too high). check:undef now catches that class before it
+// ships; this is the second layer, so if anything else throws at runtime the
+// buyer still sees who we are and what to do, never a blank page.
+//
+// It does NOT swallow the error: it re-throws to the console so the failure
+// stays visible in logs and in development. Silent degradation would violate
+// the rule that a miss must never read as an all-clear.
+// Runs a render function inside a CHILD component's own render pass. Without
+// this, `<ReportBoundary>{(()=>{...})()}</ReportBoundary>` evaluates its children
+// in the parent, so the boundary never sees the throw -- verified by injecting a
+// deliberate error, which produced a blank page until this indirection existed.
+// The report block contains no hooks, so relocating it changes nothing else.
+function RenderSlot({ fn }){ return fn(); }
+
+class ReportBoundary extends Component {
+  constructor(props){ super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err){ return { err }; }
+  componentDidCatch(err, info){ console.error("[LotCheck] report render failed:", err, info?.componentStack); }
+  render(){
+    if (!this.state.err) return this.props.children;
+    const C = this.props.C || {};
+    return (
+      <div style={{ border: `1px solid ${C.line || "rgba(0,0,0,.12)"}`, borderRadius: 14, padding: 20, background: C.card || "#fff", color: C.ink || "#33305A" }}>
+        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 6 }}>This report couldn't be displayed</div>
+        <div style={{ fontSize: 13, color: C.inkSoft || "#5B5885", lineHeight: 1.55 }}>
+          Your scan completed — the problem is on our side, in how this page draws the result, not in the figures.
+          Reload the page to try again. If it keeps happening, send us the link and we'll fix it.
+        </div>
+        <div style={{ fontSize: 11.5, color: C.inkFaint || "#706D96", marginTop: 10, fontFamily: "ui-monospace,monospace" }}>{String(this.state.err?.message || this.state.err).slice(0, 160)}</div>
+      </div>
+    );
+  }
+}
+
+// Module-level money formatter. Four components each declare their own local
+// `money`, which shadows this one and leaves their behaviour untouched -- but
+// QuoteCheckPage never had one, so `money(...)` in the msrpReference note was an
+// undefined reference that blanked the ENTIRE scroll view whenever a report
+// carried a starting-at reference price. Found by check:undef, reproduced live.
+function money(n){ const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); }
+
 function encodeReport(a){
   const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
     qp:a.quotedPrice,ms:a.msrp,
@@ -5627,6 +5717,7 @@ function encodeReport(a){
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     tw:a.tradeInWidget&&a.tradeInWidget.detected?{v:a.tradeInWidget.vendor||null}:null,
+    fcx:a.financeContingent&&a.financeContingent.contingent?{r:a.financeContingent.reasons||[],e:a.financeContingent.evidence||""}:null,
     pb:a.msrpPriceBasis||null,
     omsrp:a.originalMsrp?{m:a.originalMsrp.msrp,t:a.originalMsrp.trim||null,y:a.originalMsrp.year||null}:null,
     mun:a.msrpUnavailable?{n:a.msrpUnavailable.note}:null,
@@ -5658,6 +5749,7 @@ function decodeReport(s){
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
       tradeInWidget:c.tw?{detected:true,vendor:c.tw.v||null}:null,
+      financeContingent:c.fcx?{contingent:true,reasons:c.fcx.r||[],evidence:c.fcx.e||""}:null,
       msrpPriceBasis:c.pb||null,
       originalMsrp:c.omsrp?{msrp:c.omsrp.m,trim:c.omsrp.t||null,year:c.omsrp.y||null}:null,
       msrpUnavailable:c.mun?{note:c.mun.n}:null,
@@ -5693,8 +5785,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // Only an EXACT trim MSRP supports an over/under claim. A "starting_at" floor
   // (base trim / adjacent model year) is a reference, not this unit's sticker —
   // an option-loaded car above the base floor is NOT "over MSRP".
-  const msrpExact = ms > 0 && a.msrpBasis === "exact";
+  const msrpExact = isExactMsrp(a);
   const deltaOk = !!(qp && ms && msrpExact);
+  // Derived once here and read by BOTH the rebate card and its plain-language
+  // explainer below — the two used to read a server field that is never set.
+  const evap = resolveEvap(a);
   // "Contact Us For Price" — the page deliberately withholds the number
   // (detected from the page's own call-to-action text). A tactic, not a miss.
   const priceGated = !qp && a.priceDisclosure === "contact_for_price";
@@ -5797,9 +5892,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // 7 VIN
   { const vc = a.vinCheck; const tone = vc?.present ? (vc.valid ? "pass" : "flag") : "muted"; const v = vc?.present ? (vc.valid ? "VALID" : "CHECK PATTERN") : "NOT ON QUOTE";
     P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : "⚠ VIN doesn't validate") : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
-  // 8 EV / PHEV rebate
-  { const ev = a.evapRebate; const tone = ev?.eligible ? "pass" : "muted"; const gas = !(a.fuelType === "BEV" || a.fuelType === "PHEV"); const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : gas ? "N/A (GAS)" : "—");
-    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : gas ? "N/A — gas vehicle" : "—")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : "Federal/provincial EV incentives don't apply here.")} /> }); }
+  // 8 EV / PHEV rebate — via resolveEvap so this panel can never disagree with
+  // the scroll view or the emailed report (it used to read a server field that
+  // was never populated, rendering a dead "—" on every EV).
+  { const ev = evap.rebate, eft = evap.effectiveFuelType;
+    const notEv = !!eft && eft !== "BEV" && eft !== "PHEV";
+    const tone = ev?.eligible ? "pass" : "muted";
+    const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : notEv ? `N/A (${String(eft).toUpperCase()})` : "NOT DETERMINED");
+    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : notEv ? `N/A — ${String(eft).toLowerCase()} vehicle` : "Not determined")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : notEv ? "Federal and provincial EV incentives don't apply to this drivetrain." : "We couldn't confirm this vehicle's drivetrain from the listing, so no rebate claim is made — ask the dealer to confirm it in writing.")} /> }); }
   // 9 Included warranty
   { const w = a.standardWarranty; const tone = w?.coverage ? "pass" : "muted"; const v = w?.coverage ? "INCLUDED" : "NOT SHOWN";
     P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
@@ -5848,11 +5948,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     "VIN check": a.vinCheck?.present
       ? "The VIN is the car's unique fingerprint. This one has a valid format — before you sign, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
       : "The listing doesn't show the VIN (the car's unique fingerprint). Ask for it — it lets you verify recalls, history and that the paperwork matches the actual car.",
-    "EV / PHEV rebate": a.evapRebate?.eligible
-      ? `Government money you may qualify for on this vehicle: ${money(a.evapRebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
-      : (a.fuelType === "BEV" || a.fuelType === "PHEV")
+    "EV / PHEV rebate": evap.rebate?.eligible
+      ? `Government money you may qualify for on this vehicle: ${money(evap.rebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
+      : evap.show
         ? "This electric/plug-in vehicle doesn't qualify for the federal rebate (usually the price cap or the model list). Don't let anyone imply a government discount that isn't there."
-        : "Rebates only apply to electric and plug-in vehicles — this one runs on gas, so there's no government money in play.",
+        : evap.effectiveFuelType
+          ? `Rebates only apply to electric and plug-in vehicles — this one is ${String(evap.effectiveFuelType).toLowerCase()}, so there's no government money in play.`
+          : "We couldn't confirm this vehicle's drivetrain from the listing, so we make no rebate claim either way — ask the dealer to state it in writing.",
     "Included warranty": a.standardWarranty?.coverage
       ? "Every new vehicle already includes the manufacturer's factory warranty at no charge — shown here. When the finance office pitches an 'extended warranty,' remember this coverage is already yours for free."
       : "We couldn't confirm the factory warranty terms from this listing. Every new vehicle includes one — ask exactly what's covered and for how long, in writing, before considering any paid coverage.",
@@ -6016,6 +6118,33 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // S37 — the advertised price is conditional on financing with the dealer.
+  // This is a flag, not a muted note: the buyer paying cash or arriving with
+  // their own bank approval believes they hold the strongest hand, and this is
+  // the clause that quietly takes the discount back at signing. Evidence is the
+  // page's own words, so it is the dealer's statement we are repeating.
+  let financeContingentItem = null;
+  if (a.financeContingent && a.financeContingent.contingent) {
+    const F = a.financeContingent;
+    financeContingentItem = { key: "fincontingent", title: "⚠ Price depends on financing with the dealer", tone: "flag", glow: true, v: "Conditional", body: (
+      <div>
+        <div style={{ fontSize: 13.5, color: "#e2e8f0", lineHeight: 1.6 }}>
+          This listing's own wording ties the advertised price to taking <b>the dealer's financing</b>.
+          Pay cash or use your own bank and the price can legitimately change — the discount is often funded by
+          the dealer's commission on the loan, so it goes away with the loan.
+        </div>
+        <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>
+          Detected: {F.reasons.join(" · ")}
+        </div>
+        {F.evidence && <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 8, padding: "8px 10px", borderLeft: `2px solid ${ROSE}`, background: "rgba(255,255,255,.03)", lineHeight: 1.5, fontStyle: "italic" }}>“…{F.evidence}…”</div>}
+        <div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 10, lineHeight: 1.65 }}>
+          <div><b style={{ color: TEAL }}>Ask before you go in:</b> “What is the price if I pay cash or use my own bank — and if it changes, by exactly how much?” Get the answer in writing.</div>
+        </div>
+        <ExplainBox txt={`Dealers earn a commission when you finance through them, and they often fund part of the advertised discount out of it. So the headline price can be a financed price. That is not necessarily improper — but it has to be disclosed, and it means a cash buyer may not get the number they came for. Settle this in writing before you're at the desk, because that is where the price gets "corrected".`} />
+      </div>
+    )};
+  }
+
   // #11 — AMVIC dealer licence. Only rendered on a confident registry match;
   // the status is the regulator's own wording, verbatim. A valid licence is
   // quiet reassurance; expired/closed/suspended is a real flag with the ask.
@@ -6042,9 +6171,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(licItem ? [licItem] : [])];
+  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
+  // Every view that surfaces "things to watch" draws from this one pool, so a
+  // new flag cannot reach one view and miss another (report-features-all-views).
+  const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  const items = [verdictItem, ...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -6108,7 +6240,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         } : null;
         return (<div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 12px" }}>{tabs.map(tabBtn)}</div>
-          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{licItem ? cell(licItem) : null}{pointItems.map((c) => cell(c))}</div>}
+          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{financeContingentItem ? cell(financeContingentItem, true) : null}{licItem ? cell(licItem) : null}{pointItems.map((c) => cell(c))}</div>}
           {btab === "lev" && (levCards.length
             ? <div style={grid}>{levCards.map((c) => cell(c, levCards.length === 1))}</div>
             : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13, lineHeight: 1.6 }}>No sitting-time or trade-in leverage surfaced on this listing — the price case on THE DEAL tab is your leverage.</div>)}
@@ -6162,9 +6294,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               ))}
             </div>
           </div>
-          {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 0 && (
+          {flagPool.filter((p) => p.tone === "flag").length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-              {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+              {flagPool.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
             </div>
           )}
           <div style={cardBox({ tone: "muted" })}>
@@ -6188,11 +6320,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
             {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
             {a.summary && <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 12, textAlign: "left", maxWidth: 660 }}>{a.summary}</div>}
           </div>
-          {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 0 ? (
+          {flagPool.filter((p) => p.tone === "flag").length > 0 ? (
             <div>
-              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length} thing{[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
+              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {flagPool.filter((p) => p.tone === "flag").length} thing{flagPool.filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-                {[...pointItems, ...(daysLotItem ? [daysLotItem] : [])].filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
+                {flagPool.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
               </div>
             </div>
           ) : (
@@ -6227,7 +6359,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   const P=[];
   P.push({t:"cover"});
   if(qp||ms) P.push({t:"deal"});
-  if(a.financing?.paymentAmount||a.financeRates?.dealer||a.financeRates?.manufacturer) P.push({t:"fin"});
+  if(a.financing?.paymentAmount||a.financeRates?.dealer||a.financeRates?.manufacturer||a.financeContingent?.contingent) P.push({t:"fin"});
   if(a.recalls?.checked) P.push({t:"recalls"});
   if(feeItems.length) P.push({t:"fees"});
   if(a.dealerSentiment?.rating) P.push({t:"rep"});
@@ -6254,7 +6386,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
           <div className="rfb-seal">◈ Verified{a.vehicleCondition?` · ${a.vehicleCondition}`:""}</div>
         </div>
       </div>);
-    if(p.t==="deal"){ const exactFb = ms>0 && a.msrpBasis==="exact";
+    if(p.t==="deal"){ const exactFb = isExactMsrp(a);
       return (<div className="rfb-pg">{num}
       <div className="rfb-k">The deal</div>
       <h2 className="rfb-h2">{exactFb?(delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"):(ms>0?`Base MSRP from ${money(ms)}`:(qp>0?`Asking ${money(qp)}`:"The deal"))}</h2>
@@ -6271,6 +6403,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
         {mRate!=null&&<div className="rfb-r"><span className="rfb-n">{a.make} advertised</span><span className="rfb-v">{mRate}%</span></div>}
       </div>
       {dRate&&mRate&&dRate>mRate&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Worth pushing back</div><div className="rfb-wt">{(dRate-mRate).toFixed(2)}% above {a.make}'s advertised rate — ask them to match the manufacturer rate.</div></div>}
+      {a.financeContingent?.contingent&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#e0503c"}}>This price depends on financing with the dealer</div><div className="rfb-wt">The listing's own wording ties the advertised price to taking their financing — the discount is often funded by their commission on the loan, so a cash buyer can lose it. Ask in writing: <b>what is the price if I pay cash or use my own bank, and by exactly how much does it change?</b></div></div>}
     </div>); }
     if(p.t==="recalls"){ const r=a.recalls;
       return (<div className="rfb-pg">{num}<div className="rfb-k">Safety</div>
@@ -6430,6 +6563,7 @@ function canonicalReport(a){
     basis:a.msrpBasis?{b:a.msrpBasis,t:a.msrpTrim||null,y:a.msrpYear||null}:null,
     allIn:a.allInPricing?.body||null,
     disc:a.disclaimerCheck?{e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
+    fcx:a.financeContingent?.contingent?{r:a.financeContingent.reasons||[]}:null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };
@@ -6744,6 +6878,7 @@ function VerifyPage(){
                   <Row t="VIN" v={o.vin||"Not published — ask the dealer"} c={o.vin?undefined:T.soft}/>
                   {o.odo!=null&&<Row t="Odometer" v={`${Number(o.odo).toLocaleString()} km`}/>}
                   {o.dol&&<Row t="Days on lot" v={`${Number(o.dol.d).toLocaleString()} days${o.dol.s?` · since ${o.dol.s}`:""}`} c={o.dol.d>=90?"#f0997b":o.dol.d>=31?"#eab308":"#34d399"}/>}
+                  {o.fcx&&<Row t="Price conditions" v="Tied to dealer financing" c="#f0997b"/>}
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
                   {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
@@ -6996,13 +7131,8 @@ function QuoteCheckPage(){
     // computed rebate to the payload so the emailed report includes it too.
     let emailAnalysis=analysis;
     try{
-      if(analysis&&analysis.year&&analysis.make&&analysis.model){
-        const evapListMatch=getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0});
-        const eft=evapListMatch?.fuel||analysis.fuelType;
-        if(eft==="BEV"||eft==="PHEV"){
-          emailAnalysis={...analysis,evapRebate:getRebate("AB",eft,{year:analysis.year,make:analysis.make,model:analysis.model,condition:analysis.vehicleCondition,km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0})};
-        }
-      }
+      const {show,rebate}=resolveEvap(analysis);
+      if(show&&rebate) emailAnalysis={...analysis,evapRebate:rebate};
     }catch{}
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
@@ -7826,25 +7956,14 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="done"&&analysis&&(()=>{
+          {status==="done"&&analysis&&<ReportBoundary C={C}><RenderSlot fn={()=>{
             // ── Shared report computations (used by the summary hero tiles and
             //    the grouped Rebates & conditions card below). Every value is
             //    derived from real analysis fields -- nothing fabricated. ──
             // EVAP: mirror the card's own gate/logic exactly so the hero tile
             // and the Rebates card always agree (lifted out of the card's old
             // inline IIFE so both can read the same result).
-            const evapListMatch=analysis.year&&analysis.make&&analysis.model
-              ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
-              :null;
-            const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
-            const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
-            const evapShow=!!(analysis.year&&analysis.make&&analysis.model
-              &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"));
-            const rebate=evapShow?getRebate("AB",effectiveFuelType,{
-              year:analysis.year,make:analysis.make,model:analysis.model,
-              condition:analysis.vehicleCondition,
-              km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
-            }):null;
+            const {show:evapShow,rebate,effectiveFuelType,fuelMismatch,listMatch:evapListMatch}=resolveEvap(analysis);
             // Watch-outs tile: a COUNT of the report's own flagged items
             // (recalls, odometer flag, invalid VIN, flagged add-ons) -- a
             // factual tally of what's flagged below, never an invented rating.
@@ -7852,6 +7971,7 @@ function QuoteCheckPage(){
             if(analysis.recalls?.checked&&analysis.recalls.count>0) watchOuts+=analysis.recalls.count;
             if(analysis.odometerCheck?.flag) watchOuts+=1;
             if(analysis.vinCheck?.present&&!analysis.vinCheck.valid) watchOuts+=1;
+            if(analysis.financeContingent?.contingent) watchOuts+=1;
             if(analysis.addOns?.length) watchOuts+=analysis.addOns.filter(a=>(a.verdict||(a.flagged?"flagged":"standard"))==="flagged").length;
             // Summary tiles -- factual figures only (no verdict chip). Built
             // adaptively: only tiles backed by real data render.
@@ -7883,6 +8003,7 @@ function QuoteCheckPage(){
             if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
             if(analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0) tiles.push({label:"Days on lot",value:Number(analysis.daysOnLot.days).toLocaleString(),sub:analysis.daysOnLot.since?`first seen ${analysis.daysOnLot.since}`:"dealer inventory data",flag:Number(analysis.daysOnLot.days)>=90});
             if(analysis.tradeInWidget&&analysis.tradeInWidget.detected) tiles.push({label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",sub:"wholesale-anchored — keep it a separate written line",flag:false});
+            if(analysis.financeContingent&&analysis.financeContingent.contingent) tiles.push({label:"Price conditions",value:"Financing-tied",sub:"cash or your own bank may not get this price — ask in writing",flag:true});
             if(analysis.dealerLicence&&analysis.dealerLicence.status) tiles.push({label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,sub:analysis.dealerLicence.licenceNumber?`licence ${analysis.dealerLicence.licenceNumber}`:"AMVIC public registry",flag:analysis.dealerLicence.state!=="valid"});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
@@ -8012,7 +8133,7 @@ function QuoteCheckPage(){
               <div style={cardStyle}>
                 <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>{analysis.msrpBasis==="dealer_stated"?"MSRP · as stated by dealer":analysis.msrpBasis==="starting_at"?`MSRP · starting at${analysis.msrpYear&&analysis.msrpYear!==analysis.year?` (${analysis.msrpYear} MY)`:""}`:analysis.msrpTrim?`MSRP · ${String(analysis.msrpTrim).toUpperCase()}`:"MSRP"}</div>
                 <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
-                {msrpExactScroll&&analysis.allInPricing&&analysis.allInPricing.body&&analysis.msrpPriceBasis!=="incl_freight"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>Basis note: the asking price is all-in ({analysis.allInPricing.body}), while a published MSRP normally excludes freight &amp; PDI (typically $2,000–$2,600) — part of the gap is that freight. Ask for freight and PDI as their own line.</div>}
+                {isExactMsrp(analysis)&&analysis.allInPricing&&analysis.allInPricing.body&&analysis.msrpPriceBasis!=="incl_freight"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>Basis note: the asking price is all-in ({analysis.allInPricing.body}), while a published MSRP normally excludes freight &amp; PDI (typically $2,000–$2,600) — part of the gap is that freight. Ask for freight and PDI as their own line.</div>}
                 {analysis.msrpBasis==="original_when_new"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>This is what the vehicle cost <b>when new</b> — context, not a sticker to measure a used price against, so no over/under-MSRP claim is made.</div>}
                 {analysis.msrpUnavailable&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.msrpUnavailable.note}</div>}
                 {analysis.msrpBasis==="dealer_stated"&&<div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This is the figure the dealer states on their own page — not verified against {analysis.make||"the manufacturer"}'s published price, so no over/under-MSRP claim is made from it.</div>}
@@ -8030,7 +8151,7 @@ function QuoteCheckPage(){
                 // "starting_at" floor (base trim / adjacent MY) is a reference,
                 // not this unit's sticker — an option-loaded car above the base
                 // floor is NOT "over MSRP", so the compare stays neutral.
-                const msrpExactScroll=!!(analysis.msrp&&analysis.msrpBasis==="exact");
+                const msrpExactScroll=isExactMsrp(analysis);
                 const hasMsrpCompare=!!(msrpExactScroll&&analysis.quotedPrice);
                 const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
                 const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
@@ -8143,6 +8264,25 @@ function QuoteCheckPage(){
                   </div>
                 );
               })()}
+
+              {/* S37 — advertised price conditional on dealer financing. Same
+                  data and same ask as the deck's card; a cash buyer never learns
+                  this from the page's own headline. */}
+              {analysis.financeContingent&&analysis.financeContingent.contingent&&(
+                <div style={{...cardStyle,borderLeft:`3px solid ${C.coral}`}}>
+                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Price conditions · {(analysis.financeContingent.reasons||[]).join(" · ")}</div>
+                  <div style={{fontSize:15,fontWeight:900,color:C.ink,lineHeight:1.35}}>This price depends on financing with the dealer</div>
+                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
+                    The listing's own wording ties the advertised price to taking the dealer's financing. Pay cash, or use your own bank, and the price can legitimately change — the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.
+                  </div>
+                  {analysis.financeContingent.evidence&&(
+                    <div style={{fontSize:12,color:C.inkSoft,marginTop:8,fontStyle:"italic",lineHeight:1.5}}>“…{analysis.financeContingent.evidence}…”</div>
+                  )}
+                  <div style={{fontSize:12,color:C.ink,marginTop:8,lineHeight:1.55}}>
+                    <b>Ask before you go in:</b> “What is the price if I pay cash or use my own bank — and if it changes, by exactly how much?” In writing.
+                  </div>
+                </div>
+              )}
 
               {/* S36 — trade-in instant-offer widget: name the mechanism, coach the
                   decoupling play. Same data as the deck's Trade-in card. */}
@@ -8760,7 +8900,7 @@ function QuoteCheckPage(){
               <button onClick={reset} style={{width:"100%",background:C.ink,border:"none",borderRadius:999,padding:"13px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)"}}>Check another quote</button>
             </div>
             );
-          })()}
+          }}/></ReportBoundary>}
 
           <div style={{textAlign:"center",marginTop:20,fontSize:11,color:C.inkFaint}}>
             LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.

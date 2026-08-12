@@ -303,6 +303,19 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${good ? "AMVIC is Alberta's regulator and its registry currently shows this business as licensed - that's what you want to see." : "AMVIC's registry currently shows this status. Ask the dealer to confirm their current licence number and status in writing before any deposit, and check it yourself at amvic.org."}</div>` });
   }
 
+  // 5b2 -- Finance-contingent price (S37). A flag, not a note: the cash buyer
+  // and the buyer with their own bank approval are the ones it costs.
+  if (a.financeContingent && a.financeContingent.contingent) {
+    const reasons = escapeHtml((a.financeContingent.reasons || []).join(" · "));
+    const ev = a.financeContingent.evidence ? escapeHtml(a.financeContingent.evidence) : "";
+    deck.push({ label: "Price depends on financing with the dealer", tone: "flag", glow: true, body:
+      `<div style="font-size:15px;font-weight:900;color:#A63C25;">This price is tied to taking the dealer's financing</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">The listing's own wording conditions the advertised price on financing through the dealer. Pay cash, or use your own bank, and the price can legitimately change — the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.</div>` +
+      (ev ? `<div style="font-size:12px;color:#5B5885;margin-top:8px;font-style:italic;line-height:1.45;">“…${ev}…”</div>` : "") +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;"><b>Ask before you go in:</b> “What is the price if I pay cash or use my own bank — and if it changes, by exactly how much?” In writing.</div>` +
+      (reasons ? `<div style="font-size:11px;color:#706D96;margin-top:6px;">Detected: ${reasons}</div>` : "") });
+  }
+
   // 5c -- Trade-in instant-offer widget (S36): name the mechanism, coach the split
   if (a.tradeInWidget && a.tradeInWidget.detected) {
     const tv = a.tradeInWidget.vendor ? escapeHtml(a.tradeInWidget.vendor) : "";
@@ -708,6 +721,18 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
       ? "AMVIC is Alberta's regulator; every business selling vehicles in the province must hold a licence. This dealer's registry entry currently reads as licensed."
       : "AMVIC's registry currently shows this status for the matched business. Records can lag and businesses do reapply, so this is not a verdict - but ask for the current licence number and status in writing before any deposit, and verify it yourself on AMVIC's public search.",
       { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- FINANCE-CONTINGENT PRICE (S37) ----
+  if (a.financeContingent && a.financeContingent.contingent) {
+    need(80);
+    kicker("PRICE DEPENDS ON FINANCING WITH THE DEALER");
+    T("This price is tied to taking the dealer's financing", { size: 13, font: serifB, color: INK }); y -= 18;
+    para("The listing's own wording conditions the advertised price on financing through the dealer. Pay cash, or use your own bank, and the price can legitimately change - the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.", { size: 9, color: SOFT, lead: 4 });
+    if (a.financeContingent.evidence) { advance(2); para(`"...${String(a.financeContingent.evidence).replace(/[^ -~]/g, " ")}..."`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
+    advance(2);
+    para('Ask before you go in: "What is the price if I pay cash or use my own bank - and if it changes, by exactly how much?" In writing.', { size: 9, color: INK, lead: 4 });
     rule();
   }
 
