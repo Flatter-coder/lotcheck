@@ -169,7 +169,7 @@
   @media(max-width:820px){.mg-row{grid-template-columns:1fr}}
   .mg-card{text-align:center}
   .mg-card svg{width:100%;height:auto;display:block;overflow:visible}
-  .mg-val{font-size:30px;font-weight:700;letter-spacing:-.6px;margin-top:-16px}
+  .mg-val{font-size:30px;font-weight:700;letter-spacing:-.6px;margin-top:6px}
   .mg-lbl{font-size:10.5px;color:var(--dim);margin-top:3px;line-height:1.5}
   /* Hover-only, and absolutely positioned so revealing it never shifts the
      layout underneath. */
@@ -181,7 +181,8 @@
     transition:opacity .25s,transform .3s cubic-bezier(.16,1,.3,1);box-shadow:0 12px 28px rgba(0,0,0,.6)}
   .mg-card:hover .mg-split{opacity:1;transform:translate(-50%,0) scale(1)}
   .mg-split b{color:var(--ink);font-weight:700}
-  @keyframes vxbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+  @keyframes cbdash{to{stroke-dashoffset:-40}}
+  @keyframes cbpulse{0%,100%{opacity:.45}50%{opacity:1}}
   @media (prefers-reduced-motion:reduce){#mgauge g{animation:none!important}}
   .mg-arc{transition:stroke-dashoffset .9s cubic-bezier(.16,1,.3,1)}
   /* section headings with a hairline rule, magazine style */
@@ -707,7 +708,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
           over sticker, <b style="color:var(--up)">green below</b> means under. New vehicles only, since used listings
           rarely state an MSRP to compare against.</p>
         <div class="mg-card">
-          <svg id="mgauge" viewBox="0 0 246 128" role="img" aria-label="Isometric terrain of Alberta asking prices against MSRP"></svg>
+          <svg id="mgauge" viewBox="0 0 236 150" role="img" aria-label="Circuit traces of Alberta price slices routing into the MSRP rail"></svg>
           <div class="mg-val mono" id="mgVal">—</div>
           <div class="mg-lbl" id="mgLbl">typical cut when a dealer discounts</div>
           <div class="mg-split" id="mgSplit"></div>
@@ -1110,27 +1111,27 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var amber=[224,168,0], green=[47,167,126];
     return [0,1,2].map(function(i){ return Math.round(amber[i]+(green[i]-amber[i])*f); });
   }
-  // ── Voxel landscape (lab option 11) ──────────────────────────────────────
-  // Each block is a SLICE OF THE MARKET, not a step on a scale. 48 blocks, so
-  // one block ≈ 2% of listings, laid out in an isometric grid and sorted by
-  // distance from MSRP — cheapest at the back-left, closest to sticker at the
-  // front-right.
+  // ── Circuit board (lab option 23) ────────────────────────────────────────
+  // Each trace is a SLICE OF THE MARKET routing into the MSRP rail on the
+  // right. 12 traces, so one trace is roughly 8% of the 658 listings, ordered
+  // from the deepest discount at the top to the closest to sticker at the
+  // bottom.
   //
-  // Why not drive it off the headline value: Alberta is flat at 0.0% over, so a
-  // value-driven grid would light three blocks out of 48 and read as broken.
-  // Making the terrain the DISTRIBUTION means the same picture works whether
-  // the market is flat, discounting hard, or (one day) charging over sticker.
+  // Why traces-as-slices rather than traces-as-value: Alberta is flat at 0.0%
+  // over, so a value-driven board would light one trace of twelve and read as
+  // broken. Making each trace a slice keeps the picture informative whether
+  // the market is flat, discounting hard, or one day charging over sticker.
   //
-  // Height = how far that slice sits from MSRP. Colour = which side of MSRP:
+  // The jog in each trace is how far that slice sits from MSRP — a longer
+  // detour before reaching the rail means a bigger gap. Colour is which side:
   // green at or below sticker, amber at 5% over, bright red beyond.
-  var VX_COLS=8, VX_ROWS=6;
-  function vxColor(pctOver){
+  function cbColor(pctOver){
     var GRN=[47,167,126], AMB=[224,168,0], RED=[255,45,45];
     if(pctOver<=0) return GRN;
     if(pctOver>5)  return RED;
     return [0,1,2].map(function(i){ return Math.round(GRN[i]+(AMB[i]-GRN[i])*(pctOver/5)); });
   }
-  function shade(rgb,f){ return "rgb("+rgb.map(function(x){return Math.max(0,Math.min(255,Math.round(x*f)));}).join(",")+")"; }
+  function cbRGB(c,f){ return "rgb("+c.map(function(x){return Math.max(0,Math.min(255,Math.round(x*(f||1))));}).join(",")+")"; }
 
   function drawGauge(dev, animate){
     var svg=document.getElementById("mgauge");
@@ -1138,45 +1139,41 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var val=document.getElementById("mgVal"), lbl=document.getElementById("mgLbl"), sp=document.getElementById("mgSplit");
 
     if(!dev || !dev.enough || !dev.curve || !dev.curve.length){
-      svg.innerHTML='<text x="130" y="80" text-anchor="middle" fill="var(--dim)" font-size="12">awaiting Alberta listings</text>';
+      svg.innerHTML='<text x="120" y="70" text-anchor="middle" fill="var(--dim)" font-size="12">awaiting Alberta listings</text>';
       val.textContent="—"; if(sp) sp.innerHTML=""; return;
     }
 
-    // Resample the 21-point percentile curve up to one value per block.
-    var c=dev.curve.map(Number), N=VX_COLS*VX_ROWS, cells=[];
+    // Resample the 21-point percentile curve down to one value per trace.
+    var c=dev.curve.map(Number), N=12, rows=[];
     for(var i=0;i<N;i++){
       var t=i/(N-1)*(c.length-1), lo=Math.floor(t), hi=Math.min(c.length-1,lo+1);
-      cells.push(c[lo]+(c[hi]-c[lo])*(t-lo));
+      rows.push(c[lo]+(c[hi]-c[lo])*(t-lo));
     }
-    var mx=1; cells.forEach(function(v){ mx=Math.max(mx,Math.abs(v)); });
+    var mx=1; rows.forEach(function(x){ mx=Math.max(mx,Math.abs(x)); });
 
-    var TW=17, TH=9, H0=3, HS=30, ox=104, oy=44, out="";
-    for(var r=0;r<VX_ROWS;r++){
-      for(var col=0;col<VX_COLS;col++){
-        var idx=r*VX_COLS+col, v=cells[idx];
-        var x=ox+(col-r)*TW, y=oy+(col+r)*TH*0.5;
-        var h=H0+Math.abs(v)/mx*HS;
-        var rgb=vxColor(v);                       // v>0 = over sticker
-        var top=shade(rgb,1.28), left=shade(rgb,0.52), right=shade(rgb,0.8);
-        out+='<g style="animation:vxbob '+(3+((r+col)%4)*.45).toFixed(2)+'s '+(((r+col)%6)*.16).toFixed(2)+'s ease-in-out infinite">'+
-          '<polygon points="'+x+','+(y-h)+' '+(x+TW)+','+(y-h+TH)+' '+x+','+(y-h+TH*2)+' '+(x-TW)+','+(y-h+TH)+'" fill="'+top+'"/>'+
-          '<polygon points="'+(x-TW)+','+(y-h+TH)+' '+x+','+(y-h+TH*2)+' '+x+','+(y+TH*2)+' '+(x-TW)+','+(y+TH)+'" fill="'+left+'"/>'+
-          '<polygon points="'+(x+TW)+','+(y-h+TH)+' '+x+','+(y-h+TH*2)+' '+x+','+(y+TH*2)+' '+(x+TW)+','+(y+TH)+'" fill="'+right+'"/></g>';
-      }
+    var W=236, H=150, RAIL=W-22, x0=10, top=14, gap=(H-top*2)/(N-1), out="";
+    for(var r=0;r<N;r++){
+      var v=rows[r], y=top+r*gap;
+      // Detour length scales with distance from MSRP: a slice sitting far from
+      // sticker takes a longer route to the rail.
+      var jog=26+Math.abs(v)/mx*104;
+      var rgb=cbColor(v), line=cbRGB(rgb), pad=cbRGB(rgb,1.35);
+      out+='<path d="M'+x0+' '+y.toFixed(1)+' H'+jog.toFixed(1)+' L'+(jog+13).toFixed(1)+' '+(y+ (r%2?6:-6)).toFixed(1)+' H'+RAIL+'" '+
+           'fill="none" stroke="'+line+'" stroke-width="1.8" stroke-dasharray="6 4" '+
+           'style="animation:cbdash '+(2.1+ (r%5)*0.3).toFixed(1)+'s linear infinite"/>'+
+           '<circle cx="'+x0+'" cy="'+y.toFixed(1)+'" r="2.6" fill="'+line+'"/>'+
+           '<circle cx="'+RAIL+'" cy="'+(y+(r%2?6:-6)).toFixed(1)+'" r="3.4" fill="'+pad+'" '+
+           'style="animation:cbpulse '+(2.2+(r%4)*.35).toFixed(1)+'s '+(r*.12).toFixed(2)+'s infinite"/>';
     }
-    // MSRP plane: the reference the terrain is measured against. Corners are
-    // derived from the same iso transform as the blocks, so it frames the grid
-    // exactly instead of floating near it.
-    var iso=function(c,r){ return [ox+(c-r)*TW, oy+(c+r)*TH*0.5+TH]; };
-    var c0=iso(-0.6,-0.6), c1=iso(VX_COLS-0.4,-0.6), c2=iso(VX_COLS-0.4,VX_ROWS-0.4), c3=iso(-0.6,VX_ROWS-0.4);
-    out+='<polygon points="'+[c0,c1,c2,c3].map(function(q){return q[0].toFixed(1)+","+q[1].toFixed(1);}).join(" ")+'" '+
-      'fill="none" stroke="#2fa77e" stroke-width="1.4" stroke-dasharray="5 4" opacity=".75"/>'+
-      '<text x="'+c3[0].toFixed(1)+'" y="'+(c3[1]+13).toFixed(1)+'" fill="#2fa77e" font-size="9" font-weight="700" font-family="ui-monospace,monospace">MSRP</text>';
+    // The MSRP rail every trace terminates on, plus the board edge.
+    out+='<line x1="'+RAIL+'" y1="6" x2="'+RAIL+'" y2="'+(H-6)+'" stroke="#2fa77e" stroke-width="3.4" stroke-linecap="round"/>'+
+         '<text x="'+RAIL+'" y="'+(H-1)+'" text-anchor="middle" fill="#2fa77e" font-size="9" font-weight="700" font-family="ui-monospace,monospace">MSRP</text>'+
+         '<rect x="3" y="4" width="'+(W-8)+'" height="'+(H-14)+'" rx="9" fill="none" stroke="#2fa77e" stroke-opacity=".35" stroke-width="1.3"/>';
     svg.innerHTML=out;
 
     var over=Number(dev.median)||0;
     val.textContent = over>0.049 ? "+"+over.toFixed(1)+"% over" : "At MSRP";
-    val.style.color = "rgb("+vxColor(over).join(",")+")";
+    val.style.color = cbRGB(cbColor(over));
     lbl.textContent = "Alberta live market vs MSRP";
     if(sp) sp.innerHTML='<b>'+dev.over_n+'</b> above sticker<br><b>'+dev.at_n+'</b> at sticker<br>'+
                         '<b>'+dev.under_n+'</b> below · '+dev.n+' total';
