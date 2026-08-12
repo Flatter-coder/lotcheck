@@ -58,6 +58,7 @@ import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+import { powertrainCompatible } from "../_shared/model-identity.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -85,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11l";
+const CACHE_VER = "2026-08-12a";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -487,6 +488,12 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     for (const row of data) {
       const cm = String(row.model || "").trim(); if (!cm) continue;
       const cmU = cm.toUpperCase();
+      // Prefix-stripping is for TRIM noise, never for a powertrain suffix: an
+      // "Equinox EV" must not collapse onto the gasoline "Equinox" and inherit
+      // its sticker (measured 2026-08-12 — a BEV was reported at the gas RS's
+      // $44,942). Losing the match is the correct outcome when the catalog has
+      // no row for the actual vehicle.
+      if (!powertrainCompatible(model, cm)) continue;
       if (em === cmU || em.startsWith(cmU + " ")) { if (!best || cm.length > best.length) best = cm; }
     }
     return best;

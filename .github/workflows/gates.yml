@@ -43,6 +43,8 @@ jobs:
         run: npm run check:copy
       - name: Reconciliation (the real pre-tax price)
         run: npm run test:reconciliation
+      - name: Model identity (an EV never inherits a gas MSRP)
+        run: npm run test:model-identity
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
       - name: Stacked incentives (real captured dealer pages)

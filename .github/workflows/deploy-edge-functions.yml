@@ -28,6 +28,7 @@ jobs:
       - run: npm run test:invariants
       - run: npm run check:copy
       - run: npm run test:reconciliation
+      - run: npm run test:model-identity
 
   deploy:
     needs: gates

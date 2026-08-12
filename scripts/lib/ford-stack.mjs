@@ -23,7 +23,7 @@ const HDRS = {
 
 // Model params are Ford's marketing names (verified 2026-07-26 from shop.ford.ca).
 // Refresh from the showroom tiles if the lineup changes.
-export const FORD_MODELS = ["Explorer", "Expedition", "Mustang", "Mach-E", "Bronco", "Bronco Sport", "Maverick", "Ranger", "F-150", "Super Duty", "Transit"];
+export const FORD_MODELS = ["Escape", "Explorer", "Expedition", "Mustang", "Mach-E", "Bronco", "Bronco Sport", "Maverick", "Ranger", "F-150", "Super Duty", "Transit"];
 export const LINCOLN_MODELS = ["Corsair", "Nautilus", "Aviator", "Navigator"];
 
 async function modelSlices(make, model, year) {
