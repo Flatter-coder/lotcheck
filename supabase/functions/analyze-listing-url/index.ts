@@ -86,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-12e";
+const CACHE_VER = "2026-08-12f";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2481,9 +2481,25 @@ Deno.serve(async (req: Request) => {
     // Start the sealed-screenshot capture NOW, in parallel with the whole scan,
     // so it gets the full request duration instead of the seconds left after
     // extraction. Fire-and-forget until the attach point; errors resolve null.
-    const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
+    // PAID CHECKS ONLY. Measured 2026-08-12: Scrapfly reports 51 credits per
+    // scrape, and this screenshot fired on EVERY scan -- it is the entire
+    // per-scan Scrapfly cost, and it occupies one of only 5 concurrent slots.
+    // Anonymous free checks are exactly the traffic we do not want spending
+    // that: they carry no revenue and they are where volume risk lives.
+    //
+    // Skipping them costs nothing a free user can see today. The seal is
+    // evidence for a report someone intends to USE, and a free check that
+    // later needs it can be re-run once signed in, which re-captures and
+    // re-signs cleanly. Paid checks are unchanged.
+    //
+    // MUST stay a promise resolving to null rather than `undefined`:
+    // attachSealedScreenshot does `pre ?? captureListingScreenshot(...)`, so an
+    // undefined `pre` silently buys the very call this gate exists to avoid.
+    const paidCheck = !!creditUser;
+    const shotPromise: Promise<{ b64: string; mime: string } | null> = (scrapflyEnabled() && paidCheck)
       ? captureListingScreenshot(url, 90_000).catch(() => null)
       : Promise.resolve(null);
+    if (scrapflyEnabled() && !paidCheck) console.log("Free check -- skipping the evidence screenshot (no Scrapfly spend).");
 
     // Structured-data safety net, started NOW instead of only after the scrape
     // fails. Many dealer platforms (EDealer, Convertus, ...) serve a complete
@@ -2912,7 +2928,13 @@ Deno.serve(async (req: Request) => {
     const hasFeeLines = Array.isArray(analysis.addOns) && analysis.addOns.length > 0;
     const missingMoneyDetail = !hasFinancing || !hasFeeLines;
     const timeForRescue = REQUEST_DEADLINE - Date.now() > 25_000;
-    const wantRescue = !(Number(analysis.quotedPrice) > 0) || (missingMoneyDetail && timeForRescue);
+    // The money-detail rescue reuses the screenshot a PAID scan already bought,
+    // so it adds no Scrapfly call. On a free check there is no such screenshot,
+    // and falling through to a fresh render would buy the 51-credit call this
+    // gate just avoided -- so that rescue is paid-only too. A MISSING PRICE is
+    // different and stays unconditional: without it there is no report at all,
+    // which is worth the call on any check.
+    const wantRescue = !(Number(analysis.quotedPrice) > 0) || (missingMoneyDetail && timeForRescue && paidCheck);
 
     if (wantRescue && scrapflyEnabled()) {
       try {
