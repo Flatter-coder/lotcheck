@@ -41,6 +41,8 @@ jobs:
         run: npm run test:invariants
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
+      - name: Reconciliation (the real pre-tax price)
+        run: npm run test:reconciliation
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
       - name: Stacked incentives (real captured dealer pages)

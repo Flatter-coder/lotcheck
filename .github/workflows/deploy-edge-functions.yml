@@ -27,6 +27,7 @@ jobs:
           node-version: "24"
       - run: npm run test:invariants
       - run: npm run check:copy
+      - run: npm run test:reconciliation
 
   deploy:
     needs: gates

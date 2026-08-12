@@ -24,10 +24,26 @@ const DISCOUNT_RE = /\b(discount|rebate|savings|incentive|loyalty|conquest)\b/;
 
 export type LineClass = "fee" | "addon" | "discount";
 
-export function classifyLine(name: unknown, price: unknown, verdict?: unknown): LineClass {
+export function classifyLine(name: unknown, price: unknown, verdict?: unknown, kind?: unknown): LineClass {
   const p = num(price);
   const n = norm(name);
-  if ((p != null && p < 0) || (DISCOUNT_RE.test(n) && (p == null || p <= 0))) return "discount";
+  // A negative amount reduces the price, whatever anyone called the line.
+  if (p != null && p < 0) return "discount";
+  // The extractor (or the model, via the `kind` field it is asked to fill)
+  // states outright that this line REDUCES the price. Trust that over the
+  // name, because dealer names for offers read exactly like charges:
+  // "Delivery Allowance" is a GM cash offer, but FEE_RE matches "delivery"
+  // and classified it as freight. On a live Rainbow Ford listing that turned
+  // $6,990 of advertised discounts into $6,990 stacked ON TOP, and told the
+  // buyer a car advertised at $39,765 really cost $46,755 before tax --
+  // wrong, and wrong in the direction that helps the dealer.
+  //
+  // Only "discount" is honoured here. `kind` is a two-way flag (fee|discount)
+  // with no way to say "add-on", so treating kind==="fee" as authoritative
+  // would collapse removable dealer add-ons into unavoidable fees and lose
+  // the negotiable-markup signal. Fee-vs-add-on stays with the patterns.
+  if (typeof kind === "string" && kind.trim().toLowerCase() === "discount") return "discount";
+  if (DISCOUNT_RE.test(n) && (p == null || p <= 0)) return "discount";
   if (ADDON_RE.test(n)) return "addon";
   if (FEE_RE.test(n)) return "fee";
   if (verdict === "flagged") return "addon";
@@ -248,8 +264,12 @@ export function computeReconciliation(analysis: any): Reconciliation | null {
   const fees: any[] = [], addons: any[] = [], discounts: any[] = [];
   for (const it of items) {
     const entry = { name: it?.name ?? null, price: num(it?.price) };
-    switch (classifyLine(it?.name, it?.price, it?.verdict)) {
-      case "discount": discounts.push(entry); break;
+    switch (classifyLine(it?.name, it?.price, it?.verdict, it?.kind)) {
+      // Discounts arrive with either sign -- the model reports a magnitude
+      // ("$3,490 off"), our own extractors report a signed reduction
+      // (-$4,762). Normalise to one convention so discountsTotal can never
+      // come out positive and read as money added to the price.
+      case "discount": discounts.push({ ...entry, price: entry.price == null ? null : -Math.abs(entry.price) }); break;
       case "addon": addons.push(entry); break;
       default: fees.push(entry);
     }
