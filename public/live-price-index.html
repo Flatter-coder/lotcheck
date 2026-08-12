@@ -468,6 +468,25 @@
   .tm-legend .sw.good{background:var(--up)} .tm-legend .sw.bad{background:var(--down)} .tm-legend .sw.neutral{background:var(--dim);opacity:.6}
   .tm-legend .sw.size{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dim);background:transparent}
 
+  /* ---------------- 3D powertrain chart ---------------- */
+  .pt3d-wrap{border:1px solid var(--hair);border-radius:14px;background:var(--panel);padding:14px 12px 10px}
+  #pt3d{width:100%;height:330px;display:block;cursor:grab;touch-action:pan-y}
+  #pt3d:active{cursor:grabbing}
+  @media (max-width:620px){#pt3d{height:240px}}
+  .pt3d-lg{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:8px;
+    font-size:.72rem;color:var(--dim)}
+  .pt3d-lg span{display:inline-flex;align-items:center;gap:6px}
+  .pt3d-lg i{width:9px;height:9px;border-radius:2px;display:inline-block}
+
+  /* ---------------- depth backdrop ----------------
+     A perspective-projected wireframe plane behind the page. Parallel lines
+     converging on a horizon is the cue that actually reads as depth; a flat
+     starfield never does. Decorative only -- it never carries a value. */
+  #lcMesh{position:fixed;left:0;right:0;bottom:0;height:52vh;z-index:0;pointer-events:none;opacity:.42}
+  #lcFog{position:fixed;left:0;right:0;bottom:0;height:52vh;z-index:0;pointer-events:none;
+    background:linear-gradient(180deg,var(--bg) 0%,transparent 40%,transparent 76%,var(--bg) 100%)}
+  header,.wrap,.backbar,.ticker,.tickerwrap{position:relative;z-index:1}
+
   @media (prefers-reduced-motion:reduce){
     .track{animation:none} .dealer{transition:none} .card{transition:none} .dot{animation:none}
     /* freeze the brand-logo motif — car rests mid-gate, window lit */
@@ -717,6 +736,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   <div class="track" id="track"></div>
 </div>
 
+<canvas id="lcMesh" aria-hidden="true"></canvas><div id="lcFog" aria-hidden="true"></div>
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
@@ -846,6 +866,18 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <h2>By powertrain <span class="n">median MSRP · verified trims</span></h2>
       <div class="pt-chips" id="ptChips"></div>
       <div class="scene"><div class="pt-grid" id="ptGrid"></div></div>
+    </section>
+
+    <!-- 3D: price band x powertrain. REAL catalog rows; the depth axis is a
+         CATEGORY (powertrain), never a magnitude, so perspective separates the
+         series without ever rescaling a value. -->
+    <section>
+      <h2>MSRP by price band <span class="n">verified trims · by powertrain</span></h2>
+      <div class="pt3d-wrap">
+        <canvas id="pt3d" aria-label="Three-dimensional chart: verified trim counts per MSRP price band, one receding row per powertrain"></canvas>
+        <div class="pt3d-lg" id="pt3dLg"></div>
+        <div class="mg-lbl" id="pt3dNote">drag to swing the view</div>
+      </div>
     </section>
 
     <!-- INSIGHTS -->
@@ -1920,6 +1952,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
     .then(function(rows){
       catalog = summarize(rows || []);
+      // Published for the 3D powertrain module. Same object the rest of the page
+      // renders from, so the two can never disagree.
+      try{ window.__lcCatalog = catalog; window.dispatchEvent(new Event("lc-catalog")); }catch(e){}
       // Never render a headline off a suspiciously thin read — an empty or
       // partial response must not become "$0 median". Say so instead.
       if(!catalog.loaded || !catalog.median || catalog.trims < 50) throw new Error("thin catalog read ("+catalog.trims+" trims)");
@@ -2435,5 +2470,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   window.addEventListener("resize",function(){clearTimeout(t);t=setTimeout(build,200);});  // rebuild on resize/zoom/rotate
 })();
 </script>
+<script src="/_lpi-3d.js" defer></script>
 </body>
 </html>
