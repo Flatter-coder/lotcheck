@@ -1058,21 +1058,51 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var svg=document.getElementById("chart");
     var mid=H/2, SPAN=12;                       // ±12% fills the plot
     var y=function(pct){ return mid - Math.max(-SPAN,Math.min(SPAN,pct))*(mid-16)/SPAN; };
-    var g='';
+    // innerHTML replaces the whole SVG each draw, so the filter has to be
+    // redeclared here or the line loses its glow on every redraw.
+    var g='<defs><filter id="glow" x="-10%" y="-40%" width="120%" height="180%">'+
+          '<feGaussianBlur stdDeviation="1.6" result="b"/>'+
+          '<feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>'+
+          '</filter></defs>';
 
     // gridlines at ±4/8%, unlabelled, so the eye has a scale
     [-8,-4,4,8].forEach(function(p){
       g+='<line x1="0" y1="'+y(p)+'" x2="'+W+'" y2="'+y(p)+'" stroke="var(--ink)" stroke-opacity=".06" stroke-width="1"/>';
     });
 
-    if(dev && dev.enough){
-      var band=Math.abs(y(dev.p75)-y(dev.p25));
-      var over=dev.median>0;
-      var col=over?"var(--down)":"var(--up)";   // over sticker = bad for the buyer
-      g+='<rect x="0" y="'+Math.min(y(dev.p25),y(dev.p75))+'" width="'+W+'" height="'+Math.max(band,2)+'" fill="'+col+'" fill-opacity=".13"/>'+
-         '<line x1="0" y1="'+y(dev.median)+'" x2="'+W+'" y2="'+y(dev.median)+'" stroke="'+col+'" stroke-width="2.4"/>'+
-         '<text x="'+(W-8)+'" y="'+(y(dev.median)+(over?-8:16))+'" text-anchor="end" fill="'+col+'" font-size="13" font-weight="600">'+
-           (dev.median>0?"+":"")+dev.median.toFixed(1)+'% vs MSRP · '+dev.n+' listings</text>';
+    if(dev && dev.enough && dev.curve && dev.curve.length > 1){
+      // The sweeping line is back — but it plots the real MARKET, not a
+      // simulated clock. Every listing sorted by distance from MSRP: deepest
+      // discount at the left, closest to sticker at the right. It answers the
+      // buyer's actual question ("where does my quote sit against everyone
+      // else's?") better than a time series would, and unlike the old series
+      // every point is a real car.
+      var c=dev.curve, step=W/(c.length-1);
+      var pt=function(i){ return [i*step, y(c[i])]; };
+      var line="", i;
+      for(i=0;i<c.length;i++){ line+=(i?" L":"M")+pt(i)[0].toFixed(1)+" "+pt(i)[1].toFixed(1); }
+
+      // Sorted ascending, so the curve crosses MSRP at most once. That lets the
+      // fill be split cleanly: green under sticker, red over it.
+      var cross=-1;
+      for(i=0;i<c.length-1;i++){ if((c[i]<0)!==(c[i+1]<0)) { cross=i; break; } }
+      var seg=function(a,b,col){
+        if(b<=a) return "";
+        var d="M"+pt(a)[0].toFixed(1)+" "+mid;
+        for(var k=a;k<=b;k++) d+=" L"+pt(k)[0].toFixed(1)+" "+pt(k)[1].toFixed(1);
+        d+=" L"+pt(b)[0].toFixed(1)+" "+mid+" Z";
+        return '<path d="'+d+'" fill="'+col+'" fill-opacity=".16"/>';
+      };
+      if(cross<0){ g+=seg(0,c.length-1, c[0]<0?"var(--up)":"var(--down)"); }
+      else { g+=seg(0,cross,"var(--up)")+seg(cross,c.length-1,"var(--down)"); }
+
+      g+='<path d="'+line+'" fill="none" stroke="var(--cyan)" stroke-width="2.1" filter="url(#glow)"/>';
+
+      var over=dev.median>0, col=over?"var(--down)":"var(--up)";
+      g+='<text x="'+(W-8)+'" y="'+(y(dev.median)+(over?-10:18))+'" text-anchor="end" fill="'+col+'" font-size="13" font-weight="600">'+
+           'median '+(dev.median>0?"+":"")+dev.median.toFixed(1)+'% vs MSRP · '+dev.n+' listings, '+dev.dealers+' dealers</text>'+
+         '<text x="8" y="'+(H-8)+'" fill="var(--dim)" font-size="11">deepest discount</text>'+
+         '<text x="'+(W-8)+'" y="'+(H-8)+'" text-anchor="end" fill="var(--dim)" font-size="11">closest to sticker →</text>';
     }
 
     // the MSRP reference line, always last so nothing paints over it
