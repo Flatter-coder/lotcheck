@@ -1,0 +1,55 @@
+# Apply database migrations from CI.
+#
+# WHY THIS EXISTS. Migrations used to mean copying a file into the Supabase SQL
+# Editor by hand. That cost about ten exchanges on the Alberta inventory tables
+# — wrong window, wrong directory, steps run out of order, a confirm query run
+# before the thing it was confirming, and at the end the tables still were not
+# there. None of it was necessary: SUPABASE_ACCESS_TOKEN is already a repo
+# secret and the Management API has been running our SQL all along (see
+# scripts/amvic-refresh.mjs, which applies its own DDL this way every week).
+#
+# SAFE TO RE-RUN. Every migration in this repo is idempotent — create ... if
+# not exists, create or replace, on conflict do nothing — so re-applying one is
+# a no-op. Default is dry_run=true, which prints what it would do and executes
+# nothing.
+#
+# It reloads the PostgREST schema cache afterwards. Without that, a table
+# created here stays invisible to the REST API and reads as "does not exist" to
+# anything going through PostgREST.
+name: Apply migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Migration filenames, space-separated (or blank with since=)"
+        type: string
+        default: ""
+      since:
+        description: "Apply every migration at or after this prefix, e.g. 20260811"
+        type: string
+        default: ""
+      dry_run:
+        description: "Print what would run, execute nothing"
+        type: boolean
+        default: true
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Apply
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.files }}" ]; then ARGS="${{ inputs.files }}"; fi
+          if [ -n "${{ inputs.since }}" ]; then ARGS="$ARGS --all-since ${{ inputs.since }}"; fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          echo "node scripts/apply-migrations.mjs $ARGS"
+          node scripts/apply-migrations.mjs $ARGS
