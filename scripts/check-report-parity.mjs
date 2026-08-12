@@ -82,6 +82,55 @@ if (calls.length !== EXPECTED_CALL_SITES) {
   );
 }
 
+// ── Rule 4 (coverage): a report field must reach EVERY surface ───────────────
+// Rules 1-3 stop one specific field from drifting. This one generalises the
+// standing rule itself: a feature that renders on the deck but not the scroll,
+// or in the app but not the emailed PDF, is a half-shipped feature — and that
+// is exactly how days-on-lot went out missing the scroll view.
+//
+// Each entry pins the minimum number of render paths a field must appear in,
+// across BOTH files. Adding a surface should push the count UP; a count that
+// drops means a view was dropped. Deliberately mechanical: it counts mentions,
+// so it cannot prove a card looks right — only that no surface forgot the field.
+const EMAIL_FILE = "supabase/functions/email-quote-report/index.ts";
+const emailSrc = readFileSync(EMAIL_FILE, "utf8");
+
+const SURFACES = [
+  {
+    field: "financeContingent (S37)",
+    // Each entry is one render path. If a surface is deleted or renamed, the
+    // named anchor stops matching and the gate says WHICH view went missing --
+    // strictly better than a count, which stayed green when the scroll card was
+    // deleted during this gate's own trial run.
+    app: {
+      "deck / heatmap / scorecard card": "financeContingentItem = {",
+      "flag pool (HUD + sidebar)":       "financeContingentItem ? [financeContingentItem]",
+      "flipbook financing page":         'a.financeContingent?.contingent&&<div className="rfb-why warn"',
+      "flipbook page is reachable":      "a.financeContingent?.contingent) P.push",
+      "bento DEAL tab (default view)":   "financeContingentItem ? cell(financeContingentItem",
+      "scroll summary tile strip":       'tiles.push({label:"Price conditions"',
+      "bento watch-outs count":          "analysis.financeContingent?.contingent) watchOuts",
+      "scroll view card":                "analysis.financeContingent&&analysis.financeContingent.contingent&&(",
+      "share link encode":               "fcx:a.financeContingent&&a.financeContingent.contingent",
+      "share link decode":               "financeContingent:c.fcx",
+      "signed verify payload":           "fcx:a.financeContingent?.contingent?{r:",
+      "verify page row":                 'o.fcx&&<Row t="Price conditions"',
+    },
+    email: {
+      "emailed HTML deck": 'deck.push({ label: "Price depends on financing with the dealer"',
+      "emailed PDF":       'kicker("PRICE DEPENDS ON FINANCING WITH THE DEALER")',
+    },
+  },
+];
+for (const { field, app, email } of SURFACES) {
+  for (const [surface, anchor] of Object.entries(app)) {
+    if (!src.includes(anchor)) failures.push(`${FILE}: '${field}' is missing from the ${surface}. Every report feature ships to ALL views in the same change.`);
+  }
+  for (const [surface, anchor] of Object.entries(email)) {
+    if (!emailSrc.includes(anchor)) failures.push(`${EMAIL_FILE}: '${field}' is missing from the ${surface}.`);
+  }
+}
+
 if (failures.length) {
   console.error("REPORT PARITY GATE — FAILED\n");
   for (const f of failures) console.error("  ✗ " + f);
@@ -89,4 +138,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`REPORT PARITY GATE — clean (${calls.length} resolveEvap call sites, 0 stale field reads).`);
+console.log(`REPORT PARITY GATE — clean (${calls.length} resolveEvap call sites, 0 stale field reads, ${SURFACES.reduce((n,f)=>n+Object.keys(f.app).length+Object.keys(f.email).length,0)} named surfaces wired).`);

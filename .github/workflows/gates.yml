@@ -45,3 +45,26 @@ jobs:
         run: npm run check:parity
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
+      - name: Finance-contingent pricing (S37)
+        run: npm run test:finance-contingent
+
+  # Separate job ON PURPOSE. The gates above are offline and dependency-free, and
+  # that is worth protecting -- they run in seconds and a red run always means a
+  # real regression. This one needs node_modules (Babel's parser, for real scope
+  # analysis), so it installs. Slower and network-bound, but it catches the one
+  # class of bug that every other check is blind to: an identifier referenced
+  # outside the scope that declares it. That is a runtime ReferenceError, not a
+  # build error, and it took the whole scroll view down twice before this existed.
+  render-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Undefined identifiers (a green build does NOT catch these)
+        run: npm run check:undef
+      - name: Build must still succeed
+        run: npm run build

@@ -93,6 +93,13 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (analysis?.financingTrap) {
     moves.push({ topic: "Financing", say: `Is this price "in lieu of special financing"? I want the discount AND the promo APR — not one or the other.` });
   }
+  // S37 — the advertised price is conditional on financing with the dealer. The
+  // cash buyer and the buyer with their own bank approval are the ones who lose
+  // it, and they are exactly the buyers who think they're in the strongest
+  // position. Ask before the desk gets to reprice at signing.
+  if (analysis?.financeContingent) {
+    moves.push({ topic: "Finance-contingent price", say: `Your own listing says this price depends on financing through you. Confirm in writing: what is the price if I pay cash or use my own bank — and if it changes, by exactly how much?` });
+  }
   // S35 — disclaimer escape hatch. The page's own fine print hedges the
   // advertised price; in an all-in province the regulator has ruled such
   // disclaimers are not a defence. The buyer quotes the dealer's own words.
