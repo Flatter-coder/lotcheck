@@ -51,6 +51,8 @@ jobs:
         run: npm run test:trim
       - name: MSRP authority (inflation callout thresholds)
         run: npm run test:msrp-authority
+      - name: Catalog carry-forward (a refresh must not wipe enrichment)
+        run: npm run test:carry-forward
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)

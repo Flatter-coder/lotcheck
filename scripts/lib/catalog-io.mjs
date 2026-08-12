@@ -43,6 +43,49 @@ function gateMsrpRows(rows, make) {
   return kept;
 }
 
+// Columns a SCRAPER does not produce but that are true about the vehicle and
+// expensive to re-establish: drivetrain is verified per trim against the
+// manufacturer, attrs records distinctive equipment, price_basis records the
+// freight/PDI convention.
+//
+// They have to be carried across a refresh explicitly. replaceRows deletes
+// every row for a make and re-inserts what the scraper produced, so any column
+// the scraper is silent about comes back NULL. That is not hypothetical: the
+// drivetrain values seeded by hand from official sources (Toyota bZ, Camry,
+// Nissan Rogue) were wiped this way, and msrp_catalog.drivetrain was 0/881
+// populated by the time anyone looked. Backfilling without this fix just
+// queues the same loss for the next refresh.
+export const CARRY_FORWARD = ["drivetrain", "attrs", "price_basis", "source_url"];
+
+export const catKey = (r) => `${r.year}|${r.model}|${r.trim ?? ""}`;
+
+// Pure half, exported so it can be tested without a database.
+export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
+  const prev = new Map();
+  for (const r of prevRows || []) prev.set(catKey(r), r);
+  let carried = 0;
+  const out = (rows || []).map((r) => {
+    const old = prev.get(catKey(r));
+    if (!old) return r;
+    const add = {};
+    // Only fill what the scraper left empty — a fresh scrape always wins.
+    for (const c of cols) if (r[c] == null && old[c] != null) { add[c] = old[c]; carried++; }
+    return Object.keys(add).length ? { ...r, ...add } : r;
+  });
+  return { rows: out, carried };
+}
+
+async function carryForward(table, rows, make, headers, url) {
+  if (table !== "msrp_catalog") return rows;
+  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}` +
+            `&select=year,model,trim,${CARRY_FORWARD.join(",")}&limit=5000`;
+  const res = await fetch(q, { headers });
+  if (!res.ok) { console.warn(`  ⚠️ carry-forward read failed (HTTP ${res.status}); enrichment may be lost.`); return rows; }
+  const { rows: out, carried } = mergeCarryForward(rows, await res.json());
+  if (carried) console.log(`  carried forward ${carried} enrichment value(s) for ${make}.`);
+  return out;
+}
+
 async function replaceRows(table, rows, make, { fatal = true, upsert = false } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
@@ -71,6 +114,8 @@ async function replaceRows(table, rows, make, { fatal = true, upsert = false } =
     // Provenance wins: rows carrying a source_url were verified by hand against
     // the manufacturer's own published page (Land Cruiser, Mach-E). A scraper
     // refresh must never wipe them -- exactly what happened on 2026-08-11.
+    // Read the enrichment BEFORE the delete, or there is nothing left to read.
+    rows = await carryForward(table, rows, make, headers, url);
     const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
     const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);

@@ -1,0 +1,52 @@
+# Backfill msrp_catalog.drivetrain from NRCan's Fuel Consumption Ratings.
+#
+# Context: drivetrain was 0/881 populated. The values seeded by hand from
+# official sources were deleted by a later scraper refresh, because
+# replaceRows() deletes every row for a make and re-inserts what the scraper
+# produced -- and no scraper emits drivetrain. catalog-io.mjs now carries the
+# column forward across a refresh, so this backfill will survive.
+#
+# Without a drivetrain the matcher cannot grant basis:"exact" to any listing
+# that states one, which suppresses the over/under-MSRP claim on it. See
+# _shared/trim-match.js rowConfirmsConfig().
+#
+# Safe to re-run: it only fills rows where drivetrain IS NULL, and it skips any
+# row whose trim names a different driveline.
+name: Catalog drivetrain backfill (NRCan)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Dry run (prints the decision for every model)
+        run: node scripts/backfill-drivetrain.mjs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      - name: Write
+        run: node scripts/backfill-drivetrain.mjs --write
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      # A cached analysis was computed against the old NULL drivetrain, so it
+      # would keep serving "starting_at" for vehicles that now resolve exact.
+      - name: Drop the analysis cache so reports pick the new basis up
+        run: |
+          python3 - <<'PY' > payload.json
+          import json
+          print(json.dumps({"query": "delete from listing_analysis_cache;"}))
+          PY
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @payload.json
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
