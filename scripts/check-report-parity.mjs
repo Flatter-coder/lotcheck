@@ -82,6 +82,23 @@ if (calls.length !== EXPECTED_CALL_SITES) {
   );
 }
 
+// Rule 4: remaining factory warranty must reach the 10-point panel.
+// Same class as the evapRebate bug, found the same way. `remainingWarranty` is
+// computed, verified and source-linked, and rendered on the scroll view - while
+// the panel card read only `standardWarranty`. A used 2026 Taos carrying 61,686
+// km of basic coverage was reported "NOT SHOWN" (2026-08-12, live). Remaining
+// coverage is money the buyer already owns and their answer to the finance
+// office's extended-warranty pitch; it is the last thing that may go missing.
+for (const [what, anchor] of Object.entries({
+  "10-point card": "const w = a.standardWarranty, rw = a.remainingWarranty;",
+  "what-this-means explainer": "a.remainingWarranty.powertrain.active))",
+  "scroll view card": "analysis.remainingWarranty&&(analysis.remainingWarranty.basic||analysis.remainingWarranty.powertrain)",
+})) {
+  if (!code.includes(anchor)) {
+    failures.push(`${FILE}: remaining factory warranty is missing from the ${what}. A verified warranty must never render as "NOT SHOWN".`);
+  }
+}
+
 if (failures.length) {
   console.error("REPORT PARITY GATE — FAILED\n");
   for (const f of failures) console.error("  ✗ " + f);

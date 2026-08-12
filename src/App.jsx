@@ -5845,9 +5845,26 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const tone = ev?.eligible ? "pass" : "muted";
     const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : notEv ? `N/A (${String(eft).toUpperCase()})` : "NOT DETERMINED");
     P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : notEv ? `N/A — ${String(eft).toLowerCase()} vehicle` : "Not determined")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : notEv ? "Federal and provincial EV incentives don't apply to this drivetrain." : "We couldn't confirm this vehicle's drivetrain from the listing, so no rebate claim is made — ask the dealer to confirm it in writing.")} /> }); }
-  // 9 Included warranty
-  { const w = a.standardWarranty; const tone = w?.coverage ? "pass" : "muted"; const v = w?.coverage ? "INCLUDED" : "NOT SHOWN";
-    P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
+  // 9 Included warranty — the listing's own statement if it made one, otherwise
+  // our VERIFIED remaining-factory-warranty figure. This card used to read only
+  // `standardWarranty` and say "NOT SHOWN", while `remainingWarranty` sat fully
+  // populated one field away and rendered on the scroll view alone: a used 2026
+  // Taos was reported as having no warranty shown while we held 61,686 km of
+  // basic coverage left, sourced to vw.ca (2026-08-12, live). Remaining factory
+  // coverage on a used car is money, and it is the buyer's answer to the finance
+  // office's extended-warranty pitch — the one place it must not go missing.
+  { const w = a.standardWarranty, rw = a.remainingWarranty;
+    const term = rw && ((rw.basic && rw.basic.active) ? rw.basic : (rw.powertrain && rw.powertrain.active) ? rw.powertrain : null);
+    const left = term ? [term.yearsLeft != null ? `~${term.yearsLeft} yr` : null,
+                        term.kmUnlimited ? "unlimited km" : (term.odometerKnown && term.kmLeft != null ? `${Number(term.kmLeft).toLocaleString()} km` : null)]
+                        .filter(Boolean).join(" / ") : null;
+    const tone = (w?.coverage || term) ? "pass" : "muted";
+    const v = term ? `${left} LEFT` : w?.coverage ? "INCLUDED" : "NOT SHOWN";
+    const big = term ? `${left} left` : w?.coverage ? "✓ Manufacturer warranty" : "Not shown";
+    const note = term
+      ? `Factory ${rw.basic && rw.basic.active ? "basic" : "powertrain"} coverage (${term.term}) — estimated from the ${rw.modelYear} model year${rw.odometerKm != null ? ` and ${Number(rw.odometerKm).toLocaleString()} km` : ""}. The clock starts on the in-service date, so confirm it against the VIN.`
+      : (w?.coverage || "No standard warranty coverage was stated on the quote.");
+    P.push({ title: "Included warranty", tone, v, body: <Simple big={big} c={(w?.coverage || term) ? TEAL : MUT2} note={note} /> }); }
   // 10 Dealer reputation
   { const d = a.dealerSentiment; const tone = d?.rating ? (Number(d.rating) >= 4 ? "pass" : "muted") : "muted"; const v = d?.rating ? Number(d.rating).toFixed(1) + "★ / " + Number(d.reviewCount || 0).toLocaleString() : "NOT FOUND";
     const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : <Simple big="Not found" c={MUT2} note="No public Google reviews were located for this dealer." />;
@@ -5900,7 +5917,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         : evap.effectiveFuelType
           ? `Rebates only apply to electric and plug-in vehicles — this one is ${String(evap.effectiveFuelType).toLowerCase()}, so there's no government money in play.`
           : "We couldn't confirm this vehicle's drivetrain from the listing, so we make no rebate claim either way — ask the dealer to state it in writing.",
-    "Included warranty": a.standardWarranty?.coverage
+    "Included warranty": (a.remainingWarranty && ((a.remainingWarranty.basic && a.remainingWarranty.basic.active) || (a.remainingWarranty.powertrain && a.remainingWarranty.powertrain.active)))
+      ? "This car still carries part of its original factory warranty — coverage you already own, at no extra cost. Before the finance office sells you an 'extended warranty', make them tell you exactly when this one runs out and what the new one adds that you don't already have."
+      : a.standardWarranty?.coverage
       ? "Every new vehicle already includes the manufacturer's factory warranty at no charge — shown here. When the finance office pitches an 'extended warranty,' remember this coverage is already yours for free."
       : "We couldn't confirm the factory warranty terms from this listing. Every new vehicle includes one — ask exactly what's covered and for how long, in writing, before considering any paid coverage.",
     "Dealer reputation": a.dealerSentiment?.rating
