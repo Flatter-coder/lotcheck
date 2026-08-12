@@ -20,6 +20,10 @@ on:
         description: "Fetch feeds but write nothing"
         type: boolean
         default: true
+      host:
+        description: "Re-crawl one dealer only, e.g. https://www.citygm.com (blank = all)"
+        type: string
+        default: ""
   # schedule:
   #   - cron: "0 11 * * *"   # 5am Calgary — after dealers' overnight inventory sync
   #   ENABLE ONLY AFTER LEGAL SIGN-OFF (see header)
@@ -27,7 +31,9 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Raised with PAGE_CAP: a 60-page lot at an 800ms inter-page delay is ~2
+    # minutes on its own, and the cap now allows far larger ones.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -40,8 +46,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "false" ]; then
-            node --experimental-strip-types scripts/crawl-alberta-inventory.mjs
-          else
-            node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run
-          fi
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" != "false" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.host }}" ]; then ARGS="$ARGS --host ${{ inputs.host }}"; fi
+          echo "node scripts/crawl-alberta-inventory.mjs $ARGS"
+          node --experimental-strip-types scripts/crawl-alberta-inventory.mjs $ARGS
