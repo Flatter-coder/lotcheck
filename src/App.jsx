@@ -5256,10 +5256,10 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           </div>
         )}
 
-        {analysis.financingCheck?.checked && analysis.financingCheck.note && (
+        {(analysis.financingCheck?.checked || analysis.financingCheck?.undisclosed) && analysis.financingCheck.note && (
           <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
             <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
-              {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+              {analysis.financingCheck.undisclosed?"⚠️ Payment advertised, terms not disclosed":analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
             </div>
             <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
           </div>
@@ -5829,8 +5829,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const body = (dr != null || a.financing?.paymentAmount) ? <div>{a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}{dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}{high ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div> : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}</div> : <Simple big="Not shown" c={MUT2} note="No financing rate was quoted." />;
     P.push({ title: "Financing APR", tone, v, body }); }
   // 5 Financing math
-  { const fc = a.financingCheck; const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : "muted"; const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : "NOT CHECKED";
-    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up") : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || "The advertised payment, price, rate and term were cross-checked."} /> }); }
+  { const fc = a.financingCheck; const und = !!(fc && fc.undisclosed && Number(fc.advertisedPayment) > 0);
+    const per = fc?.paymentFrequency === "weekly" ? "weekly" : fc?.paymentFrequency === "monthly" ? "monthly" : "bi-weekly";
+    const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : und ? "flag" : "muted";
+    const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : und ? "TERMS NOT DISCLOSED" : "NOT CHECKED";
+    const big = fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up")
+      : und ? `⚠ ${money(fc.advertisedPayment)} ${per}, terms undisclosed` : "Not checked";
+    P.push({ title: "Financing math", tone, v, body: <Simple big={big} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : und ? ROSE : MUT2} note={fc?.note || "The advertised payment, price, rate and term were cross-checked."} /> }); }
   // 6 Odometer
   { const o = a.odometerCheck; const isNew = a.vehicleCondition === "new"; const tone = o?.checked ? (o.flag ? "flag" : "pass") : "muted"; const v = o?.checked ? Number(o.km).toLocaleString() + " km" + (o.flag ? " FLAG" : "") : (isNew ? "N/A (NEW)" : "NOT ON QUOTE");
     P.push({ title: "Odometer", tone, v, body: <Simple big={o?.checked ? Number(o.km).toLocaleString() + " km" : (isNew ? "N/A — new vehicle" : "Not on quote")} c={o?.flag ? ROSE : "#fff"} note={o?.note || (isNew ? "New vehicles carry delivery-only mileage." : "No odometer reading was on this quote.")} /> }); }
@@ -5899,7 +5904,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     "Financing APR": a.financeRates?.dealer?.apr != null
       ? `APR is the yearly interest rate on the loan. This dealer advertises ${a.financeRates.dealer.apr}% — compare it against your own bank or credit union before accepting, because dealer rates often carry hidden markup.`
       : "The listing doesn't advertise a financing rate. Get the APR in writing and compare it with your own bank before you sign anything in the finance office.",
-    "Financing math": a.financingCheck?.checked
+    "Financing math": a.financingCheck?.undisclosed
+      ? "They advertised a payment, not a price. Without the interest rate and the number of months, that payment can't be compared to anything — and a small bi-weekly number is usually bought by stretching the loan out for years, which costs far more in interest. Ask for the rate, the term and the total cost of borrowing in writing."
+      : a.financingCheck?.checked
       ? (a.financingCheck.consistent
         ? "We recomputed the advertised payment from the price, rate and term — the numbers line up. No hidden amount is baked into the payment."
         : "We recomputed the advertised payment from the price, rate and term — and they DON'T line up. Something extra is baked into the payment. Ask them to show the calculation line by line.")

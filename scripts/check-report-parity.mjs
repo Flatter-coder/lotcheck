@@ -99,6 +99,23 @@ for (const [what, anchor] of Object.entries({
   }
 }
 
+// Rule 5: "payment advertised, terms not disclosed" must reach every surface.
+// The whole point of widening the vision rescue was to recover an advertised
+// payment on JS-rendered pages; if that finding lands in the JSON and renders
+// nowhere, we paid for the extraction and told the buyer nothing.
+const EMAIL_SRC = readFileSync("supabase/functions/email-quote-report/index.ts", "utf8");
+for (const [what, anchor, file, hay] of [
+  ["10-point card", "und ? \"TERMS NOT DISCLOSED\"", FILE, code],
+  ["what-this-means explainer", 'a.financingCheck?.undisclosed', FILE, code],
+  ["scroll view card", "analysis.financingCheck?.undisclosed", FILE, code],
+  ["emailed checklist", "Payment advertised without a rate or term", "email-quote-report", EMAIL_SRC],
+  ["emailed PDF panel", 'v: "TERMS NOT DISCLOSED"', "email-quote-report", EMAIL_SRC],
+]) {
+  if (!hay.includes(anchor)) {
+    failures.push(`${file}: the undisclosed-financing finding is missing from the ${what}.`);
+  }
+}
+
 if (failures.length) {
   console.error("REPORT PARITY GATE — FAILED\n");
   for (const f of failures) console.error("  ✗ " + f);

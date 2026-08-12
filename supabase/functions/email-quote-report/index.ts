@@ -250,11 +250,12 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   if (a.vinCheck?.present) checks.push(`${a.vinCheck.valid ? "✓" : "⚠"} VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + escapeHtml(a.vinCheck.vin) : ""}`);
   if (a.odometerCheck?.checked) checks.push(`${a.odometerCheck.flag ? "⚠" : "✓"} Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`);
   if (a.financingCheck?.checked) checks.push(`${a.financingCheck.consistent ? "✓" : "⚠"} Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`);
+  else if (a.financingCheck?.undisclosed) checks.push("⚠ Payment advertised without a rate or term");
   if (a.standardWarranty?.coverage) checks.push(`✓ Included warranty: ${escapeHtml(a.standardWarranty.coverage)}`);
   if (a.evapRebate?.eligible) checks.push(`✓ EV rebate ${money(a.evapRebate.total)} eligible`);
   else if (a.evapRebate?.ineligibleReason) checks.push(`• EV rebate: ${escapeHtml(a.evapRebate.ineligibleReason)}`);
   if (a.warranty?.offered) checks.push(`• Protection plan offered: ${escapeHtml(a.warranty.offered)}${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}`);
-  const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
+  const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent) || !!a.financingCheck?.undisclosed;
   if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
 
   // 5b -- Days on lot (motivated-seller clock, dealer's own inventory data)
@@ -406,6 +407,7 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   else if (fr?.manufacturer) P.push({ t: "Financing APR", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
   else P.push({ t: "Financing APR", v: "NONE ADVERTISED", tone: "muted" });
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
+  else if (a.financingCheck?.undisclosed) P.push({ t: "Financing math", v: "TERMS NOT DISCLOSED", tone: "flag" });
   else P.push({ t: "Financing math", v: "NO TERMS QUOTED", tone: "muted" });
   if (a.odometerCheck?.checked) P.push({ t: "Odometer", v: Number(a.odometerCheck.km).toLocaleString() + " km" + (a.odometerCheck.flag ? " FLAG" : ""), tone: a.odometerCheck.flag ? "flag" : "pass" });
   else P.push({ t: "Odometer", v: a.vehicleCondition === "new" ? "N/A (NEW)" : "NOT LISTED", tone: "muted" });
