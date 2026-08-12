@@ -281,6 +281,9 @@
   .pt{padding:16px 18px;cursor:pointer}
   .pt .name{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--dim);letter-spacing:.6px}
   .pt .name svg{width:17px;height:17px;color:var(--dimmer);flex:none}
+  /* The gate card reuses the powertrain icons outside .pt .name, so it needs
+     its own size rule or they render at their native (very large) size. */
+  .pt-gate svg{width:15px;height:15px;vertical-align:-3px;margin-right:3px}
   .pt .price{font-size:23px;font-weight:700;margin-top:11px;letter-spacing:-.4px}
   .pt .meta{display:flex;justify-content:space-between;align-items:center;margin-top:7px;font-size:11.5px}
   .pt .meta .sub{color:var(--dimmer)}
@@ -747,7 +750,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
     <!-- POWERTRAIN -->
     <section>
-      <h2>By powertrain <span class="n">avg MSRP · today</span></h2>
+      <h2>By powertrain <span class="n">median MSRP · verified trims</span></h2>
       <div class="pt-chips" id="ptChips"></div>
       <div class="scene"><div class="pt-grid" id="ptGrid"></div></div>
     </section>
@@ -961,7 +964,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // listings table is empty until the Alberta crawl runs. Those stay visibly
   // labelled rather than filled with invented numbers.
   var CATALOG_URL = "https://debigtyjhjamipooajhk.supabase.co/rest/v1/msrp_catalog"
-    + "?select=make,msrp,year&limit=5000";
+    + "?select=make,msrp,year,fuel_type&limit=5000";
   var catalog = { rows: [], makes: 0, trims: 0, median: null, loaded: false };
 
   function summarize(rows){
@@ -976,8 +979,24 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // skew into a headline number.
       median: prices.length ? prices[Math.floor(prices.length/2)] : null,
       byMake: makeMedians(priced),
+      byFuel: fuelStats(priced),
+      fuelTagged: priced.filter(function(r){ return !!r.fuel_type; }).length,
       loaded: true,
     };
+  }
+
+  // Median MSRP per powertrain, with the sample size that produced it. The
+  // count is not decoration — it is what decides whether the figure may be
+  // shown at all (see PT_FLOOR / PT_COVERAGE below).
+  function fuelStats(rows){
+    var g={};
+    rows.forEach(function(r){ if(r.fuel_type) (g[r.fuel_type]=g[r.fuel_type]||[]).push(Number(r.msrp)); });
+    var out={};
+    Object.keys(g).forEach(function(k){
+      var v=g[k].sort(function(a,b){return a-b;});
+      out[k]={ n:v.length, median:v[Math.floor(v.length/2)] };
+    });
+    return out;
   }
 
   // Median MSRP per make, richest coverage first. Makes with too few verified
@@ -1471,6 +1490,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // ---- powertrain filter chips ----
   function renderChips(){
     var host=document.getElementById("ptChips"); host.innerHTML="";
+    // Chips scope the powertrain tiles. While those are gated there is nothing
+    // to scope, so a row of dead buttons would just invite clicks that do
+    // nothing. They come back with the tiles.
+    if(!ptGateState().ready){ host.style.display="none"; return; }
+    host.style.display="";
     // "All" chip
     var all=document.createElement("button"); all.type="button"; all.className="chip on"; all.dataset.key="";
     all.innerHTML='All powertrains'; host.appendChild(all);
@@ -1516,17 +1540,73 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   }
 
   // ---- powertrain breakdown tiles (clickable -> drawer) ----
+  // ── Powertrain section: GATED until fuel_type coverage supports it ────────
+  // The tiles used to show a simulated price per powertrain that drifted every
+  // four seconds. Wiring them to the real catalog is not enough either: only
+  // 219 of 881 verified trims carry a fuel type, and the tagged slice is
+  // skewed badly enough to invert the answer — 25 tagged Gas trims median
+  // $67,000 against 108 BEV at $60,398, which would tell a buyer gas costs
+  // more than electric. The 662 untagged rows are overwhelmingly gas.
+  //
+  // So the whole section is gated, not just the thin tiles. The point of this
+  // section is the COMPARISON between powertrains, and a comparison drawn from
+  // a biased slice is worse than no comparison.
+  //
+  // It ungates itself: fill fuel_type in msrp_catalog and the tiles appear the
+  // next time the page loads. No code change needed.
+  var PT_FLOOR = 40;     // minimum verified trims before a powertrain may show a figure
+  var PT_COVERAGE = 0.6; // and at least this share of the catalog must be tagged at all
+
+  function ptGateState(){
+    if(!catalog.loaded) return { ready:false, tagged:0, total:0, share:0, rows:[] };
+    var tagged=catalog.fuelTagged||0, total=catalog.trims||0;
+    var share = total ? tagged/total : 0;
+    var rows = powertrains.map(function(p){
+      var s = (catalog.byFuel||{})[p.key] || { n:0, median:null };
+      return { key:p.key, label:p.label, n:s.n, median:s.median, ok:s.n>=PT_FLOOR };
+    });
+    return { ready: share>=PT_COVERAGE && rows.every(function(r){return r.ok;}),
+             tagged:tagged, total:total, share:share, rows:rows };
+  }
+
   function renderPt(){
     var host=document.getElementById("ptGrid"); host.innerHTML="";
-    powertrains.forEach((p)=>{
-      var el=document.createElement("div"); el.className="card pt"; el.dataset.pt=p.key;
-      var up=p.chg>=0;
-      el.innerHTML='<div class="name">'+ICON[p.key]+'<span>'+p.label+'</span></div>'+
-        '<div class="price mono" data-t="'+p.price+'" data-k="$">$0</div>'+
-        '<div class="meta"><span class="'+(up?"up":"down")+' mono" data-chg>'+pct(p.chg)+'</span><span class="sub">avg MSRP</span></div>'+
-        '<div class="bar"><i style="width:'+(38+Math.abs(p.chg)*22)+'%"></i></div>'+
+    var g=ptGateState();
+
+    if(!g.ready){
+      // One honest card in place of four misleading ones. It states the real
+      // coverage and what each powertrain still needs, so the gap is visible
+      // rather than papered over.
+      var el=document.createElement("div");
+      el.className="card in pt-gate";
+      el.style.gridColumn="1 / -1";
+      el.style.padding="18px 20px";
+      el.innerHTML=
+        '<div style="font-size:13px;color:var(--ink);font-weight:600">Not published yet — fuel type is recorded on '+
+          g.tagged+' of '+g.total+' verified trims ('+Math.round(g.share*100)+'%).</div>'+
+        '<div style="font-size:12px;color:var(--dim);line-height:1.6;margin-top:7px;max-width:70ch">'+
+          'A per-powertrain median drawn from the tagged slice would mislead: the untagged majority is '+
+          'overwhelmingly gas, so the few gas trims that carry a label are not representative of gas prices. '+
+          'These figures appear automatically once coverage reaches '+Math.round(PT_COVERAGE*100)+'% '+
+          'and every powertrain has at least '+PT_FLOOR+' verified trims.</div>'+
+        '<div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:13px">'+
+          g.rows.map(function(r){
+            return '<span style="font-size:11.5px;color:var(--dim)">'+ICON[r.key]+' '+r.label+
+              ' <b style="color:'+(r.ok?"var(--up)":"var(--ink)")+'">'+r.n+'</b>'+
+              '<span style="color:var(--dimmer)"> / '+PT_FLOOR+' trims</span></span>';
+          }).join('')+
+        '</div>';
+      host.appendChild(el);
+      return;
+    }
+
+    g.rows.forEach(function(r){
+      var el=document.createElement("div"); el.className="card pt"; el.dataset.pt=r.key;
+      el.innerHTML='<div class="name">'+ICON[r.key]+'<span>'+r.label+'</span></div>'+
+        '<div class="price mono" data-t="'+r.median+'" data-k="$">$0</div>'+
+        '<div class="meta"><span class="sub">median MSRP · '+r.n+' trims</span></div>'+
         '<div class="drill">◎ nearest dealers near Calgary →</div>';
-      el.addEventListener("click",()=>openDrawer(p.key));
+      el.addEventListener("click",function(){ openDrawer(r.key); });
       host.appendChild(el);
     });
   }
@@ -1598,6 +1678,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     });
     document.querySelectorAll("#side .val[data-t]").forEach(function(el){ countUp(el, +el.dataset.t, el.dataset.k); });
     renderTicker();   // swap the placeholder strip for real per-make medians
+    renderChips(); renderPt();   // the powertrain gate can only be judged once the catalog is in
   }
 
   fetch(CATALOG_URL, { headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON } })
@@ -1661,12 +1742,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // Ticker jitter removed — it randomly walked the per-segment numbers every
     // few seconds. The ticker now reports real per-make medians, which do not
     // move between catalog refreshes, so there is nothing to animate.
-    // powertrain tiles
-    document.querySelectorAll("#ptGrid .pt").forEach((el,i)=>{
-      var p=powertrains[i]; var dd=(rnd()-0.5)*80; p.price=Math.max(20000,p.price+dd); p.chg=Math.max(-2.5,Math.min(2.5,p.chg+(rnd()-0.5)*0.1));
-      var pv=el.querySelector(".price"); pv.textContent=money(p.price); flash(pv, dd>=0);
-      var cv=el.querySelector("[data-chg]"); cv.textContent=pct(p.chg); cv.className=(p.chg>=0?"up":"down")+" mono";
-    });
+    // Powertrain tile jitter removed with the simulation. The tiles are gated
+    // until fuel_type coverage supports them, and when they do appear they
+    // will show a real median that only changes when the catalog does.
   }, 4000);
 })();
 </script>
