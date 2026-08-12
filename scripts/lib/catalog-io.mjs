@@ -74,6 +74,39 @@ async function replaceRows(table, rows, make, { fatal = true, upsert = false } =
     const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
     const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
+
+    // The DELETE above deliberately SPARES hand-verified rows (source_url set).
+    // Those survivors still occupy their slot in UNIQUE(year,make,model,trim),
+    // so a scraped row for the same trim collides -- and one collision fails
+    // the whole INSERT, after the delete has already run. That is not a lost
+    // row, it is a lost lineup: on 2026-08-12 a Ford refresh deleted 78 rows,
+    // hit a duplicate "2026 Bronco Sport Heritage" against a preserved row,
+    // and left the catalog with 7 Ford rows in production.
+    //
+    // Provenance wins, same rule as the delete guard: keep the verified row and
+    // drop the scraped duplicate. Then dedupe within the batch too, so two
+    // configs resolving to one grade name can't collide with each other either.
+    if (table === "msrp_catalog") {
+      let kept = new Set();
+      try {
+        const keyRes = await fetch(`${url}/rest/v1/${table}?select=year,model,trim&make=ilike.${encodeURIComponent(make)}`, { headers });
+        if (keyRes.ok) {
+          for (const r of await keyRes.json()) kept.add(`${r.year}|${String(r.model ?? "")}|${String(r.trim ?? "")}`);
+        }
+      } catch { /* best-effort: a failed probe must not block the refresh */ }
+      const before = rows.length;
+      const seen = new Set();
+      rows = rows.filter((r) => {
+        const k = `${r.year}|${String(r.model ?? "")}|${String(r.trim ?? "")}`;
+        if (kept.has(k) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      if (before !== rows.length) {
+        console.log(`  ${table} (${make}): skipped ${before - rows.length} row(s) already held by a verified or duplicate key.`);
+      }
+    }
+
     for (let i = 0; i < rows.length; i += 500) {
       const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
       if (!ins.ok) throw new Error(`INSERT ${table} -> HTTP ${ins.status}: ${await ins.text()}`);
