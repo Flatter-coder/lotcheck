@@ -10,6 +10,8 @@
     "test:recalls": "node --experimental-strip-types supabase/functions/_shared/recalls.test.ts",
     "test:invariants": "node --experimental-strip-types supabase/functions/_shared/invariants.test.ts",
     "check:copy": "node scripts/check-copy-compliance.mjs",
+    "check:parity": "node scripts/check-report-parity.mjs",
+    "test:incentives": "node scripts/test-incentive-extract.mjs",
     "crawl:dry": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run",
     "crawl": "node --experimental-strip-types scripts/crawl-alberta-inventory.mjs"
   },

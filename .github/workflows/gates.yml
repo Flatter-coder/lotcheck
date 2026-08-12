@@ -4,6 +4,11 @@
 #                    price-disclosure consistency, the accusation gate, VIN check
 #                    integrity, MSRP basis + provenance. These are the rules that
 #                    keep a report from making a claim it can't back.
+#   check:parity     Client-derived report cards must render on EVERY view. The
+#                    EVAP rebate is computed on the client, and two surfaces
+#                    derived it while two read a server field that is never set
+#                    — so a BEV showed a dead "—" on the panel while the scroll
+#                    view showed the real rebate. Pins the shared resolver.
 #   check:copy       Forbidden and count-pinned claims in shipped copy: paused
 #                    regulatory-status language, scrape vocabulary, absolute
 #                    accuracy promises, and the two condition-bound claims
@@ -36,3 +41,7 @@ jobs:
         run: npm run test:invariants
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
+      - name: Report parity (client-derived cards render on every view)
+        run: npm run check:parity
+      - name: Stacked incentives (real captured dealer pages)
+        run: npm run test:incentives

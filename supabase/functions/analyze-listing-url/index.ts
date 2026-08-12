@@ -56,6 +56,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
+import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
@@ -84,7 +85,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11h";
+const CACHE_VER = "2026-08-11i";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2007,6 +2008,58 @@ async function buildJsonLdFallbackAnalysis(url: string): Promise<any | null> {
   }
 }
 
+// Hand the page's OWN structured data to Claude alongside the scraped text.
+//
+// WHY. These same facts are already gap-filled into the analysis AFTER Claude
+// runs, so the numbers on the report were right — but the narrative wasn't.
+// Claude only ever saw the scraped text, so when a dealer page rendered its
+// price into schema.org markup but not into readable prose, Claude correctly
+// reported that it found no price and told the buyer to go ask the dealer,
+// while the gap-fill quietly populated quotedPrice underneath. The buyer got a
+// report showing $39,890 next to a summary saying no price was disclosed.
+// Measured 2026-08-11 on a live Kramer Mazda listing (schema.org Offer said
+// $39,890; the summary said "no price ... present to extract").
+//
+// Fixing the class means Claude must not be able to claim a fact is absent
+// when we can already see it. The fetch is a plain browser-shaped GET started
+// in parallel far upstream, so by this point it has almost always resolved;
+// the race below caps the wait so a slow dealer can never stall the scan on a
+// safety net. Facts are labelled as authoritative, not as a hint — they are
+// read from the page's machine-readable markup, which is stronger evidence
+// than prose, and they are exactly what the gap-fill would apply anyway.
+async function structuredFactsBlock(early: Promise<any | null>): Promise<string> {
+  let d: any = null;
+  try {
+    d = await Promise.race([
+      early,
+      new Promise((r) => setTimeout(() => r(null), 1_500)),
+    ]);
+  } catch { d = null; }
+  if (!d) return "";
+
+  const facts: string[] = [];
+  const price = Number(d.quotedPrice);
+  if (price > 0) facts.push(`- Advertised price: $${price.toLocaleString("en-CA")}`);
+  if (d.vin) facts.push(`- VIN: ${d.vin}`);
+  if (d.vehicle) facts.push(`- Vehicle: ${d.vehicle}`);
+  const odo = Number(d.odometerKm);
+  if (Number.isFinite(odo) && odo >= 0) facts.push(`- Odometer: ${odo.toLocaleString("en-CA")} km`);
+  if (d.vehicleCondition) facts.push(`- Condition: ${d.vehicleCondition}`);
+  if (d.dealerName) facts.push(`- Dealer: ${d.dealerName}`);
+  if (!facts.length) return "";
+
+  console.log(`Structured facts passed to Claude: ${facts.length} field(s).`);
+  return (
+    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup embedded in the page source).\n` +
+    `These values are machine-read directly from the page and are authoritative. Some dealer platforms put ` +
+    `them ONLY in the markup, so they may not appear in the extracted text above — that does NOT mean the ` +
+    `page withheld them.\n\n${facts.join("\n")}\n\n` +
+    `Use these values in your output, and never state or imply that one of them is missing, undisclosed, or ` +
+    `not shown on the page. If the extracted text disagrees with a value here, say so plainly in the summary ` +
+    `so the buyer can check it — do not silently pick one.\n---`
+  );
+}
+
 // Shared downstream enrichment, run identically by BOTH the normal page-scrape
 // path and the SM360 feed fallback so a fallback report is as rich as its
 // (partial) data allows: verified warranty + fuel type, VIN pattern/check-digit
@@ -2636,7 +2689,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyJsonLd)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -2730,6 +2783,37 @@ Deno.serve(async (req: Request) => {
         console.log(`Advertised APR read from page text: ${hit.apr}%`);
       }
     }
+
+    // Stacked-incentive backstop. EDealer-family pages carry their advertised
+    // offers in an embedded JSON blob rather than in prose, so the LLM pass
+    // reads the sticker and reports "no discount" while the page's own title
+    // advertises the post-incentive price. Measured 2026-08-11: a Jack Carter
+    // Bolt listing hid $7,062 across a $2,300 dealer-payee delivery allowance
+    // and a $4,762 eligibility-gated federal EVAP rebate. That spread is the
+    // buyer's leverage, so a miss here is the costliest kind of miss we make.
+    // Additive and deduped by name: never displaces a line the page stated
+    // plainly and the LLM already read.
+    try {
+      const inc = typeof rawHtml === "string" ? extractCashIncentives(rawHtml) : null;
+      if (inc) {
+        const existing = Array.isArray(analysis.addOns) ? analysis.addOns : [];
+        const seen = new Set(existing.map((r: any) => String(r?.name || "").trim().toLowerCase()));
+        const fresh = incentivesToAddOns(inc).filter((r) => !seen.has(r.name.trim().toLowerCase()));
+        if (fresh.length) {
+          analysis.addOns = [...existing, ...fresh];
+          console.log(`Stacked incentives: +${fresh.length} discount line(s), $${inc.totalIncentives} total.`);
+        }
+        // NOT recorded here: the page's advertised-after-incentives figure
+        // ($43,246 on the listing above). It belongs on the report — it is the
+        // number the dealer markets and the buyer arrives believing — but a new
+        // field has to ship to EVERY view in the same change (scroll + deck /
+        // heatmap / sidebar + PDF + email), and adding one that only the JSON
+        // carries is the exact defect this pass is fixing. The offers
+        // themselves flow through addOns, which every view already renders, so
+        // the $7,062 reaches the buyer today; the headline figure is a
+        // deliberate follow-up, not an oversight.
+      }
+    } catch (err) { console.warn("Stacked-incentive read failed (non-fatal):", err); }
 
     // S36: flag embedded trade-in instant-offer widgets (checks the scraped
     // text first; falls back to one direct fetch), then refresh the script.

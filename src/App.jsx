@@ -835,6 +835,43 @@ function getEVAP(l){
   }) || null;
 }
 
+// Single source of truth for the EVAP rebate on a Quote Check report.
+//
+// The server never sends an `evapRebate` field -- the rebate is derived on the
+// client from the EVAP list plus the analysis. That derivation used to be
+// inlined in two places (the scroll view and the emailed-report payload), and
+// the 10-point panel instead read `analysis.evapRebate`, a field nothing ever
+// populates. Result: on a BEV, the scroll view and the email showed the real
+// rebate while the deck/heatmap/sidebar rendered a dead "—". Measured
+// 2026-08-11 on three live BEV listings (bZ4X, Bolt, Equinox EV) -- all three
+// showed "—" on the panel, and the Jack Carter page was openly advertising a
+// $4,762 federal rebate at the time.
+//
+// Every surface that renders the rebate goes through this function. Adding a
+// new view means calling it, not re-deriving it.
+function resolveEvap(a){
+  const none = { show:false, rebate:null, effectiveFuelType:a?.fuelType || null, fuelMismatch:false, listMatch:null };
+  if(!a || !a.year || !a.make || !a.model) return none;
+  let listMatch = null;
+  try{ listMatch = getEVAP({ year:a.year, make:a.make, model:a.model, km:0 }); }catch{ listMatch = null; }
+  // Our verified list wins over the page's own fuel-type label -- dealer pages
+  // mislabel drivetrains, and the mismatch is surfaced to the buyer.
+  const effectiveFuelType = listMatch?.fuel || a.fuelType;
+  const fuelMismatch = !!listMatch && !!a.fuelType && a.fuelType !== listMatch.fuel;
+  const show = effectiveFuelType === "BEV" || effectiveFuelType === "PHEV";
+  if(!show) return { show:false, rebate:null, effectiveFuelType, fuelMismatch, listMatch };
+  return {
+    show:true,
+    rebate: getRebate("AB", effectiveFuelType, {
+      year:a.year, make:a.make, model:a.model,
+      condition:a.vehicleCondition,
+      km:a.odometerKm || 0,
+      price:a.quotedPrice || a.msrp || 0,
+    }),
+    effectiveFuelType, fuelMismatch, listMatch,
+  };
+}
+
 const DEMO_LISTINGS=[
   {id:1,name:"2025 Toyota RAV4 Prime XSE",make:"Toyota",model:"RAV4 Prime",year:2025,price:49900,km:8000,fuel:"PHEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
   {id:2,name:"2025 Hyundai IONIQ 5 Preferred",make:"Hyundai",model:"IONIQ 5",year:2025,price:48500,km:5200,fuel:"BEV",province:"AB",city:"Calgary",source:"Kijiji",dealer:true},
@@ -5695,6 +5732,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // an option-loaded car above the base floor is NOT "over MSRP".
   const msrpExact = ms > 0 && a.msrpBasis === "exact";
   const deltaOk = !!(qp && ms && msrpExact);
+  // Derived once here and read by BOTH the rebate card and its plain-language
+  // explainer below — the two used to read a server field that is never set.
+  const evap = resolveEvap(a);
   // "Contact Us For Price" — the page deliberately withholds the number
   // (detected from the page's own call-to-action text). A tactic, not a miss.
   const priceGated = !qp && a.priceDisclosure === "contact_for_price";
@@ -5797,9 +5837,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // 7 VIN
   { const vc = a.vinCheck; const tone = vc?.present ? (vc.valid ? "pass" : "flag") : "muted"; const v = vc?.present ? (vc.valid ? "VALID" : "CHECK PATTERN") : "NOT ON QUOTE";
     P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : "⚠ VIN doesn't validate") : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
-  // 8 EV / PHEV rebate
-  { const ev = a.evapRebate; const tone = ev?.eligible ? "pass" : "muted"; const gas = !(a.fuelType === "BEV" || a.fuelType === "PHEV"); const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : gas ? "N/A (GAS)" : "—");
-    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : gas ? "N/A — gas vehicle" : "—")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : "Federal/provincial EV incentives don't apply here.")} /> }); }
+  // 8 EV / PHEV rebate — via resolveEvap so this panel can never disagree with
+  // the scroll view or the emailed report (it used to read a server field that
+  // was never populated, rendering a dead "—" on every EV).
+  { const ev = evap.rebate, eft = evap.effectiveFuelType;
+    const notEv = !!eft && eft !== "BEV" && eft !== "PHEV";
+    const tone = ev?.eligible ? "pass" : "muted";
+    const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : notEv ? `N/A (${String(eft).toUpperCase()})` : "NOT DETERMINED");
+    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : notEv ? `N/A — ${String(eft).toLowerCase()} vehicle` : "Not determined")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : notEv ? "Federal and provincial EV incentives don't apply to this drivetrain." : "We couldn't confirm this vehicle's drivetrain from the listing, so no rebate claim is made — ask the dealer to confirm it in writing.")} /> }); }
   // 9 Included warranty
   { const w = a.standardWarranty; const tone = w?.coverage ? "pass" : "muted"; const v = w?.coverage ? "INCLUDED" : "NOT SHOWN";
     P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
@@ -5848,11 +5893,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     "VIN check": a.vinCheck?.present
       ? "The VIN is the car's unique fingerprint. This one has a valid format — before you sign, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
       : "The listing doesn't show the VIN (the car's unique fingerprint). Ask for it — it lets you verify recalls, history and that the paperwork matches the actual car.",
-    "EV / PHEV rebate": a.evapRebate?.eligible
-      ? `Government money you may qualify for on this vehicle: ${money(a.evapRebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
-      : (a.fuelType === "BEV" || a.fuelType === "PHEV")
+    "EV / PHEV rebate": evap.rebate?.eligible
+      ? `Government money you may qualify for on this vehicle: ${money(evap.rebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
+      : evap.show
         ? "This electric/plug-in vehicle doesn't qualify for the federal rebate (usually the price cap or the model list). Don't let anyone imply a government discount that isn't there."
-        : "Rebates only apply to electric and plug-in vehicles — this one runs on gas, so there's no government money in play.",
+        : evap.effectiveFuelType
+          ? `Rebates only apply to electric and plug-in vehicles — this one is ${String(evap.effectiveFuelType).toLowerCase()}, so there's no government money in play.`
+          : "We couldn't confirm this vehicle's drivetrain from the listing, so we make no rebate claim either way — ask the dealer to state it in writing.",
     "Included warranty": a.standardWarranty?.coverage
       ? "Every new vehicle already includes the manufacturer's factory warranty at no charge — shown here. When the finance office pitches an 'extended warranty,' remember this coverage is already yours for free."
       : "We couldn't confirm the factory warranty terms from this listing. Every new vehicle includes one — ask exactly what's covered and for how long, in writing, before considering any paid coverage.",
@@ -6996,13 +7043,8 @@ function QuoteCheckPage(){
     // computed rebate to the payload so the emailed report includes it too.
     let emailAnalysis=analysis;
     try{
-      if(analysis&&analysis.year&&analysis.make&&analysis.model){
-        const evapListMatch=getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0});
-        const eft=evapListMatch?.fuel||analysis.fuelType;
-        if(eft==="BEV"||eft==="PHEV"){
-          emailAnalysis={...analysis,evapRebate:getRebate("AB",eft,{year:analysis.year,make:analysis.make,model:analysis.model,condition:analysis.vehicleCondition,km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0})};
-        }
-      }
+      const {show,rebate}=resolveEvap(analysis);
+      if(show&&rebate) emailAnalysis={...analysis,evapRebate:rebate};
     }catch{}
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
@@ -7833,18 +7875,7 @@ function QuoteCheckPage(){
             // EVAP: mirror the card's own gate/logic exactly so the hero tile
             // and the Rebates card always agree (lifted out of the card's old
             // inline IIFE so both can read the same result).
-            const evapListMatch=analysis.year&&analysis.make&&analysis.model
-              ?getEVAP({year:analysis.year,make:analysis.make,model:analysis.model,km:0})
-              :null;
-            const effectiveFuelType=evapListMatch?.fuel||analysis.fuelType;
-            const fuelMismatch=!!evapListMatch&&analysis.fuelType&&analysis.fuelType!==evapListMatch.fuel;
-            const evapShow=!!(analysis.year&&analysis.make&&analysis.model
-              &&(effectiveFuelType==="BEV"||effectiveFuelType==="PHEV"));
-            const rebate=evapShow?getRebate("AB",effectiveFuelType,{
-              year:analysis.year,make:analysis.make,model:analysis.model,
-              condition:analysis.vehicleCondition,
-              km:analysis.odometerKm||0,price:analysis.quotedPrice||analysis.msrp||0,
-            }):null;
+            const {show:evapShow,rebate,effectiveFuelType,fuelMismatch,listMatch:evapListMatch}=resolveEvap(analysis);
             // Watch-outs tile: a COUNT of the report's own flagged items
             // (recalls, odometer flag, invalid VIN, flagged add-ons) -- a
             // factual tally of what's flagged below, never an invented rating.
