@@ -176,12 +176,29 @@
   /* Gauge sits in the dead space to the right of the chart blurb — the same
      radial dial the Alberta Dealers Map uses, so the two pages read as one
      product. */
-  .mg-row{display:grid;grid-template-columns:1fr minmax(0,230px);gap:26px;align-items:start}
-  @media(max-width:820px){.mg-row{grid-template-columns:1fr}}
+  /* Three instruments across. Equal columns so no dial reads as the "main" one,
+     and a fixed svg height so the three value figures sit on one baseline
+     despite the gauges having different native aspect ratios. */
+  .mg-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;align-items:start}
+  @media(max-width:900px){.mg-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:600px){.mg-row{grid-template-columns:1fr}}
   .mg-card{text-align:center}
-  .mg-card svg{width:100%;height:auto;display:block;overflow:visible}
+  .mg-card svg{width:100%;height:150px;display:block;overflow:visible}
   .mg-val{font-size:30px;font-weight:700;letter-spacing:-.6px;margin-top:6px}
   .mg-lbl{font-size:10.5px;color:var(--dim);margin-top:3px;line-height:1.5}
+  /* Says which of the two scales a card is on, before you read its colours. */
+  .mg-cap{font-size:9px;letter-spacing:.1em;text-transform:uppercase;text-align:center;
+    color:var(--dim);opacity:.8;margin-bottom:4px;padding-bottom:4px;
+    border-bottom:1px solid rgba(255,255,255,.07)}
+  .mg-cap.alt{color:var(--cyan,#4ec8e0);opacity:.95}
+  .mg-explain{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0 2px}
+  @media(max-width:760px){.mg-explain{grid-template-columns:1fr}}
+  .mg-ex{font-size:11.5px;line-height:1.62;color:var(--dim);
+    border-left:2px solid rgba(255,255,255,.12);padding-left:11px}
+  .mg-ex-h{display:block;color:var(--ink);font-weight:650;font-size:11.5px;margin-bottom:2px}
+  .mg-ex b{font-weight:700}
+  .k-c{color:#4ec8e0} .k-g{color:#2fa77e} .k-a{color:#e0a800} .k-r{color:#ff2d2d}
+  .mg-ex-n{display:block;margin-top:5px;opacity:.78}
   /* Hover-only, and absolutely positioned so revealing it never shifts the
      layout underneath. */
   .mg-card{position:relative}
@@ -194,7 +211,49 @@
   .mg-split b{color:var(--ink);font-weight:700}
   @keyframes cbdash{to{stroke-dashoffset:-40}}
   @keyframes cbpulse{0%,100%{opacity:.45}50%{opacity:1}}
-  @media (prefers-reduced-motion:reduce){#mgauge g{animation:none!important}}
+  /* Namespaced: the page already defines a `pulse` for the starfield, and
+     reusing that name would silently retime these gauges. */
+  @keyframes mgShift{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+  @keyframes mgPulse{0%,100%{opacity:.45}50%{opacity:1}}
+  @keyframes mgSpin{to{transform:rotate(360deg)}}
+  /* CSS-3D stage for the price drum. Sized to the card rather than scaled,
+     because a 3D transform chain does not inherit the svg width:100% trick. */
+  /* Price reel. It turns about X, not Y: rotating about Y skewed every face
+     away from the reader and capped the face width at the drum's chord
+     (43.8px at r=64 with 9 faces, against 74px-wide faces — a 69% overlap,
+     which is why the prices were unreadable). About X the width is
+     unconstrained, so a face gets the whole card and the one at the front sits
+     perfectly square to the reader. */
+  /* Perspective is deliberately long. At 340px the translateZ(42) scaled the
+     front face up by 14% — 169px inside a 158px column, so the ends of
+     "$337,050" were clipped off. At 560 the scale-up is 8%, which the 6%
+     side insets below absorb at any column width. */
+  .mg-3d{height:150px;perspective:560px;position:relative;overflow:hidden}
+  /* Fades the reel off top and bottom so it reads as a cylinder turning behind
+     a window. Done with a MASK, not a colour overlay: this page has a dark and
+     a bright theme, so any gradient painted in a fixed colour matches the
+     backdrop in one of them and shows as a band in the other. A mask fades to
+     genuine transparency and is correct in both. */
+  .mg-3d{-webkit-mask-image:linear-gradient(180deg,transparent 0,#000 24%,#000 76%,transparent 100%);
+          mask-image:linear-gradient(180deg,transparent 0,#000 24%,#000 76%,transparent 100%)}
+  /* The drum fills the card so the faces' % insets resolve against the card
+     width. A 1px drum made 6% mean 0.06px. */
+  .mg-drum{position:absolute;inset:0;transform-style:preserve-3d;
+    animation:mgDrumSpin 24s linear infinite}
+  .mg-card:hover .mg-drum{animation-play-state:paused}
+  .mg-face{position:absolute;left:6%;right:6%;top:50%;height:27px;margin-top:-13.5px;
+    display:flex;align-items:center;justify-content:center;border-radius:5px;
+    font:700 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.4px;
+    backface-visibility:hidden;white-space:nowrap}
+  /* The reading window: the price crossing this band is the one being shown. */
+  .mg-win{position:absolute;left:6px;right:6px;top:50%;height:31px;margin-top:-15.5px;
+    border-top:1px solid rgba(255,255,255,.16);border-bottom:1px solid rgba(255,255,255,.16);
+    border-radius:5px;z-index:3;pointer-events:none}
+  @keyframes mgDrumSpin{to{transform:rotateX(360deg)}}
+  /* Per-piston travel comes in as --mgT so all five share one keyframe. */
+  @keyframes mgStroke{from{transform:translateY(0)}to{transform:translateY(var(--mgT,-20px))}}
+  @media (prefers-reduced-motion:reduce){
+    #mgauge g,#mgRings *,#mgPistons *{animation:none!important}}
   .mg-arc{transition:stroke-dashoffset .9s cubic-bezier(.16,1,.3,1)}
   /* section headings with a hairline rule, magazine style */
   .report h2{font-size:13px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);
@@ -717,15 +776,48 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     <section>
       <h2>Alberta market vs MSRP <span class="n">asking price against sticker</span></h2>
       <div class="mg-row">
-        <p class="basis-note" style="margin:0 0 14px">The green line is manufacturer MSRP — the reference point.
-          Alberta asking prices are drawn against it: <b style="color:var(--down)">red above</b> means dealers are asking
-          over sticker, <b style="color:var(--up)">green below</b> means under. New vehicles only, since used listings
-          rarely state an MSRP to compare against.</p>
         <div class="mg-card">
-          <svg id="mgauge" viewBox="0 0 236 150" role="img" aria-label="Circuit traces of Alberta price slices routing into the MSRP rail"></svg>
+          <div class="mg-cap">Alberta asking vs sticker</div>
+          <svg id="mgRings" viewBox="0 0 190 150" role="img" aria-label="Planetary rings edge-on, one ring per Alberta price slice orbiting the MSRP datum"></svg>
+          <div class="mg-val mono" id="mgRingsVal">—</div>
+          <div class="mg-lbl">every price slice, nearest sticker innermost</div>
+          <div class="mg-split" id="mgRingsSplit"></div>
+        </div>
+        <div class="mg-card">
+          <div class="mg-cap">Alberta asking vs sticker</div>
+          <svg id="mgPistons" viewBox="0 0 190 150" role="img" aria-label="Piston bank, each cylinder's stroke set by a price slice's distance from MSRP"></svg>
+          <div class="mg-val mono" id="mgPistonsVal">—</div>
+          <div class="mg-lbl">stroke length is distance from sticker</div>
+          <div class="mg-split" id="mgPistonsSplit"></div>
+        </div>
+        <div class="mg-card">
+          <div class="mg-cap alt">Manufacturer MSRP levels</div>
+          <div id="mgDrum" class="mg-3d" role="img" aria-label="Rotating reel of manufacturer MSRP prices, cheapest green through dearest red"></div>
           <div class="mg-val mono" id="mgVal">—</div>
-          <div class="mg-lbl" id="mgLbl">typical cut when a dealer discounts</div>
+          <div class="mg-lbl" id="mgLbl">live MSRP range · cheapest to dearest</div>
           <div class="mg-split" id="mgSplit"></div>
+        </div>
+      </div>
+
+      <!-- These three dials use the SAME three colours for TWO different
+           things, which is a genuine trap: red on the reel means "expensive
+           car", not "dealer overcharging". Spelled out rather than left to be
+           inferred. -->
+      <div class="mg-explain">
+        <div class="mg-ex">
+          <span class="mg-ex-h">Rings &amp; pistons — what Alberta dealers ask</span>
+          Both read the gap between advertised prices here and the manufacturer's sticker.
+          <b class="k-c">Cyan</b> deeply discounted · <b class="k-g">green</b> at MSRP ·
+          <b class="k-a">amber</b> 1% over · <b class="k-r">red</b> past 5% over.
+          <span class="mg-ex-n">Right now nothing in Alberta is above sticker, so these run cyan
+          through green — the colder the reading, the bigger the discount off MSRP.</span>
+        </div>
+        <div class="mg-ex">
+          <span class="mg-ex-h">The reel — what the cars cost new</span>
+          Nine real MSRPs from the verified catalogue, sampled evenly from the cheapest trim to the dearest.
+          <b class="k-g">Green</b> is the cheapest · <b class="k-a">amber</b> the median · <b class="k-r">red</b> the dearest.
+          These are <b>sticker prices set nationally by manufacturers — not what any dealer is asking</b>,
+          so red here means an expensive vehicle, never an overcharge.
         </div>
       </div>
       <div class="ctrls">
@@ -736,6 +828,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       </div>
       <div class="legend" id="legend">
         <span class="lg" style="color:var(--up)"><i style="background:var(--up)"></i>MSRP baseline</span>
+        <span class="lg" style="color:#4ec8e0"><i style="background:#4ec8e0"></i>Alberta asking below sticker</span>
         <span class="lg" style="color:var(--down)"><i style="background:var(--down)"></i>Alberta asking above sticker</span>
       </div>
       <div class="chartwrap" id="chartwrap">
@@ -1153,60 +1246,201 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // the market is flat, discounting hard, or one day charging over sticker.
   //
   // The jog in each trace is how far that slice sits from MSRP — a longer
-  // detour before reaching the rail means a bigger gap. Colour is which side:
-  // green at or below sticker, amber at 5% over, bright red beyond.
+  // FOUR stops, running in both directions from sticker:
+  //   -40% cyan · at MSRP green · 1% over amber · 5%+ bright red
+  //
+  // Above sticker, green->amber is compressed into the first single percent on
+  // purpose, so any amount over reads as a warning immediately; amber->red then
+  // spans 1..5%. (An earlier version ran green->amber across the whole 0..5
+  // band and jumped straight to red at 5.01%, so it never rendered an
+  // amber->red gradient at all and treated 4.9% over as merely amber.)
+  //
+  // Below sticker matters just as much and used to be thrown away: every
+  // negative value returned the same flat green, so a car discounted 38.3%
+  // looked identical to one at full sticker. With 0 of 658 Alberta listings
+  // above MSRP and 298 below, that flat green was the entire picture — the
+  // dials showed one colour and could not show anything else until some dealer
+  // charged over sticker. Discount depth is the buyer-relevant signal we
+  // actually have, so it gets its own direction.
+  //
+  // The -40% floor is FIXED, not scaled to the deepest slice in the current
+  // read. A scale that re-normalises each day would make today's cyan mean
+  // something different from yesterday's.
+  var DISCOUNT_FLOOR = -40;
   function cbColor(pctOver){
-    var GRN=[47,167,126], AMB=[224,168,0], RED=[255,45,45];
-    if(pctOver<=0) return GRN;
-    if(pctOver>5)  return RED;
-    return [0,1,2].map(function(i){ return Math.round(GRN[i]+(AMB[i]-GRN[i])*(pctOver/5)); });
+    var CYN=[78,200,224], GRN=[47,167,126], AMB=[224,168,0], RED=[255,45,45];
+    if(pctOver<=DISCOUNT_FLOOR) return CYN;
+    if(pctOver>=5) return RED;
+    var a,b,t;
+    if(pctOver<0){ a=GRN; b=CYN; t=pctOver/DISCOUNT_FLOOR; }
+    else if(pctOver<1){ a=GRN; b=AMB; t=pctOver; }
+    else { a=AMB; b=RED; t=(pctOver-1)/4; }
+    return [0,1,2].map(function(i){ return Math.round(a[i]+(b[i]-a[i])*t); });
   }
   function cbRGB(c,f){ return "rgb("+c.map(function(x){return Math.max(0,Math.min(255,Math.round(x*(f||1))));}).join(",")+")"; }
 
-  function drawGauge(dev, animate){
-    var svg=document.getElementById("mgauge");
-    if(!svg) return;
-    var val=document.getElementById("mgVal"), lbl=document.getElementById("mgLbl"), sp=document.getElementById("mgSplit");
+  // ---- Shared instrument helpers (dial + constellation) ---------------------
+  // Same cbColor ramp as the circuit board, so all three gauges agree on what
+  // green / amber / red mean. Semicircle geometry: fraction 0 = left = MSRP.
+  var MG_SPAN=15;                       // % over MSRP at the far right of a dial
+  function mgShade(v,f,add){ return "rgb("+cbColor(v).map(function(x){
+    return Math.max(0,Math.min(255,Math.round(x*f+(add||0)))); }).join(",")+")"; }
+  function mgPol(cx,cy,r,f){ var a=(180-f*180)*Math.PI/180; return [cx+r*Math.cos(a), cy-r*Math.sin(a)]; }
+  function mgArc(cx,cy,r,f0,f1){ var a=mgPol(cx,cy,r,f0), b=mgPol(cx,cy,r,f1);
+    return "M"+a[0].toFixed(1)+" "+a[1].toFixed(1)+"A"+r+" "+r+" 0 0 1 "+b[0].toFixed(1)+" "+b[1].toFixed(1); }
+  function mgN(n){ return n.toFixed(1); }
+  // Resample the 21-point percentile curve to N slices — the same trick the
+  // circuit board uses so a flat market still renders a full instrument
+  // instead of one lit element out of twelve.
+  function mgSlices(curve,N){
+    var c=curve.map(Number), out=[];
+    for(var i=0;i<N;i++){ var t=i/(N-1)*(c.length-1), lo=Math.floor(t), hi=Math.min(c.length-1,lo+1);
+      out.push(c[lo]+(c[hi]-c[lo])*(t-lo)); }
+    return out;
+  }
+  // Both directions stated plainly. The dial floors at MSRP because its scale
+  // only runs 0..15% over, so without this a market asking UNDER sticker would
+  // read "At MSRP" — 298 of 658 Alberta listings sit below it.
+  function mgLabel(v){
+    if(v>0.049) return "+"+v.toFixed(1)+"% over";
+    if(v<-0.049) return v.toFixed(1).replace("-","−")+"% under";
+    return "At MSRP";
+  }
+  function mgEmpty(svg,val,sp){
+    svg.innerHTML='<text x="95" y="75" text-anchor="middle" fill="var(--dim)" font-size="12">awaiting Alberta listings</text>';
+    if(val) val.textContent="—"; if(sp) sp.innerHTML="";
+  }
+  function mgSplitHTML(dev){
+    return '<b>'+dev.over_n+'</b> above sticker<br><b>'+dev.at_n+'</b> at sticker<br>'+
+           '<b>'+dev.under_n+'</b> below · '+dev.n+' total';
+  }
 
-    if(!dev || !dev.enough || !dev.curve || !dev.curve.length){
-      svg.innerHTML='<text x="120" y="70" text-anchor="middle" fill="var(--dim)" font-size="12">awaiting Alberta listings</text>';
+  // Lab #25 — planetary rings, edge-on. Seven rings, one per price slice,
+  // innermost = closest to sticker. Each ring carries its own slice's colour
+  // and rotates at its own rate, so the spread is the picture. Driving it from
+  // the single median would light one ring of seven at a flat market and read
+  // as broken — the same reason the circuit board uses slices.
+  function drawRings(dev){
+    var svg=document.getElementById("mgRings"); if(!svg) return;
+    var val=document.getElementById("mgRingsVal"), sp=document.getElementById("mgRingsSplit");
+    if(!dev || !dev.enough || !dev.curve || !dev.curve.length){ mgEmpty(svg,val,sp); return; }
+    var N=7, slices=mgSlices(dev.curve,N), cx=95, cy=75, o="";
+    slices.sort(function(a,b){ return Math.abs(a)-Math.abs(b); });
+    for(var i=0;i<N;i++){
+      var s=slices[i], rx=28+i*9.5, ry=rx*0.15;
+      o+='<ellipse cx="'+cx+'" cy="'+cy+'" rx="'+mgN(rx)+'" ry="'+mgN(ry)+'" fill="none" '+
+         'stroke="'+mgShade(s,1)+'" stroke-width="'+(2.6-i*0.13).toFixed(2)+'" '+
+         'stroke-dasharray="'+(14+i*5)+' '+(5+i)+'" '+
+         'style="transform-origin:'+cx+'px '+cy+'px;animation:mgSpin '+(5+i*1.4).toFixed(1)+'s linear infinite'+(i%2?' reverse':'')+'"/>';
+    }
+    // The planet itself is the MSRP datum every ring orbits.
+    o+='<circle cx="'+cx+'" cy="'+cy+'" r="15" fill="#0d1218" stroke="#2fa77e" stroke-width="2.2"/>'+
+       '<ellipse cx="'+(cx-5)+'" cy="'+(cy-5)+'" rx="6" ry="4" fill="#2fa77e" opacity=".4"/>'+
+       '<text x="'+cx+'" y="'+(cy+34)+'" text-anchor="middle" fill="#2fa77e" font-size="8.5" font-weight="700" font-family="ui-monospace,monospace">MSRP</text>';
+    svg.innerHTML=o;
+    var v=Number(dev.median)||0;
+    val.textContent=mgLabel(v); val.style.color=mgShade(v,1);
+    if(sp) sp.innerHTML=mgSplitHTML(dev);
+  }
+
+  // Lab #19 — piston bank. Five cylinders, one per price slice. Stroke height
+  // is that slice's distance from sticker, so a market at MSRP idles flat and a
+  // market over sticker pumps visibly. Scaled against the widest slice, floored
+  // so a flat market still shows moving pistons rather than a dead engine.
+  function drawPistons(dev){
+    var svg=document.getElementById("mgPistons"); if(!svg) return;
+    var val=document.getElementById("mgPistonsVal"), sp=document.getElementById("mgPistonsSplit");
+    if(!dev || !dev.enough || !dev.curve || !dev.curve.length){ mgEmpty(svg,val,sp); return; }
+    var N=5, slices=mgSlices(dev.curve,N), o="";
+    var mx=1; slices.forEach(function(s){ mx=Math.max(mx, Math.abs(s)); });
+    o+='<rect x="20" y="104" width="150" height="11" rx="4" fill="#161c25"/>';
+    for(var i=0;i<N;i++){
+      var s=slices[i], x=38+i*29, col=mgShade(s,1), lite=mgShade(s,1.42,40);
+      var travel=(0.22+Math.abs(s)/mx*0.78);          // 0..1 of the bore
+      o+='<rect x="'+(x-10)+'" y="24" width="20" height="80" rx="3" fill="#0d1218" stroke="#232b36" stroke-width="1.2"/>'+
+         '<g style="animation:mgStroke '+(1.05+i*0.14).toFixed(2)+'s '+(i*0.19).toFixed(2)+'s ease-in-out infinite alternate;'+
+         '--mgT:'+mgN(-travel*36)+'px">'+
+         '<rect x="'+(x-8)+'" y="60" width="16" height="18" rx="2.4" fill="'+col+'"/>'+
+         '<rect x="'+(x-8)+'" y="60" width="16" height="4" rx="2" fill="'+lite+'" opacity=".7"/>'+
+         '<rect x="'+(x-2)+'" y="76" width="4" height="30" fill="'+mgShade(s,.72)+'"/></g>';
+    }
+    // Crankshaft, and the MSRP datum the whole bank sits on.
+    o+='<circle cx="95" cy="126" r="14" fill="none" stroke="'+mgShade(Number(dev.median)||0,1.42,40)+'" '+
+       'stroke-width="2.6" stroke-dasharray="15 9" style="transform-origin:95px 126px;animation:mgSpin 1.4s linear infinite"/>';
+    o+='<line x1="20" y1="119" x2="170" y2="119" stroke="#2fa77e" stroke-width="2" stroke-dasharray="5 4"/>'+
+       '<text x="20" y="132" fill="#2fa77e" font-size="8.5" font-weight="700" font-family="ui-monospace,monospace">MSRP</text>';
+    svg.innerHTML=o;
+    var v=Number(dev.median)||0;
+    val.textContent=mgLabel(v); val.style.color=mgShade(v,1);
+    if(sp) sp.innerHTML=mgSplitHTML(dev);
+  }
+
+  // Lab #38 — rotating price drum. This one does NOT measure % over MSRP; it
+  // shows the live catalogue's own MSRP figures, coloured by where each price
+  // sits in the range: cheapest green, the middle amber, the dearest red. Every
+  // face is a REAL catalogued price sampled at an even percentile, never an
+  // interpolated number, and no make names appear — prices only.
+  //
+  // The amber anchor is the MEDIAN, not the mean. It is what the hero figure on
+  // this page already reports, and summarize() avoids the mean deliberately:
+  // the catalogue leans premium/EV depending on which manufacturer sites have
+  // been backfilled, and a mean would carry that skew into the colour scale.
+  // The red anchor is the 95th percentile, NOT the absolute maximum. The
+  // catalogue's dearest row is a $337,050 exotic against a $59,650 median, and
+  // anchoring red there left seven of nine faces amber — every ordinary
+  // expensive car, $65k through $105k, rendered as mid-scale. Anything at or
+  // above p95 still clamps to full red, so the dearest price is red as asked;
+  // the true maximum stays visible in the hover detail.
+  function priceColor(x,min,mid,hi){
+    var GRN=[47,167,126], AMB=[224,168,0], RED=[255,45,45];
+    if(!(hi>min)) return AMB;
+    if(x<=min) return GRN;
+    if(x>=hi)  return RED;
+    var a,b,t;
+    if(x<mid){ a=GRN; b=AMB; t=(x-min)/Math.max(1,mid-min); }
+    else     { a=AMB; b=RED; t=(x-mid)/Math.max(1,hi-mid); }
+    return [0,1,2].map(function(i){ return Math.round(a[i]+(b[i]-a[i])*t); });
+  }
+
+  function drawDrum(cat){
+    var host=document.getElementById("mgDrum"); if(!host) return;
+    var val=document.getElementById("mgVal"), lbl=document.getElementById("mgLbl"),
+        sp=document.getElementById("mgSplit");
+
+    var prices=((cat&&cat.rows)||[]).map(function(r){ return Number(r.msrp); })
+      .filter(function(x){ return x>0; }).sort(function(a,b){ return a-b; });
+    // Same honesty gate as the headline: a thin read must not become a price
+    // scale. Say we are waiting rather than colour three numbers as a range.
+    if(prices.length<20){
+      host.innerHTML='<div style="color:var(--dim);font-size:12">awaiting MSRP catalog</div>';
       val.textContent="—"; if(sp) sp.innerHTML=""; return;
     }
 
-    // Resample the 21-point percentile curve down to one value per trace.
-    var c=dev.curve.map(Number), N=12, rows=[];
+    var min=prices[0], max=prices[prices.length-1], mid=prices[Math.floor(prices.length/2)];
+    var hi=prices[Math.floor(0.95*(prices.length-1))];   // red anchor, outlier-proof
+    // R must clear the face height or the faces overlap and the text becomes
+    // unreadable: the gap between neighbours is the chord 2R·sin(180/N), so
+    // with N=9 and 27px faces R has to be at least 39.5. 42 leaves 1.7px.
+    var N=9, R=42, faces="";
     for(var i=0;i<N;i++){
-      var t=i/(N-1)*(c.length-1), lo=Math.floor(t), hi=Math.min(c.length-1,lo+1);
-      rows.push(c[lo]+(c[hi]-c[lo])*(t-lo));
+      // A real row at this percentile — not min+(max-min)*t.
+      var px=prices[Math.round(i/(N-1)*(prices.length-1))];
+      var c=priceColor(px,min,mid,hi), col="rgb("+c.join(",")+")";
+      var dk="rgb("+c.map(function(x){return Math.round(x*.34);}).join(",")+")";
+      faces+='<div class="mg-face" style="transform:rotateX('+(-i*(360/N))+'deg) translateZ('+R+'px);'+
+        'background:linear-gradient(180deg,'+dk+',rgba(8,11,15,.96));'+
+        'border:1px solid '+col+';color:'+col+';text-shadow:0 0 10px '+col+'66">'+money(px)+'</div>';
     }
-    var mx=1; rows.forEach(function(x){ mx=Math.max(mx,Math.abs(x)); });
+    host.innerHTML='<div class="mg-win"></div><div class="mg-drum">'+faces+'</div>';
 
-    var W=236, H=150, RAIL=W-22, x0=10, top=14, gap=(H-top*2)/(N-1), out="";
-    for(var r=0;r<N;r++){
-      var v=rows[r], y=top+r*gap;
-      // Detour length scales with distance from MSRP: a slice sitting far from
-      // sticker takes a longer route to the rail.
-      var jog=26+Math.abs(v)/mx*104;
-      var rgb=cbColor(v), line=cbRGB(rgb), pad=cbRGB(rgb,1.35);
-      out+='<path d="M'+x0+' '+y.toFixed(1)+' H'+jog.toFixed(1)+' L'+(jog+13).toFixed(1)+' '+(y+ (r%2?6:-6)).toFixed(1)+' H'+RAIL+'" '+
-           'fill="none" stroke="'+line+'" stroke-width="1.8" stroke-dasharray="6 4" '+
-           'style="animation:cbdash '+(2.1+ (r%5)*0.3).toFixed(1)+'s linear infinite"/>'+
-           '<circle cx="'+x0+'" cy="'+y.toFixed(1)+'" r="2.6" fill="'+line+'"/>'+
-           '<circle cx="'+RAIL+'" cy="'+(y+(r%2?6:-6)).toFixed(1)+'" r="3.4" fill="'+pad+'" '+
-           'style="animation:cbpulse '+(2.2+(r%4)*.35).toFixed(1)+'s '+(r*.12).toFixed(2)+'s infinite"/>';
-    }
-    // The MSRP rail every trace terminates on, plus the board edge.
-    out+='<line x1="'+RAIL+'" y1="6" x2="'+RAIL+'" y2="'+(H-6)+'" stroke="#2fa77e" stroke-width="3.4" stroke-linecap="round"/>'+
-         '<text x="'+RAIL+'" y="'+(H-1)+'" text-anchor="middle" fill="#2fa77e" font-size="9" font-weight="700" font-family="ui-monospace,monospace">MSRP</text>'+
-         '<rect x="3" y="4" width="'+(W-8)+'" height="'+(H-14)+'" rx="9" fill="none" stroke="#2fa77e" stroke-opacity=".35" stroke-width="1.3"/>';
-    svg.innerHTML=out;
-
-    var over=Number(dev.median)||0;
-    val.textContent = over>0.049 ? "+"+over.toFixed(1)+"% over" : "At MSRP";
-    val.style.color = cbRGB(cbColor(over));
-    lbl.textContent = "Alberta live market vs MSRP";
-    if(sp) sp.innerHTML='<b>'+dev.over_n+'</b> above sticker<br><b>'+dev.at_n+'</b> at sticker<br>'+
-                        '<b>'+dev.under_n+'</b> below · '+dev.n+' total';
+    val.textContent=money(mid);
+    val.style.color="rgb("+priceColor(mid,min,mid,hi).join(",")+")";
+    lbl.textContent="median of "+prices.length.toLocaleString("en-CA")+" verified trims";
+    if(sp) sp.innerHTML='Manufacturer MSRP, '+prices.length+' verified trims<br>'+
+                        '<b class="k-g">'+money(min)+'</b> cheapest trim<br>'+
+                        '<b class="k-a">'+money(mid)+'</b> median<br>'+
+                        '<b class="k-r">'+money(max)+'</b> dearest trim<br>'+
+                        'colour scale tops out at '+money(hi)+' (95th pct)';
   }
 
   function drawMsrpChart(dev, animate){
@@ -1643,12 +1877,12 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // Baseline first so the chart is never blank, then the real reading if we
   // have enough listings to publish one.
   var lastDev=null;
-  renderTicker(); renderSide(); renderChips(); renderPt(); drawMsrpChart(null); drawGauge(null);
+  renderTicker(); renderSide(); renderChips(); renderPt(); drawMsrpChart(null); drawDrum(null); drawRings(null); drawPistons(null);
 
   fetch("https://debigtyjhjamipooajhk.supabase.co/rest/v1/rpc/fn_alberta_msrp_deviation",
         { method:"POST", headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON, "Content-Type":"application/json" }, body:"{}" })
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ if(d){ lastDev=d; drawMsrpChart(d, true); drawGauge(d, true); } })
+    .then(function(d){ if(d){ lastDev=d; drawMsrpChart(d, true); drawRings(d); drawPistons(d); } })
     .catch(function(e){ console.warn("deviation read failed:", e.message); });
   var lmiEl=document.getElementById("lmi");
 
@@ -1677,6 +1911,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*70);
     });
     document.querySelectorAll("#side .val[data-t]").forEach(function(el){ countUp(el, +el.dataset.t, el.dataset.k); });
+    drawDrum(catalog);  // the price drum reads the catalogue, not the deviation RPC
     renderTicker();   // swap the placeholder strip for real per-make medians
     renderChips(); renderPt();   // the powertrain gate can only be judged once the catalog is in
   }
