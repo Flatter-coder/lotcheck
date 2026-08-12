@@ -86,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-12b";
+const CACHE_VER = "2026-08-12c";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2873,7 +2873,31 @@ Deno.serve(async (req: Request) => {
     // must NOT suppress it (else the report shows an MSRP but no deal). Fully
     // fail-safe: any failure returns null and we fall through as before.
     let renderConfirmedGated = false; // vision saw the rendered page and found NO price
-    if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
+
+    // WHEN THE RESCUE FIRES. It used to be "only when the price is missing",
+    // which left the most JS-dependent parts of a listing permanently unread:
+    // a House of Cars Taos returned a correct price and VIN while its financing
+    // and fee sections stayed blank, because the payment figures live in spans
+    // that JavaScript fills ("As Little As $243 / bi-weekly" is an EMPTY span in
+    // the source) and the fee lines render the same way. Points 3 and 5 read
+    // "NONE LISTED" and "NOT CHECKED" on a page that plainly showed both.
+    //
+    // We already pay to render and screenshot this page on every scan for the
+    // evidence seal. Reading it when material money fields are missing costs one
+    // more vision call and turns an asset we already buy into the extractor for
+    // exactly the fields that keep coming back empty.
+    //
+    // Bounded deliberately: only when a money field is missing (never for
+    // cosmetics), only when there is real time left, and identity/price are
+    // never overwritten by it (mergeRescued fills blanks). A page that genuinely
+    // has no financing costs one call and changes nothing.
+    const hasFinancing = Number(analysis.financing?.rate) > 0 || Number(analysis.financing?.paymentAmount) > 0;
+    const hasFeeLines = Array.isArray(analysis.addOns) && analysis.addOns.length > 0;
+    const missingMoneyDetail = !hasFinancing || !hasFeeLines;
+    const timeForRescue = REQUEST_DEADLINE - Date.now() > 25_000;
+    const wantRescue = !(Number(analysis.quotedPrice) > 0) || (missingMoneyDetail && timeForRescue);
+
+    if (wantRescue && scrapflyEnabled()) {
       try {
         const rescued = await rescueListingViaScrapfly(url, {
           systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
@@ -2881,7 +2905,13 @@ Deno.serve(async (req: Request) => {
         });
         // Confirmation means the vision pass READ the rendered page and itself
         // reported the gating -- an empty/failed read is not confirmation.
-        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+        // Only meaningful when we had NO price to begin with. Now that the
+        // rescue also runs on priced pages to recover financing/fees, a vision
+        // pass that simply didn't re-read a price we already hold must never be
+        // read as the dealer hiding it.
+        renderConfirmedGated = !(Number(analysis.quotedPrice) > 0)
+          && !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+          && (rescued as any)?.priceDisclosure === "contact_for_price";
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
