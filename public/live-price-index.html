@@ -1054,9 +1054,17 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // Draws the baseline even with no data — the reference line is true whether
   // or not we have listings yet, and an empty chart that shows the scale reads
   // as "not collected" rather than "broken".
-  function drawMsrpChart(dev){
+  function drawMsrpChart(dev, animate){
     var svg=document.getElementById("chart");
-    var mid=H/2, SPAN=12;                       // ±12% fills the plot
+    // Scale to the data, not to a guess. A fixed ±12% pinned the deepest
+    // discount (−38%) to the floor and clipped it, which hides the most
+    // interesting car on the lot. Floor of 12% so a flat market still has a
+    // sensible axis instead of magnifying rounding noise.
+    var mid=H/2, SPAN=12;
+    if(dev && dev.curve && dev.curve.length){
+      var mx=0; dev.curve.forEach(function(v){ mx=Math.max(mx, Math.abs(Number(v)||0)); });
+      SPAN=Math.max(12, Math.ceil(mx*1.08));
+    }
     var y=function(pct){ return mid - Math.max(-SPAN,Math.min(SPAN,pct))*(mid-16)/SPAN; };
     // innerHTML replaces the whole SVG each draw, so the filter has to be
     // redeclared here or the line loses its glow on every redraw.
@@ -1115,6 +1123,25 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
          'Awaiting Alberta listings — '+n+' of '+need+' needed before a market reading is published</text>';
     }
     svg.innerHTML=g;
+
+    // Motion, honestly sourced. The line draws itself in and the fills rise —
+    // a reveal of data that is already true, not a ticking number pretending
+    // the market moved while you watched. The old chart animated a random walk
+    // every four seconds; this animates once, on arrival.
+    if(animate && !reduce){
+      var lp=svg.querySelector("path[stroke]");
+      if(lp && lp.getTotalLength){
+        var len=lp.getTotalLength();
+        lp.style.strokeDasharray=len; lp.style.strokeDashoffset=len;
+        lp.animate([{strokeDashoffset:len},{strokeDashoffset:0}],
+                   {duration:1500,easing:"cubic-bezier(.16,1,.3,1)",fill:"forwards"});
+      }
+      svg.querySelectorAll("path[fill-opacity]").forEach(function(a,i){
+        a.animate([{opacity:0},{opacity:1}],{duration:1100,delay:420+i*140,fill:"forwards"});
+      });
+      var lbl=svg.querySelectorAll("text");
+      lbl.forEach(function(t,i){ t.animate([{opacity:0},{opacity:1}],{duration:700,delay:900+i*90,fill:"forwards"}); });
+    }
   }
 
   function drawChart(animate){
@@ -1405,7 +1432,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   fetch("https://debigtyjhjamipooajhk.supabase.co/rest/v1/rpc/fn_alberta_msrp_deviation",
         { method:"POST", headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON, "Content-Type":"application/json" }, body:"{}" })
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ if(d){ lastDev=d; drawMsrpChart(d); } })
+    .then(function(d){ if(d){ lastDev=d; drawMsrpChart(d, true); } })
     .catch(function(e){ console.warn("deviation read failed:", e.message); });
   var lmiEl=document.getElementById("lmi");
 
