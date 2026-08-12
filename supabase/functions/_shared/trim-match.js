@@ -65,7 +65,52 @@ const KEY_TOKENS = new Set([
   "touring","preferred","sport","premium","ultimate","calligraphy","denali",
   "laramie","rubicon","sahara","raptor","lariat","woodland","prime","n","type",
   "signature","select","essential","technology","luxury","execline","progressif",
+  "gt",
 ]);
+
+function keyTokens(s) {
+  return contentTokens(s).filter((t) => KEY_TOKENS.has(t));
+}
+
+// A row expresses a drivetrain either in its own column or inside its trim
+// name ("XSE AWD"). Used for scoring and for the configuration test below.
+function rowDrive(r) {
+  return normDrive(r && r.drivetrain) || normDrive(r && r.trim);
+}
+
+// The drivetrain the listing claims, from any of the three places it can appear.
+// Wider than `wantDrive` in the scorer on purpose: a drivetrain read out of a
+// free-text trim string is weak evidence for RANKING rows, but it is still the
+// buyer being told this car is AWD, so it must count when we decide whether we
+// may call a figure exact.
+function statedDrive(s) {
+  return normDrive(s.drivetrain) || normDrive(s.vinDrive) || normDrive(s.trim);
+}
+
+// CONFIGURATION CONFIRMATION — the fix for the Mach-E false accusation.
+//
+// Catalog rows pin a TRIM, not a CONFIGURATION. Ford publishes one Mach-E
+// "Premium" row at $49,990 and sells AWD and extended range as options above
+// it. A listing for a Premium AWD matched that row on the token "premium",
+// scored a clear win, and was labelled basis:"exact" — so the report treated a
+// five-figure options gap as though the catalog had priced this exact car.
+// Downstream that produced a $13,018 "inflated sticker" accusation against a
+// named dealer.
+//
+// The tell was available the whole time and ignored: the listing STATED a
+// drivetrain and the matched row did not pin one. "exact" has to mean the row
+// describes THIS car, not merely that it shares a trim name with it. So the
+// winning row must itself express the drivetrain the listing claims.
+//
+// Conservative on purpose. A single-drivetrain model whose catalog omits the
+// column (Land Cruiser, all 4WD) gets labelled "starting at" even though its
+// figure is right. That costs a precise label on a figure the report still
+// shows; the alternative cost a named dealer a false accusation.
+function rowConfirmsConfig(r, s) {
+  const stated = statedDrive(s);
+  if (!stated) return true;            // nothing claimed -> nothing to confirm
+  return rowDrive(r) === stated;       // the row must pin the same configuration
+}
 
 // rows: [{ trim, msrp, fuel_type?, drivetrain?, attrs? }]
 // sig:  { trim?, drivetrain?, fuelType?, quotedPrice?, features?[], vinDrive?, vinBody? }
@@ -76,7 +121,10 @@ export function pickTrimMsrp(rows, sig) {
   if (valid.length === 0) return null;
   if (valid.length === 1) {
     const r = valid[0];
-    return { msrp: Number(r.msrp), trim: r.trim || null, basis: r.trim ? "exact" : "starting_at", score: 0 };
+    // One row cannot pin a configuration the listing names, so the same test
+    // applies here — a lone row is the likeliest place to over-claim.
+    const exact = !!r.trim && rowConfirmsConfig(r, s);
+    return { msrp: Number(r.msrp), trim: r.trim || null, basis: exact ? "exact" : "starting_at", score: 0 };
   }
 
   // 1) Fuel partition — never cross hybrid / gas / bev / phev.
@@ -87,16 +135,27 @@ export function pickTrimMsrp(rows, sig) {
 
   const wantDrive = normDrive(s.drivetrain) || normDrive(s.vinDrive);
   const wantTokens = new Set(contentTokens(s.trim));
+  const wantKeys = keyTokens(s.trim);
   const price = Number(s.quotedPrice) > 0 ? Number(s.quotedPrice) : null;
   const feats = new Set((s.features || []).map((f) => String(f).toLowerCase()));
 
   const scored = pool.map((r) => {
     let sc = 0;
-    // Drivetrain — strong: match +4, mismatch -6 (near-exclusion).
-    const rDrive = normDrive(r.drivetrain);
+    // Drivetrain — strong: match +4, mismatch -6 (near-exclusion). Reads the
+    // trim name as well as the column, so a catalog that encodes drivetrain as
+    // "XSE AWD" still discriminates instead of scoring it as unknown.
+    const rDrive = rowDrive(r);
     if (wantDrive && rDrive) sc += wantDrive === rDrive ? 4 : -6;
     // Trim-name token overlap (order-independent, drivetrain words excluded).
     for (const t of contentTokens(r.trim)) if (wantTokens.has(t)) sc += KEY_TOKENS.has(t) ? 2 : 1;
+    // Trim-name CONFLICT — both sides name a grade and they share none of them.
+    // Without this, overlap could only ever add, so a row that matched on
+    // drivetrain alone (+4) outscored the correctly-named trim (+2): a Premium
+    // AWD listing picked the "GT AWD" row at $69,990 and called it exact. A
+    // grade the manufacturer did not print on this car is disqualifying
+    // evidence, so it has to be able to cost more than drivetrain can win.
+    const rKeys = keyTokens(r.trim);
+    if (wantKeys.length && rKeys.length && !rKeys.some((t) => wantKeys.includes(t))) sc -= 5;
     // Distinctive features from attrs (e.g. { digitalKey2: true }).
     const attrs = r.attrs || {};
     for (const k of Object.keys(attrs)) {
@@ -131,7 +190,12 @@ export function pickTrimMsrp(rows, sig) {
   // Clear winner if it leads by >=2, or the runner-up's MSRP is within $500
   // (same price -> either is an accurate answer).
   const clear = !second || (top.sc - second.sc) >= 2 || Math.abs(Number(top.r.msrp) - Number(second.r.msrp)) < 500;
-  if (clear) return { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis: "exact", score: top.sc };
+  if (clear) {
+    // A clear winner among rows that cannot express the stated configuration is
+    // still only the right TRIM, not the right CAR.
+    const basis = rowConfirmsConfig(top.r, s) ? "exact" : "starting_at";
+    return { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis, score: top.sc };
+  }
 
   // Genuinely ambiguous between materially different trims -> cheapest of the tie,
   // labelled starting_at so the report never presents a guess as the exact MSRP.
