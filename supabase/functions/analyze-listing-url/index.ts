@@ -86,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-12c";
+const CACHE_VER = "2026-08-12d";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -568,6 +568,23 @@ function computeFinancingCheck(analysis: any): void {
   const total = Number(f.totalObligation);
   const freq = f.paymentFrequency;
   const perYear = freq === "weekly" ? 52 : freq === "biweekly" ? 26 : freq === "monthly" ? 12 : null;
+  // A payment advertised with NO rate and NO term is not a gap in our data --
+  // it is the finding. "As Little As $243 / bi-weekly" tells a buyer nothing
+  // they can evaluate or compare, and a low bi-weekly figure is usually bought
+  // with a long term: 96 months is common, and it keeps the buyer underwater
+  // for years. Recorded as undisclosed rather than silently "not checked", so
+  // every surface can say WHY the math could not be done.
+  if (pay && perYear && !term && !(Number(f.rate) > 0)) {
+    const per = freq === "weekly" ? "weekly" : freq === "biweekly" ? "bi-weekly" : "monthly";
+    analysis.financingCheck = {
+      checked: false,
+      undisclosed: true,
+      advertisedPayment: pay,
+      paymentFrequency: freq,
+      note: `This listing advertises about $${pay.toLocaleString()} ${per} without showing the interest rate or the number of months behind it, so the payment cannot be checked against the price. A low ${per} figure is usually bought with a long term. Ask for the rate, the term and the total cost of borrowing in writing before comparing this payment to anything.`,
+    };
+    return;
+  }
   if (!pay || !term || !total || !perYear) return; // not enough disclosed to check
   const nPayments = Math.round((term / 12) * perYear);
   const expected = pay * nPayments;
@@ -2899,9 +2916,15 @@ Deno.serve(async (req: Request) => {
 
     if (wantRescue && scrapflyEnabled()) {
       try {
+        const priceMissing = !(Number(analysis.quotedPrice) > 0);
         const rescued = await rescueListingViaScrapfly(url, {
           systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
+          // Price missing -> pay for the heavier render (longer settle, anti-bot,
+          // HTML fallback). Chasing financing/fees on an already-priced page ->
+          // reuse the evidence screenshot, so the widened trigger adds no
+          // Scrapfly call and cannot eat into the 5-concurrency ceiling.
+          preShot: priceMissing ? undefined : shotPromise,
         });
         // Confirmation means the vision pass READ the rendered page and itself
         // reported the gating -- an empty/failed read is not confirmation.

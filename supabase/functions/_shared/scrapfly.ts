@@ -175,6 +175,9 @@ export interface RescueOpts {
   anthropicKey: string;
   model: string;
   budgetMs?: number;
+  /** Already-captured evidence screenshot; when present the rescue reuses it
+   *  instead of spending a second Scrapfly render. */
+  preShot?: Promise<{ b64: string; mime: string } | null>;
 }
 
 // Full rescue: render with Scrapfly, then read the result with Claude vision
@@ -184,7 +187,27 @@ export interface RescueOpts {
 export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): Promise<any | null> {
   if (!SCRAPFLY_API_KEY || !opts.anthropicKey) return null;
   try {
-    const rendered = await scrapflyRender(url, opts.budgetMs ?? 70_000);
+    // COST TIERING. The Scrapfly plan allows 5 concurrent calls, and every scan
+    // already spends one on the evidence screenshot. Issuing a second render
+    // here would let a single scan hold 2 of 5 slots -- roughly two concurrent
+    // users before the account queues.
+    //
+    // That second call is only worth it when the PRICE is missing, where the
+    // heavier render earns its keep: 8s settle instead of 3s, anti-bot, and
+    // HTML as a fallback if the shot fails. When we already have the price and
+    // are only after financing or fee lines, the evidence screenshot we have
+    // ALREADY paid for is the same fully-rendered page -- fullpage, auto-
+    // scrolled, JS executed -- so the widened trigger costs one Claude vision
+    // call and nothing at Scrapfly.
+    let rendered: RenderResult | null = null;
+    if (opts.preShot) {
+      const shot = await opts.preShot.catch(() => null);
+      if (shot?.b64) {
+        rendered = { html: null, screenshotB64: shot.b64, screenshotMime: shot.mime };
+        console.log("scrapfly-rescue: reusing the evidence screenshot (no extra Scrapfly call).");
+      }
+    }
+    if (!rendered) rendered = await scrapflyRender(url, opts.budgetMs ?? 70_000);
     if (!rendered) return null;
 
     const userContent: any[] = [];
