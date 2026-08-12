@@ -86,7 +86,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-12d";
+const CACHE_VER = "2026-08-12e";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",

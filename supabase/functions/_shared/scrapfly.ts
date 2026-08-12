@@ -95,7 +95,14 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       u.searchParams.set("url", url);
       u.searchParams.set("format", "jpg");
       if (fullpage) u.searchParams.set("capture", "fullpage");
-      u.searchParams.set("rendering_wait", "3000");
+      // 8s, not 3s. This shot now does double duty: evidence for the seal AND
+      // the extraction source when the rescue is only after financing or fee
+      // lines. At 3s the finance widget had not computed yet -- the House of
+      // Cars payment span was still empty, so the rescue read a page with no
+      // payment on it and financing came back null even though the figure
+      // renders fine a few seconds later. Matches scrapflyRender's settle time
+      // so one call can serve both jobs instead of us buying a second render.
+      u.searchParams.set("rendering_wait", "8000");
       u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("country", "ca");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
