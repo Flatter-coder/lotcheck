@@ -150,6 +150,17 @@
        so the scatter doesn't balloon in height at full page width). */
     .report>section:nth-of-type(4){grid-column:1 / -1}
     .report>section:nth-of-type(4) .tm-matrix-card{max-width:860px;margin-left:auto;margin-right:auto}
+    /* Powertrain and Market insights both span the full width so their tiles
+       fit on ONE row each. In a half-width column the four powertrain tiles
+       wrapped 2x2 and PHEV/BEV dropped to a second line, leaving the section
+       taller than the column beside it and looking stranded. Full width also
+       makes the page SHORTER, not longer: each section goes from two rows of
+       tiles to one. */
+    .report>section:nth-of-type(2),
+    .report>section:nth-of-type(3){grid-column:1 / -1}
+    .report>section:nth-of-type(2) .pt-grid{grid-template-columns:repeat(4,1fr)}
+    .report>section:nth-of-type(3) .side{flex-direction:row;gap:16px}
+    .report>section:nth-of-type(3) .side>*{flex:1 1 0;min-width:0}
   }
   /* headline block */
   .report-head .kicker{font-size:11px;color:var(--cyan);letter-spacing:2.4px;text-transform:uppercase}
@@ -1578,6 +1589,13 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // The init pass counted up the tiles while they still held placeholder
     // zeros, and renderSide() has just replaced those nodes — so the fresh ones
     // need their own count-up or they sit at 0 forever.
+    // .card starts at opacity:0 and only becomes visible once ".in" lands. The
+    // entrance stagger runs ONCE at init — before this fetch resolves — so the
+    // cards renderSide() just created never received it and the whole Market
+    // insights column rendered blank. Re-run the reveal on the new nodes.
+    document.querySelectorAll("#side .card").forEach(function(c,i){
+      setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*70);
+    });
     document.querySelectorAll("#side .val[data-t]").forEach(function(el){ countUp(el, +el.dataset.t, el.dataset.k); });
     renderTicker();   // swap the placeholder strip for real per-make medians
   }
