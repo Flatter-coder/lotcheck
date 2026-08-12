@@ -67,9 +67,28 @@ console.log("\njackcarterchev.ca — 2027 Chevrolet Bolt RS");
   }
 }
 
+// ── Rainbow Ford — the real negative control ─────────────────────────────────
+// This page DOES carry embedded pricing ("msrp":46755) and DOES advertise real
+// promotions ($6,990 across a Delivery Allowance and Ford Employee Pricing) —
+// but it states them in visible prose, which the LLM pass already reads
+// correctly. Two things must hold here, and the second one nearly shipped as a
+// regression: the extractor must not emit duplicate discount lines, and
+// nothing may treat the embedded "msrp" as the advertised price. This car's
+// MSRP is $46,755 and it is advertised at $39,765 — deriving an asking price
+// from that key would have overwritten a correct number with a $6,990 error on
+// a listing that was already right.
+console.log("\nrainbowford.ca — 2026 Ford Bronco Sport (negative control)");
+{
+  const html = loadFixture("rainbowford-bronco.html");
+  check("no cash-incentive block is invented", extractCashIncentives(html) === null);
+  check(
+    "embedded msrp is present but is NOT the advertised price",
+    /"msrp"\s*:\s*46755/.test(html) && /39,?765/.test(html),
+    "fixture no longer demonstrates the MSRP-vs-advertised gap",
+  );
+}
+
 // ── Negative control: a page with no cash-incentive block must return null ────
-// Rainbow Ford's promotions were already read from visible prose; the extractor
-// must not invent a block, and must not throw on unrelated markup.
 console.log("\nnegative controls");
 {
   check("empty string → null", extractCashIncentives("") === null);
