@@ -4670,10 +4670,13 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const [priceStr, setPriceStr] = useState(baseSource === "msrp" ? String(msrpVal) : "");
   const [priceConfirmed, setPriceConfirmed] = useState(false);
   const enteredPrice = Number(priceStr) || 0;
-  // Effective price + source that everything below renders from.
+  // Effective price + source that everything below renders from. A price the
+  // user TYPES wins over everything — including a verified listing price — but
+  // is always labelled "the price you entered", never "listed", and is never
+  // written back to analysis.quotedPrice (price-verification gate).
   let priceSource, price;
-  if (baseSource === "listing") { priceSource = "listing"; price = quotedPrice; }
-  else if (priceConfirmed && enteredPrice > 0) { priceSource = "user"; price = enteredPrice; }
+  if (priceConfirmed && enteredPrice > 0) { priceSource = "user"; price = enteredPrice; }
+  else if (baseSource === "listing") { priceSource = "listing"; price = quotedPrice; }
   else if (baseSource === "msrp") { priceSource = "msrp"; price = msrpVal; }
   else { priceSource = "none"; price = 0; }
   const disclosedRate = Number(analysis?.financing?.rate) || null;
@@ -4736,10 +4739,19 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
     return () => { alive = false; };
   }, []);
 
-  // Hero payment (quote term/down, current rate & frequency) with a
+  // User-typed down payment / term. Blank = the quote's own anchors; a valid
+  // typed value re-anchors the hero payment (and the grid highlight) to it.
+  const [downStr, setDownStr] = useState("");
+  const [termStr, setTermStr] = useState("");
+  const customDown = downStr !== "" && Number.isFinite(Number(downStr)) && Number(downStr) >= 0 ? Number(downStr) : null;
+  const customTerm = termStr !== "" && Number.isFinite(Number(termStr)) && Number(termStr) >= 12 && Number(termStr) <= 120 ? Math.round(Number(termStr)) : null;
+  const heroDown = customDown != null ? Math.min(customDown, Math.max(0, price)) : quoteDown;
+  const heroTerm = customTerm != null ? customTerm : quoteTerm;
+
+  // Hero payment (selected term/down, current rate & frequency) with a
   // reduced-motion-safe count-up.
-  const Pq = Math.max(0, price - quoteDown);
-  const heroPay = aprValid ? amortPayment(Pq, apr, freq.per, quoteTerm) : 0;
+  const Pq = Math.max(0, price - heroDown);
+  const heroPay = aprValid ? amortPayment(Pq, apr, freq.per, heroTerm) : 0;
   const [shownPay, setShownPay] = useState(heroPay);
   const prevPayRef = useRef(heroPay);
   useEffect(() => {
@@ -4906,7 +4918,10 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   if (priceSource === "none") {
     return (
       <div style={{...cardStyle}}>
-        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink,display:"flex",alignItems:"center",gap:7}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2.5" stroke="currentColor" strokeWidth="2"/><path d="M2 9.5h20" stroke="currentColor" strokeWidth="2"/><path d="M6 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          Financing breakdown
+        </div>
         {vehLine && <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>{vehLine}{analysis?.vehicleCondition?` · ${analysis.vehicleCondition}`:""}</div>}
         <div style={{fontSize:12.5,color:C.inkSoft,marginTop:10,lineHeight:1.55}}>
           We couldn't find this vehicle's price, so there's nothing to base a payment on yet. Enter the price to see your financing breakdown.
@@ -4936,7 +4951,10 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
       }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontSize:14,fontWeight:800,color:C.ink}}>💳 Financing breakdown</div>
+            <div style={{fontSize:14,fontWeight:800,color:C.ink,display:"flex",alignItems:"center",gap:7}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2.5" stroke="currentColor" strokeWidth="2"/><path d="M2 9.5h20" stroke="currentColor" strokeWidth="2"/><path d="M6 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+          Financing breakdown
+        </div>
             <div style={{fontSize:12,color:C.inkFaint,marginTop:3}}>
               {vehLine ? `${vehLine} · ` : ""}
               {priceSource === "msrp"
@@ -4968,18 +4986,37 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             <div style={{fontSize:40,fontWeight:800,letterSpacing:-1.5,lineHeight:1,marginTop:5,color:C.ink,fontVariantNumeric:"tabular-nums"}}>
               {aprValid ? money(shownPay) : "—"}<span style={{fontSize:14,color:C.inkFaint,fontWeight:600,letterSpacing:0}}>{aprValid ? freqSuffix : ""}</span>
             </div>
-            <div style={{fontSize:12,color:C.inkFaint,marginTop:7}}>at {aprValid ? apr : "—"}% · {money(quoteDown)} down · {quoteTerm} months</div>
+            <div style={{fontSize:12,color:C.inkFaint,marginTop:7}}>at {aprValid ? apr : "—"}% · {money(heroDown)} down · {heroTerm} months</div>
             {heroBand && (
               <div style={{display:"inline-block",fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:20,marginTop:9,background:heroTL.bg,color:heroTL.fg}}>{bandLabel(heroBand)}</div>
             )}
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:7,alignItems:"flex-end"}}>
-            <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your rate (edit)</div>
-            <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${aprValid ? C.line : C.coral}`,borderRadius:11,padding:"6px 10px"}}>
-              <input type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
-                onChange={e => setApr(e.target.value)}
-                style={{width:70,background:"transparent",border:0,color:C.ink,fontSize:19,fontWeight:700,textAlign:"right",outline:"none"}}/>
-              <span style={{color:C.inkFaint,fontSize:14}}>%</span>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:7,alignItems:"flex-end"}}>
+                <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Purchase price (edit)</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${C.line}`,borderRadius:11,padding:"6px 10px"}}>
+                  <span style={{color:C.inkFaint,fontSize:14}}>$</span>
+                  <input type="number" inputMode="numeric" min="0" value={priceConfirmed ? priceStr : (price ? String(Math.round(price)) : "")}
+                    onChange={e => { setPriceStr(e.target.value); setPriceConfirmed(true); }}
+                    style={{width:92,background:"transparent",border:0,color:C.ink,fontSize:19,fontWeight:700,textAlign:"right",outline:"none"}}/>
+                </div>
+                {priceSource === "user" && baseSource === "listing" && (
+                  <button onClick={() => { setPriceConfirmed(false); setPriceStr(""); }}
+                    style={{background:"none",border:0,padding:0,color:C.tealInk,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>
+                    use listed {money(quotedPrice)}
+                  </button>
+                )}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:7,alignItems:"flex-end"}}>
+                <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Your rate (edit)</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,background:C.paper,border:`2px solid ${aprValid ? C.line : C.coral}`,borderRadius:11,padding:"6px 10px"}}>
+                  <input type="number" inputMode="decimal" step="0.01" min="0" max="39.99" value={aprStr}
+                    onChange={e => setApr(e.target.value)}
+                    style={{width:70,background:"transparent",border:0,color:C.ink,fontSize:19,fontWeight:700,textAlign:"right",outline:"none"}}/>
+                  <span style={{color:C.inkFaint,fontSize:14}}>%</span>
+                </div>
+              </div>
             </div>
             <div style={{display:"inline-flex",gap:4,background:C.paper2,borderRadius:10,padding:3}}>
               {FIN_FREQS.map(f => (
@@ -5123,6 +5160,35 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
 
         {/* Heatmap: down payment x term, shaded by relative total interest */}
         <div style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6,marginTop:0,marginBottom:6}}>Explore down payment &amp; term — greener = cheaper</div>
+        {/* Type-your-own down + term: re-anchors the hero payment above (and
+            the grid outline when the values match a preset cell). Blank =
+            back to the quote's own anchors. */}
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",margin:"2px 0 10px"}}>
+          <span style={{fontSize:11,color:C.inkFaint,textTransform:"uppercase",letterSpacing:.6}}>Or type your own:</span>
+          <div style={{display:"flex",alignItems:"center",gap:5,background:C.paper,border:`1px solid ${C.line}`,borderRadius:10,padding:"5px 9px"}}>
+            <span style={{color:C.inkFaint,fontSize:12}}>$</span>
+            <input type="number" inputMode="numeric" min="0" placeholder="down" value={downStr}
+              onChange={e=>setDownStr(e.target.value)}
+              style={{width:70,background:"transparent",border:0,color:C.ink,fontSize:13.5,fontWeight:700,outline:"none"}}/>
+            <span style={{color:C.inkFaint,fontSize:11}}>down</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:5,background:C.paper,border:`1px solid ${termStr!==""&&customTerm==null?C.coral:C.line}`,borderRadius:10,padding:"5px 9px"}}>
+            <input type="number" inputMode="numeric" min="12" max="120" step="12" placeholder="term" value={termStr}
+              onChange={e=>setTermStr(e.target.value)}
+              style={{width:52,background:"transparent",border:0,color:C.ink,fontSize:13.5,fontWeight:700,textAlign:"right",outline:"none"}}/>
+            <span style={{color:C.inkFaint,fontSize:11}}>months</span>
+          </div>
+          {(downStr!==""||termStr!=="")&&(
+            <button onClick={()=>{setDownStr("");setTermStr("");}}
+              style={{background:"none",border:0,padding:0,color:C.tealInk,fontSize:11,fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>reset</button>
+          )}
+          {(customDown!=null||customTerm!=null)&&aprValid&&price>0&&(
+            <span style={{fontSize:12,color:C.inkSoft}}>
+              → <b style={{color:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(heroPay)}{freqSuffix}</b> at {apr}% · the payment above follows your numbers
+            </span>
+          )}
+          {termStr!==""&&customTerm==null&&<span style={{fontSize:11,color:C.coralInk}}>term must be 12–120 months</span>}
+        </div>
         <div style={{overflowX:"auto",margin:"0 -4px"}}>
           <table style={{width:"100%",borderCollapse:"separate",borderSpacing:2,fontSize:12,minWidth:360}}>
             <thead>
@@ -5141,7 +5207,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
                     const tt = mx > mn ? (cell.interest - mn) / (mx - mn) : 0;
                     const h = (aprValid && cell.P > 0) ? heatOf(tt) : null;
                     const hTL = h ? TL[h] : null;
-                    const isQuote = cell.d === quoteDown && cell.t === quoteTerm;
+                    const isQuote = cell.d === heroDown && cell.t === heroTerm;
                     return (
                       <td key={cell.t} style={{
                         textAlign:"right", padding:"6px 5px", borderRadius:8, whiteSpace:"nowrap",
@@ -6185,7 +6251,6 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const [btab, setBtab] = useState("deal"); // bento view's active tab
   const N = items.length;
   const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
-  useEffect(() => { if (view !== "deck") return; const h = (e) => { if (e.key === "ArrowRight") setIdx((i) => Math.min(N - 1, i + 1)); else if (e.key === "ArrowLeft") setIdx((i) => Math.max(0, i - 1)); }; window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h); }, [N, view]);
   const touchX = useRef(null);
 
   const toneColor = (c) => c.cosmic ? CY : c.tone === "flag" ? ROSE : c.tone === "pass" ? TEAL : MUT2;
@@ -6199,7 +6264,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("bento", "Bento")}{vb("deck", "Deck")}{vb("score", "Scorecard")}{vb("hud", "HUD")}{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
           ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
@@ -6210,47 +6275,6 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       </div>
       {emailErr && <div style={{ fontSize: 11.5, color: ROSE, textAlign: "right", marginBottom: 6 }}>{emailErr}</div>}
 
-      {view === "deck" && (<>
-        <div style={{ position: "relative" }} onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (touchX.current == null) return; const dx = e.changedTouches[0].clientX - touchX.current; if (dx < -40) go(1); else if (dx > 40) go(-1); touchX.current = null; }}>
-          <button onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous card" style={{ ...navBtn("left"), opacity: idx === 0 ? .3 : 1 }}>‹</button>
-          <div style={{ padding: "0 30px" }}>
-            <div key={idx} style={{ animation: "rvIn .3s ease" }}>
-              <div style={cardBox(items[idx])}><Head c={items[idx]} n={`${String(idx + 1).padStart(2, "0")} / ${String(N).padStart(2, "0")}`} /><div>{items[idx].body}</div></div>
-            </div>
-          </div>
-          <button onClick={() => go(1)} disabled={idx === N - 1} aria-label="Next card" style={{ ...navBtn("right"), opacity: idx === N - 1 ? .3 : 1 }}>›</button>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, marginTop: 16, flexWrap: "wrap" }}>{items.map((c, i) => (<button key={i} onClick={() => setIdx(i)} aria-label={`Card ${i + 1}`} style={{ width: i === idx ? 22 : 8, height: 8, borderRadius: 99, border: "none", cursor: "pointer", padding: 0, background: i === idx ? (c.glow ? CY : "#94a3b8") : "#334155", transition: "all .25s" }} />))}</div>
-        <div style={{ textAlign: "center", fontSize: 11, color: MUT, fontFamily: mono, marginTop: 8 }}>swipe or ← →  ·  card {idx + 1} of {N}</div>
-      </>)}
-
-      {view === "bento" && (() => {
-        // Variant 9 (Vic-picked, 2026-08-10): one compact grid, four tabs as
-        // lenses — THE DEAL (verdict + all 10 points, never-empty honoured),
-        // LEVERAGE, EVIDENCE, SAY THIS. Replaces the long scroll as default.
-        const tabs = [["deal", "THE DEAL"], ["lev", "LEVERAGE"], ["evid", "EVIDENCE"], ["say", "SAY THIS"]];
-        const tabBtn = ([id, label]) => (<button key={id} onClick={() => setBtab(id)} style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1.4, fontWeight: 800, padding: "7px 14px", borderRadius: 999, border: `1px solid ${btab === id ? CY : BORD}`, background: btab === id ? CY : "transparent", color: btab === id ? "#04222b" : MUT2, cursor: "pointer" }}>{label}</button>);
-        const cell = (c, span) => c ? (<div key={c.key} style={{ ...cardBox(c), ...(span ? { gridColumn: "1 / -1" } : {}) }}><Head c={c} n={c.v != null ? String(c.v) : undefined} /><div>{c.body}</div></div>) : null;
-        const grid = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", marginTop: 4 };
-        const levCards = [...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : [])];
-        const finePrint = (a.disclaimerCheck && a.disclaimerCheck.text) ? {
-          key: "fineprint", title: "The dealer's fine print — captured verbatim",
-          tone: (a.disclaimerCheck.escapeHatch || a.disclaimerCheck.contradiction) ? "flag" : "muted",
-          glow: false,
-          body: (<div><div style={{ fontSize: 12, color: MUT2, fontStyle: "italic", lineHeight: 1.55 }}>"{String(a.disclaimerCheck.text).slice(0, 420)}"</div>{a.disclaimerCheck.note && <div style={{ fontSize: 12, color: TX, marginTop: 8, lineHeight: 1.5 }}>{a.disclaimerCheck.note}</div>}</div>),
-        } : null;
-        return (<div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 12px" }}>{tabs.map(tabBtn)}</div>
-          {btab === "deal" && <div style={grid}>{cell(verdictItem, true)}{financeContingentItem ? cell(financeContingentItem, true) : null}{licItem ? cell(licItem) : null}{pointItems.map((c) => cell(c))}</div>}
-          {btab === "lev" && (levCards.length
-            ? <div style={grid}>{levCards.map((c) => cell(c, levCards.length === 1))}</div>
-            : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13, lineHeight: 1.6 }}>No sitting-time or trade-in leverage surfaced on this listing — the price case on THE DEAL tab is your leverage.</div>)}
-          {btab === "evid" && <div style={grid}>{cell(evidenceItem, !finePrint)}{cell(finePrint)}</div>}
-          {btab === "say" && (sayItem
-            ? <div style={grid}>{cell(sayItem, true)}</div>
-            : <div style={{ ...cardBox({ tone: "muted" }), color: MUT2, fontSize: 13 }}>No counter-script moves were generated for this report.</div>)}
-        </div>);
-      })()}
 
       {view === "sidebar" && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
@@ -6269,77 +6293,6 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         <div style={{ marginTop: 14 }}><div style={cardBox(heatItems[Math.min(selP, heatItems.length - 1)])}><Head c={heatItems[Math.min(selP, heatItems.length - 1)]} n={`point ${Math.min(selP, heatItems.length - 1) + 1} / ${heatItems.length}`} /><div>{heatItems[Math.min(selP, heatItems.length - 1)].body}</div></div></div>
       </>)}
 
-            {view === "hud" && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ ...cardBox({ cosmic: true }), flex: "1 1 230px", minWidth: 220, alignItems: "center", textAlign: "center", padding: 18 }}>
-              <div style={{ ...klabel, alignSelf: "flex-start" }}>Negotiation leverage</div>
-              {score != null ? (
-                <div style={{ width: 168, maxWidth: "100%" }}>
-                  <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
-                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
-                    <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
-                    <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}><line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" /></g>
-                    <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
-                  </svg>
-                  <div style={{ fontSize: 34, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -8 }}>{score.toFixed(1)}<span style={{ fontSize: 14, color: MUT }}>/10</span></div>
-                </div>
-              ) : <div style={{ padding: "20px 0", color: MUT }}>No score</div>}
-            </div>
-            <div style={{ flex: "2 1 320px", minWidth: 280, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(132px,1fr))", gap: 10 }}>
-              {[["Price vs MSRP", pointItems[0].v, pointItems[0].tone], ["Watch-outs", flagged.length ? flagged.length + " flagged" : "None", flagged.length ? "flag" : "pass"], ["Recalls", pointItems[1].v, pointItems[1].tone], ["Dealer", pointItems[9].v, pointItems[9].tone], ...(a.daysOnLot && Number(a.daysOnLot.days) > 0 ? [["Days on lot", Number(a.daysOnLot.days).toLocaleString() + " days", Number(a.daysOnLot.days) >= 90 ? "flag" : Number(a.daysOnLot.days) >= 31 ? "muted" : "pass"]] : [])].map(([l, v, t], i) => (
-                <div key={i} style={{ background: "rgba(15,23,42,.5)", border: `1px solid ${t === "flag" ? CY : BORD}`, borderRadius: 12, padding: 14, boxShadow: t === "flag" ? `0 0 0 1px ${CY}, 0 0 16px ${CY}44` : "none" }}>
-                  <div style={{ fontSize: 10.5, color: MUT, fontFamily: mono, textTransform: "uppercase", letterSpacing: ".06em" }}>{l}</div>
-                  <div style={{ fontSize: 17, fontWeight: 800, fontFamily: mono, color: t === "flag" ? ROSE : t === "pass" ? TEAL : "#fff", marginTop: 6, wordBreak: "break-word" }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {flagPool.filter((p) => p.tone === "flag").length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-              {flagPool.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
-            </div>
-          )}
-          <div style={cardBox({ tone: "muted" })}>
-            <div style={{ ...klabel, marginBottom: 10 }}>10-point verification</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
-              {pointItems.map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), boxShadow: p.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 12 }}>
-            {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
-            <div style={cardBox(evidenceItem)}><Head c={evidenceItem} /><div>{evidenceItem.body}</div></div>
-          </div>
-        </div>
-      )}
-
-            {view === "score" && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ ...cardBox({ cosmic: true }), alignItems: "center", textAlign: "center", padding: 24 }}>
-            <div style={{ fontSize: 56, fontWeight: 800, fontFamily: mono, color: scoreColor, lineHeight: 1 }}>{score != null ? score.toFixed(1) : "—"}<span style={{ fontSize: 20, color: MUT }}>/10</span></div>
-            <div style={{ ...klabel, marginTop: 8 }}>Negotiation leverage{score != null ? ` · ${score >= 7 ? "strong" : score >= 4 ? "fair" : "weak"}` : ""}</div>
-            {(qp || ms) > 0 && <div style={{ marginTop: 12, fontFamily: mono, fontSize: 15, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
-            {a.summary && <div style={{ marginTop: 12, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 12, textAlign: "left", maxWidth: 660 }}>{a.summary}</div>}
-          </div>
-          {flagPool.filter((p) => p.tone === "flag").length > 0 ? (
-            <div>
-              <div style={{ ...klabel, color: ROSE, margin: "4px 2px 8px" }}>⚠ {flagPool.filter((p) => p.tone === "flag").length} thing{flagPool.filter((p) => p.tone === "flag").length > 1 ? "s" : ""} to watch</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(250px,1fr))", gap: 12 }}>
-                {flagPool.filter((p) => p.tone === "flag").map((p) => (<div key={p.key} style={cardBox(p)}><Head c={p} /><div>{p.body}</div></div>))}
-              </div>
-            </div>
-          ) : (
-            <div style={{ ...cardBox({ tone: "pass" }), textAlign: "center" }}><div style={{ fontSize: 15, fontWeight: 800, color: TEAL }}>✓ Nothing flagged — this one checks out</div></div>
-          )}
-          <div style={cardBox({ tone: "muted" })}>
-            <div style={{ ...klabel, marginBottom: 10 }}>The rest of the 10-point audit</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(158px,1fr))", gap: "5px 16px" }}>
-              {[...pointItems, ...(daysLotItem && daysLotItem.tone !== "flag" ? [{ ...daysLotItem, v: Number(a.daysOnLot.days).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(licItem ? [licItem] : [])].filter((p) => p.tone !== "flag").map((p) => (<div key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(p), flexShrink: 0 }} /><span style={{ flex: 1, fontSize: 12.5, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</span><span style={{ fontSize: 11, fontFamily: mono, color: toneColor(p), whiteSpace: "nowrap" }}>{p.v}</span></div>))}
-            </div>
-          </div>
-          {sayItem && <div style={cardBox(sayItem)}><Head c={sayItem} /><div>{sayItem.body}</div></div>}
-        </div>
-      )}
 
       {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
     </div>
@@ -7088,7 +7041,7 @@ function QuoteCheckPage(){
   // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
   // "Report view"). `sharedReport` is true when the analysis was reconstructed
   // from a self-contained share link (#r=...), never fetched or stored.
-  const [reportView,setReportView]=useState("bento"); // tabbed bento grid (variant 9) — the scroll stays as the "full story" view
+  const [reportView,setReportView]=useState("scroll"); // the scroll is the default "full story" view (Bento/Deck/Scorecard/HUD removed 2026-08-12 — too many display modes)
   const [sharedReport,setSharedReport]=useState(false);
   // Authenticity of an OPENED shared report: "valid" | "invalid" | null
   // (null = no signature to check / crypto unavailable — say "fingerprint only").
@@ -8121,14 +8074,14 @@ function QuoteCheckPage(){
                 </div>
               </div>
             ) : null;
-            if(reportView==="bento"||reportView==="deck"||reportView==="score"||reportView==="hud"||reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
+            if(reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
             if(reportView==="flip") return <div>{sharedBanner}<ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/></div>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("bento","Bento")}{vBtn("deck","Deck")}{vBtn("score","Scorecard")}{vBtn("hud","HUD")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("scroll","Scroll")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                  {vBtn("scroll","Scroll")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
