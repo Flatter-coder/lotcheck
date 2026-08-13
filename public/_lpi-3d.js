@@ -1,22 +1,12 @@
-/* ── depth backdrop + 3D powertrain chart ───────────────────────────────────
-   Additive and self-contained: reads the catalog the page already loaded and
-   touches nothing else on it. If the catalog never arrives, the chart hides its
-   own section rather than drawing an empty grid.
-
-   The depth axis is a CATEGORY (powertrain), never a magnitude, and the
-   projection is axonometric — a bar at the back is drawn at exactly the same
-   scale as the same value at the front. Perspective separates the series; it
-   never rescales a number you are comparing. */
+/* ── MSRP Live Index: hero pedestal parallax ────────────────────────────────
+   The median figure stands on a 3D disc (#idxPodium); this tilts it a few
+   degrees to follow the pointer. That is ALL this file does — the wireframe
+   backdrop and 3D powertrain chart that used to live here were removed on
+   purpose (commit 2307a25, "screenshot is the spec"); do not re-add them.
+   Additive and self-contained: if the element is missing or the user prefers
+   reduced motion, it does nothing. */
 (function () {
   var RM = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var rootCss = getComputedStyle(document.documentElement);
-  function tok(n, f) { var v = rootCss.getPropertyValue(n).trim(); return v || f; }
-  function isLight() {
-    return document.documentElement.getAttribute("data-theme") === "light" ||
-           document.body.classList.contains("light");
-  }
-
-  /* ---- median pedestal: pointer parallax ---- */
   var pod = document.getElementById("idxPodium");
   if (pod && !RM) {
     addEventListener("mousemove", function (e) {

@@ -76,6 +76,10 @@ export function parseListingShot(a: unknown): ParsedShot | null {
 // whole isolate, which no try/catch can survive.
 export function pngPixelCount(bytes: Uint8Array): number | null {
   if (bytes.length < 24) return null;
+  // The first chunk MUST be IHDR (bytes 12-15). Without this check a bomb
+  // hides behind a small decoy chunk placed first: dimensions read from the
+  // decoy pass the budget while the decoder still finds the real, huge IHDR.
+  if (bytes[12] !== 0x49 || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) return null;
   const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
   const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
   if (w <= 0 || h <= 0) return null;

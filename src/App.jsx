@@ -6012,7 +6012,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
         </div>
       )}
-      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot && a.verifyPayload && a.sig ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
         <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
       </div>
     </div>
@@ -6612,6 +6612,9 @@ function verifyLinkFor(a){
 // ── Report signing (provenance). Public keys only — safe to ship. Each report
 // carries a keyId so keys can rotate; keep retired public keys here so old
 // links keep verifying. Private key lives only on the server.
+// ROTATION: the email function keeps its own copy of this registry
+// (supabase/functions/email-quote-report/index.ts REPORT_PUBLIC_KEYS) — update
+// BOTH or sealed captures silently stop attaching (verifySealedShot → null).
 const REPORT_PUBLIC_KEYS = {
   k1: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErEpWm/YsbAN9i9RkuGAPDadAp8BJ+i3j7V1WVUtvsQgmBN04hEQksYdyUksotL6LYOrPAnRkpqh6DXmMlTI7FA==",
 };
@@ -6732,11 +6735,15 @@ function VerifyPage(){
   // Monotonic token: a result may only land if no newer drop and no report
   // change superseded it (two quick drops race — last-started must win).
   const photoSeqRef=useRef(0);
+  // Hashing guard only — deliberately far above the server's ~12 MB capture
+  // cap, so any real LotCheck capture passes and only absurd files skip the
+  // in-browser SHA-256.
+  const PHOTO_CHECK_MAX_BYTES=64*1024*1024;
   async function checkPhotoFile(file,sealedHex){
     if(!file) return;
     const seq=++photoSeqRef.current;
     try{
-      if(file.size>64*1024*1024){ setPhotoCheck({status:"toobig"}); return; }
+      if(file.size>PHOTO_CHECK_MAX_BYTES){ setPhotoCheck({status:"toobig"}); return; }
       setPhotoCheck({status:"hashing"});
       const buf=await file.arrayBuffer();
       const dig=await crypto.subtle.digest("SHA-256",buf);
@@ -6914,7 +6921,11 @@ function VerifyPage(){
                   {o.marketValue&&o.marketValue.avg!=null&&<Row t={`Market value · ${o.marketValue.source||"independent"}`} v={money(o.marketValue.avg)}/>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
-                  {o.shot&&<Row t="Listing photo" v={`Sealed · ${String(o.shot).slice(0,10)}…`} c="#34d399"/>}
+                  {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/
+                      unclaimed phases the hash is just a claim in a link anyone
+                      could mint, and stamping it "Sealed" lends a doctored
+                      image LotCheck's credibility. */}
+                  {o.shot&&P==="signed"&&<Row t="Listing photo" v={`Sealed · ${String(o.shot).slice(0,10)}…`} c="#34d399"/>}
                   {(o.addOns||[]).length>0&&(
                     <div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:9,marginTop:2}}>
                       <div style={{fontSize:12,color:T.soft,marginBottom:4,fontWeight:700}}>Add-ons & line items</div>
@@ -6953,7 +6964,7 @@ function VerifyPage(){
                       <div style={{fontSize:12.5,fontWeight:800,color:T.heading,marginBottom:4}}>Check the sealed photo</div>
                       <div style={{fontSize:12,color:T.soft,lineHeight:1.55}}>This signed report seals a full-page photo of the listing (fingerprint <span style={{fontFamily:mono}}>{String(o.shot).slice(0,10)}…</span>). Drop the “listing-capture” file from your LotCheck email here — your browser recomputes its fingerprint and compares. Nothing is uploaded.</div>
                       <div style={{display:"flex",alignItems:"center",gap:10,marginTop:9,flexWrap:"wrap"}}>
-                        <label style={{position:"relative",display:"inline-flex",alignItems:"center",minHeight:40,background:"transparent",border:`1px solid ${zoneUi.focus?T.cyan:T.cardBd}`,boxShadow:zoneUi.focus?`0 0 0 2px ${vdark?"rgba(58,224,255,.35)":"rgba(13,143,176,.3)"}`:"none",borderRadius:9,padding:"10px 16px",fontSize:12,fontWeight:700,color:T.cyan,cursor:"pointer"}}>
+                        <label style={{position:"relative",display:"inline-flex",alignItems:"center",minHeight:44,background:"transparent",border:`1px solid ${zoneUi.focus?T.cyan:T.cardBd}`,boxShadow:zoneUi.focus?`0 0 0 2px ${vdark?"rgba(58,224,255,.35)":"rgba(13,143,176,.3)"}`:"none",borderRadius:9,padding:"10px 16px",fontSize:12,fontWeight:700,color:T.cyan,cursor:"pointer"}}>
                           Choose photo
                           {/* Visually hidden, NOT display:none — keeps the input in the tab
                               order so keyboard users can reach the file picker (drag-and-drop

@@ -403,6 +403,8 @@ import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXE
 interface SealedShot extends ParsedShot {
   sha: string;          // computed server-side over shot.bytes
   issuedAt: string | null; // from the VERIFIED canonical, not raw client input
+  rid: string;             // report id recomputed from the VERIFIED canonical
+  sourceUrl: string | null; // listing URL from the VERIFIED canonical
 }
 
 // Public verification keys — same registry the web app ships in App.jsx.
@@ -417,9 +419,34 @@ function b64urlToBytes(s: string): Uint8Array {
 }
 async function maybeGunzip(bytes: Uint8Array): Promise<Uint8Array> {
   if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b && typeof DecompressionStream !== "undefined") {
+    // Budgeted read: gzip inflates up to ~1000:1 and this runs BEFORE the
+    // signature check on an unauthenticated endpoint, so an unbounded
+    // arrayBuffer() hands any caller an OOM lever. Real canonicals are a few
+    // KB; anything past the cap is hostile and throws (caller catches -> null).
+    const CANON_MAX = 2_000_000;
     const ds = new DecompressionStream("gzip");
-    const w = ds.writable.getWriter(); w.write(bytes); w.close();
-    return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+    const w = ds.writable.getWriter();
+    // Fire-and-catch: a corrupt stream rejects these promises OUTSIDE the
+    // caller's try/catch — unhandled, that kills the whole isolate mid-send.
+    w.write(bytes as unknown as ArrayBufferView).catch(() => {});
+    w.close().catch(() => {});
+    const reader = ds.readable.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > CANON_MAX) {
+        try { await reader.cancel(); } catch { /* already errored */ }
+        throw new Error("canonical payload exceeds decompression budget");
+      }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(size);
+    let off = 0;
+    for (const c of chunks) { out.set(c, off); off += c.length; }
+    return out;
   }
   return bytes;
 }
@@ -443,8 +470,21 @@ async function verifySealedShot(analysis: any, shot: ParsedShot): Promise<Sealed
     if (!ok) return null;
     const canonical = JSON.parse(new TextDecoder().decode(canonBytes));
     if (canonical?.shot !== sha) return null;
+    // Bind the seal to THIS report. A valid signature only proves the image is
+    // sealed in SOME LotCheck canonical — without this check an attacker can
+    // keep a genuine (verifyPayload, sig, keyId, listingShot) quad and rewrite
+    // every other analysis field, transplanting the seal's credibility onto
+    // fabricated report content (cross-report splice). The report id is the
+    // canonical's own fingerprint, so recompute it here and require the match.
+    const fpDig = await crypto.subtle.digest("SHA-256", canonBytes as unknown as ArrayBuffer);
+    const fp = bytesToHex(new Uint8Array(fpDig));
+    const rid = "LC-" + fp.slice(0, 4).toUpperCase() + "-" + fp.slice(4, 7).toUpperCase(); // mirrors makeReportId (src/App.jsx)
+    if (String(analysis?.reportId || "") !== rid) return null;
     const issuedAt = typeof canonical?.issuedAt === "string" && !Number.isNaN(Date.parse(canonical.issuedAt)) ? canonical.issuedAt : null;
-    return { ...shot, sha, issuedAt };
+    // Caption facts come from the VERIFIED canonical, never the client's
+    // mutable analysis fields (forged-evidence class).
+    const sourceUrl = typeof canonical?.source?.url === "string" ? canonical.source.url : null;
+    return { ...shot, sha, issuedAt, rid, sourceUrl };
   } catch (e) {
     console.warn("Sealed-shot verification failed:", (e as Error)?.message);
     return null;
@@ -932,7 +972,14 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       }
     } catch (e) { console.warn("Capture embed skipped:", (e as Error)?.message); capImg = null; }
   }
-  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
+  // Page geometry hoisted ABOVE the footer text: a capture can embed fine yet
+  // slice to zero pages (extreme wide-thin aspect), and the footer may only
+  // promise pages that will actually render.
+  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 6;
+  const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
+  const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
+  const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
+  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
   need(40);
   { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
   y -= 30;
@@ -947,15 +994,15 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // over these exact bytes, and the issue time from the SIGNED canonical —
   // never the client's claims (forged-evidence class, 2026-08-12 review).
   // Never fatal: a bad image already resolved to capImg = null above.
-  if (capImg && sealedShot) {
+  if (capImg && sealedShot && capPages > 0) {
     try {
       const img = capImg;
-      const scaledH = img.height * (W / img.width);
-      const HEAD_FIRST = 100, HEAD_REST = 34, MAXP = 6;
-      const u0 = PH - M * 2 - HEAD_FIRST, uR = PH - M * 2 - HEAD_REST;
+      const scaledH = capScaledH;
+      const HEAD_FIRST = CAP_HEAD_FIRST, HEAD_REST = CAP_HEAD_REST, MAXP = CAP_MAXP;
       // Page count mirrors the loop below exactly (shared, tested helper) so
-      // "PAGE k OF N" can never disagree with the rendered page count.
-      const totalPages = capturePageCount(scaledH, u0, uR, MAXP);
+      // "PAGE k OF N" can never disagree with the rendered page count. Same
+      // capPages the footer promise was gated on.
+      const totalPages = capPages;
       let off = 0, k = 0;
       while (off < scaledH - 2 && k < MAXP) {
         const headH = k === 0 ? HEAD_FIRST : HEAD_REST;
@@ -973,8 +1020,8 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
         T("SEALED LISTING CAPTURE" + (totalPages > 1 ? "  -  PAGE " + (k + 1) + " OF " + totalPages : ""), { size: 8.5, font: sansB, color: TEAL });
         y -= 15;
         if (k === 0) {
-          para("Full-page photo of the listing, captured for report " + pdfSafe(RID) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-          if (a.sourceUrl) { const src = String(a.sourceUrl); T("Listing address (as scanned): " + (src.length > 80 ? src.slice(0, 77) + "..." : src), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          para("Full-page photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+          if (sealedShot.sourceUrl) { const src = String(sealedShot.sourceUrl); T("Listing address (sealed in the signed report): " + (src.length > 80 ? src.slice(0, 77) + "..." : src), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
           T("SHA-256 " + sealedShot.sha.slice(0, 64), { size: 7.5, font: mono, color: FAINT }); y -= 11;
         }
         off += slice; k++;
@@ -1002,7 +1049,13 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const { email, analysis, reportUrl, verifyUrl: verifyUrlIn } = await req.json();
+    const { email, analysis, reportUrl: reportUrlIn, verifyUrl: verifyUrlIn } = await req.json();
+    // Same rule as verifyUrl below: the email's primary CTA button must never
+    // carry an off-domain target in a DKIM-signed LotCheck email — an
+    // unvalidated client URL turns this endpoint into a phishing-mail minter
+    // (escapeHtml stops markup injection, not hostile hrefs).
+    const reportUrl: string | undefined =
+      (typeof reportUrlIn === "string" && reportUrlIn.startsWith("https://lotcheck.ca/")) ? reportUrlIn : undefined;
 
     if (!email || !isValidEmail(email)) {
       return new Response(
