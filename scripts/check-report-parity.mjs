@@ -103,11 +103,13 @@ const SURFACES = [
     // strictly better than a count, which stayed green when the scroll card was
     // deleted during this gate's own trial run.
     app: {
-      "deck / heatmap / scorecard card": "financeContingentItem = {",
-      "flag pool (HUD + sidebar)":       "financeContingentItem ? [financeContingentItem]",
+      // Bento/Deck/Scorecard/HUD views removed 2026-08-12 (too many display
+      // modes) — the surviving report surfaces are heatmap + sidebar (both
+      // render from the shared item pool below), scroll, and the flipbook.
+      "heatmap / sidebar card pool":     "financeContingentItem = {",
+      "flag pool (sidebar)":             "financeContingentItem ? [financeContingentItem]",
       "flipbook financing page":         'a.financeContingent?.contingent&&<div className="rfb-why warn"',
       "flipbook page is reachable":      "a.financeContingent?.contingent) P.push",
-      "bento DEAL tab (default view)":   "financeContingentItem ? cell(financeContingentItem",
       "scroll summary tile strip":       'tiles.push({label:"Price conditions"',
       "bento watch-outs count":          "analysis.financeContingent?.contingent) watchOuts",
       "scroll view card":                "analysis.financeContingent&&analysis.financeContingent.contingent&&(",
