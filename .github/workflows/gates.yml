@@ -14,6 +14,20 @@
 #                    accuracy promises, and the two condition-bound claims
 #                    ("never stored", "10-point") whose truth depends on a
 #                    system state that can change.
+#   test:jsonld-vehicle  schema.org Vehicle/Offer read (_shared/jsonld-vehicle.js)
+#                    and the scrapfly.ts vision-rescue merge (fillFromJsonLd):
+#                    when a dealer page's screenshot blows Claude vision's size
+#                    ceiling and the vision/text pass returns nothing, this is
+#                    what still recovers the listing from the page's own
+#                    structured data (capitalchev.ca, 2026-08-13).
+#   test:convertus-vms  Convertus platform vehicle-data read (_shared/
+#                    convertus-vms.js): the "/vehicles/YYYY/..." dealer family
+#                    embeds price/MSRP/VIN in a `var vmsData = {...}` blob that
+#                    carries NO schema.org JSON-LD on many of its themes, so
+#                    the JSON-LD gate above never covers it. A real, correctly-
+#                    scraped page reported "price not shown" and a wrong
+#                    generic MSRP while this exact data sat unread the whole
+#                    time (southtrailkia.com, 2026-08-13).
 #
 # Both are offline and take milliseconds — no network, no clock, no secrets, and
 # no npm install, because neither uses a dependency. There is no reason for this
@@ -59,6 +73,10 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
+        run: npm run test:jsonld-vehicle
+      - name: Convertus vmsData vehicle extraction (structured-data fallback)
+        run: npm run test:convertus-vms
 
   # Separate job ON PURPOSE. The gates above are offline and dependency-free, and
   # that is worth protecting -- they run in seconds and a red run always means a

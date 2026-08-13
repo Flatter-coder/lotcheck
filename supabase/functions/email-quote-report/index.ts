@@ -748,6 +748,10 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   };
 
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = qp && ms ? qp - ms : 0;
+  // MSRP basis, NOT quotedPrice verification -- "VERIFIED" must mean exact-trim
+  // match, never a base-trim "starting at" floor, or the header makes an
+  // over/under claim the audit detail below it explicitly disclaims.
+  const msrpExact = ms > 0 && a.msrpBasis === "exact";
 
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
@@ -777,9 +781,9 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   Tat(qp ? money(qp) : "Not shown", figTop - 34, { size: 25, font: monoB, color: INK });
   Tat("before tax & fees", figTop - 48, { size: 8, font: sans, color: FAINT });
   const rx = M + colW + 14;
-  Tat(priceVerified ? "MSRP (VERIFIED)" : "CATALOG MSRP", figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
-  Tat(ms ? money(ms) : "-", figTop - 34, { x: rx, size: 25, font: monoB, color: priceVerified ? TEAL : SOFT });
-  Tat(priceVerified ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
+  Tat(msrpExact ? "MSRP (VERIFIED)" : "CATALOG MSRP", figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
+  Tat(ms ? money(ms) : "-", figTop - 34, { x: rx, size: 25, font: monoB, color: msrpExact ? TEAL : SOFT });
+  Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
   y = figTop - 58;
   if (delta && a.msrpBasis === "exact") {
@@ -808,7 +812,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     page.drawCircle({ x: cx, y: gy, size: 5, color: INK });
     center(score.toFixed(1), gy - 36, { size: 38, font: sansB, color: INK, cx });
     center("LEVERAGE  /  OUT OF 10", gy - 49, { size: 7.5, font: sansB, color: FAINT, cx });
-    if (ms) { const refLbl = priceVerified ? "MSRP " + money(ms) : "CATALOG MSRP " + money(ms); const refAsk = (priceVerified && qp) ? "   -   ASKING " + money(qp) : ""; center(refLbl + refAsk, gy - 65, { size: 8.5, font: mono, color: SOFT, cx }); }
+    if (ms) { const refLbl = msrpExact ? "MSRP " + money(ms) : "CATALOG MSRP " + money(ms); const refAsk = (msrpExact && qp) ? "   -   ASKING " + money(qp) : ""; center(refLbl + refAsk, gy - 65, { size: 8.5, font: mono, color: SOFT, cx }); }
     const noteX = cx + r + 26, noteW = M + W - noteX;
     if (a.leverageScore.note) { let ny2 = y - 20; for (const ln of wrap(a.leverageScore.note, serifI, 11, noteW)) { page.drawText(ln, { x: noteX, y: ny2 - 11, size: 11, font: serifI, color: SOFT }); ny2 -= 16; } }
     y = gy - 78;

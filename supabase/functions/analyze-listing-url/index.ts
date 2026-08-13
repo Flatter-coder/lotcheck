@@ -55,6 +55,7 @@ import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedSc
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
+import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
@@ -86,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11j";
+const CACHE_VER = "2026-08-13b";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2017,6 +2018,64 @@ async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<str
   }
 }
 
+// Convertus vmsData fallback -- same role as buildJsonLdFallbackAnalysis, for
+// Convertus platform sites that carry NO schema.org JSON-LD at all (confirmed
+// live, 2026-08-13: southtrailkia.com's "Platinum Kia" theme has zero
+// <script type="application/ld+json"> blocks anywhere on the VDP, so the
+// JSON-LD tier above always returns null for this whole platform family).
+// Only reached here after BOTH the page scrape and the JSON-LD tier have
+// already failed, so pages that load normally are unaffected. Unlike the
+// JSON-LD fallback, this carries a real msrp (Convertus's vmsData always
+// separates msrp from asking_price; schema.org listings essentially never do).
+async function buildConvertusVmsFallbackAnalysis(url: string, sharedHtml?: Promise<string | null>): Promise<any | null> {
+  try {
+    const html = sharedHtml ? await sharedHtml : await fetchDirectHtml(url, 15_000);
+    if (!html) { console.log(`Convertus fallback: direct fetch returned nothing for ${url}.`); return null; }
+    const v = extractConvertusVmsVehicle(html);
+    if (!v || (v.quotedPrice == null && v.msrp == null && !v.year && !v.model)) {
+      console.log(`Convertus fallback: no usable vmsData.vehicle in ${url}.`);
+      return null;
+    }
+    const tiwHit = matchTradeInWidget(html);
+    const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year: v.year, make: v.make, model: v.model, trim: v.trim,
+      vin: v.vin, odometerKm: v.odometerKm, fuelType: null,
+      vehicleCondition: v.condition,
+      dealerName: v.dealerName, dealerCity: v.dealerCity,
+      // Left unset deliberately (not "listing"/"dealer_stated" here) -- the
+      // shared enrichAnalysis pipeline's own provenance + catalog cross-check
+      // (resolveMsrpAuthority) labels and verifies it, same as the primary path.
+      msrp: v.msrp,
+      quotedPrice: v.quotedPrice,
+      quotedPriceSource: v.quotedPrice != null ? "structured_data" : null,
+      priceDisclosure: v.quotedPrice != null ? "advertised" : "not_shown",
+      daysOnLot: null,
+      tradeInWidget: tiwHit,
+      financeContingent: detectFinanceContingent(html),
+      standardWarranty: null,
+      addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      source: "structured_data_fallback",
+      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details and the dealer's stated price/MSRP come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
+      summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+    };
+    try {
+      const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
+      if (m) {
+        const dt = Date.parse(m[1] + "T00:00:00Z");
+        const dd = Math.floor((Date.now() - dt) / 86_400_000);
+        if (Number.isFinite(dt) && dd > 0 && dd <= 3650) analysis.daysOnLot = { days: dd, since: m[1], source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
+      }
+    } catch { /* best-effort */ }
+    console.log(`Convertus fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.quotedPrice ?? "none"}, msrp=${v.msrp ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildConvertusVmsFallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
 // Hand the page's OWN structured data to Claude alongside the scraped text.
 //
 // WHY. These same facts are already gap-filled into the analysis AFTER Claude
@@ -2049,6 +2108,12 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
   const facts: string[] = [];
   const price = Number(d.quotedPrice);
   if (price > 0) facts.push(`- Advertised price: $${price.toLocaleString("en-CA")}`);
+  // The dealer's OWN stated MSRP for this exact unit (e.g. Convertus vmsData) --
+  // not necessarily the verified manufacturer figure, which the enrichment
+  // pipeline resolves separately. Still worth Claude seeing so it never claims
+  // "no MSRP shown" when the page's own data plainly states one.
+  const msrp = Number(d.msrp);
+  if (msrp > 0) facts.push(`- MSRP (as stated on this page): $${msrp.toLocaleString("en-CA")}`);
   if (d.vin) facts.push(`- VIN: ${d.vin}`);
   if (d.vehicle) facts.push(`- Vehicle: ${d.vehicle}`);
   const odo = Number(d.odometerKm);
@@ -2059,10 +2124,10 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 
   console.log(`Structured facts passed to Claude: ${facts.length} field(s).`);
   return (
-    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup embedded in the page source).\n` +
+    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup or the platform's own embedded vehicle-data JSON).\n` +
     `These values are machine-read directly from the page and are authoritative. Some dealer platforms put ` +
-    `them ONLY in the markup, so they may not appear in the extracted text above — that does NOT mean the ` +
-    `page withheld them.\n\n${facts.join("\n")}\n\n` +
+    `them ONLY in markup or script-embedded JSON, so they may not appear in the extracted text above — that ` +
+    `does NOT mean the page withheld them.\n\n${facts.join("\n")}\n\n` +
     `Use these values in your output, and never state or imply that one of them is missing, undisclosed, or ` +
     `not shown on the page. If the extracted text disagrees with a value here, say so plainly in the summary ` +
     `so the buyer can check it — do not silently pick one.\n---`
@@ -2484,6 +2549,42 @@ Deno.serve(async (req: Request) => {
     // must come through here.
     const directHtml: Promise<string | null> = fetchDirectHtml(url, 15_000).catch(() => null);
     const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
+    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
+    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
+    // that Nimble's markdown AND this same direct-fetch text view both miss
+    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
+    // a real, correctly-scraped page still reported "price not shown" while
+    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
+    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
+    const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // Combined structured-data view for structuredFactsBlock + the post-Claude
+    // gap-fill below: JSON-LD's fields stay authoritative where present (an
+    // established, tested source); Convertus fills whatever JSON-LD didn't
+    // have -- notably msrp, which buildJsonLdFallbackAnalysis never sets
+    // (schema.org listings essentially never carry MSRP, only the asking
+    // price). A page with neither source resolves this to null, same as today.
+    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms]).then(([jl, cv]) => {
+      if (!jl && !cv) return null;
+      if (!cv) return jl;
+      if (!jl) {
+        return {
+          quotedPrice: cv.quotedPrice, msrp: cv.msrp, vin: cv.vin,
+          vehicle: [cv.year, cv.make, cv.model, cv.trim].filter(Boolean).join(" ") || null,
+          odometerKm: cv.odometerKm, vehicleCondition: cv.condition,
+          dealerName: cv.dealerName, dealerCity: cv.dealerCity,
+        };
+      }
+      return {
+        ...jl,
+        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : cv.quotedPrice,
+        msrp: Number(jl.msrp) > 0 ? jl.msrp : cv.msrp,
+        vin: jl.vin || cv.vin,
+        odometerKm: jl.odometerKm ?? cv.odometerKm,
+        vehicleCondition: jl.vehicleCondition || cv.condition,
+        dealerName: jl.dealerName || cv.dealerName,
+        dealerCity: jl.dealerCity || cv.dealerCity,
+      };
+    }).catch(() => null);
 
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
@@ -2542,8 +2643,12 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
-            if (rescued) mergeRescued(jsonLdFallback, rescued);
+            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+            if (rescued) {
+              mergeRescued(jsonLdFallback, rescued);
+              if (jlRenderConfirmedGated && !(Number(jsonLdFallback.quotedPrice) > 0)) jsonLdFallback.priceDisclosure = "contact_for_price";
+            }
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
         }
         // ASSERT (render check done). Same gates as the main path, from the
@@ -2567,6 +2672,53 @@ Deno.serve(async (req: Request) => {
           JSON.stringify(credits
             ? { analysis: jsonLdFallback, source: "structured_data_fallback", credits }
             : { analysis: jsonLdFallback, source: "structured_data_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Third fallback: Convertus platform sites (no JSON-LD at all on many of
+      // their themes -- see buildConvertusVmsFallbackAnalysis) still embed a
+      // `var vmsData = {...}` vehicle-data blob to a plain browser-UA fetch.
+      // Only reached after BOTH the page scrape and the JSON-LD tier failed.
+      const convertusFallback = (await earlyConvertusVms)
+        ? await buildConvertusVmsFallbackAnalysis(url, directHtml)
+        : null;
+      if (convertusFallback) {
+        await detectTradeInWidget(url, convertusFallback);
+        let cvRenderConfirmedGated = false;
+        if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
+          try {
+            const rescued = await rescueListingViaScrapfly(url, {
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+              budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
+            });
+            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+            if (rescued) {
+              mergeRescued(convertusFallback, rescued);
+              if (cvRenderConfirmedGated && !(Number(convertusFallback.quotedPrice) > 0)) convertusFallback.priceDisclosure = "contact_for_price";
+            }
+          } catch (e) { console.warn("Convertus-path rescue threw (ignored):", (e as Error)?.message); }
+        }
+        assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
+        await enrichAnalysis(convertusFallback, REQUEST_DEADLINE);
+        await attachSealedScreenshot(url, convertusFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await finalizeServerSide(convertusFallback);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: { ...convertusFallback, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (Convertus fallback):", err);
+        }
+        await logUsage({ success: true, errorMessage: `page-load failed, served Convertus vmsData fallback` });
+        console.log(`Served Convertus vmsData fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        const cvCredits = await captureCredit(holdId);
+        holdId = null;
+        return new Response(
+          JSON.stringify(cvCredits
+            ? { analysis: convertusFallback, source: "structured_data_fallback", credits: cvCredits }
+            : { analysis: convertusFallback, source: "structured_data_fallback" }),
           { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
         );
       }
@@ -2706,7 +2858,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyJsonLd)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -2865,6 +3017,45 @@ Deno.serve(async (req: Request) => {
       if (rt?.waitUntil) rt.waitUntil(saveReq);
     } catch { /* best-effort */ }
 
+    // Identity + MSRP gap-fill from Convertus vmsData, BEFORE enrichAnalysis --
+    // deliberately ahead of the catalog MSRP lookup inside it, not after.
+    //
+    // Identity (year/make/model/trim/...): that lookup only runs
+    // `if (!analysis.msrp && year && make && model)` and picks the catalog row
+    // using analysis.trim; if the scrape missed trim/year/make/model (this
+    // platform's real identity lives in a <script>-embedded JSON blob the
+    // markdown/text passes never see), the lookup either misses entirely or
+    // matches the wrong/generic trim -- confirmed live 2026-08-13
+    // (southtrailkia.com): a real, correctly-scraped page showed a base-trim
+    // "$28,495 starting at" MSRP for what was actually a $43,780 X-Line
+    // Limited AWD. Filling identity first lets that lookup find the CORRECT
+    // trim row.
+    //
+    // msrp: seeding it here does NOT skip verification -- it hands the
+    // dealer's own stated figure to the EXISTING listing-vs-catalog
+    // cross-check a few lines down (`analysis.msrpSource !== "catalog" &&
+    // analysis.msrpSource !== "manufacturer_site"` -> resolveMsrpAuthority),
+    // which already exists precisely to arbitrate a dealer-stated number
+    // against the manufacturer's own catalog (and flag inflation either way).
+    // Leaving analysis.msrpSource unset here is deliberate: the "Provenance
+    // for an MSRP that came from the LISTING itself" step right after labels
+    // it "listing"/"dealer_stated" on its own, and only THAT unverified label
+    // makes the cross-check run at all -- setting msrpSource ourselves would
+    // skip it. Fill-only throughout: never overwrites what the scrape/Claude
+    // already found.
+    try {
+      const cv = await earlyConvertusVms;
+      if (cv) {
+        for (const k of ["year", "make", "model", "trim", "vin", "odometerKm", "dealerName", "dealerCity", "msrp"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (cv as any)[k];
+          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
+          if (missing && alt != null && alt !== "") { (analysis as any)[k] = alt; console.log(`Convertus identity gap-fill: ${k}.`); }
+        }
+        if (!analysis.vehicleCondition && cv.condition) analysis.vehicleCondition = cv.condition;
+      }
+    } catch { /* the safety net must never sink the scan */ }
+
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
@@ -2894,12 +3085,18 @@ Deno.serve(async (req: Request) => {
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself
-        // reported the gating -- an empty/failed read is not confirmation.
-        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+        // reported the gating -- an empty/failed read is not confirmation. A
+        // ground-truth CTA match against the raw rendered DOM counts too: a
+        // broken/incomplete screenshot can make vision miss the sidebar (Rock
+        // Creek, 2026-08-13), but a plain text match against the actual
+        // rendered HTML can't be fooled by a bad capture the same way.
+        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+          && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
           mergeRescued(analysis, rescued);
+          if (renderConfirmedGated && !(Number(analysis.quotedPrice) > 0)) analysis.priceDisclosure = "contact_for_price";
           // The rescue can recover identity the text pass missed (trim, VIN).
           // A catalog "starting_at" floor picked WITHOUT that identity is stale
           // -- drop it so enrich re-resolves with the full signals (fixes the
@@ -2939,10 +3136,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // Gap-fill from the structured-data read: the scrape sometimes lands the
-    // vehicle but misses the price or VIN that schema.org states outright.
+    // vehicle but misses the price or VIN that schema.org (or a platform's own
+    // embedded vehicle-data JSON, e.g. Convertus vmsData) states outright.
     // Never overwrites a value the scrape already found.
     try {
-      const early = await earlyJsonLd;
+      const early = await earlyStructuredFacts;
       if (early) {
         for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
           const cur = (analysis as any)[k];

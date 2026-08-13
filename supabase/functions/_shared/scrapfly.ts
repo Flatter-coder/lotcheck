@@ -19,8 +19,36 @@
 // Crowfoot test before this path is relied on (see the deploy/test step).
 // ============================================================================
 
+import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
+
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
+
+// Ground-truth price-gate CTA text, matched against the RAW rendered DOM --
+// independent of whether the screenshot capture was complete or the vision
+// pass actually saw the sidebar it lives in. Same pattern already proven in
+// the Convertus-specific backstop (analyze-listing-url/index.ts); exported
+// here so the general Scrapfly-rescue path (every dealer platform, not just
+// Convertus) gets the same protection. A vision read of an incomplete
+// screenshot can miss a CTA that a plain text search of the DOM never will.
+export const PRICE_GATE_CTA_RE = /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i;
+
+// Cookie/privacy-consent overlays (OneTrust, TrustArc, Quantcast, and any
+// other IAB-TCF-based CMP) sit on top of the page until a human clicks
+// through -- a bot render never does, so both the sealed evidence photo and
+// the vision-analysis screenshot can end up capturing a blank consent
+// backdrop instead of the listing. Confirmed live on tazaparkvw.com
+// (2026-08-13): a full-page "Consent Management" dialog, page behind it
+// never visible in the capture. Rather than chase each CMP vendor's own
+// button selector (brittle, breaks silently when a vendor changes markup),
+// strip any fixed/sticky high-z-index element before the shot -- covers
+// consent banners, paywalls and sticky promo bars generically. Best-effort:
+// wrapped in try/catch so a page that rejects injected JS just renders as
+// before, never breaks the request. NEEDS LIVE VERIFICATION against a real
+// Scrapfly call before being fully trusted -- same convention as the rest of
+// this file (see header comment).
+const DISMISS_OVERLAYS_JS = `(function(){try{document.querySelectorAll('*').forEach(function(el){var cs=getComputedStyle(el);if((cs.position==='fixed'||cs.position==='sticky')&&parseInt(cs.zIndex||'0',10)>999){el.remove();}});document.documentElement.style.overflow='auto';document.body.style.overflow='auto';}catch(e){}})();`;
+const DISMISS_OVERLAYS_JS_B64 = btoa(DISMISS_OVERLAYS_JS);
 
 export interface RenderResult {
   html: string | null;          // fully-rendered HTML (JS executed)
@@ -48,6 +76,7 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     u.searchParams.set("country", "ca");          // Canadian residential IP
     u.searchParams.set("rendering_wait", "8000"); // give the price XHR time to land
     u.searchParams.set("auto_scroll", "true");    // trigger lazy-loaded sections
+    u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     u.searchParams.set("screenshots[main]", "fullpage");
     u.searchParams.set("format", "json");
 
@@ -71,6 +100,19 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
           screenshotMime = (bytes[0] === 0x89 && bytes[1] === 0x50) ? "image/png" : (bytes[0] === 0xFF && bytes[1] === 0xD8) ? "image/jpeg" : (sr.headers.get("content-type") || "image/jpeg");
         }
       } catch (e) { console.warn("scrapfly screenshot fetch failed:", (e as Error)?.message); }
+    }
+    // Claude's vision API rejects images past its own size/dimension ceiling.
+    // A "fullpage" capture of a long dealer page can run well past that --
+    // confirmed live on capitalchev.ca, whose listing page is 17,729px tall.
+    // That silently fails the vision call below (res.ok false -> null) and
+    // loses the WHOLE rescue even though Scrapfly's render itself succeeded.
+    // Same cutoff already proven safe for the sealed-evidence screenshot in
+    // captureListingScreenshot() below. Drop the oversized shot here so the
+    // caller falls back to the rendered HTML (text) path instead of a
+    // guaranteed-failing vision call.
+    if (screenshotB64 && screenshotB64.length > 1_500_000) {
+      console.warn(`scrapflyRender: full-page screenshot too large (${screenshotB64.length} b64 chars) -- dropping, falling back to rendered HTML.`);
+      screenshotB64 = null;
     }
     if (!html && !screenshotB64) return null;
     return { html, screenshotB64, screenshotMime };
@@ -97,6 +139,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       if (fullpage) u.searchParams.set("capture", "fullpage");
       u.searchParams.set("rendering_wait", "3000");
       u.searchParams.set("auto_scroll", "true");
+      u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
       if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
@@ -187,6 +230,24 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     const rendered = await scrapflyRender(url, opts.budgetMs ?? 70_000);
     if (!rendered) return null;
 
+    // Deterministic structured-data read of the SAME rendered HTML, alongside
+    // (not instead of) the vision/text pass below. Matters here specifically:
+    // htmlToText() below strips every <script> tag before Claude ever sees the
+    // text fallback, which deletes schema.org JSON-LD outright -- the text
+    // path can only ever read prose, never this. Confirmed live on
+    // capitalchev.ca: the page's Car/Offer JSON-LD (price, VIN, year/make/
+    // model, dealer) parses cleanly with extractJsonLdVehicle even though the
+    // vision call fails outright on that page's 17,729px-tall screenshot.
+    // Structured data already outranks a vision/prose guess everywhere else
+    // in this codebase (buildJsonLdFallbackAnalysis) -- same rule here.
+    const jsonLd = rendered.html ? extractJsonLdVehicle(rendered.html) : null;
+
+    // Ground-truth price-gate check against the RAW rendered DOM text -- runs
+    // regardless of whether the screenshot capture was complete or the vision
+    // call below actually saw the CTA. A plain regex over real HTML can't miss
+    // a sidebar the way an incomplete screenshot can. See PRICE_GATE_CTA_RE.
+    const renderGateCtaDetected = !!(rendered.html && PRICE_GATE_CTA_RE.test(rendered.html));
+
     const userContent: any[] = [];
     if (rendered.screenshotB64) {
       userContent.push({ type: "image", source: { type: "base64", media_type: rendered.screenshotMime || "image/jpeg", data: rendered.screenshotB64 } });
@@ -197,18 +258,33 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
       return null;
     }
 
+    let parsed: any = null;
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": opts.anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({ model: opts.model, max_tokens: 8000, system: opts.systemPrompt, messages: [{ role: "user", content: userContent }] }),
       signal: AbortSignal.timeout(opts.budgetMs ?? 60_000),
     });
-    if (!res.ok) { console.warn("scrapfly-rescue Claude HTTP", res.status); return null; }
-    const data: any = await res.json();
-    const text: string = data?.content?.[0]?.text ?? "";
-    const parsed = firstJsonObject(text);
-    if (!parsed) return null;
-    parsed.extractionMethod = "scrapfly_render_vision";
+    if (!res.ok) console.warn("scrapfly-rescue Claude HTTP", res.status);
+    else {
+      const data: any = await res.json();
+      const text: string = data?.content?.[0]?.text ?? "";
+      parsed = firstJsonObject(text);
+    }
+
+    // Claude's pass (vision or text) failed outright -- still worth returning
+    // a JSON-LD-only result rather than losing the whole rescue, exactly the
+    // capitalchev.ca case (oversized screenshot -> vision 400 -> parsed stays
+    // null, but the page's own structured data was sitting right there). A
+    // confirmed price-gate CTA is the same kind of signal worth keeping even
+    // when both the vision pass and JSON-LD came back empty.
+    if (!parsed && !jsonLd && !renderGateCtaDetected) return null;
+    if (!parsed) parsed = {};
+    parsed.extractionMethod = parsed.extractionMethod
+      || (Object.keys(parsed).length === 0 && jsonLd ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
+    parsed.renderGateCtaDetected = renderGateCtaDetected;
+
+    if (jsonLd) fillFromJsonLd(parsed, jsonLd);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
     // and seal its SHA-256 into the signed canonical (report-sign.ts reads
     // listingShotSha256). Proves what the page looked like at that moment --

@@ -64,6 +64,25 @@ const MACHE_MIXED = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
   { trim: "GT AWD",  msrp: 69990, fuel_type: "BEV" },
 ];
+// IONIQ 9 — the catalog gap case (see msrp-exact-must-pin-config). The real
+// lineup has 5 AWD-or-RWD trims spanning $59,999-$81,499; the catalog was
+// missing the top two package trims ($76,499 Luxury, $81,499 Ultimate
+// Calligraphy), leaving only the 3 below. A $83,899 asking price matched
+// "Preferred AWD" ($64,999, correct drivetrain, so rowConfirmsConfig passed)
+// and was labelled exact -- an $18,900 "over MSRP" accusation against a named
+// dealer, when the real explanation was two missing catalog rows.
+const IONIQ9_GAPPED = [
+  { trim: "Essential RWD", msrp: 59999, fuel_type: "BEV" },
+  { trim: "Preferred AWD", msrp: 64999, fuel_type: "BEV" },
+  { trim: "Preferred AWD+", msrp: 64999, fuel_type: "BEV" },
+];
+// The same lineup after backfilling the two missing rows.
+const IONIQ9_FULL = [
+  ...IONIQ9_GAPPED,
+  { trim: "Preferred AWD with Luxury Package", msrp: 76499, fuel_type: "BEV" },
+  { trim: "Preferred AWD+ with Ultimate Calligraphy Package", msrp: 81499, fuel_type: "BEV" },
+];
+
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
 const CX90PH  = [{ trim: null, msrp: 49999, fuel_type: "PHEV" }];
@@ -149,6 +168,28 @@ const CASES = [
     { trim: "Premium", drivetrain: "AWD", fuelType: "BEV" }, 49990, "starting_at"],
   ["Mach-E GT AWD vs mixed catalog -> GT row confirms config, exact", MACHE_MIXED,
     { trim: "GT", drivetrain: "AWD", fuelType: "BEV" }, 69990, "exact"],
+
+  // PRICE PLAUSIBILITY CEILING — IONIQ 9 (see msrp-exact-must-pin-config).
+  // Catalog missing the two highest package trims: the $83,899 asking price
+  // matched "Preferred AWD" ($64,999, correct AWD drivetrain, so
+  // rowConfirmsConfig alone can't catch this) and was called exact -- an
+  // $18,900 "over MSRP" accusation, root cause a missing row, not a markup.
+  ["IONIQ 9, catalog missing top 2 trims -> $18,900 gap downgrades to starting_at", IONIQ9_GAPPED,
+    { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 83899 }, 64999, "starting_at"],
+  // Same asking price, same signal shape, but a small/plausible gap (a few
+  // hundred dollars) must NOT be suppressed -- the ceiling only fires past
+  // BOTH 20% and $6,000.
+  ["IONIQ 9, small plausible gap stays exact", IONIQ9_GAPPED,
+    { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 66500 }, 64999, "exact"],
+  // After backfilling the missing rows, the SAME asking price against the
+  // full lineup correctly matches the real top trim (Ultimate Calligraphy,
+  // $81,499) on its distinctive tokens + closest price -- a $2,400 gap, well
+  // under the ceiling, stays exact. Confirms the fix doesn't just suppress
+  // the false accusation, it lets the real match through once the data is
+  // complete.
+  ["IONIQ 9, full catalog -> correct top trim, small honest gap stays exact", IONIQ9_FULL,
+    { trim: "Preferred AWD+ with Ultimate Calligraphy Package", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 83899 },
+    81499, "exact"],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],
