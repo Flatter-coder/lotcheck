@@ -36,6 +36,18 @@ function isValidEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
+// Parked-time care asks for the Days-on-Lot surfaces (email HTML deck + PDF).
+// Server-side mirror of src/App.jsx dolCareAsk — identical wording on every
+// surface, locked by the report-parity gate. Backed: GM dealer-inventory
+// bulletin 09-00-89-002K (battery test + move every 30 days in stock; oil
+// advisory past 7 months; flat spots can become permanent past 90 days) and
+// OEM oil schedules' months clauses. Ask-framed: questions, never assertions.
+function dolCareAskTxt(d: number): string {
+  if (d >= 90) return " Parked this long, the car sits mechanically too — ask when the oil was last changed (manufacturers cap oil life by time, not just km), whether the 12-volt battery was tested and the car moved every 30 days (GM's own dealer-inventory guidance calls for both), and ask to see the completed pre-delivery inspection sheet.";
+  if (d >= 31) return " Worth asking too: whether the 12-volt battery has been tested and the car moved during storage — manufacturer lot-care guidance calls for both every 30 days.";
+  return "";
+}
+
 function escapeHtml(s: unknown): string {
   if (s === null || s === undefined) return "";
   return String(s)
@@ -265,7 +277,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     deck.push({ label: "Days on lot", tone: hot ? "flag" : warm ? "muted" : "pass", glow: hot, body:
       `<div style="font-size:18px;font-weight:900;color:${dolC};">${d.toLocaleString()} days on the lot</div>` +
       `<div style="font-size:12px;color:#706D96;margin-top:2px;">${a.daysOnLot.since ? "First seen " + escapeHtml(a.daysOnLot.since) + " · " : ""}${escapeHtml(a.daysOnLot.sourceLabel || "dealer inventory data")}</div>` +
-      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}</div>` });
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${escapeHtml(dolCareAskTxt(d))}</div>` });
   }
 
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
@@ -622,11 +634,29 @@ function guillocheRings(seed: number, cx: number, cy: number, R: number, steps: 
 async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedShot | null): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import("https://esm.sh/pdf-lib@1.17.1");
   const doc = await PDFDocument.create();
-  const serif  = await doc.embedFont(StandardFonts.TimesRoman);
-  const serifB = await doc.embedFont(StandardFonts.TimesRomanBold);
-  const serifI = await doc.embedFont(StandardFonts.TimesRomanItalic);
-  const sans   = await doc.embedFont(StandardFonts.Helvetica);
-  const sansB  = await doc.embedFont(StandardFonts.HelveticaBold);
+  // Poppins throughout — the StandardFonts set (Times/Helvetica) rendered too
+  // thin to read comfortably ("hard to see, not bold enough", 2026-08-12).
+  // Weight map: body Regular, emphasis Medium, headers SemiBold/Bold, notes
+  // MediumItalic. Falls back to StandardFonts if the embed ever fails — a font
+  // problem must never cost the user their PDF (no-single-point-of-failure).
+  let serif: any, serifB: any, serifI: any, sans: any, sansB: any;
+  try {
+    const fontkit = (await import("https://esm.sh/@pdf-lib/fontkit@1.1.1")).default;
+    const P = await import("../_shared/poppins.ts");
+    doc.registerFontkit(fontkit);
+    serif  = await doc.embedFont(P.fontBytes(P.POPPINS_REGULAR), { subset: true });
+    serifB = await doc.embedFont(P.fontBytes(P.POPPINS_BOLD), { subset: true });
+    serifI = await doc.embedFont(P.fontBytes(P.POPPINS_MEDIUM_ITALIC), { subset: true });
+    sans   = await doc.embedFont(P.fontBytes(P.POPPINS_MEDIUM), { subset: true });
+    sansB  = await doc.embedFont(P.fontBytes(P.POPPINS_SEMIBOLD), { subset: true });
+  } catch (e) {
+    console.warn("Poppins embed failed, falling back to standard fonts:", (e as Error)?.message);
+    serif  = await doc.embedFont(StandardFonts.TimesRoman);
+    serifB = await doc.embedFont(StandardFonts.TimesRomanBold);
+    serifI = await doc.embedFont(StandardFonts.TimesRomanItalic);
+    sans   = await doc.embedFont(StandardFonts.Helvetica);
+    sansB  = await doc.embedFont(StandardFonts.HelveticaBold);
+  }
   const mono   = await doc.embedFont(StandardFonts.Courier);
   const monoB  = await doc.embedFont(StandardFonts.CourierBold);
 
@@ -797,20 +827,76 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   }
   rule();
 
-  // ---- DAYS ON LOT — the motivated-seller clock (dealer's own inventory data) ----
+  // ---- DAYS ON LOT — the motivated-seller clock (dealer's own inventory data)
+  // Rendered as the same alert card the app shows (white frame, tier-coloured
+  // panel, first-seen date box, traffic light, CTA chip) so the PDF carries the
+  // report's visual language, not a plain-text shadow of it.
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
-    need(70);
+    const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
+    // Same tiers as the app card: green < 31, amber 31-89, red 90+.
+    const tier = d >= 90 ? 2 : d >= 31 ? 1 : 0;
+    const ACC = [rgb(0.557, 0.835, 0), rgb(1, 0.69, 0.125), rgb(1, 0.231, 0.361)][tier];
+    const DK = rgb(0.078, 0.078, 0.078), DK2 = rgb(0.165, 0.165, 0.165);
+    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
+    const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+
+    const CARD_W = 330, CX = (PW - CARD_W) / 2, PADX = 20;
+    const bodyTxt =
+      `${dolMonths ? `About ${dolMonths} months` : `${d.toLocaleString("en-CA")} days`} on the dealer's lot` +
+      `${a.daysOnLot.since ? ` - first seen ${a.daysOnLot.since}` : ""}. Source: ${a.daysOnLot.sourceLabel || "dealer inventory data"}. ` +
+      (tier === 2
+        ? "Well past the typical turn window - every extra week costs the dealer real money. Concrete discount leverage."
+        : tier === 1
+          ? "A month-plus on the lot - worth asking what they'll do on price to move it."
+          : "Recently listed - limited sitting-time leverage on this unit.");
+    const bodyW = CARD_W - PADX * 2 - 34;   // right inset clears the traffic light
+    const bodyLines = wrap(bodyTxt, sans, 9, bodyW);
+    const STRIP = 44, TITLE_H = 26, LINE_H = 12.5, CHIP_H = 20;
+    const panelH = 16 + TITLE_H + bodyLines.length * LINE_H + 12 + CHIP_H + 16;
+    const CARD_H = STRIP + panelH;
+
+    need(CARD_H + 46);
     kicker("DAYS ON LOT");
-    T(`${d.toLocaleString("en-CA")} days on the lot`, { size: 15, font: serifB, color: d >= 90 ? CORAL : INK }); y -= 20;
-    para(`First seen ${a.daysOnLot.since || "date not published"} - source: ${a.daysOnLot.sourceLabel || "dealer inventory data"}.`, { size: 9, color: SOFT, lead: 4 });
-    advance(2);
-    para(d >= 90
-      ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. Dealers pay interest on unsold stock every week - at this age you're doing them a favour by buying it. Negotiate like it."
-      : d >= 31
-        ? "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. A month-plus of sitting is real carrying cost - reasonable grounds to ask for a better price."
-        : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system. This one is fresh, so sitting-time won't move the price much yet.",
-      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    const top = y;                          // PDF y of the card's top edge
+    // white frame + dark border
+    page.drawRectangle({ x: CX, y: top - CARD_H, width: CARD_W, height: CARD_H, color: rgb(1, 1, 1), borderColor: DK, borderWidth: 2 });
+    // tier-coloured content panel
+    page.drawRectangle({ x: CX + 2, y: top - CARD_H + 2, width: CARD_W - 4, height: panelH - 2, color: ACC });
+    // brand mark on the white strip
+    drawLogo(CX + 12, top - 6, 34);
+    // first-seen date box (dark, accent-bordered), straddling strip and panel
+    const DB = 54, DBX = CX + CARD_W - DB - 16, DBY = top - 12;
+    page.drawRectangle({ x: DBX, y: DBY - DB, width: DB, height: DB, color: DK, borderColor: ACC, borderWidth: 1 });
+    if (sinceD) {
+      center(`${M3[sinceD.getMonth()]} ${sinceD.getFullYear()}`, DBY - 15, { cx: DBX + DB / 2, size: 6.5, font: sansB, color: ACC });
+      center(String(sinceD.getDate()), DBY - 34, { cx: DBX + DB / 2, size: 17, font: serifB, color: ACC });
+      center("FIRST SEEN", DBY - 46, { cx: DBX + DB / 2, size: 5.5, font: sansB, color: ACC });
+    } else {
+      center(`${d.toLocaleString("en-CA")}d`, DBY - 34, { cx: DBX + DB / 2, size: 15, font: serifB, color: ACC });
+    }
+    // traffic light below the date box — the tier's bulb is lit
+    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16;
+    page.drawRectangle({ x: TLX - 10, y: TLTOP - GAP * 2 - 10 - BULB, width: 20, height: GAP * 2 + BULB * 2 + 10, color: DK, borderColor: DK2, borderWidth: 1 });
+    ([[rgb(1, 0.231, 0.361), tier === 2], [rgb(1, 0.69, 0.125), tier === 1], [rgb(0.557, 0.835, 0), tier === 0]] as const)
+      .forEach(([col, on], i) => {
+        page.drawCircle({ x: TLX, y: TLTOP - BULB - 2 - i * GAP, size: BULB, color: on ? col : DK2 });
+      });
+    // headline + body inside the panel
+    let cy = top - STRIP - 16;
+    Tat(`${d.toLocaleString("en-CA")} DAYS ON LOT`, cy - 17, { x: CX + PADX, size: 17, font: serifB, color: DK });
+    cy -= TITLE_H + 6;
+    for (const ln of bodyLines) { Tat(ln, cy - 9, { x: CX + PADX, size: 9, font: sans, color: DK }); cy -= LINE_H; }
+    // CTA chip (dark, accent text) — mirrors the app card's chip
+    const chipTxt = d >= 31 ? "ASK FOR A DISCOUNT" : "FRESH ON THE LOT";
+    const chipW = sansB.widthOfTextAtSize(chipTxt, 8) + 20;
+    page.drawRectangle({ x: CX + PADX, y: cy - CHIP_H - 6, width: chipW, height: CHIP_H, color: DK });
+    Tat(chipTxt, cy - CHIP_H + 1, { x: CX + PADX + 10, size: 8, font: sansB, color: ACC });
+    y = top - CARD_H - 12;
+
+    para("This is how long this exact car has sat unsold, counted by the dealer's own inventory system - not our guess. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    const careAsk = dolCareAskTxt(d).trim();
+    if (careAsk) { advance(3); para(careAsk, { size: 8.5, font: serif, color: SOFT, lead: 3 }); }
     rule();
   }
 

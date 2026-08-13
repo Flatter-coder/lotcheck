@@ -6083,13 +6083,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
                   : d >= 31
                     ? " A month-plus on the lot — worth asking what they'll do on price to move it."
                     : " Recently listed — limited sitting-time leverage on this unit."}
+                {dolCareAsk(d)}
               </div>
               <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
             </div>
           </div>
         </div>
         <div style={{ width: "min(320px, 100%)" }}>
-          <ExplainBox txt={`This is how long this exact car has been sitting unsold — ${d.toLocaleString()} days, counted by the dealer's own inventory system (not our guess). Dealers pay interest on unsold cars every single week, so the longer one sits, the more motivated they are to move it. ${d >= 90 ? "At this age, you're doing them a favour by buying it — negotiate like it." : d >= 31 ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}`} />
+          <ExplainBox txt={`This is how long this exact car has been sitting unsold — ${d.toLocaleString()} days, counted by the dealer's own inventory system (not our guess). Dealers pay interest on unsold cars every single week, so the longer one sits, the more motivated they are to move it. ${d >= 90 ? "At this age, you're doing them a favour by buying it — negotiate like it." : d >= 31 ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${d >= 31 ? " A car that sits also sits mechanically — the oil clock, the 12-volt battery and the tires all run on time, which is why the card suggests asking what lot care was done." : ""}`} />
         </div>
       </div>
     )};
@@ -6418,7 +6419,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       return (<div className="rfb-pg">{num}<div className="rfb-k">Leverage</div>
       <h2 className="rfb-h2">{d>0?`${d.toLocaleString()} days on the lot`:"Trade-in tool on this listing"}</h2>
       {d>0&&<div className="rfb-stat"><div className="rfb-lab">Days on lot{a.daysOnLot.since?` · first seen ${a.daysOnLot.since}`:""}</div><div className="rfb-big" style={{color:d>=90?"#e0503c":d>=31?"#c78a1e":"#159e8f"}}>{d.toLocaleString()} days</div><div className="rfb-sub">{a.daysOnLot.sourceLabel||"dealer inventory data"} — the dealer's own clock, not our guess</div></div>}
-      {d>0&&<div className="rfb-lede" style={{fontSize:12}}>{d>=90?"Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage.":d>=31?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"Recently listed — limited sitting-time leverage on this unit."}</div>}
+      {d>0&&<div className="rfb-lede" style={{fontSize:12}}>{d>=90?"Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage.":d>=31?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"Recently listed — limited sitting-time leverage on this unit."}{dolCareAsk(d)}</div>}
       {tiw?.detected&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Trade-in tool on this listing{tiw.vendor?` · ${tiw.vendor}`:""}</div><div className="rfb-wt">Its instant number is the <b>wholesale</b> side of the market (what dealers pay each other) and it's non-binding. Settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment.</div></div>}
     </div>); }
     if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
@@ -6537,6 +6538,20 @@ async function sha256Hex(str){
 }
 function b64urlEncode(str){ return btoa(unescape(encodeURIComponent(str))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
 function b64urlDecode(s){ s=s.replace(/-/g,"+").replace(/_/g,"/"); return decodeURIComponent(escape(atob(s))); }
+// Parked-time care asks for the Days-on-Lot card — one helper so every surface
+// (deck card, scroll view, flipbook; mirrored server-side for email + PDF)
+// prints the identical wording. Backed: GM dealer-inventory bulletin
+// 09-00-89-002K (battery test + move every 30 days in stock; oil advisory past
+// 7 months; tires can flat-spot toward permanent past 90 days; storage
+// deterioration excluded from the new-vehicle warranty) and every OEM oil
+// schedule's months clause (Ford "never exceed one year", Honda 12 months,
+// Toyota 12 months/16,000 km). Ask-framed on purpose: we advise questions,
+// never assert the car is damaged (defamation-proof rule).
+function dolCareAsk(d){
+  if(d>=90) return " Parked this long, the car sits mechanically too — ask when the oil was last changed (manufacturers cap oil life by time, not just km), whether the 12-volt battery was tested and the car moved every 30 days (GM's own dealer-inventory guidance calls for both), and ask to see the completed pre-delivery inspection sheet.";
+  if(d>=31) return " Worth asking too: whether the 12-volt battery has been tested and the car moved during storage — manufacturer lot-care guidance calls for both every 30 days.";
+  return "";
+}
 function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
 // Canonical, fixed-order projection of ONLY what the report shows. This exact
 // object is what gets fingerprinted and what /verify re-hashes — so both sides
@@ -8322,6 +8337,7 @@ function QuoteCheckPage(){
                     <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
                       This is how long this exact car has sat unsold — counted by the dealer's own inventory system, not our guess. Dealers pay interest on unsold stock every week, so the longer it sits, the more motivated they are.{" "}
                       {hot?"At this age, you're doing them a favour by buying it — negotiate like it.":warm?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"This one is fresh, so sitting-time won't move the price much yet."}
+                      {dolCareAsk(d)}
                     </div>
                   </div>
                 );

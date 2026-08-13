@@ -122,6 +122,17 @@ const SURFACES = [
     },
   },
   {
+    field: "daysOnLot parked-time care-asks",
+    app: {
+      "shared care-ask helper":      "function dolCareAsk",
+      "care-ask applied to surfaces": "dolCareAsk(d)",
+    },
+    email: {
+      "server care-ask helper":       "function dolCareAskTxt",
+      "care-ask in HTML deck + PDF":  "oil was last changed",
+    },
+  },
+  {
     field: "sealedShot (listing capture)",
     app: {
       "scroll view copy":        "capture rides along as its own photo file",
