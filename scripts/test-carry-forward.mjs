@@ -57,17 +57,36 @@ check("a fresh value is never overwritten by the old one",
   mergeCarryForward(withDrive, existing).rows[0].drivetrain === "RWD",
   JSON.stringify(mergeCarryForward(withDrive, existing).rows[0]));
 
-// A trim the table has never seen passes through untouched.
+// A trim the table has never seen inherits nothing — but the key must still be
+// PRESENT (explicitly null), see the homogeneity case below.
 const newTrim = [{ year: 2026, model: "Camry", trim: "TRD", msrp: 45000 }];
-check("an unseen trim is passed through unchanged",
-  mergeCarryForward(newTrim, existing).rows[0].drivetrain === undefined,
+check("an unseen trim inherits nothing",
+  mergeCarryForward(newTrim, existing).rows[0].drivetrain === null,
   JSON.stringify(mergeCarryForward(newTrim, existing).rows[0]));
 
 // Model years are distinct vehicles; last year's drivetrain must not leak.
 const nextYear = [{ year: 2027, model: "Camry", trim: "XLE", msrp: 51000 }];
 check("a different model year does not inherit",
-  mergeCarryForward(nextYear, existing).rows[0].drivetrain === undefined,
+  mergeCarryForward(nextYear, existing).rows[0].drivetrain === null,
   JSON.stringify(mergeCarryForward(nextYear, existing).rows[0]));
+
+// PGRST102 regression (2026-08-13): PostgREST bulk INSERT requires every
+// object in the batch to share ONE key set. Carrying enrichment onto only the
+// rows that had a predecessor made the batch heterogeneous, the INSERT 400'd
+// with "All object keys must match" AFTER the DELETE had run, and eleven makes
+// (Mazda 74, Kia 106, Ford 78, …) left msrp_catalog in production. Every row
+// must leave the merge with every carry column present.
+{
+  const mixed = [
+    { year: 2026, model: "Camry", trim: "XLE", msrp: 49442 },  // has a predecessor -> carries
+    { year: 2026, model: "Camry", trim: "TRD", msrp: 45000 },  // brand new -> carries nothing
+  ];
+  const merged = mergeCarryForward(mixed, existing).rows;
+  const keySets = merged.map((r) => Object.keys(r).sort().join(","));
+  check("batch stays homogeneous when only some rows carry (PGRST102 class)",
+    new Set(keySets).size === 1 && CARRY_FORWARD.every((c) => c in merged[1]),
+    `key sets diverged: ${JSON.stringify(keySets)}`);
+}
 
 check("every enrichment column is covered by a case",
   CARRY_FORWARD.every((c) => ["drivetrain", "attrs", "price_basis", "source_url"].includes(c)),
