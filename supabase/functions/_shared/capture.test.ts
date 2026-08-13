@@ -53,6 +53,16 @@ check("reads IHDR dimensions (100x200 = 20,000 px)",
   pngPixelCount(new Uint8Array(PNG_IHDR)) === 20_000);
 check("returns null for a truncated buffer",
   pngPixelCount(new Uint8Array(PNG_HEAD)) === null);
+// Zero-dimension IHDR: w or h of 0 is not a real image; null (embed skipped).
+const PNG_ZERO_W = [...PNG_IHDR.slice(0, 16), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8];
+const PNG_ZERO_H = [...PNG_IHDR.slice(0, 16), 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x00];
+check("returns null for a zero-dimension IHDR (w=0 or h=0)",
+  pngPixelCount(new Uint8Array(PNG_ZERO_W)) === null && pngPixelCount(new Uint8Array(PNG_ZERO_H)) === null);
+// Sign-bit width (declared 2^31 px): the 32-bit read goes negative — must fail
+// CLOSED (null -> embed skipped), never wrap into a small "safe" pixel count.
+const PNG_SIGN_W = [...PNG_IHDR.slice(0, 16), 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8];
+check("sign-bit width fails closed (bomb declaring 2^31 px is refused, not wrapped)",
+  pngPixelCount(new Uint8Array(PNG_SIGN_W)) === null);
 
 // ── b64 round trip + hex ────────────────────────────────────────────────────
 {
