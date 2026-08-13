@@ -4485,47 +4485,51 @@ function AdminPanel(){
   );
 }
 
-// ── Reusable isometric 3D scan visual -- a real CSS 3D transform
-// (perspective + rotateX/rotateZ), not a flat icon, with a scan beam
-// sweeping across a tilted document. Used both as the idle-state teaser
-// (slow, ambient loop) and the "analyzing" loading state (faster, more
-// active loop) -- one consistent visual instead of a flat emoji for the
-// real moment a file is actually being read.
-// Upload-zone visual — Uiverse "Nawsome" rings adapted to LotCheck: counter-
-// rotating verification rings orbiting the buyer's quote (document at centre).
-// Meaning-matched per the no-emoji/3D rule: rings = the checks running around
-// the document. speed="active" doubles rotation while an analysis runs.
-// Hover fans the ring layers out in 3D (the Nawsome signature). Reduced-motion
-// parks everything on a static frame.
-function RingsScanVisual({C, speed="idle"}){
-  const f = speed==="active" ? 0.5 : 1; // active = twice as fast
+// "Orbital Halo" -- the upload-zone idle teaser AND the full-screen scan
+// takeover's centerpiece (one consistent visual instead of two different
+// ring styles): three dashed elliptical rings, each carrying a glowing
+// satellite dot riding its edge, around a document glyph. speed="active"
+// (used while a scan is actually running) halves each ring's rotation
+// duration for a faster, more urgent feel than the idle resting state.
+// The outer ring doubles as a real progress arc (strokeDashoffset driven by
+// `progress`, 0..1) -- at rest progress is 0, so only the faint track shows;
+// during a scan it's the one place this visual reports actual completion
+// rather than just implying "work is happening."
+function OrbitalHaloVisual({C, progress=0, speed="idle"}){
+  const f=speed==="active"?0.5:1; // active = twice as fast
+  const R=100, CIRC=2*Math.PI*R;
+  const offset=CIRC*(1-Math.max(0,Math.min(1,progress)));
+  const rings=[
+    {rx:86, ry:36, color:C.teal,   dur:6*f,   rev:false, dotAngle:0},
+    {rx:64, ry:27, color:"#7c6cf0",dur:4.5*f, rev:true,  dotAngle:140},
+    {rx:42, ry:18, color:C.teal,   dur:3.2*f, rev:false, dotAngle:250},
+  ];
   return (
-    <div className="lc-rings" style={{position:"relative",width:210,height:210,margin:"0 auto",transformStyle:"preserve-3d",display:"flex",justifyContent:"center",alignItems:"center"}}>
+    <div className="lc-orbital" style={{position:"relative",width:220,height:220,margin:"0 auto"}}>
       <style>{`
-        @keyframes lcRings16 { to { transform: rotate(360deg); } }
-        .lc-rings svg { position: absolute; transition: .5s; transform-origin: center; width: 210px; height: 210px; fill: none; }
-        .lc-rings svg#lcr-out2 { animation: lcRings16 ${7*f}s ease-in-out infinite alternate; }
-        .lc-rings svg#lcr-out3 { animation: lcRings16 ${3*f}s ease-in-out infinite alternate; }
-        .lc-rings svg#lcr-in1, .lc-rings svg#lcr-in3 { animation: lcRings16 ${4*f}s ease-in-out infinite alternate; }
-        .lc-rings:hover svg { transform: rotate(-80deg) skew(30deg) translateX(calc(16px * var(--i))) translateY(calc(-12px * var(--i))); }
-        .lc-rings:hover svg#lcr-center { transform: rotate(-30deg) translateX(16px) translateY(-2px); }
-        @media (prefers-reduced-motion: reduce) { .lc-rings svg { animation: none !important; } .lc-rings:hover svg { transform: none !important; } }
+        @keyframes lcOrbitalSpin { to { transform: rotate(360deg); } }
+        @keyframes lcOrbitalSpinRev { to { transform: rotate(-360deg); } }
+        .lc-orbital svg.lco-ring { position:absolute; inset:0; width:220px; height:220px; fill:none; transform-origin:center; }
+        @media (prefers-reduced-motion: reduce) { .lc-orbital svg.lco-ring { animation:none !important; } }
       `}</style>
-      <svg id="lcr-out2" viewBox="0 0 220 220" style={{"--i":2}}>
-        <circle cx="110" cy="110" r="100" stroke={C.line} strokeWidth="2" strokeDasharray="24 14"/>
-        <circle cx="110" cy="110" r="100" stroke={C.teal+"55"} strokeWidth="6" strokeDasharray="4 64"/>
+      {rings.map((r,i)=>{
+        const rad=(r.dotAngle*Math.PI)/180;
+        const dx=110+Math.cos(rad)*r.rx, dy=110+Math.sin(rad)*r.ry;
+        return (
+          <svg key={i} className="lco-ring" viewBox="0 0 220 220"
+            style={{animation:`${r.rev?"lcOrbitalSpinRev":"lcOrbitalSpin"} ${r.dur}s linear infinite`}}>
+            <ellipse cx="110" cy="110" rx={r.rx} ry={r.ry} stroke={r.color} strokeWidth="1.4" strokeDasharray="3 8" opacity=".55"/>
+            <circle cx={dx} cy={dy} r="3" fill={r.color} style={{filter:`drop-shadow(0 0 4px ${r.color})`}}/>
+          </svg>
+        );
+      })}
+      <svg className="lco-ring" viewBox="0 0 220 220">
+        <circle cx="110" cy="110" r={R} stroke={C.line} strokeWidth="3" fill="none"/>
+        <circle cx="110" cy="110" r={R} stroke={C.teal} strokeWidth="3" fill="none" strokeLinecap="round"
+          transform="rotate(-90 110 110)" strokeDasharray={CIRC} strokeDashoffset={offset}
+          style={{transition:"stroke-dashoffset .3s ease",filter:`drop-shadow(0 0 5px ${C.teal})`}}/>
       </svg>
-      <svg id="lcr-out3" viewBox="0 0 220 220" style={{"--i":1.5}}>
-        <circle cx="110" cy="110" r="86" stroke={C.teal} strokeWidth="2.5" strokeDasharray="60 105" strokeLinecap="round"/>
-      </svg>
-      <svg id="lcr-in1" viewBox="0 0 220 220" style={{"--i":1}}>
-        <circle cx="110" cy="110" r="70" stroke="#7c6cf0" strokeWidth="2" strokeDasharray="10 18"/>
-      </svg>
-      <svg id="lcr-in3" viewBox="0 0 220 220" style={{"--i":0.5}}>
-        <circle cx="110" cy="110" r="56" stroke={C.teal} strokeWidth="1.6" strokeDasharray="2 12" opacity=".8"/>
-        <circle cx="110" cy="110" r="44" stroke={C.line} strokeWidth="1.2"/>
-      </svg>
-      <svg id="lcr-center" viewBox="0 0 220 220" style={{"--i":0}}>
+      <svg className="lco-ring" viewBox="0 0 220 220" style={{animation:"none"}}>
         <rect x="88" y="80" width="44" height="60" rx="7" fill="#f7f4ea"/>
         <rect x="96" y="92" width="28" height="4" rx="2" fill="#d9d4c2"/>
         <rect x="96" y="102" width="20" height="4" rx="2" fill="#d9d4c2"/>
@@ -4536,6 +4540,70 @@ function RingsScanVisual({C, speed="idle"}){
   );
 }
 
+// Full-screen scan takeover -- replaces the old inline "analyzing" card.
+// Reuses the same .lc-modal-overlay used by SignInModal/QuotePaywallModal, so
+// it matches their exact backdrop/positioning (centered on desktop, bottom
+// sheet on mobile) instead of inventing new modal chrome. `progress` is a
+// genuine elapsed-time curve (not a hardcoded animation) because a URL scan
+// is ~30-60s and a file scan ~5-25s -- it eases toward 92% over `estimate`
+// seconds and holds there for however long the real fetch actually takes, so
+// it never lies by finishing before the backend responds. phase="success" is
+// a brief (900ms, see QuoteCheckPage) closing beat once the real result has
+// actually landed -- never shown on an error, since that would be dishonest.
+function ScanTakeover({C, cardStyle, phase, attemptType, fileName, stageText}){
+  const estimate=attemptType==="url"?45:15;
+  const [elapsed,setElapsed]=useState(0);
+
+  useEffect(()=>{
+    if(phase!=="running") return;
+    const t0=Date.now();
+    const id=setInterval(()=>{ setElapsed((Date.now()-t0)/1000); },250);
+    return ()=>clearInterval(id);
+  },[phase]);
+
+  const progress=phase==="success"?1:Math.min(0.92,1-Math.exp(-elapsed/estimate));
+  const remaining=Math.max(0,Math.round(estimate-elapsed));
+
+  return (
+    <div className="lc-modal-overlay">
+      <div style={{...cardStyle,width:"100%",maxWidth:400,margin:16,marginBottom:16,textAlign:"center",padding:"36px 28px 30px",boxShadow:C.cardShadow}}>
+        <OrbitalHaloVisual C={C} progress={progress} speed="active"/>
+        {phase==="success"?(
+          <>
+            <div style={{width:52,height:52,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
+              margin:"16px auto 14px",background:C.tealBg,border:`1.5px solid ${C.teal}`,color:C.tealInk,fontSize:24}}>✓</div>
+            <div style={{color:C.ink,fontWeight:1000,fontSize:17,marginBottom:6}}>
+              {attemptType==="file"?"Document successfully scanned":"URL successfully scanned"}
+            </div>
+            <div style={{color:C.inkFaint,fontSize:12.5}}>{fileName}</div>
+          </>
+        ):(
+          <>
+            <div style={{color:C.ink,fontWeight:1000,marginTop:16,marginBottom:6}}>
+              {attemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}
+            </div>
+            <div style={{color:C.inkFaint,fontSize:13,marginBottom:10,minHeight:18,transition:"opacity .2s"}}>{stageText}</div>
+            <div style={{display:"flex",justifyContent:"center",gap:8,fontSize:13,color:C.tealInk,fontVariantNumeric:"tabular-nums"}}>
+              <span>{Math.round(progress*100)}%</span>
+              <span style={{color:C.inkFaint}}>·</span>
+              <span style={{color:C.inkFaint}}>{remaining>0?`~${remaining}s left`:"Almost there…"}</span>
+            </div>
+            {attemptType==="url"&&(
+              <div style={{color:C.inkFaint,fontSize:11,marginTop:12,opacity:.75}}>Reading a live dealer page can take up to a minute — hang tight.</div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Reusable isometric 3D scan visual -- a real CSS 3D transform
+// (perspective + rotateX/rotateZ), not a flat icon, with a scan beam
+// sweeping across a tilted document. Used both as the idle-state teaser
+// (slow, ambient loop) and the "analyzing" loading state (faster, more
+// active loop) -- one consistent visual instead of a flat emoji for the
+// real moment a file is actually being read.
 function IsoScanVisual({C, speed="idle"}){
   const floatDur = speed==="active" ? 2.2 : 3.6;
   const sweepDur = speed==="active" ? 1.3 : 2.8;
@@ -7037,6 +7105,14 @@ function QuoteCheckPage(){
   },[user,giftPending]);
   const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
+  // Brief (900ms) success beat shown in the full-screen ScanTakeover right as
+  // a scan actually finishes -- tracked separately from `status` because the
+  // takeover needs to keep rendering for a moment *after* status has already
+  // flipped to "done" (report is already computed and rendering underneath).
+  // Only fires on a real analyzing->done transition, never on error/idle, so
+  // the "successfully scanned" message is never shown for a scan that failed.
+  const prevStatusRef=useRef("idle");
+  const [scanFlash,setScanFlash]=useState(false);
   const [analysis,setAnalysis]=useState(null);
   // Report presentation: "scroll" (default, canonical) or "flip" (the flip-book
   // "Report view"). `sharedReport` is true when the analysis was reconstructed
@@ -7479,6 +7555,19 @@ function QuoteCheckPage(){
     return ()=>clearInterval(id);
   },[status,lastAttemptType]);
 
+  // Fires the ScanTakeover's success beat exactly once, only on a genuine
+  // analyzing->done transition (never on the initial mount, never on
+  // error/idle -- see scanFlash declaration above for why this exists).
+  useEffect(()=>{
+    const prev=prevStatusRef.current;
+    prevStatusRef.current=status;
+    if(prev==="analyzing"&&status==="done"){
+      setScanFlash(true);
+      const id=setTimeout(()=>setScanFlash(false),900);
+      return ()=>clearTimeout(id);
+    }
+  },[status]);
+
   // Hybrid policy: LotCheck reads DEALER-OWN sites only. These third-party
   // listing marketplaces/aggregators are blocked (their ToS bar automated
   // access — Century 21 v. Zoocasa); the edge function enforces the same list
@@ -7918,7 +8007,7 @@ function QuoteCheckPage(){
                 boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)",
               }}
             >
-              <RingsScanVisual C={C} speed="idle"/>
+              <OrbitalHaloVisual C={C} progress={0} speed="idle"/>
 
               <div style={{position:"relative",height:24,margin:"8px 0 14px"}}>
                 {EXAMPLES.map((ex,i)=>(
@@ -7972,14 +8061,13 @@ function QuoteCheckPage(){
           )}
 
           {status==="analyzing"&&(
-            <div style={{...cardStyle,padding:"48px 24px",textAlign:"center"}}>
-              <RingsScanVisual C={C} speed="active"/>
-              <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>{lastAttemptType==="url"?`Scanning ${fileName}…`:`Reading ${fileName}…`}</div>
-              <div style={{color:C.inkFaint,fontSize:13,transition:"opacity .2s"}}>{scanMsg||"Checking MSRP, add-ons, and warranty terms"}</div>
-              {lastAttemptType==="url"&&(
-                <div style={{color:C.inkFaint,fontSize:11,marginTop:10,opacity:.75}}>Reading a live dealer page can take up to a minute — hang tight.</div>
-              )}
-            </div>
+            <ScanTakeover C={C} cardStyle={cardStyle} phase="running"
+              attemptType={lastAttemptType} fileName={fileName}
+              stageText={scanMsg||"Checking MSRP, add-ons, and warranty terms"}/>
+          )}
+          {scanFlash&&(
+            <ScanTakeover C={C} cardStyle={cardStyle} phase="success"
+              attemptType={lastAttemptType} fileName={fileName}/>
           )}
 
           {status==="error"&&(
