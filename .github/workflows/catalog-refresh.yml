@@ -1,13 +1,15 @@
-name: Catalog refresh — weekly FULL (MSRP + rates)
-# Full weekly refresh of msrp_catalog + finance_rate_catalog + lease_rate_catalog
-# for ALL makes. MSRP changes ~yearly so weekly is plenty; rates are ALSO kept
-# fresh daily by catalog-rates-daily.yml (rates-only). Requires repo secrets
-# SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Without them the scripts dry-run.
+name: Catalog refresh — daily FULL (MSRP + rates)
+# Full daily refresh of msrp_catalog + finance_rate_catalog + lease_rate_catalog
+# for ALL makes (daily per Vic, 2026-08-13 — was weekly). Scrapers hit the
+# manufacturers' own sites directly (no paid vendor), so the extra runs cost
+# nothing. Rates are ALSO kept fresh by catalog-rates-daily.yml (rates-only).
+# Requires repo secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Without
+# them the scripts dry-run.
 on:
   workflow_dispatch:
   schedule:
-    # Weekly, Mondays 10:00 UTC (~4am Calgary). Full MSRP + rate rewrite.
-    - cron: "0 10 * * 1"
+    # Daily 10:00 UTC (~4am Calgary). Full MSRP + rate rewrite.
+    - cron: "0 10 * * *"
 jobs:
   refresh:
     runs-on: ubuntu-latest
