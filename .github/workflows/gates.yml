@@ -39,6 +39,8 @@ jobs:
           node-version: "24"      # --experimental-strip-types runs the .ts suite directly
       - name: Invariants (analysis object)
         run: npm run test:invariants
+      - name: Sealed capture (parse/magic-byte/page-count gates)
+        run: npm run test:capture
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
       - name: Report parity (client-derived cards render on every view)
