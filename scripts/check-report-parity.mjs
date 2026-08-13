@@ -121,6 +121,21 @@ const SURFACES = [
       "emailed PDF":       'kicker("PRICE DEPENDS ON FINANCING WITH THE DEALER")',
     },
   },
+  {
+    field: "sealedShot (listing capture)",
+    app: {
+      "scroll view copy":        "capture rides along as its own photo file",
+      "signed verify payload":   "shot:a.listingShotSha256||null",
+      "verify page sealed row":  'o.shot&&P==="signed"&&<Row t="Listing photo"',
+      "verify page drop zone":   "Check the sealed photo",
+    },
+    email: {
+      "email capture box":     "Attached: the listing, as it looked at report time",
+      "PDF evidence pages":    "SEALED LISTING CAPTURE",
+      "attachment push":       "-listing-capture.",
+      "verified seal gate":    "async function verifySealedShot",
+    },
+  },
 ];
 for (const { field, app, email } of SURFACES) {
   for (const [surface, anchor] of Object.entries(app)) {

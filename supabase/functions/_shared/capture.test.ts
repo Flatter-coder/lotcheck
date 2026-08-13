@@ -63,6 +63,12 @@ check("returns null for a zero-dimension IHDR (w=0 or h=0)",
 const PNG_SIGN_W = [...PNG_IHDR.slice(0, 16), 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc8];
 check("sign-bit width fails closed (bomb declaring 2^31 px is refused, not wrapped)",
   pngPixelCount(new Uint8Array(PNG_SIGN_W)) === null);
+// Chunk-reorder bypass: a tiny decoy chunk (gAMA) placed first would have its
+// data read as "dimensions" and pass the budget while the real, huge IHDR sits
+// later for the decoder to find. A non-IHDR first chunk must fail closed.
+const PNG_FAKE_CHUNK = [...PNG_IHDR.slice(0, 8), 0x00, 0x00, 0x00, 0x08, 0x67, 0x41, 0x4d, 0x41, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01];
+check("non-IHDR first chunk fails closed (budget can't be bypassed by chunk reordering)",
+  pngPixelCount(new Uint8Array(PNG_FAKE_CHUNK)) === null);
 
 // ── b64 round trip + hex ────────────────────────────────────────────────────
 {
