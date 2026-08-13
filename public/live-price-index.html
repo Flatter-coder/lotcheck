@@ -468,29 +468,37 @@
   .tm-legend .sw.good{background:var(--up)} .tm-legend .sw.bad{background:var(--down)} .tm-legend .sw.neutral{background:var(--dim);opacity:.6}
   .tm-legend .sw.size{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dim);background:transparent}
 
-  /* ---------------- 3D powertrain chart ---------------- */
-  .pt3d-wrap{border:1px solid var(--hair);border-radius:14px;background:var(--panel);padding:14px 12px 10px}
-  #pt3d{width:100%;height:330px;display:block;cursor:grab;touch-action:pan-y}
-  #pt3d:active{cursor:grabbing}
-  @media (max-width:620px){#pt3d{height:240px}}
-  .pt3d-lg{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:8px;
-    font-size:.72rem;color:var(--dim)}
-  .pt3d-lg span{display:inline-flex;align-items:center;gap:6px}
-  .pt3d-lg i{width:9px;height:9px;border-radius:2px;display:inline-block}
-
-  /* ---------------- depth backdrop ----------------
-     A perspective-projected wireframe plane behind the page. Parallel lines
-     converging on a horizon is the cue that actually reads as depth; a flat
-     starfield never does. Decorative only -- it never carries a value. */
-  #lcMesh{position:fixed;left:0;right:0;bottom:0;height:52vh;z-index:0;pointer-events:none;opacity:.42}
-  #lcFog{position:fixed;left:0;right:0;bottom:0;height:52vh;z-index:0;pointer-events:none;
-    background:linear-gradient(180deg,var(--bg) 0%,transparent 40%,transparent 76%,var(--bg) 100%)}
-  header,.wrap,.backbar,.ticker,.tickerwrap{position:relative;z-index:1}
+  /* ---------------- median on a 3D pedestal ----------------
+     The headline figure is lifted off a lit disc and tilts to follow the
+     pointer. Purely presentational: the number itself is untouched, so nothing
+     here can change what is reported. */
+  .idx-stage{perspective:900px;display:inline-block;max-width:100%}
+  .idx-podium{transform-style:preserve-3d;position:relative;display:inline-block;
+    transform:rotateX(var(--prx,13deg)) rotateY(var(--pry,0deg));
+    transition:transform .5s cubic-bezier(.2,.7,.3,1)}
+  .idx-podium .idx{transform:translateZ(46px);text-shadow:0 14px 34px rgba(0,0,0,.55)}
+  .pedestal{position:relative;height:56px;margin:-4px auto 0;
+    width:min(320px,86%);transform-style:preserve-3d}
+  .pedestal i{position:absolute;display:block}
+  .pedestal .top{inset:0;border-radius:50%;transform:rotateX(74deg);
+    background:linear-gradient(180deg,rgba(150,170,255,.20),rgba(150,170,255,.04));
+    border:1px solid var(--hair-strong)}
+  .pedestal .side{left:0;right:0;top:10px;height:18px;border-radius:50%;
+    transform:rotateX(74deg) translateZ(-12px);
+    background:linear-gradient(180deg,rgba(120,140,220,.16),transparent)}
+  .pedestal .ring{inset:-14px;border-radius:50%;border:1px solid var(--cyan);opacity:.18;
+    transform:rotateX(74deg);animation:idxPulse 3.6s ease-in-out infinite}
+  @keyframes idxPulse{50%{opacity:.05;transform:rotateX(74deg) scale(1.06)}}
+  @media(max-width:560px){.pedestal{height:40px;width:min(240px,88%)}
+    .idx-podium .idx{transform:translateZ(30px)}}
 
   @media (prefers-reduced-motion:reduce){
     .track{animation:none} .dealer{transition:none} .card{transition:none} .dot{animation:none}
     /* freeze the brand-logo motif — car rests mid-gate, window lit */
     .lc-gate-car,.lc-gate-window{animation:none!important}
+    /* freeze the median pedestal — the disc stays, the pulse stops */
+    .pedestal .ring{animation:none!important}
+    .idx-podium{transition:none!important}
     /* freeze the powertrain icons — static, legible */
     .fuel-ico{animation:none!important;opacity:1;transform:none}
     /* Reviews vs MSRP: freeze the drift pulse, keep hover cards */
@@ -736,7 +744,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   <div class="track" id="track"></div>
 </div>
 
-<canvas id="lcMesh" aria-hidden="true"></canvas><div id="lcFog" aria-hidden="true"></div>
 <header>
   <div class="brand">
     <div class="logo" aria-hidden="true" title="LotCheck — passing the check">
@@ -782,7 +789,12 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     <!-- HEADLINE -->
     <div class="report-head">
       <div class="kicker">LotCheck MSRP Index · base 100</div>
-      <div class="idx mono" id="lmi">0.00</div>
+      <div class="idx-stage">
+        <div class="idx-podium" id="idxPodium">
+          <div class="idx mono" id="lmi">0.00</div>
+          <div class="pedestal" aria-hidden="true"><i class="ring"></i><i class="side"></i><i class="top"></i></div>
+        </div>
+      </div>
       <div class="chg up" id="lmiChg">&nbsp;</div>
       <div class="scope-lbl" id="scopeLbl"></div>
       <p class="lede">Where Alberta new-vehicle sticker prices sit today, tracked across
@@ -868,17 +880,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <div class="scene"><div class="pt-grid" id="ptGrid"></div></div>
     </section>
 
-    <!-- 3D: price band x powertrain. REAL catalog rows; the depth axis is a
-         CATEGORY (powertrain), never a magnitude, so perspective separates the
-         series without ever rescaling a value. -->
-    <section>
-      <h2>MSRP by price band <span class="n">verified trims · by powertrain</span></h2>
-      <div class="pt3d-wrap">
-        <canvas id="pt3d" aria-label="Three-dimensional chart: verified trim counts per MSRP price band, one receding row per powertrain"></canvas>
-        <div class="pt3d-lg" id="pt3dLg"></div>
-        <div class="mg-lbl" id="pt3dNote">drag to swing the view</div>
-      </div>
-    </section>
+
 
     <!-- INSIGHTS -->
     <section>
