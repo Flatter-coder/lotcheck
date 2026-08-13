@@ -26,6 +26,9 @@ jobs:
         with:
           node-version: "24"
       - run: npm run test:invariants
+      # capture.ts ships INSIDE email-quote-report (sealed listing capture),
+      # so a parsing/paging regression is a deploy-blocking defect too.
+      - run: npm run test:capture
       # trim-match.js and msrp-authority.js ship INSIDE these functions, so a
       # bad MSRP label is a deploy-blocking defect, not just a CI note.
       - run: npm run test:trim
