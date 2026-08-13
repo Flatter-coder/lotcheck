@@ -6012,7 +6012,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
         </div>
       )}
-      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
         <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
       </div>
     </div>
@@ -6721,8 +6721,35 @@ function VerifyPage(){
   const [state,setState]=useState({phase:"loading"});
   const [input,setInput]=useState("");
   const [hint,setHint]=useState("");
+  // Sealed-photo check: hash a dropped/chosen image ENTIRELY in the browser and
+  // compare it to the SHA-256 sealed in this report's SIGNED canonical. Nothing
+  // is uploaded — the file never leaves the device, keeping the "nothing
+  // stored" promise while making the emailed capture file provable. Only
+  // rendered for signature-valid reports: the hash in an unsigned link proves
+  // nothing (anyone can seal a doctored image's hash into a link they minted).
+  const [photoCheck,setPhotoCheck]=useState({status:"idle"});
+  const [zoneUi,setZoneUi]=useState({drag:false,focus:false});
+  // Monotonic token: a result may only land if no newer drop and no report
+  // change superseded it (two quick drops race — last-started must win).
+  const photoSeqRef=useRef(0);
+  async function checkPhotoFile(file,sealedHex){
+    if(!file) return;
+    const seq=++photoSeqRef.current;
+    try{
+      if(file.size>64*1024*1024){ setPhotoCheck({status:"toobig"}); return; }
+      setPhotoCheck({status:"hashing"});
+      const buf=await file.arrayBuffer();
+      const dig=await crypto.subtle.digest("SHA-256",buf);
+      const hex=Array.from(new Uint8Array(dig)).map(b=>b.toString(16).padStart(2,"0")).join("");
+      if(seq!==photoSeqRef.current) return;
+      const sealed=sealedHex?String(sealedHex).toLowerCase():null;
+      setPhotoCheck({status:sealed?(hex===sealed.trim()?"match":"mismatch"):"noseal",hex});
+    }catch(e){ if(seq===photoSeqRef.current) setPhotoCheck({status:"error"}); }
+  }
   async function runVerify(d,id,s,k){
     setState({phase:"loading"});
+    photoSeqRef.current++;
+    setPhotoCheck({status:"idle"});
     try{
       if(!d){ setState({phase:"empty"}); return; }
       // Payload is gzip-compressed (falls back to raw for legacy links). Inflate
@@ -6909,9 +6936,49 @@ function VerifyPage(){
                   )}
                   {o.summary&&<div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:10,marginTop:4,fontSize:12.5,color:T.soft,lineHeight:1.6,fontStyle:"italic"}}>{o.summary}</div>}
                 </div>
+                {o.shot&&P==="signed"&&(()=>{
+                  const pc=photoCheck;
+                  // Verdict inks flip with the theme — the dark-palette greens/
+                  // salmons wash out to ~2:1 contrast on the bright background.
+                  const okInk=vdark?"#34d399":"#047857";
+                  const badInk=vdark?"#f0997b":"#b4490f";
+                  const zoneBd=pc.status==="match"?okInk:(pc.status==="mismatch"||pc.status==="toobig")?badInk:zoneUi.drag?T.cyan:T.cardBd;
+                  return (
+                    <div
+                      onDragEnter={e=>{e.preventDefault();setZoneUi(u=>({...u,drag:true}));}}
+                      onDragOver={e=>{e.preventDefault();if(!zoneUi.drag)setZoneUi(u=>({...u,drag:true}));}}
+                      onDragLeave={e=>{if(e.currentTarget.contains(e.relatedTarget))return;setZoneUi(u=>({...u,drag:false}));}}
+                      onDrop={e=>{e.preventDefault();setZoneUi(u=>({...u,drag:false}));const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];checkPhotoFile(f,o.shot);}}
+                      style={{marginTop:12,border:`1.5px dashed ${zoneBd}`,borderRadius:12,padding:"13px 15px",background:zoneUi.drag?(vdark?"rgba(58,224,255,.06)":"rgba(13,143,176,.06)"):vdark?"rgba(255,255,255,.03)":"rgba(255,255,255,.55)"}}>
+                      <div style={{fontSize:12.5,fontWeight:800,color:T.heading,marginBottom:4}}>Check the sealed photo</div>
+                      <div style={{fontSize:12,color:T.soft,lineHeight:1.55}}>This signed report seals a full-page photo of the listing (fingerprint <span style={{fontFamily:mono}}>{String(o.shot).slice(0,10)}…</span>). Drop the “listing-capture” file from your LotCheck email here — your browser recomputes its fingerprint and compares. Nothing is uploaded.</div>
+                      <div style={{display:"flex",alignItems:"center",gap:10,marginTop:9,flexWrap:"wrap"}}>
+                        <label style={{position:"relative",display:"inline-flex",alignItems:"center",minHeight:40,background:"transparent",border:`1px solid ${zoneUi.focus?T.cyan:T.cardBd}`,boxShadow:zoneUi.focus?`0 0 0 2px ${vdark?"rgba(58,224,255,.35)":"rgba(13,143,176,.3)"}`:"none",borderRadius:9,padding:"10px 16px",fontSize:12,fontWeight:700,color:T.cyan,cursor:"pointer"}}>
+                          Choose photo
+                          {/* Visually hidden, NOT display:none — keeps the input in the tab
+                              order so keyboard users can reach the file picker (drag-and-drop
+                              has no keyboard path). */}
+                          <input type="file" accept="image/*"
+                            style={{position:"absolute",opacity:0,width:1,height:1,overflow:"hidden",pointerEvents:"none"}}
+                            onFocus={()=>setZoneUi(u=>({...u,focus:true}))}
+                            onBlur={()=>setZoneUi(u=>({...u,focus:false}))}
+                            onChange={e=>{const f=e.target.files&&e.target.files[0];checkPhotoFile(f,o.shot);e.target.value="";}}/>
+                        </label>
+                        {pc.status==="hashing"&&<span style={{fontSize:12,color:T.soft}}>Checking…</span>}
+                      </div>
+                      <div role="status" aria-live="polite">
+                        {pc.status==="match"&&<div style={{marginTop:10,fontSize:12,lineHeight:1.55,color:okInk,background:"rgba(52,211,153,.1)",border:"1px solid rgba(52,211,153,.35)",borderRadius:9,padding:"9px 11px"}}>This photo is the untouched original — its fingerprint matches the one sealed in this signed report. It shows the listing exactly as it looked at report time.</div>}
+                        {pc.status==="mismatch"&&<div style={{marginTop:10,fontSize:12,lineHeight:1.55,color:badInk,background:"rgba(240,153,123,.12)",border:"1px solid rgba(240,153,123,.4)",borderRadius:9,padding:"9px 11px"}}>This image doesn't match the sealed fingerprint (it computes <span style={{fontFamily:mono}}>{String(pc.hex||"").slice(0,10)}…</span>). That only means it isn't the exact original file — images that were edited, re-saved, screenshotted or recompressed by another app also stop matching. Try the original “listing-capture” attachment from your LotCheck email.</div>}
+                        {pc.status==="toobig"&&<div style={{marginTop:10,fontSize:12,lineHeight:1.55,color:badInk}}>That file is too large to be a LotCheck capture — use the “listing-capture” image attached to your LotCheck email.</div>}
+                        {pc.status==="noseal"&&<div style={{marginTop:10,fontSize:12,lineHeight:1.55,color:T.soft}}>This report link doesn't carry a sealed photo fingerprint, so there's nothing to compare against.</div>}
+                        {pc.status==="error"&&<div style={{marginTop:10,fontSize:12,color:T.soft}}>Couldn't read that file — try again with the image file from your LotCheck email.</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",gap:10,marginTop:12,flexWrap:"wrap"}}>
                   <button onClick={()=>{if(window.history.length>1)window.history.back();else window.location.href="/quote-check";}} style={{background:T.eyebrow,border:"none",color:"#0b0b14",borderRadius:9,padding:"8px 16px",fontSize:12,fontWeight:800,cursor:"pointer"}}>Back to report</button>
-                  <button onClick={()=>{setInput("");setState({phase:"empty"});}} style={{background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
+                  <button onClick={()=>{setInput("");photoSeqRef.current++;setPhotoCheck({status:"idle"});setState({phase:"empty"});}} style={{background:"transparent",border:`1px solid ${T.cardBd}`,color:T.soft,borderRadius:9,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Verify another</button>
                 </div>
               </div>);
             })()}
