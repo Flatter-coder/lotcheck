@@ -345,9 +345,13 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   return { total, deckHtml, sayHtml };
 }
 
-function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string): string {
+function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string, sealedShot?: SealedShot | null): string {
   const a = analysis;
   const { total, deckHtml, sayHtml } = buildDeckBody(a);
+  // The capture box renders ONLY off the handler's verified SealedShot — the
+  // same object that drives the actual attachment — so the email copy and the
+  // attachment can never disagree (divergent-gate class, capture.test.ts).
+  const hasShot = !!sealedShot;
   return `
   <div style="font-family:'Nunito',system-ui,-apple-system,sans-serif;background:#FBF5EC;padding:24px;">
     <div style="max-width:560px;margin:0 auto;">
@@ -356,6 +360,7 @@ function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string): 
       ${coverCard(a)}
       ${reportUrl ? `<div style="margin-bottom:14px;"><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#17756B;color:#fff;font-weight:800;font-size:14px;text-decoration:none;padding:12px 22px;border-radius:10px;">View your interactive report</a><div style="font-size:11px;color:#706D96;margin-top:6px;">Swipe through the deck in your browser, or open the attached PDF.</div></div>` : ""}
       ${verifyUrl ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">${a.reportId ? escapeHtml(a.reportId) : "Your report"} — tamper-evident</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">If a dealer questions this report, <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">verify it here</a> — the ID is a fingerprint of its contents, so any altered figure changes it. We store nothing.</div></div>` : ""}
+      ${hasShot ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">Attached: the listing, as it looked at report time</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">The full-page capture rides along as its own photo file. Its fingerprint is sealed in the signed report — if the page ever changes, ${verifyUrl ? `drop the photo on <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">the verify page</a>` : "drop the photo on lotcheck.ca/verify"} to prove yours is the untouched original. Keep this email — nothing is stored on our end.</div></div>` : ""}
       <div style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;margin:6px 2px 8px;">The audit · ${total} card${total > 1 ? "s" : ""} · flagged cards glow</div>
       ${deckHtml}
       ${sayHtml}
@@ -384,6 +389,66 @@ function u8ToB64(u8: Uint8Array): string {
   let s = ""; const chunk = 0x8000;
   for (let i = 0; i < u8.length; i += chunk) s += String.fromCharCode.apply(null, u8.subarray(i, i + chunk) as unknown as number[]);
   return btoa(s);
+}
+// Sealed listing capture — shape/size/magic-byte validation lives in the pure,
+// tested module (_shared/capture.ts, pinned by capture.test.ts).
+import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
+
+// A capture the server has PROVEN is the sealed original: its SHA-256 was
+// recomputed here over the actual bytes AND that hash sits inside the report's
+// ECDSA-signed canonical (signature checked against LotCheck's public key).
+// Only a SealedShot may be attached, printed, or described as "sealed" — the
+// endpoint is unauthenticated, so anything less lets an anonymous caller mint
+// LotCheck-branded "evidence" for a doctored image (2026-08-12 review).
+interface SealedShot extends ParsedShot {
+  sha: string;          // computed server-side over shot.bytes
+  issuedAt: string | null; // from the VERIFIED canonical, not raw client input
+}
+
+// Public verification keys — same registry the web app ships in App.jsx.
+// Public material, safe to embed; add retired keys here on rotation.
+const REPORT_PUBLIC_KEYS: Record<string, string> = {
+  k1: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErEpWm/YsbAN9i9RkuGAPDadAp8BJ+i3j7V1WVUtvsQgmBN04hEQksYdyUksotL6LYOrPAnRkpqh6DXmMlTI7FA==",
+};
+function b64urlToBytes(s: string): Uint8Array {
+  s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "=";
+  const bin = atob(s); const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr;
+}
+async function maybeGunzip(bytes: Uint8Array): Promise<Uint8Array> {
+  if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b && typeof DecompressionStream !== "undefined") {
+    const ds = new DecompressionStream("gzip");
+    const w = ds.writable.getWriter(); w.write(bytes); w.close();
+    return new Uint8Array(await new Response(ds.readable).arrayBuffer());
+  }
+  return bytes;
+}
+// Prove the parsed capture is the one sealed in the SIGNED canonical:
+// 1) recompute SHA-256 over the decoded bytes (never trust the client's claim),
+// 2) verify the ECDSA P-256 signature over the canonical payload bytes
+//    (signature is over the RAW canonical string — same as /verify),
+// 3) require canonical.shot === computed hash.
+// Returns null when any link in that chain fails — unsigned/legacy reports
+// simply don't get the capture treatment, which is the honest outcome.
+async function verifySealedShot(analysis: any, shot: ParsedShot): Promise<SealedShot | null> {
+  try {
+    const dig = await crypto.subtle.digest("SHA-256", shot.bytes as unknown as ArrayBuffer);
+    const sha = bytesToHex(new Uint8Array(dig));
+    const pubB64 = analysis?.keyId ? REPORT_PUBLIC_KEYS[analysis.keyId] : null;
+    if (!pubB64 || !analysis?.sig || !analysis?.verifyPayload) return null;
+    const canonBytes = await maybeGunzip(b64urlToBytes(String(analysis.verifyPayload)));
+    const spki = Uint8Array.from(atob(pubB64), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey("spki", spki, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, b64urlToBytes(String(analysis.sig)), canonBytes as unknown as ArrayBuffer);
+    if (!ok) return null;
+    const canonical = JSON.parse(new TextDecoder().decode(canonBytes));
+    if (canonical?.shot !== sha) return null;
+    const issuedAt = typeof canonical?.issuedAt === "string" && !Number.isNaN(Date.parse(canonical.issuedAt)) ? canonical.issuedAt : null;
+    return { ...shot, sha, issuedAt };
+  } catch (e) {
+    console.warn("Sealed-shot verification failed:", (e as Error)?.message);
+    return null;
+  }
 }
 // Stable, non-random report number from vehicle + dealer (same input -> same No.).
 function reportNo(a: any): string {
@@ -514,7 +579,7 @@ function guillocheRings(seed: number, cx: number, cy: number, R: number, steps: 
   return [ring(1, 0), ring(1, 2.4), ring(0.66, 0), ring(0.66, 1.9)];
 }
 
-async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
+async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedShot | null): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import("https://esm.sh/pdf-lib@1.17.1");
   const doc = await PDFDocument.create();
   const serif  = await doc.embedFont(StandardFonts.TimesRoman);
@@ -852,11 +917,73 @@ async function buildReportPdf(a: any, verifyUrl?: string): Promise<Uint8Array> {
   }
 
   rule(HAIR, 0.7, 6);
-  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
+  // Pre-embed the sealed capture BEFORE the footer text so the footer can only
+  // promise pages that will actually exist (embed failures, oversize captures,
+  // and PNG pixel bombs all resolve to capImg = null here, never mid-promise).
+  let capImg: any = null;
+  if (sealedShot && sealedShot.b64.length <= SHOT_PDF_EMBED_CAP) {
+    try {
+      if (sealedShot.ext === "png") {
+        const px = pngPixelCount(sealedShot.bytes);
+        if (px !== null && px <= PNG_PIXEL_BUDGET) capImg = await doc.embedPng(sealedShot.bytes);
+        else console.warn(`Capture PDF embed skipped: PNG pixel count ${px} over budget.`);
+      } else {
+        capImg = await doc.embedJpg(sealedShot.bytes);
+      }
+    } catch (e) { console.warn("Capture embed skipped:", (e as Error)?.message); capImg = null; }
+  }
+  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
   need(40);
   { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
   y -= 30;
   center("LOTCHECK  -  " + RID + "  -  lotcheck.ca/verify", y - 8, { size: 7.5, font: sansB, color: FAINT });
+
+  // ---- SEALED LISTING CAPTURE — evidence pages ----
+  // The full-page photo of the listing, printed into the PDF itself so the
+  // emailed report is self-contained evidence (nothing stored on our end,
+  // nothing to go back to a server for). The tall capture is sliced across
+  // pages at full content width — readable, not shrunk to a thumbnail. The
+  // caption prints ONLY server-verified facts: the SHA-256 recomputed here
+  // over these exact bytes, and the issue time from the SIGNED canonical —
+  // never the client's claims (forged-evidence class, 2026-08-12 review).
+  // Never fatal: a bad image already resolved to capImg = null above.
+  if (capImg && sealedShot) {
+    try {
+      const img = capImg;
+      const scaledH = img.height * (W / img.width);
+      const HEAD_FIRST = 100, HEAD_REST = 34, MAXP = 6;
+      const u0 = PH - M * 2 - HEAD_FIRST, uR = PH - M * 2 - HEAD_REST;
+      // Page count mirrors the loop below exactly (shared, tested helper) so
+      // "PAGE k OF N" can never disagree with the rendered page count.
+      const totalPages = capturePageCount(scaledH, u0, uR, MAXP);
+      let off = 0, k = 0;
+      while (off < scaledH - 2 && k < MAXP) {
+        const headH = k === 0 ? HEAD_FIRST : HEAD_REST;
+        const winTop = PH - M - headH;
+        const slice = Math.min(winTop - M, scaledH - off);
+        page = doc.addPage([PW, PH]); paper();
+        // Draw the whole image shifted so slice k lands in this page's window,
+        // then mask the overflow with paper (above the window and below the
+        // slice) — pdf-lib has no clip helper, so the mask IS the clip.
+        page.drawImage(img, { x: M, y: winTop - scaledH + off, width: W, height: scaledH });
+        page.drawRectangle({ x: 0, y: winTop, width: PW, height: PH - winTop, color: PAPER });
+        page.drawRectangle({ x: 0, y: 0, width: PW, height: Math.max(0, winTop - slice), color: PAPER });
+        page.drawRectangle({ x: M, y: winTop - slice, width: W, height: slice, borderColor: HAIR, borderWidth: 0.7 });
+        y = PH - M;
+        T("SEALED LISTING CAPTURE" + (totalPages > 1 ? "  -  PAGE " + (k + 1) + " OF " + totalPages : ""), { size: 8.5, font: sansB, color: TEAL });
+        y -= 15;
+        if (k === 0) {
+          para("Full-page photo of the listing, captured for report " + pdfSafe(RID) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+          if (a.sourceUrl) { const src = String(a.sourceUrl); T("Listing address (as scanned): " + (src.length > 80 ? src.slice(0, 77) + "..." : src), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          T("SHA-256 " + sealedShot.sha.slice(0, 64), { size: 7.5, font: mono, color: FAINT }); y -= 11;
+        }
+        off += slice; k++;
+      }
+      // No silent caps: if the capture outruns the page budget, say so — the
+      // attached image file always carries the complete page.
+      if (off < scaledH - 2) center("Capture truncated for print - the attached photo file contains the complete page.", 34, { size: 7.5, font: sans, color: FAINT });
+    } catch (e) { console.warn("Capture pages skipped:", (e as Error)?.message); }
+  }
 
   return await doc.save();
 }
@@ -895,12 +1022,13 @@ Deno.serve(async (req: Request) => {
       : "Your LotCheck quote report";
 
     // Verify link — drives both the PDF QR and the email "verify it here" box.
-    // Prefer the link the client sent; if it's missing, rebuild it from the
-    // signed fields on the analysis so a client that forgot to send it still
-    // gets a working QR (no single point of failure). Same shape as the
-    // client's verifyLinkFor(): d = payload, id/s/k optional.
+    // The client's value is honoured ONLY when it points at LotCheck's own
+    // verify page: this email is branded and DKIM-signed, and the verify link
+    // is its trust anchor, so a client-chosen external URL (a lookalike page
+    // that always shows green) must never ride in it. Anything else is
+    // rebuilt server-side from the signed fields on the analysis.
     let verifyUrl: string | undefined =
-      (typeof verifyUrlIn === "string" && /^https?:\/\//.test(verifyUrlIn)) ? verifyUrlIn : undefined;
+      (typeof verifyUrlIn === "string" && verifyUrlIn.startsWith("https://lotcheck.ca/verify")) ? verifyUrlIn : undefined;
     if (!verifyUrl && analysis.verifyPayload) {
       verifyUrl = `https://lotcheck.ca/verify?d=${analysis.verifyPayload}`
         + (analysis.reportId ? `&id=${encodeURIComponent(analysis.reportId)}` : "")
@@ -908,15 +1036,37 @@ Deno.serve(async (req: Request) => {
         + (analysis.keyId ? `&k=${encodeURIComponent(analysis.keyId)}` : "");
     }
 
-    // PDF attachment — never fatal: if generation fails, send the email anyway.
-    let attachments: Array<{ filename: string; content: string }> | undefined;
+    // Sealed listing capture — parsed ONCE, then PROVEN sealed (SHA-256 of the
+    // bytes recomputed here + ECDSA signature over the canonical checked)
+    // before it may touch the email, the PDF, or the word "sealed". A capture
+    // that fails any link in that chain is dropped entirely: this endpoint is
+    // unauthenticated, and anything weaker lets an anonymous caller mint
+    // LotCheck-branded "evidence" for a doctored image.
+    let sealedShot: SealedShot | null = null;
     try {
-      const bytes = await buildReportPdf(analysis, verifyUrl);
-      const fnameVeh = (analysis.vehicle || "report").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "report";
-      attachments = [{ filename: `LotCheck-${fnameVeh}.pdf`, content: u8ToB64(bytes) }];
+      const parsed = parseListingShot(analysis);
+      if (parsed) {
+        sealedShot = await verifySealedShot(analysis, parsed);
+        if (!sealedShot) console.warn("Capture dropped: not provably sealed (unsigned report, signature mismatch, or hash disagrees).");
+      }
+    } catch (e) {
+      console.error("Capture verification skipped:", e);
+    }
+
+    // Attachments — never fatal: if generation fails, send the email anyway.
+    const fnameVeh = (analysis.vehicle || "report").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "report";
+    const attachments: Array<{ filename: string; content: string }> = [];
+    try {
+      const bytes = await buildReportPdf(analysis, verifyUrl, sealedShot);
+      attachments.push({ filename: `LotCheck-${fnameVeh}.pdf`, content: u8ToB64(bytes) });
     } catch (e) {
       console.error("PDF generation failed (sending email without attachment):", e);
     }
+    // The buyer's portable copy of what the page looked like at report time.
+    // The browser session that generated the report is the ONLY other place
+    // this image exists (nothing stored server-side) — this attachment is what
+    // makes the emailed report self-contained evidence.
+    if (sealedShot) attachments.push({ filename: `LotCheck-${fnameVeh}-listing-capture.${sealedShot.ext}`, content: sealedShot.b64 });
 
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -928,8 +1078,8 @@ Deno.serve(async (req: Request) => {
         from: FROM_ADDRESS,
         to: [email],
         subject,
-        html: buildEmailHtml(analysis, reportUrl, verifyUrl),
-        ...(attachments ? { attachments } : {}),
+        html: buildEmailHtml(analysis, reportUrl, verifyUrl, sealedShot),
+        ...(attachments.length ? { attachments } : {}),
       }),
     });
 
