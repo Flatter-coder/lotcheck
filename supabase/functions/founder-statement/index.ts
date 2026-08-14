@@ -74,26 +74,107 @@ function buildHtml(s: any, me: any): string {
     .filter((f: any) => f.email !== me.email)
     .map((f: any) => `${f.name} ${money(f.owes_cad)}`).join(" · ");
 
-  return `<!doctype html><html><body style="margin:0;background:#FBF5EC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;">
-  <div style="max-width:520px;margin:0 auto;padding:28px 20px;">
-    <div style="font-size:19px;font-weight:800;color:#33305A;">LotCheck — ${s.month}</div>
-    <div style="font-size:13px;color:#5B5885;margin-top:4px;">Operating costs, split ${s.active_founders} ways</div>
+  // Outstanding lines by month, so every unpaid item is named and dated. Vic's
+  // case reads "August 2026 — Scrapfly DISCOVERY  CA$15.00" rather than an
+  // unexplained remainder JC or Josh cannot check against their own records.
+  const byMonth = new Map<string, any[]>();
+  for (const l of (bal?.unpaid_lines ?? [])) {
+    const k = l.month;
+    if (!byMonth.has(k)) byMonth.set(k, []);
+    byMonth.get(k)!.push(l);
+  }
+  const monthName = (iso: string) =>
+    new Date(iso + "T00:00:00").toLocaleDateString("en-CA", { month: "long", year: "numeric" });
 
-    <div style="background:#fff;border:1px solid rgba(51,48,90,.12);border-radius:14px;padding:18px 20px;margin:18px 0;">
-      <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;">YOUR SHARE</div>
-      <div style="font-size:34px;font-weight:800;color:#17756B;letter-spacing:-1px;margin:6px 0 2px;">${money(me.owes_cad)}</div>
-      <div style="font-size:12px;color:#706D96;">of ${money(s.monthly_total_cad)} total${others ? ` · ${others}` : ""}</div>
-    </div>
+  const outstanding = [...byMonth.entries()].sort().map(([m, items]) => {
+    const rows = items.map((i: any) => `<tr>
+      <td style="padding:7px 0 7px 14px;font-size:13px;color:#5B5885;">${i.line}</td>
+      <td style="padding:7px 0;text-align:right;font-size:13px;color:#33305A;font-weight:600;font-variant-numeric:tabular-nums;">${money(Number(i.amount_cad))}</td>
+    </tr>`).join("");
+    const sub = items.reduce((a: number, i: any) => a + Number(i.amount_cad), 0);
+    return `<tr><td colspan="2" style="padding:12px 0 2px;font-size:11px;font-weight:700;letter-spacing:.8px;color:#706D96;text-transform:uppercase;">${monthName(m)}</td></tr>
+      ${rows}
+      <tr><td style="padding:6px 0 8px 14px;font-size:12px;color:#706D96;border-bottom:1px solid rgba(51,48,90,.10);">Subtotal</td>
+          <td style="padding:6px 0 8px;text-align:right;font-size:12px;color:#706D96;font-variant-numeric:tabular-nums;border-bottom:1px solid rgba(51,48,90,.10);">${money(sub)}</td></tr>`;
+  }).join("");
 
-    <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;margin-bottom:6px;">WHEN IT LEAVES THE ACCOUNT</div>
-    <table style="width:100%;border-collapse:collapse;font-size:13px;">${due}</table>
+  const paidRows = (bal?.lines ?? []).filter((l: any) => l.kind === "payment").map((l: any) =>
+    `<tr><td style="padding:5px 0;font-size:12px;color:#706D96;">${monthName(l.month)}${l.line_label ? ` — ${l.line_label}` : ""}</td>
+     <td style="padding:5px 0;text-align:right;font-size:12px;color:#17756B;font-weight:600;font-variant-numeric:tabular-nums;">${money(Number(l.amount_cad))}</td></tr>`).join("");
 
-    <div style="font-size:12px;color:#706D96;line-height:1.7;margin-top:18px;border-top:1px solid rgba(51,48,90,.12);padding-top:14px;">
-      USD vendor lines are converted at the rate the card actually bills, not mid-market, so this is
-      what really leaves the account. Figures come from the admin panel's operational cost table —
-      if a plan changes, update it there and next month's statement follows automatically.
-    </div>
-  </div></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  <body style="margin:0;padding:0;background:#F5EEE1;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F5EEE1;">
+   <tr><td align="center" style="padding:26px 12px;">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#FFFFFF;border:1px solid rgba(51,48,90,.12);border-radius:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;">
+
+     <!-- Masthead. Image + wordmark, because most clients block images by
+          default and a statement that renders as a blank box reads as spam. -->
+     <tr><td style="padding:22px 26px 0;">
+       <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+         <td style="padding-right:10px;vertical-align:middle;">
+           <img src="https://lotcheck.ca/icon-192.png" width="34" height="34" alt="LotCheck"
+                style="display:block;border:0;border-radius:8px;">
+         </td>
+         <td style="vertical-align:middle;">
+           <div style="font-size:17px;font-weight:800;color:#33305A;letter-spacing:-.2px;">LotCheck<sup style="font-size:.45em;font-weight:700;">™</sup></div>
+           <div style="font-size:11px;color:#8A86AE;letter-spacing:.4px;">Founder cost statement</div>
+         </td>
+       </tr></table>
+     </td></tr>
+
+     <tr><td style="padding:18px 26px 0;">
+       <table role="presentation" width="100%"><tr>
+         <td style="font-size:12px;color:#706D96;">Billed to</td>
+         <td style="font-size:12px;color:#706D96;text-align:right;">Period</td>
+       </tr><tr>
+         <td style="font-size:14px;color:#33305A;font-weight:700;padding-top:2px;">${me.name}</td>
+         <td style="font-size:14px;color:#33305A;font-weight:700;text-align:right;padding-top:2px;">${s.month}</td>
+       </tr></table>
+     </td></tr>
+
+     <!-- Amount due: the balance, not just this month's share. -->
+     <tr><td style="padding:20px 26px 0;">
+       <table role="presentation" width="100%" style="background:#F5EEE1;border-radius:12px;">
+        <tr><td style="padding:16px 18px;">
+          <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;">AMOUNT DUE</div>
+          <div style="font-size:32px;font-weight:800;color:${owed > 0 ? "#33305A" : "#17756B"};letter-spacing:-1px;padding-top:4px;font-variant-numeric:tabular-nums;">${money(owed)}</div>
+          <div style="font-size:12px;color:#706D96;padding-top:3px;">
+            ${carried > 0.005
+              ? `${money(me.owes_cad)} for ${s.month} · ${money(carried)} carried from earlier months`
+              : `Your ${Math.round(10000 / (s.active_founders || 3)) / 100}% share of ${money(s.monthly_total_cad)}`}
+          </div>
+        </td></tr>
+       </table>
+     </td></tr>
+
+     ${outstanding ? `<tr><td style="padding:20px 26px 0;">
+       <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;padding-bottom:2px;">OUTSTANDING BY MONTH</div>
+       <table role="presentation" width="100%" style="border-collapse:collapse;">${outstanding}</table>
+     </td></tr>` : ""}
+
+     ${paidRows ? `<tr><td style="padding:16px 26px 0;">
+       <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;padding-bottom:2px;">PAYMENTS RECEIVED</div>
+       <table role="presentation" width="100%" style="border-collapse:collapse;">${paidRows}</table>
+     </td></tr>` : ""}
+
+     <tr><td style="padding:20px 26px 0;">
+       <div style="font-size:11px;font-weight:800;letter-spacing:1px;color:#706D96;padding-bottom:4px;">WHEN IT LEAVES THE ACCOUNT</div>
+       <table role="presentation" width="100%" style="border-collapse:collapse;">${due}</table>
+     </td></tr>
+
+     <tr><td style="padding:18px 26px 24px;">
+       <div style="border-top:1px solid rgba(51,48,90,.12);padding-top:14px;font-size:11.5px;color:#8A86AE;line-height:1.7;">
+         Operating costs are split ${s.active_founders} ways. USD vendor lines convert at the rate the card
+         actually bills, not mid-market, so this is what really leaves the account. An unpaid month carries
+         forward and is itemised above by vendor. Questions or a figure that looks wrong — reply to this
+         email before paying.
+       </div>
+     </td></tr>
+    </table>
+   </td></tr>
+  </table></body></html>`;
 }
 
 Deno.serve(async (req) => {
