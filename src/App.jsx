@@ -2888,10 +2888,9 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
 // only. These figures are hypothetical -- "what this would earn if pricing
 // were live" -- not real revenue right now.
 const QC_PRICING_TIERS = [
-  {key:"single", name:"1 check", price:2.99, quotesPerUnit:1},
-  {key:"five", name:"5 checks", price:9.99, quotesPerUnit:5},
-  {key:"ten", name:"10 checks", price:14.99, quotesPerUnit:10},
-  {key:"sub", name:"25 / month", price:9.99, quotesPerUnit:25},
+  {key:"single", name:"1 check", price:4.99, quotesPerUnit:1},
+  {key:"three", name:"3 checks", price:9.99, quotesPerUnit:3},
+  {key:"five", name:"5 checks", price:12.99, quotesPerUnit:5},
 ];
 const QC_COST_PER_QUOTE = 0.0277; // current intro-pricing cost per quote check
 
@@ -3016,7 +3015,7 @@ function ProfitTrackerTab(){
 const ECON_WINDOWS = [["today","Today"],["7d","Last 7 days"],["30d","Last 30 days"]];
 // Pack prices are treated as USD, matching the existing Profit tab convention
 // (tier.price * count = USD, then × USD_TO_CAD for the CAD estimate).
-const PRICE_BY_CREDITS = {1:2.99, 5:9.99, 10:14.99, 25:9.99};
+const PRICE_BY_CREDITS = {1:4.99, 3:9.99, 5:12.99};
 
 function estRevenueUsd(purchasesByDelta){
   if(!purchasesByDelta) return 0;
@@ -3024,9 +3023,10 @@ function estRevenueUsd(purchasesByDelta){
   for(const [delta,n] of Object.entries(purchasesByDelta)){
     const d=Number(delta);
     // Known tier price if the credit grant matches a pack; otherwise fall back
-    // to a per-credit proxy ($9.99 / 5 credits) so an unexpected grant size
-    // still contributes a sensible (clearly estimated) figure rather than $0.
-    const price = PRICE_BY_CREDITS[d] ?? d*(9.99/5);
+    // to a per-credit proxy ($12.99 / 5 credits, the current best-value unit
+    // rate) so an unexpected grant size still contributes a sensible (clearly
+    // estimated) figure rather than $0.
+    const price = PRICE_BY_CREDITS[d] ?? d*(12.99/5);
     sum += price*Number(n||0);
   }
   return sum;
@@ -4669,6 +4669,122 @@ const SERVICE_NOTES = [
   },
 ];
 
+// What a URL scan costs us vs what the buyer pays for it, per pricing tier.
+//
+// This is the founders' number. A scan costs about CA$0.03 in Claude tokens and
+// sells for CA$2.60-4.99, so the gross margin per report is over 99% and the
+// whole business reduces to one question: do enough reports sell to cover the
+// fixed CA$339 a month. Everything past that line is nearly pure margin, which
+// is why "bills paid" is the headline and not revenue.
+function VerifPackEconomics({C}){
+  const [d,setD]=useState(null);
+  const [state,setState]=useState("loading");
+
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_pack_economics");
+        if(error) throw error;
+        if(!cancelled){ setD(data||null); setState("ok"); }
+      }catch(err){
+        console.warn("pack economics unavailable:",err?.message||err);
+        if(!cancelled) setState("absent");
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[]);
+
+  const cad=(n,dp=2)=>`CA$${Number(n||0).toLocaleString("en-CA",{minimumFractionDigits:dp,maximumFractionDigits:dp})}`;
+  const packs=d?.packs||[];
+  const pct=Math.min(100,Number(d?.bills_paid_pct||0));
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:4}}>
+        WHAT A SCAN COSTS US vs WHAT THE USER PAYS
+      </div>
+
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:13,padding:"12px 0"}}>Loading…</div>}
+      {state==="absent" && (
+        <div style={{fontSize:12.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260815_credit_packs.sql</span>.
+        </div>
+      )}
+
+      {state==="ok" && d && (<>
+        {/* Bills paid — the only line that decides whether the month worked. */}
+        <div style={{background:d.bills_paid?C.tealBg:C.paper2,border:`1px solid ${d.bills_paid?C.teal:C.line}`,
+                     borderRadius:12,padding:"13px 15px",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
+            <span style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:d.bills_paid?C.tealInk:C.inkFaint}}>
+              {d.bills_paid ? "BILLS ARE PAID" : "BILLS NOT YET COVERED"}
+            </span>
+            <span style={{fontSize:14,fontWeight:800,color:d.bills_paid?C.tealInk:C.ink,
+                          fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {cad(d.revenue_month_cad)} / {cad(d.fixed_month_cad)}
+            </span>
+          </div>
+          <div style={{height:6,borderRadius:3,background:C.line,marginTop:8,overflow:"hidden"}}>
+            <div style={{width:`${pct}%`,height:"100%",background:d.bills_paid?C.teal:C.butter}}/>
+          </div>
+          <div style={{fontSize:12.5,color:C.inkFaint,marginTop:6}}>
+            {d.bills_paid
+              ? "Every report from here is nearly pure margin."
+              : `${cad(d.still_needed_cad)} still to cover this month's fixed cost.`}
+          </div>
+        </div>
+
+        {/* The eye-opener, per tier. */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(215px,1fr))",gap:12}}>
+          {packs.map(p=>(
+            <div key={p.key} style={{border:`1px solid ${p.best_value?C.teal:C.line}`,borderRadius:12,
+                        padding:"13px 15px",background:p.best_value?C.tealBg:"transparent"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <span style={{fontSize:15,fontWeight:800,color:C.ink}}>{p.name}</span>
+                <span style={{fontSize:17,fontWeight:800,color:C.ink,
+                              fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.price_cad)}</span>
+              </div>
+
+              <div style={{marginTop:10,display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <span style={{fontSize:12.5,color:C.inkFaint}}>User pays / scan</span>
+                <span style={{fontSize:15,fontWeight:800,color:C.tealInk,
+                              fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.user_pays_per_scan)}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:3}}>
+                <span style={{fontSize:12.5,color:C.inkFaint}}>Costs us / scan</span>
+                <span style={{fontSize:15,fontWeight:800,color:C.coralInk,
+                              fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.costs_us_per_scan,3)}</span>
+              </div>
+
+              <div style={{borderTop:`1px solid ${C.line}`,marginTop:9,paddingTop:9}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:12.5,color:C.inkFaint}}>Profit / pack</span>
+                  <span style={{fontSize:16,fontWeight:800,color:C.tealInk,
+                                fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.profit_per_pack)}</span>
+                </div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.margin_pct}% margin</div>
+              </div>
+
+              <div style={{marginTop:9,fontSize:12.5,color:C.ink,lineHeight:1.55}}>
+                <b>{vnum(p.packs_to_pay_bills)}</b> sold covers the month
+                <div style={{fontSize:11.5,color:C.inkFaint}}>= {vnum(p.scans_to_pay_bills)} scans</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{fontSize:12.5,color:C.inkFaint,marginTop:12,lineHeight:1.65}}>
+          Cost per scan is <b>{d.cost_basis}</b> — Claude tokens for reading the listing. A report sells
+          for {cad(packs[0]?.user_pays_per_scan||0)}–{cad(packs[packs.length-1]?.user_pays_per_scan||0)} and
+          costs about {cad(d.cost_per_scan_cad,3)} to produce, so the fixed {cad(d.fixed_month_cad)} a month
+          is the entire battle. Cover it and the rest is margin.
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function VerifWhyWePay({C}){
   const tone=(t)=> t==="variable" ? {bg:C.coralBg,ink:C.coralInk,label:"scales with usage"}
                  : t==="free"    ? {bg:C.tealBg,ink:C.tealInk,label:"free today"}
@@ -4845,6 +4961,8 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       <VerifOperationalCost C={C}/>
 
       <VerifFounderLedger C={C}/>
+
+      <VerifPackEconomics C={C}/>
 
       <VerifWhyWePay C={C}/>
 
@@ -6683,10 +6801,15 @@ function SignInModal({C, cardStyle, onClose, notice}){
 // this is display-only, it never grants credits client-side. Styled to match
 // SignInModal (same lc-modal-overlay + cardStyle + QC theme colours).
 function QuotePaywallModal({C, cardStyle, onClose}){
+  // Ladder as of 2026-08-15. Entry is $4.99 for a single check: most buyers are
+  // looking at one or two cars, and the old $9.99 five-pack minimum priced them
+  // out of trying it at all. The 5-pack is $12.99 rather than $14.99 so the
+  // last two checks cost $1.50 each — at $14.99 the marginal price was flat and
+  // the pack gave nobody a reason to trade up. Mirrors credit_pack in the DB.
   const packs=[
-    {name:"Free",       price:"$0",     checks:"1 check",   share:"+1 to share", note:"Your current plan", best:false},
-    {name:"5 checks",   price:"$9.99",  checks:"5 checks",  share:"+1 to share", note:null,               best:false},
-    {name:"10 checks",  price:"$14.99", checks:"10 checks", share:"+2 to share", note:null,               best:true},
+    {name:"1 check",  price:"$4.99",  checks:"1 check",  share:null,          note:null,          best:false},
+    {name:"3 checks", price:"$9.99",  checks:"3 checks", share:"+1 to share", note:"$3.33 each",  best:false},
+    {name:"5 checks", price:"$12.99", checks:"5 checks", share:"+2 to share", note:"$2.60 each",  best:true},
   ];
   return(
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
