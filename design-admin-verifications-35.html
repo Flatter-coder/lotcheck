@@ -1,0 +1,542 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Admin — verification tracking · 35 directions in 3D</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{
+  --bg:#06060f; --panel:rgba(150,170,255,.045); --panel-solid:rgba(12,14,32,.94);
+  --hair:rgba(150,170,255,.12); --hair-strong:rgba(150,170,255,.2);
+  --cyan:#3ae0ff; --cyan-soft:rgba(58,224,255,.14); --cyan-dim:rgba(58,224,255,.42);
+  --ok:#00e87a; --ok-lo:#00a856; --ok-hi:#5cffab; --ok-soft:rgba(0,232,122,.16);
+  --no:#ff2f52; --no-lo:#b8153a; --no-hi:#ff7d94; --no-soft:rgba(255,47,82,.16);
+  --ink:#e7ecf3; --dim:#8b95a6; --dimmer:#586172;
+  --grid:rgba(255,255,255,.05); --gate:#8b7bff;
+  --mono:'JetBrains Mono',ui-monospace,"SF Mono",Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif;
+}
+:root[data-theme="light"]{
+  --bg:#f5f7fa; --panel:rgba(255,255,255,.72); --panel-solid:rgba(253,254,255,.96);
+  --hair:rgba(22,32,52,.1); --hair-strong:rgba(22,32,52,.18);
+  --cyan:#0d8fb0; --cyan-soft:rgba(13,143,176,.12); --cyan-dim:rgba(13,143,176,.5);
+  --ok:#0aa25c; --ok-lo:#067040; --ok-hi:#43d68f; --ok-soft:rgba(10,162,92,.14);
+  --no:#d81e42; --no-lo:#98122e; --no-hi:#f2708a; --no-soft:rgba(216,30,66,.13);
+  --ink:#16223a; --dim:#5a6579; --dimmer:#8a94a5;
+  --grid:rgba(22,32,52,.07); --gate:#6a5acd;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;padding:28px clamp(12px,3vw,20px) 80px;overflow-x:hidden}
+.wrap{max-width:1500px;margin:0 auto}
+header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;
+  padding-bottom:18px;border-bottom:1px solid var(--hair);margin-bottom:22px}
+h1{font-size:19px;margin:0;font-weight:700;letter-spacing:-.2px}
+.sub{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:5px;letter-spacing:.3px}
+.toggle{font-family:var(--mono);font-size:11px;background:var(--panel);border:1px solid var(--hair-strong);
+  color:var(--ink);border-radius:999px;padding:7px 15px;cursor:pointer}
+.note{font-family:var(--mono);font-size:10.5px;color:var(--dimmer);border:1px solid var(--hair);
+  border-radius:8px;padding:8px 12px;line-height:1.6;max-width:620px}
+.warn{border-color:rgba(255,47,82,.35);color:var(--no-hi)}
+:root[data-theme="light"] .warn{color:var(--no-lo)}
+
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr))}
+.v{background:var(--panel);border:1px solid var(--hair);border-radius:16px;overflow:hidden;
+  display:flex;flex-direction:column}
+.v .stage{padding:20px;min-height:250px;display:flex;flex-direction:column;justify-content:center;flex:1}
+.v .cap{border-top:1px solid var(--hair);padding:10px 14px;display:flex;gap:9px;align-items:baseline}
+.v .num{font-family:var(--mono);font-size:10px;color:var(--cyan);flex:none}
+.v .nm{font-size:12px;font-weight:600}
+.v .why{font-family:var(--mono);font-size:10px;color:var(--dim);margin-left:auto;text-align:right}
+
+.k{font-family:var(--mono);font-size:9.5px;letter-spacing:1.3px;color:var(--dim);text-transform:uppercase}
+.big{font-family:var(--mono);font-weight:700;letter-spacing:-2px;line-height:.92}
+.d64{font-size:56px}.d44{font-size:40px}.d34{font-size:31px}
+.row{display:flex;gap:8px;align-items:center}
+.between{display:flex;justify-content:space-between;align-items:baseline}
+.chip{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--hair);
+  border-radius:6px;padding:3px 8px}
+.ok{color:var(--ok)}.no{color:var(--no)}.cy{color:var(--cyan)}.dim{color:var(--dim)}
+.hair{height:1px;background:var(--hair);margin:12px 0}
+svg{display:block;width:100%;overflow:visible}
+.mono{font-family:var(--mono)}
+
+/* live dot — standing rule: only rendered after a successful read */
+.live{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:1.2px;color:var(--ok);text-transform:uppercase}
+.live i{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live i{animation:none}}
+
+/* ---- shared CSS-3D primitives (true perspective, hover to rotate) ---- */
+.scene{perspective:900px;perspective-origin:50% 42%;display:flex;justify-content:center;
+  align-items:flex-end}
+.rig{position:relative;transform-style:preserve-3d;transition:transform .55s cubic-bezier(.22,.61,.36,1)}
+.scene:hover .rig{transform:var(--hover,rotateX(-16deg) rotateY(6deg))}
+.cube{position:absolute;transform-style:preserve-3d;left:0;bottom:var(--o,0px);
+  width:var(--w);height:var(--h)}
+.cube>i{position:absolute;left:50%;top:50%;display:block;background:var(--f)}
+.cube>.fr,.cube>.bk{width:var(--w);height:var(--h);margin-left:calc(var(--w)/-2);margin-top:calc(var(--h)/-2)}
+.cube>.lf,.cube>.rt{width:var(--d);height:var(--h);margin-left:calc(var(--d)/-2);margin-top:calc(var(--h)/-2)}
+.cube>.tp,.cube>.bt{width:var(--w);height:var(--d);margin-left:calc(var(--w)/-2);margin-top:calc(var(--d)/-2)}
+.cube>.fr{transform:translateZ(calc(var(--d)/2))}
+.cube>.bk{transform:translateZ(calc(var(--d)/-2)) rotateY(180deg)}
+.cube>.rt{transform:rotateY(90deg) translateZ(calc(var(--w)/2));background:var(--s)}
+.cube>.lf{transform:rotateY(-90deg) translateZ(calc(var(--w)/2));background:var(--s)}
+.cube>.tp{transform:rotateX(90deg) translateZ(calc(var(--h)/2));background:var(--t)}
+.cube>.bt{transform:rotateX(-90deg) translateZ(calc(var(--h)/2));background:var(--s)}
+.cOK{--f:var(--ok);--s:var(--ok-lo);--t:var(--ok-hi)}
+.cNO{--f:var(--no);--s:var(--no-lo);--t:var(--no-hi)}
+.cGH{--f:var(--panel);--s:var(--panel);--t:var(--hair)}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div>
+    <h1>Admin — verification tracking · 35 directions in 3D</h1>
+    <div class="sub">success vs fail · 1h / day / week / month / year · 13 checkpoints · URL scans vs uploaded files</div>
+  </div>
+  <div class="row" style="gap:10px;flex-wrap:wrap">
+    <div class="note warn">SAMPLE DATA — every figure on this board is invented for layout only. Nothing here is wired to <span class="mono">api_usage_log</span> yet.</div>
+    <button class="toggle" id="t">theme</button>
+  </div>
+</header>
+<div class="grid" id="g"></div>
+</div>
+
+<script>
+/* theme — synced to lc-theme so the board matches the app */
+const root=document.documentElement;
+root.dataset.theme=localStorage.getItem("lc-theme")||"dark";
+document.getElementById("t").onclick=()=>{
+  const n=root.dataset.theme==="dark"?"light":"dark";
+  root.dataset.theme=n;localStorage.setItem("lc-theme",n);};
+
+/* ============================ SAMPLE DATA ============================ */
+const H=[[ "00",14,1],["01",9,0],["02",6,1],["03",4,0],["04",5,1],["05",11,2],
+ ["06",22,3],["07",38,4],["08",57,6],["09",71,9],["10",84,7],["11",79,11],
+ ["12",68,6],["13",73,8],["14",88,12],["15",92,9],["16",81,14],["17",64,7],
+ ["18",52,5],["19",44,6],["20",39,3],["21",31,4],["22",24,2],["23",18,2]];
+const DAY=[["Mon",612,58],["Tue",704,71],["Wed",668,49],["Thu",741,83],["Fri",803,62],["Sat",417,31],["Sun",352,22]];
+const WK=[["W32",3980,341],["W33",4270,388],["W34",4611,296],["W35",4297,412],["W36",4890,357],["W37",5122,441]];
+const MO=[["Mar",16210,1482],["Apr",17740,1361],["May",18990,1702],["Jun",20110,1554],["Jul",21480,1893],["Aug",12030,988]];
+const YR=[["2024",84200,9120],["2025",173400,14880],["2026",128600,9970]];
+const CHECKS=[
+ ["MSRP",96.2],["Odometer",99.1],["Open recalls",94.8],["Fee audit",88.4],
+ ["EV rebate",91.7],["VIN pattern",99.6],["Warranty",93.2],["Financing math",86.9],
+ ["APR vs official",71.3],["Dealer reputation",82.5],["Leverage score",97.8],
+ ["Days on lot",79.4],["AMVIC licence",95.1]];
+const SRC={url:[812,684,731,798,655,742],file:[213,188,241,197,266,229]};
+const TOT=H.reduce((a,b)=>a+b[1]+b[2],0), TOK=H.reduce((a,b)=>a+b[1],0);
+const RATE=(TOK/TOT*100).toFixed(1);
+
+/* ============================ HELPERS ============================ */
+const mx=a=>Math.max(...a);
+const pad=n=>String(n).padStart(2,"0");
+const num=n=>n.toLocaleString("en-CA");
+
+/* isometric projection: grid (a,b,y) -> screen */
+const IX=.866, IY=.5;
+const P=(cx,cy,a,b,y)=>[(cx+(a-b)*IX).toFixed(1),(cy+(a+b)*IY-y).toFixed(1)];
+const poly=(pts,fill,op)=>`<polygon points="${pts.map(p=>p.join(",")).join(" ")}" fill="${fill}"${op?` opacity="${op}"`:""}/>`;
+/* one isometric box: base centred at (cx,cy), footprint w x d, height h */
+function box(cx,cy,w,d,h,base,c,op){
+  const hw=w/2,hd=d/2,y0=base,y1=base+h;
+  const A=[-hw,-hd],B=[hw,-hd],C=[hw,hd],D=[-hw,hd];
+  const t=q=>P(cx,cy,q[0],q[1],y1), g=q=>P(cx,cy,q[0],q[1],y0);
+  return poly([t(A),t(B),t(C),t(D)],`var(--${c}-hi)`,op)
+       + poly([t(B),t(C),g(C),g(B)],`var(--${c})`,op)
+       + poly([t(C),t(D),g(D),g(C)],`var(--${c}-lo)`,op);
+}
+// LOW-ANGLE box, for the one place a full isometric is geometrically wrong:
+// densely stacked ledger rows. At the standard IY=.5 a 150-long slab spans
+// 2*(75+7.5)*.5 = 82px vertically, so rows 22px apart overlap three deep and
+// the ledger renders as a diagonal mesh. The rule is:
+//     2*(w/2 + d/2)*IY + maxLift  <=  row pitch
+// Here 2*(75+10)*.08 + 9 = 22.6 < 24. `cy + h/2` re-centres the block, since
+// the lift grows upward only and would otherwise clip the row above.
+function boxLow(cx,cy,w,d,h,c,op){
+  const IYL=.08, hw=w/2, hd=d/2, y=cy+h/2;
+  const Q=(a,b,l)=>[(cx+(a-b)*IX).toFixed(1),(y+(a+b)*IYL-l).toFixed(1)];
+  return poly([Q(-hw,-hd,h),Q(hw,-hd,h),Q(hw,hd,h),Q(-hw,hd,h)],`var(--${c}-hi)`,op)
+       + poly([Q(hw,-hd,h),Q(hw,hd,h),Q(hw,hd,0),Q(hw,-hd,0)],`var(--${c})`,op)
+       + poly([Q(hw,hd,h),Q(-hw,hd,h),Q(-hw,hd,0),Q(hw,hd,0)],`var(--${c}-lo)`,op);
+}
+const svg=(vb,inner,st)=>`<svg viewBox="${vb}"${st?` style="${st}"`:""}>${inner}</svg>`;
+/* a CSS-3D cube segment */
+const cube=(w,d,h,o,cls)=>`<div class="cube ${cls}" style="--w:${w}px;--d:${d}px;--h:${h}px;--o:${o}px">
+ <i class="fr"></i><i class="bk"></i><i class="rt"></i><i class="lf"></i><i class="tp"></i><i class="bt"></i></div>`;
+const liveTag=`<span class="live"><i></i>Live</span>`;
+
+/* ============================ 35 VARIANTS ============================ */
+const V=[
+
+["Extruded stack","the default — fail caps the column",()=>{
+  const m=mx(H.map(r=>r[1]+r[2])),SC=118/m;
+  return `<div class="between"><span class="k">Last 24h</span>${liveTag}</div>
+  <div class="scene" style="height:190px;margin-top:14px">
+   <div class="rig" style="--hover:rotateX(-14deg) rotateY(-4deg);width:${H.length*10}px;height:140px;
+     transform:rotateX(-14deg) rotateY(-26deg)">
+   ${H.map((r,i)=>`<div style="position:absolute;left:${i*10}px;bottom:0;transform-style:preserve-3d">
+     ${cube(7,7,Math.max(2,r[1]*SC),0,"cOK")}
+     ${cube(7,7,Math.max(2,r[2]*SC),Math.max(2,r[1]*SC),"cNO")}</div>`).join("")}
+   </div></div>
+  <div class="between mono dim" style="font-size:10px;margin-top:6px"><span>00:00</span><span>23:00</span></div>`;}],
+
+["Isometric row","crisp at any size — no perspective drift",()=>{
+  const D=H.filter((_,i)=>i%2===0),m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Hourly · isometric</div>
+  ${svg("0 0 300 190",`<g>${D.map((r,i)=>{
+    const cx=34+i*22,cy=150,hs=r[1]/m*88,hf=r[2]/m*88;
+    return box(cx,cy,12,12,hs,0,"ok")+box(cx,cy,12,12,hf,hs,"no");}).join("")}</g>`,"margin-top:10px")}
+  <div class="between mono dim" style="font-size:10px"><span>every 2h</span><span class="ok">${RATE}% pass</span></div>`;}],
+
+["Split-face cube","one solid — success front, fail flank",()=>{
+  return `<div class="k">Today · 4,209 checks</div>
+  <div class="scene" style="height:170px;margin:12px 0">
+   <div class="rig" style="width:78px;height:130px;transform:rotateX(-12deg) rotateY(34deg)">
+    ${cube(78,78,130,0,"cOK")}
+    <div class="cube cNO" style="--w:78px;--d:78px;--h:${130*.086}px;--o:${130*.914}px">
+     <i class="fr"></i><i class="rt"></i><i class="lf"></i><i class="tp"></i></div>
+   </div></div>
+  <div class="between"><span class="mono ok" style="font-size:13px">3,847 pass</span>
+   <span class="mono no" style="font-size:13px">362 fail</span></div>`;}],
+
+["Unit voxels","one cube = 25 checks — countable, not estimated",()=>{
+  const cells=[];for(let i=0;i<48;i++)cells.push(i<44?"ok":"no");
+  return `<div class="k">Grain · 25 checks per block</div>
+  ${svg("0 0 300 180",`<g>${cells.map((c,i)=>{const a=i%8,b=(i/8|0);
+    const cx=150+(a-b)*15,cy=62+(a+b)*8.6;return box(cx,cy,15,15,10,0,c);}).join("")}</g>`,"margin-top:8px")}
+  <div class="mono dim" style="font-size:10px">44 blocks clean · 4 blocks carry a failure</div>`;}],
+
+["Depth planes","1h → year, each timeframe its own Z-plane",()=>{
+  const sets=[["1H",H.slice(-8)],["DAY",DAY],["WEEK",WK]];
+  return `<div class="k">Same shape, five depths</div>
+  <div class="scene" style="height:200px;margin-top:10px">
+   <div class="rig" style="width:210px;height:150px;transform:rotateX(-22deg) rotateY(-30deg)">
+   ${sets.map((s,z)=>{const m=mx(s[1].map(r=>r[1]+r[2]));
+     return `<div style="position:absolute;inset:0;transform:translateZ(${-z*52}px);transform-style:preserve-3d">
+      ${s[1].map((r,i)=>`<div style="position:absolute;left:${i*24}px;bottom:0;transform-style:preserve-3d">
+        ${cube(16,16,Math.max(3,r[1]/m*84),0,"cOK")}
+        ${cube(16,16,Math.max(3,r[2]/m*84),Math.max(3,r[1]/m*84),"cNO")}</div>`).join("")}
+     </div>`}).join("")}
+   </div></div>
+  <div class="row mono dim" style="font-size:10px;gap:12px"><span>1h</span><span>day</span><span>week</span><span class="dimmer">month · year behind</span></div>`;}],
+
+["Tilted heat plane","hour × weekday — where failures cluster",()=>{
+  let c="";for(let d=0;d<7;d++)for(let h=0;h<12;h++){
+    const f=Math.abs(Math.sin(d*1.7+h*.9))*.9;
+    const cx=150+(h-d)*12,cy=40+(h+d)*6.6;
+    c+=box(cx,cy,12,12,2+f*22,0,f>.62?"no":"ok",(.35+f*.65).toFixed(2));}
+  return `<div class="k">Failure density · height = fail rate</div>
+  ${svg("0 0 300 190",`<g>${c}</g>`,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">ridge = Thu 14:00–16:00, the APR-lookup window</div>`;}],
+
+["Checkpoint matrix","all 13 checks × time, one surface",()=>{
+  let c="";CHECKS.forEach((ck,d)=>{for(let h=0;h<9;h++){
+    const p=ck[1]/100-Math.abs(Math.sin(h*1.3+d))*0.09;
+    const cx=152+(h-d*.55)*13,cy=26+(h+d*.55)*7.2;
+    c+=box(cx,cy,11,11,4+(1-p)*70,0,p<.85?"no":"ok",.92);}});
+  return `<div class="k">13 checkpoints · spikes are misses</div>
+  ${svg("0 0 300 200",`<g>${c}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">tallest ridge = <span class="no">APR vs official 71.3%</span></div>`;}],
+
+["Ribbon extrusion","the trend line, given thickness",()=>{
+  const m=mx(H.map(r=>r[1]+r[2]));let top="",side="";
+  const pts=H.filter((_,i)=>i%2===0);
+  const co=pts.map((r,i)=>{const x=24+i*22,y=150-r[1]/m*92;return [x,y];});
+  const cf=pts.map((r,i)=>{const x=24+i*22,y=150-(r[1]+r[2])/m*92;return [x,y];});
+  top=`<polygon points="${cf.map(p=>p.join(",")).join(" ")} ${cf[cf.length-1][0]},150 24,150" fill="var(--no)" opacity=".55"/>`;
+  side=`<polygon points="${co.map(p=>p.join(",")).join(" ")} ${co[co.length-1][0]},150 24,150" fill="var(--ok)" opacity=".85"/>`;
+  const lip=co.map(p=>[p[0]+9,p[1]-5]);
+  return `<div class="k">Volume with depth</div>
+  ${svg("0 0 300 180",`${top}${side}
+   <polygon points="${co.map(p=>p.join(",")).join(" ")} ${lip.slice().reverse().map(p=>p.join(",")).join(" ")}" fill="var(--ok-hi)" opacity=".9"/>`,"margin-top:10px")}
+  <div class="mono dim" style="font-size:10px">green band = verified · red shoulder = misses</div>`;}],
+
+["Cylinder columns","softer read for a wall display",()=>{
+  const D=DAY;const m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">This week</div>
+  ${svg("0 0 300 180",D.map((r,i)=>{const x=26+i*38,hs=r[1]/m*96,hf=r[2]/m*96,b=150;
+   return `<ellipse cx="${x}" cy="${b}" rx="13" ry="5" fill="var(--ok-lo)"/>
+    <rect x="${x-13}" y="${b-hs}" width="26" height="${hs}" fill="var(--ok)"/>
+    <ellipse cx="${x}" cy="${b-hs}" rx="13" ry="5" fill="var(--ok-hi)"/>
+    <rect x="${x-13}" y="${b-hs-hf}" width="26" height="${hf}" fill="var(--no)"/>
+    <ellipse cx="${x}" cy="${b-hs-hf}" rx="13" ry="5" fill="var(--no-hi)"/>`;}).join(""),"margin-top:8px")}
+  <div class="row between mono dim" style="font-size:10px">${D.map(r=>`<span>${r[0][0]}</span>`).join("")}</div>`;}],
+
+["Coin stack","one disc per 100 — physical, countable",()=>{
+  let s="";for(let i=0;i<11;i++){const y=152-i*11,c=i>8?"no":"ok";
+   s+=`<ellipse cx="150" cy="${y}" rx="46" ry="15" fill="var(--${c})"/>
+       <ellipse cx="150" cy="${y-4}" rx="46" ry="15" fill="var(--${c}-hi)"/>`;}
+  return `<div class="between"><span class="k">Today · 1,100</span>${liveTag}</div>
+  ${svg("0 0 300 175",s,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">top two discs are the failures — always on top, always visible</div>`;}],
+
+["Perspective tunnel","now in front, history receding",()=>{
+  const D=H.slice(-7).reverse(),m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Receding hours</div>
+  <div class="scene" style="height:190px;margin-top:8px;perspective:520px">
+   <div class="rig" style="width:120px;height:150px;transform:rotateX(-6deg)">
+   ${D.map((r,i)=>{const s=r[1]/m*110,f=r[2]/m*110;
+    return `<div style="position:absolute;left:0;bottom:0;transform:translateZ(${-i*68}px);transform-style:preserve-3d;opacity:${1-i*.11}">
+      ${cube(110,20,Math.max(3,s),0,"cOK")}${cube(110,20,Math.max(3,f),Math.max(3,s),"cNO")}</div>`;}).join("")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">nearest slab = the hour you are in</div>`;}],
+
+["Iso city","each checkpoint is a building",()=>{
+  let c="";CHECKS.forEach((ck,i)=>{const a=i%4,b=(i/4|0);
+   const cx=150+(a-b)*30,cy=52+(a+b)*17;
+   c+=box(cx,cy,26,26,18+ck[1]*.62,0,ck[1]<85?"no":"ok");});
+  return `<div class="k">Skyline · height = pass rate</div>
+  ${svg("0 0 300 195",`<g>${c}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">short red towers are the checks to fix first</div>`;}],
+
+["Radial clock","24 columns on a dial — shift patterns pop",()=>{
+  const m=mx(H.map(r=>r[1]+r[2]));let s="";
+  H.forEach((r,i)=>{const A=i/24*Math.PI*2-Math.PI/2;
+   const R=42,cx=150+Math.cos(A)*R,cy=96+Math.sin(A)*R*.5;
+   s+=box(cx,cy,9,9,(r[1]/m)*58,0,"ok")+box(cx,cy,9,9,(r[2]/m)*58,(r[1]/m)*58,"no");});
+  return `<div class="k">One rotation = one day</div>
+  ${svg("0 0 300 185",`<ellipse cx="150" cy="96" rx="42" ry="21" fill="none" stroke="var(--hair)"/>${s}`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">tall arc = 09:00–17:00 · quiet floor overnight</div>`;}],
+
+["Helix year","12 months climbing a spiral",()=>{
+  let s="";for(let i=0;i<12;i++){const A=i/12*Math.PI*2.4;
+   const cx=150+Math.cos(A)*52,cy=42+i*10.5+Math.sin(A)*13;
+   const f=i%5===3;s+=box(cx,cy,20,20,14,0,f?"no":"ok",(.5+i*.04).toFixed(2));}
+  return `<div class="k">Rolling 12 months</div>
+  ${svg("0 0 300 195",`<g>${s}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">one turn per quarter · red rung = the month that slipped</div>`;}],
+
+["Floating plates","hovering slabs, gap = the failure share",()=>{
+  const D=DAY.slice(0,5),m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Lift = misses</div>
+  <div class="scene" style="height:190px;margin-top:8px">
+   <div class="rig" style="width:170px;height:140px;transform:rotateX(-24deg) rotateY(-22deg)">
+   ${D.map((r,i)=>`<div style="position:absolute;left:${i*34}px;bottom:0;transform-style:preserve-3d">
+     ${cube(26,26,10,0,"cOK")}
+     ${cube(26,26,6,22+r[2]/m*60,"cNO")}</div>`).join("")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">the higher the red plate floats, the worse the day</div>`;}],
+
+["Mirror floor","reflection doubles the signal",()=>{
+  const D=WK,m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Six weeks</div>
+  ${svg("0 0 300 190",D.map((r,i)=>{const x=30+i*44,hs=r[1]/m*74,hf=r[2]/m*74,b=118;
+   return `<rect x="${x}" y="${b-hs}" width="24" height="${hs}" fill="var(--ok)"/>
+    <rect x="${x}" y="${b-hs-hf}" width="24" height="${hf}" fill="var(--no)"/>
+    <rect x="${x}" y="${b+2}" width="24" height="${hs*.5}" fill="var(--ok)" opacity=".18"/>
+    <rect x="${x}" y="${b+2+hs*.5}" width="24" height="${hf*.5}" fill="var(--no)" opacity=".18"/>`;}).join("")
+   +`<line x1="18" y1="119" x2="288" y2="119" stroke="var(--hair-strong)"/>`,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">W37 is the record week — and the worst fail count</div>`;}],
+
+["Iso treemap","area = volume, colour = health",()=>{
+  const L=[[0,0,52,52,"ok"],[52,0,34,26,"ok"],[52,26,34,26,"no"],[0,52,30,30,"ok"],[30,52,56,30,"ok"]];
+  return `<div class="k">Where the volume actually is</div>
+  ${svg("0 0 300 190",`<g>${L.map(b=>{const cx=150+((b[0]+b[2]/2)-(b[1]+b[3]/2))*1.15;
+    const cy=54+((b[0]+b[2]/2)+(b[1]+b[3]/2))*.62;
+    return box(cx,cy,b[2]*1.1,b[3]*1.1,b[4]==="no"?30:13,0,b[4]);}).join("")}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">raised red block = fee audit, 11.6% of all misses</div>`;}],
+
+["Terrain relief","the failure ridge, at a glance",()=>{
+  let s="";for(let b=6;b>=0;b--){let p=[];
+   for(let a=0;a<14;a++){const hgt=8+Math.abs(Math.sin(a*.8+b*.6))*30;
+    p.push(P(150,60,(a-7)*13,(b-3)*13,hgt));}
+   s+=`<polyline points="${p.map(q=>q.join(",")).join(" ")}" fill="none"
+     stroke="var(--${b===3?"no":"ok"})" stroke-width="${b===3?2.4:1.2}" opacity="${.28+b*.11}"/>`;}
+  return `<div class="k">Contour · 7 days deep</div>
+  ${svg("0 0 300 185",s,"margin-top:8px")}
+  <div class="mono dim" style="font-size:10px">the red contour is the day the APR source changed</div>`;}],
+
+["Ratio gauge","one number, read from across the room",()=>{
+  const pct=parseFloat(RATE);
+  return `<div class="between"><span class="k">Pass rate · 24h</span>${liveTag}</div>
+  ${svg("0 0 300 150",`
+   <ellipse cx="150" cy="112" rx="94" ry="30" fill="var(--panel)" stroke="var(--hair)"/>
+   <path d="M56,112 A94,30 0 0,1 244,112" fill="none" stroke="var(--no)" stroke-width="13"/>
+   <path d="M56,112 A94,30 0 0,1 ${150+Math.cos(Math.PI*(1-pct/100))*-94},${112-Math.sin(Math.PI*(pct/100))*30}"
+     fill="none" stroke="var(--ok)" stroke-width="13"/>`,"margin-top:6px")}
+  <div style="text-align:center;margin-top:-46px"><div class="big d44 ok">${RATE}%</div>
+   <div class="mono dim" style="font-size:10px;margin-top:6px">${num(TOK)} of ${num(TOT)}</div></div>`;}],
+
+["Layered glass","two sheets — total above, misses below",()=>{
+  const D=H.filter((_,i)=>i%3===0),m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Stacked sheets</div>
+  <div class="scene" style="height:180px;margin-top:12px">
+   <div class="rig" style="width:180px;height:110px;transform:rotateX(-40deg) rotateY(-16deg)">
+    <div style="position:absolute;inset:0;background:var(--ok-soft);border:1px solid var(--ok);
+      transform:translateZ(34px);display:flex;align-items:flex-end;gap:5px;padding:6px">
+      ${D.map(r=>`<div style="flex:1;height:${r[1]/m*82}%;background:var(--ok)"></div>`).join("")}</div>
+    <div style="position:absolute;inset:0;background:var(--no-soft);border:1px solid var(--no);
+      display:flex;align-items:flex-end;gap:5px;padding:6px">
+      ${D.map(r=>`<div style="flex:1;height:${r[2]/m*82*4}%;background:var(--no)"></div>`).join("")}</div>
+   </div></div>
+  <div class="mono dim" style="font-size:10px">misses magnified 4× on the lower sheet so they stay legible</div>`;}],
+
+["Funnel","scan → read → verified → on report",()=>{
+  const st=[["Scanned",4209],["Read",4102],["Verified",3901],["On report",3847]];
+  const m=st[0][1];
+  return `<div class="k">Where checks drop out</div>
+  ${svg("0 0 300 190",`<g>${st.map((s,i)=>{const w=s[1]/m*104;
+   return box(150,44+i*36,w,w*.42,16,0,i===3?"ok":"ok",1-i*.13);}).join("")}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">107 never read · 201 read but unverifiable · 54 verified too late</div>`;}],
+
+["Sankey ribbons","URL scans vs uploaded files, split by outcome",()=>{
+  return `<div class="k">Source → outcome</div>
+  ${svg("0 0 300 180",`
+   <path d="M40,52 C120,52 150,44 260,40 L260,72 C150,80 120,84 40,84 Z" fill="var(--ok)" opacity=".8"/>
+   <path d="M40,90 C120,90 150,96 260,92 L260,104 C150,110 120,112 40,112 Z" fill="var(--ok)" opacity=".45"/>
+   <path d="M40,118 C130,118 160,128 260,124 L260,140 C160,146 130,144 40,140 Z" fill="var(--no)" opacity=".8"/>
+   <text x="34" y="70" text-anchor="end" fill="var(--dim)" font-size="10" font-family="var(--mono)">URL</text>
+   <text x="34" y="130" text-anchor="end" fill="var(--dim)" font-size="10" font-family="var(--mono)">File</text>
+   <text x="268" y="60" fill="var(--ok)" font-size="10" font-family="var(--mono)">pass</text>
+   <text x="268" y="136" fill="var(--no)" font-size="10" font-family="var(--mono)">fail</text>`,"margin-top:10px")}
+  <div class="mono dim" style="font-size:10px">uploads fail 2.4× more often than URL scans</div>`;}],
+
+["Iso ledger","raised rows — a table that is still 3D",()=>{
+  const R=CHECKS.slice(0,7);
+  return `<div class="k">Per checkpoint · 24h</div>
+  ${svg("0 0 300 190",`<g>${R.map((r,i)=>
+    boxLow(150,30+i*24,150,20,r[1]<85?Math.min(9,3+(100-r[1])*.6):3,r[1]<85?"no":"ok",.95)).join("")}</g>
+   ${R.map((r,i)=>`<text x="34" y="${33+i*24}" fill="var(--ink)" font-size="9.5"
+     font-family="var(--mono)">${r[0]}</text>
+     <text x="278" y="${33+i*24}" fill="var(--${r[1]<85?"no":"ok"})" font-size="9.5"
+     font-family="var(--mono)" text-anchor="end">${r[1]}%</text>`).join("")}`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">a row lifts off the plane when it drops below 85%</div>`;}],
+
+["Bar wall","total behind, failures in front",()=>{
+  const D=DAY,m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Front bar = misses only</div>
+  <div class="scene" style="height:180px;margin-top:10px">
+   <div class="rig" style="width:170px;height:130px;transform:rotateX(-14deg) rotateY(-30deg)">
+   ${D.map((r,i)=>`<div style="position:absolute;left:${i*24}px;bottom:0;transform-style:preserve-3d">
+     <div style="position:absolute;transform:translateZ(-30px);transform-style:preserve-3d">
+       ${cube(16,10,(r[1]+r[2])/m*110,0,"cGH")}</div>
+     ${cube(16,10,r[2]/m*110*3,0,"cNO")}</div>`).join("")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">ghost wall = volume · red = the part that needs a fix</div>`;}],
+
+["Notch column","failures cut into the solid",()=>{
+  return `<div class="k">Month to date</div>
+  <div class="scene" style="height:180px;margin:8px 0">
+   <div class="rig" style="width:66px;height:140px;transform:rotateX(-10deg) rotateY(28deg)">
+    ${cube(66,66,44,0,"cOK")}${cube(66,66,7,44,"cNO")}
+    ${cube(66,66,38,51,"cOK")}${cube(66,66,5,89,"cNO")}
+    ${cube(66,66,30,94,"cOK")}${cube(66,66,9,124,"cNO")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">each notch is a deploy that broke a reader</div>`;}],
+
+["Orbit ring","13 checks circling the run",()=>{
+  let s="";CHECKS.forEach((c,i)=>{const A=i/13*Math.PI*2;
+   const cx=150+Math.cos(A)*88,cy=95+Math.sin(A)*34;
+   s+=box(cx,cy,13,13,c[1]<85?26:9,0,c[1]<85?"no":"ok");});
+  return `<div class="k">One report, 13 checks</div>
+  ${svg("0 0 300 180",`<ellipse cx="150" cy="95" rx="88" ry="34" fill="none" stroke="var(--hair)"/>
+   ${s}<circle cx="150" cy="95" r="16" fill="var(--panel-solid)" stroke="var(--cyan)"/>
+   <text x="150" y="99" text-anchor="middle" fill="var(--cyan)" font-size="10" font-family="var(--mono)">13</text>`,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">spikes = the checks that failed on this run</div>`;}],
+
+["Calendar cubes","a month you can scan in one pass",()=>{
+  let s="";for(let i=0;i<28;i++){const a=i%7,b=(i/7|0);
+   const bad=[3,11,12,19,25].includes(i);
+   const cx=150+(a-b)*22,cy=44+(a+b)*12;
+   s+=box(cx,cy,19,19,bad?24:8,0,bad?"no":"ok");}
+  return `<div class="k">August · daily health</div>
+  ${svg("0 0 300 190",`<g>${s}</g>`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">five raised red days — all five are Convertus platform misses</div>`;}],
+
+["Recency depth","the closer the bar, the newer",()=>{
+  const D=MO,m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Six months</div>
+  <div class="scene" style="height:185px;margin-top:8px;perspective:600px">
+   <div class="rig" style="width:150px;height:130px;transform:rotateX(-12deg) rotateY(-14deg)">
+   ${D.slice().reverse().map((r,i)=>`<div style="position:absolute;left:0;bottom:0;
+     transform:translateZ(${-i*40}px);transform-style:preserve-3d;opacity:${1-i*.12}">
+     ${cube(140,22,r[1]/m*100,0,"cOK")}${cube(140,22,r[2]/m*100*2,r[1]/m*100,"cNO")}</div>`).join("")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">August in front and still climbing</div>`;}],
+
+["Extruded radar","13 axes, height instead of length",()=>{
+  let s="",r=78;const pts=[];
+  CHECKS.forEach((c,i)=>{const A=i/13*Math.PI*2-Math.PI/2;
+   const cx=150+Math.cos(A)*r,cy=92+Math.sin(A)*r*.44;pts.push([cx,cy]);
+   s+=box(cx,cy,10,10,(100-c[1])*2.4+4,0,c[1]<85?"no":"ok");});
+  return `<div class="k">Miss profile · taller = worse</div>
+  ${svg("0 0 300 180",`<polygon points="${pts.map(p=>p.join(",")).join(" ")}"
+    fill="var(--ok-soft)" stroke="var(--hair-strong)"/>${s}`,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">flat ring = healthy · any spike is a reader to fix</div>`;}],
+
+["Scanline slices","hologram stack, one slice per hour",()=>{
+  const D=H.filter((_,i)=>i%2===0),m=mx(D.map(r=>r[1]+r[2]));
+  return `<div class="k">Sliced volume</div>
+  <div class="scene" style="height:185px;margin-top:8px">
+   <div class="rig" style="width:160px;height:120px;transform:rotateX(-52deg) rotateY(-8deg)">
+   ${D.map((r,i)=>`<div style="position:absolute;left:0;right:0;height:2px;top:${i*9}px;
+     background:linear-gradient(90deg,var(--ok) ${r[1]/(r[1]+r[2])*100}%,var(--no) ${r[1]/(r[1]+r[2])*100}%);
+     transform:translateZ(${r[1]/m*46}px);opacity:.9"></div>`).join("")}
+   </div></div>
+  <div class="mono dim" style="font-size:10px">slice lifts with volume · red tail is the fail share</div>`;}],
+
+["Ziggurat","drill down a level at a time",()=>{
+  const L=[["YEAR",128600,110],["MONTH",21480,84],["WEEK",5122,58],["DAY",803,34],["HOUR",92,16]];
+  return `<div class="k">One shape, five zooms</div>
+  ${svg("0 0 300 195",`<g>${L.map((l,i)=>box(150,150-i*24,l[2],l[2]*.5,18,0,i===4?"ok":"ok",.45+i*.13)).join("")}</g>
+   ${L.map((l,i)=>`<text x="286" y="${150-i*24+2}" text-anchor="end" fill="var(--dim)"
+     font-size="9" font-family="var(--mono)">${l[0]} ${num(l[1])}</text>`).join("")}`,"margin-top:4px")}
+  <div class="mono dim" style="font-size:10px">click a tier to rebucket everything below it</div>`;}],
+
+["Repair loop","the fail → error code → fix cycle, as a circuit",()=>{
+  const N=[["SCAN",40,40],["READ",150,32],["VERIFY",258,44],["FAIL",258,116],["CODE",150,128],["FIX",40,112]];
+  return `<div class="k">Every miss becomes a ticket</div>
+  ${svg("0 0 300 175",`
+   ${N.map((n,i)=>{const j=N[(i+1)%N.length];
+     return `<line x1="${n[1]}" y1="${n[2]}" x2="${j[1]}" y2="${j[2]}"
+       stroke="var(--${i>2?"no":"ok"})" stroke-width="1.4" opacity=".55"/>`}).join("")}
+   ${N.map(n=>box(n[1],n[2]+16,30,30,13,0,n[0]==="FAIL"||n[0]==="CODE"?"no":"ok")).join("")}
+   ${N.map(n=>`<text x="${n[1]}" y="${n[2]}" text-anchor="middle" fill="var(--ink)"
+     font-size="8.5" font-family="var(--mono)">${n[0]}</text>`).join("")}`,"margin-top:6px")}
+  <div class="mono dim" style="font-size:10px">no failure leaves the loop until a fix closes it</div>`;}],
+
+["Twin towers","URL scans vs uploaded files, side by side",()=>{
+  const u=SRC.url.reduce((a,b)=>a+b,0),f=SRC.file.reduce((a,b)=>a+b,0);
+  return `<div class="k">Source mix · 24h</div>
+  <div class="scene" style="height:175px;margin:8px 0">
+   <div class="rig" style="width:150px;height:130px;transform:rotateX(-13deg) rotateY(-24deg)">
+    <div style="position:absolute;left:0;bottom:0;transform-style:preserve-3d">
+      ${cube(48,48,118,0,"cOK")}${cube(48,48,10,118,"cNO")}</div>
+    <div style="position:absolute;left:78px;bottom:0;transform-style:preserve-3d">
+      ${cube(48,48,36,0,"cOK")}${cube(48,48,11,36,"cNO")}</div>
+   </div></div>
+  <div class="between mono" style="font-size:10.5px">
+    <span>URL <span class="cy">${num(u)}</span></span><span>File <span class="cy">${num(f)}</span></span></div>`;}],
+
+["Ratio prism","rotate the solid, read a different timeframe",()=>{
+  return `<div class="k">One block, five faces</div>
+  <div class="scene" style="height:175px;margin:8px 0">
+   <div class="rig" style="--hover:rotateX(-12deg) rotateY(74deg);width:96px;height:96px;
+     transform:rotateX(-12deg) rotateY(16deg)">
+    <div class="cube" style="--w:96px;--d:96px;--h:96px;--o:0px">
+     <i class="fr" style="background:var(--ok)"></i><i class="bk" style="background:var(--ok-lo)"></i>
+     <i class="rt" style="background:var(--no)"></i><i class="lf" style="background:var(--ok-lo)"></i>
+     <i class="tp" style="background:var(--ok-hi)"></i><i class="bt" style="background:var(--ok-lo)"></i></div>
+   </div></div>
+  <div class="mono dim" style="font-size:10px">hover to spin — each face is a different bucket</div>`;}],
+
+["Command bar","the hero: one ratio, one 3D trend, twelve dots",()=>{
+  const m=mx(H.map(r=>r[1]+r[2]));
+  return `<div class="between"><span class="k">Verification health</span>${liveTag}</div>
+  <div class="row" style="gap:14px;align-items:flex-end;margin:10px 0 12px">
+    <div class="big d44 ok">${RATE}%</div>
+    <div style="flex:1">${svg("0 0 150 52",H.filter((_,i)=>i%2===0).map((r,i)=>{
+      const x=6+i*12,hs=r[1]/m*34,hf=r[2]/m*34;
+      return box(x,46,8,8,hs,0,"ok")+box(x,46,8,8,hf,hs,"no");}).join(""))}</div>
+  </div>
+  <div class="row" style="gap:5px;flex-wrap:wrap">${CHECKS.map(c=>
+    `<span title="${c[0]} ${c[1]}%" style="width:13px;height:13px;border-radius:3px;
+      background:var(--${c[1]<85?"no":"ok"})"></span>`).join("")}</div>
+  <div class="mono dim" style="font-size:10px;margin-top:9px">13 checkpoints · ${num(TOT)} checks · 3 below 85%</div>`;}],
+];
+
+document.getElementById("g").innerHTML = V.map(([nm,why,fn],i)=>`
+  <div class="v"><div class="stage">${fn()}</div>
+  <div class="cap"><span class="num">${pad(i+1)}</span><span class="nm">${nm}</span><span class="why">${why}</span></div></div>`).join("");
+</script>
