@@ -46,6 +46,24 @@ const money = (n: number) =>
   `CA$${Number(n).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function buildHtml(s: any, me: any): string {
+  // Outstanding balance, if the ledger stamped one at approval. This is the
+  // number that actually gets invoiced: an unpaid earlier month carries
+  // forward, so JC's September note is August + September, not September alone.
+  const bal = (s.balances ?? []).find((b: any) => b.email === me.email);
+  const owed = bal ? Number(bal.balance_cad) : Number(me.owes_cad);
+  const carried = bal ? owed - Number(me.owes_cad) : 0;
+
+  const ledgerRows = (bal?.lines ?? [])
+    .filter((l: any) => Number(l.amount_cad) !== 0)
+    .map((l: any) => {
+      const paid = l.kind === "payment";
+      const month = new Date(l.month + "T00:00:00").toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+      return `<tr>
+        <td style="padding:5px 0;color:#5B5885;">${month}${paid ? " — payment" : ""}</td>
+        <td style="padding:5px 0;text-align:right;color:${paid ? "#17756B" : "#33305A"};font-weight:600;">${money(Number(l.amount_cad))}</td>
+      </tr>`;
+    }).join("");
+
   const due = (s.due_dates ?? [])
     .map((d: any) => `<tr>
       <td style="padding:6px 0;color:#5B5885;">${d.day}${d.day === 1 ? "st" : d.day === 2 ? "nd" : d.day === 3 ? "rd" : "th"} — ${d.label}</td>
