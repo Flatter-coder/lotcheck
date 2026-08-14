@@ -7241,8 +7241,11 @@ function QuoteCheckPage(){
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
   }
 
-  async function sendReportEmail(){
-    const email=emailInput.trim();
+  async function sendReportEmail(overrideEmail){
+    // overrideEmail lets the auto-send effect pass the address explicitly
+    // instead of reading emailInput -- state set via setEmailInput() in the
+    // same tick isn't guaranteed to have committed yet by the time this runs.
+    const email=(overrideEmail??emailInput).trim();
     if(!isValidEmail(email)){
       setEmailErr("That doesn't look like a valid email address.");
       return;
@@ -7467,6 +7470,9 @@ function QuoteCheckPage(){
     setLastAttemptType("file");
     setStatus("analyzing");
     setErrorMsg("");
+    // Fresh email state per scan -- otherwise a second report in the same
+    // session would inherit "sent" from the first and never auto-send again.
+    setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
 
     try{
       // Convert HEIC/HEIF to JPEG entirely in the browser before anything
@@ -7564,6 +7570,17 @@ function QuoteCheckPage(){
     if(prev==="analyzing"&&status==="done"){
       setScanFlash(true);
       const id=setTimeout(()=>setScanFlash(false),900);
+      // Logged-in users get their own copy emailed automatically, right
+      // alongside the report that's still fully shown on the page -- this
+      // doesn't replace or hide anything on-screen, it just removes the
+      // "forgot to send it, got distracted, closed the tab" failure mode
+      // (Vic, 2026-08-13). Guarded on emailInput being untouched so it never
+      // clobbers an address someone's already typing, and on emailStatus
+      // still being "idle" so it never re-fires or fights a manual send.
+      if(user?.email&&!emailInput&&emailStatus==="idle"){
+        setEmailInput(user.email);
+        sendReportEmail(user.email);
+      }
       return ()=>clearTimeout(id);
     }
   },[status]);
@@ -7598,6 +7615,9 @@ function QuoteCheckPage(){
     setLastAttemptType("url");
     setStatus("analyzing");
     setErrorMsg("");
+    // Fresh email state per scan -- otherwise a second report in the same
+    // session would inherit "sent" from the first and never auto-send again.
+    setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
 
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
