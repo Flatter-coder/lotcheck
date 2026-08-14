@@ -4371,6 +4371,187 @@ function VerifOperationalCost({C}){
   );
 }
 
+// Founder ledger — approve the monthly statement, see balances, record payments.
+//
+// This is the surface the approval rule needs: the statement is staged by cron
+// and goes nowhere until it is approved HERE, with the frozen total shown
+// beside the current one so a mid-month cost jump is visible before JC and
+// Josh are billed rather than after.
+function VerifFounderLedger({C}){
+  const [runs,setRuns]=useState(null);
+  const [bal,setBal]=useState(null);
+  const [state,setState]=useState("loading");
+  const [busy,setBusy]=useState(null);
+  const [pay,setPay]=useState({email:"",amount:"",line:"",month:"",covered:""});
+  const [msg,setMsg]=useState(null);
+
+  const load=async()=>{
+    try{
+      const [r,b]=await Promise.all([
+        supabase.rpc("fn_admin_statement_runs"),
+        supabase.rpc("fn_admin_founder_balances"),
+      ]);
+      if(r.error) throw r.error;
+      if(b.error) throw b.error;
+      setRuns(r.data||[]); setBal(b.data||[]); setState("ok");
+    }catch(err){
+      console.warn("founder ledger unavailable:",err?.message||err);
+      setState("absent");
+    }
+  };
+  useEffect(()=>{load();},[]);
+
+  const cad=(n)=>`CA$${Number(n||0).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const act=async(fn,args,label)=>{
+    setBusy(label); setMsg(null);
+    try{
+      const {error}=await supabase.rpc(fn,args);
+      if(error) throw error;
+      setMsg({ok:true,text:`${label} — done`});
+      await load();
+    }catch(err){ setMsg({ok:false,text:err?.message||String(err)}); }
+    finally{ setBusy(null); }
+  };
+
+  const pending=(runs||[]).filter(r=>r.status==="pending_approval");
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+        FOUNDER LEDGER
+      </div>
+
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Loading…</div>}
+      {state==="absent" && (
+        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_founder_ledger.sql</span>.
+        </div>
+      )}
+
+      {state==="ok" && (<>
+        {/* Approval — nothing reaches JC or Josh without this click. */}
+        {pending.length===0 ? (
+          <div style={{fontSize:11.5,color:C.inkFaint,marginBottom:12}}>
+            No statement awaiting approval. The cron stages one on the 1st; nothing sends until you approve it here.
+          </div>
+        ) : pending.map(r=>{
+          const drift=Number(r.total_now_cad||0)-Number(r.total_cad||0);
+          return (
+            <div key={r.id} style={{background:C.paper2,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
+                <span style={{fontSize:13,fontWeight:800,color:C.ink}}>
+                  {new Date(r.period_month+"T00:00:00").toLocaleDateString("en-CA",{month:"long",year:"numeric"})} — awaiting your approval
+                </span>
+                <span style={{fontSize:15,fontWeight:800,color:C.ink,fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(r.total_cad)}</span>
+              </div>
+              {Math.abs(drift)>0.005 && (
+                <div style={{fontSize:11.5,color:C.coralInk,marginTop:5,fontWeight:700}}>
+                  Costs changed since this was staged: now {cad(r.total_now_cad)} ({drift>0?"+":""}{cad(drift)}).
+                  Approving re-freezes at the current figure.
+                </div>
+              )}
+              <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+                <button disabled={busy} onClick={()=>act("fn_admin_approve_statement",{p_id:r.id},"Approved")}
+                  style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
+                          fontSize:12,fontWeight:800,cursor:busy?"wait":"pointer"}}>
+                  Approve
+                </button>
+                <button disabled={busy} onClick={()=>act("fn_admin_cancel_statement",{p_id:r.id},"Cancelled")}
+                  style={{background:"transparent",color:C.inkSoft,border:`1px solid ${C.line}`,borderRadius:8,
+                          padding:"7px 14px",fontSize:12,cursor:busy?"wait":"pointer"}}>
+                  Cancel
+                </button>
+              </div>
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:7}}>
+                Approving accrues this month's charges and authorises the send. It does not email anyone by
+                itself — run the Founder statement workflow in send mode after approving.
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Balances */}
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>BALANCES</div>
+        {(bal||[]).map(f=>(
+          <div key={f.email} style={{padding:"7px 2px",borderBottom:`1px solid ${C.line}`}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+              <span style={{fontSize:12.5,color:C.ink,flex:1,fontWeight:700}}>{f.name}</span>
+              <span style={{fontSize:11,color:C.inkFaint}}>paid {cad(f.paid_cad)}</span>
+              <span style={{fontSize:13,fontWeight:800,fontFamily:"ui-monospace,Menlo,monospace",
+                            color:Number(f.balance_cad)>0.005?C.coralInk:C.tealInk,minWidth:88,textAlign:"right"}}>
+                {cad(f.balance_cad)}
+              </span>
+            </div>
+            {(f.unpaid_lines||[]).length>0 && (
+              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:3,paddingLeft:2}}>
+                {f.unpaid_lines.map(u=>
+                  `${new Date(u.month+"T00:00:00").toLocaleDateString("en-CA",{month:"short",year:"numeric"})} ${u.line} ${cad(u.amount_cad)}`
+                ).join("  ·  ")}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Record a payment */}
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,margin:"14px 0 6px"}}>
+          RECORD A PAYMENT
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6}}>
+          <select value={pay.email} onChange={e=>setPay({...pay,email:e.target.value})}
+            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+                    background:C.paper2,color:C.ink}}>
+            <option value="">Who paid…</option>
+            {(bal||[]).map(f=><option key={f.email} value={f.email}>{f.name}</option>)}
+          </select>
+          <input placeholder="Amount CAD" value={pay.amount} inputMode="decimal"
+            onChange={e=>setPay({...pay,amount:e.target.value})}
+            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+                    background:C.paper2,color:C.ink}}/>
+          <input placeholder="Line (optional)" value={pay.line}
+            onChange={e=>setPay({...pay,line:e.target.value})}
+            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+                    background:C.paper2,color:C.ink}}/>
+          <input placeholder="Month YYYY-MM-01" value={pay.month}
+            onChange={e=>setPay({...pay,month:e.target.value})}
+            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+                    background:C.paper2,color:C.ink}}/>
+          <select value={pay.covered} onChange={e=>setPay({...pay,covered:e.target.value})}
+            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+                    background:C.paper2,color:C.ink}}>
+            <option value="">Paid it themselves</option>
+            {(bal||[]).map(f=><option key={f.email} value={f.email}>Fronted by {f.name}</option>)}
+          </select>
+          <button disabled={busy||!pay.email||!pay.amount}
+            onClick={()=>act("fn_admin_record_payment",{
+              p_founder_email:pay.email,
+              p_amount_cad:Number(pay.amount),
+              p_period_month:pay.month||null,
+              p_covered_by_email:pay.covered||null,
+              p_line_label:pay.line||null,
+              p_note:null,
+            },"Payment recorded")}
+            style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 12px",
+                    fontSize:12,fontWeight:800,cursor:(busy||!pay.email||!pay.amount)?"not-allowed":"pointer",
+                    opacity:(busy||!pay.email||!pay.amount)?.5:1}}>
+            Record
+          </button>
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:7,lineHeight:1.6}}>
+          "Fronted by" records that someone else paid the vendor on their behalf — the charge stays
+          outstanding, because that moves the debt to the founder who paid, it does not clear it.
+          The ledger is append-only; a mistake is corrected with another entry, never an edit.
+        </div>
+
+        {msg && (
+          <div style={{fontSize:11.5,marginTop:9,color:msg.ok?C.tealInk:C.coralInk,fontWeight:700}}>
+            {msg.text}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 function VerificationTab({apiUsage, apiUsageLoading}){
   const {C}=useAdminTheme();
   const [range,setRange]=useState("24h");
@@ -4510,6 +4691,8 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       </div>
 
       <VerifOperationalCost C={C}/>
+
+      <VerifFounderLedger C={C}/>
 
       <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
 
