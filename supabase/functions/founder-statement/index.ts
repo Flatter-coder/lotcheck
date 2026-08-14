@@ -5,15 +5,27 @@
 // Claude subscription; the 10th, Scrapfly) so there is a week of notice before
 // the first debit.
 //
-// REFUSES TO SEND when the split does not add up. While JC's and Josh's real
-// addresses are missing they sit inactive in the founder table, so the active
-// shares total 3334 bps instead of 10000. Sending then would tell Vic he owes
-// CA$138 of a CA$414 bill with nobody assigned the rest — a statement that is
-// arithmetically true and practically a lie. It returns 409 and sends nothing
-// until all three are active.
+// TWO MODES, and the separation IS the safety property.
+//
+//   ?mode=stage  (what the cron calls) — computes the statement, writes it as
+//                a pending_approval run, and MAILS NOBODY.
+//   ?mode=send   — sends only a run Vic has explicitly approved in the admin
+//                panel, claimed atomically so a double trigger cannot bill the
+//                founders twice.
+//
+// Vic, 2026-08-14: "before you send, you need permission from me — because if
+// our cost jumps we need to adjust invoices." The statement tells two other
+// people what they owe; if a vendor bill moves between the 1st and the send, an
+// automated statement bills JC and Josh the wrong amount, and a number sent to
+// a co-founder has been acted on by the time anyone notices. There is no code
+// path here that mails a founder without an approved run.
+//
+// Also refuses when the split does not add up: if active founder shares do not
+// total 10000 bps, someone owes an unassigned remainder and the statement is
+// arithmetically true but practically a lie. 409, sends nothing.
 //
 // Deploy: supabase functions deploy founder-statement
-// Trigger: .github/workflows/founder-statement.yml (cron, 1st of the month)
+// Trigger: .github/workflows/founder-statement.yml (cron, 1st — STAGE only)
 // Auth:    STATEMENT_SECRET header — this sends mail, so it is not open.
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
@@ -75,27 +87,62 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url);
+  const mode = url.searchParams.get("mode") ?? "stage";  // stage is the safe default
   const dryRun = url.searchParams.get("dry_run") === "true";
 
-  // Statement
-  const sres = await fetch(`${SUPABASE_URL}/rest/v1/rpc/fn_founder_statement`, {
-    method: "POST",
-    headers: {
-      "apikey": SERVICE_ROLE_KEY,
-      "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: "{}",
-  });
-  if (!sres.ok) {
-    console.error("statement rpc failed:", sres.status, await sres.text());
-    return new Response("statement failed", { status: 500 });
-  }
-  const s = await sres.json();
+  const rpc = async (fn: string, body = "{}") => {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: {
+        "apikey": SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body,
+    });
+    if (!r.ok) throw new Error(`${fn}: ${r.status} ${await r.text()}`);
+    return await r.json();
+  };
 
-  // The refusal that matters. See the header.
+  // ---- STAGE: compute, record, mail nobody --------------------------------
+  if (mode === "stage") {
+    try {
+      await rpc("fn_expire_stale_statements");
+      const staged = await rpc("fn_stage_statement");
+      console.log(`statement staged: ${JSON.stringify(staged)}`);
+      return new Response(JSON.stringify({
+        ok: true, mode: "stage", sent: 0,
+        note: "Staged for approval. Nothing has been emailed — approve it in the admin panel to send.",
+        ...staged,
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    } catch (e) {
+      console.error("stage failed:", e);
+      return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500 });
+    }
+  }
+
+  if (mode !== "send") return new Response("unknown mode", { status: 400 });
+
+  // ---- SEND: only a run Vic approved --------------------------------------
+  let claimed: any;
+  try {
+    claimed = await rpc("fn_claim_statement_for_send");
+  } catch (e) {
+    console.error("claim failed:", e);
+    return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500 });
+  }
+  if (!claimed) {
+    // The default state, and not an error: nothing is approved, so nothing sends.
+    return new Response(JSON.stringify({
+      ok: true, sent: 0,
+      reason: "no approved statement waiting — approve one in the admin panel first",
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }
+
+  const s = claimed.snapshot;
+
   if (!s?.shares_balanced) {
-    const msg = `shares total ${s?.shares_total_bps ?? 0} bps across ${s?.active_founders ?? 0} active founder(s), not 10000 — refusing to send a split that does not account for the whole bill. Add the missing founders' real addresses and set active = true.`;
+    const msg = `shares total ${s?.shares_total_bps ?? 0} bps across ${s?.active_founders ?? 0} active founder(s), not 10000 — refusing to send a split that does not account for the whole bill.`;
     console.error(msg);
     return new Response(JSON.stringify({ ok: false, sent: 0, reason: msg, statement: s }), {
       status: 409, headers: { "Content-Type": "application/json" },
