@@ -32,7 +32,12 @@
   <!-- Fonts (used by the Quote Check page to match the marketing site) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800;1000&display=swap" rel="stylesheet">
+  <!-- Poppins is the report typeface: the emailed PDF embeds Poppins Regular /
+       Medium / SemiBold / Bold (supabase/functions/_shared/poppins.ts), chosen
+       after the StandardFonts set read "too thin, hard to see". The admin panel
+       now uses the same family so the numbers Vic reads on screen and the ones
+       a founder reads on a PDF are set in the same face. -->
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;800;1000&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
   <!-- Favicon — tells Google what icon to show in search results -->
   <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
