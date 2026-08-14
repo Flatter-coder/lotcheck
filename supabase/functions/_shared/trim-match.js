@@ -66,6 +66,14 @@ const KEY_TOKENS = new Set([
   "laramie","rubicon","sahara","raptor","lariat","woodland","prime","n","type",
   "signature","select","essential","technology","luxury","execline","progressif",
   "gt",
+  // Honda/Acura/Kia grade ladders. Missing, these scored the CORRECT row a
+  // feeble +1: a 2027 HR-V EX-L AWD listing tied its own EX-L row ($39,200)
+  // against "LX AWD" ($33,100, +4 on the drivetrain word alone), and the
+  // ambiguous-tie rule then anchored the report $6,100 low on the cheaper row
+  // (albertahonda.com, 2026-08-14). A grade the manufacturer prints on the
+  // car is the strongest name evidence there is -- same reasoning the rest of
+  // this list was built on.
+  "ex","lx","dx","exl",
 ]);
 
 function keyTokens(s) {

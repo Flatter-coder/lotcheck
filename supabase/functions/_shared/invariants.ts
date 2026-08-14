@@ -183,6 +183,28 @@ export const INVARIANTS: Invariant[] = [
     applies: (a) => !!a?.daysOnLot && num(a.daysOnLot.days) > 0,
     holds: (a) => !!a.daysOnLot.source && !!a.daysOnLot.sourceLabel,
   },
+  {
+    // Kramer Mazda family, narrative half. The NUMBERS get gap-filled after
+    // whichever pass wrote the prose, so a report could show "$43,481 · price
+    // verified" beside a verdict insisting the listing "contains no pricing
+    // information at all" (albertahonda.com 2027 HR-V EX-L, 2026-08-14 --
+    // vision pass wrote the summary from a capture that predated the price
+    // recovery). A report that contradicts itself is worse than one that says
+    // less: verify the TEXT against the verified figures before anything
+    // ships, and when they disagree the figures win -- the prose is rebuilt
+    // from them, never the other way around.
+    id: "SUMMARY_MATCHES_PRICE",
+    severity: "repair",
+    why: "the narrative may never deny a price the report itself displays",
+    applies: (a) => hasPrice(a) && typeof a.summary === "string"
+      && /\bno (?:pricing|price|advertised(?: selling| asking)? price)\b(?![-–])|\bprice (?:is |was )?not (?:shown|disclosed|advertised|published|present)\b|\b(?:doesn'?t|does not|do not) disclose\b[^.]{0,60}\bpric/i.test(a.summary),
+    holds: () => false,
+    repair: (a) => {
+      const price = Math.round(num(a.quotedPrice)).toLocaleString("en-CA");
+      const vehicle = typeof a.vehicle === "string" && a.vehicle.trim() ? a.vehicle.trim() : "This vehicle";
+      a.summary = `${vehicle} is advertised at $${price} on the dealer's own listing page. The figures on this report were read from the page's own data and rendered view. Confirm the out-the-door total, any add-on fees, and financing details directly with the dealer before signing anything.`;
+    },
+  },
 ];
 
 export interface InvariantResult {

@@ -3859,6 +3859,360 @@ function AlertFoldersTab(){
   );
 }
 
+// ── Verification ledger (admin tab 9) ────────────────────────────────────────
+// Every scan, every checkpoint, every send. This is the instrument panel for
+// the promise that a report delivers all of its points with backed results.
+//
+// HONESTY RULE, and it is the whole design of this tab: show real numbers where
+// a table exists, and say "not instrumented" where one does not. It must never
+// paint a checkpoint green that we are not actually measuring. A fabricated
+// pass rate is worse here than a blank, because this is precisely the surface
+// you would consult to decide whether the reports are sound — a false all-clear
+// on this screen is how a broken reader survives for weeks.
+//
+//   Real today   api_usage_log (feature, success, created_at). URL path only:
+//                logUsage is wired into analyze-listing-url, NOT analyze-quote,
+//                so uploaded files are invisible rather than zero.
+//   Missing      verification_run / verification_check — per-checkpoint outcomes
+//                report_delivery — email send + PDF hash + provider receipt
+const VERIF_BUCKETS = [
+  { k:"1h",  label:"Last hour",      n:12,
+    floor:d=>{const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/5)*5); return x;},
+    prev:d=>new Date(d.getTime()-5*60e3),
+    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` },
+  { k:"24h", label:"Last 24 hours",  n:24,
+    floor:d=>{const x=new Date(d); x.setMinutes(0,0,0); return x;},
+    prev:d=>new Date(d.getTime()-3600e3),
+    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:00 → ${String((d.getHours()+1)%24).padStart(2,"0")}:00` },
+  { k:"7d",  label:"Last 7 days",    n:7,
+    floor:d=>{const x=new Date(d); x.setHours(0,0,0,0); return x;},
+    prev:d=>new Date(d.getTime()-864e5),
+    fmt:d=>d.toLocaleDateString("en-CA",{weekday:"short",month:"short",day:"numeric"}) },
+  { k:"30d", label:"Last 30 days",   n:30,
+    floor:d=>{const x=new Date(d); x.setHours(0,0,0,0); return x;},
+    prev:d=>new Date(d.getTime()-864e5),
+    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"}) },
+  { k:"1y",  label:"Last 12 months", n:12,
+    floor:d=>{const x=new Date(d); x.setDate(1); x.setHours(0,0,0,0); return x;},
+    prev:d=>{const x=new Date(d); x.setMonth(x.getMonth()-1); return x;},
+    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",year:"numeric"}) },
+];
+
+// The 13 checkpoints, in report order. `feature` is the api_usage_log value that
+// would carry it once per-checkpoint logging exists; until then every row here
+// renders as unmeasured, never as passing.
+const VERIF_CHECKPOINTS = [
+  ["MSRP","verification_check.msrp"],
+  ["Odometer","verification_check.odometer"],
+  ["Open recalls","verification_check.recalls"],
+  ["Fee audit","verification_check.fees"],
+  ["EV rebate","verification_check.ev_rebate"],
+  ["VIN pattern","verification_check.vin"],
+  ["Warranty validity","verification_check.warranty"],
+  ["Financing math","verification_check.financing"],
+  ["APR vs official site","verification_check.apr"],
+  ["Dealer reputation","verification_check.reputation"],
+  ["Leverage score","verification_check.leverage"],
+  ["Days on lot","verification_check.days_on_lot"],
+  ["AMVIC licence","verification_check.amvic"],
+];
+
+// Bucket rows into gap-filled intervals. Empty intervals MUST survive as zero
+// rows — a dead hour that vanishes from the list is the one thing you most need
+// to see, and dropping it makes the neighbours look adjacent.
+function buildVerifIntervals(bucket, rows){
+  const edges=[]; let cur=bucket.floor(new Date());
+  for(let i=0;i<bucket.n;i++){ edges.unshift(new Date(cur)); cur=bucket.prev(cur); }
+  const out=edges.map((start,i)=>({
+    start, label:bucket.fmt(start),
+    end: i+1<edges.length ? edges[i+1] : new Date(8640000000000000),
+    ok:0, fail:0,
+  }));
+  for(const r of rows||[]){
+    const t=new Date(r.created_at).getTime();
+    if(isNaN(t) || t<out[0].start.getTime()) continue;
+    for(let i=out.length-1;i>=0;i--){
+      if(t>=out[i].start.getTime()){ if(r.success) out[i].ok++; else out[i].fail++; break; }
+    }
+  }
+  return out;
+}
+
+// Small isometric bar, matching the ledger direction from the design board but
+// in the admin palette (teal = verified, coral = failed) so this tab does not
+// diverge from the rest of the panel.
+function verifIsoBar(x, y, w, h, top, side, face){
+  const P=(a,b,l)=>`${(x+(a-b)*0.866).toFixed(1)},${(y+(a+b)*0.5-l).toFixed(1)}`;
+  const hw=w/2, hd=h/2;
+  return (
+    <g>
+      <polygon points={`${P(-hw,-hd,h)} ${P(hw,-hd,h)} ${P(hw,hd,h)} ${P(-hw,hd,h)}`} fill={top}/>
+      <polygon points={`${P(hw,-hd,h)} ${P(hw,hd,h)} ${P(hw,hd,0)} ${P(hw,-hd,0)}`} fill={face}/>
+      <polygon points={`${P(hw,hd,h)} ${P(-hw,hd,h)} ${P(-hw,hd,0)} ${P(hw,hd,0)}`} fill={side}/>
+    </g>
+  );
+}
+
+function VerifLiveDot({C}){
+  return (
+    <span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:10,fontWeight:800,letterSpacing:1.2,color:C.tealInk,textTransform:"uppercase"}}>
+      <style>{`
+        @keyframes lcVerifPulse{0%,100%{opacity:1}50%{opacity:.22}}
+        .lc-verif-dot{animation:lcVerifPulse 1.6s ease-in-out infinite}
+        @media (prefers-reduced-motion:reduce){.lc-verif-dot{animation:none}}
+      `}</style>
+      <i className="lc-verif-dot" style={{width:6,height:6,borderRadius:"50%",background:C.teal,display:"inline-block"}}/>
+      Live
+    </span>
+  );
+}
+
+const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
+
+// Direction 23 — the isometric ledger (Vic's pick from the 35-direction board,
+// design-admin-verifications-35.html). Every tracked thing is one row on a
+// shared plane; a row LIFTS off that plane as it degrades, so a bad checkpoint
+// is visible as height before you read a single number.
+//
+// `state` drives the whole rendering and there are four, not three:
+//   ok          teal, flat to the plane
+//   bad         coral, lifted in proportion to how far it has fallen
+//   info        neutral teal, low — volume counters that can't be good or bad
+//   unmeasured  a HOLLOW outline, never a filled slab. Nothing writes this
+//               value yet, and a solid green row for something we do not
+//               measure is the false all-clear this panel exists to prevent.
+function VerifIsoLedger({C, rows, onPick, picked}){
+  const SP = 22, TOP = 26, CX = 236, W = 208, D = 13;
+  const height = TOP + rows.length * SP + 14;
+  const P = (cx, cy, a, b, l) => `${(cx + (a - b) * 0.866).toFixed(1)},${(cy + (a + b) * 0.5 - l).toFixed(1)}`;
+
+  return (
+    <svg viewBox={`0 0 620 ${height}`} style={{display:"block",width:"100%",overflow:"visible"}}>
+      {rows.map((r, i) => {
+        const cy = TOP + i * SP;
+        if (r.sec) return (
+          <text key={`s${i}`} x="8" y={cy+3} fill={C.inkFaint} fontSize="8.5"
+                fontFamily="ui-monospace,Menlo,monospace" letterSpacing="1.4">{r.sec}</text>
+        );
+        const hw = W/2, hd = D/2;
+        const lift = r.state==="bad" ? 6 + (100 - (r.pct ?? 0)) * 0.5
+                   : r.state==="unmeasured" ? 0
+                   : r.state==="info" ? 5 : 4;
+        const top   = r.state==="bad" ? C.coralInk : C.tealInk;
+        const face  = r.state==="bad" ? C.coral    : C.teal;
+        const side  = r.state==="bad" ? C.coralInk : C.tealInk;
+        const op    = r.state==="info" ? 0.45 : 0.95;
+        const val   = r.state==="bad" ? C.coralInk : r.state==="unmeasured" ? C.inkFaint : C.tealInk;
+
+        return (
+          <g key={r.id} onClick={()=>onPick && onPick(r.id)} style={{cursor:onPick?"pointer":"default"}}>
+            <rect x="4" y={cy-9} width="612" height="19" rx="4"
+                  fill={picked===r.id ? C.tealBg : "transparent"}/>
+            {r.state==="unmeasured" ? (
+              // Hollow: the plane is drawn, nothing stands on it.
+              <polygon
+                points={`${P(CX,cy,-hw,-hd,0)} ${P(CX,cy,hw,-hd,0)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,-hw,hd,0)}`}
+                fill="none" stroke={C.inkFaint} strokeWidth="1" strokeDasharray="3 3" opacity=".55"/>
+            ) : (<>
+              <polygon points={`${P(CX,cy,-hw,-hd,lift)} ${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)}`} fill={top} opacity={op}/>
+              <polygon points={`${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,hw,-hd,0)}`} fill={face} opacity={op}/>
+              <polygon points={`${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)} ${P(CX,cy,-hw,hd,0)} ${P(CX,cy,hw,hd,0)}`} fill={side} opacity={op}/>
+            </>)}
+            <text x="8" y={cy+3} fill={C.ink} fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.name}</text>
+            <text x="452" y={cy+3} textAnchor="end" fill={val} fontSize="10.5"
+                  fontFamily="ui-monospace,Menlo,monospace">{r.value}</text>
+            <text x="612" y={cy+3} textAnchor="end" fill={C.inkFaint} fontSize="9.5"
+                  fontFamily="ui-monospace,Menlo,monospace">{r.note}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function VerificationTab({apiUsage, apiUsageLoading}){
+  const {C}=useAdminTheme();
+  const [range,setRange]=useState("24h");
+  const bucket=VERIF_BUCKETS.find(b=>b.k===range)||VERIF_BUCKETS[1];
+
+  // Delivery ledger (20260814_report_delivery.sql). Absent until that
+  // migration is applied — which renders as "not instrumented", exactly as it
+  // did before, rather than as an error. The panel must never imply a send was
+  // recorded when the table that would record it does not exist.
+  const [ledger,setLedger]=useState(null);
+  useEffect(()=>{
+    let cancelled=false;
+    const hours={"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_delivery_ledger",{p_hours:hours});
+        if(error) throw error;
+        if(!cancelled) setLedger(data||null);
+      }catch(err){
+        console.warn("delivery ledger unavailable (migration applied?):",err?.message||err);
+        if(!cancelled) setLedger(null);
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[range]);
+
+  const [picked,setPicked]=useState(null);
+
+  const intervals=useMemo(()=>buildVerifIntervals(bucket,apiUsage),[bucket,apiUsage]);
+  const totOk=intervals.reduce((a,r)=>a+r.ok,0);
+  const totFail=intervals.reduce((a,r)=>a+r.fail,0);
+  const tot=totOk+totFail;
+  const rate=tot?((totOk/tot)*100).toFixed(1):null;
+  const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
+  const loaded=!apiUsageLoading;
+
+  // The ledger's rows, in report order. Volume first (what came in), delivery
+  // second (what went out), then the 13 checkpoints that decide whether the
+  // report was worth sending.
+  const isoRows = useMemo(()=>{
+    const unmeasured = (id,name,needs,proof) =>
+      ({id, name, value:"—", note:needs, state:"unmeasured", proof});
+    const rows = [
+      {sec:"VOLUME"},
+      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(tot),
+       note:"api_usage_log", state:"info",
+       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run."},
+      unmeasured("file","Uploaded files (PDF path)","logUsage in analyze-quote",
+        "Invisible, not zero. analyze-quote writes no telemetry at all — not even api_usage_log — so uploaded quotes cannot be counted until logUsage is mirrored into it."),
+      {sec:"DELIVERY"},
+    ];
+    if (ledger) {
+      const attempts = ledger.attempts || 0;
+      const okPct = attempts ? (ledger.accepted / attempts) * 100 : 100;
+      const delivPct = ledger.accepted ? (ledger.delivered / ledger.accepted) * 100 : 100;
+      rows.push(
+        {id:"sent", name:"Emails sent with the PDF", value:vnum(ledger.accepted),
+         note:`${vnum(attempts)} attempted · ${vnum(ledger.provider_err)} rejected`,
+         state:(ledger.provider_err||0)>0?"bad":"ok", pct:okPct,
+         proof:"One row per attempt in report_delivery, written before the send and carrying the SHA-256 of the exact PDF bytes handed to Resend. A customer forwards their PDF, you hash it, and it matches a row or it does not."},
+        {id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
+         note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints`,
+         state:(ledger.bounced||0)>0?"bad":"ok", pct:delivPct,
+         proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."},
+        {id:"stall", name:"Accepted, unresolved over 1h", value:vnum(ledger.stalled_1h),
+         note:`${vnum(ledger.no_msg_id)} with no provider id`,
+         state:(ledger.stalled_1h||0)>0?"bad":"ok", pct:(ledger.stalled_1h||0)>0?60:100,
+         proof:"Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
+      );
+    } else {
+      rows.push(
+        unmeasured("sent","Emails sent with the PDF","report_delivery.pdf_sha256",
+          "The ledger tables are written but not applied — supabase/migrations/20260814_report_delivery.sql. Until that migration runs, sends are recorded nowhere and this row stays hollow."),
+        unmeasured("deliv","Delivery confirmed by provider","report_delivery_event",
+          "Needs the same migration plus the resend-webhook function deployed and RESEND_WEBHOOK_SECRET set."),
+      );
+    }
+    rows.push({sec:`CHECKPOINTS · ${VERIF_CHECKPOINTS.length} PER REPORT`});
+    for (const [label, needs] of VERIF_CHECKPOINTS) {
+      rows.push(unmeasured(needs, label, needs,
+        `Nothing writes a per-checkpoint outcome yet. When verification_check lands, this row carries verified / checked-no-match / not-applicable / error / not-attempted — and a miss will read as a miss, never as a clean bill.`));
+    }
+    return rows;
+  },[ledger,tot,apiUsageLoading]);
+
+  const SP = intervals.length>20 ? 15 : intervals.length>10 ? 19 : 25;
+  const BARW = 300, LX = 132, H = intervals.length*SP + 16;
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:14}}>
+        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
+          VERIFICATION LEDGER {loaded && <VerifLiveDot C={C}/>}
+        </div>
+        <div style={{display:"flex",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:999,padding:3}}>
+          {VERIF_BUCKETS.map(b=>(
+            <button key={b.k} onClick={()=>setRange(b.k)} style={{
+              background: range===b.k ? C.tealBg : "transparent",
+              color: range===b.k ? C.tealInk : C.inkFaint,
+              border:"none",borderRadius:999,padding:"5px 13px",fontSize:11.5,fontWeight:700,cursor:"pointer",
+            }}>{b.k}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ---- volume + pass rate, real, from api_usage_log ---- */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
+        {[
+          ["Checks", apiUsageLoading?"…":tot.toLocaleString("en-CA"), C.ink, bucket.label],
+          ["Verified", apiUsageLoading?"…":totOk.toLocaleString("en-CA"), C.tealInk, rate?`${rate}% of all checks`:"no checks in range"],
+          ["Failed", apiUsageLoading?"…":totFail.toLocaleString("en-CA"), totFail?C.coralInk:C.inkFaint, totFail?"each one is an open error code":"none in range"],
+        ].map(([k,v,col,sub])=>(
+          <div key={k} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px"}}>
+            <div style={{fontSize:10.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,textTransform:"uppercase"}}>{k}</div>
+            <div style={{fontSize:26,fontWeight:800,color:col,marginTop:4,letterSpacing:-1}}>{v}</div>
+            <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ---- every interval, separated ---- */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+          EVERY INTERVAL, SEPARATED — {bucket.label.toUpperCase()}
+        </div>
+        {apiUsageLoading ? (
+          <div style={{color:C.inkFaint,fontSize:12.5,padding:"14px 0"}}>Reading api_usage_log…</div>
+        ) : (
+          <>
+            <svg viewBox={`0 0 ${LX+BARW+120} ${H}`} style={{display:"block",width:"100%",overflow:"visible"}}>
+              {intervals.map((r,i)=>{
+                const y=12+i*SP, n=r.ok+r.fail;
+                const wOK=(r.ok/peak)*BARW, wNO=(r.fail/peak)*BARW;
+                const bh=SP>18?7:5;
+                return (
+                  <g key={i}>
+                    <text x="0" y={y+3} fill={C.ink} fontSize={SP>18?10.5:9.5} fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
+                    {n===0 ? (
+                      <line x1={LX} y1={y} x2={LX+26} y2={y} stroke={C.line} strokeWidth="2"/>
+                    ) : (<>
+                      {wOK>0.4 && verifIsoBar(LX+wOK/2, y+2, wOK, bh, C.tealInk, C.tealInk, C.teal)}
+                      {wNO>0.4 && verifIsoBar(LX+wOK+wNO/2, y+2, wNO, bh, C.coralInk, C.coralInk, C.coral)}
+                    </>)}
+                    <text x={LX+BARW+16} y={y+3} fill={n?C.inkSoft:C.inkFaint} fontSize="9.5" fontFamily="ui-monospace,Menlo,monospace">
+                      {n===0 ? "no checks" : n.toLocaleString("en-CA")}
+                    </text>
+                    {r.fail>0 && (
+                      <text x={LX+BARW+114} y={y+3} textAnchor="end" fill={C.coralInk} fontSize="9.5" fontFamily="ui-monospace,Menlo,monospace">
+                        {r.fail} failed
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+            <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>
+              Teal = verified, coral = failed reads. An interval with no checks keeps its row — a gap you can see is the point.
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ---- direction 23: the isometric ledger (volume + delivery + 13 checks) ---- */}
+      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:2}}>
+          <span style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+            LEDGER — {bucket.label.toUpperCase()}
+          </span>
+          <span style={{fontSize:11,color:C.inkFaint}}>
+            a row lifts off the plane as it degrades · hollow = not instrumented
+          </span>
+        </div>
+        <VerifIsoLedger C={C} rows={isoRows} picked={picked} onPick={setPicked}/>
+        <div style={{borderTop:`1px solid ${C.line}`,marginTop:6,paddingTop:10,fontSize:11,color:C.inkFaint,lineHeight:1.65}}>
+          {picked
+            ? (isoRows.find(r=>r.id===picked)?.proof || "")
+            : "Click any row for what backs it. Hollow rows are deliberately not green: nothing writes that value yet, and a checkpoint painted as passing while unmeasured is the false all-clear this panel exists to prevent."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -4218,6 +4572,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
           <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
+          <AdminTabButton active={tab==="verification"} onClick={()=>setTab("verification")}>Verification</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -4479,6 +4834,7 @@ function AdminPanel(){
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
         {tab==="alerts" && <AlertFoldersTab/>}
+        {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
@@ -7309,7 +7665,10 @@ function QuoteCheckPage(){
       const data=await res.json();
       if(!res.ok||data.error){
         setEmailStatus("error");
-        setEmailErr(data.error||"Couldn't send that email. Please try again.");
+        // Prefer the human `message` over the machine `error` code. The
+        // function returns structured errors (e.g. pdf_generation_failed) and
+        // showing the raw slug to a buyer is worse than showing nothing.
+        setEmailErr(data.message||data.error||"Couldn't send that email. Please try again.");
         return;
       }
       setEmailStatus("sent");
@@ -7703,7 +8062,7 @@ function QuoteCheckPage(){
           // Existing error card already shows an "Upload a screenshot instead →"
           // CTA for url attempts; the message tells them they weren't charged.
           setStatus("error");
-          setErrorMsg(body.message||"We couldn't read the price on this dealer listing. Upload a screenshot or PDF of the quote instead — you haven't been charged.");
+          setErrorMsg(body.message||"Sorry — we couldn't read the price on this dealer listing, so there's no report to give you. Your credit has already been refunded. Upload a screenshot or PDF of the quote instead, or try the same vehicle at another dealer.");
           return;
         }
         if(body.error==="aggregator_not_supported"){

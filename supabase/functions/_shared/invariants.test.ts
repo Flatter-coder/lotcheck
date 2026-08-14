@@ -74,6 +74,34 @@ const CASES: Case[] = [
     after: { priceDisclosure: "advertised" },
   },
 
+  // ── Summary vs verified price (read facts first, THEN write) ──────────────
+  {
+    name: "HR-V family: a summary denying pricing beside a verified price is rebuilt from the figures",
+    analysis: { quotedPrice: 43481, vehicle: "2027 Honda HR-V EX-L AWD", summary: "This listing for a 2027 Honda HR-V (currently in transit to the dealer) contains no pricing information at all -- no MSRP, no advertised selling price, and no financing or lease terms are disclosed anywhere in the extracted page content." },
+    repaired: ["SUMMARY_MATCHES_PRICE"],
+    after: { summary: "2027 Honda HR-V EX-L AWD is advertised at $43,481 on the dealer's own listing page. The figures on this report were read from the page's own data and rendered view. Confirm the out-the-door total, any add-on fees, and financing details directly with the dealer before signing anything." },
+  },
+  {
+    name: "'no advertised price' phrasing is caught too",
+    analysis: { quotedPrice: 37381, summary: "There is no advertised selling price on this page." },
+    repaired: ["SUMMARY_MATCHES_PRICE"],
+  },
+  {
+    name: "a truthful summary with a price is left alone",
+    analysis: { quotedPrice: 43481, summary: "This vehicle is advertised at $43,481; confirm fees with the dealer." },
+    repaired: [],
+  },
+  {
+    name: "'no price-gating' phrasing is NOT a denial -- summary untouched",
+    analysis: { quotedPrice: 43481, summary: "There is no price-gating on this listing; the figure is published plainly." },
+    repaired: [],
+  },
+  {
+    name: "a denial with NO recovered price stands -- nothing to contradict",
+    analysis: { summary: "No advertised selling price is disclosed on this page." },
+    repaired: [],
+  },
+
   // ── VIN ────────────────────────────────────────────────────────────────────
   {
     name: "a VIN with no vinCheck is repaired, never shipped bare",
