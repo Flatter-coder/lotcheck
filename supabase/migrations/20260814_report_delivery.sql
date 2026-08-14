@@ -360,10 +360,24 @@ grant execute on function public.fn_admin_delivery_by_domain(text,timestamptz,ti
 -- ---- 8) open questions for counsel ----------------------------------------
 -- Seeded as drafts in the legal register so they cannot be forgotten. The
 -- ledger is safe to run without answers; the SEND may not be.
+-- Guarded on purpose. legal_question comes from 20260810_legal_register.sql,
+-- which is in the repo but was never applied to production — and a migration
+-- that creates the delivery ledger must not fail because an OPTIONAL
+-- bookkeeping seed has an unmet dependency. The tables above are the point;
+-- these two rows are a note to counsel. If the register is absent we say so
+-- and carry on, and re-running this after the register lands picks them up.
+--
 -- legal_question is keyed by the question TEXT (ux_legal_question_text), not by
 -- a slug — `on conflict (question)` is what makes re-running this idempotent.
-insert into public.legal_question (question, jurisdiction, blocks, status)
-values
+do $$
+begin
+  if to_regclass('public.legal_question') is null then
+    raise notice 'legal_question is not present — skipping the counsel-question seed. Apply 20260810_legal_register.sql, then re-run this migration to record them.';
+    return;
+  end if;
+
+  insert into public.legal_question (question, jurisdiction, blocks, status)
+  values
   ('The Quote Check report email is buyer-initiated and one-off: the buyer types their own address on the results screen to receive that specific report. There is no subscription, no list, and no recurring send - each email is delivered once, in response to a request the buyer just made. On that basis it is treated as transactional delivery (and arguably express consent under CASL s.10, since the buyer solicited it). Residual question for counsel: the footer carries a link to the paid product ("Check another quote", email-quote-report/index.ts:381), and the function sets no unsubscribe header and no physical mailing address. Does that link affect the s.6(6) analysis, and if the message is a CEM, do the s.6(2) form requirements apply notwithstanding that the buyer asked for it?',
    'CA-federal',
    array['report email send path'],
@@ -372,4 +386,5 @@ values
    'CA-AB',
    array['report_delivery.recipient_domain'],
    'open')
-on conflict (question) do nothing;
+  on conflict (question) do nothing;
+end $$;
