@@ -1,0 +1,57 @@
+# Founder cost statement — emails each founder their share on the 1st.
+#
+# Timed on purpose: the two fixed debits land on the 8th (Claude subscription)
+# and the 10th (Scrapfly), so a statement on the 1st gives a week of notice
+# before the first one rather than arriving after the money has gone.
+#
+# 13:00 UTC = 06:00 Mountain in summer, 07:00 in winter. Deliberately not
+# midnight UTC: that is the 30th/31st of the previous month in Alberta, and a
+# statement headed "September" arriving on 31 August is confusing.
+#
+# SAFE TO RUN EARLY. The function refuses to send unless the founder shares
+# total 10000 basis points, so while JC's and Josh's real addresses are missing
+# it returns 409 and mails nobody. Use dry_run to see the computed statement
+# without sending.
+#
+# Secrets: STATEMENT_SECRET (matching the function's), SUPABASE_FN_BASE.
+name: Founder statement
+
+on:
+  schedule:
+    - cron: "0 13 1 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute and print the statement, send nothing"
+        type: boolean
+        default: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send (or dry-run) the monthly statement
+        env:
+          STATEMENT_SECRET: ${{ secrets.STATEMENT_SECRET }}
+        run: |
+          # Scheduled runs send for real; manual runs default to dry_run=true.
+          DRY="${{ inputs.dry_run }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then DRY="false"; fi
+          URL="https://debigtyjhjamipooajhk.supabase.co/functions/v1/founder-statement?dry_run=$DRY"
+          echo "dry_run=$DRY"
+
+          CODE=$(curl -s -o /tmp/out.json -w "%{http_code}" -X POST "$URL" \
+            -H "x-statement-secret: $STATEMENT_SECRET" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "HTTP $CODE"
+          cat /tmp/out.json | head -c 4000; echo
+
+          # 409 is the deliberate refusal (shares do not total 10000), not a
+          # fault — surface it loudly but do not fail the run, or a red cron
+          # every month becomes noise that gets ignored.
+          if [ "$CODE" = "409" ]; then
+            echo "::warning::Statement refused to send — founder shares incomplete. Add the missing addresses and set active = true."
+            exit 0
+          fi
+          [ "$CODE" = "200" ] || exit 1
