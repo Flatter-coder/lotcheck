@@ -2511,12 +2511,12 @@ function ThemeToggle(){
       <button onClick={()=>toggleTheme("dark")} style={{
         background: theme==="dark" ? C.ink : "transparent",
         color: theme==="dark" ? C.paper : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
       }}>🌙 Dark</button>
       <button onClick={()=>toggleTheme("light")} style={{
         background: theme==="light" ? C.card : "transparent",
         color: theme==="light" ? C.ink : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:11.5, fontWeight:700, cursor:"pointer",
+        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
         boxShadow: theme==="light" ? "0 1px 4px rgba(51,48,90,.15)" : "none",
       }}>☀️ Bright</button>
     </div>
@@ -2548,12 +2548,12 @@ function AdminLogin(){
         <form onSubmit={handleLogin} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"40px 36px",width:360,maxWidth:"90vw",textAlign:"center",boxSizing:"border-box",boxShadow:"6px 7px 0 rgba(51,48,90,0.10)"}}>
           <div style={{display:"flex",justifyContent:"center",marginBottom:16}}><LogoMark size={56}/></div>
           <div style={{fontSize:22,fontWeight:800,color:C.ink,marginBottom:4}}>LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Admin</div>
-          <div style={{fontSize:13,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
+          <div style={{fontSize:14.5,color:C.inkFaint,marginBottom:24,lineHeight:1.5}}>Real Supabase login — leads data is protected at the database level, not just this screen.</div>
           <input type="email" placeholder="you@lotcheck.ca" value={email} onChange={e=>setEmail(e.target.value)} required
             style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:10,outline:"none",boxSizing:"border-box"}}/>
           <input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required
             style={{width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"12px 14px",color:C.ink,fontSize:14,marginBottom:14,outline:"none",boxSizing:"border-box"}}/>
-          {err&&<div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:8,padding:"10px 14px",fontSize:13,color:C.coralInk,marginBottom:14,textAlign:"left"}}>{err}</div>}
+          {err&&<div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:8,padding:"10px 14px",fontSize:14.5,color:C.coralInk,marginBottom:14,textAlign:"left"}}>{err}</div>}
           <button type="submit" disabled={loading}
             style={{width:"100%",background:loading?C.tealInk:C.teal,border:"none",borderRadius:12,padding:"13px",color:"#fff",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:loading?"default":"pointer"}}>
             {loading?"Signing in…":"Sign in →"}
@@ -2571,7 +2571,7 @@ function AdminTabButton({active,onClick,children}){
     <button onClick={onClick} style={{
       background: active ? C.card : "transparent",
       border: "none", borderRadius: 8, padding: "7px 14px",
-      color: active ? C.ink : C.inkFaint, fontSize: 13, fontWeight: 700,
+      color: active ? C.ink : C.inkFaint, fontSize: 14.5, fontWeight: 700,
       cursor: "pointer", boxShadow: active ? "0 2px 6px rgba(51,48,90,.12)" : "none",
     }}>{children}</button>
   );
@@ -2593,14 +2593,14 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
+        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
           DEALER NETWORK · {dealersLoading?"loading…":`${dealers.length} dealer${dealers.length===1?"":"s"}`}
         </div>
-        <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>+ Add Dealer</button>
+        <button onClick={onAdd} style={{background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:13.5,fontWeight:800,cursor:"pointer"}}>+ Add Dealer</button>
       </div>
 
       {dealersLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
       ) : dealers.length===0 ? (
         <AdminEmpty icon="🏢">No dealers yet — add your first one</AdminEmpty>
       ) : (
@@ -2609,35 +2609,35 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
             <div key={d.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
               <div>
                 <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{d.name}</div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
+                <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>{d.contact||""} {d.city?`· ${d.city}, ${d.province||""}`:""}</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
                 {d.amvic_number&&(
-                  <div style={{fontSize:11,marginTop:4,fontWeight:800,color:d.amvic_verified?C.tealInk:C.butterInk}}>
+                  <div style={{fontSize:13,marginTop:4,fontWeight:800,color:d.amvic_verified?C.tealInk:C.butterInk}}>
                     {d.amvic_verified?"✓":"⚠"} AMVIC {d.amvic_number}{!d.amvic_verified&&" -- unverified"}
                   </div>
                 )}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!d.live} onChange={e=>onToggle(d.id,"live",e.target.checked)}/> Live lot
                 </label>
-                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.inkSoft,cursor:"pointer"}}>
+                <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!d.featured} onChange={e=>onToggle(d.id,"featured",e.target.checked)}/> Featured ($300/mo)
                 </label>
-                {d.sold_count>0 && <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800}}>{d.sold_count} sold</span>}
-                <button onClick={()=>onEdit(d)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Edit</button>
-                <button onClick={()=>onDelete(d.id,d.name)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Delete</button>
+                {d.sold_count>0 && <span style={{background:C.tealBg,color:C.tealInk,border:`1px solid ${C.teal}55`,borderRadius:6,padding:"3px 8px",fontSize:13,fontWeight:800}}>{d.sold_count} sold</span>}
+                <button onClick={()=>onEdit(d)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Edit</button>
+                <button onClick={()=>onDelete(d.id,d.name)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Delete</button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         DEALER SUBMITTED INVENTORY · {dealerListingsLoading?"loading…":`${dealerListings.length} vehicle${dealerListings.length===1?"":"s"}`}
       </div>
       {dealerListingsLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
       ) : dealerListings.length===0 ? (
         <AdminEmpty icon="🚗">No dealer submissions yet</AdminEmpty>
       ) : (
@@ -2649,17 +2649,17 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
               <div key={v.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div>
                   <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{v.year} {v.make} {v.model}</div>
-                  <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
+                  <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>{v.dealer} · ${(v.price||0).toLocaleString()} · {v.plan==="commission"?"1% commission":"$100/lead"}</div>
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:8}}>
                   <span style={{
                     background: isSold?C.paper2:isLive?C.tealBg:C.paper2,
                     color: isSold?C.ink:isLive?C.tealInk:C.inkFaint,
                     border: `1px solid ${isSold?C.line:isLive?C.teal+"55":C.line}`,
-                    borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:800,
+                    borderRadius:6,padding:"3px 8px",fontSize:13,fontWeight:800,
                   }}>{isSold?"✓ Sold":isLive?"● Live":"Pending"}</span>
-                  {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"5px 10px",color:C.tealInk,fontSize:11,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
-                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:11,cursor:"pointer"}}>Publish</button>}
+                  {!isSold && <button onClick={()=>onMarkSold(v)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"5px 10px",color:C.tealInk,fontSize:13,cursor:"pointer"}}>✓ Mark Sold (${commission.toLocaleString()})</button>}
+                  {!isLive && !isSold && <button onClick={()=>onPublish(v.id)} style={{background:"none",border:`1px solid ${C.line}`,borderRadius:6,padding:"5px 10px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Publish</button>}
                 </div>
               </div>
             );
@@ -2675,11 +2675,11 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
   const {C}=useAdminTheme();
   return (
     <div>
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         PENDING REVIEW · {reviewLoading?"loading…":`${reviewListings.length} listing${reviewListings.length===1?"":"s"}`}
       </div>
       {reviewLoading ? (
-        <div style={{color:C.inkFaint,fontSize:13}}>Loading…</div>
+        <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
       ) : reviewListings.length===0 ? (
         <AdminEmpty icon="✅">No listings pending review — pipeline approved everything</AdminEmpty>
       ) : (
@@ -2692,12 +2692,12 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
               <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
                 <div style={{flex:1,minWidth:200}}>
                   <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{l.name}</div>
-                  <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:800}}>{score}</span></div>
-                  {flags.map((f,i)=>(<div key={i} style={{fontSize:11,color:C.butterInk,marginTop:2}}>⚠ {f}</div>))}
+                  <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:800}}>{score}</span></div>
+                  {flags.map((f,i)=>(<div key={i} style={{fontSize:13,color:C.butterInk,marginTop:2}}>⚠ {f}</div>))}
                 </div>
                 <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"6px 12px",color:C.tealInk,fontSize:12,cursor:"pointer"}}>✓ Approve</button>
-                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:`1px solid ${C.coral}`,borderRadius:6,padding:"6px 12px",color:C.coralInk,fontSize:12,cursor:"pointer"}}>✗ Reject</button>
+                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"6px 12px",color:C.tealInk,fontSize:13.5,cursor:"pointer"}}>✓ Approve</button>
+                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:`1px solid ${C.coral}`,borderRadius:6,padding:"6px 12px",color:C.coralInk,fontSize:13.5,cursor:"pointer"}}>✗ Reject</button>
                 </div>
               </div>
             );
@@ -2705,7 +2705,7 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
         RECENTLY REJECTED · {rejectedListings.length}
       </div>
       {rejectedListings.length===0 ? (
@@ -2713,10 +2713,10 @@ function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onRe
       ) : (
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
           {rejectedListings.map((l,i)=>(
-            <div key={i} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:13}}>
+            <div key={i} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:14.5}}>
               <span style={{color:C.ink}}>{l.name}</span>
               <span style={{color:C.coralInk,fontWeight:800}}>{l.verification_score||0}</span>
-              <span style={{color:C.inkFaint,fontSize:11}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
+              <span style={{color:C.inkFaint,fontSize:13}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
             </div>
           ))}
         </div>
@@ -2773,7 +2773,7 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
     return (
       <>
         <div style={{fontSize:size,fontWeight:800,color:color||C.ink}}>${usd.toFixed(4)} <span style={{fontSize:size*0.5,fontWeight:700,color:C.inkFaint}}>USD</span></div>
-        <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>≈ ${(usd*USD_TO_CAD).toFixed(4)} CAD</div>
+        <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>≈ ${(usd*USD_TO_CAD).toFixed(4)} CAD</div>
       </>
     );
   }
@@ -2783,11 +2783,11 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
           <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>${featuredRev.toLocaleString()}</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Featured listings/mo — real</div>
+          <div style={{fontSize:13.5,color:C.inkFaint}}>Featured listings/mo — real</div>
         </div>
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
           <div style={{fontSize:26,fontWeight:800,color:C.inkFaint}}>$0</div>
-          <div style={{fontSize:12,color:C.inkFaint}}>Lead referral fees</div>
+          <div style={{fontSize:13.5,color:C.inkFaint}}>Lead referral fees</div>
         </div>
       </div>
       <AdminEmpty>
@@ -2800,7 +2800,7 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
       {featured.length>0 && (
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginTop:20,marginBottom:28}}>
           {featured.map(d=>(
-            <div key={d.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:13}}>
+            <div key={d.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:14.5}}>
               <span style={{color:C.ink}}>{d.name}</span>
               <span style={{color:C.tealInk,fontWeight:800}}>$300/mo</span>
             </div>
@@ -2808,10 +2808,10 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
         </div>
       )}
 
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:2}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:2}}>
         QUOTE CHECK COST · {apiUsageLoading?"loading…":`${apiUsage.length} logged call${apiUsage.length===1?"":"s"}`}
       </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:10}}>USD is what you're actually billed — CAD is an estimate at a fixed 1 USD = {USD_TO_CAD} CAD rate (July 15, 2026), not a live conversion.</div>
+      <div style={{fontSize:13,color:C.inkFaint,marginBottom:10}}>USD is what you're actually billed — CAD is an estimate at a fixed 1 USD = {USD_TO_CAD} CAD rate (July 15, 2026), not a live conversion.</div>
       {!apiUsageLoading&&apiUsage.length===0?(
         <AdminEmpty icon="📊">
           No usage logged yet — this fills in the moment someone runs a real quote through Quote Check, once the analyze-quote function's logging is live.
@@ -2821,20 +2821,20 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
             {[["Today",costToday],["Last 7 days",costWeek],["Last 30 days",costMonth]].map(([label,stats])=>(
               <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-                <div style={{fontSize:12,color:C.inkFaint,marginBottom:6}}>{label}</div>
+                <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:6}}>{label}</div>
                 <CostFigure usd={stats.cost}/>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:6}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
               </div>
             ))}
           </div>
 
           <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Cost over time</div>
+              <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>Cost over time</div>
               <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
                 {[["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
                   <button key={key} onClick={()=>setCostGranularity(key)}
-                    style={{background:costGranularity===key?C.tealBg:"transparent",color:costGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    style={{background:costGranularity===key?C.tealBg:"transparent",color:costGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
                     {label}
                   </button>
                 ))}
@@ -2843,9 +2843,9 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
             <div style={{height:180}}>
               <ResponsiveContainer>
                 <BarChart data={bucketedCost} margin={{top:4,right:4,bottom:0,left:0}}>
-                  <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                  <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v.toFixed(2)}`}/>
-                  <Tooltip formatter={(v)=>[`$${Number(v).toFixed(4)} USD · $${(Number(v)*USD_TO_CAD).toFixed(4)} CAD`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:11}}/>
+                  <XAxis dataKey="label" tick={{fontSize:12,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                  <YAxis tick={{fontSize:13,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v.toFixed(2)}`}/>
+                  <Tooltip formatter={(v)=>[`$${Number(v).toFixed(4)} USD · $${(Number(v)*USD_TO_CAD).toFixed(4)} CAD`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:13.5,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:13}}/>
                   <Bar dataKey="cost" radius={[3,3,0,0]} fill={C.teal}/>
                 </BarChart>
               </ResponsiveContainer>
@@ -2853,28 +2853,28 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
           </div>
 
           <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:12}}>
-            <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Cost vs. subscription — estimate</div>
-            <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
+            <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Cost vs. subscription — estimate</div>
+            <div style={{fontSize:13,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
               There's no real subscriber billing yet — type in a subscriber count to see an estimated margin. This is a manual stand-in, not live billing data.
             </div>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-              <label style={{fontSize:12,color:C.inkSoft,whiteSpace:"nowrap"}}>Subscribers at $9.99/mo:</label>
+              <label style={{fontSize:13.5,color:C.inkSoft,whiteSpace:"nowrap"}}>Subscribers at $9.99/mo:</label>
               <input type="number" min="0" value={subscribers} onChange={e=>updateSubscribers(e.target.value)}
-                style={{width:90,background:C.paper,border:`2px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.ink,fontSize:13,outline:"none"}}/>
+                style={{width:90,background:C.paper,border:`2px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.ink,fontSize:14.5,outline:"none"}}/>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
               <div>
-                <div style={{fontSize:18,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)} <span style={{fontSize:11,fontWeight:700,color:C.inkFaint}}>USD</span></div>
-                <div style={{fontSize:11,color:C.inkFaint}}>≈ ${(assumedRevenue*USD_TO_CAD).toFixed(2)} CAD</div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Assumed monthly revenue</div>
+                <div style={{fontSize:18,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)} <span style={{fontSize:13,fontWeight:700,color:C.inkFaint}}>USD</span></div>
+                <div style={{fontSize:13,color:C.inkFaint}}>≈ ${(assumedRevenue*USD_TO_CAD).toFixed(2)} CAD</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Assumed monthly revenue</div>
               </div>
               <div>
                 <CostFigure usd={costMonth.cost} size={18}/>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Actual cost, last 30 days</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Actual cost, last 30 days</div>
               </div>
               <div>
                 <CostFigure usd={Math.abs(margin)} size={18} color={margin>=0?C.tealInk:C.coralInk}/>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Estimated margin{margin<0?" (loss)":""}</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Estimated margin{margin<0?" (loss)":""}</div>
               </div>
             </div>
           </div>
@@ -2933,23 +2933,23 @@ function ProfitTrackerTab(){
     return {...tier,count,revenueUsd,revenueCad,profitUsd,profitCad};
   });
 
-  const th={textAlign:"right",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"8px 10px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4};
+  const th={textAlign:"right",fontSize:12,color:C.inkFaint,fontWeight:800,padding:"8px 10px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4};
   const td={textAlign:"right",padding:"12px 10px",borderBottom:`1px solid ${C.line}`};
 
   return (
     <div>
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>QUOTE CHECK PROFIT</div>
-      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.coralInk,fontWeight:700,marginBottom:16,lineHeight:1.5}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>QUOTE CHECK PROFIT</div>
+      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:13.5,color:C.coralInk,fontWeight:700,marginBottom:16,lineHeight:1.5}}>
         ⚠ "Checks sold" below are sample placeholders, not real data -- there's no purchase-logging table yet, so nothing tracks actual sales per tier today. The pricing and profit math itself is real and will be correct the moment real counts flow in.
       </div>
 
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:16,marginBottom:20}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Checks sold & profit</div>
+          <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>Checks sold & profit</div>
           <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
             {[["day","Day"],["week","Week"],["month","Month"],["year","Year"]].map(([key,label])=>(
               <button key={key} onClick={()=>setPeriod(key)}
-                style={{background:period===key?C.tealBg:"transparent",color:period===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                style={{background:period===key?C.tealBg:"transparent",color:period===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
                 {label}
               </button>
             ))}
@@ -2969,36 +2969,36 @@ function ProfitTrackerTab(){
             {rows.map(r=>(
               <tr key={r.key}>
                 <td style={{padding:"12px 10px",borderBottom:`1px solid ${C.line}`}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.ink}}>{r.name}</div>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${r.price.toFixed(2)} each</div>
+                  <div style={{fontSize:14.5,fontWeight:800,color:C.ink}}>{r.name}</div>
+                  <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>${r.price.toFixed(2)} each</div>
                 </td>
                 <td style={{...td,fontFamily:"monospace",fontSize:14,fontWeight:700,color:C.ink}}>{r.count.toLocaleString()}</td>
                 <td style={td}>
-                  <div style={{fontFamily:"monospace",fontSize:13,fontWeight:700,color:C.ink}}>${fmt(r.revenueUsd)}</div>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(r.revenueCad)} CAD</div>
+                  <div style={{fontFamily:"monospace",fontSize:14.5,fontWeight:700,color:C.ink}}>${fmt(r.revenueUsd)}</div>
+                  <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>${fmt(r.revenueCad)} CAD</div>
                 </td>
                 <td style={td}>
-                  <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.tealInk}}>${fmt(r.profitUsd)}</div>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(r.profitCad)} CAD</div>
+                  <div style={{fontFamily:"monospace",fontSize:14.5,fontWeight:800,color:C.tealInk}}>${fmt(r.profitUsd)}</div>
+                  <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>${fmt(r.profitCad)} CAD</div>
                 </td>
               </tr>
             ))}
             <tr style={{background:C.paper2}}>
-              <td style={{padding:"12px 10px",fontWeight:800,color:C.butterInk,fontSize:13}}>Total</td>
+              <td style={{padding:"12px 10px",fontWeight:800,color:C.butterInk,fontSize:14.5}}>Total</td>
               <td style={{textAlign:"right",padding:"12px 10px",fontFamily:"monospace",fontSize:14,fontWeight:800,color:C.ink}}>{totalCount.toLocaleString()}</td>
               <td style={{textAlign:"right",padding:"12px 10px"}}>
-                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.ink}}>${fmt(totalRevUsd)}</div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(totalRevCad)} CAD</div>
+                <div style={{fontFamily:"monospace",fontSize:14.5,fontWeight:800,color:C.ink}}>${fmt(totalRevUsd)}</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>${fmt(totalRevCad)} CAD</div>
               </td>
               <td style={{textAlign:"right",padding:"12px 10px"}}>
-                <div style={{fontFamily:"monospace",fontSize:13,fontWeight:800,color:C.tealInk}}>${fmt(totalProfitUsd)}</div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>${fmt(totalProfitCad)} CAD</div>
+                <div style={{fontFamily:"monospace",fontSize:14.5,fontWeight:800,color:C.tealInk}}>${fmt(totalProfitUsd)}</div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>${fmt(totalProfitCad)} CAD</div>
               </td>
             </tr>
           </tbody>
         </table>
 
-        <div style={{fontSize:11,color:C.inkFaint,marginTop:12,lineHeight:1.6}}>
+        <div style={{fontSize:13,color:C.inkFaint,marginTop:12,lineHeight:1.6}}>
           Profit basis: ${QC_COST_PER_QUOTE} USD cost per quote check (current intro API pricing) × checks actually delivered per tier -- e.g. a "5 checks" bundle costs 5× that per unit sold. CAD figures use the same fixed {USD_TO_CAD} snapshot rate already used above in Cost over time, not a live rate.
         </div>
       </div>
@@ -3097,23 +3097,23 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
   const cols=ECON_WINDOWS.map(([win,label])=>({win,label,d:derive(win)}));
 
   const cardStyle={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
-  const th={textAlign:"right",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 12px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4,whiteSpace:"nowrap"};
-  const td={textAlign:"right",padding:"12px",borderBottom:`1px solid ${C.line}`,fontFamily:"monospace",fontSize:13};
-  const RealTag=()=><span style={{fontSize:9,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>REAL</span>;
-  const EstTag=()=><span style={{fontSize:9,fontWeight:800,color:C.butterInk,background:C.butter+"55",borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>EST.</span>;
+  const th={textAlign:"right",fontSize:12,color:C.inkFaint,fontWeight:800,padding:"9px 12px",borderBottom:`1px solid ${C.line}`,letterSpacing:0.4,whiteSpace:"nowrap"};
+  const td={textAlign:"right",padding:"12px",borderBottom:`1px solid ${C.line}`,fontFamily:"monospace",fontSize:14.5};
+  const RealTag=()=><span style={{fontSize:11,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>REAL</span>;
+  const EstTag=()=><span style={{fontSize:11,fontWeight:800,color:C.butterInk,background:C.butter+"55",borderRadius:4,padding:"1px 5px",marginLeft:6,letterSpacing:0.3,fontFamily:"'Nunito',sans-serif"}}>EST.</span>;
 
   if(econLoading){
     return <AdminEmpty>Loading unit economics…</AdminEmpty>;
   }
   if(econError||!econ){
     return (
-      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+      <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:14.5,color:C.coralInk,lineHeight:1.6}}>
         <div style={{fontWeight:800,marginBottom:6}}>Couldn't load unit economics.</div>
         <div>{econError||"No data returned."}</div>
         <div style={{marginTop:8,color:C.inkFaint}}>
           This RPC is admin-gated. Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260730_admin_economics.sql</code> is applied and your login email is listed in <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>admin_config.admin_emails</code>.
         </div>
-        <button onClick={onRefresh} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+        <button onClick={onRefresh} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:13.5,fontWeight:800,cursor:"pointer"}}>Retry</button>
       </div>
     );
   }
@@ -3121,26 +3121,26 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>UNIT ECONOMICS</div>
-        <button onClick={onRefresh} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>UNIT ECONOMICS</div>
+        <button onClick={onRefresh} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:13.5,fontWeight:700,cursor:"pointer"}}>Refresh</button>
       </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+      <div style={{fontSize:13,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
         Calendar-day windows (DB timezone). Check counts and purchases are <b style={{color:C.tealInk}}>real</b> (from the credit ledger + free-check tally); modeled $ figures multiply those counts by the cost-per-check below. Revenue is <b style={{color:C.butterInk}}>estimated</b> from purchase grants — there's no Stripe billing yet. Pack prices are treated as USD (matching the Profit tab); CAD shown at the fixed {USD_TO_CAD} snapshot rate.
       </div>
 
       {/* Controls: cost-per-check */}
       <div style={{...cardStyle,marginBottom:14,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:6}}>Cost per check <span style={{color:C.inkFaint,fontWeight:600}}>(USD — drives every modeled $ figure)</span></div>
+          <div style={{fontSize:13.5,fontWeight:800,color:C.inkSoft,marginBottom:6}}>Cost per check <span style={{color:C.inkFaint,fontWeight:600}}>(USD — drives every modeled $ figure)</span></div>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:18,fontWeight:800,color:C.inkFaint}}>$</span>
             <input type="number" min="0" step="0.01" value={costPerCheck}
               onChange={e=>updateCpc(e.target.value)}
               style={{width:120,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:16,fontWeight:700,outline:"none"}}/>
-            <span style={{fontSize:12,color:C.inkFaint}}>≈ {cad(costPerCheck)} each</span>
+            <span style={{fontSize:13.5,color:C.inkFaint}}>≈ {cad(costPerCheck)} each</span>
           </div>
         </div>
-        <div style={{fontSize:11,color:C.inkFaint,maxWidth:340,lineHeight:1.5}}>
+        <div style={{fontSize:13,color:C.inkFaint,maxWidth:340,lineHeight:1.5}}>
           A modeling assumption you set, saved on this device. Use it to fill the gap where real API cost isn't logged (the PDF path doesn't write to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code>).
         </div>
       </div>
@@ -3148,8 +3148,8 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
       {/* Free-check breaker status + editable cap */}
       <div style={{...cardStyle,marginBottom:20}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:12}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Free-check breaker <RealTag/></div>
-          <div style={{fontSize:12,color:C.inkFaint}}>anonymous free checks used today</div>
+          <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>Free-check breaker <RealTag/></div>
+          <div style={{fontSize:13.5,color:C.inkFaint}}>anonymous free checks used today</div>
         </div>
         {(()=>{
           const used=Number(status?.used||0);
@@ -3161,23 +3161,23 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
               <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:8}}>
                 <span style={{fontSize:30,fontWeight:800,color:atCap?C.coralInk:C.ink,fontFamily:"monospace"}}>{used.toLocaleString()}</span>
                 <span style={{fontSize:16,color:C.inkFaint}}>/ {lim<=0?"disabled":lim.toLocaleString()}</span>
-                {atCap&&<span style={{fontSize:11,fontWeight:800,color:C.coralInk,background:C.coralBg,borderRadius:5,padding:"2px 7px"}}>AT CAPACITY</span>}
+                {atCap&&<span style={{fontSize:13,fontWeight:800,color:C.coralInk,background:C.coralBg,borderRadius:5,padding:"2px 7px"}}>AT CAPACITY</span>}
               </div>
               <div style={{background:C.paper2,borderRadius:5,height:8,overflow:"hidden",marginBottom:16}}>
                 <div style={{width:`${pct}%`,height:"100%",background:atCap?C.coral:C.teal}}/>
               </div>
               <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
                 <div>
-                  <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Daily free-check cap</div>
+                  <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Daily free-check cap</div>
                   <input type="number" min="0" step="1" value={capInput}
                     onChange={e=>setCapInput(e.target.value)}
                     style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
                 </div>
                 <button onClick={saveCap} disabled={savingCap||capInput===String(lim)}
-                  style={{background:(savingCap||capInput===String(lim))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(lim))?"default":"pointer"}}>
+                  style={{background:(savingCap||capInput===String(lim))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:14.5,fontWeight:800,cursor:(savingCap||capInput===String(lim))?"default":"pointer"}}>
                   {savingCap?"Saving…":"Save cap"}
                 </button>
-                <div style={{fontSize:11,color:C.inkFaint,maxWidth:300,lineHeight:1.5}}>
+                <div style={{fontSize:13,color:C.inkFaint,maxWidth:300,lineHeight:1.5}}>
                   Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.free_checks_per_day</code>. 0 disables anonymous free checks entirely.
                 </div>
               </div>
@@ -3203,13 +3203,13 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
             ].map(row=>(
               <tr key={row.label}>
                 <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>{row.label}{row.tag==="real"?<RealTag/>:<EstTag/>}</div>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>{row.sub}</div>
+                  <div style={{fontSize:14.5,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>{row.label}{row.tag==="real"?<RealTag/>:<EstTag/>}</div>
+                  <div style={{fontSize:13,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>{row.sub}</div>
                 </td>
                 {cols.map(c=>(
                   <td key={c.win} style={{...td,color:C.ink}}>
                     <div style={{fontWeight:800,fontSize:15}}>{row.count(c.d).toLocaleString()}</div>
-                    <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{fmtUsd(row.cost(c.d))} <span style={{opacity:0.7}}>modeled</span></div>
+                    <div style={{fontSize:13,color:C.inkFaint,marginTop:3}}>{fmtUsd(row.cost(c.d))} <span style={{opacity:0.7}}>modeled</span></div>
                   </td>
                 ))}
               </tr>
@@ -3217,21 +3217,21 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
             {/* Estimated revenue */}
             <tr style={{background:C.paper2}}>
               <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. revenue<EstTag/></div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>from purchase grants</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. revenue<EstTag/></div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>from purchase grants</div>
               </td>
               {cols.map(c=>(
                 <td key={c.win} style={{...td}}>
                   <div style={{fontWeight:800,fontSize:15,color:C.ink}}>{fmtUsd(c.d.revenue)}</div>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:3}}>{c.d.purchaseN} purchase{c.d.purchaseN===1?"":"s"} · {cad(c.d.revenue)}</div>
+                  <div style={{fontSize:13,color:C.inkFaint,marginTop:3}}>{c.d.purchaseN} purchase{c.d.purchaseN===1?"":"s"} · {cad(c.d.revenue)}</div>
                 </td>
               ))}
             </tr>
             {/* Gross margin on paid */}
             <tr>
               <td style={{padding:"12px",borderBottom:`1px solid ${C.line}`}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. gross margin<EstTag/></div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − paid-check cost</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. gross margin<EstTag/></div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − paid-check cost</div>
               </td>
               {cols.map(c=>(
                 <td key={c.win} style={{...td}}>
@@ -3242,8 +3242,8 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
             {/* Net after free/shared subsidy */}
             <tr>
               <td style={{padding:"12px"}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. net after subsidy<EstTag/></div>
-                <div style={{fontSize:11,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − ALL check cost</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.ink,fontFamily:"'Nunito',sans-serif"}}>Est. net after subsidy<EstTag/></div>
+                <div style={{fontSize:13,color:C.inkFaint,marginTop:2,fontFamily:"'Nunito',sans-serif"}}>revenue − ALL check cost</div>
               </td>
               {cols.map(c=>(
                 <td key={c.win} style={{...td,borderBottom:"none"}}>
@@ -3256,23 +3256,23 @@ function UnitEconomicsTab({econ, econLoading, econError, apiUsage, apiUsageLoadi
       </div>
 
       {/* API spend: logged (real, partial) vs modeled */}
-      <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:8}}>API SPEND · LOGGED vs MODELED</div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.6,maxWidth:760}}>
+      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:8}}>API SPEND · LOGGED vs MODELED</div>
+      <div style={{fontSize:13,color:C.inkFaint,marginBottom:12,lineHeight:1.6,maxWidth:760}}>
         <b style={{color:C.tealInk}}>Logged</b> is the real cost written to <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>api_usage_log</code> — but only the URL analyze function logs it; the <b>PDF path doesn't</b>, so this <b>undercounts</b>. <b style={{color:C.butterInk}}>Modeled</b> = every check (free + shared + paid) × cost-per-check, a fuller estimate.
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
         {cols.map(c=>(
           <div key={c.win} style={cardStyle}>
-            <div style={{fontSize:12,color:C.inkFaint,marginBottom:8}}>{c.label}</div>
+            <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:8}}>{c.label}</div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:6}}>
-              <span style={{fontSize:11,fontWeight:800,color:C.tealInk}}>LOGGED{apiUsageLoading?"…":""}</span>
+              <span style={{fontSize:13,fontWeight:800,color:C.tealInk}}>LOGGED{apiUsageLoading?"…":""}</span>
               <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.logged)}</span>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
-              <span style={{fontSize:11,fontWeight:800,color:C.butterInk}}>MODELED</span>
+              <span style={{fontSize:13,fontWeight:800,color:C.butterInk}}>MODELED</span>
               <span style={{fontFamily:"monospace",fontSize:15,fontWeight:800,color:C.ink}}>{fmtUsd(c.d.modeledSpend)}</span>
             </div>
-            <div style={{fontSize:11,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:8}}>
+            <div style={{fontSize:13,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:8}}>
               {c.d.totalChecks.toLocaleString()} check{c.d.totalChecks===1?"":"s"} total ({c.d.free}f · {c.d.shared}s · {c.d.paid}p)
             </div>
           </div>
@@ -3286,8 +3286,8 @@ function DealerModal({dealer,onSave,onClose}){
   const [form,setForm]=useState(dealer||{name:"",contact:"",phone:"",email:"",city:"",province:"AB",makes:"",notes:"",live:false,featured:false,amvic_number:"",amvic_verified:false,amvic_verified_at:null});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const {C}=useAdminTheme();
-  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:13,marginBottom:10,outline:"none",boxSizing:"border-box"};
-  const labelStyle={fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
+  const inputStyle={width:"100%",background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"11px 13px",color:C.ink,fontSize:14.5,marginBottom:10,outline:"none",boxSizing:"border-box"};
+  const labelStyle={fontSize:13,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5,display:"block"};
 
   // Format sanity-check only -- confirmed from 2 real AMVIC business
   // licence numbers found in an actual public AMVIC document (e.g.
@@ -3334,23 +3334,23 @@ function DealerModal({dealer,onSave,onClose}){
             placeholder="B1022490"
           />
           {amvicTrimmed&&!amvicFormatLooksRight&&(
-            <div style={{fontSize:11,color:C.coralInk,marginBottom:8,lineHeight:1.4}}>
+            <div style={{fontSize:13,color:C.coralInk,marginBottom:8,lineHeight:1.4}}>
               Doesn't match the usual AMVIC format (a "B" followed by 7 digits) -- that's only based on 2 confirmed real examples though, so this isn't a hard block. Worth a second look before saving.
             </div>
           )}
-          <div style={{fontSize:11,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+          <div style={{fontSize:13,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
             AMVIC has no public API to auto-verify this against -- a correctly formatted number isn't proof of an active licence. Check it yourself:
           </div>
           <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noreferrer"
-            style={{fontSize:12,fontWeight:800,color:C.tealInk,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5,marginBottom:12}}>
+            style={{fontSize:13.5,fontWeight:800,color:C.tealInk,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5,marginBottom:12}}>
             Verify on AMVIC's public search →
           </a>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14.5,color:C.inkSoft,cursor:"pointer"}}>
             <input type="checkbox" checked={!!form.amvic_verified} onChange={e=>set("amvic_verified",e.target.checked)}/>
             I checked AMVIC's public search and confirmed this licence is active
           </label>
           {form.amvic_verified&&form.amvic_verified_at&&(
-            <div style={{fontSize:11,color:C.tealInk,marginTop:6}}>
+            <div style={{fontSize:13,color:C.tealInk,marginTop:6}}>
               ✓ Verified {new Date(form.amvic_verified_at).toLocaleDateString("en-CA")}
             </div>
           )}
@@ -3359,10 +3359,10 @@ function DealerModal({dealer,onSave,onClose}){
         <label style={labelStyle}>Notes</label>
         <input style={inputStyle} value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="Met at Costco"/>
         <div style={{display:"flex",gap:16,marginBottom:16,marginTop:6}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14.5,color:C.inkSoft,cursor:"pointer"}}>
             <input type="checkbox" checked={form.live} onChange={e=>set("live",e.target.checked)}/> Live lot
           </label>
-          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:C.inkSoft,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:14.5,color:C.inkSoft,cursor:"pointer"}}>
             <input type="checkbox" checked={form.featured} onChange={e=>set("featured",e.target.checked)}/> Featured ($300/mo)
           </label>
         </div>
@@ -3427,7 +3427,7 @@ function VisitorMap({pageViews}){
       <div style={{textAlign:"center",padding:"32px 16px",color:C.inkFaint}}>
         <div style={{fontSize:26,marginBottom:8}}>🗺️</div>
         <div style={{fontWeight:700,color:C.inkSoft,marginBottom:4}}>No located visits yet</div>
-        <div style={{fontSize:12}}>Geolocation just went live — every visit before this update was recorded without it. This fills in from here forward.</div>
+        <div style={{fontSize:13.5}}>Geolocation just went live — every visit before this update was recorded without it. This fills in from here forward.</div>
       </div>
     );
   }
@@ -3451,17 +3451,17 @@ function VisitorMap({pageViews}){
           })}
         </svg>
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.inkFaint,marginTop:8,maxWidth:640,margin:"8px auto 0"}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:C.inkFaint,marginTop:8,maxWidth:640,margin:"8px auto 0"}}>
         <span>{located.length.toLocaleString()} of {pageViews.length.toLocaleString()} visits located</span>
         <span>Dot size = relative visit volume</span>
       </div>
       <div style={{marginTop:16,maxWidth:640,margin:"16px auto 0"}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,marginBottom:8}}>Top locations</div>
+        <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,marginBottom:8}}>Top locations</div>
         {locations.slice(0,8).map((loc,i)=>{
           const pct=Math.round((loc.count/located.length)*100);
           return(
             <div key={i} style={{marginBottom:6}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13.5,marginBottom:2}}>
                 <span style={{color:C.ink,fontWeight:700}}>{loc.city||"Unknown"}{loc.country?`, ${loc.country}`:""}</span>
                 <span style={{color:C.inkFaint}}>{loc.count} · {pct}%</span>
               </div>
@@ -3577,21 +3577,21 @@ function GiveCheckTab(){
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>GIVE A FREE CHECK</div>
-        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>GIVE A FREE CHECK</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:13.5,fontWeight:700,cursor:"pointer"}}>Refresh</button>
       </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+      <div style={{fontSize:13,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
         Mint a single-use link to hand a friend or family a free Quote Check. Text them the link — they tap it, sign in, and the check lands on their account. A leaked or forwarded link can't be reused. Capped per day (editable below).
       </div>
 
       {err&&(
-        <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:12,color:C.coralInk,marginBottom:14,lineHeight:1.5}}>{err}</div>
+        <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:13.5,color:C.coralInk,marginBottom:14,lineHeight:1.5}}>{err}</div>
       )}
 
       {/* Mint control + today's allowance */}
       <div style={{...card,marginBottom:14,display:"flex",alignItems:"center",gap:18,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Left to give today</div>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Left to give today</div>
           <div style={{display:"flex",alignItems:"baseline",gap:8}}>
             <span style={{fontSize:32,fontWeight:900,color:remaining>0?C.ink:C.coralInk,fontFamily:"monospace"}}>{remaining}</span>
             <span style={{fontSize:15,color:C.inkFaint}}>/ {cap}</span>
@@ -3601,26 +3601,26 @@ function GiveCheckTab(){
           style={{background:canMint?C.teal:C.inkFaint,border:"none",borderRadius:12,padding:"13px 22px",color:"#fff",fontSize:14,fontWeight:800,cursor:canMint?"pointer":"default"}}>
           {minting?"Creating…":"Create free-check link"}
         </button>
-        {remaining<=0&&<div style={{fontSize:12,color:C.coralInk,fontWeight:700}}>Daily limit reached — resets tomorrow, or raise the cap below.</div>}
-        {copied&&<div style={{fontSize:12,color:C.tealInk,fontWeight:800}}>Link copied — paste it into a text</div>}
+        {remaining<=0&&<div style={{fontSize:13.5,color:C.coralInk,fontWeight:700}}>Daily limit reached — resets tomorrow, or raise the cap below.</div>}
+        {copied&&<div style={{fontSize:13.5,color:C.tealInk,fontWeight:800}}>Link copied — paste it into a text</div>}
       </div>
 
       {/* Links list */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:16}}>
         {codes.length===0?(
-          <div style={{padding:"22px 18px",fontSize:13,color:C.inkFaint,textAlign:"center"}}>No links yet — create one above.</div>
+          <div style={{padding:"22px 18px",fontSize:14.5,color:C.inkFaint,textAlign:"center"}}>No links yet — create one above.</div>
         ):codes.map((c)=>{
           const st=statusStyle(c.status);
           const active=c.status==="active";
           return (
             <div key={c.code} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",padding:"12px 16px",borderBottom:`1px solid ${C.line}`}}>
               <span style={{fontFamily:"monospace",fontSize:14,fontWeight:800,color:C.ink,letterSpacing:1}}>{c.code}</span>
-              <span style={{fontSize:11,fontWeight:800,color:st.color,background:st.bg,borderRadius:5,padding:"2px 8px"}}>{st.label}</span>
-              <span style={{flex:"1 1 120px",fontSize:11,color:C.inkFaint,fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{linkFor(c.code)}</span>
+              <span style={{fontSize:13,fontWeight:800,color:st.color,background:st.bg,borderRadius:5,padding:"2px 8px"}}>{st.label}</span>
+              <span style={{flex:"1 1 120px",fontSize:13,color:C.inkFaint,fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{linkFor(c.code)}</span>
               {active&&(
                 <>
-                  <button onClick={()=>copyLink(c.code)} style={{background:copied===c.code?C.tealBg:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:copied===c.code?C.tealInk:C.inkSoft,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{copied===c.code?"Copied":"Copy link"}</button>
-                  <button onClick={()=>revoke(c.code)} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.inkFaint,fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Cancel</button>
+                  <button onClick={()=>copyLink(c.code)} style={{background:copied===c.code?C.tealBg:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:copied===c.code?C.tealInk:C.inkSoft,fontSize:13.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>{copied===c.code?"Copied":"Copy link"}</button>
+                  <button onClick={()=>revoke(c.code)} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.inkFaint,fontSize:13.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Cancel</button>
                 </>
               )}
             </div>
@@ -3631,23 +3631,23 @@ function GiveCheckTab(){
       {/* Editable daily cap */}
       <div style={{...card,display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:11,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Free checks I can give per day</div>
+          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>Free checks I can give per day</div>
           <input type="number" min="0" step="1" value={capInput} onChange={e=>setCapInput(e.target.value)}
             style={{width:140,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:15,fontWeight:700,outline:"none"}}/>
         </div>
         <button onClick={saveCap} disabled={savingCap||capInput===String(cap)}
-          style={{background:(savingCap||capInput===String(cap))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:13,fontWeight:800,cursor:(savingCap||capInput===String(cap))?"default":"pointer"}}>
+          style={{background:(savingCap||capInput===String(cap))?C.inkFaint:C.teal,border:"none",borderRadius:10,padding:"11px 18px",color:"#fff",fontSize:14.5,fontWeight:800,cursor:(savingCap||capInput===String(cap))?"default":"pointer"}}>
           {savingCap?"Saving…":"Save cap"}
         </button>
-        <div style={{fontSize:11,color:C.inkFaint,maxWidth:320,lineHeight:1.5}}>
+        <div style={{fontSize:13,color:C.inkFaint,maxWidth:320,lineHeight:1.5}}>
           Live-writes <code style={{background:C.paper2,padding:"1px 4px",borderRadius:4}}>app_config.admin_daily_share_cap</code>. Cancelling an unredeemed link frees its slot back.
         </div>
       </div>
 
       {/* Grant free checks directly to an email (comp a customer / tester) */}
       <div style={{...card,marginTop:10}}>
-        <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>Grant free checks to an email</div>
-        <div style={{fontSize:11,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>Adds free Quote Checks straight to an account. If they already have one, it's credited now; if not, it waits and lands the moment they sign in with that email.</div>
+        <div style={{fontSize:14,fontWeight:800,color:C.inkSoft,marginBottom:2}}>Grant free checks to an email</div>
+        <div style={{fontSize:13,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>Adds free Quote Checks straight to an account. If they already have one, it's credited now; if not, it waits and lands the moment they sign in with that email.</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
           <input type="email" placeholder="person@email.com" value={grantEmail} onChange={e=>{setGrantEmail(e.target.value);if(grantMsg)setGrantMsg(null);}}
             style={{flex:"1 1 220px",minWidth:180,background:C.paper,border:`2px solid ${C.line}`,borderRadius:10,padding:"10px 12px",color:C.ink,fontSize:14,outline:"none"}}/>
@@ -3658,7 +3658,7 @@ function GiveCheckTab(){
             {granting?"Granting…":"Grant"}
           </button>
         </div>
-        {grantMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:700,color:grantMsg.ok?C.tealInk:C.coralInk}}>{grantMsg.text}</div>}
+        {grantMsg&&<div style={{marginTop:10,fontSize:14,fontWeight:700,color:grantMsg.ok?C.tealInk:C.coralInk}}>{grantMsg.text}</div>}
       </div>
     </div>
   );
@@ -3708,17 +3708,17 @@ function PushCarPanel({C,onDispatched}){
     setBusy("");
   }
 
-  const inp={background:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 10px",color:C.ink,fontSize:12.5,fontWeight:600,width:"100%",boxSizing:"border-box"};
-  const lab={fontSize:10,fontWeight:800,color:C.inkFaint,letterSpacing:.4,display:"block",marginBottom:4,textTransform:"uppercase"};
+  const inp={background:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 10px",color:C.ink,fontSize:14,fontWeight:600,width:"100%",boxSizing:"border-box"};
+  const lab={fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.4,display:"block",marginBottom:4,textTransform:"uppercase"};
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:16,marginBottom:16}}>
       <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-        <div style={{fontSize:13,fontWeight:900,color:C.ink}}>📣 Push a car → alert matching buyers</div>
-        <span style={{fontSize:11,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
+        <div style={{fontSize:14.5,fontWeight:900,color:C.ink}}>📣 Push a car → alert matching buyers</div>
+        <span style={{fontSize:13,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
       </div>
-      {!open && <div style={{fontSize:11,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
+      {!open && <div style={{fontSize:13,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
       {open && <>
-        <div style={{fontSize:11,color:C.inkFaint,margin:"8px 0 14px",lineHeight:1.6,maxWidth:720}}>
+        <div style={{fontSize:13,color:C.inkFaint,margin:"8px 0 14px",lineHeight:1.6,maxWidth:720}}>
           <b style={{color:C.inkSoft}}>The process:</b> a signup emails the buyer a confirm link → they click it (now “confirmed”). When you enter an at/below-MSRP car below, step 1 shows how many confirmed buyers match; step 2 emails them and logs each send so no one is emailed twice for the same car.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
@@ -3731,15 +3731,15 @@ function PushCarPanel({C,onDispatched}){
           <div><label style={lab}>Dealer</label><input style={inp} value={f.dealer} onChange={set("dealer")} placeholder="ABC Toyota"/></div>
           <div style={{gridColumn:"1/-1"}}><label style={lab}>Note (internal)</label><input style={inp} value={f.note} onChange={set("note")} placeholder="e.g. demo unit, in stock this week"/></div>
         </div>
-        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:C.inkSoft,fontWeight:700,margin:"12px 0 4px",cursor:"pointer"}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13.5,color:C.inkSoft,fontWeight:700,margin:"12px 0 4px",cursor:"pointer"}}>
           <input type="checkbox" checked={f.below} onChange={set("below")} style={{accentColor:C.teal}}/> This car is <b>below</b> MSRP (not just at it)
         </label>
-        {msg && <div style={{fontSize:12,fontWeight:700,margin:"10px 0 2px",color:msg.kind==="ok"?C.tealInk:C.coralInk}}>{msg.text}</div>}
+        {msg && <div style={{fontSize:13.5,fontWeight:700,margin:"10px 0 2px",color:msg.kind==="ok"?C.tealInk:C.coralInk}}>{msg.text}</div>}
         <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}>
-          <button onClick={match} disabled={busy==="match"} style={{background:C.card,border:`1px solid ${C.teal}`,borderRadius:9,padding:"9px 16px",color:C.tealInk,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="match"?"Matching…":"1 · Match buyers"}</button>
+          <button onClick={match} disabled={busy==="match"} style={{background:C.card,border:`1px solid ${C.teal}`,borderRadius:9,padding:"9px 16px",color:C.tealInk,fontSize:14,fontWeight:800,cursor:"pointer"}}>{busy==="match"?"Matching…":"1 · Match buyers"}</button>
           {cand && (cand.matches>0
-            ? <button onClick={send} disabled={busy==="send"} style={{background:C.teal,border:"none",borderRadius:9,padding:"9px 18px",color:"#fff",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{busy==="send"?"Sending…":`2 · Send ${cand.matches} alert${cand.matches===1?"":"s"}`}</button>
-            : <span style={{fontSize:12,color:C.inkFaint,fontWeight:700}}>No confirmed buyers match this make + city yet.</span>)}
+            ? <button onClick={send} disabled={busy==="send"} style={{background:C.teal,border:"none",borderRadius:9,padding:"9px 18px",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}}>{busy==="send"?"Sending…":`2 · Send ${cand.matches} alert${cand.matches===1?"":"s"}`}</button>
+            : <span style={{fontSize:13.5,color:C.inkFaint,fontWeight:700}}>No confirmed buyers match this make + city yet.</span>)}
         </div>
       </>}
     </div>
@@ -3793,20 +3793,20 @@ function AlertFoldersTab(){
   const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
   if(loading) return <AdminEmpty>Loading MSRP alert folders…</AdminEmpty>;
   if(err) return (
-    <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:13,color:C.coralInk,lineHeight:1.6}}>
+    <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:14.5,color:C.coralInk,lineHeight:1.6}}>
       <div style={{fontWeight:800,marginBottom:6}}>Couldn't load the alert folders.</div><div>{err}</div>
       <div style={{marginTop:8,color:C.inkFaint}}>Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260731_admin_alert_folders.sql</code> is applied.</div>
-      <button onClick={load} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:12,fontWeight:800,cursor:"pointer"}}>Retry</button>
+      <button onClick={load} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:13.5,fontWeight:800,cursor:"pointer"}}>Retry</button>
     </div>
   );
 
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>MSRP ALERT FOLDERS</div>
-        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>Refresh</button>
+        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>MSRP ALERT FOLDERS</div>
+        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:13.5,fontWeight:700,cursor:"pointer"}}>Refresh</button>
       </div>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
+      <div style={{fontSize:13,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
         Every waitlist signup, filed by make — the Dealer Bridge's demand inventory. <b style={{color:C.inkSoft}}>{data?.total||0}</b> total signup{(data?.total||0)===1?"":"s"}. Owner-only; buyers are never handed to a dealer without a separate, explicit consent.
       </div>
 
@@ -3822,29 +3822,29 @@ function AlertFoldersTab(){
               <div key={f.make} style={card}>
                 <div onClick={()=>setOpenMake(open?null:f.make)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",flexWrap:"wrap"}}>
                   <div style={{fontSize:16,fontWeight:900,color:C.ink,minWidth:120}}>{f.make}</div>
-                  <div style={{fontSize:13,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"3px 11px"}}>{f.list.length} buyer{f.list.length===1?"":"s"}</div>
+                  <div style={{fontSize:14.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"3px 11px"}}>{f.list.length} buyer{f.list.length===1?"":"s"}</div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
-                    {f.cities.slice(0,4).map(([c,n])=><span key={c} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:6,padding:"2px 8px"}}>{c} · {n}</span>)}
+                    {f.cities.slice(0,4).map(([c,n])=><span key={c} style={{fontSize:13,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:6,padding:"2px 8px"}}>{c} · {n}</span>)}
                   </div>
-                  <button onClick={(e)=>{e.stopPropagation();exportCsv(f);}} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 11px",color:C.inkSoft,fontSize:11.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>Export CSV</button>
-                  <span style={{fontSize:11,color:C.inkFaint}}>{open?"▲":"▼"}</span>
+                  <button onClick={(e)=>{e.stopPropagation();exportCsv(f);}} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 11px",color:C.inkSoft,fontSize:13.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>Export CSV</button>
+                  <span style={{fontSize:13,color:C.inkFaint}}>{open?"▲":"▼"}</span>
                 </div>
                 {open&&(
                   <div style={{marginTop:12,borderTop:`1px solid ${C.line}`,overflowX:"auto"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:12.5}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:14}}>
                       <thead><tr>{["Email","Model","Year","City","Alert when","Status","Signed up"].map(h=>(
-                        <th key={h} style={{textAlign:"left",fontSize:10,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
+                        <th key={h} style={{textAlign:"left",fontSize:12,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
                       <tbody>{f.list.map((r,i)=>(
                         <tr key={i}>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink,fontWeight:700,fontFamily:"monospace",fontSize:12}}>{r.email}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink,fontWeight:700,fontFamily:"monospace",fontSize:13.5}}>{r.email}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink}}>{r.model||"—"}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.year||"—"}</td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.city||"—"}{r.province?`, ${r.province}`:""}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:11,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:13,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
                           <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}>{r.status==="confirmed"
-                            ? <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px"}}>✓ Confirmed</span>
-                            : <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:5,padding:"2px 7px"}}>Waitlist</span>}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:11}}>{fmtDate(r.created_at)}</td>
+                            ? <span style={{fontSize:12.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px"}}>✓ Confirmed</span>
+                            : <span style={{fontSize:12.5,fontWeight:800,color:C.inkFaint,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:5,padding:"2px 7px"}}>Waitlist</span>}</td>
+                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:13}}>{fmtDate(r.created_at)}</td>
                         </tr>
                       ))}</tbody>
                     </table>
@@ -3941,7 +3941,7 @@ function buildVerifIntervals(bucket, rows){
 
 function VerifLiveDot({C}){
   return (
-    <span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:10,fontWeight:800,letterSpacing:1.2,color:C.tealInk,textTransform:"uppercase"}}>
+    <span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:800,letterSpacing:1.2,color:C.tealInk,textTransform:"uppercase"}}>
       <style>{`
         @keyframes lcVerifPulse{0%,100%{opacity:1}50%{opacity:.22}}
         .lc-verif-dot{animation:lcVerifPulse 1.6s ease-in-out infinite}
@@ -4018,7 +4018,7 @@ function VerifExtrudedStack({C, intervals, peak, labelEvery}){
                 </>}
             {i % labelEvery === 0 && (
               <text x={x + w / 2} y={BASE + 14} textAnchor="middle" fill={C.inkFaint}
-                    fontSize="8.5" fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
+                    fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
             )}
           </g>
         );
@@ -4035,7 +4035,7 @@ function VerifRowList({C, rows, picked, onPick}){
   return (
     <div>
       {rows.map((r, i) => r.sec ? (
-        <div key={`s${i}`} style={{fontSize:9,fontWeight:800,letterSpacing:1.4,color:C.inkFaint,
+        <div key={`s${i}`} style={{fontSize:11,fontWeight:800,letterSpacing:1.4,color:C.inkFaint,
                                    margin: i === 0 ? "0 0 6px" : "14px 0 6px"}}>{r.sec}</div>
       ) : (
         <div key={r.id} onClick={() => onPick && onPick(r.id)}
@@ -4046,10 +4046,10 @@ function VerifRowList({C, rows, picked, onPick}){
             background: r.state === "unmeasured" ? "transparent" : r.state === "bad" ? C.coral : C.teal,
             border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none",
             opacity: r.state === "info" ? 0.5 : 1}}/>
-          <span style={{fontSize:12.5,color:C.ink,flex:1}}>{r.name}</span>
-          <span style={{fontSize:12.5,fontWeight:800,
+          <span style={{fontSize:14,color:C.ink,flex:1}}>{r.name}</span>
+          <span style={{fontSize:14,fontWeight:800,
             color: r.state === "bad" ? C.coralInk : r.state === "unmeasured" ? C.inkFaint : C.tealInk}}>{r.value}</span>
-          <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",
+          <span style={{fontSize:12.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",
                         minWidth:200,textAlign:"right"}}>{r.note}</span>
         </div>
       ))}
@@ -4098,14 +4098,14 @@ function VerifProviderCosts({C, hours}){
 
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+      <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
         PROVIDER COST + RELIABILITY
       </div>
 
-      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Reading provider_call…</div>}
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:14,padding:"12px 0"}}>Reading provider_call…</div>}
 
       {state==="absent" && (
-        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+        <div style={{fontSize:13.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
           No provider log yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_provider_call_log.sql</span> is
           written but not applied, or no scans have run since it was. Every figure here stays blank until
           real calls land; nothing on this card is estimated.
@@ -4133,8 +4133,8 @@ function VerifProviderCosts({C, hours}){
             return (
               <div key={m.k} style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:11,fontWeight:800,color:C.ink}}>{m.k}</span>
-                  <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
+                  <span style={{fontSize:13,fontWeight:800,color:C.ink}}>{m.k}</span>
+                  <span style={{fontSize:12.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
                     {Math.round(pct)}%
                   </span>
                 </div>
@@ -4145,7 +4145,7 @@ function VerifProviderCosts({C, hours}){
                 <div style={{height:4,borderRadius:2,background:C.line,marginTop:6,overflow:"hidden"}}>
                   <div style={{width:`${pct}%`,height:"100%",background:hot?C.coral:C.teal}}/>
                 </div>
-                <div style={{fontSize:9.5,color:C.inkFaint,marginTop:5}}>{m.sub}</div>
+                <div style={{fontSize:11.5,color:C.inkFaint,marginTop:5}}>{m.sub}</div>
               </div>
             );
           })}
@@ -4153,14 +4153,14 @@ function VerifProviderCosts({C, hours}){
       )}
 
       {state==="ok" && byProv.length===0 && (
-        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+        <div style={{fontSize:13.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
           Table is live but empty — no provider calls recorded in this window yet.
         </div>
       )}
 
       {state==="ok" && byProv.length>0 && (<>
         <div style={{display:"grid",gridTemplateColumns:"1.1fr .7fr .7fr .8fr .7fr",gap:6,
-                     fontSize:10,color:C.inkFaint,fontWeight:800,letterSpacing:.6,padding:"0 6px 4px"}}>
+                     fontSize:12,color:C.inkFaint,fontWeight:800,letterSpacing:.6,padding:"0 6px 4px"}}>
           <span>PROVIDER</span><span style={{textAlign:"right"}}>CALLS</span>
           <span style={{textAlign:"right"}}>FAIL</span><span style={{textAlign:"right"}}>COST</span>
           <span style={{textAlign:"right"}}>P95</span>
@@ -4170,15 +4170,15 @@ function VerifProviderCosts({C, hours}){
           return (
             <div key={p.provider} style={{display:"grid",gridTemplateColumns:"1.1fr .7fr .7fr .8fr .7fr",gap:6,
                         alignItems:"baseline",padding:"6px",borderBottom:`1px solid ${C.line}`}}>
-              <span style={{fontSize:12.5,color:C.ink,textTransform:"capitalize"}}>{p.provider}</span>
-              <span style={{fontSize:12.5,textAlign:"right",color:C.inkSoft}}>{vnum(p.calls)}</span>
-              <span style={{fontSize:12.5,textAlign:"right",fontWeight:800,color:bad?C.coralInk:C.tealInk}}>
+              <span style={{fontSize:14,color:C.ink,textTransform:"capitalize"}}>{p.provider}</span>
+              <span style={{fontSize:14,textAlign:"right",color:C.inkSoft}}>{vnum(p.calls)}</span>
+              <span style={{fontSize:14,textAlign:"right",fontWeight:800,color:bad?C.coralInk:C.tealInk}}>
                 {p.fail_pct}%
               </span>
-              <span style={{fontSize:12.5,textAlign:"right",color:Number(p.cost_usd)>0?C.ink:C.inkFaint}}>
+              <span style={{fontSize:14,textAlign:"right",color:Number(p.cost_usd)>0?C.ink:C.inkFaint}}>
                 {Number(p.cost_usd)>0?money(p.cost_usd):(p.credits>0?`${vnum(p.credits)} cr`:"—")}
               </span>
-              <span style={{fontSize:11.5,textAlign:"right",color:C.inkFaint}}>{ms(p.p95_ms)}</span>
+              <span style={{fontSize:13.5,textAlign:"right",color:C.inkFaint}}>{ms(p.p95_ms)}</span>
             </div>
           );
         })}
@@ -4186,19 +4186,19 @@ function VerifProviderCosts({C, hours}){
         {/* The comparison the decision actually turns on. */}
         {(nimbleExtract||scrapflyShot) && (
           <div style={{marginTop:12,padding:"10px 12px",background:C.paper2,borderRadius:10}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
+            <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
               SAME JOB, BOTH VENDORS
             </div>
             {[["Nimble — listing extract",nimbleExtract],["Scrapfly — screenshot",scrapflyShot]].map(([label,o])=>(
               <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"3px 0"}}>
-                <span style={{fontSize:12,color:C.ink}}>{label}</span>
-                <span style={{fontSize:12,fontFamily:"ui-monospace,Menlo,monospace",
+                <span style={{fontSize:13.5,color:C.ink}}>{label}</span>
+                <span style={{fontSize:13.5,fontFamily:"ui-monospace,Menlo,monospace",
                               color:o&&Number(o.fail_pct)>=15?C.coralInk:C.tealInk}}>
                   {o?`${o.fail_pct}% fail of ${vnum(o.calls)}`:"no calls yet"}
                 </span>
               </div>
             ))}
-            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
+            <div style={{fontSize:12.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
               Nimble also runs the MSRP fallback search, which Scrapfly cannot replace — it renders a URL
               you already have, it does not find one. Judge the two jobs separately.
             </div>
@@ -4207,18 +4207,18 @@ function VerifProviderCosts({C, hours}){
 
         {hosts.length>0 && (
           <div style={{marginTop:12}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>
+            <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>
               WHERE READS FAIL
             </div>
             {hosts.slice(0,5).map(h=>(
               <div key={h.host} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
-                <span style={{fontSize:11.5,color:C.inkSoft,fontFamily:"ui-monospace,Menlo,monospace"}}>{h.host}</span>
-                <span style={{fontSize:11.5,color:C.coralInk,fontFamily:"ui-monospace,Menlo,monospace"}}>
+                <span style={{fontSize:13.5,color:C.inkSoft,fontFamily:"ui-monospace,Menlo,monospace"}}>{h.host}</span>
+                <span style={{fontSize:13.5,color:C.coralInk,fontFamily:"ui-monospace,Menlo,monospace"}}>
                   {h.failed}/{h.calls} failed
                 </span>
               </div>
             ))}
-            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
+            <div style={{fontSize:12.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
               Concentrated failures mean a platform is walled, not that the vendor is bad. Spread-out
               failures mean the vendor is.
             </div>
@@ -4262,60 +4262,99 @@ function VerifOperationalCost({C}){
   const today=new Date().getDate();
   const lines=d?.lines||[];
   const billed=lines.filter(l=>l.billing_day).sort((a,b)=>a.billing_day-b.billing_day);
-  const cpc=d?.cost_per_check_cad;
-  const rev=Number(d?.revenue_per_check_cad||0);
-  const underwater=cpc!=null && rev>0 && Number(cpc)>rev;
+  const rev=Number(d?.revenue_per_report_cad||0);
 
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+      <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
         OPERATIONAL COST vs USAGE
       </div>
 
-      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Reading operational_cost…</div>}
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:14,padding:"12px 0"}}>Reading operational_cost…</div>}
       {state==="absent" && (
-        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+        <div style={{fontSize:13.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
           Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_operational_cost.sql</span>.
         </div>
       )}
 
       {state==="ok" && d && (<>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
-          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>MONTHLY BURN</div>
-            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
-              {cad(d.monthly_total_cad)}
+        {/* Two blocks, because these are two different kinds of money. Green is
+            what the founders owe whatever happens; red is what users cause by
+            running scans and what report revenue has to cover. The old card put
+            them in one row of tiles and computed "cost per check" as burn over
+            checks — not a unit cost at all, and it made CA$1.50 look like a
+            cost when it is the SELLING price. */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(250px,1fr))",gap:12,marginBottom:14}}>
+
+          {/* GREEN — founders */}
+          <div style={{background:C.tealBg,border:`1px solid ${C.teal}`,borderRadius:12,padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.tealInk}}>
+              FOUNDERS PAY — FIXED EVERY MONTH
             </div>
-            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>fixed, all vendors</div>
+            <div style={{fontSize:30,fontWeight:800,color:C.tealInk,marginTop:6,letterSpacing:-1,
+                         fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {cad(d.fixed_per_founder)}
+            </div>
+            <div style={{fontSize:13,color:C.tealInk,opacity:.85,marginTop:2}}>
+              each · {cad(d.fixed_month_cad)} split {d.active_founders} ways
+            </div>
+            <div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.6}}>
+              Claude subscription and the Scrapfly plan. These do not move with how many reports run —
+              you owe them at zero users and at ten thousand.
+            </div>
           </div>
-          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>CHECKS THIS MONTH</div>
-            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
-              {vnum(d.checks_this_month)}
+
+          {/* RED — users */}
+          <div style={{background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"14px 16px"}}>
+            <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.coralInk}}>
+              USERS DRIVE — COST PER REPORT
             </div>
-            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>api_usage_log · URL path</div>
+            <div style={{fontSize:30,fontWeight:800,color:C.coralInk,marginTop:6,letterSpacing:-1,
+                         fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {d.variable_per_report_cad==null ? "—" : `CA$${Number(d.variable_per_report_cad).toFixed(2)}`}
+            </div>
+            <div style={{fontSize:13,color:C.coralInk,opacity:.85,marginTop:2}}>
+              {d.variable_per_report_cad==null
+                ? "no reports run this month yet"
+                : `${cad(d.variable_month_cad)} over ${vnum(d.checks_this_month)} reports`}
+            </div>
+            <div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.6}}>
+              Claude API tokens for reading listings, billed on what was actually consumed. Every URL a
+              user runs adds to this.
+            </div>
           </div>
-          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>COST PER CHECK</div>
-            <div style={{fontSize:20,fontWeight:800,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace",
-                         color:cpc==null?C.inkFaint:underwater?C.coralInk:C.tealInk}}>
-              {cpc==null ? "—" : cad(cpc)}
-            </div>
-            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>
-              {cpc==null ? "no checks yet this month" : `sells for ${cad(rev)}`}
-            </div>
+        </div>
+
+        {/* The unit economics, stated so CA$1.50 cannot be mistaken for a cost. */}
+        <div style={{background:C.paper2,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:8}}>
+            PER REPORT
           </div>
-          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
-            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>BREAK-EVEN</div>
-            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
-              {vnum(d.breakeven_checks)}
-            </div>
-            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>paid checks / month</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
+            {[
+              ["Sells for", cad(d.revenue_per_report_cad), C.tealInk, "10-pack unit price"],
+              ["Costs us", d.variable_per_report_cad==null?"—":`CA$${Number(d.variable_per_report_cad).toFixed(2)}`, C.coralInk, "API tokens"],
+              ["Margin", d.margin_per_report_cad==null?"—":`CA$${Number(d.margin_per_report_cad).toFixed(2)}`,
+               d.margin_per_report_cad!=null&&Number(d.margin_per_report_cad)>0?C.tealInk:C.coralInk, "keeps the lights on"],
+              ["Break-even", vnum(d.breakeven_reports), C.ink, "paid reports / month"],
+            ].map(([k,v,col,sub])=>(
+              <div key={k}>
+                <div style={{fontSize:11.5,color:C.inkFaint}}>{k}</div>
+                <div style={{fontSize:19,fontWeight:800,color:col,marginTop:2,
+                             fontFamily:"ui-monospace,Menlo,monospace"}}>{v}</div>
+                <div style={{fontSize:10.5,color:C.inkFaint,marginTop:1}}>{sub}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.6}}>
+            CA$1.50 is what a report <b>sells</b> for — the 10-pack unit price ($14.99 ÷ 10), the
+            conservative end of the ladder since the 5-pack earns $2.00. Break-even is how many paid
+            reports cover the fixed {cad(d.fixed_month_cad)} at the current margin.
           </div>
         </div>
 
         {/* Billing calendar — the month has two fixed hits, two days apart. */}
-        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
+        <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
           BILLING CALENDAR
         </div>
         <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
@@ -4325,7 +4364,7 @@ function VerifOperationalCost({C}){
             return (
               <div key={day} title={hit?`${hit.label} — ${cad(hit.cad)}`:`day ${day}`}
                    style={{width:26,height:26,borderRadius:6,display:"flex",alignItems:"center",
-                           justifyContent:"center",fontSize:10,fontFamily:"ui-monospace,Menlo,monospace",
+                           justifyContent:"center",fontSize:12,fontFamily:"ui-monospace,Menlo,monospace",
                            background: hit ? C.coralBg : isToday ? C.tealBg : "transparent",
                            border: isToday ? `1px solid ${C.teal}` : `1px solid ${C.line}`,
                            color: hit ? C.coralInk : isToday ? C.tealInk : C.inkFaint,
@@ -4335,7 +4374,7 @@ function VerifOperationalCost({C}){
             );
           })}
         </div>
-        <div style={{fontSize:10.5,color:C.inkFaint,marginBottom:10}}>
+        <div style={{fontSize:12.5,color:C.inkFaint,marginBottom:10}}>
           {billed.map(l=>`${l.billing_day}th — ${l.label} ${cad(l.cad)}`).join("  ·  ")}
           {billed.length>0 && "  ·  outlined = today"}
         </div>
@@ -4344,27 +4383,25 @@ function VerifOperationalCost({C}){
         {lines.map(l=>(
           <div key={l.vendor+l.label} style={{display:"flex",alignItems:"baseline",gap:10,padding:"6px 2px",
                       borderBottom:`1px solid ${C.line}`}}>
-            <span style={{fontSize:12.5,color:C.ink,flex:1}}>{l.label}</span>
-            <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
+            <span style={{fontSize:14,color:C.ink,flex:1}}>{l.label}</span>
+            <span style={{fontSize:12.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
               {l.currency==="USD" ? `US$${Number(l.amount).toFixed(2)}` : ""}
             </span>
-            <span style={{fontSize:12.5,fontWeight:800,color:Number(l.cad)>0?C.ink:C.tealInk,
+            <span style={{fontSize:14,fontWeight:800,color:Number(l.cad)>0?C.ink:C.tealInk,
                           fontFamily:"ui-monospace,Menlo,monospace",minWidth:86,textAlign:"right"}}>
               {Number(l.cad)>0 ? cad(l.cad) : "free"}
             </span>
-            <span style={{fontSize:10,color:C.inkFaint,minWidth:64,textAlign:"right"}}>
+            <span style={{fontSize:12,color:C.inkFaint,minWidth:64,textAlign:"right"}}>
               {l.billing_day ? `the ${l.billing_day}th` : "on demand"}
             </span>
           </div>
         ))}
 
-        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:9,lineHeight:1.65}}>
+        <div style={{fontSize:12.5,color:C.inkFaint,marginTop:9,lineHeight:1.65}}>
           USD billed at {d.fx_usd_cad} — the rate your card actually charges, not mid-market
           ({d.fx_usd_cad_interbank} on {d.fx_read_at}). That spread is {d.fx_markup_pct}%, about{" "}
-          <span style={{color:C.coralInk,fontWeight:800}}>{cad(d.fx_markup_cad_year)}/year</span> on current
-          vendor spend — a real line item, not a rounding difference. Both rates live in admin_config.
-          Break-even assumes {cad(rev)} a check, the conservative end of the credit ladder; the 5-pack
-          earns more, so this reads pessimistically on purpose.
+          the card's conversion fee on every USD line — a real cost, not a rounding difference.
+          Both rates live in admin_config.
         </div>
       </>)}
     </div>
@@ -4419,13 +4456,13 @@ function VerifFounderLedger({C}){
 
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+      <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
         FOUNDER LEDGER
       </div>
 
-      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Loading…</div>}
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:14,padding:"12px 0"}}>Loading…</div>}
       {state==="absent" && (
-        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+        <div style={{fontSize:13.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
           Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_founder_ledger.sql</span>.
         </div>
       )}
@@ -4433,7 +4470,7 @@ function VerifFounderLedger({C}){
       {state==="ok" && (<>
         {/* Approval — nothing reaches JC or Josh without this click. */}
         {pending.length===0 ? (
-          <div style={{fontSize:11.5,color:C.inkFaint,marginBottom:12}}>
+          <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:12}}>
             No statement awaiting approval. The cron stages one on the 1st; nothing sends until you approve it here.
           </div>
         ) : pending.map(r=>{
@@ -4441,13 +4478,13 @@ function VerifFounderLedger({C}){
           return (
             <div key={r.id} style={{background:C.paper2,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",flexWrap:"wrap",gap:8}}>
-                <span style={{fontSize:13,fontWeight:800,color:C.ink}}>
+                <span style={{fontSize:14.5,fontWeight:800,color:C.ink}}>
                   {new Date(r.period_month+"T00:00:00").toLocaleDateString("en-CA",{month:"long",year:"numeric"})} — awaiting your approval
                 </span>
                 <span style={{fontSize:15,fontWeight:800,color:C.ink,fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(r.total_cad)}</span>
               </div>
               {Math.abs(drift)>0.005 && (
-                <div style={{fontSize:11.5,color:C.coralInk,marginTop:5,fontWeight:700}}>
+                <div style={{fontSize:13.5,color:C.coralInk,marginTop:5,fontWeight:700}}>
                   Costs changed since this was staged: now {cad(r.total_now_cad)} ({drift>0?"+":""}{cad(drift)}).
                   Approving re-freezes at the current figure.
                 </div>
@@ -4455,16 +4492,16 @@ function VerifFounderLedger({C}){
               <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
                 <button disabled={busy} onClick={()=>act("fn_admin_approve_statement",{p_id:r.id},"Approved")}
                   style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",
-                          fontSize:12,fontWeight:800,cursor:busy?"wait":"pointer"}}>
+                          fontSize:13.5,fontWeight:800,cursor:busy?"wait":"pointer"}}>
                   Approve
                 </button>
                 <button disabled={busy} onClick={()=>act("fn_admin_cancel_statement",{p_id:r.id},"Cancelled")}
                   style={{background:"transparent",color:C.inkSoft,border:`1px solid ${C.line}`,borderRadius:8,
-                          padding:"7px 14px",fontSize:12,cursor:busy?"wait":"pointer"}}>
+                          padding:"7px 14px",fontSize:13.5,cursor:busy?"wait":"pointer"}}>
                   Cancel
                 </button>
               </div>
-              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:7}}>
+              <div style={{fontSize:12.5,color:C.inkFaint,marginTop:7}}>
                 Approving accrues this month's charges and authorises the send. It does not email anyone by
                 itself — run the Founder statement workflow in send mode after approving.
               </div>
@@ -4477,16 +4514,16 @@ function VerifFounderLedger({C}){
         {owed?.payer && Number(owed.total_cad)>0.005 && (
           <div style={{background:C.paper2,borderRadius:10,padding:"11px 13px",marginBottom:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-              <span style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>
+              <span style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>
                 OWED TO {String(owed.payer).toUpperCase()}
               </span>
               <span style={{fontSize:17,fontWeight:800,color:C.tealInk,
                             fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(owed.total_cad)}</span>
             </div>
-            <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>
+            <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>
               {(owed.from||[]).map(x=>`${x.name} ${cad(x.owes_cad)}`).join("  ·  ")}
             </div>
-            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:5,lineHeight:1.55}}>
+            <div style={{fontSize:12.5,color:C.inkFaint,marginTop:5,lineHeight:1.55}}>
               {owed.payer}'s card pays the vendors, so his own share settles automatically and
               everyone else's balance is money owed to him.
             </div>
@@ -4494,19 +4531,19 @@ function VerifFounderLedger({C}){
         )}
 
         {/* Balances */}
-        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>BALANCES</div>
+        <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>BALANCES</div>
         {(bal||[]).map(f=>(
           <div key={f.email} style={{padding:"7px 2px",borderBottom:`1px solid ${C.line}`}}>
             <div style={{display:"flex",alignItems:"baseline",gap:10}}>
-              <span style={{fontSize:12.5,color:C.ink,flex:1,fontWeight:700}}>{f.name}</span>
-              <span style={{fontSize:11,color:C.inkFaint}}>paid {cad(f.paid_cad)}</span>
-              <span style={{fontSize:13,fontWeight:800,fontFamily:"ui-monospace,Menlo,monospace",
+              <span style={{fontSize:14,color:C.ink,flex:1,fontWeight:700}}>{f.name}</span>
+              <span style={{fontSize:13,color:C.inkFaint}}>paid {cad(f.paid_cad)}</span>
+              <span style={{fontSize:14.5,fontWeight:800,fontFamily:"ui-monospace,Menlo,monospace",
                             color:Number(f.balance_cad)>0.005?C.coralInk:C.tealInk,minWidth:88,textAlign:"right"}}>
                 {cad(f.balance_cad)}
               </span>
             </div>
             {(f.unpaid_lines||[]).length>0 && (
-              <div style={{fontSize:10.5,color:C.inkFaint,marginTop:3,paddingLeft:2}}>
+              <div style={{fontSize:12.5,color:C.inkFaint,marginTop:3,paddingLeft:2}}>
                 {f.unpaid_lines.map(u=>
                   `${new Date(u.month+"T00:00:00").toLocaleDateString("en-CA",{month:"short",year:"numeric"})} ${u.line} ${cad(u.amount_cad)}`
                 ).join("  ·  ")}
@@ -4516,30 +4553,30 @@ function VerifFounderLedger({C}){
         ))}
 
         {/* Record a payment */}
-        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,margin:"14px 0 6px"}}>
+        <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,margin:"14px 0 6px"}}>
           RECORD A PAYMENT
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6}}>
           <select value={pay.email} onChange={e=>setPay({...pay,email:e.target.value})}
-            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+            style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}>
             <option value="">Who paid…</option>
             {(bal||[]).map(f=><option key={f.email} value={f.email}>{f.name}</option>)}
           </select>
           <input placeholder="Amount CAD" value={pay.amount} inputMode="decimal"
             onChange={e=>setPay({...pay,amount:e.target.value})}
-            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+            style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}/>
           <input placeholder="Line (optional)" value={pay.line}
             onChange={e=>setPay({...pay,line:e.target.value})}
-            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+            style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}/>
           <input placeholder="Month YYYY-MM-01" value={pay.month}
             onChange={e=>setPay({...pay,month:e.target.value})}
-            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+            style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}/>
           <select value={pay.covered} onChange={e=>setPay({...pay,covered:e.target.value})}
-            style={{fontSize:12,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
+            style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}>
             <option value="">Paid it themselves</option>
             {(bal||[]).map(f=><option key={f.email} value={f.email}>Fronted by {f.name}</option>)}
@@ -4554,23 +4591,115 @@ function VerifFounderLedger({C}){
               p_note:null,
             },"Payment recorded")}
             style={{background:C.teal,color:"#fff",border:"none",borderRadius:8,padding:"7px 12px",
-                    fontSize:12,fontWeight:800,cursor:(busy||!pay.email||!pay.amount)?"not-allowed":"pointer",
+                    fontSize:13.5,fontWeight:800,cursor:(busy||!pay.email||!pay.amount)?"not-allowed":"pointer",
                     opacity:(busy||!pay.email||!pay.amount)?.5:1}}>
             Record
           </button>
         </div>
-        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:7,lineHeight:1.6}}>
+        <div style={{fontSize:12.5,color:C.inkFaint,marginTop:7,lineHeight:1.6}}>
           "Fronted by" records that someone else paid the vendor on their behalf — the charge stays
           outstanding, because that moves the debt to the founder who paid, it does not clear it.
           The ledger is append-only; a mistake is corrected with another entry, never an edit.
         </div>
 
         {msg && (
-          <div style={{fontSize:11.5,marginTop:9,color:msg.ok?C.tealInk:C.coralInk,fontWeight:700}}>
+          <div style={{fontSize:13.5,marginTop:9,color:msg.ok?C.tealInk:C.coralInk,fontWeight:700}}>
             {msg.text}
           </div>
         )}
       </>)}
+    </div>
+  );
+}
+
+// Why we pay for each thing — written for JC and Josh, not for engineers.
+//
+// They are asked to fund a share every month, so they are owed a plain answer
+// to "what is this and why do we need it". Each entry says what the service
+// does, what happens without it, and what it costs — including the two we pay
+// nothing for, because "free" is worth knowing too.
+const SERVICE_NOTES = [
+  {
+    name: "Claude subscription",
+    cost: "CA$294.00 / month · billed the 8th",
+    type: "fixed",
+    what: "The Claude Code subscription the product is built with — writing, reviewing and fixing LotCheck itself.",
+    why: "This is development capacity, not something the running site consumes. It is the one line that buys build speed rather than serving a buyer.",
+    without: "Work slows to whatever can be written by hand.",
+  },
+  {
+    name: "Claude API credits",
+    cost: "billed on actual use · ~US$24 in August",
+    type: "variable",
+    what: "Every time a buyer runs a check, a Claude API call reads the dealer listing and extracts price, VIN, odometer, fees and financing.",
+    why: "This is the product. It is also the only cost that grows with usage — more reports, more tokens — which is why report revenue has to cover it.",
+    without: "No reports. This is the engine.",
+  },
+  {
+    name: "Scrapfly",
+    cost: "US$30.00 / month · billed the 10th",
+    type: "fixed",
+    what: "Loads dealer pages that block ordinary requests, and takes the sealed full-page screenshot attached to every report.",
+    why: "Most dealer sites are JavaScript-rendered and bot-protected; a plain fetch gets an empty shell. The screenshot is also the buyer's evidence of what the page said at report time.",
+    without: "Roughly half of dealer listings become unreadable, and reports lose the capture that makes them dispute-proof.",
+  },
+  {
+    name: "Nimble",
+    cost: "free — trial, 5,000 requests",
+    type: "free",
+    what: "A second listing reader, plus the search that finds a manufacturer's MSRP page when our catalog has no row for a trim.",
+    why: "Under review. Its success rate over 973 requests was 52.7%, spread evenly across 51 domains — which points at the vendor rather than at two awkward dealer platforms.",
+    without: "The extract job is largely covered by Scrapfly. The MSRP search has no replacement yet, which is the open question.",
+  },
+  {
+    name: "Supabase",
+    cost: "free tier today",
+    type: "free",
+    what: "The database and the edge functions — the MSRP catalog, credits, the delivery ledger, and this admin panel.",
+    why: "Everything LotCheck knows lives here. Free until roughly 10,000 checks a day, then US$25/month.",
+    without: "There is no product.",
+  },
+  {
+    name: "Resend",
+    cost: "free tier today",
+    type: "free",
+    what: "Sends the report email with its PDF, and will send these founder statements.",
+    why: "Transactional email from our own domain, so a report lands in an inbox rather than a spam folder.",
+    without: "Reports can be read on screen but not kept.",
+  },
+];
+
+function VerifWhyWePay({C}){
+  const tone=(t)=> t==="variable" ? {bg:C.coralBg,ink:C.coralInk,label:"scales with usage"}
+                 : t==="free"    ? {bg:C.tealBg,ink:C.tealInk,label:"free today"}
+                 :                  {bg:C.butterBg,ink:C.butterInk,label:"fixed monthly"};
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:4}}>
+        WHAT WE PAY FOR, AND WHY
+      </div>
+      <div style={{fontSize:12.5,color:C.inkFaint,marginBottom:12,lineHeight:1.6}}>
+        For JC and Josh. Every service the three of us fund, what it does, and what breaks without it.
+      </div>
+      {SERVICE_NOTES.map(s=>{
+        const t=tone(s.type);
+        return (
+          <div key={s.name} style={{borderTop:`1px solid ${C.line}`,padding:"12px 0"}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:15,fontWeight:800,color:C.ink}}>{s.name}</span>
+              <span style={{fontSize:11,fontWeight:800,padding:"2px 8px",borderRadius:999,
+                            background:t.bg,color:t.ink}}>{t.label}</span>
+              <span style={{fontSize:12.5,color:C.inkSoft,marginLeft:"auto",
+                            fontFamily:"ui-monospace,Menlo,monospace"}}>{s.cost}</span>
+            </div>
+            <div style={{fontSize:13.5,color:C.ink,marginTop:6,lineHeight:1.65}}>{s.what}</div>
+            <div style={{fontSize:13,color:C.inkSoft,marginTop:5,lineHeight:1.65}}>{s.why}</div>
+            <div style={{fontSize:12.5,color:C.inkFaint,marginTop:5,lineHeight:1.6}}>
+              <b style={{color:C.inkSoft}}>Without it:</b> {s.without}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4664,7 +4793,7 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
+        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
           VERIFICATION LEDGER {loaded && <VerifLiveDot C={C}/>}
         </div>
         <div style={{display:"flex",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:999,padding:3}}>
@@ -4672,7 +4801,7 @@ function VerificationTab({apiUsage, apiUsageLoading}){
             <button key={b.k} onClick={()=>setRange(b.k)} style={{
               background: range===b.k ? C.tealBg : "transparent",
               color: range===b.k ? C.tealInk : C.inkFaint,
-              border:"none",borderRadius:999,padding:"5px 13px",fontSize:11.5,fontWeight:700,cursor:"pointer",
+              border:"none",borderRadius:999,padding:"5px 13px",fontSize:13.5,fontWeight:700,cursor:"pointer",
             }}>{b.k}</button>
           ))}
         </div>
@@ -4686,25 +4815,25 @@ function VerificationTab({apiUsage, apiUsageLoading}){
           ["Failed", apiUsageLoading?"…":totFail.toLocaleString("en-CA"), totFail?C.coralInk:C.inkFaint, totFail?"each one is an open error code":"none in range"],
         ].map(([k,v,col,sub])=>(
           <div key={k} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px"}}>
-            <div style={{fontSize:10.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,textTransform:"uppercase"}}>{k}</div>
+            <div style={{fontSize:12.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,textTransform:"uppercase"}}>{k}</div>
             <div style={{fontSize:26,fontWeight:800,color:col,marginTop:4,letterSpacing:-1}}>{v}</div>
-            <div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{sub}</div>
+            <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>{sub}</div>
           </div>
         ))}
       </div>
 
       {/* ---- every interval, separated ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+        <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
           EVERY INTERVAL, SEPARATED — {bucket.label.toUpperCase()}
         </div>
         {apiUsageLoading ? (
-          <div style={{color:C.inkFaint,fontSize:12.5,padding:"14px 0"}}>Reading api_usage_log…</div>
+          <div style={{color:C.inkFaint,fontSize:14,padding:"14px 0"}}>Reading api_usage_log…</div>
         ) : (
           <>
             <VerifExtrudedStack C={C} intervals={intervals} peak={peak}
               labelEvery={intervals.length > 24 ? 5 : intervals.length > 12 ? 3 : 1}/>
-            <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>
+            <div style={{fontSize:13,color:C.inkFaint,marginTop:6}}>
               One column per interval — teal base is verified, the coral cap on top is failed reads,
               so the failure share sits above the stack instead of hiding inside it. An interval with
               no checks keeps its slot and shows a floor tick: a gap you can see is the point.
@@ -4717,20 +4846,22 @@ function VerificationTab({apiUsage, apiUsageLoading}){
 
       <VerifFounderLedger C={C}/>
 
+      <VerifWhyWePay C={C}/>
+
       <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
 
       {/* ---- the ledger: volume + delivery + 13 checks ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:2}}>
-          <span style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+          <span style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
             LEDGER — {bucket.label.toUpperCase()}
           </span>
-          <span style={{fontSize:11,color:C.inkFaint}}>
+          <span style={{fontSize:13,color:C.inkFaint}}>
             hollow = not instrumented yet
           </span>
         </div>
         <VerifRowList C={C} rows={isoRows} picked={picked} onPick={setPicked}/>
-        <div style={{borderTop:`1px solid ${C.line}`,marginTop:6,paddingTop:10,fontSize:11,color:C.inkFaint,lineHeight:1.65}}>
+        <div style={{borderTop:`1px solid ${C.line}`,marginTop:6,paddingTop:10,fontSize:13,color:C.inkFaint,lineHeight:1.65}}>
           {picked
             ? (isoRows.find(r=>r.id===picked)?.proof || "")
             : "Click any row for what backs it. Hollow rows are deliberately not green: nothing writes that value yet, and a checkpoint painted as passing while unmeasured is the false all-clear this panel exists to prevent."}
@@ -5076,7 +5207,8 @@ function AdminPanel(){
 
   return(
     <AdminThemeContext.Provider value={themeState}>
-    <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>
+    <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontSize:15,
+                 fontFamily:"'Poppins',Helvetica,Arial,sans-serif"}}>
       {dealerModal && (
         <DealerModal
           dealer={dealerModal==="new"?null:dealerModal}
@@ -5092,7 +5224,6 @@ function AdminPanel(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:10,padding:4}}>
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
-          <AdminTabButton active={tab==="dealers"} onClick={()=>setTab("dealers")}>Dealers</AdminTabButton>
           <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
@@ -5103,13 +5234,13 @@ function AdminPanel(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
-          <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:13,cursor:"pointer"}}>Sign out</button>
+          <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,fontSize:14.5,cursor:"pointer"}}>Sign out</button>
         </div>
       </div>
 
       <div style={{maxWidth:1100,margin:"0 auto"}}>
         {tab==="overview" && (<>
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
+          <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
             TRAFFIC · {viewsLoading?"loading…":trackingSince?`tracking since ${trackingSince.toLocaleDateString("en-CA")}`:"no data yet"}
           </div>
           {!viewsLoading&&pageViews.length===0?(
@@ -5121,20 +5252,20 @@ function AdminPanel(){
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
                 {[["Today",trafficToday],["Last 7 days",trafficWeek],["Last 30 days",trafficMonth],["All time",trafficAllTime]].map(([label,stats])=>(
                   <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:6}}>{label}</div>
+                    <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:6}}>{label}</div>
                     <div style={{fontSize:22,fontWeight:800,color:C.ink}}>{stats.visitors.toLocaleString()}</div>
-                    <div style={{fontSize:11,color:C.inkFaint}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
+                    <div style={{fontSize:13,color:C.inkFaint}}>unique visitor{stats.visitors===1?"":"s"} · {stats.views.toLocaleString()} view{stats.views===1?"":"s"}</div>
                   </div>
                 ))}
               </div>
 
               <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Visits over time</div>
+                  <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>Visits over time</div>
                   <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
                     {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
                       <button key={key} onClick={()=>setTrafficGranularity(key)}
-                        style={{background:trafficGranularity===key?C.tealBg:"transparent",color:trafficGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                        style={{background:trafficGranularity===key?C.tealBg:"transparent",color:trafficGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
                         {label}
                       </button>
                     ))}
@@ -5143,12 +5274,12 @@ function AdminPanel(){
                 <div style={{height:180}}>
                   <ResponsiveContainer>
                     <BarChart data={bucketedTraffic} margin={{top:4,right:4,bottom:0,left:0}}>
-                      <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                      <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <XAxis dataKey="label" tick={{fontSize:12,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:13,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
                       <Tooltip
                         formatter={(v,name)=>[v,name==="views"?"Views":name]}
-                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}}
-                        labelStyle={{color:"#D9DBEF",fontSize:11}}
+                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:13.5,fontWeight:700,color:"#fff"}}
+                        labelStyle={{color:"#D9DBEF",fontSize:13}}
                       />
                       <Bar dataKey="views" radius={[3,3,0,0]}>
                         {bucketedTraffic.map((entry,i)=>(
@@ -5158,16 +5289,16 @@ function AdminPanel(){
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:C.inkFaint}}>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:13,color:C.inkFaint}}>
                   <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.teal,marginRight:5}}/>Up from previous period</span>
                   <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.butter,marginRight:5}}/>Down from previous period</span>
                 </div>
               </div>
 
               <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visits come from</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visits come from</div>
                 {sortedSources.every(([src])=>src==="Unknown (recorded before tracking)")?(
-                  <div style={{color:C.inkFaint,fontSize:13,lineHeight:1.6}}>
+                  <div style={{color:C.inkFaint,fontSize:14.5,lineHeight:1.6}}>
                     Source tracking just went live — every visit before this update was recorded without it, so there's nothing real to show yet. This will fill in from here forward.
                   </div>
                 ):(
@@ -5176,7 +5307,7 @@ function AdminPanel(){
                       const pct=Math.round((count/pageViews.length)*100);
                       return(
                         <div key={src}>
-                          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:13.5,marginBottom:3}}>
                             <span style={{color:C.ink,fontWeight:700}}>{src}</span>
                             <span style={{color:C.inkFaint}}>{count.toLocaleString()} · {pct}%</span>
                           </div>
@@ -5191,9 +5322,9 @@ function AdminPanel(){
               </div>
 
               <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>What visitors are on</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft,marginBottom:12}}>What visitors are on</div>
                 {sortedDevices.every(([d])=>d==="Unknown (before tracking)")?(
-                  <div style={{color:C.inkFaint,fontSize:13,lineHeight:1.6}}>
+                  <div style={{color:C.inkFaint,fontSize:14.5,lineHeight:1.6}}>
                     Device tracking just went live — iPhone / Android / Desktop will fill in from here forward.
                   </div>
                 ):(
@@ -5202,7 +5333,7 @@ function AdminPanel(){
                       const pct=Math.round((count/pageViews.length)*100);
                       return(
                         <div key={d}>
-                          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                          <div style={{display:"flex",justifyContent:"space-between",fontSize:13.5,marginBottom:3}}>
                             <span style={{color:C.ink,fontWeight:700}}>{d==="iOS"?"iPhone / iPad (iOS)":d}</span>
                             <span style={{color:C.inkFaint}}>{count.toLocaleString()} · {pct}%</span>
                           </div>
@@ -5217,61 +5348,61 @@ function AdminPanel(){
               </div>
 
               <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
-                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visitors are located</div>
+                <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Where visitors are located</div>
                 <VisitorMap pageViews={pageViews}/>
               </div>
             </>
           )}
 
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
+          <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{liveListings.length}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Total live listings</div>
+              <div style={{fontSize:13.5,color:C.inkFaint}}>Total live listings</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>{evapCount}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>EVAP-eligible (new, verified)</div>
+              <div style={{fontSize:13.5,color:C.inkFaint}}>EVAP-eligible (new, verified)</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{Object.keys(byProvince).length}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Provinces covered</div>
+              <div style={{fontSize:13.5,color:C.inkFaint}}>Provinces covered</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{reportLeads.length}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Report emails captured</div>
+              <div style={{fontSize:13.5,color:C.inkFaint}}>Report emails captured</div>
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
               <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
-              <div style={{fontSize:12,color:C.inkFaint}}>Avg. days on market</div>
+              <div style={{fontSize:13.5,color:C.inkFaint}}>Avg. days on market</div>
             </div>
           </div>
 
           <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>New listings tracked over time</div>
+              <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>New listings tracked over time</div>
               <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
                 {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
                   <button key={key} onClick={()=>setListingsGranularity(key)}
-                    style={{background:listingsGranularity===key?C.tealBg:"transparent",color:listingsGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    style={{background:listingsGranularity===key?C.tealBg:"transparent",color:listingsGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
                     {label}
                   </button>
                 ))}
               </div>
             </div>
             {firstSeenTimestamps.length===0?(
-              <div style={{color:C.inkFaint,fontSize:13,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
+              <div style={{color:C.inkFaint,fontSize:14.5,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
             ):(
               <>
                 <div style={{height:180}}>
                   <ResponsiveContainer>
                     <BarChart data={bucketedListings} margin={{top:4,right:4,bottom:0,left:0}}>
-                      <XAxis dataKey="label" tick={{fontSize:10,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                      <YAxis tick={{fontSize:11,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
+                      <XAxis dataKey="label" tick={{fontSize:12,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
+                      <YAxis tick={{fontSize:13,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
                       <Tooltip
                         formatter={(v)=>[v,"New listings"]}
-                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:12,fontWeight:700,color:"#fff"}}
-                        labelStyle={{color:"#D9DBEF",fontSize:11}}
+                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:13.5,fontWeight:700,color:"#fff"}}
+                        labelStyle={{color:"#D9DBEF",fontSize:13}}
                       />
                       <Bar dataKey="count" radius={[3,3,0,0]}>
                         {bucketedListings.map((entry,i)=>(
@@ -5281,7 +5412,7 @@ function AdminPanel(){
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{display:"flex",gap:16,marginTop:8,fontSize:11,color:C.inkFaint}}>
+                <div style={{display:"flex",gap:16,marginTop:8,fontSize:13,color:C.inkFaint}}>
                   <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.teal,marginRight:5}}/>Up from previous period</span>
                   <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.butter,marginRight:5}}/>Down from previous period</span>
                 </div>
@@ -5291,34 +5422,34 @@ function AdminPanel(){
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By province</div>
+              <div style={{fontSize:13.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By province</div>
               {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
-                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:13}}>
+                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:14.5}}>
                   <span style={{color:C.inkSoft}}>{p}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
                 </div>
               ))}
             </div>
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:12,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By fuel type</div>
+              <div style={{fontSize:13.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By fuel type</div>
               {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
-                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:13}}>
+                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:14.5}}>
                   <span style={{color:C.inkSoft}}>{f}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div style={{fontSize:13,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
             <span>REPORT EMAILS · {reportLeadsLoading?"loading…":`${reportLeads.length} total`}</span>
             {!reportLeadsLoading&&reportLeads.length>0&&(
               <button onClick={exportReportLeadsCsv}
-                style={{fontSize:11,fontWeight:700,letterSpacing:0,padding:"5px 12px",borderRadius:6,cursor:"pointer",background:"transparent",border:`1px solid ${C.line}`,color:C.inkSoft}}>
+                style={{fontSize:13,fontWeight:700,letterSpacing:0,padding:"5px 12px",borderRadius:6,cursor:"pointer",background:"transparent",border:`1px solid ${C.line}`,color:C.inkSoft}}>
                 Export CSV
               </button>
             )}
           </div>
           {reportLeadsLoading?(
-            <div style={{color:C.inkFaint,fontSize:13}}>Loading report emails…</div>
+            <div style={{color:C.inkFaint,fontSize:14.5}}>Loading report emails…</div>
           ):reportLeads.length===0?(
             <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"24px",textAlign:"center",color:C.inkFaint}}>
               No report emails yet. They'll show up here the moment someone uses "Email me this report" on a Quote Check.
@@ -5329,19 +5460,15 @@ function AdminPanel(){
                 <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
                   <div>
                     <strong style={{color:C.ink}}>{l.email}</strong>
-                    {l.source&&<div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>Re: {l.source}</div>}
+                    {l.source&&<div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>Re: {l.source}</div>}
                   </div>
-                  <div style={{fontSize:11,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
+                  <div style={{fontSize:13,color:C.inkFaint}}>{new Date(l.created_at).toLocaleString("en-CA")}</div>
                 </div>
               ))}
             </div>
           )}
         </>)}
 
-        {tab==="dealers" && (
-          <DealersTab
-            dealers={dealers} dealersLoading={dealersLoading}
-            onAdd={()=>setDealerModal("new")} onEdit={d=>setDealerModal(d)}
             onToggle={toggleDealerField} onDelete={deleteDealer}
             dealerListings={dealerListings} dealerListingsLoading={dealerListingsLoading}
             onMarkSold={markSold} onPublish={publishDealerListing}
