@@ -38,10 +38,17 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+// WHY the last render failed, readable by callers so the failure reason can
+// ride into api_usage_log (edge console logs are only visible in the
+// dashboard; a paid report shipping hollow deserves a queryable trace).
+// Reset at the top of every scrapflyRender call.
+export let lastScrapflyError: string | null = null;
+
 // Render a URL through Scrapfly's anti-scraping-protection engine. Returns the
 // rendered HTML and a full-page screenshot. null when disabled or on any error.
 export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
+  lastScrapflyError = null;
   const renderDeadline = Date.now() + budgetMs;
   try {
     const u = new URL("https://api.scrapfly.io/scrape");
@@ -56,9 +63,14 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     u.searchParams.set("format", "json");
 
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
-    if (!res.ok) { console.warn("scrapflyRender HTTP", res.status); return null; }
+    if (!res.ok) {
+      lastScrapflyError = `render HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`;
+      console.warn("scrapflyRender", lastScrapflyError);
+      return null;
+    }
     const j: any = await res.json();
     const html: string | null = j?.result?.content ?? null;
+    if (!html) lastScrapflyError = `render 200 but no content (success=${j?.result?.success}, status=${j?.result?.status_code}, reason=${String(j?.result?.reason ?? "").slice(0, 80)})`;
 
     // Screenshots come back as authenticated URLs; fetch the main one to bytes.
     let screenshotB64: string | null = null;
@@ -100,6 +112,7 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     if (!html && !screenshotB64) return null;
     return { html, screenshotB64, screenshotMime };
   } catch (e) {
+    lastScrapflyError = `render threw: ${String((e as Error)?.name)} ${String((e as Error)?.message).slice(0, 120)}`;
     console.warn("scrapflyRender error:", (e as Error)?.message);
     return null;
   }
@@ -211,6 +224,15 @@ export interface RescueOpts {
   // already done or nearly done by then. Resolving null falls back to a
   // fresh render with whatever budget remains, same as before.
   preRendered?: Promise<RenderResult | null>;
+  // The sealed-evidence screenshot ALREADY being captured at t=0 on every
+  // scan (Scrapfly Screenshot API). Vic's screenshot-first directive
+  // (2026-08-14): on albertahonda.com the /scrape ASP render kept failing
+  // while THIS endpoint attached a clean full-page shot on every single one
+  // of the same scans -- so when both renders fail, the rescue reads the
+  // page the way a human does: vision on the screenshot we already hold.
+  // The rescue must never again return empty while a good photo of the page
+  // sits in the same request.
+  fallbackShot?: Promise<{ b64: string; mime: string } | null>;
 }
 
 // Full rescue: render with Scrapfly, then read the result with Claude vision
@@ -242,6 +264,15 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // pre-render may itself have consumed some.
     let rendered = opts.preRendered ? await opts.preRendered.catch(() => null) : null;
     if (!rendered) rendered = await scrapflyRender(url, Math.max(5_000, deadline - Date.now()));
+    // Both renders dead -> screenshot-first (see RescueOpts.fallbackShot):
+    // the sealed shot captured at t=0 becomes the vision input.
+    if (!rendered && opts.fallbackShot) {
+      const shot = await opts.fallbackShot.catch(() => null);
+      if (shot) {
+        console.log("Rescue renders failed -- falling back to the sealed screenshot as the vision input (screenshot-first).");
+        rendered = { html: null, screenshotB64: shot.b64, screenshotMime: shot.mime };
+      }
+    }
     if (!rendered) return null;
 
     // Deterministic structured-data read of the SAME rendered HTML, alongside

@@ -51,7 +51,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
-import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, type RenderResult } from "../_shared/scrapfly.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
@@ -87,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-14b";
+const CACHE_VER = "2026-08-14c";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2697,7 +2697,7 @@ Deno.serve(async (req: Request) => {
         if (!(Number(jsonLdFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
-              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
             jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
@@ -2742,7 +2742,7 @@ Deno.serve(async (req: Request) => {
         if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
-              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
             cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
@@ -2776,13 +2776,15 @@ Deno.serve(async (req: Request) => {
       // text path (scrape, platform feed, JSON-LD) -- exactly the case the
       // residential-proxy render exists for. Only fires here, after all three
       // cheaper paths failed, so normal scans never pay for it.
+      let rescueTrace = "rescue not attempted";
       if (scrapflyEnabled()) {
         try {
           const renderOnly: any = { sourceUrl: url };
           const rescued = await rescueListingViaScrapfly(url, {
-            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
+            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
             budgetMs: Math.max(1_000, Math.min(80_000, REQUEST_DEADLINE - Date.now())),
           });
+          rescueTrace = rescued ? `rescued keys=${Object.keys(rescued).length}, price=${rescued.quotedPrice ?? "none"}` : "rescue returned null";
           if (rescued) mergeRescued(renderOnly, rescued);
           if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle) {
             await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
@@ -2807,12 +2809,20 @@ Deno.serve(async (req: Request) => {
             );
           }
           console.warn(`Scrapfly render fallback produced no usable data for ${url}.`);
-        } catch (e) { console.warn("Scrapfly render fallback threw (ignored):", (e as Error)?.message); }
+        } catch (e) { rescueTrace = `rescue threw: ${(e as Error)?.message?.slice(0, 100)}`; console.warn("Scrapfly render fallback threw (ignored):", (e as Error)?.message); }
       }
 
       // Not an SM360 listing (or its feed was also unreachable / the unit isn't
-      // in the feed): keep today's behaviour exactly.
-      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody}` });
+      // in the feed): keep today's behaviour exactly. The breadcrumbs ride in
+      // the log row because a hollow/failed PAID scan must be diagnosable from
+      // SQL alone -- edge console logs live only in the dashboard, and three
+      // hollow reports in two days each burned a round-trip through Vic just
+      // to learn WHICH layer died. direct= is the shared page fetch,
+      // preRender= what the pre-warmed Scrapfly render delivered, sfErr= why
+      // Scrapfly's LAST render call failed (see lastScrapflyError).
+      const dHtmlTrace = await directHtml.then((h) => (h ? `ok:${h.length}` : "fail")).catch(() => "fail");
+      const preRenderTrace = await earlyRender.then((r) => (r ? `html:${r.html?.length ?? 0},shot:${r.screenshotB64?.length ?? 0}` : "null")).catch(() => "null");
+      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody} | direct=${dHtmlTrace} | preRender=${preRenderTrace} | ${rescueTrace} | sfErr=${lastScrapflyError ?? "none"}` });
       await releaseCredit(holdId);
       holdId = null;
       return new Response(
@@ -3145,7 +3155,7 @@ Deno.serve(async (req: Request) => {
     if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
       try {
         const rescued = await rescueListingViaScrapfly(url, {
-          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
+          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself
