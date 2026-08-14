@@ -5910,6 +5910,43 @@ function RealLogo({width=40}){ return <svg width={width} height={Math.round(widt
 // grid, hot = flagged), #18 sidebar (rail + wide panel). A VERDICT cover leads;
 // EVIDENCE (signature + Internet Archive snapshot) and SAY-THIS close it. Money
 // items glow cyan. Email + copy-link live in here so these views are self-serve.
+// #21 "Drone Delivery" — Vic's pick (2026-08-14) from the 35-concept 3D
+// email-sent gallery: a quadcopter carries the envelope across the
+// confirmation row, rotors blurring, hovers a beat mid-flight, then exits
+// right. Plays ONCE per send (it mounts only when emailStatus flips to
+// "sent"), then the plain "Sent to …" text remains. Pure CSS transforms —
+// no emoji glyphs (3D/animated-icons rule). Static under reduced-motion.
+function DroneSentBeat({compact,body,accent}){
+  const w=compact?72:96,h=compact?24:30,s=compact?.72:1;
+  return (
+    <span aria-hidden="true" style={{position:"relative",display:"inline-block",width:w,height:h,overflow:"hidden",verticalAlign:"middle",flex:"0 0 auto"}}>
+      <style>{`
+        @keyframes lcDroneX{0%{left:-58px}55%{left:calc(50% - 26px)}72%{left:calc(50% - 26px)}100%{left:110%}}
+        @keyframes lcDroneBob{0%,100%{transform:translateY(0) scale(${s})}50%{transform:translateY(2.5px) scale(${s})}}
+        @keyframes lcRotor{0%{transform:scaleX(1)}50%{transform:scaleX(.18)}100%{transform:scaleX(1)}}
+        @keyframes lcSentFade{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+        @media (prefers-reduced-motion: reduce){
+          .lcDroneTrack{animation:none !important;left:110% !important}
+          .lcDroneRotor{animation:none !important}
+          .lcSentFade{animation:none !important;opacity:1 !important;transform:none !important}
+        }
+      `}</style>
+      <span className="lcDroneTrack" style={{position:"absolute",top:1,left:-58,animation:"lcDroneX 2.6s ease-in-out 1 forwards"}}>
+        <span style={{display:"block",transformOrigin:"top center",animation:"lcDroneBob 1.1s ease-in-out infinite"}}>
+          <span style={{display:"block",position:"relative",width:44,height:4,borderRadius:3,background:body}}>
+            <span className="lcDroneRotor" style={{position:"absolute",top:-5,left:-6,width:20,height:3,borderRadius:2,background:accent,animation:"lcRotor .16s linear infinite"}}/>
+            <span className="lcDroneRotor" style={{position:"absolute",top:-5,right:-6,width:20,height:3,borderRadius:2,background:accent,animation:"lcRotor .16s linear infinite"}}/>
+            <span style={{position:"absolute",top:4,left:21,width:1.5,height:5,background:body}}/>
+            <span style={{position:"absolute",top:9,left:14,width:16,height:11,borderRadius:2,border:`1.2px solid ${accent}`,background:"rgba(34,211,238,.08)"}}>
+              <span style={{position:"absolute",inset:0,background:`linear-gradient(to bottom right,transparent 44%,${accent} 48%,transparent 54%),linear-gradient(to bottom left,transparent 44%,${accent} 48%,transparent 54%)`,opacity:.7}}/>
+            </span>
+          </span>
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend }){
   const [mounted, setMounted] = useState(false);
   useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
@@ -6335,7 +6372,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
-          ? <span style={{ marginLeft: "auto", color: TEAL, fontWeight: 700, fontSize: 12.5 }}>✓ Emailed</span>
+          ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: TEAL, fontWeight: 700, fontSize: 12.5 }}><DroneSentBeat compact body="#3b3f7a" accent={TEAL}/><span className="lcSentFade" style={{ animation: "lcSentFade .5s ease .9s both" }}>Emailed</span></span>
           : <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
               <input type="email" placeholder="you@email.com — email the PDF" value={emailInput || ""} onChange={(e) => { setEmailInput && setEmailInput(e.target.value); if (emailErr && setEmailErr) setEmailErr(""); }} disabled={emailStatus === "sending"} style={{ width: 210, maxWidth: "48vw", background: "#020617", border: `1px solid ${emailErr ? ROSE : BORD}`, borderRadius: 9, padding: "8px 11px", color: TX, fontSize: 12.5, outline: "none", boxSizing: "border-box" }} />
               <button onClick={onSend} disabled={emailStatus === "sending"} style={{ background: CY, border: "none", borderRadius: 9, padding: "8px 15px", color: "#04222b", fontWeight: 800, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap" }}>{emailStatus === "sending" ? "Sending…" : "Send email"}</button>
@@ -9041,7 +9078,8 @@ function QuoteCheckPage(){
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Email me this report</div>
                 {emailStatus==="sent"?(
                   <div style={{display:"flex",alignItems:"center",gap:8,color:C.tealInk,fontWeight:700,fontSize:14}}>
-                    <span>✓</span> Sent to {emailInput.trim()}
+                    <DroneSentBeat body={C.inkFaint} accent={C.teal}/>
+                    <span className="lcSentFade" style={{animation:"lcSentFade .5s ease .9s both"}}>Sent to {emailInput.trim()}</span>
                   </div>
                 ):(
                   <>
