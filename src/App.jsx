@@ -4229,6 +4229,148 @@ function VerifProviderCosts({C, hours}){
   );
 }
 
+// Operational cost — what LotCheck pays to run, against what it processes.
+//
+// The provider card answers "what did the API calls cost". This answers the
+// question that decides the business: what does a check COST, versus what a
+// check SELLS for. Credit packs put a check at roughly CA$1.50-2.00, so the
+// fixed monthly burn over monthly checks is the whole unit-economics story.
+//
+// Every USD line is converted at a STORED rate with the date it was read, not
+// a hardcoded one. A cost panel running on a silently ageing FX rate is how you
+// end up planning against a number that stopped being true months ago.
+function VerifOperationalCost({C}){
+  const [d,setD]=useState(null);
+  const [state,setState]=useState("loading");
+
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_operational_cost");
+        if(error) throw error;
+        if(!cancelled){ setD(data||null); setState("ok"); }
+      }catch(err){
+        console.warn("operational cost unavailable:",err?.message||err);
+        if(!cancelled){ setD(null); setState("absent"); }
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[]);
+
+  const cad=(n)=>`CA$${Number(n||0).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const today=new Date().getDate();
+  const lines=d?.lines||[];
+  const billed=lines.filter(l=>l.billing_day).sort((a,b)=>a.billing_day-b.billing_day);
+  const cpc=d?.cost_per_check_cad;
+  const rev=Number(d?.revenue_per_check_cad||0);
+  const underwater=cpc!=null && rev>0 && Number(cpc)>rev;
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+        OPERATIONAL COST vs USAGE
+      </div>
+
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Reading operational_cost…</div>}
+      {state==="absent" && (
+        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_operational_cost.sql</span>.
+        </div>
+      )}
+
+      {state==="ok" && d && (<>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:12}}>
+          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>MONTHLY BURN</div>
+            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {cad(d.monthly_total_cad)}
+            </div>
+            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>fixed, all vendors</div>
+          </div>
+          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>CHECKS THIS MONTH</div>
+            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {vnum(d.checks_this_month)}
+            </div>
+            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>api_usage_log · URL path</div>
+          </div>
+          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>COST PER CHECK</div>
+            <div style={{fontSize:20,fontWeight:800,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace",
+                         color:cpc==null?C.inkFaint:underwater?C.coralInk:C.tealInk}}>
+              {cpc==null ? "—" : cad(cpc)}
+            </div>
+            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>
+              {cpc==null ? "no checks yet this month" : `sells for ${cad(rev)}`}
+            </div>
+          </div>
+          <div style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>BREAK-EVEN</div>
+            <div style={{fontSize:20,fontWeight:800,color:C.ink,marginTop:3,fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {vnum(d.breakeven_checks)}
+            </div>
+            <div style={{fontSize:9.5,color:C.inkFaint,marginTop:3}}>paid checks / month</div>
+          </div>
+        </div>
+
+        {/* Billing calendar — the month has two fixed hits, two days apart. */}
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
+          BILLING CALENDAR
+        </div>
+        <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:8}}>
+          {Array.from({length:28},(_,i)=>i+1).map(day=>{
+            const hit=billed.find(l=>l.billing_day===day);
+            const isToday=day===today;
+            return (
+              <div key={day} title={hit?`${hit.label} — ${cad(hit.cad)}`:`day ${day}`}
+                   style={{width:26,height:26,borderRadius:6,display:"flex",alignItems:"center",
+                           justifyContent:"center",fontSize:10,fontFamily:"ui-monospace,Menlo,monospace",
+                           background: hit ? C.coralBg : isToday ? C.tealBg : "transparent",
+                           border: isToday ? `1px solid ${C.teal}` : `1px solid ${C.line}`,
+                           color: hit ? C.coralInk : isToday ? C.tealInk : C.inkFaint,
+                           fontWeight: hit||isToday ? 800 : 400}}>
+                {day}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10.5,color:C.inkFaint,marginBottom:10}}>
+          {billed.map(l=>`${l.billing_day}th — ${l.label} ${cad(l.cad)}`).join("  ·  ")}
+          {billed.length>0 && "  ·  outlined = today"}
+        </div>
+
+        {/* Per-line, biggest first. */}
+        {lines.map(l=>(
+          <div key={l.vendor+l.label} style={{display:"flex",alignItems:"baseline",gap:10,padding:"6px 2px",
+                      borderBottom:`1px solid ${C.line}`}}>
+            <span style={{fontSize:12.5,color:C.ink,flex:1}}>{l.label}</span>
+            <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
+              {l.currency==="USD" ? `US$${Number(l.amount).toFixed(2)}` : ""}
+            </span>
+            <span style={{fontSize:12.5,fontWeight:800,color:Number(l.cad)>0?C.ink:C.tealInk,
+                          fontFamily:"ui-monospace,Menlo,monospace",minWidth:86,textAlign:"right"}}>
+              {Number(l.cad)>0 ? cad(l.cad) : "free"}
+            </span>
+            <span style={{fontSize:10,color:C.inkFaint,minWidth:64,textAlign:"right"}}>
+              {l.billing_day ? `the ${l.billing_day}th` : "on demand"}
+            </span>
+          </div>
+        ))}
+
+        <div style={{fontSize:10.5,color:C.inkFaint,marginTop:9,lineHeight:1.65}}>
+          USD billed at {d.fx_usd_cad} — the rate your card actually charges, not mid-market
+          ({d.fx_usd_cad_interbank} on {d.fx_read_at}). That spread is {d.fx_markup_pct}%, about{" "}
+          <span style={{color:C.coralInk,fontWeight:800}}>{cad(d.fx_markup_cad_year)}/year</span> on current
+          vendor spend — a real line item, not a rounding difference. Both rates live in admin_config.
+          Break-even assumes {cad(rev)} a check, the conservative end of the credit ladder; the 5-pack
+          earns more, so this reads pessimistically on purpose.
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function VerificationTab({apiUsage, apiUsageLoading}){
   const {C}=useAdminTheme();
   const [range,setRange]=useState("24h");
@@ -4366,6 +4508,8 @@ function VerificationTab({apiUsage, apiUsageLoading}){
           </>
         )}
       </div>
+
+      <VerifOperationalCost C={C}/>
 
       <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
 
