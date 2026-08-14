@@ -3938,20 +3938,6 @@ function buildVerifIntervals(bucket, rows){
   return out;
 }
 
-// Small isometric bar, matching the ledger direction from the design board but
-// in the admin palette (teal = verified, coral = failed) so this tab does not
-// diverge from the rest of the panel.
-function verifIsoBar(x, y, w, h, top, side, face){
-  const P=(a,b,l)=>`${(x+(a-b)*0.866).toFixed(1)},${(y+(a+b)*0.5-l).toFixed(1)}`;
-  const hw=w/2, hd=h/2;
-  return (
-    <g>
-      <polygon points={`${P(-hw,-hd,h)} ${P(hw,-hd,h)} ${P(hw,hd,h)} ${P(-hw,hd,h)}`} fill={top}/>
-      <polygon points={`${P(hw,-hd,h)} ${P(hw,hd,h)} ${P(hw,hd,0)} ${P(hw,-hd,0)}`} fill={face}/>
-      <polygon points={`${P(hw,hd,h)} ${P(-hw,hd,h)} ${P(-hw,hd,0)} ${P(hw,hd,0)}`} fill={side}/>
-    </g>
-  );
-}
 
 function VerifLiveDot({C}){
   return (
@@ -3981,52 +3967,93 @@ const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
 //   unmeasured  a HOLLOW outline, never a filled slab. Nothing writes this
 //               value yet, and a solid green row for something we do not
 //               measure is the false all-clear this panel exists to prevent.
-function VerifIsoLedger({C, rows, onPick, picked}){
-  const SP = 22, TOP = 26, CX = 236, W = 208, D = 13;
-  const height = TOP + rows.length * SP + 14;
-  const P = (cx, cy, a, b, l) => `${(cx + (a - b) * 0.866).toFixed(1)},${(cy + (a + b) * 0.5 - l).toFixed(1)}`;
+// Direction 1 — the extruded stack. One 3D column per interval: a green base
+// block for verified reads, with a red block capping it for failed ones, so the
+// failure share is the thing sitting on top rather than a colour buried inside
+// a bar.
+//
+// Oblique projection (a flat depth offset), not isometric. Columns stand side
+// by side and never stack, so the vertical-bleed problem that wrecked the iso
+// ledger cannot arise here — the only constraint is horizontal, and
+// w + dx = 0.84 * pitch guarantees no two columns ever touch, at any interval
+// count from 7 to 30.
+function VerifExtrudedStack({C, intervals, peak, labelEvery}){
+  const H = 152, BASE = H - 24, LEFT = 26, RIGHT = 10;
+  const usable = 620 - LEFT - RIGHT;
+  const pitch = usable / Math.max(1, intervals.length);
+  const w = pitch * 0.62, dx = pitch * 0.22, dy = dx * 0.7;
+  const scale = (BASE - 16) / Math.max(1, peak);
+
+  const block = (x, yTop, h, faceCol, capCol, key) => {
+    if (h < 0.6) return null;
+    const yBot = yTop + h;
+    const pTop = `${x},${yTop} ${x + w},${yTop} ${x + w + dx},${yTop - dy} ${x + dx},${yTop - dy}`;
+    const pSide = `${x + w},${yTop} ${x + w + dx},${yTop - dy} ${x + w + dx},${yBot - dy} ${x + w},${yBot}`;
+    return (
+      <g key={key}>
+        <polygon points={pTop} fill={capCol}/>
+        <polygon points={pSide} fill={capCol} opacity="0.72"/>
+        <rect x={x} y={yTop} width={w} height={h} fill={faceCol}/>
+      </g>
+    );
+  };
 
   return (
-    <svg viewBox={`0 0 620 ${height}`} style={{display:"block",width:"100%",overflow:"visible"}}>
-      {rows.map((r, i) => {
-        const cy = TOP + i * SP;
-        if (r.sec) return (
-          <text key={`s${i}`} x="8" y={cy+3} fill={C.inkFaint} fontSize="8.5"
-                fontFamily="ui-monospace,Menlo,monospace" letterSpacing="1.4">{r.sec}</text>
-        );
-        const hw = W/2, hd = D/2;
-        const lift = r.state==="bad" ? 6 + (100 - (r.pct ?? 0)) * 0.5
-                   : r.state==="unmeasured" ? 0
-                   : r.state==="info" ? 5 : 4;
-        const top   = r.state==="bad" ? C.coralInk : C.tealInk;
-        const face  = r.state==="bad" ? C.coral    : C.teal;
-        const side  = r.state==="bad" ? C.coralInk : C.tealInk;
-        const op    = r.state==="info" ? 0.45 : 0.95;
-        const val   = r.state==="bad" ? C.coralInk : r.state==="unmeasured" ? C.inkFaint : C.tealInk;
-
+    <svg viewBox={`0 0 620 ${H}`} style={{display:"block",width:"100%",overflow:"visible"}}>
+      <line x1={LEFT - 8} y1={BASE} x2={612} y2={BASE} stroke={C.line}/>
+      {intervals.map((r, i) => {
+        const x = LEFT + i * pitch;
+        const hOk = r.ok * scale, hNo = r.fail * scale;
+        const n = r.ok + r.fail;
         return (
-          <g key={r.id} onClick={()=>onPick && onPick(r.id)} style={{cursor:onPick?"pointer":"default"}}>
-            <rect x="4" y={cy-9} width="612" height="19" rx="4"
-                  fill={picked===r.id ? C.tealBg : "transparent"}/>
-            {r.state==="unmeasured" ? (
-              // Hollow: the plane is drawn, nothing stands on it.
-              <polygon
-                points={`${P(CX,cy,-hw,-hd,0)} ${P(CX,cy,hw,-hd,0)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,-hw,hd,0)}`}
-                fill="none" stroke={C.inkFaint} strokeWidth="1" strokeDasharray="3 3" opacity=".55"/>
-            ) : (<>
-              <polygon points={`${P(CX,cy,-hw,-hd,lift)} ${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)}`} fill={top} opacity={op}/>
-              <polygon points={`${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,hw,-hd,0)}`} fill={face} opacity={op}/>
-              <polygon points={`${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)} ${P(CX,cy,-hw,hd,0)} ${P(CX,cy,hw,hd,0)}`} fill={side} opacity={op}/>
-            </>)}
-            <text x="8" y={cy+3} fill={C.ink} fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.name}</text>
-            <text x="452" y={cy+3} textAnchor="end" fill={val} fontSize="10.5"
-                  fontFamily="ui-monospace,Menlo,monospace">{r.value}</text>
-            <text x="612" y={cy+3} textAnchor="end" fill={C.inkFaint} fontSize="9.5"
-                  fontFamily="ui-monospace,Menlo,monospace">{r.note}</text>
+          <g key={i}>
+            {n === 0
+              // A dead interval keeps its slot and shows a floor tick. Dropping
+              // it would make the neighbours look adjacent and hide the gap,
+              // and the gap is the thing you most need to see.
+              ? <line x1={x} y1={BASE} x2={x + w} y2={BASE} stroke={C.inkFaint} strokeWidth="1.5" opacity="0.45"/>
+              : <>
+                  {block(x, BASE - hOk, hOk, C.teal, C.tealInk, "ok")}
+                  {block(x, BASE - hOk - hNo, hNo, C.coral, C.coralInk, "no")}
+                </>}
+            {i % labelEvery === 0 && (
+              <text x={x + w / 2} y={BASE + 14} textAnchor="middle" fill={C.inkFaint}
+                    fontSize="8.5" fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
+            )}
           </g>
         );
       })}
     </svg>
+  );
+}
+
+// One 3D treatment per surface: the columns above carry it, so these rows stay
+// flat and quiet. State is a chip, not a shape — and `unmeasured` is hollow,
+// never green, because nothing writes those values yet and a green row for
+// something we do not measure is the false all-clear this panel exists to stop.
+function VerifRowList({C, rows, picked, onPick}){
+  return (
+    <div>
+      {rows.map((r, i) => r.sec ? (
+        <div key={`s${i}`} style={{fontSize:9,fontWeight:800,letterSpacing:1.4,color:C.inkFaint,
+                                   margin: i === 0 ? "0 0 6px" : "14px 0 6px"}}>{r.sec}</div>
+      ) : (
+        <div key={r.id} onClick={() => onPick && onPick(r.id)}
+             style={{display:"flex",alignItems:"baseline",gap:10,padding:"6px 8px",cursor:"pointer",
+                     borderBottom:`1px solid ${C.line}`,borderRadius:6,
+                     background: picked === r.id ? C.tealBg : "transparent"}}>
+          <span style={{width:9,height:9,borderRadius:2,flex:"none",
+            background: r.state === "unmeasured" ? "transparent" : r.state === "bad" ? C.coral : C.teal,
+            border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none",
+            opacity: r.state === "info" ? 0.5 : 1}}/>
+          <span style={{fontSize:12.5,color:C.ink,flex:1}}>{r.name}</span>
+          <span style={{fontSize:12.5,fontWeight:800,
+            color: r.state === "bad" ? C.coralInk : r.state === "unmeasured" ? C.inkFaint : C.tealInk}}>{r.value}</span>
+          <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",
+                        minWidth:200,textAlign:"right"}}>{r.note}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -4115,8 +4142,6 @@ function VerificationTab({apiUsage, apiUsageLoading}){
     return rows;
   },[ledger,tot,apiUsageLoading]);
 
-  const SP = intervals.length>20 ? 15 : intervals.length>10 ? 19 : 25;
-  const BARW = 300, LX = 132, H = intervals.length*SP + 16;
 
   return (
     <div>
@@ -4159,34 +4184,12 @@ function VerificationTab({apiUsage, apiUsageLoading}){
           <div style={{color:C.inkFaint,fontSize:12.5,padding:"14px 0"}}>Reading api_usage_log…</div>
         ) : (
           <>
-            <svg viewBox={`0 0 ${LX+BARW+120} ${H}`} style={{display:"block",width:"100%",overflow:"visible"}}>
-              {intervals.map((r,i)=>{
-                const y=12+i*SP, n=r.ok+r.fail;
-                const wOK=(r.ok/peak)*BARW, wNO=(r.fail/peak)*BARW;
-                const bh=SP>18?7:5;
-                return (
-                  <g key={i}>
-                    <text x="0" y={y+3} fill={C.ink} fontSize={SP>18?10.5:9.5} fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
-                    {n===0 ? (
-                      <line x1={LX} y1={y} x2={LX+26} y2={y} stroke={C.line} strokeWidth="2"/>
-                    ) : (<>
-                      {wOK>0.4 && verifIsoBar(LX+wOK/2, y+2, wOK, bh, C.tealInk, C.tealInk, C.teal)}
-                      {wNO>0.4 && verifIsoBar(LX+wOK+wNO/2, y+2, wNO, bh, C.coralInk, C.coralInk, C.coral)}
-                    </>)}
-                    <text x={LX+BARW+16} y={y+3} fill={n?C.inkSoft:C.inkFaint} fontSize="9.5" fontFamily="ui-monospace,Menlo,monospace">
-                      {n===0 ? "no checks" : n.toLocaleString("en-CA")}
-                    </text>
-                    {r.fail>0 && (
-                      <text x={LX+BARW+114} y={y+3} textAnchor="end" fill={C.coralInk} fontSize="9.5" fontFamily="ui-monospace,Menlo,monospace">
-                        {r.fail} failed
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
+            <VerifExtrudedStack C={C} intervals={intervals} peak={peak}
+              labelEvery={intervals.length > 24 ? 5 : intervals.length > 12 ? 3 : 1}/>
             <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>
-              Teal = verified, coral = failed reads. An interval with no checks keeps its row — a gap you can see is the point.
+              One column per interval — teal base is verified, the coral cap on top is failed reads,
+              so the failure share sits above the stack instead of hiding inside it. An interval with
+              no checks keeps its slot and shows a floor tick: a gap you can see is the point.
             </div>
           </>
         )}
@@ -4199,10 +4202,10 @@ function VerificationTab({apiUsage, apiUsageLoading}){
             LEDGER — {bucket.label.toUpperCase()}
           </span>
           <span style={{fontSize:11,color:C.inkFaint}}>
-            a row lifts off the plane as it degrades · hollow = not instrumented
+            hollow = not instrumented yet
           </span>
         </div>
-        <VerifIsoLedger C={C} rows={isoRows} picked={picked} onPick={setPicked}/>
+        <VerifRowList C={C} rows={isoRows} picked={picked} onPick={setPicked}/>
         <div style={{borderTop:`1px solid ${C.line}`,marginTop:6,paddingTop:10,fontSize:11,color:C.inkFaint,lineHeight:1.65}}>
           {picked
             ? (isoRows.find(r=>r.id===picked)?.proof || "")
