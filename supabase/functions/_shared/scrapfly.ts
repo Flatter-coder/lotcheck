@@ -38,17 +38,22 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-// WHY the last render failed, readable by callers so the failure reason can
-// ride into api_usage_log (edge console logs are only visible in the
-// dashboard; a paid report shipping hollow deserves a queryable trace).
-// Reset at the top of every scrapflyRender call.
+// WHY renders failed, readable by callers so the failure reason can ride
+// into api_usage_log (edge console logs are only visible in the dashboard;
+// a paid report shipping hollow deserves a queryable trace). APPENDED, not
+// reset -- the first trace of this design reset it per-call, so a later
+// render call that happened to return 200 wiped the earlier failure and the
+// log said "sfErr=none" about a scan whose renders demonstrably died
+// (albertahonda.com, 2026-08-14 05:19). Callers read the accumulated trail.
 export let lastScrapflyError: string | null = null;
+function noteScrapflyError(msg: string): void {
+  lastScrapflyError = lastScrapflyError ? `${lastScrapflyError} ;; ${msg}` : msg;
+}
 
 // Render a URL through Scrapfly's anti-scraping-protection engine. Returns the
 // rendered HTML and a full-page screenshot. null when disabled or on any error.
 export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
-  lastScrapflyError = null;
   const renderDeadline = Date.now() + budgetMs;
   try {
     const u = new URL("https://api.scrapfly.io/scrape");
@@ -64,13 +69,13 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
 
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
     if (!res.ok) {
-      lastScrapflyError = `render HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`;
+      noteScrapflyError(`render HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`);
       console.warn("scrapflyRender", lastScrapflyError);
       return null;
     }
     const j: any = await res.json();
     const html: string | null = j?.result?.content ?? null;
-    if (!html) lastScrapflyError = `render 200 but no content (success=${j?.result?.success}, status=${j?.result?.status_code}, reason=${String(j?.result?.reason ?? "").slice(0, 80)})`;
+    if (!html) noteScrapflyError(`render 200 but no content (success=${j?.result?.success}, status=${j?.result?.status_code}, reason=${String(j?.result?.reason ?? "").slice(0, 80)})`);
 
     // Screenshots come back as authenticated URLs; fetch the main one to bytes.
     let screenshotB64: string | null = null;
@@ -112,7 +117,7 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     if (!html && !screenshotB64) return null;
     return { html, screenshotB64, screenshotMime };
   } catch (e) {
-    lastScrapflyError = `render threw: ${String((e as Error)?.name)} ${String((e as Error)?.message).slice(0, 120)}`;
+    noteScrapflyError(`render threw: ${String((e as Error)?.name)} ${String((e as Error)?.message).slice(0, 120)}`);
     console.warn("scrapflyRender error:", (e as Error)?.message);
     return null;
   }
@@ -133,7 +138,13 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       u.searchParams.set("url", url);
       u.searchParams.set("format", "jpg");
       if (fullpage) u.searchParams.set("capture", "fullpage");
-      u.searchParams.set("rendering_wait", "3000");
+      // 8s, not 3s: the page's own content paints well inside 3s, but dealer
+      // vehicle PHOTOS come off a separate image CDN (autoscout24's picture
+      // service on Convertus sites) that hadn't delivered yet -- Vic's
+      // 2027 HR-V report (2026-08-14) sealed a perfect capture of every
+      // figure with grey boxes where the car should be. Matches the 8s the
+      // ASP render already uses for the same reason.
+      u.searchParams.set("rendering_wait", "8000");
       u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("country", "ca");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
@@ -263,7 +274,13 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // fallback uses the REMAINING budget, since awaiting a pending
     // pre-render may itself have consumed some.
     let rendered = opts.preRendered ? await opts.preRendered.catch(() => null) : null;
-    if (!rendered) rendered = await scrapflyRender(url, Math.max(5_000, deadline - Date.now()));
+    // The fresh render RESERVES ~20s for the Claude read that follows it. It
+    // used to get everything left, so on a slow ASP fight (albertahonda.com,
+    // 2026-08-14 05:19 breadcrumbs) the render consumed the entire remaining
+    // budget and the vision call aborted at its 1s floor -- a render we PAID
+    // for, thrown away unread. A render capped 20s shorter still usually
+    // finishes, and the vision step is the whole point of rendering.
+    if (!rendered) rendered = await scrapflyRender(url, Math.max(5_000, deadline - Date.now() - 20_000));
     // Both renders dead -> screenshot-first (see RescueOpts.fallbackShot):
     // the sealed shot captured at t=0 becomes the vision input.
     if (!rendered && opts.fallbackShot) {
