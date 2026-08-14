@@ -87,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-13b";
+const CACHE_VER = "2026-08-13d";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1056,6 +1056,22 @@ async function lookupManufacturerMsrp(
   const MFR_TIMEOUT_MS = 30_000;
   const MFR_VX10_WAIT_MS = 6_000;
 
+  // The entry gate above only checks that ~40s existed when this function
+  // STARTED -- it never re-checked before each of the three sequential steps
+  // below, which each independently spent up to their own full fixed budget
+  // (20s search + 30s extract + 30s Claude = 80s worst case, double the 40s
+  // the gate guaranteed). Same bug class just fixed in scrapfly.ts's
+  // rescueListingViaScrapfly, confirmed live 2026-08-14: a caller computes a
+  // budget from ITS remaining deadline, hands it down, and each downstream
+  // step re-spending that same full value independently can blow the total
+  // request past Supabase's 150s platform ceiling with no graceful error.
+  // stepBudget shrinks each step to what's ACTUALLY left of `deadline` (never
+  // above its own cap, never below a floor short enough to still be a real
+  // attempt) -- and falls back to the fixed cap when no deadline was passed,
+  // matching this function's existing "unlimited budget" behavior for that case.
+  const stepBudget = (floorMs: number, capMs: number): number =>
+    deadline != null ? Math.max(floorMs, Math.min(capMs, deadline - Date.now())) : capMs;
+
   try {
     // Step 1: cheap search, purely to find the right URL. Confirmed via
     // direct testing (2026-07-22) that manufacturer build-and-price/
@@ -1083,7 +1099,7 @@ async function lookupManufacturerMsrp(
         country: "CA",
         locale: "en",
       }),
-    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: 20_000, label: "nimble-search" });
+    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: stepBudget(5_000, 20_000), label: "nimble-search" });
 
     if (!searchRes.ok) {
       console.warn("Manufacturer MSRP search failed:", searchRes.status, await searchRes.text());
@@ -1137,7 +1153,7 @@ async function lookupManufacturerMsrp(
     // (vx10 + explicit wait) already proven reliable on JS-heavy DEALER
     // pages all session -- manufacturer configurator pages need the
     // identical treatment, confirmed by direct testing just now.
-    const extractResult = await nimbleExtract(targetUrl, "vx10", MFR_TIMEOUT_MS, MFR_VX10_WAIT_MS);
+    const extractResult = await nimbleExtract(targetUrl, "vx10", stepBudget(10_000, MFR_TIMEOUT_MS), MFR_VX10_WAIT_MS);
     if (!extractResult.ok) {
       console.warn(`Manufacturer MSRP page extract failed for ${targetUrl}:`, extractResult.errBody);
       return null;
@@ -1164,7 +1180,7 @@ async function lookupManufacturerMsrp(
           `You are looking for the manufacturer's suggested retail price (MSRP) for one specific vehicle trim on its own official Canadian manufacturer website. Find the MSRP for exactly: ${year} ${make} ${model}${trim ? " " + trim : ""}. Only use a price you can clearly attribute to this exact trim -- if the content shows multiple trims, pick the matching one, don't average or guess across trims. Return ONLY this JSON object, nothing else, no markdown fence: {"msrp": number or null}`,
         messages: [{ role: "user", content: pageContent }],
       }),
-    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: 30_000, label: "anthropic-mfr-msrp" });
+    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: stepBudget(5_000, 30_000), label: "anthropic-mfr-msrp" });
 
     if (!claudeRes.ok) {
       console.warn("Manufacturer MSRP extraction call failed:", claudeRes.status, await claudeRes.text());
@@ -2643,12 +2659,8 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
-              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
-            if (rescued) {
-              mergeRescued(jsonLdFallback, rescued);
-              if (jlRenderConfirmedGated && !(Number(jsonLdFallback.quotedPrice) > 0)) jsonLdFallback.priceDisclosure = "contact_for_price";
-            }
+            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+            if (rescued) mergeRescued(jsonLdFallback, rescued);
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
         }
         // ASSERT (render check done). Same gates as the main path, from the
@@ -2692,12 +2704,8 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
-              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
-            if (rescued) {
-              mergeRescued(convertusFallback, rescued);
-              if (cvRenderConfirmedGated && !(Number(convertusFallback.quotedPrice) > 0)) convertusFallback.priceDisclosure = "contact_for_price";
-            }
+            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+            if (rescued) mergeRescued(convertusFallback, rescued);
           } catch (e) { console.warn("Convertus-path rescue threw (ignored):", (e as Error)?.message); }
         }
         assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
@@ -3085,18 +3093,12 @@ Deno.serve(async (req: Request) => {
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself
-        // reported the gating -- an empty/failed read is not confirmation. A
-        // ground-truth CTA match against the raw rendered DOM counts too: a
-        // broken/incomplete screenshot can make vision miss the sidebar (Rock
-        // Creek, 2026-08-13), but a plain text match against the actual
-        // rendered HTML can't be fooled by a bad capture the same way.
-        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
-          && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+        // reported the gating -- an empty/failed read is not confirmation.
+        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
           mergeRescued(analysis, rescued);
-          if (renderConfirmedGated && !(Number(analysis.quotedPrice) > 0)) analysis.priceDisclosure = "contact_for_price";
           // The rescue can recover identity the text pass missed (trim, VIN).
           // A catalog "starting_at" floor picked WITHOUT that identity is stale
           // -- drop it so enrich re-resolves with the full signals (fixes the
