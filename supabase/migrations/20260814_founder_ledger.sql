@@ -258,7 +258,11 @@ revoke all on function public.fn_founder_balances()             from anon, authe
 grant execute on function public.fn_accrue_statement_charges(uuid) to service_role;
 grant execute on function public.fn_founder_balances()             to service_role;
 
-revoke all on function public.fn_admin_record_payment(text,numeric,date,text,text) from anon, public;
-revoke all on function public.fn_admin_founder_balances()                          from anon, public;
-grant execute on function public.fn_admin_record_payment(text,numeric,date,text,text) to authenticated, service_role;
-grant execute on function public.fn_admin_founder_balances()                          to authenticated, service_role;
+-- Signature is (text,numeric,date,text,text,text) — six args since p_line_label
+-- was added. A REVOKE naming a signature that does not exist is a hard error,
+-- not a warning, and it aborts the whole migration: exactly what happened on
+-- the first run of this file.
+revoke all on function public.fn_admin_record_payment(text,numeric,date,text,text,text) from anon, public;
+revoke all on function public.fn_admin_founder_balances()                               from anon, public;
+grant execute on function public.fn_admin_record_payment(text,numeric,date,text,text,text) to authenticated, service_role;
+grant execute on function public.fn_admin_founder_balances()                               to authenticated, service_role;
