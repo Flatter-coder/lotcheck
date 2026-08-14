@@ -106,6 +106,17 @@ const SELTOS = [
   { trim: "X-Line Limited", msrp: 41295, fuel_type: "Gas", drivetrain: "AWD" },
 ];
 
+// 2027 HR-V — the $6,100-low anchor (albertahonda.com, 2026-08-14). "EX"
+// wasn't a KEY_TOKEN, so the listing's own EX-L row tied the wrong "LX AWD"
+// row (drivetrain word alone) and the ambiguous-tie rule took the cheaper
+// one: a $43,481 EX-L AWD anchored against the $33,100 LX AWD floor.
+const HRV = [
+  { trim: "LX 2WD", msrp: 30800, fuel_type: "Gas" },
+  { trim: "LX AWD", msrp: 33100, fuel_type: "Gas" },
+  { trim: "SPORT", msrp: 36400, fuel_type: "Gas" },
+  { trim: "EX-L", msrp: 39200, fuel_type: "Gas" },
+];
+
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
 const CX90PH  = [{ trim: null, msrp: 49999, fuel_type: "PHEV" }];
@@ -233,6 +244,14 @@ const CASES = [
   // the safe ambiguous-tie floor, not a confident guess either direction.
   ["Seltos LX, ambiguous vs LX FWD -> honest starting_at (not a guess)", SELTOS,
     { trim: "LX", fuelType: "Gas" }, 28495, "starting_at"],
+
+  // HR-V EX-L AWD -> its own EX-L row ($39,200), never the LX floor. Basis
+  // stays starting_at honestly (the row can't confirm AWD), but the anchor
+  // is the right trim's figure instead of $6,100 low.
+  ["HR-V EX-L AWD -> EX-L row, not the LX floor", HRV,
+    { trim: "EX-L AWD", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 43481 }, 39200, "starting_at"],
+  ["HR-V LX AWD stays exact on its own row", HRV,
+    { trim: "LX AWD", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 37381 }, 33100, "exact"],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],

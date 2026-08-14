@@ -87,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-14d";
+const CACHE_VER = "2026-08-14e";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -3223,6 +3223,12 @@ Deno.serve(async (req: Request) => {
         gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
       }
     } catch { /* the safety net must never sink the scan */ }
+    // Re-assert AFTER the last gap-fill: a price that arrived here (structured
+    // data recovered what the prose pass never saw) can newly contradict the
+    // summary written earlier -- verify the text against the final figures
+    // before anything ships (SUMMARY_MATCHES_PRICE). Ctx-less on purpose: the
+    // render-check gate already ran above with its real context.
+    assertInvariants(analysis);
 
     if (!gotPricing) {
       await logUsage({ success: false, errorMessage: "unreadable_listing (no price/MSRP extracted)" });
