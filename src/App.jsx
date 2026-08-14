@@ -4057,6 +4057,138 @@ function VerifRowList({C, rows, picked, onPick}){
   );
 }
 
+// Provider cost + reliability, from provider_call (20260814_provider_call_log.sql).
+//
+// The point of this card is a decision, not a dashboard: Nimble's extract job
+// and its search job are shown SEPARATELY, because only one of them has a
+// replacement. Scrapfly's screenshot job sits next to Nimble's extract job on
+// purpose — they do the same work on the same listings, so their failure rates
+// are directly comparable and the keep-or-drop answer reads straight off.
+//
+// Nimble is reported in CALLS, not dollars. Their API exposes no per-call
+// price, and a made-up cost on the screen you use to fire a vendor is worse
+// than an honest blank.
+function VerifProviderCosts({C, hours}){
+  const [d,setD]=useState(null);
+  const [state,setState]=useState("loading");
+
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_provider_costs",{p_hours:hours});
+        if(error) throw error;
+        if(!cancelled){ setD(data||null); setState("ok"); }
+      }catch(err){
+        console.warn("provider costs unavailable:",err?.message||err);
+        if(!cancelled){ setD(null); setState("absent"); }
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[hours]);
+
+  const byProv=d?.by_provider||[];
+  const byOp=d?.by_operation||[];
+  const hosts=d?.worst_hosts||[];
+  const money=(n)=>`$${Number(n||0).toFixed(2)}`;
+  const ms=(n)=>n==null?"—":`${(n/1000).toFixed(1)}s`;
+
+  const nimbleExtract=byOp.find(o=>o.provider==="nimble"&&o.operation==="listing_extract");
+  const scrapflyShot=byOp.find(o=>o.provider==="scrapfly"&&o.operation==="screenshot");
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
+        PROVIDER COST + RELIABILITY
+      </div>
+
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:12.5,padding:"12px 0"}}>Reading provider_call…</div>}
+
+      {state==="absent" && (
+        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          No provider log yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260814_provider_call_log.sql</span> is
+          written but not applied, or no scans have run since it was. Every figure here stays blank until
+          real calls land; nothing on this card is estimated.
+        </div>
+      )}
+
+      {state==="ok" && byProv.length===0 && (
+        <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Table is live but empty — no provider calls recorded in this window yet.
+        </div>
+      )}
+
+      {state==="ok" && byProv.length>0 && (<>
+        <div style={{display:"grid",gridTemplateColumns:"1.1fr .7fr .7fr .8fr .7fr",gap:6,
+                     fontSize:10,color:C.inkFaint,fontWeight:800,letterSpacing:.6,padding:"0 6px 4px"}}>
+          <span>PROVIDER</span><span style={{textAlign:"right"}}>CALLS</span>
+          <span style={{textAlign:"right"}}>FAIL</span><span style={{textAlign:"right"}}>COST</span>
+          <span style={{textAlign:"right"}}>P95</span>
+        </div>
+        {byProv.map(p=>{
+          const bad=Number(p.fail_pct)>=15;
+          return (
+            <div key={p.provider} style={{display:"grid",gridTemplateColumns:"1.1fr .7fr .7fr .8fr .7fr",gap:6,
+                        alignItems:"baseline",padding:"6px",borderBottom:`1px solid ${C.line}`}}>
+              <span style={{fontSize:12.5,color:C.ink,textTransform:"capitalize"}}>{p.provider}</span>
+              <span style={{fontSize:12.5,textAlign:"right",color:C.inkSoft}}>{vnum(p.calls)}</span>
+              <span style={{fontSize:12.5,textAlign:"right",fontWeight:800,color:bad?C.coralInk:C.tealInk}}>
+                {p.fail_pct}%
+              </span>
+              <span style={{fontSize:12.5,textAlign:"right",color:Number(p.cost_usd)>0?C.ink:C.inkFaint}}>
+                {Number(p.cost_usd)>0?money(p.cost_usd):(p.credits>0?`${vnum(p.credits)} cr`:"—")}
+              </span>
+              <span style={{fontSize:11.5,textAlign:"right",color:C.inkFaint}}>{ms(p.p95_ms)}</span>
+            </div>
+          );
+        })}
+
+        {/* The comparison the decision actually turns on. */}
+        {(nimbleExtract||scrapflyShot) && (
+          <div style={{marginTop:12,padding:"10px 12px",background:C.paper2,borderRadius:10}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:6}}>
+              SAME JOB, BOTH VENDORS
+            </div>
+            {[["Nimble — listing extract",nimbleExtract],["Scrapfly — screenshot",scrapflyShot]].map(([label,o])=>(
+              <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"3px 0"}}>
+                <span style={{fontSize:12,color:C.ink}}>{label}</span>
+                <span style={{fontSize:12,fontFamily:"ui-monospace,Menlo,monospace",
+                              color:o&&Number(o.fail_pct)>=15?C.coralInk:C.tealInk}}>
+                  {o?`${o.fail_pct}% fail of ${vnum(o.calls)}`:"no calls yet"}
+                </span>
+              </div>
+            ))}
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
+              Nimble also runs the MSRP fallback search, which Scrapfly cannot replace — it renders a URL
+              you already have, it does not find one. Judge the two jobs separately.
+            </div>
+          </div>
+        )}
+
+        {hosts.length>0 && (
+          <div style={{marginTop:12}}>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>
+              WHERE READS FAIL
+            </div>
+            {hosts.slice(0,5).map(h=>(
+              <div key={h.host} style={{display:"flex",justifyContent:"space-between",padding:"2px 0"}}>
+                <span style={{fontSize:11.5,color:C.inkSoft,fontFamily:"ui-monospace,Menlo,monospace"}}>{h.host}</span>
+                <span style={{fontSize:11.5,color:C.coralInk,fontFamily:"ui-monospace,Menlo,monospace"}}>
+                  {h.failed}/{h.calls} failed
+                </span>
+              </div>
+            ))}
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>
+              Concentrated failures mean a platform is walled, not that the vendor is bad. Spread-out
+              failures mean the vendor is.
+            </div>
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 function VerificationTab({apiUsage, apiUsageLoading}){
   const {C}=useAdminTheme();
   const [range,setRange]=useState("24h");
@@ -4195,7 +4327,9 @@ function VerificationTab({apiUsage, apiUsageLoading}){
         )}
       </div>
 
-      {/* ---- direction 23: the isometric ledger (volume + delivery + 13 checks) ---- */}
+      <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
+
+      {/* ---- the ledger: volume + delivery + 13 checks ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:2}}>
           <span style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>

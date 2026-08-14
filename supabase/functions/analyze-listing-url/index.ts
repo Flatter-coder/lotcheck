@@ -313,6 +313,49 @@ function computeCost(inputTokens: number, outputTokens: number): number {
   return (inputTokens * inputRatePerMillion + outputTokens * outputRatePerMillion) / 1_000_000;
 }
 
+// ── Per-provider call log (20260814_provider_call_log.sql) ──────────────────
+// api_usage_log records one row per RUN, so a Nimble extract that fails and is
+// then rescued by Scrapfly is logged as `success: true` with no trace of the
+// failure — which is exactly why Nimble's real failure rate and cost share are
+// unmeasurable today. This records one row per PROVIDER CALL.
+//
+// Fail-open and never awaited on the hot path where it would add latency:
+// instrumentation must not be able to break or slow a buyer's report.
+function hostOf(url: string): string | null {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return null; }
+}
+
+async function logProviderCall(f: {
+  provider: "anthropic" | "scrapfly" | "nimble";
+  operation: "listing_extract" | "search" | "manufacturer_extract" | "render" | "screenshot" | "vision_rescue" | "analysis";
+  ok: boolean;
+  driver?: string | null;
+  listingHost?: string | null;
+  attempts?: number;
+  durationMs?: number | null;
+  errorCode?: string | null;
+  costUsd?: number | null;
+  credits?: number | null;
+}) {
+  try {
+    const { error } = await supabase.rpc("fn_log_provider_call", {
+      p_provider: f.provider,
+      p_operation: f.operation,
+      p_ok: f.ok,
+      p_driver: f.driver ?? null,
+      p_listing_host: f.listingHost ?? null,
+      p_attempts: f.attempts ?? 1,
+      p_duration_ms: f.durationMs ?? null,
+      p_error_code: f.errorCode ? String(f.errorCode).slice(0, 200) : null,
+      p_cost_usd: f.costUsd ?? null,
+      p_credits: f.credits ?? null,
+    });
+    if (error) console.warn("provider_call log failed:", error.message);
+  } catch (e) {
+    console.warn("provider_call log threw (run continues):", e);
+  }
+}
+
 async function logUsage(fields: {
   success: boolean;
   inputTokens?: number | null;
@@ -1100,6 +1143,7 @@ async function lookupManufacturerMsrp(
     // regardless of brand, while static announcement pages and spec PDFs
     // are not. Query steers toward the latter accordingly.
     const query = `${year} ${make} ${model} ${trim ?? ""} pricing announcement press release MSRP Canada`.trim();
+    const searchT0 = Date.now();
     const searchRes = await fetchWithRetry("https://sdk.nimbleway.com/v1/search", {
       method: "POST",
       headers: {
@@ -1115,6 +1159,19 @@ async function lookupManufacturerMsrp(
         locale: "en",
       }),
     }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: stepBudget(5_000, 20_000), label: "nimble-search" });
+
+    // Nimble's SEARCH job, logged separately from its extract job — they have
+    // different failure profiles and only one of them has a replacement, so a
+    // keep-or-drop decision needs them apart, not averaged together.
+    logProviderCall({
+      provider: "nimble",
+      operation: "search",
+      ok: searchRes.ok,
+      driver: "search",
+      listingHost: domain,
+      durationMs: Date.now() - searchT0,
+      errorCode: searchRes.ok ? null : `http_${searchRes.status}`,
+    });
 
     if (!searchRes.ok) {
       console.warn("Manufacturer MSRP search failed:", searchRes.status, await searchRes.text());
@@ -1236,7 +1293,34 @@ type NimbleResult =
 // cancelled instead of running to completion and billing for a result
 // nobody will read. Combined with the internal timeout: whichever fires
 // first aborts the fetch.
+// Instrumented wrapper. Every Nimble extract in this function goes through
+// nimbleExtract, so wrapping it here is the single point that captures the
+// driver, the outcome and the wall-clock for all of them — including the vx6/
+// vx8 race, where BOTH drivers get a row and the loser's failure stops being
+// invisible. The inner function is untouched.
 async function nimbleExtract(
+  url: string,
+  driver: string,
+  timeoutMs: number,
+  waitMs?: number,
+  externalSignal?: AbortSignal,
+): Promise<NimbleResult> {
+  const t0 = Date.now();
+  const r = await nimbleExtractInner(url, driver, timeoutMs, waitMs, externalSignal);
+  // Not awaited: this is on the hot path and the log must never add latency.
+  logProviderCall({
+    provider: "nimble",
+    operation: driver === "vx10" ? "manufacturer_extract" : "listing_extract",
+    ok: r.ok,
+    driver,
+    listingHost: hostOf(url),
+    durationMs: Date.now() - t0,
+    errorCode: r.ok ? null : (r.timedOut ? "timeout" : r.errBody?.slice(0, 120)),
+  });
+  return r;
+}
+
+async function nimbleExtractInner(
   url: string,
   driver: string,
   timeoutMs: number,
@@ -2585,8 +2669,34 @@ Deno.serve(async (req: Request) => {
     // Start the sealed-screenshot capture NOW, in parallel with the whole scan,
     // so it gets the full request duration instead of the seconds left after
     // extraction. Fire-and-forget until the attach point; errors resolve null.
+    // Instrumented so Scrapfly's screenshot job is directly comparable with
+    // Nimble's extract job on the same listing — same host, same run, both
+    // logged. 60 credits/shot on the Discovery plan (~$0.009).
+    const SCRAPFLY_SHOT_CREDITS = 60, SCRAPFLY_SHOT_USD = 0.009;
     const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
-      ? captureListingScreenshot(url, 90_000).catch(() => null)
+      ? (() => {
+          const t0 = Date.now();
+          return captureListingScreenshot(url, 90_000)
+            .then((r) => {
+              logProviderCall({
+                provider: "scrapfly", operation: "screenshot", ok: !!r,
+                driver: "capture", listingHost: hostOf(url),
+                durationMs: Date.now() - t0,
+                errorCode: r ? null : (lastScrapflyError ?? "empty"),
+                credits: r ? SCRAPFLY_SHOT_CREDITS : null,
+                costUsd: r ? SCRAPFLY_SHOT_USD : null,
+              });
+              return r;
+            })
+            .catch((e) => {
+              logProviderCall({
+                provider: "scrapfly", operation: "screenshot", ok: false,
+                driver: "capture", listingHost: hostOf(url),
+                durationMs: Date.now() - t0, errorCode: String(e).slice(0, 120),
+              });
+              return null;
+            });
+        })()
       : Promise.resolve(null);
 
     // Structured-data safety net, started NOW instead of only after the scrape
@@ -2906,6 +3016,7 @@ Deno.serve(async (req: Request) => {
     // throws → the outer catch logs + releases the credit hold (no strand); a
     // spent-budget 5xx returns non-ok → the !ok branch below releases.
     const claudeBudget = Math.max(1_000, REQUEST_DEADLINE - Date.now());
+    const claudeT0 = Date.now();
     const claudeRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -2941,6 +3052,11 @@ Deno.serve(async (req: Request) => {
     if (!claudeRes.ok) {
       const errBody = await claudeRes.text();
       console.error("Claude API call failed:", claudeRes.status, errBody);
+      logProviderCall({
+        provider: "anthropic", operation: "analysis", ok: false,
+        driver: CLAUDE_MODEL, listingHost: hostOf(url),
+        durationMs: Date.now() - claudeT0, errorCode: `http_${claudeRes.status}`,
+      });
       await logUsage({ success: false, errorMessage: `Claude HTTP ${claudeRes.status}` });
       await releaseCredit(holdId);
       holdId = null;
@@ -2953,6 +3069,15 @@ Deno.serve(async (req: Request) => {
     const claudeData = await claudeRes.json();
     const usage = claudeData?.usage;
     const stopReason = claudeData?.stop_reason;
+    // Anthropic is the one provider whose per-call cost is exactly computable,
+    // so it carries real dollars while Nimble carries call counts.
+    logProviderCall({
+      provider: "anthropic", operation: "analysis", ok: true,
+      driver: CLAUDE_MODEL, listingHost: hostOf(url),
+      durationMs: Date.now() - claudeT0,
+      costUsd: (usage?.input_tokens != null && usage?.output_tokens != null)
+        ? computeCost(usage.input_tokens, usage.output_tokens) : null,
+    });
     const textBlock = Array.isArray(claudeData?.content)
       ? claudeData.content.find((b: any) => b?.type === "text")
       : null;
