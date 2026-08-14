@@ -4112,6 +4112,46 @@ function VerifProviderCosts({C, hours}){
         </div>
       )}
 
+      {/* Plan ceilings. Spend without its ceiling is a number you can't act on:
+          "$24.47" means nothing until you know the cap is $100. Limits live in
+          admin_config so a plan change is an UPDATE, not a deploy. */}
+      {state==="ok" && d?.config && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:14}}>
+          {[
+            {k:"Anthropic", used:Number(d.month_to_date?.anthropic_usd||0),
+             cap:Number(d.config.limit_anthropic_usd_month||0),
+             fmt:(n)=>`$${n.toFixed(2)}`, sub:"month to date · api_usage_log"},
+            {k:"Scrapfly", used:Number(d.config.baseline_scrapfly_credits||0)+Number(d.month_to_date?.scrapfly_credits||0),
+             cap:Number(d.config.limit_scrapfly_credits||0),
+             fmt:(n)=>`${vnum(Math.round(n))} cr`, sub:`vendor baseline ${d.config.baseline_read_at||""} + since`},
+            {k:"Nimble", used:Number(d.config.baseline_nimble_requests||0)+Number(d.month_to_date?.nimble_requests||0),
+             cap:Number(d.config.limit_nimble_requests||0),
+             fmt:(n)=>`${vnum(Math.round(n))} req`, sub:"free trial allowance"},
+          ].map(m=>{
+            const pct=m.cap>0?Math.min(100,(m.used/m.cap)*100):0;
+            const hot=pct>=75;
+            return (
+              <div key={m.k} style={{background:C.paper2,borderRadius:10,padding:"10px 12px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                  <span style={{fontSize:11,fontWeight:800,color:C.ink}}>{m.k}</span>
+                  <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace"}}>
+                    {Math.round(pct)}%
+                  </span>
+                </div>
+                <div style={{fontSize:14,fontWeight:800,color:hot?C.coralInk:C.ink,marginTop:3,
+                             fontFamily:"ui-monospace,Menlo,monospace"}}>
+                  {m.fmt(m.used)} <span style={{color:C.inkFaint,fontWeight:400}}>/ {m.fmt(m.cap)}</span>
+                </div>
+                <div style={{height:4,borderRadius:2,background:C.line,marginTop:6,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:hot?C.coral:C.teal}}/>
+                </div>
+                <div style={{fontSize:9.5,color:C.inkFaint,marginTop:5}}>{m.sub}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {state==="ok" && byProv.length===0 && (
         <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
           Table is live but empty — no provider calls recorded in this window yet.
