@@ -7570,20 +7570,33 @@ function QuoteCheckPage(){
     if(prev==="analyzing"&&status==="done"){
       setScanFlash(true);
       const id=setTimeout(()=>setScanFlash(false),900);
-      // Logged-in users get their own copy emailed automatically, right
-      // alongside the report that's still fully shown on the page -- this
-      // doesn't replace or hide anything on-screen, it just removes the
-      // "forgot to send it, got distracted, closed the tab" failure mode
-      // (Vic, 2026-08-13). Guarded on emailInput being untouched so it never
-      // clobbers an address someone's already typing, and on emailStatus
-      // still being "idle" so it never re-fires or fights a manual send.
-      if(user?.email&&!emailInput&&emailStatus==="idle"){
-        setEmailInput(user.email);
-        sendReportEmail(user.email);
-      }
       return ()=>clearTimeout(id);
     }
   },[status]);
+
+  // Logged-in users get their own copy emailed automatically, right alongside
+  // the report that's still fully shown on the page -- this doesn't replace
+  // or hide anything on-screen, it just removes the "forgot to send it, got
+  // distracted, closed the tab" failure mode (Vic, 2026-08-13).
+  //
+  // Deliberately a SEPARATE effect from the scanFlash one above, watching
+  // `user` as a real dependency rather than reading it once inside a
+  // status-only effect. Matters concretely: a report opened from a shared
+  // `#r=` link sets status straight to "done" on mount (never passes through
+  // "analyzing"), and useSupabaseUser()'s auth check is itself async -- at
+  // that exact mount instant `user` is essentially always still null, so
+  // logic nested inside a `[status]`-only effect would silently see a stale
+  // null and never fire even once auth resolves moments later. Confirmed
+  // live, 2026-08-14: a report was fully displayed and NO send was ever
+  // attempted (checked quote_report_leads directly -- zero rows). Watching
+  // `user` here means the effect re-fires the moment auth catches up,
+  // regardless of how the report got on screen.
+  useEffect(()=>{
+    if(status==="done"&&user?.email&&!emailInput&&emailStatus==="idle"){
+      setEmailInput(user.email);
+      sendReportEmail(user.email);
+    }
+  },[status,user,emailInput,emailStatus]);
 
   // Hybrid policy: LotCheck reads DEALER-OWN sites only. These third-party
   // listing marketplaces/aggregators are blocked (their ToS bar automated
