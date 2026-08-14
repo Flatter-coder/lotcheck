@@ -64,6 +64,48 @@ const MACHE_MIXED = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
   { trim: "GT AWD",  msrp: 69990, fuel_type: "BEV" },
 ];
+// IONIQ 9 — the catalog gap case (see msrp-exact-must-pin-config). The real
+// lineup has 5 AWD-or-RWD trims spanning $59,999-$81,499; the catalog was
+// missing the top two package trims ($76,499 Luxury, $81,499 Ultimate
+// Calligraphy), leaving only the 3 below. A $83,899 asking price matched
+// "Preferred AWD" ($64,999, correct drivetrain, so rowConfirmsConfig passed)
+// and was labelled exact -- an $18,900 "over MSRP" accusation against a named
+// dealer, when the real explanation was two missing catalog rows.
+const IONIQ9_GAPPED = [
+  { trim: "Essential RWD", msrp: 59999, fuel_type: "BEV" },
+  { trim: "Preferred AWD", msrp: 64999, fuel_type: "BEV" },
+  { trim: "Preferred AWD+", msrp: 64999, fuel_type: "BEV" },
+];
+// The same lineup after backfilling the two missing rows.
+const IONIQ9_FULL = [
+  ...IONIQ9_GAPPED,
+  { trim: "Preferred AWD with Luxury Package", msrp: 76499, fuel_type: "BEV" },
+  { trim: "Preferred AWD+ with Ultimate Calligraphy Package", msrp: 81499, fuel_type: "BEV" },
+];
+
+// SELTOS — the drivetrain-gap case (see msrp-exact-must-pin-config, second
+// defect 2026-08-13). NOT a missing-row problem like IONIQ 9: Kia's OWN
+// build-and-price page lists exactly these 6 trims, no more -- "X-Line
+// Limited" IS the real trim, priced correctly at $41,295. The gap was
+// msrp_catalog.drivetrain being null on it, so a listing stating "AWD"
+// (South Trail Kia's real vmsData: "X-Line Limited AWD", $43,780 dealer-
+// stated) couldn't be confirmed against the row and fell back to an
+// unhelpful "starting at" with no claim at all -- even though NRCan
+// confirms the Seltos's 1.6L turbo engine (X-Line's engine, per the same
+// listing's own data) is ONLY ever sold as AWD in Canada, so "exact" was
+// always safe to grant here. Backfilled drivetrain="AWD" on the X-Line /
+// X-Line Limited rows specifically (NOT model-wide -- LX/EX trims are the
+// separate FWD-capable 2.0L lineup, confirmed via NRCan's per-engine
+// entries, not guessed).
+const SELTOS = [
+  { trim: "LX FWD", msrp: 28495, fuel_type: "Gas" },
+  { trim: "LX", msrp: 30495, fuel_type: "Gas" },
+  { trim: "EX", msrp: 33495, fuel_type: "Gas" },
+  { trim: "EX Premium", msrp: 36795, fuel_type: "Gas" },
+  { trim: "X-Line", msrp: 39295, fuel_type: "Gas", drivetrain: "AWD" },
+  { trim: "X-Line Limited", msrp: 41295, fuel_type: "Gas", drivetrain: "AWD" },
+];
+
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
 const CX90PH  = [{ trim: null, msrp: 49999, fuel_type: "PHEV" }];
@@ -149,6 +191,48 @@ const CASES = [
     { trim: "Premium", drivetrain: "AWD", fuelType: "BEV" }, 49990, "starting_at"],
   ["Mach-E GT AWD vs mixed catalog -> GT row confirms config, exact", MACHE_MIXED,
     { trim: "GT", drivetrain: "AWD", fuelType: "BEV" }, 69990, "exact"],
+
+  // PRICE PLAUSIBILITY CEILING — IONIQ 9 (see msrp-exact-must-pin-config).
+  // Catalog missing the two highest package trims: the $83,899 asking price
+  // matched "Preferred AWD" ($64,999, correct AWD drivetrain, so
+  // rowConfirmsConfig alone can't catch this) and was called exact -- an
+  // $18,900 "over MSRP" accusation, root cause a missing row, not a markup.
+  ["IONIQ 9, catalog missing top 2 trims -> $18,900 gap downgrades to starting_at", IONIQ9_GAPPED,
+    { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 83899 }, 64999, "starting_at"],
+  // Same asking price, same signal shape, but a small/plausible gap (a few
+  // hundred dollars) must NOT be suppressed -- the ceiling only fires past
+  // BOTH 20% and $6,000.
+  ["IONIQ 9, small plausible gap stays exact", IONIQ9_GAPPED,
+    { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 66500 }, 64999, "exact"],
+  // After backfilling the missing rows, the SAME asking price against the
+  // full lineup correctly matches the real top trim (Ultimate Calligraphy,
+  // $81,499) on its distinctive tokens + closest price -- a $2,400 gap, well
+  // under the ceiling, stays exact. Confirms the fix doesn't just suppress
+  // the false accusation, it lets the real match through once the data is
+  // complete.
+  ["IONIQ 9, full catalog -> correct top trim, small honest gap stays exact", IONIQ9_FULL,
+    { trim: "Preferred AWD+ with Ultimate Calligraphy Package", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 83899 },
+    81499, "exact"],
+
+  // Seltos X-Line Limited AWD -- exact once drivetrain is pinned, so the
+  // dealer's $43,780-stated MSRP can be honestly checked against Kia's real
+  // $41,295 instead of falling back to a no-claim "starting at".
+  ["Seltos X-Line Limited AWD (drivetrain pinned) -> exact", SELTOS,
+    { trim: "X-Line Limited AWD", drivetrain: "AWD", fuelType: "Gas", quotedPrice: 47509 }, 41295, "exact"],
+  // A bare "X-Line" signal (no "Limited") is a genuinely separate, narrower
+  // gap: neither "x" nor "line" is a KEY_TOKEN, so the trim-name CONFLICT
+  // penalty that already distinguishes e.g. "Premium" from "GT" never
+  // engages here, and "X-Line" ties with "X-Line Limited" on drivetrain +
+  // token overlap alone. The safe direction (ambiguous -> cheapest,
+  // starting_at) is correct as-is; this pins that it stays safe rather than
+  // silently starting to guess if the scorer changes.
+  ["Seltos X-Line AWD, base trim -- ties with X-Line Limited, honest starting_at", SELTOS,
+    { trim: "X-Line", drivetrain: "AWD", fuelType: "Gas" }, 39295, "starting_at"],
+  // A bare "LX" signal is genuinely ambiguous between "LX FWD" and "LX" (no
+  // drivetrain stated, no price, tokens identical) -- the honest answer is
+  // the safe ambiguous-tie floor, not a confident guess either direction.
+  ["Seltos LX, ambiguous vs LX FWD -> honest starting_at (not a guess)", SELTOS,
+    { trim: "LX", fuelType: "Gas" }, 28495, "starting_at"],
 
   // SINGLE-ROW MODELS — must keep working (no regressions).
   ["Compass (single base row)", COMPASS, { trim: "Sport", fuelType: "Gas" }, 34700],

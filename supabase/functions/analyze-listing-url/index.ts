@@ -51,10 +51,11 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
-import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, type RenderResult } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
+import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
@@ -86,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-11j";
+const CACHE_VER = "2026-08-14b";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1055,6 +1056,22 @@ async function lookupManufacturerMsrp(
   const MFR_TIMEOUT_MS = 30_000;
   const MFR_VX10_WAIT_MS = 6_000;
 
+  // The entry gate above only checks that ~40s existed when this function
+  // STARTED -- it never re-checked before each of the three sequential steps
+  // below, which each independently spent up to their own full fixed budget
+  // (20s search + 30s extract + 30s Claude = 80s worst case, double the 40s
+  // the gate guaranteed). Same bug class just fixed in scrapfly.ts's
+  // rescueListingViaScrapfly, confirmed live 2026-08-14: a caller computes a
+  // budget from ITS remaining deadline, hands it down, and each downstream
+  // step re-spending that same full value independently can blow the total
+  // request past Supabase's 150s platform ceiling with no graceful error.
+  // stepBudget shrinks each step to what's ACTUALLY left of `deadline` (never
+  // above its own cap, never below a floor short enough to still be a real
+  // attempt) -- and falls back to the fixed cap when no deadline was passed,
+  // matching this function's existing "unlimited budget" behavior for that case.
+  const stepBudget = (floorMs: number, capMs: number): number =>
+    deadline != null ? Math.max(floorMs, Math.min(capMs, deadline - Date.now())) : capMs;
+
   try {
     // Step 1: cheap search, purely to find the right URL. Confirmed via
     // direct testing (2026-07-22) that manufacturer build-and-price/
@@ -1082,7 +1099,7 @@ async function lookupManufacturerMsrp(
         country: "CA",
         locale: "en",
       }),
-    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: 20_000, label: "nimble-search" });
+    }, { timeoutMs: 15_000, maxAttempts: 2, budgetMs: stepBudget(5_000, 20_000), label: "nimble-search" });
 
     if (!searchRes.ok) {
       console.warn("Manufacturer MSRP search failed:", searchRes.status, await searchRes.text());
@@ -1136,7 +1153,7 @@ async function lookupManufacturerMsrp(
     // (vx10 + explicit wait) already proven reliable on JS-heavy DEALER
     // pages all session -- manufacturer configurator pages need the
     // identical treatment, confirmed by direct testing just now.
-    const extractResult = await nimbleExtract(targetUrl, "vx10", MFR_TIMEOUT_MS, MFR_VX10_WAIT_MS);
+    const extractResult = await nimbleExtract(targetUrl, "vx10", stepBudget(10_000, MFR_TIMEOUT_MS), MFR_VX10_WAIT_MS);
     if (!extractResult.ok) {
       console.warn(`Manufacturer MSRP page extract failed for ${targetUrl}:`, extractResult.errBody);
       return null;
@@ -1163,7 +1180,7 @@ async function lookupManufacturerMsrp(
           `You are looking for the manufacturer's suggested retail price (MSRP) for one specific vehicle trim on its own official Canadian manufacturer website. Find the MSRP for exactly: ${year} ${make} ${model}${trim ? " " + trim : ""}. Only use a price you can clearly attribute to this exact trim -- if the content shows multiple trims, pick the matching one, don't average or guess across trims. Return ONLY this JSON object, nothing else, no markdown fence: {"msrp": number or null}`,
         messages: [{ role: "user", content: pageContent }],
       }),
-    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: 30_000, label: "anthropic-mfr-msrp" });
+    }, { timeoutMs: 20_000, maxAttempts: 2, budgetMs: stepBudget(5_000, 30_000), label: "anthropic-mfr-msrp" });
 
     if (!claudeRes.ok) {
       console.warn("Manufacturer MSRP extraction call failed:", claudeRes.status, await claudeRes.text());
@@ -1951,6 +1968,26 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
   }
 }
 
+// Retrying wrapper for the shared direct read. A single attempt is exactly how
+// three reports in two days lost price/VIN/financing on Convertus pages:
+// Cloudflare's bot scoring intermittently rejects the FIRST request from a
+// datacenter IP while passing a retry moments later (the same page fetched
+// clean from a residential IP every single time we checked). One failed
+// attempt used to null out earlyConvertusVms / earlyJsonLd / the incentive
+// reader / structuredFactsBlock all at once -- everything downstream of
+// directHtml -- and the whole scan then leaned on the late, time-starved
+// Scrapfly rescue. These retries run in PARALLEL with Nimble's own 30-100s
+// extraction, so the added attempts cost zero wall-clock in practice.
+async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3): Promise<string | null> {
+  for (let i = 1; i <= attempts; i++) {
+    const html = await fetchDirectHtml(url, timeoutMs);
+    if (html) { if (i > 1) console.log(`Direct fetch succeeded on attempt ${i}/${attempts}.`); return html; }
+    if (i < attempts) await sleep(1_500 * i); // 1.5s, 3s -- a fresh connection, not a hammer
+  }
+  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url}.`);
+  return null;
+}
+
 // Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
 // @graph arrays and a top-level array of nodes. Returns normalized fields, or
@@ -2017,6 +2054,70 @@ async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<str
   }
 }
 
+// Convertus vmsData fallback -- same role as buildJsonLdFallbackAnalysis, for
+// Convertus platform sites that carry NO schema.org JSON-LD at all (confirmed
+// live, 2026-08-13: southtrailkia.com's "Platinum Kia" theme has zero
+// <script type="application/ld+json"> blocks anywhere on the VDP, so the
+// JSON-LD tier above always returns null for this whole platform family).
+// Only reached here after BOTH the page scrape and the JSON-LD tier have
+// already failed, so pages that load normally are unaffected. Unlike the
+// JSON-LD fallback, this carries a real msrp (Convertus's vmsData always
+// separates msrp from asking_price; schema.org listings essentially never do).
+async function buildConvertusVmsFallbackAnalysis(url: string, sharedHtml?: Promise<string | null>): Promise<any | null> {
+  try {
+    const html = sharedHtml ? await sharedHtml : await fetchDirectHtml(url, 15_000);
+    if (!html) { console.log(`Convertus fallback: direct fetch returned nothing for ${url}.`); return null; }
+    const v = extractConvertusVmsVehicle(html);
+    if (!v || (v.quotedPrice == null && v.msrp == null && !v.year && !v.model)) {
+      console.log(`Convertus fallback: no usable vmsData.vehicle in ${url}.`);
+      return null;
+    }
+    const tiwHit = matchTradeInWidget(html);
+    const vehicleStr = [v.year, v.make, v.model, v.trim].filter(Boolean).join(" ") || null;
+    const analysis: any = {
+      vehicle: vehicleStr,
+      year: v.year, make: v.make, model: v.model, trim: v.trim,
+      vin: v.vin, odometerKm: v.odometerKm, fuelType: null,
+      vehicleCondition: v.condition,
+      dealerName: v.dealerName, dealerCity: v.dealerCity,
+      // Left unset deliberately (not "listing"/"dealer_stated" here) -- the
+      // shared enrichAnalysis pipeline's own provenance + catalog cross-check
+      // (resolveMsrpAuthority) labels and verifies it, same as the primary path.
+      msrp: v.msrp,
+      quotedPrice: v.quotedPrice,
+      quotedPriceSource: v.quotedPrice != null ? "structured_data" : null,
+      priceDisclosure: v.quotedPrice != null ? "advertised" : "not_shown",
+      daysOnLot: null,
+      tradeInWidget: tiwHit,
+      financeContingent: detectFinanceContingent(html),
+      standardWarranty: null,
+      addOns: [], totalFlaggedCost: 0, warranty: null,
+      // The dealer's own advertised finance rate lives in the SAME vmsData
+      // blob as price/VIN -- captured here too, not just the itemized fee
+      // breakdown (which genuinely isn't in this data source, hence the note
+      // below still calling that out specifically).
+      financing: v.financeApr != null ? { rate: v.financeApr, termMonths: v.financeTermMonths, source: "convertus_vms" } : null,
+      pricingDisclaimer: v.finePrint,
+      source: "structured_data_fallback",
+      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details, the dealer's stated price/MSRP, and the advertised financing rate come straight from that data. Itemized add-on fees couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
+      summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized add-on fees aren't included -- confirm the out-the-door price and any add-on fees directly with the dealer.`,
+    };
+    try {
+      const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
+      if (m) {
+        const dt = Date.parse(m[1] + "T00:00:00Z");
+        const dd = Math.floor((Date.now() - dt) / 86_400_000);
+        if (Number.isFinite(dt) && dd > 0 && dd <= 3650) analysis.daysOnLot = { days: dd, since: m[1], source: "dealer_platform_page", sourceLabel: "the dealer's own inventory data" };
+      }
+    } catch { /* best-effort */ }
+    console.log(`Convertus fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.quotedPrice ?? "none"}, msrp=${v.msrp ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
+    return analysis;
+  } catch (err) {
+    console.warn("buildConvertusVmsFallbackAnalysis threw:", err);
+    return null;
+  }
+}
+
 // Hand the page's OWN structured data to Claude alongside the scraped text.
 //
 // WHY. These same facts are already gap-filled into the analysis AFTER Claude
@@ -2049,6 +2150,12 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
   const facts: string[] = [];
   const price = Number(d.quotedPrice);
   if (price > 0) facts.push(`- Advertised price: $${price.toLocaleString("en-CA")}`);
+  // The dealer's OWN stated MSRP for this exact unit (e.g. Convertus vmsData) --
+  // not necessarily the verified manufacturer figure, which the enrichment
+  // pipeline resolves separately. Still worth Claude seeing so it never claims
+  // "no MSRP shown" when the page's own data plainly states one.
+  const msrp = Number(d.msrp);
+  if (msrp > 0) facts.push(`- MSRP (as stated on this page): $${msrp.toLocaleString("en-CA")}`);
   if (d.vin) facts.push(`- VIN: ${d.vin}`);
   if (d.vehicle) facts.push(`- Vehicle: ${d.vehicle}`);
   const odo = Number(d.odometerKm);
@@ -2059,10 +2166,10 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 
   console.log(`Structured facts passed to Claude: ${facts.length} field(s).`);
   return (
-    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup embedded in the page source).\n` +
+    `\n\n---\nVERIFIED FROM THIS PAGE'S OWN STRUCTURED DATA (schema.org markup or the platform's own embedded vehicle-data JSON).\n` +
     `These values are machine-read directly from the page and are authoritative. Some dealer platforms put ` +
-    `them ONLY in the markup, so they may not appear in the extracted text above — that does NOT mean the ` +
-    `page withheld them.\n\n${facts.join("\n")}\n\n` +
+    `them ONLY in markup or script-embedded JSON, so they may not appear in the extracted text above — that ` +
+    `does NOT mean the page withheld them.\n\n${facts.join("\n")}\n\n` +
     `Use these values in your output, and never state or imply that one of them is missing, undisclosed, or ` +
     `not shown on the page. If the extracted text disagrees with a value here, say so plainly in the summary ` +
     `so the buyer can check it — do not silently pick one.\n---`
@@ -2482,8 +2589,59 @@ Deno.serve(async (req: Request) => {
     // executed even once in production, despite passing 18/18 against a saved
     // copy of the very page it was written for. Anything needing real HTML
     // must come through here.
-    const directHtml: Promise<string | null> = fetchDirectHtml(url, 15_000).catch(() => null);
+    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, 15_000).catch(() => null);
     const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
+    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
+    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
+    // that Nimble's markdown AND this same direct-fetch text view both miss
+    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
+    // a real, correctly-scraped page still reported "price not shown" while
+    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
+    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
+    const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
+    // fails (all retries exhausted) -- the strongest early signal the rescue
+    // will be needed. Started here, ~20-50s into the request, it runs in
+    // parallel with Nimble+Claude and is finished (or nearly) by the time any
+    // rescue call site wants it; started there instead, the honestly-bounded
+    // remaining budget is often too short for a cold ASP render of a
+    // bot-protected page and the rescue dies empty-handed (albertahonda.com,
+    // 2026-08-14: a paid report shipped with no price/VIN/APR while every one
+    // of those figures was on the page). Cost: one ASP render (~a few cents)
+    // spent ONLY on scans whose direct fetch failed -- exactly the scans that
+    // were otherwise losing data outright. Resolves null when the direct
+    // fetch succeeded (rescue then renders fresh only if it actually fires).
+    const earlyRender: Promise<RenderResult | null> = scrapflyEnabled()
+      ? directHtml.then((html) => (html ? null : (console.log("Direct fetch failed -- pre-warming Scrapfly render for a possible rescue."), scrapflyRender(url, 70_000)))).catch(() => null)
+      : Promise.resolve(null);
+    // Combined structured-data view for structuredFactsBlock + the post-Claude
+    // gap-fill below: JSON-LD's fields stay authoritative where present (an
+    // established, tested source); Convertus fills whatever JSON-LD didn't
+    // have -- notably msrp, which buildJsonLdFallbackAnalysis never sets
+    // (schema.org listings essentially never carry MSRP, only the asking
+    // price). A page with neither source resolves this to null, same as today.
+    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms]).then(([jl, cv]) => {
+      if (!jl && !cv) return null;
+      if (!cv) return jl;
+      if (!jl) {
+        return {
+          quotedPrice: cv.quotedPrice, msrp: cv.msrp, vin: cv.vin,
+          vehicle: [cv.year, cv.make, cv.model, cv.trim].filter(Boolean).join(" ") || null,
+          odometerKm: cv.odometerKm, vehicleCondition: cv.condition,
+          dealerName: cv.dealerName, dealerCity: cv.dealerCity,
+        };
+      }
+      return {
+        ...jl,
+        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : cv.quotedPrice,
+        msrp: Number(jl.msrp) > 0 ? jl.msrp : cv.msrp,
+        vin: jl.vin || cv.vin,
+        odometerKm: jl.odometerKm ?? cv.odometerKm,
+        vehicleCondition: jl.vehicleCondition || cv.condition,
+        dealerName: jl.dealerName || cv.dealerName,
+        dealerCity: jl.dealerCity || cv.dealerCity,
+      };
+    }).catch(() => null);
 
     const nimbleResult = await fetchListingContent(url);
     if (!("data" in nimbleResult)) {
@@ -2539,7 +2697,7 @@ Deno.serve(async (req: Request) => {
         if (!(Number(jsonLdFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
-              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
             jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
@@ -2571,6 +2729,49 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // Third fallback: Convertus platform sites (no JSON-LD at all on many of
+      // their themes -- see buildConvertusVmsFallbackAnalysis) still embed a
+      // `var vmsData = {...}` vehicle-data blob to a plain browser-UA fetch.
+      // Only reached after BOTH the page scrape and the JSON-LD tier failed.
+      const convertusFallback = (await earlyConvertusVms)
+        ? await buildConvertusVmsFallbackAnalysis(url, directHtml)
+        : null;
+      if (convertusFallback) {
+        await detectTradeInWidget(url, convertusFallback);
+        let cvRenderConfirmedGated = false;
+        if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
+          try {
+            const rescued = await rescueListingViaScrapfly(url, {
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
+              budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
+            });
+            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+            if (rescued) mergeRescued(convertusFallback, rescued);
+          } catch (e) { console.warn("Convertus-path rescue threw (ignored):", (e as Error)?.message); }
+        }
+        assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
+        await enrichAnalysis(convertusFallback, REQUEST_DEADLINE);
+        await attachSealedScreenshot(url, convertusFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await finalizeServerSide(convertusFallback);
+        try {
+          await supabase
+            .from("listing_analysis_cache")
+            .upsert({ url, analysis: { ...convertusFallback, _cacheVer: CACHE_VER }, created_at: new Date().toISOString() }, { onConflict: "url" });
+        } catch (err) {
+          console.warn("Cache write failed (Convertus fallback):", err);
+        }
+        await logUsage({ success: true, errorMessage: `page-load failed, served Convertus vmsData fallback` });
+        console.log(`Served Convertus vmsData fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
+        const cvCredits = await captureCredit(holdId);
+        holdId = null;
+        return new Response(
+          JSON.stringify(cvCredits
+            ? { analysis: convertusFallback, source: "structured_data_fallback", credits: cvCredits }
+            : { analysis: convertusFallback, source: "structured_data_fallback" }),
+          { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+        );
+      }
+
       // Last resort: full Scrapfly render + vision. The page blocked every
       // text path (scrape, platform feed, JSON-LD) -- exactly the case the
       // residential-proxy render exists for. Only fires here, after all three
@@ -2579,7 +2780,7 @@ Deno.serve(async (req: Request) => {
         try {
           const renderOnly: any = { sourceUrl: url };
           const rescued = await rescueListingViaScrapfly(url, {
-            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
             budgetMs: Math.max(1_000, Math.min(80_000, REQUEST_DEADLINE - Date.now())),
           });
           if (rescued) mergeRescued(renderOnly, rescued);
@@ -2706,7 +2907,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyJsonLd)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -2865,6 +3066,60 @@ Deno.serve(async (req: Request) => {
       if (rt?.waitUntil) rt.waitUntil(saveReq);
     } catch { /* best-effort */ }
 
+    // Identity + MSRP gap-fill from Convertus vmsData, BEFORE enrichAnalysis --
+    // deliberately ahead of the catalog MSRP lookup inside it, not after.
+    //
+    // Identity (year/make/model/trim/...): that lookup only runs
+    // `if (!analysis.msrp && year && make && model)` and picks the catalog row
+    // using analysis.trim; if the scrape missed trim/year/make/model (this
+    // platform's real identity lives in a <script>-embedded JSON blob the
+    // markdown/text passes never see), the lookup either misses entirely or
+    // matches the wrong/generic trim -- confirmed live 2026-08-13
+    // (southtrailkia.com): a real, correctly-scraped page showed a base-trim
+    // "$28,495 starting at" MSRP for what was actually a $43,780 X-Line
+    // Limited AWD. Filling identity first lets that lookup find the CORRECT
+    // trim row.
+    //
+    // msrp: seeding it here does NOT skip verification -- it hands the
+    // dealer's own stated figure to the EXISTING listing-vs-catalog
+    // cross-check a few lines down (`analysis.msrpSource !== "catalog" &&
+    // analysis.msrpSource !== "manufacturer_site"` -> resolveMsrpAuthority),
+    // which already exists precisely to arbitrate a dealer-stated number
+    // against the manufacturer's own catalog (and flag inflation either way).
+    // Leaving analysis.msrpSource unset here is deliberate: the "Provenance
+    // for an MSRP that came from the LISTING itself" step right after labels
+    // it "listing"/"dealer_stated" on its own, and only THAT unverified label
+    // makes the cross-check run at all -- setting msrpSource ourselves would
+    // skip it. Fill-only throughout: never overwrites what the scrape/Claude
+    // already found.
+    try {
+      const cv = await earlyConvertusVms;
+      if (cv) {
+        for (const k of ["year", "make", "model", "trim", "vin", "odometerKm", "dealerName", "dealerCity", "msrp"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (cv as any)[k];
+          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
+          if (missing && alt != null && alt !== "") { (analysis as any)[k] = alt; console.log(`Convertus identity gap-fill: ${k}.`); }
+        }
+        if (!analysis.vehicleCondition && cv.condition) analysis.vehicleCondition = cv.condition;
+        // Same gap this whole extractor exists for -- the dealer's own
+        // advertised finance rate and pricing fine print live in the SAME
+        // script-embedded blob as price/VIN, invisible to the scrape/Claude
+        // pass the same way. Confirmed live 2026-08-14 (albertahonda.com):
+        // "Financing APR: Not shown" and a missing disclaimer, while the page
+        // headlined "6.69% for 96 Months" and carried a full Alberta Winter
+        // Package fine-print paragraph vmsData had the whole time.
+        if (!(Number(analysis.financing?.rate) > 0) && cv.financeApr != null) {
+          analysis.financing = { ...(analysis.financing || {}), rate: cv.financeApr, termMonths: cv.financeTermMonths ?? (analysis.financing as any)?.termMonths ?? null, source: "convertus_vms" };
+          console.log("Convertus identity gap-fill: financing.rate.");
+        }
+        if (!analysis.pricingDisclaimer && cv.finePrint) {
+          analysis.pricingDisclaimer = cv.finePrint;
+          console.log("Convertus identity gap-fill: pricingDisclaimer.");
+        }
+      }
+    } catch { /* the safety net must never sink the scan */ }
+
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
@@ -2890,7 +3145,7 @@ Deno.serve(async (req: Request) => {
     if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
       try {
         const rescued = await rescueListingViaScrapfly(url, {
-          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself
@@ -2939,10 +3194,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // Gap-fill from the structured-data read: the scrape sometimes lands the
-    // vehicle but misses the price or VIN that schema.org states outright.
+    // vehicle but misses the price or VIN that schema.org (or a platform's own
+    // embedded vehicle-data JSON, e.g. Convertus vmsData) states outright.
     // Never overwrites a value the scrape already found.
     try {
-      const early = await earlyJsonLd;
+      const early = await earlyStructuredFacts;
       if (early) {
         for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
           const cur = (analysis as any)[k];

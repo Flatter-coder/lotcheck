@@ -6,7 +6,7 @@
 // publishing the price in plain sight (advantageford.ca, 2026-08-11).
 // Every fixture below is a real page shape.
 
-import { extractJsonLdVehicle } from "../supabase/functions/_shared/jsonld-vehicle.js";
+import { extractJsonLdVehicle, fillFromJsonLd } from "../supabase/functions/_shared/jsonld-vehicle.js";
 
 const wrap = (obj) => `<html><head><script type="application/ld+json">${JSON.stringify(obj)}</script></head><body>x${"y".repeat(600)}</body></html>`;
 
@@ -81,5 +81,42 @@ for (const [label, html, want] of CASES) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail}`);
   ok ? pass++ : fail++;
 }
+
+// fillFromJsonLd: the scrapfly.ts vision-rescue merge. The case this exists
+// for -- capitalchev.ca, 2026-08-13 -- is a 17,729px page whose screenshot
+// blows Claude's vision size ceiling, so the vision/text pass returns nothing
+// at all and the page's own JSON-LD has to carry the whole rescue alone.
+const FILL_CASES = [
+  ["vision returned nothing -> jsonLd carries the whole rescue",
+    {}, { year: 2025, make: "Toyota", model: "RAV4", trim: "XLE", price: 38995, vin: "2T3W1RFV8MW123456", odometerKm: 41000, condition: "used", dealerCity: "Calgary, AB" },
+    { quotedPrice: 38995, vin: "2T3W1RFV8MW123456", year: 2025, make: "Toyota", model: "RAV4", trim: "XLE", vehicleCondition: "used", dealerCity: "Calgary, AB", odometerKm: 41000, vehicle: "2025 Toyota RAV4 XLE" }],
+  ["a real parsed price is never clobbered by a differing jsonLd price",
+    { quotedPrice: 41000 }, { price: 38995 },
+    { quotedPrice: 41000 }],
+  ["a zero/falsy parsed price IS replaced (bad vision read, not a real $0 listing)",
+    { quotedPrice: 0 }, { price: 38995 },
+    { quotedPrice: 38995 }],
+  ["odometerKm 0 (new car) is a real reading, not \"missing\" -> not overwritten",
+    { odometerKm: 0 }, { odometerKm: 41000 },
+    { odometerKm: 0 }],
+  ["existing fields are left alone, only blanks fill in",
+    { vin: "1FTEW1EP0KKD00000", vehicle: "Real Vehicle String" }, { vin: "2T3W1RFV8MW123456", year: 2025, make: "Toyota", model: "RAV4" },
+    { vin: "1FTEW1EP0KKD00000", vehicle: "Real Vehicle String" }],
+  ["null jsonLd is a no-op", { quotedPrice: 41000 }, null, { quotedPrice: 41000 }],
+];
+for (const [label, parsed, jsonLd, want] of FILL_CASES) {
+  let got;
+  try { got = fillFromJsonLd(parsed, jsonLd); } catch (e) { got = "THREW: " + e.message; }
+  let ok, detail = "";
+  if (!got || typeof got !== "object") { ok = false; detail = ` got ${JSON.stringify(got)}`; }
+  else {
+    const bad = Object.entries(want).filter(([k, v]) => got[k] !== v);
+    ok = bad.length === 0;
+    detail = ok ? "" : ` mismatched: ${bad.map(([k, v]) => `${k} want ${v} got ${got[k]}`).join("; ")}`;
+  }
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail}`);
+  ok ? pass++ : fail++;
+}
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);

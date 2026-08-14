@@ -112,6 +112,34 @@ function rowConfirmsConfig(r, s) {
   return rowDrive(r) === stated;       // the row must pin the same configuration
 }
 
+// PRICE PLAUSIBILITY CEILING — same failure class as rowConfirmsConfig, one
+// layer deeper: several real trims can share ONE drivetrain (a model sold as
+// "base AWD" / "AWD + package A" / "AWD + package B", all literally AWD), so
+// drivetrain-confirmation alone cannot tell them apart. If the catalog is
+// missing the higher-package rows (confirmed live, 2026-08-13: the IONIQ 9's
+// $76,499 and $81,499 package trims were absent, leaving only $59,999/
+// $64,999/$64,999 to compare against), the matcher confidently calls the
+// closest AVAILABLE row "exact" against an asking price it isn't remotely
+// close to — southtrailkia's sibling defect, but for MSRP instead of price:
+// $83,899 asking matched to a $64,999 "exact" row read as an $18,900 "over
+// MSRP" accusation against a named dealer, when the real explanation was a
+// missing catalog row, not dealer padding.
+//
+// A genuine dealer markup this large on a mainstream new vehicle is far less
+// likely than an incomplete catalog. Past BOTH 20% AND $6,000 over the
+// winning row, the confident "exact" claim costs more than it's worth --
+// downgrade to "starting_at" so the report shows the honest floor instead of
+// a specific accusation. Both thresholds required (not either alone) so a
+// cheap car with a large percentage and an expensive car with a large
+// absolute gap are each still judged on the other -- same calibration
+// already proven safe for the inflation-callout ceiling (3.1%/$1,350 and
+// 11.9%/$4,965 real padding cases both still get caught).
+function priceImplausible(rowMsrp, askingPrice) {
+  if (!(Number(askingPrice) > 0) || !(Number(rowMsrp) > 0)) return false; // nothing to compare -> not implausible
+  const gap = Number(askingPrice) - Number(rowMsrp);
+  return gap > Number(rowMsrp) * 0.20 && gap > 6000;
+}
+
 // rows: [{ trim, msrp, fuel_type?, drivetrain?, attrs? }]
 // sig:  { trim?, drivetrain?, fuelType?, quotedPrice?, features?[], vinDrive?, vinBody? }
 // returns { msrp, trim, basis: "exact"|"starting_at", score } or null.
@@ -123,7 +151,7 @@ export function pickTrimMsrp(rows, sig) {
     const r = valid[0];
     // One row cannot pin a configuration the listing names, so the same test
     // applies here — a lone row is the likeliest place to over-claim.
-    const exact = !!r.trim && rowConfirmsConfig(r, s);
+    const exact = !!r.trim && rowConfirmsConfig(r, s) && !priceImplausible(r.msrp, s.quotedPrice);
     return { msrp: Number(r.msrp), trim: r.trim || null, basis: exact ? "exact" : "starting_at", score: 0 };
   }
 
@@ -192,8 +220,10 @@ export function pickTrimMsrp(rows, sig) {
   const clear = !second || (top.sc - second.sc) >= 2 || Math.abs(Number(top.r.msrp) - Number(second.r.msrp)) < 500;
   if (clear) {
     // A clear winner among rows that cannot express the stated configuration is
-    // still only the right TRIM, not the right CAR.
-    const basis = rowConfirmsConfig(top.r, s) ? "exact" : "starting_at";
+    // still only the right TRIM, not the right CAR. Same for a winner whose own
+    // MSRP isn't remotely close to what's actually being asked -- more likely a
+    // missing higher-package row than a real markup (see priceImplausible).
+    const basis = (rowConfirmsConfig(top.r, s) && !priceImplausible(top.r.msrp, s.quotedPrice)) ? "exact" : "starting_at";
     return { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis, score: top.sc };
   }
 

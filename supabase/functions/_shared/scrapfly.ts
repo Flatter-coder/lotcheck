@@ -19,6 +19,9 @@
 // Crowfoot test before this path is relied on (see the deploy/test step).
 // ============================================================================
 
+import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
+import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
+
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
 
@@ -39,6 +42,7 @@ function base64FromBytes(bytes: Uint8Array): string {
 // rendered HTML and a full-page screenshot. null when disabled or on any error.
 export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
+  const renderDeadline = Date.now() + budgetMs;
   try {
     const u = new URL("https://api.scrapfly.io/scrape");
     u.searchParams.set("key", SCRAPFLY_API_KEY);
@@ -63,7 +67,15 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     if (shotUrl) {
       try {
         const sep = shotUrl.includes("?") ? "&" : "?";
-        const sr = await fetch(`${shotUrl}${sep}key=${SCRAPFLY_API_KEY}`, { signal: AbortSignal.timeout(20_000) });
+        // Bounded by what's left of the caller's budgetMs, not a flat 20s on
+        // top of it -- a hardcoded extra timeout here is the same class of
+        // bug as the render/Claude-call doubling above: the caller computed
+        // budgetMs from their own deadline expecting THIS to be the total
+        // time this function takes, not total-plus-20s. Same minimum-1s
+        // floor so a render that used the whole budget still gets a real
+        // (if short) attempt instead of an instant abort.
+        const shotBudget = Math.max(1_000, Math.min(20_000, renderDeadline - Date.now()));
+        const sr = await fetch(`${shotUrl}${sep}key=${SCRAPFLY_API_KEY}`, { signal: AbortSignal.timeout(shotBudget) });
         if (sr.ok) {
           const bytes = new Uint8Array(await sr.arrayBuffer());
           screenshotB64 = base64FromBytes(bytes);
@@ -71,6 +83,19 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
           screenshotMime = (bytes[0] === 0x89 && bytes[1] === 0x50) ? "image/png" : (bytes[0] === 0xFF && bytes[1] === 0xD8) ? "image/jpeg" : (sr.headers.get("content-type") || "image/jpeg");
         }
       } catch (e) { console.warn("scrapfly screenshot fetch failed:", (e as Error)?.message); }
+    }
+    // Claude's vision API rejects images past its own size/dimension ceiling.
+    // A "fullpage" capture of a long dealer page can run well past that --
+    // confirmed live on capitalchev.ca, whose listing page is 17,729px tall.
+    // That silently fails the vision call below (res.ok false -> null) and
+    // loses the WHOLE rescue even though Scrapfly's render itself succeeded.
+    // Same cutoff already proven safe for the sealed-evidence screenshot in
+    // captureListingScreenshot() below. Drop the oversized shot here so the
+    // caller falls back to the rendered HTML (text) path instead of a
+    // guaranteed-failing vision call.
+    if (screenshotB64 && screenshotB64.length > 1_500_000) {
+      console.warn(`scrapflyRender: full-page screenshot too large (${screenshotB64.length} b64 chars) -- dropping, falling back to rendered HTML.`);
+      screenshotB64 = null;
     }
     if (!html && !screenshotB64) return null;
     return { html, screenshotB64, screenshotMime };
@@ -175,6 +200,17 @@ export interface RescueOpts {
   anthropicKey: string;
   model: string;
   budgetMs?: number;
+  // A render the caller started EARLY, in parallel with the main scan (the
+  // moment its direct page fetch conclusively failed -- the strongest signal
+  // this rescue will be needed). By the time the main path gets here it has
+  // burned 60-110s of the request on Nimble+Claude, and the honest remaining
+  // budget is often too short for a cold ASP render of a bot-protected page
+  // (confirmed live 2026-08-14, albertahonda.com: rescue fired with the
+  // correct bounded budget and the render just couldn't finish inside it, so
+  // a paid report shipped with no price/VIN at all). A pre-warmed render is
+  // already done or nearly done by then. Resolving null falls back to a
+  // fresh render with whatever budget remains, same as before.
+  preRendered?: Promise<RenderResult | null>;
 }
 
 // Full rescue: render with Scrapfly, then read the result with Claude vision
@@ -183,9 +219,50 @@ export interface RescueOpts {
 // object, or null if disabled / render failed / nothing extracted.
 export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): Promise<any | null> {
   if (!SCRAPFLY_API_KEY || !opts.anthropicKey) return null;
+  // opts.budgetMs is the caller's TOTAL time budget for this whole function,
+  // computed from their own remaining REQUEST_DEADLINE -- but this function
+  // used to hand that SAME full value to BOTH internal steps independently
+  // (scrapflyRender, then the Claude call), so a "70s-budgeted" call could
+  // actually take up to ~140s worst case. Confirmed live, 2026-08-14
+  // (albertahonda.com Civic Sedan): that doubling, stacked on Nimble's own
+  // 30s+, pushed the whole request past Supabase's 150s platform ceiling --
+  // the function gets killed outright with no error response and no log
+  // line, which is why the report showed a generic "something went wrong"
+  // with nothing in api_usage_log to explain it. Now the render step gets
+  // the caller's budget up front (it's the step most likely to need it --
+  // ASP challenge-solving, JS execution, lazy-load waits) and the Claude
+  // call gets only whatever's left, so the total is bounded by opts.budgetMs
+  // the way every caller already assumes.
+  const totalBudget = opts.budgetMs ?? 70_000;
+  const deadline = Date.now() + totalBudget;
   try {
-    const rendered = await scrapflyRender(url, opts.budgetMs ?? 70_000);
+    // Prefer the caller's pre-warmed render; a fresh one only when there is
+    // none or it failed (see RescueOpts.preRendered). The fresh-render
+    // fallback uses the REMAINING budget, since awaiting a pending
+    // pre-render may itself have consumed some.
+    let rendered = opts.preRendered ? await opts.preRendered.catch(() => null) : null;
+    if (!rendered) rendered = await scrapflyRender(url, Math.max(5_000, deadline - Date.now()));
     if (!rendered) return null;
+
+    // Deterministic structured-data read of the SAME rendered HTML, alongside
+    // (not instead of) the vision/text pass below. Matters here specifically:
+    // htmlToText() below strips every <script> tag before Claude ever sees the
+    // text fallback, which deletes schema.org JSON-LD outright -- the text
+    // path can only ever read prose, never this. Confirmed live on
+    // capitalchev.ca: the page's Car/Offer JSON-LD (price, VIN, year/make/
+    // model, dealer) parses cleanly with extractJsonLdVehicle even though the
+    // vision call fails outright on that page's 17,729px-tall screenshot.
+    // Structured data already outranks a vision/prose guess everywhere else
+    // in this codebase (buildJsonLdFallbackAnalysis) -- same rule here.
+    const jsonLd = rendered.html ? extractJsonLdVehicle(rendered.html) : null;
+    // Same deal, for the platform JSON-LD can't cover: a Convertus page
+    // (e.g. Convertus/DealerFire family sites) with NO schema.org markup at
+    // all. Confirmed live, 2026-08-14 (albertahonda.com Civic Sedan): zero
+    // JSON-LD blocks on the page, and price/VIN/financing/fine-print ALL
+    // live in vmsData instead -- when this rescue's own vision/text pass
+    // also misses them (long page, oversized screenshot, whatever), this was
+    // the one remaining source with nothing reading it. See convertus-vms.js.
+    const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
 
     const userContent: any[] = [];
     if (rendered.screenshotB64) {
@@ -197,18 +274,39 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
       return null;
     }
 
+    let parsed: any = null;
+    // Whatever's left of totalBudget after the render step -- NOT the full
+    // budget again (see the doubling bug explained above). A minimum of 1s
+    // so a render that consumed the entire budget still gets a real attempt
+    // instead of an instant abort.
+    const claudeBudget = Math.max(1_000, deadline - Date.now());
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": opts.anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({ model: opts.model, max_tokens: 8000, system: opts.systemPrompt, messages: [{ role: "user", content: userContent }] }),
-      signal: AbortSignal.timeout(opts.budgetMs ?? 60_000),
+      signal: AbortSignal.timeout(claudeBudget),
     });
-    if (!res.ok) { console.warn("scrapfly-rescue Claude HTTP", res.status); return null; }
-    const data: any = await res.json();
-    const text: string = data?.content?.[0]?.text ?? "";
-    const parsed = firstJsonObject(text);
-    if (!parsed) return null;
-    parsed.extractionMethod = "scrapfly_render_vision";
+    if (!res.ok) console.warn("scrapfly-rescue Claude HTTP", res.status);
+    else {
+      const data: any = await res.json();
+      const text: string = data?.content?.[0]?.text ?? "";
+      parsed = firstJsonObject(text);
+    }
+
+    // Claude's pass (vision or text) failed outright -- still worth returning
+    // a JSON-LD-only result rather than losing the whole rescue, exactly the
+    // capitalchev.ca case (oversized screenshot -> vision 400 -> parsed stays
+    // null, but the page's own structured data was sitting right there).
+    if (!parsed && !jsonLd && !cv) return null;
+    if (!parsed) parsed = {};
+    parsed.extractionMethod = parsed.extractionMethod
+      || (Object.keys(parsed).length === 0 && (jsonLd || cv) ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
+
+    if (jsonLd) fillFromJsonLd(parsed, jsonLd);
+    // Runs AFTER JSON-LD on purpose: Convertus's own msrp/financing/fine-print
+    // fields have no schema.org equivalent, so this only ever fills gaps
+    // JSON-LD genuinely couldn't -- never overwrites what fillFromJsonLd set.
+    if (cv) fillFromConvertusVms(parsed, cv);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
     // and seal its SHA-256 into the signed canonical (report-sign.ts reads
     // listingShotSha256). Proves what the page looked like at that moment --

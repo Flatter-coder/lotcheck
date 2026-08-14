@@ -89,3 +89,28 @@ export function extractJsonLdVehicle(html) {
   if (!year && !make && !model && price == null) return null;
   return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
 }
+
+// Fill blanks in a Claude-extracted analysis object (`parsed`) using a
+// schema.org read of the SAME page (`jsonLd`, from extractJsonLdVehicle
+// above). Structured data outranks a vision/prose guess everywhere else in
+// this codebase (buildJsonLdFallbackAnalysis) -- same rule here. Never
+// clobbers a real parsed value, only fills what's missing or a non-positive
+// price. Mutates and returns `parsed`; a null jsonLd is a no-op.
+export function fillFromJsonLd(parsed, jsonLd) {
+  if (!parsed || !jsonLd) return parsed;
+  if ((parsed.quotedPrice == null || Number(parsed.quotedPrice) <= 0) && Number(jsonLd.price) > 0) parsed.quotedPrice = jsonLd.price;
+  if (!parsed.vin && jsonLd.vin) parsed.vin = jsonLd.vin;
+  if (!parsed.year && jsonLd.year) parsed.year = jsonLd.year;
+  if (!parsed.make && jsonLd.make) parsed.make = jsonLd.make;
+  if (!parsed.model && jsonLd.model) parsed.model = jsonLd.model;
+  if (!parsed.trim && jsonLd.trim) parsed.trim = jsonLd.trim;
+  if (!parsed.vehicleCondition && jsonLd.condition) parsed.vehicleCondition = jsonLd.condition;
+  if (!parsed.dealerName && jsonLd.dealerName) parsed.dealerName = jsonLd.dealerName;
+  if (!parsed.dealerCity && jsonLd.dealerCity) parsed.dealerCity = jsonLd.dealerCity;
+  if (parsed.odometerKm == null && jsonLd.odometerKm != null) parsed.odometerKm = jsonLd.odometerKm;
+  if (!parsed.vehicle) {
+    const vehicleStr = [jsonLd.year, jsonLd.make, jsonLd.model, jsonLd.trim].filter(Boolean).join(" ");
+    if (vehicleStr) parsed.vehicle = vehicleStr;
+  }
+  return parsed;
+}
