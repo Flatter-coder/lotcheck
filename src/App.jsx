@@ -3969,27 +3969,64 @@ function VerifLiveDot({C}){
 
 const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
 
-function VerifMeasuredRow({C,label,value,sub,tone}){
-  const col = tone==="bad" ? C.coralInk : tone==="warn" ? C.butterInk : C.tealInk;
-  const dot = tone==="bad" ? C.coral : tone==="warn" ? C.butter : C.teal;
-  return (
-    <div style={{display:"flex",alignItems:"baseline",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.line}`}}>
-      <span style={{width:9,height:9,borderRadius:2,background:dot,flex:"none"}}/>
-      <span style={{fontSize:12.5,color:C.ink,flex:1}}>{label}</span>
-      <span style={{fontSize:13,fontWeight:800,color:col}}>{value}</span>
-      <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",minWidth:190,textAlign:"right"}}>{sub}</span>
-    </div>
-  );
-}
+// Direction 23 — the isometric ledger (Vic's pick from the 35-direction board,
+// design-admin-verifications-35.html). Every tracked thing is one row on a
+// shared plane; a row LIFTS off that plane as it degrades, so a bad checkpoint
+// is visible as height before you read a single number.
+//
+// `state` drives the whole rendering and there are four, not three:
+//   ok          teal, flat to the plane
+//   bad         coral, lifted in proportion to how far it has fallen
+//   info        neutral teal, low — volume counters that can't be good or bad
+//   unmeasured  a HOLLOW outline, never a filled slab. Nothing writes this
+//               value yet, and a solid green row for something we do not
+//               measure is the false all-clear this panel exists to prevent.
+function VerifIsoLedger({C, rows, onPick, picked}){
+  const SP = 22, TOP = 26, CX = 236, W = 208, D = 13;
+  const height = TOP + rows.length * SP + 14;
+  const P = (cx, cy, a, b, l) => `${(cx + (a - b) * 0.866).toFixed(1)},${(cy + (a + b) * 0.5 - l).toFixed(1)}`;
 
-function VerifUnmeasuredRow({C,label,needs}){
   return (
-    <div style={{display:"flex",alignItems:"baseline",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.line}`}}>
-      <span style={{width:9,height:9,borderRadius:2,background:"transparent",border:`1px dashed ${C.inkFaint}`,flex:"none"}}/>
-      <span style={{fontSize:12.5,color:C.ink,flex:1}}>{label}</span>
-      <span style={{fontSize:11,color:C.inkFaint,fontStyle:"italic"}}>not instrumented</span>
-      <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",minWidth:190,textAlign:"right"}}>{needs}</span>
-    </div>
+    <svg viewBox={`0 0 620 ${height}`} style={{display:"block",width:"100%",overflow:"visible"}}>
+      {rows.map((r, i) => {
+        const cy = TOP + i * SP;
+        if (r.sec) return (
+          <text key={`s${i}`} x="8" y={cy+3} fill={C.inkFaint} fontSize="8.5"
+                fontFamily="ui-monospace,Menlo,monospace" letterSpacing="1.4">{r.sec}</text>
+        );
+        const hw = W/2, hd = D/2;
+        const lift = r.state==="bad" ? 6 + (100 - (r.pct ?? 0)) * 0.5
+                   : r.state==="unmeasured" ? 0
+                   : r.state==="info" ? 5 : 4;
+        const top   = r.state==="bad" ? C.coralInk : C.tealInk;
+        const face  = r.state==="bad" ? C.coral    : C.teal;
+        const side  = r.state==="bad" ? C.coralInk : C.tealInk;
+        const op    = r.state==="info" ? 0.45 : 0.95;
+        const val   = r.state==="bad" ? C.coralInk : r.state==="unmeasured" ? C.inkFaint : C.tealInk;
+
+        return (
+          <g key={r.id} onClick={()=>onPick && onPick(r.id)} style={{cursor:onPick?"pointer":"default"}}>
+            <rect x="4" y={cy-9} width="612" height="19" rx="4"
+                  fill={picked===r.id ? C.tealBg : "transparent"}/>
+            {r.state==="unmeasured" ? (
+              // Hollow: the plane is drawn, nothing stands on it.
+              <polygon
+                points={`${P(CX,cy,-hw,-hd,0)} ${P(CX,cy,hw,-hd,0)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,-hw,hd,0)}`}
+                fill="none" stroke={C.inkFaint} strokeWidth="1" strokeDasharray="3 3" opacity=".55"/>
+            ) : (<>
+              <polygon points={`${P(CX,cy,-hw,-hd,lift)} ${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)}`} fill={top} opacity={op}/>
+              <polygon points={`${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,hw,-hd,0)}`} fill={face} opacity={op}/>
+              <polygon points={`${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)} ${P(CX,cy,-hw,hd,0)} ${P(CX,cy,hw,hd,0)}`} fill={side} opacity={op}/>
+            </>)}
+            <text x="8" y={cy+3} fill={C.ink} fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.name}</text>
+            <text x="452" y={cy+3} textAnchor="end" fill={val} fontSize="10.5"
+                  fontFamily="ui-monospace,Menlo,monospace">{r.value}</text>
+            <text x="612" y={cy+3} textAnchor="end" fill={C.inkFaint} fontSize="9.5"
+                  fontFamily="ui-monospace,Menlo,monospace">{r.note}</text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
@@ -4019,6 +4056,8 @@ function VerificationTab({apiUsage, apiUsageLoading}){
     return()=>{cancelled=true;};
   },[range]);
 
+  const [picked,setPicked]=useState(null);
+
   const intervals=useMemo(()=>buildVerifIntervals(bucket,apiUsage),[bucket,apiUsage]);
   const totOk=intervals.reduce((a,r)=>a+r.ok,0);
   const totFail=intervals.reduce((a,r)=>a+r.fail,0);
@@ -4026,6 +4065,55 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   const rate=tot?((totOk/tot)*100).toFixed(1):null;
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
   const loaded=!apiUsageLoading;
+
+  // The ledger's rows, in report order. Volume first (what came in), delivery
+  // second (what went out), then the 13 checkpoints that decide whether the
+  // report was worth sending.
+  const isoRows = useMemo(()=>{
+    const unmeasured = (id,name,needs,proof) =>
+      ({id, name, value:"—", note:needs, state:"unmeasured", proof});
+    const rows = [
+      {sec:"VOLUME"},
+      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(tot),
+       note:"api_usage_log", state:"info",
+       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run."},
+      unmeasured("file","Uploaded files (PDF path)","logUsage in analyze-quote",
+        "Invisible, not zero. analyze-quote writes no telemetry at all — not even api_usage_log — so uploaded quotes cannot be counted until logUsage is mirrored into it."),
+      {sec:"DELIVERY"},
+    ];
+    if (ledger) {
+      const attempts = ledger.attempts || 0;
+      const okPct = attempts ? (ledger.accepted / attempts) * 100 : 100;
+      const delivPct = ledger.accepted ? (ledger.delivered / ledger.accepted) * 100 : 100;
+      rows.push(
+        {id:"sent", name:"Emails sent with the PDF", value:vnum(ledger.accepted),
+         note:`${vnum(attempts)} attempted · ${vnum(ledger.provider_err)} rejected`,
+         state:(ledger.provider_err||0)>0?"bad":"ok", pct:okPct,
+         proof:"One row per attempt in report_delivery, written before the send and carrying the SHA-256 of the exact PDF bytes handed to Resend. A customer forwards their PDF, you hash it, and it matches a row or it does not."},
+        {id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
+         note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints`,
+         state:(ledger.bounced||0)>0?"bad":"ok", pct:delivPct,
+         proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."},
+        {id:"stall", name:"Accepted, unresolved over 1h", value:vnum(ledger.stalled_1h),
+         note:`${vnum(ledger.no_msg_id)} with no provider id`,
+         state:(ledger.stalled_1h||0)>0?"bad":"ok", pct:(ledger.stalled_1h||0)>0?60:100,
+         proof:"Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
+      );
+    } else {
+      rows.push(
+        unmeasured("sent","Emails sent with the PDF","report_delivery.pdf_sha256",
+          "The ledger tables are written but not applied — supabase/migrations/20260814_report_delivery.sql. Until that migration runs, sends are recorded nowhere and this row stays hollow."),
+        unmeasured("deliv","Delivery confirmed by provider","report_delivery_event",
+          "Needs the same migration plus the resend-webhook function deployed and RESEND_WEBHOOK_SECRET set."),
+      );
+    }
+    rows.push({sec:`CHECKPOINTS · ${VERIF_CHECKPOINTS.length} PER REPORT`});
+    for (const [label, needs] of VERIF_CHECKPOINTS) {
+      rows.push(unmeasured(needs, label, needs,
+        `Nothing writes a per-checkpoint outcome yet. When verification_check lands, this row carries verified / checked-no-match / not-applicable / error / not-attempted — and a miss will read as a miss, never as a clean bill.`));
+    }
+    return rows;
+  },[ledger,tot,apiUsageLoading]);
 
   const SP = intervals.length>20 ? 15 : intervals.length>10 ? 19 : 25;
   const BARW = 300, LX = 132, H = intervals.length*SP + 16;
@@ -4104,63 +4192,21 @@ function VerificationTab({apiUsage, apiUsageLoading}){
         )}
       </div>
 
-      {/* ---- source split: one side real, one side honestly missing ---- */}
-      <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>SOURCE SPLIT</div>
-        <div style={{display:"flex",alignItems:"baseline",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.line}`}}>
-          <span style={{width:9,height:9,borderRadius:2,background:C.teal,flex:"none"}}/>
-          <span style={{fontSize:12.5,color:C.ink,flex:1}}>URL scans</span>
-          <span style={{fontSize:13,fontWeight:800,color:C.tealInk}}>{apiUsageLoading?"…":tot.toLocaleString("en-CA")}</span>
-          <span style={{fontSize:10.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",minWidth:190,textAlign:"right"}}>api_usage_log.feature</span>
-        </div>
-        <VerifUnmeasuredRow C={C} label="Uploaded files (PDF path)" needs="logUsage in analyze-quote"/>
-        <div style={{fontSize:11,color:C.inkFaint,marginTop:8,lineHeight:1.6}}>
-          logUsage is wired into analyze-listing-url only, so every number above is the URL path.
-          Uploaded quotes are invisible here — not zero. Mirroring logUsage into analyze-quote is what
-          makes this split real.
-        </div>
-      </div>
-
-      {/* ---- delivery + checkpoints: named, unmeasured, never green ---- */}
+      {/* ---- direction 23: the isometric ledger (volume + delivery + 13 checks) ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
-        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>DELIVERY</div>
-        {ledger ? (<>
-          <VerifMeasuredRow C={C} label="Emails sent with the PDF attached"
-            value={vnum(ledger.accepted)}
-            tone={(ledger.provider_err||0)>0?"warn":"ok"}
-            sub={`${vnum(ledger.attempts)} attempted · ${vnum(ledger.provider_err)} rejected`}/>
-          <VerifMeasuredRow C={C} label="Delivery confirmed by provider"
-            value={vnum(ledger.delivered)}
-            tone={(ledger.bounced||0)>0?"bad":"ok"}
-            sub={`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints`}/>
-          <VerifMeasuredRow C={C} label="Accepted but unresolved over 1h"
-            value={vnum(ledger.stalled_1h)}
-            tone={(ledger.stalled_1h||0)>0?"warn":"ok"}
-            sub={`${vnum(ledger.no_msg_id)} with no provider id`}/>
-          <div style={{fontSize:11,color:C.inkFaint,marginTop:8,lineHeight:1.6}}>
-            A confirmed delivery means the receiving mail server accepted the message — not that it
-            reached the inbox, and not that anyone read it. Opens are not tracked here: image blocking
-            hides them and Apple Mail Privacy Protection invents them, so an open proves nothing in
-            either direction.
-          </div>
-        </>) : (<>
-          <VerifUnmeasuredRow C={C} label="PDF emailed" needs="report_delivery.pdf_sha256"/>
-          <VerifUnmeasuredRow C={C} label="Delivery confirmed by provider" needs="report_delivery_event"/>
-          <div style={{fontSize:11,color:C.inkFaint,marginTop:8,lineHeight:1.6}}>
-            The ledger tables exist in <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>supabase/migrations/20260814_report_delivery.sql</span> but
-            are not applied yet — these rows stay blank until they are.
-          </div>
-        </>)}
-        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8,margin:"16px 0 8px"}}>
-          CHECKPOINTS — {VERIF_CHECKPOINTS.length} PER REPORT
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:2}}>
+          <span style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+            LEDGER — {bucket.label.toUpperCase()}
+          </span>
+          <span style={{fontSize:11,color:C.inkFaint}}>
+            a row lifts off the plane as it degrades · hollow = not instrumented
+          </span>
         </div>
-        {VERIF_CHECKPOINTS.map(([label,needs])=>(
-          <VerifUnmeasuredRow key={label} C={C} label={label} needs={needs}/>
-        ))}
-        <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.6}}>
-          These rows are deliberately blank rather than green. Nothing writes a per-checkpoint outcome
-          today, and a checkpoint painted as passing while unmeasured is exactly the false all-clear
-          this panel exists to prevent. They light up when verification_run / verification_check land.
+        <VerifIsoLedger C={C} rows={isoRows} picked={picked} onPick={setPicked}/>
+        <div style={{borderTop:`1px solid ${C.line}`,marginTop:6,paddingTop:10,fontSize:11,color:C.inkFaint,lineHeight:1.65}}>
+          {picked
+            ? (isoRows.find(r=>r.id===picked)?.proof || "")
+            : "Click any row for what backs it. Hollow rows are deliberately not green: nothing writes that value yet, and a checkpoint painted as passing while unmeasured is the false all-clear this panel exists to prevent."}
         </div>
       </div>
     </div>
