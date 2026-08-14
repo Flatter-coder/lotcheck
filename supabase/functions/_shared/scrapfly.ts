@@ -24,32 +24,6 @@ import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
 
-// Ground-truth price-gate CTA text, matched against the RAW rendered DOM --
-// independent of whether the screenshot capture was complete or the vision
-// pass actually saw the sidebar it lives in. Same pattern already proven in
-// the Convertus-specific backstop (analyze-listing-url/index.ts); exported
-// here so the general Scrapfly-rescue path (every dealer platform, not just
-// Convertus) gets the same protection. A vision read of an incomplete
-// screenshot can miss a CTA that a plain text search of the DOM never will.
-export const PRICE_GATE_CTA_RE = /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i;
-
-// Cookie/privacy-consent overlays (OneTrust, TrustArc, Quantcast, and any
-// other IAB-TCF-based CMP) sit on top of the page until a human clicks
-// through -- a bot render never does, so both the sealed evidence photo and
-// the vision-analysis screenshot can end up capturing a blank consent
-// backdrop instead of the listing. Confirmed live on tazaparkvw.com
-// (2026-08-13): a full-page "Consent Management" dialog, page behind it
-// never visible in the capture. Rather than chase each CMP vendor's own
-// button selector (brittle, breaks silently when a vendor changes markup),
-// strip any fixed/sticky high-z-index element before the shot -- covers
-// consent banners, paywalls and sticky promo bars generically. Best-effort:
-// wrapped in try/catch so a page that rejects injected JS just renders as
-// before, never breaks the request. NEEDS LIVE VERIFICATION against a real
-// Scrapfly call before being fully trusted -- same convention as the rest of
-// this file (see header comment).
-const DISMISS_OVERLAYS_JS = `(function(){try{document.querySelectorAll('*').forEach(function(el){var cs=getComputedStyle(el);if((cs.position==='fixed'||cs.position==='sticky')&&parseInt(cs.zIndex||'0',10)>999){el.remove();}});document.documentElement.style.overflow='auto';document.body.style.overflow='auto';}catch(e){}})();`;
-const DISMISS_OVERLAYS_JS_B64 = btoa(DISMISS_OVERLAYS_JS);
-
 export interface RenderResult {
   html: string | null;          // fully-rendered HTML (JS executed)
   screenshotB64: string | null; // full-page screenshot, base64
@@ -67,6 +41,7 @@ function base64FromBytes(bytes: Uint8Array): string {
 // rendered HTML and a full-page screenshot. null when disabled or on any error.
 export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
+  const renderDeadline = Date.now() + budgetMs;
   try {
     const u = new URL("https://api.scrapfly.io/scrape");
     u.searchParams.set("key", SCRAPFLY_API_KEY);
@@ -76,7 +51,6 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     u.searchParams.set("country", "ca");          // Canadian residential IP
     u.searchParams.set("rendering_wait", "8000"); // give the price XHR time to land
     u.searchParams.set("auto_scroll", "true");    // trigger lazy-loaded sections
-    u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     u.searchParams.set("screenshots[main]", "fullpage");
     u.searchParams.set("format", "json");
 
@@ -92,7 +66,15 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     if (shotUrl) {
       try {
         const sep = shotUrl.includes("?") ? "&" : "?";
-        const sr = await fetch(`${shotUrl}${sep}key=${SCRAPFLY_API_KEY}`, { signal: AbortSignal.timeout(20_000) });
+        // Bounded by what's left of the caller's budgetMs, not a flat 20s on
+        // top of it -- a hardcoded extra timeout here is the same class of
+        // bug as the render/Claude-call doubling above: the caller computed
+        // budgetMs from their own deadline expecting THIS to be the total
+        // time this function takes, not total-plus-20s. Same minimum-1s
+        // floor so a render that used the whole budget still gets a real
+        // (if short) attempt instead of an instant abort.
+        const shotBudget = Math.max(1_000, Math.min(20_000, renderDeadline - Date.now()));
+        const sr = await fetch(`${shotUrl}${sep}key=${SCRAPFLY_API_KEY}`, { signal: AbortSignal.timeout(shotBudget) });
         if (sr.ok) {
           const bytes = new Uint8Array(await sr.arrayBuffer());
           screenshotB64 = base64FromBytes(bytes);
@@ -139,7 +121,6 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       if (fullpage) u.searchParams.set("capture", "fullpage");
       u.searchParams.set("rendering_wait", "3000");
       u.searchParams.set("auto_scroll", "true");
-      u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
       if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
@@ -226,8 +207,24 @@ export interface RescueOpts {
 // object, or null if disabled / render failed / nothing extracted.
 export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): Promise<any | null> {
   if (!SCRAPFLY_API_KEY || !opts.anthropicKey) return null;
+  // opts.budgetMs is the caller's TOTAL time budget for this whole function,
+  // computed from their own remaining REQUEST_DEADLINE -- but this function
+  // used to hand that SAME full value to BOTH internal steps independently
+  // (scrapflyRender, then the Claude call), so a "70s-budgeted" call could
+  // actually take up to ~140s worst case. Confirmed live, 2026-08-14
+  // (albertahonda.com Civic Sedan): that doubling, stacked on Nimble's own
+  // 30s+, pushed the whole request past Supabase's 150s platform ceiling --
+  // the function gets killed outright with no error response and no log
+  // line, which is why the report showed a generic "something went wrong"
+  // with nothing in api_usage_log to explain it. Now the render step gets
+  // the caller's budget up front (it's the step most likely to need it --
+  // ASP challenge-solving, JS execution, lazy-load waits) and the Claude
+  // call gets only whatever's left, so the total is bounded by opts.budgetMs
+  // the way every caller already assumes.
+  const totalBudget = opts.budgetMs ?? 70_000;
+  const deadline = Date.now() + totalBudget;
   try {
-    const rendered = await scrapflyRender(url, opts.budgetMs ?? 70_000);
+    const rendered = await scrapflyRender(url, totalBudget);
     if (!rendered) return null;
 
     // Deterministic structured-data read of the SAME rendered HTML, alongside
@@ -242,12 +239,6 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // in this codebase (buildJsonLdFallbackAnalysis) -- same rule here.
     const jsonLd = rendered.html ? extractJsonLdVehicle(rendered.html) : null;
 
-    // Ground-truth price-gate check against the RAW rendered DOM text -- runs
-    // regardless of whether the screenshot capture was complete or the vision
-    // call below actually saw the CTA. A plain regex over real HTML can't miss
-    // a sidebar the way an incomplete screenshot can. See PRICE_GATE_CTA_RE.
-    const renderGateCtaDetected = !!(rendered.html && PRICE_GATE_CTA_RE.test(rendered.html));
-
     const userContent: any[] = [];
     if (rendered.screenshotB64) {
       userContent.push({ type: "image", source: { type: "base64", media_type: rendered.screenshotMime || "image/jpeg", data: rendered.screenshotB64 } });
@@ -259,11 +250,16 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     }
 
     let parsed: any = null;
+    // Whatever's left of totalBudget after the render step -- NOT the full
+    // budget again (see the doubling bug explained above). A minimum of 1s
+    // so a render that consumed the entire budget still gets a real attempt
+    // instead of an instant abort.
+    const claudeBudget = Math.max(1_000, deadline - Date.now());
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": opts.anthropicKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
       body: JSON.stringify({ model: opts.model, max_tokens: 8000, system: opts.systemPrompt, messages: [{ role: "user", content: userContent }] }),
-      signal: AbortSignal.timeout(opts.budgetMs ?? 60_000),
+      signal: AbortSignal.timeout(claudeBudget),
     });
     if (!res.ok) console.warn("scrapfly-rescue Claude HTTP", res.status);
     else {
@@ -275,14 +271,11 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // Claude's pass (vision or text) failed outright -- still worth returning
     // a JSON-LD-only result rather than losing the whole rescue, exactly the
     // capitalchev.ca case (oversized screenshot -> vision 400 -> parsed stays
-    // null, but the page's own structured data was sitting right there). A
-    // confirmed price-gate CTA is the same kind of signal worth keeping even
-    // when both the vision pass and JSON-LD came back empty.
-    if (!parsed && !jsonLd && !renderGateCtaDetected) return null;
+    // null, but the page's own structured data was sitting right there).
+    if (!parsed && !jsonLd) return null;
     if (!parsed) parsed = {};
     parsed.extractionMethod = parsed.extractionMethod
       || (Object.keys(parsed).length === 0 && jsonLd ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
-    parsed.renderGateCtaDetected = renderGateCtaDetected;
 
     if (jsonLd) fillFromJsonLd(parsed, jsonLd);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
