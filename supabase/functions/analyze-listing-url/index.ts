@@ -87,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-13d";
+const CACHE_VER = "2026-08-14a";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -2071,10 +2071,16 @@ async function buildConvertusVmsFallbackAnalysis(url: string, sharedHtml?: Promi
       tradeInWidget: tiwHit,
       financeContingent: detectFinanceContingent(html),
       standardWarranty: null,
-      addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      addOns: [], totalFlaggedCost: 0, warranty: null,
+      // The dealer's own advertised finance rate lives in the SAME vmsData
+      // blob as price/VIN -- captured here too, not just the itemized fee
+      // breakdown (which genuinely isn't in this data source, hence the note
+      // below still calling that out specifically).
+      financing: v.financeApr != null ? { rate: v.financeApr, termMonths: v.financeTermMonths, source: "convertus_vms" } : null,
+      pricingDisclaimer: v.finePrint,
       source: "structured_data_fallback",
-      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details and the dealer's stated price/MSRP come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
-      summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
+      sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details, the dealer's stated price/MSRP, and the advertised financing rate come straight from that data. Itemized add-on fees couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
+      summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized add-on fees aren't included -- confirm the out-the-door price and any add-on fees directly with the dealer.`,
     };
     try {
       const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
@@ -3061,6 +3067,21 @@ Deno.serve(async (req: Request) => {
           if (missing && alt != null && alt !== "") { (analysis as any)[k] = alt; console.log(`Convertus identity gap-fill: ${k}.`); }
         }
         if (!analysis.vehicleCondition && cv.condition) analysis.vehicleCondition = cv.condition;
+        // Same gap this whole extractor exists for -- the dealer's own
+        // advertised finance rate and pricing fine print live in the SAME
+        // script-embedded blob as price/VIN, invisible to the scrape/Claude
+        // pass the same way. Confirmed live 2026-08-14 (albertahonda.com):
+        // "Financing APR: Not shown" and a missing disclaimer, while the page
+        // headlined "6.69% for 96 Months" and carried a full Alberta Winter
+        // Package fine-print paragraph vmsData had the whole time.
+        if (!(Number(analysis.financing?.rate) > 0) && cv.financeApr != null) {
+          analysis.financing = { ...(analysis.financing || {}), rate: cv.financeApr, termMonths: cv.financeTermMonths ?? (analysis.financing as any)?.termMonths ?? null, source: "convertus_vms" };
+          console.log("Convertus identity gap-fill: financing.rate.");
+        }
+        if (!analysis.pricingDisclaimer && cv.finePrint) {
+          analysis.pricingDisclaimer = cv.finePrint;
+          console.log("Convertus identity gap-fill: pricingDisclaimer.");
+        }
       }
     } catch { /* the safety net must never sink the scan */ }
 

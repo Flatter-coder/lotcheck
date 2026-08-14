@@ -20,6 +20,7 @@
 // ============================================================================
 
 import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
+import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
@@ -238,6 +239,14 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // Structured data already outranks a vision/prose guess everywhere else
     // in this codebase (buildJsonLdFallbackAnalysis) -- same rule here.
     const jsonLd = rendered.html ? extractJsonLdVehicle(rendered.html) : null;
+    // Same deal, for the platform JSON-LD can't cover: a Convertus page
+    // (e.g. Convertus/DealerFire family sites) with NO schema.org markup at
+    // all. Confirmed live, 2026-08-14 (albertahonda.com Civic Sedan): zero
+    // JSON-LD blocks on the page, and price/VIN/financing/fine-print ALL
+    // live in vmsData instead -- when this rescue's own vision/text pass
+    // also misses them (long page, oversized screenshot, whatever), this was
+    // the one remaining source with nothing reading it. See convertus-vms.js.
+    const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
 
     const userContent: any[] = [];
     if (rendered.screenshotB64) {
@@ -272,12 +281,16 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // a JSON-LD-only result rather than losing the whole rescue, exactly the
     // capitalchev.ca case (oversized screenshot -> vision 400 -> parsed stays
     // null, but the page's own structured data was sitting right there).
-    if (!parsed && !jsonLd) return null;
+    if (!parsed && !jsonLd && !cv) return null;
     if (!parsed) parsed = {};
     parsed.extractionMethod = parsed.extractionMethod
-      || (Object.keys(parsed).length === 0 && jsonLd ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
+      || (Object.keys(parsed).length === 0 && (jsonLd || cv) ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
 
     if (jsonLd) fillFromJsonLd(parsed, jsonLd);
+    // Runs AFTER JSON-LD on purpose: Convertus's own msrp/financing/fine-print
+    // fields have no schema.org equivalent, so this only ever fills gaps
+    // JSON-LD genuinely couldn't -- never overwrites what fillFromJsonLd set.
+    if (cv) fillFromConvertusVms(parsed, cv);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
     // and seal its SHA-256 into the signed canonical (report-sign.ts reads
     // listingShotSha256). Proves what the page looked like at that moment --
