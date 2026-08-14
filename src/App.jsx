@@ -3982,9 +3982,22 @@ const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
 //               value yet, and a solid green row for something we do not
 //               measure is the false all-clear this panel exists to prevent.
 function VerifIsoLedger({C, rows, onPick, picked}){
-  const SP = 22, TOP = 26, CX = 236, W = 208, D = 13;
-  const height = TOP + rows.length * SP + 14;
-  const P = (cx, cy, a, b, l) => `${(cx + (a - b) * 0.866).toFixed(1)},${(cy + (a + b) * 0.5 - l).toFixed(1)}`;
+  // LOW-ANGLE isometric, and the angle is the whole trick. A textbook iso
+  // projection uses y = (a+b)*0.5, which for a 200-long slab spans ±55px
+  // vertically — across three rows at any readable density, so every slab
+  // overlaps its neighbours into an unreadable mesh. Flattening the vertical
+  // coefficient to 0.10 keeps the dimensional read (you still see a top face,
+  // a front face and a side) while collapsing the bleed to ~±11px, which fits
+  // inside one row. VERIF_ISO_MAX_LIFT then caps how far a degraded row can
+  // climb so a bad row rises visibly without colliding with the row above.
+  // These five numbers are load-bearing and were solved, not guessed. One
+  // slab's vertical extent is 2*(W/2 + D/2)*IY + maxLift; if that exceeds SP,
+  // every row overlaps its neighbours. Here: 2*(75+10)*0.09 + 9 = 24.3 < 26.
+  // Change any of them and re-check that inequality first.
+  const SP = 26, TOP = 28, CX = 300, W = 150, D = 20;
+  const IX = 0.90, IY = 0.09;
+  const height = TOP + rows.length * SP + 16;
+  const P = (cx, cy, a, b, l) => `${(cx + (a - b) * IX).toFixed(1)},${(cy + (a + b) * IY - l).toFixed(1)}`;
 
   return (
     <svg viewBox={`0 0 620 ${height}`} style={{display:"block",width:"100%",overflow:"visible"}}>
@@ -3995,9 +4008,18 @@ function VerifIsoLedger({C, rows, onPick, picked}){
                 fontFamily="ui-monospace,Menlo,monospace" letterSpacing="1.4">{r.sec}</text>
         );
         const hw = W/2, hd = D/2;
-        const lift = r.state==="bad" ? 6 + (100 - (r.pct ?? 0)) * 0.5
+        // Capped: an uncapped lift (a row at 0% climbed 56px) is what made the
+        // slabs collide. A degraded row must rise enough to be obvious and not
+        // one pixel further.
+        const VERIF_ISO_MAX_LIFT = 9;
+        const lift = r.state==="bad"
+                       ? Math.min(VERIF_ISO_MAX_LIFT, 3 + (100 - (r.pct ?? 0)) * 0.12)
                    : r.state==="unmeasured" ? 0
-                   : r.state==="info" ? 5 : 4;
+                   : r.state==="info" ? 4 : 3;
+        // The slab grows upward only, so without this it would sit off-centre
+        // in its row band and clip the row above at full lift. Half the lift
+        // pushes it back down and keeps the whole block inside its band.
+        const by    = cy + lift / 2;
         const top   = r.state==="bad" ? C.coralInk : C.tealInk;
         const face  = r.state==="bad" ? C.coral    : C.teal;
         const side  = r.state==="bad" ? C.coralInk : C.tealInk;
@@ -4011,12 +4033,12 @@ function VerifIsoLedger({C, rows, onPick, picked}){
             {r.state==="unmeasured" ? (
               // Hollow: the plane is drawn, nothing stands on it.
               <polygon
-                points={`${P(CX,cy,-hw,-hd,0)} ${P(CX,cy,hw,-hd,0)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,-hw,hd,0)}`}
+                points={`${P(CX,by,-hw,-hd,0)} ${P(CX,by,hw,-hd,0)} ${P(CX,by,hw,hd,0)} ${P(CX,by,-hw,hd,0)}`}
                 fill="none" stroke={C.inkFaint} strokeWidth="1" strokeDasharray="3 3" opacity=".55"/>
             ) : (<>
-              <polygon points={`${P(CX,cy,-hw,-hd,lift)} ${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)}`} fill={top} opacity={op}/>
-              <polygon points={`${P(CX,cy,hw,-hd,lift)} ${P(CX,cy,hw,hd,lift)} ${P(CX,cy,hw,hd,0)} ${P(CX,cy,hw,-hd,0)}`} fill={face} opacity={op}/>
-              <polygon points={`${P(CX,cy,hw,hd,lift)} ${P(CX,cy,-hw,hd,lift)} ${P(CX,cy,-hw,hd,0)} ${P(CX,cy,hw,hd,0)}`} fill={side} opacity={op}/>
+              <polygon points={`${P(CX,by,-hw,-hd,lift)} ${P(CX,by,hw,-hd,lift)} ${P(CX,by,hw,hd,lift)} ${P(CX,by,-hw,hd,lift)}`} fill={top} opacity={op}/>
+              <polygon points={`${P(CX,by,hw,-hd,lift)} ${P(CX,by,hw,hd,lift)} ${P(CX,by,hw,hd,0)} ${P(CX,by,hw,-hd,0)}`} fill={face} opacity={op}/>
+              <polygon points={`${P(CX,by,hw,hd,lift)} ${P(CX,by,-hw,hd,lift)} ${P(CX,by,-hw,hd,0)} ${P(CX,by,hw,hd,0)}`} fill={side} opacity={op}/>
             </>)}
             <text x="8" y={cy+3} fill={C.ink} fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.name}</text>
             <text x="452" y={cy+3} textAnchor="end" fill={val} fontSize="10.5"
