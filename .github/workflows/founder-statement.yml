@@ -8,50 +8,62 @@
 # midnight UTC: that is the 30th/31st of the previous month in Alberta, and a
 # statement headed "September" arriving on 31 August is confusing.
 #
-# SAFE TO RUN EARLY. The function refuses to send unless the founder shares
-# total 10000 basis points, so while JC's and Josh's real addresses are missing
-# it returns 409 and mails nobody. Use dry_run to see the computed statement
-# without sending.
+# THIS CRON CANNOT SEND ANYTHING. It calls mode=stage, which computes the
+# statement and records it as pending_approval. Vic approves it in the admin
+# panel; only that turns it into something the send path will deliver.
 #
-# Secrets: STATEMENT_SECRET (matching the function's), SUPABASE_FN_BASE.
+# Vic, 2026-08-14: "before you send, you need permission from me — because if
+# our cost jumps we need to adjust invoices." A vendor bill that moves between
+# the 1st and the send would otherwise bill JC and Josh the wrong amount, and a
+# number sent to a co-founder has been acted on by the time anyone notices.
+#
+# Secret: STATEMENT_SECRET (matching the function's).
 name: Founder statement
 
 on:
   schedule:
+    # 1st of the month, 13:00 UTC = 06:00 Mountain. Staging only.
     - cron: "0 13 1 * *"
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Compute and print the statement, send nothing"
-        type: boolean
-        default: true
+      mode:
+        description: "stage = compute + hold for approval (safe). send = deliver an ALREADY-APPROVED run."
+        type: choice
+        options: [stage, send]
+        default: stage
 
 jobs:
-  send:
+  run:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Send (or dry-run) the monthly statement
+      - name: Stage (or send an approved) statement
         env:
           STATEMENT_SECRET: ${{ secrets.STATEMENT_SECRET }}
         run: |
-          # Scheduled runs send for real; manual runs default to dry_run=true.
-          DRY="${{ inputs.dry_run }}"
-          if [ "${{ github.event_name }}" = "schedule" ]; then DRY="false"; fi
-          URL="https://debigtyjhjamipooajhk.supabase.co/functions/v1/founder-statement?dry_run=$DRY"
-          echo "dry_run=$DRY"
+          # A scheduled run ALWAYS stages. There is no input the cron can carry
+          # that would make it send -- the only way to send is a manual run
+          # against a statement already approved in the panel.
+          MODE="${{ inputs.mode }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then MODE="stage"; fi
+          echo "mode=$MODE"
 
+          URL="https://debigtyjhjamipooajhk.supabase.co/functions/v1/founder-statement?mode=$MODE"
           CODE=$(curl -s -o /tmp/out.json -w "%{http_code}" -X POST "$URL" \
             -H "x-statement-secret: $STATEMENT_SECRET" \
             -H "Content-Type: application/json" -d '{}')
           echo "HTTP $CODE"
-          cat /tmp/out.json | head -c 4000; echo
+          head -c 4000 /tmp/out.json; echo
 
           # 409 is the deliberate refusal (shares do not total 10000), not a
-          # fault — surface it loudly but do not fail the run, or a red cron
+          # fault -- surface it loudly but do not fail the run, or a red cron
           # every month becomes noise that gets ignored.
           if [ "$CODE" = "409" ]; then
-            echo "::warning::Statement refused to send — founder shares incomplete. Add the missing addresses and set active = true."
+            echo "::warning::Statement refused -- founder shares do not total 10000 bps."
             exit 0
           fi
           [ "$CODE" = "200" ] || exit 1
+
+          if [ "$MODE" = "stage" ]; then
+            echo "::notice::Statement staged and awaiting Vic's approval. Nothing has been emailed."
+          fi
