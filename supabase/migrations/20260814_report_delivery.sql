@@ -364,7 +364,7 @@ grant execute on function public.fn_admin_delivery_by_domain(text,timestamptz,ti
 -- a slug — `on conflict (question)` is what makes re-running this idempotent.
 insert into public.legal_question (question, jurisdiction, blocks, status)
 values
-  ('The Quote Check report email carries a promotional CTA ("Check another quote", email-quote-report/index.ts:381) and has no unsubscribe mechanism and no physical mailing address. Does CASL s.6(6) still exempt it as a message that SOLELY delivers a product under a prior transaction - and does the answer change for the free tier, where no transaction occurred?',
+  ('The Quote Check report email is buyer-initiated and one-off: the buyer types their own address on the results screen to receive that specific report. There is no subscription, no list, and no recurring send - each email is delivered once, in response to a request the buyer just made. On that basis it is treated as transactional delivery (and arguably express consent under CASL s.10, since the buyer solicited it). Residual question for counsel: the footer carries a link to the paid product ("Check another quote", email-quote-report/index.ts:381), and the function sets no unsubscribe header and no physical mailing address. Does that link affect the s.6(6) analysis, and if the message is a CEM, do the s.6(2) form requirements apply notwithstanding that the buyer asked for it?',
    'CA-federal',
    array['report email send path'],
    'open'),
