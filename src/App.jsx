@@ -4385,15 +4385,17 @@ function VerifFounderLedger({C}){
   const [pay,setPay]=useState({email:"",amount:"",line:"",month:"",covered:""});
   const [msg,setMsg]=useState(null);
 
+  const [owed,setOwed]=useState(null);
   const load=async()=>{
     try{
-      const [r,b]=await Promise.all([
+      const [r,b,o]=await Promise.all([
         supabase.rpc("fn_admin_statement_runs"),
         supabase.rpc("fn_admin_founder_balances"),
+        supabase.rpc("fn_admin_owed_to_payer"),
       ]);
       if(r.error) throw r.error;
       if(b.error) throw b.error;
-      setRuns(r.data||[]); setBal(b.data||[]); setState("ok");
+      setRuns(r.data||[]); setBal(b.data||[]); setOwed(o.error?null:(o.data||null)); setState("ok");
     }catch(err){
       console.warn("founder ledger unavailable:",err?.message||err);
       setState("absent");
@@ -4469,6 +4471,27 @@ function VerifFounderLedger({C}){
             </div>
           );
         })}
+
+        {/* Owed to the founder whose card pays the vendors — the number that
+            actually matters to the person out of pocket. */}
+        {owed?.payer && Number(owed.total_cad)>0.005 && (
+          <div style={{background:C.paper2,borderRadius:10,padding:"11px 13px",marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+              <span style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint}}>
+                OWED TO {String(owed.payer).toUpperCase()}
+              </span>
+              <span style={{fontSize:17,fontWeight:800,color:C.tealInk,
+                            fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(owed.total_cad)}</span>
+            </div>
+            <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>
+              {(owed.from||[]).map(x=>`${x.name} ${cad(x.owes_cad)}`).join("  ·  ")}
+            </div>
+            <div style={{fontSize:10.5,color:C.inkFaint,marginTop:5,lineHeight:1.55}}>
+              {owed.payer}'s card pays the vendors, so his own share settles automatically and
+              everyone else's balance is money owed to him.
+            </div>
+          </div>
+        )}
 
         {/* Balances */}
         <div style={{fontSize:10,fontWeight:800,letterSpacing:.8,color:C.inkFaint,marginBottom:4}}>BALANCES</div>
