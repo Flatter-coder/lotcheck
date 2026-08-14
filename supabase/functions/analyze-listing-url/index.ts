@@ -51,7 +51,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
-import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot } from "../_shared/scrapfly.ts";
+import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, type RenderResult } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
@@ -87,7 +87,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-14a";
+const CACHE_VER = "2026-08-14b";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1968,6 +1968,26 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
   }
 }
 
+// Retrying wrapper for the shared direct read. A single attempt is exactly how
+// three reports in two days lost price/VIN/financing on Convertus pages:
+// Cloudflare's bot scoring intermittently rejects the FIRST request from a
+// datacenter IP while passing a retry moments later (the same page fetched
+// clean from a residential IP every single time we checked). One failed
+// attempt used to null out earlyConvertusVms / earlyJsonLd / the incentive
+// reader / structuredFactsBlock all at once -- everything downstream of
+// directHtml -- and the whole scan then leaned on the late, time-starved
+// Scrapfly rescue. These retries run in PARALLEL with Nimble's own 30-100s
+// extraction, so the added attempts cost zero wall-clock in practice.
+async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3): Promise<string | null> {
+  for (let i = 1; i <= attempts; i++) {
+    const html = await fetchDirectHtml(url, timeoutMs);
+    if (html) { if (i > 1) console.log(`Direct fetch succeeded on attempt ${i}/${attempts}.`); return html; }
+    if (i < attempts) await sleep(1_500 * i); // 1.5s, 3s -- a fresh connection, not a hammer
+  }
+  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url}.`);
+  return null;
+}
+
 // Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
 // @graph arrays and a top-level array of nodes. Returns normalized fields, or
@@ -2569,7 +2589,7 @@ Deno.serve(async (req: Request) => {
     // executed even once in production, despite passing 18/18 against a saved
     // copy of the very page it was written for. Anything needing real HTML
     // must come through here.
-    const directHtml: Promise<string | null> = fetchDirectHtml(url, 15_000).catch(() => null);
+    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, 15_000).catch(() => null);
     const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
     // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
     // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
@@ -2579,6 +2599,21 @@ Deno.serve(async (req: Request) => {
     // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
     // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
     const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
+    // fails (all retries exhausted) -- the strongest early signal the rescue
+    // will be needed. Started here, ~20-50s into the request, it runs in
+    // parallel with Nimble+Claude and is finished (or nearly) by the time any
+    // rescue call site wants it; started there instead, the honestly-bounded
+    // remaining budget is often too short for a cold ASP render of a
+    // bot-protected page and the rescue dies empty-handed (albertahonda.com,
+    // 2026-08-14: a paid report shipped with no price/VIN/APR while every one
+    // of those figures was on the page). Cost: one ASP render (~a few cents)
+    // spent ONLY on scans whose direct fetch failed -- exactly the scans that
+    // were otherwise losing data outright. Resolves null when the direct
+    // fetch succeeded (rescue then renders fresh only if it actually fires).
+    const earlyRender: Promise<RenderResult | null> = scrapflyEnabled()
+      ? directHtml.then((html) => (html ? null : (console.log("Direct fetch failed -- pre-warming Scrapfly render for a possible rescue."), scrapflyRender(url, 70_000)))).catch(() => null)
+      : Promise.resolve(null);
     // Combined structured-data view for structuredFactsBlock + the post-Claude
     // gap-fill below: JSON-LD's fields stay authoritative where present (an
     // established, tested source); Convertus fills whatever JSON-LD didn't
@@ -2662,7 +2697,7 @@ Deno.serve(async (req: Request) => {
         if (!(Number(jsonLdFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
-              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
             jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
@@ -2707,7 +2742,7 @@ Deno.serve(async (req: Request) => {
         if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
             const rescued = await rescueListingViaScrapfly(url, {
-              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+              systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
             cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
@@ -2745,7 +2780,7 @@ Deno.serve(async (req: Request) => {
         try {
           const renderOnly: any = { sourceUrl: url };
           const rescued = await rescueListingViaScrapfly(url, {
-            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+            systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
             budgetMs: Math.max(1_000, Math.min(80_000, REQUEST_DEADLINE - Date.now())),
           });
           if (rescued) mergeRescued(renderOnly, rescued);
@@ -3110,7 +3145,7 @@ Deno.serve(async (req: Request) => {
     if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
       try {
         const rescued = await rescueListingViaScrapfly(url, {
-          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL,
+          systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender,
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself

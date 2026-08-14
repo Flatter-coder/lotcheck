@@ -200,6 +200,17 @@ export interface RescueOpts {
   anthropicKey: string;
   model: string;
   budgetMs?: number;
+  // A render the caller started EARLY, in parallel with the main scan (the
+  // moment its direct page fetch conclusively failed -- the strongest signal
+  // this rescue will be needed). By the time the main path gets here it has
+  // burned 60-110s of the request on Nimble+Claude, and the honest remaining
+  // budget is often too short for a cold ASP render of a bot-protected page
+  // (confirmed live 2026-08-14, albertahonda.com: rescue fired with the
+  // correct bounded budget and the render just couldn't finish inside it, so
+  // a paid report shipped with no price/VIN at all). A pre-warmed render is
+  // already done or nearly done by then. Resolving null falls back to a
+  // fresh render with whatever budget remains, same as before.
+  preRendered?: Promise<RenderResult | null>;
 }
 
 // Full rescue: render with Scrapfly, then read the result with Claude vision
@@ -225,7 +236,12 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
   const totalBudget = opts.budgetMs ?? 70_000;
   const deadline = Date.now() + totalBudget;
   try {
-    const rendered = await scrapflyRender(url, totalBudget);
+    // Prefer the caller's pre-warmed render; a fresh one only when there is
+    // none or it failed (see RescueOpts.preRendered). The fresh-render
+    // fallback uses the REMAINING budget, since awaiting a pending
+    // pre-render may itself have consumed some.
+    let rendered = opts.preRendered ? await opts.preRendered.catch(() => null) : null;
+    if (!rendered) rendered = await scrapflyRender(url, Math.max(5_000, deadline - Date.now()));
     if (!rendered) return null;
 
     // Deterministic structured-data read of the SAME rendered HTML, alongside
