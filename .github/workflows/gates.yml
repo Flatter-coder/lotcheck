@@ -77,6 +77,16 @@ jobs:
         run: npm run test:jsonld-vehicle
       - name: Convertus vmsData vehicle extraction (structured-data fallback)
         run: npm run test:convertus-vms
+      # Two promises to the buyer that are control flow, not data: a report
+      # email always carries the report, and nobody is charged for a report we
+      # couldn't build. The first was broken in production (the PDF build was
+      # wrapped in a catch that logged and sent the email anyway, so buyers got
+      # an empty report and we never found out). test:delivery mutation-tests
+      # the gate itself, so a weakened gate goes red instead of quietly passing.
+      - name: Delivery guarantees (PDF always attached, empty report never charged)
+        run: npm run check:delivery
+      - name: Delivery gate is load-bearing (mutation test)
+        run: npm run test:delivery
 
   # Separate job ON PURPOSE. The gates above are offline and dependency-free, and
   # that is worth protecting -- they run in seconds and a red run always means a

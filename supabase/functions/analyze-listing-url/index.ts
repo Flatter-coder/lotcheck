@@ -89,6 +89,21 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
 const CACHE_VER = "2026-08-14e";
 
+// The one and only "we couldn't build you a report" message. Both the cached
+// and the fresh-scrape paths return it, so the buyer never sees two different
+// apologies for the same outcome — and a future edit can't fix one and miss
+// the other. Every element here is load-bearing:
+//   apology  — we failed, not them
+//   refund   — stated as already done, not as something they must request
+//   two ways forward — upload the paperwork, OR price the same vehicle at
+//                      another dealer (an unreadable listing is often a
+//                      price-gated one, and another dealer may publish it)
+const UNREADABLE_LISTING_MESSAGE =
+  "Sorry — we couldn't read the price on this dealer listing, so there's no report to give you. " +
+  "Your credit has already been refunded automatically; you haven't been charged. " +
+  "Two ways forward: upload a screenshot or PDF of the quote or window sticker and we'll read it reliably, " +
+  "or run the same vehicle at another dealer — a listing we can't read is often one where the price is deliberately withheld.";
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
@@ -2548,7 +2563,7 @@ Deno.serve(async (req: Request) => {
           await releaseCredit(holdId);
           holdId = null;
           return new Response(
-            JSON.stringify({ error: "unreadable_listing", message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.", vehicle: cached.analysis.vehicle || null, dealerName: cached.analysis.dealerName || null }),
+            JSON.stringify({ error: "unreadable_listing", message: UNREADABLE_LISTING_MESSAGE, refunded: true, vehicle: cached.analysis.vehicle || null, dealerName: cached.analysis.dealerName || null }),
             { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
           );
         }
@@ -3237,7 +3252,8 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           error: "unreadable_listing",
-          message: "We couldn't read the price on this dealer listing — a lot of dealer sites block automated reading. Upload a screenshot or PDF of the quote or window sticker instead and we'll read it reliably. You haven't been charged.",
+          message: UNREADABLE_LISTING_MESSAGE,
+          refunded: true,
           vehicle: analysis.vehicle || null,
           dealerName: analysis.dealerName || null,
         }),

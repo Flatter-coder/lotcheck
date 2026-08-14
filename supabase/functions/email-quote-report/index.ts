@@ -6,9 +6,20 @@
 // the quote through Claude a second time -- cheaper, faster, and there's
 // no reason to redo work that's already done.
 //
-// Nothing here writes to a database. The email is generated and sent in
-// this one request, then the function's memory is gone -- consistent with
-// Quote Check's existing "never saved on our end" line on the page.
+// The report itself is never persisted: the analysis, the PDF bytes, the
+// capture, and the recipient's address all live only in this request's memory
+// -- which is what keeps Quote Check's "analyzed once, never stored" and
+// "not saved on our end" lines literally true.
+//
+// What IS persisted, since 2026-08-14, is a delivery LEDGER: one row per send
+// attempt recording the SHA-256 of the PDF we handed to Resend, its byte
+// length, the recipient's DOMAIN (never the address, and never a hash of it),
+// and Resend's message id. That is enough to answer the only two disputes that
+// happen -- "you never sent it" and "you sent the wrong file" -- and it holds
+// nothing about the person or the vehicle. See
+// supabase/migrations/20260814_report_delivery.sql for what is deliberately
+// absent and why. Ledger writes are FAIL-OPEN: a database problem must never
+// stop a buyer receiving their report.
 //
 // Requires a RESEND_API_KEY secret set on this function (see deployment
 // notes below). Uses Resend (resend.com) -- a transactional email API,
@@ -21,6 +32,49 @@ const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 // at your domain registrar). Until that's done, sends will fail -- Resend
 // won't let you send "from" a domain it hasn't confirmed you control.
 const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
+
+// ── Delivery ledger ─────────────────────────────────────────────────────────
+// Bump when anything changes that could alter the PDF bytes for the same
+// analysis (pdf-lib version, font subset, layout). A customer holding an older
+// copy will then hash differently, and the row explains why instead of the
+// mismatch reading as tampering.
+const PDF_BUILDER_VER = "2026-08-14a";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Every ledger call goes through here. It NEVER throws and never returns a
+// rejected promise: the ledger is evidence, not a gate, and a buyer must get
+// their report even when Postgres is having a bad day. A gap this creates is
+// visible in the admin panel's attempts-vs-rows reconciliation.
+async function ledgerRpc(fn: string, args: Record<string, unknown>): Promise<any> {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+      method: "POST",
+      headers: {
+        "apikey": SERVICE_ROLE_KEY,
+        "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(args),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) {
+      console.warn(`ledger ${fn} failed:`, res.status, await res.text());
+      return null;
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn(`ledger ${fn} threw (send continues regardless):`, e);
+    return null;
+  }
+}
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1196,20 +1250,74 @@ Deno.serve(async (req: Request) => {
       console.error("Capture verification skipped:", e);
     }
 
-    // Attachments — never fatal: if generation fails, send the email anyway.
+    // The PDF IS the report, so it is FATAL — never "best effort".
+    //
+    // This used to swallow the error and send the email anyway. That is the
+    // worst possible outcome: the buyer gets a LotCheck email that promises a
+    // report, opens it, and finds nothing attached. They believe they were
+    // served, they don't re-run, and the failure is invisible to us because
+    // nothing is recorded. An email with no report must never leave this
+    // function (Vic, 2026-08-14: "that can never happen").
+    //
+    // So: retry once (the pdf-lib / fontkit / Poppins fetches are remote
+    // imports and fail transiently), sanity-check the bytes, and if it still
+    // can't be built, send NOTHING and tell the caller. The buyer keeps their
+    // on-screen report and their credit — the credit is captured by the
+    // analyze-* functions on delivery of the analysis, never here — so a
+    // failure at this step costs them nothing but a retry.
+    const MIN_PDF_BYTES = 1024; // a real multi-page report is tens of KB; anything smaller is a broken build, not a report
     const fnameVeh = (analysis.vehicle || "report").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "report";
     const attachments: Array<{ filename: string; content: string }> = [];
-    try {
-      const bytes = await buildReportPdf(analysis, verifyUrl, sealedShot);
-      attachments.push({ filename: `LotCheck-${fnameVeh}.pdf`, content: u8ToB64(bytes) });
-    } catch (e) {
-      console.error("PDF generation failed (sending email without attachment):", e);
+    let pdfBytes: Uint8Array | null = null;
+    let pdfErr: unknown = null;
+    for (let attempt = 1; attempt <= 2 && !pdfBytes; attempt++) {
+      try {
+        const bytes = await buildReportPdf(analysis, verifyUrl, sealedShot);
+        if (!bytes || bytes.byteLength < MIN_PDF_BYTES) {
+          throw new Error(`PDF built but is implausibly small (${bytes?.byteLength ?? 0} bytes)`);
+        }
+        pdfBytes = bytes;
+      } catch (e) {
+        pdfErr = e;
+        console.error(`PDF generation failed (attempt ${attempt}/2):`, e);
+      }
     }
+    if (!pdfBytes) {
+      console.error("PDF generation failed twice — refusing to send a report email with no report attached.", pdfErr);
+      return new Response(
+        JSON.stringify({
+          error: "pdf_generation_failed",
+          message: "We couldn't build your PDF, so we didn't send the email — an email with no report attached is worse than none. Your on-screen report is unchanged and you haven't been charged for this. Please try sending it again in a moment.",
+        }),
+        { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+    attachments.push({ filename: `LotCheck-${fnameVeh}.pdf`, content: u8ToB64(pdfBytes) });
     // The buyer's portable copy of what the page looked like at report time.
     // The browser session that generated the report is the ONLY other place
     // this image exists (nothing stored server-side) — this attachment is what
     // makes the emailed report self-contained evidence.
     if (sealedShot) attachments.push({ filename: `LotCheck-${fnameVeh}-listing-capture.${sealedShot.ext}`, content: sealedShot.b64 });
+
+    const emailHtml = buildEmailHtml(analysis, reportUrl, verifyUrl, sealedShot);
+
+    // Ledger: record the attempt BEFORE the send, hashing the exact bytes we
+    // are about to hand to Resend. Recorded first so a send that times out
+    // mid-flight still leaves evidence it was attempted; an unsealed row (no
+    // provider answer) is itself the signal that we never heard back.
+    // recipient_domain only — the address never reaches this table.
+    const recipientDomain = email.trim().toLowerCase().split("@")[1] || "unknown";
+    const pdfHash = await sha256Hex(pdfBytes);
+    const htmlHash = await sha256Hex(new TextEncoder().encode(emailHtml));
+    const deliveryId: string | null = await ledgerRpc("fn_record_delivery_attempt", {
+      p_pdf_sha256: pdfHash,
+      p_pdf_bytes: pdfBytes.byteLength,
+      p_pdf_builder_ver: PDF_BUILDER_VER,
+      p_recipient_domain: recipientDomain,
+      p_html_sha256: htmlHash,
+      p_capture_attached: !!sealedShot,
+      p_signature_ok: !!sealedShot, // sealedShot is non-null only after verifySealedShot passed
+    });
 
     const resendRes = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -1221,18 +1329,49 @@ Deno.serve(async (req: Request) => {
         from: FROM_ADDRESS,
         to: [email],
         subject,
-        html: buildEmailHtml(analysis, reportUrl, verifyUrl, sealedShot),
-        ...(attachments.length ? { attachments } : {}),
+        html: emailHtml,
+        // Invariant: attachments[0] is ALWAYS the report PDF — the fail-closed
+        // guard above returns before we get here if it couldn't be built. Do
+        // not reintroduce a conditional spread; that is how the empty-report
+        // email shipped in the first place.
+        attachments,
       }),
     });
 
     if (!resendRes.ok) {
       const errBody = await resendRes.text();
       console.error("Resend send failed:", resendRes.status, errBody);
+      if (deliveryId) {
+        await ledgerRpc("fn_record_delivery_result", {
+          p_delivery_id: deliveryId,
+          p_accepted: false,
+          p_provider_msg_id: null,
+          p_error_code: `resend_${resendRes.status}`,
+        });
+      }
       return new Response(
         JSON.stringify({ error: "Couldn't send that email. Please try again in a moment." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
+    }
+
+    // Resend's message id is the ONLY token that ties our record to theirs, and
+    // it exists for exactly this instant — the response body used to be dropped
+    // on the floor here, which is why a dispute had nothing to correlate.
+    let providerMsgId: string | null = null;
+    try {
+      const body = await resendRes.json();
+      providerMsgId = typeof body?.id === "string" ? body.id : null;
+    } catch (e) {
+      console.warn("Resend returned a non-JSON success body:", e);
+    }
+    if (deliveryId) {
+      await ledgerRpc("fn_record_delivery_result", {
+        p_delivery_id: deliveryId,
+        p_accepted: true,
+        p_provider_msg_id: providerMsgId,
+        p_error_code: providerMsgId ? null : "accepted_without_message_id",
+      });
     }
 
     return new Response(
