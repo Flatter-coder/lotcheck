@@ -100,6 +100,14 @@ jobs:
       # an inflation callout. This pins that on the upload side specifically.
       - name: Quote-path MSRP authority (a catalog floor is never an accusation)
         run: npm run test:quote-msrp
+      # Per-checkpoint outcomes decide whether the admin ledger tells the truth.
+      # The rate they feed excludes exactly one outcome -- not_applicable -- so
+      # that outcome is the only way a hollow report could go back to reading as
+      # a complete one. These cases pin it to positive facts (a gas car has no EV
+      # rebate) and prove absence can never buy it: an empty analysis must
+      # produce zero green AND zero n/a checkpoints.
+      - name: Verification checkpoints (unmeasured is not passing)
+        run: npm run test:checkpoints
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was
