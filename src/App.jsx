@@ -3879,23 +3879,28 @@ const VERIF_BUCKETS = [
   { k:"1h",  label:"Last hour",      n:12,
     floor:d=>{const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/5)*5); return x;},
     prev:d=>new Date(d.getTime()-5*60e3),
-    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}` },
+    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`,
+    fmtShort:d=>`${String(d.getMinutes()).padStart(2,"0")}m` },
   { k:"24h", label:"Last 24 hours",  n:24,
     floor:d=>{const x=new Date(d); x.setMinutes(0,0,0); return x;},
     prev:d=>new Date(d.getTime()-3600e3),
-    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:00 → ${String((d.getHours()+1)%24).padStart(2,"0")}:00` },
+    fmt:d=>`${String(d.getHours()).padStart(2,"0")}:00 → ${String((d.getHours()+1)%24).padStart(2,"0")}:00`,
+    fmtShort:d=>`${String(d.getHours()).padStart(2,"0")}:00` },
   { k:"7d",  label:"Last 7 days",    n:7,
     floor:d=>{const x=new Date(d); x.setHours(0,0,0,0); return x;},
     prev:d=>new Date(d.getTime()-864e5),
-    fmt:d=>d.toLocaleDateString("en-CA",{weekday:"short",month:"short",day:"numeric"}) },
+    fmt:d=>d.toLocaleDateString("en-CA",{weekday:"short",month:"short",day:"numeric"}),
+    fmtShort:d=>d.toLocaleDateString("en-CA",{weekday:"short"}) },
   { k:"30d", label:"Last 30 days",   n:30,
     floor:d=>{const x=new Date(d); x.setHours(0,0,0,0); return x;},
     prev:d=>new Date(d.getTime()-864e5),
-    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"}) },
+    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"}),
+    fmtShort:d=>String(d.getDate()) },
   { k:"1y",  label:"Last 12 months", n:12,
     floor:d=>{const x=new Date(d); x.setDate(1); x.setHours(0,0,0,0); return x;},
     prev:d=>{const x=new Date(d); x.setMonth(x.getMonth()-1); return x;},
-    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",year:"numeric"}) },
+    fmt:d=>d.toLocaleDateString("en-CA",{month:"short",year:"numeric"}),
+    fmtShort:d=>d.toLocaleDateString("en-CA",{month:"short"}) },
 ];
 
 // The 13 checkpoints, in report order. `feature` is the api_usage_log value that
@@ -3925,6 +3930,10 @@ function buildVerifIntervals(bucket, rows){
   for(let i=0;i<bucket.n;i++){ edges.unshift(new Date(cur)); cur=bucket.prev(cur); }
   const out=edges.map((start,i)=>({
     start, label:bucket.fmt(start),
+    // Short form for the column chart. "20:00 → 21:00" is right in a ledger
+    // row and unreadable under 24 narrow columns, where it collides with its
+    // neighbours into "21:0023:00".
+    shortLabel:(bucket.fmtShort||bucket.fmt)(start),
     end: i+1<edges.length ? edges[i+1] : new Date(8640000000000000),
     ok:0, fail:0,
   }));
@@ -4018,7 +4027,7 @@ function VerifExtrudedStack({C, intervals, peak, labelEvery}){
                 </>}
             {i % labelEvery === 0 && (
               <text x={x + w / 2} y={BASE + 14} textAnchor="middle" fill={C.inkFaint}
-                    fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.label}</text>
+                    fontSize="10.5" fontFamily="ui-monospace,Menlo,monospace">{r.shortLabel||r.label}</text>
             )}
           </g>
         );
@@ -4962,7 +4971,7 @@ function VerificationTab({apiUsage, apiUsageLoading}){
         ) : (
           <>
             <VerifExtrudedStack C={C} intervals={intervals} peak={peak}
-              labelEvery={intervals.length > 24 ? 5 : intervals.length > 12 ? 3 : 1}/>
+              labelEvery={intervals.length > 24 ? 5 : intervals.length > 20 ? 4 : intervals.length > 12 ? 3 : 1}/>
             <div style={{fontSize:13,color:C.inkFaint,marginTop:6}}>
               One column per interval — teal base is verified, the coral cap on top is failed reads,
               so the failure share sits above the stack instead of hiding inside it. An interval with
@@ -5600,12 +5609,6 @@ function AdminPanel(){
             </div>
           )}
         </>)}
-
-            onToggle={toggleDealerField} onDelete={deleteDealer}
-            dealerListings={dealerListings} dealerListingsLoading={dealerListingsLoading}
-            onMarkSold={markSold} onPublish={publishDealerListing}
-          />
-        )}
 
         {tab==="review" && (
           <ReviewTab
