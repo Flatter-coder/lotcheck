@@ -396,11 +396,21 @@ Deno.serve(async (req: Request) => {
     // screenshot of a Google results page). The client now slices images so
     // this should be unreachable -- it stays as the belt-and-braces backstop
     // that names the real problem instead of a mystery 502.
-    // Anthropic's direct Messages API caps a single image at 10MB of BASE64
-    // (not raw bytes) and hard-rejects anything over 8000px on a side. Matched
-    // to the real documented limit so this backstop only ever refuses what
-    // Anthropic would refuse anyway -- the client's slicing keeps every tile
-    // far below both ceilings, so this should be unreachable in practice.
+    // Anthropic applies its per-image size limit to the BASE64 string, not the
+    // raw bytes, and separately hard-rejects anything over 8000px on a side.
+    // The exact byte cap is genuinely ambiguous: the docs say 10MB for the
+    // direct API, but the only rejection threshold anyone has actually
+    // OBSERVED in an error string is 5242880 (5 MiB), which is also still the
+    // live Bedrock/Vertex value. Rather than guess between them, this sits at
+    // the documented 10MB so we never falsely refuse an image Anthropic would
+    // have accepted -- and the logUsage call below now records the real
+    // Anthropic status, error text and payload size on every rejection, so if
+    // the true ceiling is 5MB the evidence will show up in api_usage_log and
+    // this can be tightened against data instead of assumption.
+    //
+    // Largely academic in practice: the client slices images into ~1568px
+    // tiles a few hundred KB each, so this only guards the fallback path where
+    // normalization failed and the original bytes went out.
     const VISION_B64_CAP = 10_000_000;
     const images = rawImages
       .filter((im) => im && typeof im.b64 === "string" && im.b64.length > 0)
