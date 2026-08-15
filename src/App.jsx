@@ -6765,6 +6765,16 @@ function SignInModal({C, cardStyle, onClose, notice}){
         ):(
           <>
             <SignInLinkHero/>
+            {/* The free check is the reason to sign in, so it leads. Gating it
+                behind the magic link only works if the visitor knows the link
+                is what buys it. */}
+            <div style={{background:C.tealBg,border:`1px solid ${C.teal}55`,borderRadius:10,
+                         padding:"10px 12px",marginBottom:12}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.tealInk}}>Your first check is free</div>
+              <div style={{fontSize:12.5,color:C.tealInk,opacity:.85,marginTop:2,lineHeight:1.5}}>
+                Plus one to share with someone else. No card, no subscription.
+              </div>
+            </div>
             <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.6,marginBottom:14}}>
               Enter your email and we'll send you a one-time sign-in link. No password needed.
             </div>
@@ -6806,7 +6816,12 @@ function QuotePaywallModal({C, cardStyle, onClose}){
   // out of trying it at all. The 5-pack is $12.99 rather than $14.99 so the
   // last two checks cost $1.50 each — at $14.99 the marginal price was flat and
   // the pack gave nobody a reason to trade up. Mirrors credit_pack in the DB.
+  // The free check is still here — it just lives behind the magic link now.
+  // Shown first and explicitly, because a giveaway you don't advertise buys
+  // nothing: the whole point of gating it is that signing in is the price.
   const packs=[
+    {name:"First check free", price:"$0", checks:"1 check", share:"+1 to share",
+     note:"just sign in", best:false, free:true},
     {name:"1 check",  price:"$4.99",  checks:"1 check",  share:null,          note:null,          best:false},
     {name:"3 checks", price:"$9.99",  checks:"3 checks", share:"+1 to share", note:"$3.33 each",  best:false},
     {name:"5 checks", price:"$12.99", checks:"5 checks", share:"+2 to share", note:"$2.60 each",  best:true},
@@ -8615,13 +8630,22 @@ function QuoteCheckPage(){
   };
 
   // Gate an analyze attempt before any work runs. Signed-in -> always proceed
-  // (the server enforces via 402). Anonymous -> proceed only if the free check
-  // hasn't been used; otherwise open the sign-in modal instead of running.
-  // Returns true if the caller may proceed.
+  // (the server enforces via 402).
+  //
+  // ANONYMOUS -> sign in. The free check moved BEHIND the magic link on
+  // 2026-08-15: the anonymous allowance was gated only by a localStorage flag,
+  // which clearing site data resets, so it was a standing invitation to farm
+  // free reports with throwaway addresses. A verified email costs an abuser
+  // real effort and gives us a contact worth having — the same giveaway now
+  // buys an acquisition instead of funding a bot.
+  //
+  // Server-side this is enforced by app_config.free_checks_per_day = 0, which
+  // makes fn_try_free_check return false. This client gate only saves a
+  // pointless round trip; it is not the control.
   const gateAttempt=()=>{
     if(user) return true;
-    if(isFreeCheckUsed()){ setShowSignIn(true); return false; }
-    return true;
+    setShowSignIn(true);
+    return false;
   };
 
   const handleFile=async(file)=>{
@@ -8689,7 +8713,7 @@ function QuoteCheckPage(){
         let body={}; try{ body=await res.json(); }catch{}
         if(body.error==="free_limit_reached"){
           setStatus("idle");
-          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setSignInNotice("Sign in to claim your free check — one email, no card.");
           setShowSignIn(true);
           return;
         }
@@ -8825,7 +8849,7 @@ function QuoteCheckPage(){
         let body={}; try{ body=await res.json(); }catch{}
         if(body.error==="free_limit_reached"){
           setStatus("idle");
-          setSignInNotice("Free checks are at capacity for today. Sign in and grab a pack to keep going.");
+          setSignInNotice("Sign in to claim your free check — one email, no card.");
           setShowSignIn(true);
           return;
         }
