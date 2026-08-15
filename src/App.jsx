@@ -7689,7 +7689,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     P.push({ title: "Financing APR", tone, v, body }); }
   // 5 Financing math
   { const fc = a.financingCheck; const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : "muted"; const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : "NOT CHECKED";
-    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up") : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || "The advertised payment, price, rate and term were cross-checked."} /> }); }
+    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up") : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || (fc?.checked ? "The advertised payment, price, rate and term were cross-checked." : "Not enough financing detail was published to re-check the math.")} /> }); }
   // 6 Odometer
   { const o = a.odometerCheck; const isNew = a.vehicleCondition === "new"; const tone = o?.checked ? (o.flag ? "flag" : "pass") : "muted"; const v = o?.checked ? Number(o.km).toLocaleString() + " km" + (o.flag ? " FLAG" : "") : (isNew ? "N/A (NEW)" : "NOT ON QUOTE");
     P.push({ title: "Odometer", tone, v, body: <Simple big={o?.checked ? Number(o.km).toLocaleString() + " km" : (isNew ? "N/A — new vehicle" : "Not on quote")} c={o?.flag ? ROSE : "#fff"} note={o?.note || (isNew ? "New vehicles carry delivery-only mileage." : "No odometer reading was on this quote.")} /> }); }
