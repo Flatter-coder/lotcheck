@@ -22,6 +22,10 @@ const FEE_RE = /\b(doc(ument(ation)?)?|registration|licen[sc]e|title|freight|pdi
 const ADDON_RE = /\b(protection|paint|fabric|leather|etch|nitrogen|pulse|tint|z[ie]bart|gold shield|wheel lock|appearance|under(coat|body|carriage)|rust ?proof|\bgap\b|theft|lojack|3m|ceramic|clear ?coat|addendum|accessor|admin|dealer prep|prep (fee|charge)|recon(dition(ing)?)?|vin (etch|engrav)|key (replace|protect)|road hazard|maintenance package|fabric|scotchgard)\b/;
 const DISCOUNT_RE = /\b(discount|rebate|savings|incentive|loyalty|conquest)\b/;
 
+// Whether an MSRP may back a claim is decided in ONE place. This file used to
+// answer it twice, differently, and both answers were wrong.
+import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
+
 export type LineClass = "fee" | "addon" | "discount";
 
 export function classifyLine(name: unknown, price: unknown, verdict?: unknown): LineClass {
@@ -116,7 +120,11 @@ export function buildCounterScript(analysis: any): CounterScript {
   // The buyer's move: refuse to negotiate blind — demand the all-in number in
   // writing first, anchored to the manufacturer's MSRP when we have it.
   if (analysis?.priceDisclosure === "contact_for_price" && !(num(analysis?.quotedPrice) > 0)) {
-    const anchor = num(analysis?.msrp);
+    // Only a MANUFACTURER figure may be attributed to the manufacturer by name.
+    // Anchoring on a `dealer_stated` MSRP would hand the buyer this dealer's own
+    // number, relabelled as Ford's, to argue against this dealer with — inside
+    // the report naming their price-gating tactic.
+    const anchor = isManufacturerFigure(analysis?.msrpBasis) ? num(analysis?.msrp) : null;
     moves.push({ topic: "Hidden price", say: `Your listing doesn't show a price — it says to contact you. I don't negotiate blind: please send your full all-in price in writing before I come in.${anchor ? ` For reference, ${analysis?.make || "the manufacturer"}'s MSRP for this model starts at ${money(anchor)} — I'll be comparing your number against that.` : ""}` });
   }
   // S27 — days on lot (motivated-seller). Only from real dealer-platform /
@@ -229,7 +237,17 @@ export function computeFinancingTrap(analysis: any): FinancingTrap | null {
   const msrp = num(analysis?.msrp), selling = num(analysis?.quotedPrice);
   // Discount = explicit discount line items, else price below MSRP.
   let discount = rec && rec.discountsTotal ? Math.abs(rec.discountsTotal) : 0;
-  if (!discount && msrp != null && selling != null && msrp > selling) discount = msrp - selling;
+  // An IMPLIED discount -- price below MSRP -- is only real if the MSRP is one
+  // we verified for this exact trim. Derived from a `dealer_stated` figure it is
+  // just the gap between the dealer's own sticker and their own asking price:
+  // LotCheck computing the dealer's marketing claim and handing it back as a
+  // finding. On a used car's `original_when_new` it is a five-figure phantom.
+  // The number does not merely display -- it feeds `net` and the `isTrap`
+  // verdict, so a fabricated discount flips the whole card's headline.
+  if (!discount) {
+    const claim = qualifyMsrpClaim(analysis);
+    if (claim.comparable && claim.delta !== null && claim.delta < 0) discount = -claim.delta;
+  }
   if (!(discount > 0)) return null; // S11 only applies when there IS a discount
 
   const dealerApr = num(analysis?.financeRates?.dealer?.apr ?? analysis?.financing?.rate);

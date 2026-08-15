@@ -108,6 +108,16 @@ jobs:
       # produce zero green AND zero n/a checkpoints.
       - name: Verification checkpoints (unmeasured is not passing)
         run: npm run test:checkpoints
+      # An MSRP figure carries a BASIS, and only "exact" -- a verified
+      # manufacturer price for THIS trim -- may support an over/under claim.
+      # App.jsx always enforced that; the EMAIL did not, so a used vehicle's
+      # original-when-new MSRP rendered "$28,400 under MSRP" on the emailed
+      # cover while the PDF inside the same email refused the same claim. The
+      # email is the artifact that gets forwarded to the dealer. One rule now
+      # lives in _shared/msrp-claim.ts and every surface asks it; no surface may
+      # do the subtraction itself.
+      - name: MSRP claim gate (only an exact-trim basis may accuse)
+        run: npm run test:msrp-claim
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was

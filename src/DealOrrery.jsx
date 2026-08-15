@@ -7,6 +7,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/examples/jsm/renderers/CSS2DRenderer.js";
+// The same rule the edge functions and every other surface use.
+import { qualifyMsrpClaim } from "../supabase/functions/_shared/msrp-claim.ts";
 
 const money = (n) => "$" + Math.round(Number(n) || 0).toLocaleString("en-CA");
 
@@ -20,6 +22,13 @@ export default function DealOrrery({ analysis, height = 520 }) {
 
     const asking = Number(analysis?.quotedPrice) || 0;
     const msrp = Number(analysis?.msrp) || 0;
+    // This view had NO basis check anywhere, so it was wrong in both directions
+    // from the same ungated subtraction: it floated the quote above the ring and
+    // said "$2,485 over MSRP" off a dealer's own unverified sticker, and it told
+    // a used truck sitting $27,400 below its original sticker that it was "at
+    // MSRP" — destroying the buyer's leverage rather than inventing an
+    // accusation. One toggle away from the Scroll view saying the opposite.
+    const claim = qualifyMsrpClaim(analysis);
     const vehicle = analysis?.vehicle || [analysis?.year, analysis?.make, analysis?.model].filter(Boolean).join(" ") || "Your vehicle";
     const fees = (analysis?.addOns || [])
       .filter((x) => Number(x?.price) > 0)
@@ -73,20 +82,25 @@ export default function DealOrrery({ analysis, height = 520 }) {
       const ringM = new THREE.MeshBasicMaterial({ color: 0x35e0d0, transparent: true, opacity: 0.55 });
       const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 0.06, 12, 120), ringM); ring.rotation.x = Math.PI / 2; scene.add(ring);
       const disc = new THREE.Mesh(new THREE.CircleGeometry(9, 64), new THREE.MeshBasicMaterial({ color: 0x35e0d0, transparent: true, opacity: 0.05, side: THREE.DoubleSide })); disc.rotation.x = -Math.PI / 2; scene.add(disc);
-      const ml = mkLabel("MSRP " + money(msrp), "#5ff0e0"); ml.position.set(9.3, 0, 0); scene.add(ml);
+      const ml = mkLabel(claim.label.toUpperCase().replace(/^MSRP · /, "MSRP · ") + " " + money(msrp), "#5ff0e0"); ml.position.set(9.3, 0, 0); scene.add(ml);
       disposables.push(ring.geometry, disc.geometry);
       scene.userData.ring = ring;
     }
 
     // core = the quote, lifted above the ring by how far over MSRP it is
-    const over = msrp > 0 ? asking - msrp : 0;
+    const over = claim.comparable ? (claim.delta ?? 0) : 0;
     const coreY = Math.max(0, over) / 900;
     const core = new THREE.Group(); core.position.y = coreY; scene.add(core);
     const coreMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(2.2, 1), new THREE.MeshStandardMaterial({ color: 0x0b3b39, emissive: 0x35e0d0, emissiveIntensity: 0.9, metalness: 0.3, roughness: 0.35, flatShading: true }));
     core.add(coreMesh); core.add(halo(0x35e0d0, 10));
     disposables.push(coreMesh.geometry);
     const priceTxt = asking > 0 ? `<b style="color:#5ff0e0">${money(asking)}</b>` : "";
-    const overTxt = over > 0 ? ` · <span style="color:#ff8f77">${money(over)} over MSRP</span>` : (msrp > 0 && asking > 0 ? " · at MSRP" : "");
+    // "at MSRP" is only sayable when we are actually allowed to compare. When we
+    // are not, the ring is a reference the deal sits near, not a verdict.
+    const overTxt = !claim.comparable ? ""
+      : over > 0 ? ` · <span style="color:#ff8f77">${money(over)} over MSRP</span>`
+      : over < 0 ? ` · <span style="color:#5ff0e0">${money(-over)} under MSRP</span>`
+      : " · at MSRP";
     const cl = mkLabel(`<span style="font-size:14px;color:#fff">${vehicle}${priceTxt ? "<br>" + priceTxt + overTxt : ""}</span>`, "#fff"); cl.position.set(0, 3.2, 0); core.add(cl);
     if (coreY > 0.2) { const th = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -coreY, 0), new THREE.Vector3(0, 0, 0)]), new THREE.LineDashedMaterial({ color: 0xff8f77, dashSize: 0.4, gapSize: 0.3, transparent: true, opacity: 0.6 })); th.computeLineDistances(); core.add(th); }
 

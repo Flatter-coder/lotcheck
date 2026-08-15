@@ -2350,6 +2350,16 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       if (mfrMsrp) {
         analysis.msrp = mfrMsrp;
         analysis.msrpSource = "manufacturer_site";
+        // This path set a figure and NO basis, so every surface that keyed off
+        // `msrpBasis` saw undefined and each one guessed differently.
+        // `starting_at` is the honest label: the live site lookup is a real
+        // manufacturer figure -- so it may be attributed to them by name -- but
+        // it is not proof we matched THIS trim, drivetrain and options, so it
+        // must not support an over/under claim. If the lookup ever proves an
+        // exact configuration match, it can upgrade this itself.
+        const isUsedUnit = String(analysis.vehicleCondition || "").toLowerCase() === "used"
+          || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
+        analysis.msrpBasis = isUsedUnit ? "original_when_new" : "starting_at";
       }
     }
   }
