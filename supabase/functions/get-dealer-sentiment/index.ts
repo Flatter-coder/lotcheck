@@ -71,7 +71,46 @@ Your entire response must be nothing but the JSON array itself. Do not think out
 Return ONLY a JSON array, nothing else, in this exact shape:
 [{"rating": number, "text": string}, ...]`;
 
+// The reputation checkpoint is recorded HERE rather than in the analyze
+// functions, because this is the function that actually does the lookup -- the
+// analyze pass only knows whether a dealer name existed to look up. Reading it
+// off the reason code keeps the five outcomes distinct: a dealer with genuinely
+// no Google listing is a resolved answer, while a Places API failure is a miss,
+// and collapsing those is how a broken lookup would read as a clean bill.
+const REPUTATION_OUTCOME: Record<string, "checked_no_match" | "error" | "not_attempted"> = {
+  no_dealer_name: "not_attempted",
+  no_places_match: "checked_no_match",
+  search_failed: "error",
+  details_failed: "error",
+  threw: "error",
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return await handleSentiment(req);
+  let reportId: string | null = null;
+  try { reportId = (await req.clone().json())?.reportId ?? null; } catch { /* body read once below */ }
+  const res = await handleSentiment(req);
+  try {
+    const body = await res.clone().json().catch(() => null);
+    const reason = body?.reason ?? null;
+    await supabase.rpc("fn_log_verification_checks", {
+      p_rows: [{
+        report_id: reportId,
+        feature: "dealer_sentiment",
+        checkpoint: "reputation",
+        outcome: body?.dealerSentiment ? "verified" : (REPUTATION_OUTCOME[reason] ?? "not_attempted"),
+        detail: body?.dealerSentiment
+          ? `${body.dealerSentiment.rating ?? "?"}★ from ${body.dealerSentiment.reviewCount ?? "?"} reviews`
+          : (reason ?? "no reason recorded"),
+      }],
+    });
+  } catch (e) {
+    console.warn("reputation checkpoint write failed:", (e as Error)?.message);
+  }
+  return res;
+});
+
+async function handleSentiment(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
@@ -90,7 +129,7 @@ Deno.serve(async (req: Request) => {
       // Not an error -- plenty of quotes/listings won't have a clean
       // dealer name extracted. Just no card for this one.
       return new Response(
-        JSON.stringify({ dealerSentiment: null }),
+        JSON.stringify({ dealerSentiment: null, reason: "no_dealer_name" }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
@@ -152,7 +191,7 @@ Deno.serve(async (req: Request) => {
     if (!searchRes.ok) {
       console.error("Places Text Search failed:", searchRes.status, await searchRes.text());
       return new Response(
-        JSON.stringify({ dealerSentiment: null }),
+        JSON.stringify({ dealerSentiment: null, reason: "search_failed" }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
@@ -162,7 +201,7 @@ Deno.serve(async (req: Request) => {
     if (!place?.id) {
       console.log(`No Places match for dealer lookup: "${searchQuery}"`);
       return new Response(
-        JSON.stringify({ dealerSentiment: null }),
+        JSON.stringify({ dealerSentiment: null, reason: "no_places_match" }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
@@ -190,7 +229,7 @@ Deno.serve(async (req: Request) => {
     if (!detailsRes.ok) {
       console.error("Places Details failed:", detailsRes.status, await detailsRes.text());
       return new Response(
-        JSON.stringify({ dealerSentiment: null }),
+        JSON.stringify({ dealerSentiment: null, reason: "details_failed" }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
@@ -351,8 +390,8 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     console.error("get-dealer-sentiment error:", err);
     return new Response(
-      JSON.stringify({ dealerSentiment: null }),
+      JSON.stringify({ dealerSentiment: null, reason: "threw" }),
       { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
     );
   }
-});
+}

@@ -3906,11 +3906,13 @@ function AlertFoldersTab(){
 // you would consult to decide whether the reports are sound — a false all-clear
 // on this screen is how a broken reader survives for weeks.
 //
-//   Real today   api_usage_log (feature, success, created_at). URL path only:
-//                logUsage is wired into analyze-listing-url, NOT analyze-quote,
-//                so uploaded files are invisible rather than zero.
-//   Missing      verification_run / verification_check — per-checkpoint outcomes
-//                report_delivery — email send + PDF hash + provider receipt
+//   Real today   api_usage_log (feature, success, created_at) — both paths.
+//                verification_check (checkpoint, outcome, detail) — one row per
+//                checkpoint per report, written by analyze-quote,
+//                analyze-listing-url and get-dealer-sentiment. THE TARGET IS
+//                UNDER 1% FAILURE, measured per checkpoint rather than per
+//                request, because 12 of 13 delivered is a failure of the 13th.
+//   Missing      report_delivery — email send + PDF hash + provider receipt
 const VERIF_BUCKETS = [
   { k:"1h",  label:"Last hour",      n:12,
     floor:d=>{const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/5)*5); return x;},
@@ -3939,9 +3941,10 @@ const VERIF_BUCKETS = [
     fmtShort:d=>d.toLocaleDateString("en-CA",{month:"short"}) },
 ];
 
-// The 13 checkpoints, in report order. `feature` is the api_usage_log value that
-// would carry it once per-checkpoint logging exists; until then every row here
-// renders as unmeasured, never as passing.
+// The 13 checkpoints, in report order — deliberately NOT reordered by failure
+// rate, because recognising the list is what makes a gap obvious. The worst
+// offenders are named in the summary row instead. The second element is the
+// verification_check.checkpoint key each row reads.
 const VERIF_CHECKPOINTS = [
   ["MSRP","verification_check.msrp"],
   ["Odometer","verification_check.odometer"],
@@ -5074,6 +5077,71 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
   const loaded=!apiUsageLoading;
 
+  // Per-checkpoint outcomes (20260815_verification_check.sql). Read over the
+  // SAME window as the intervals above -- rolling or calendar-anchored, both
+  // reduce to a since/until pair -- so the checkpoint rates and the volume
+  // chart can never describe different periods. Absent until the migration is
+  // applied, which renders hollow rather than green.
+  const [checks,setChecks]=useState(null);
+  const [checksLoading,setChecksLoading]=useState(true);
+  useEffect(()=>{
+    if(!winStart||!winEnd) return;
+    let cancelled=false;
+    (async()=>{
+      setChecksLoading(true);
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_verification_checks",{
+          p_since:new Date(winStart).toISOString(),
+          p_until:new Date(winEnd).toISOString(),
+        });
+        if(error) throw error;
+        if(!cancelled) setChecks(data||[]);
+      }catch(err){
+        console.warn("verification_check unavailable (migration applied?):",err?.message||err);
+        if(!cancelled) setChecks(null);
+      }finally{ if(!cancelled) setChecksLoading(false); }
+    })();
+    return()=>{cancelled=true;};
+  },[winStart,winEnd]);
+
+  // green = the check produced a backed answer; red = it did not. not_applicable
+  // is excluded from the denominator -- it is the only outcome that can be, and
+  // the writer may only emit it on a positive fact -- so the n/a count is shown
+  // beside every rate. An n/a share that starts climbing is the tell that the
+  // vocabulary is being abused to flatter the number.
+  const CHECK_TARGET_PCT = 1;
+  const checkStats=useMemo(()=>{
+    if(!Array.isArray(checks)) return null;
+    const by=new Map();
+    for(const r of checks){
+      let s=by.get(r.checkpoint);
+      if(!s){ s={green:0,red:0,na:0,reasons:new Map()}; by.set(r.checkpoint,s); }
+      if(r.outcome==="verified"||r.outcome==="checked_no_match") s.green++;
+      else if(r.outcome==="not_applicable") s.na++;
+      else { s.red++; if(r.detail) s.reasons.set(r.detail,(s.reasons.get(r.detail)||0)+1); }
+    }
+    for(const s of by.values()){
+      s.attempts=s.green+s.red;
+      s.failPct=s.attempts?(s.red/s.attempts)*100:null;
+      s.passPct=s.attempts?(s.green/s.attempts)*100:null;
+      s.top=[...s.reasons.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3);
+    }
+    return by;
+  },[checks]);
+
+  // The headline Vic asked for: one failure rate across every checkpoint of
+  // every report in the window, against the 1% bar.
+  const checkTotals=useMemo(()=>{
+    if(!checkStats) return null;
+    let green=0,red=0,na=0;
+    for(const s of checkStats.values()){ green+=s.green; red+=s.red; na+=s.na; }
+    const attempts=green+red;
+    const worst=[...checkStats.entries()]
+      .filter(([,s])=>s.attempts>0&&s.red>0)
+      .sort((a,b)=>b[1].failPct-a[1].failPct);
+    return {green,red,na,attempts,failPct:attempts?(red/attempts)*100:null,worst};
+  },[checkStats]);
+
   // The ledger's rows, in report order. Volume first (what came in), delivery
   // second (what went out), then the 13 checkpoints that decide whether the
   // report was worth sending.
@@ -5123,12 +5191,52 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       );
     }
     rows.push({sec:`CHECKPOINTS · ${VERIF_CHECKPOINTS.length} PER REPORT`});
+
+    // The headline: every checkpoint of every report in this window, against
+    // the 1% bar. Shown before the individual rows so a green wall can never be
+    // the first thing read while the aggregate is failing.
+    if (checkTotals && checkTotals.attempts > 0) {
+      const f = checkTotals.failPct;
+      rows.push({
+        id:"cp-all", name:"All checkpoints — failure rate",
+        value:`${f.toFixed(f < 10 ? 2 : 1)}%`,
+        note:`${vnum(checkTotals.red)} red of ${vnum(checkTotals.attempts)} checks · ${vnum(checkTotals.na)} n/a · target under ${CHECK_TARGET_PCT}%`,
+        state:f > CHECK_TARGET_PCT ? "bad" : "ok",
+        pct:checkTotals.attempts?(checkTotals.green/checkTotals.attempts)*100:0,
+        proof:`Every one of the ${VERIF_CHECKPOINTS.length} checkpoints, on every report in this window, counted individually — not one boolean per report. A checkpoint that did not resolve is red whatever the reason: catalog gap, unreadable page, missing trim. The buyer paid for ${VERIF_CHECKPOINTS.length} points, so 12 of 13 is a failure of the 13th.\n\nOnly "not applicable" is excluded, and only when the writer could prove it from a positive fact — a gas car has no EV rebate, a new car has no odometer history. Not knowing something is never n/a; it is red. The n/a count sits in this row so that if it starts climbing, you see it.${checkTotals.worst.length?`\n\nWorst right now: ${checkTotals.worst.slice(0,3).map(([k,s])=>`${k} ${s.failPct.toFixed(0)}%`).join(", ")}.`:""}`,
+      });
+    }
+
     for (const [label, needs] of VERIF_CHECKPOINTS) {
-      rows.push(unmeasured(needs, label, needs,
-        `Nothing writes a per-checkpoint outcome yet. When verification_check lands, this row carries verified / checked-no-match / not-applicable / error / not-attempted — and a miss will read as a miss, never as a clean bill.`));
+      const key = needs.split(".")[1];
+      const s = checkStats?.get(key);
+      if (!checkStats) {
+        rows.push(unmeasured(needs, label, needs,
+          `verification_check is written by both analyze functions but the table is not applied yet — supabase/migrations/20260815_verification_check.sql. Until it runs, this row stays hollow rather than green: unmeasured is not passing.`));
+      } else if (!s || s.attempts === 0) {
+        // No REPORTS in the window is different from no data: say which.
+        rows.push(unmeasured(needs, label, s ? `${s.na} n/a · 0 judged` : needs,
+          s ? `Every ${label.toLowerCase()} check in this window was not-applicable, so there is nothing to score. That is only legitimate if each one rested on a positive fact about the vehicle — if this row is permanently n/a, the writer is excusing itself.`
+            : `No reports ran in this window, so this checkpoint has nothing to report. It is blank, not passing.`));
+      } else {
+        const over = s.failPct > CHECK_TARGET_PCT;
+        rows.push({
+          id:needs, name:label,
+          value:`${s.failPct.toFixed(s.failPct < 10 ? 2 : 1)}%`,
+          note:`${vnum(s.red)} red of ${vnum(s.attempts)}${s.na?` · ${vnum(s.na)} n/a`:""}`,
+          state:over ? "bad" : "ok",
+          pct:s.passPct,
+          proof:(over
+            ? `Above the ${CHECK_TARGET_PCT}% bar — a defect to fix, not a number to explain.`
+            : `Within the ${CHECK_TARGET_PCT}% bar.`)
+            + ` ${vnum(s.green)} of ${vnum(s.attempts)} judged checks resolved with a backed answer.`
+            + (s.na ? ` ${vnum(s.na)} were not applicable and are excluded from the rate.` : "")
+            + (s.top.length ? `\n\nWhy it failed:\n${s.top.map(([why,n])=>`  ${vnum(n)}×  ${why}`).join("\n")}` : ""),
+        });
+      }
     }
     return rows;
-  },[ledger,tot,apiUsageLoading]);
+  },[ledger,tot,apiUsageLoading,checkStats,checkTotals]);
 
 
   return (
@@ -8598,7 +8706,10 @@ function QuoteCheckPage(){
   // any other progressive enhancement. Never blocks, never shows an
   // error -- a buyer should never know this lookup even happened if it
   // fails; the card just doesn't appear.
-  const fetchDealerSentiment=async(dealerName,dealerCity)=>{
+  // reportId is passed so the reputation checkpoint this function records lands
+  // against the same report as the other twelve. Without it the row is orphaned
+  // and the ledger can count reputation but never tie it to a report.
+  const fetchDealerSentiment=async(dealerName,dealerCity,reportId)=>{
     if(!dealerName) return;
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/get-dealer-sentiment",{
@@ -8608,7 +8719,7 @@ function QuoteCheckPage(){
           "apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
           "Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A",
         },
-        body:JSON.stringify({dealerName,dealerCity}),
+        body:JSON.stringify({dealerName,dealerCity,reportId:reportId??null}),
       });
       const data=await res.json();
       if(!res.ok||data.error||!data.dealerSentiment) return;
@@ -9159,7 +9270,7 @@ function QuoteCheckPage(){
       }
       setAnalysis(await finalizeReport(data.analysis));
       setAnalysisSource("quote");
-      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity,data.analysis?.reportId);
       applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
@@ -9316,7 +9427,7 @@ function QuoteCheckPage(){
       }
       setAnalysis(await finalizeReport({ ...data.analysis, sourceUrl: url, capturedAt: new Date().toISOString() }));
       setAnalysisSource("listing");
-      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity);
+      fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity,data.analysis?.reportId);
       applyCheckSuccess(data);
       setStatus("done");
     }catch(err){

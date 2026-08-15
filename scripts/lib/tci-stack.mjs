@@ -15,7 +15,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dedupeBy } from "./catalog-io.mjs";
+import { dedupeBy, replaceRows } from "./catalog-io.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -183,30 +183,10 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
 }
 
 // ── Supabase write (delete-then-insert per make) ───────────────────────────
-async function replaceRows(table, rows, makeName, { fatal = true } = {}) {
-  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
-  try {
-    // Match the make case-INSENSITIVELY: a scraper that changes its MAKE
-    // constant casing (Mini -> MINI) otherwise orphans the entire old lineup,
-    // which then lives forever as duplicate rows (observed 2026-08-11).
-    // Provenance wins: rows carrying a source_url were verified by hand against
-    // the manufacturer's own published page. A scraper refresh must never wipe
-    // them (it did, on 2026-08-11, replacing toyota.ca-sourced Land Cruiser
-    // MSRPs with calculated prices under internal trim codes).
-    const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
-    const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(makeName)}${guard}`, { method: "DELETE", headers });
-    if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
-    for (let i = 0; i < rows.length; i += 500) {
-      const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
-      if (!ins.ok) throw new Error(`INSERT ${table} -> HTTP ${ins.status}: ${await ins.text()}`);
-    }
-    console.log(`  ${table}: replaced with ${rows.length} rows.`);
-  } catch (e) {
-    if (fatal) throw e;
-    console.warn(`  ⚠️ ${table} skipped (${e.message.split("\n")[0]}). Create the table to enable it.`);
-  }
-}
+// replaceRows now comes from catalog-io.mjs. The local copy that used to live
+// here had no empty-scrape guard, no carry-forward and no collapse check, so a
+// partial Toyota scrape deleted the lineup and re-inserted 7 rows while
+// printing "replaced with 7 rows" as if it had succeeded (2026-08-14).
 
 // Shared runner used by scrape-toyota / scrape-lexus wrappers.
 export async function run(config) {

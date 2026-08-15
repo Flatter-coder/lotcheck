@@ -26,157 +26,157 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-toyota.mjs
+        run: node scripts/scrape-toyota.mjs || echo "toyota" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Lexus — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-lexus.mjs
+        run: node scripts/scrape-lexus.mjs || echo "lexus" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Stellantis (Jeep/Ram/Dodge/Chrysler/Fiat) — MSRP + finance/lease
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-stellantis.mjs
+        run: node scripts/scrape-stellantis.mjs || echo "stellantis" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Genesis — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-genesis.mjs
+        run: node scripts/scrape-genesis.mjs || echo "genesis" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Hyundai — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-hyundai.mjs
+        run: node scripts/scrape-hyundai.mjs || echo "hyundai" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Mazda — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-mazda.mjs
+        run: node scripts/scrape-mazda.mjs || echo "mazda" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Honda — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-honda.mjs
+        run: node scripts/scrape-honda.mjs || echo "honda" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Acura — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-acura.mjs
+        run: node scripts/scrape-acura.mjs || echo "acura" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: GM (Chevrolet/GMC/Buick/Cadillac) — MSRP only (rates gated)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-gm.mjs
+        run: node scripts/scrape-gm.mjs || echo "gm" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Ford — MSRP only (rates in separate app)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-ford.mjs
+        run: node scripts/scrape-ford.mjs || echo "ford" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Ford rates (Convertus dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-ford-rates.mjs
+        run: node scripts/scrape-ford-rates.mjs || echo "ford-rates" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Lincoln — MSRP only
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-lincoln.mjs
+        run: node scripts/scrape-lincoln.mjs || echo "lincoln" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Porsche — MSRP only (no financing exposed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-porsche.mjs
+        run: node scripts/scrape-porsche.mjs || echo "porsche" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: MINI — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-mini.mjs
+        run: node scripts/scrape-mini.mjs || echo "mini" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Mercedes-Benz — MSRP only (rates need estimator capture)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-mercedes.mjs
+        run: node scripts/scrape-mercedes.mjs || echo "mercedes" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Mercedes-Benz rates (SM360 dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-mercedes-rates.mjs
+        run: node scripts/scrape-mercedes-rates.mjs || echo "mercedes-rates" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Subaru — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-subaru.mjs
+        run: node scripts/scrape-subaru.mjs || echo "subaru" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Kia — MSRP only (rates not exposed as clean API)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-kia.mjs
+        run: node scripts/scrape-kia.mjs || echo "kia" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Nissan — MSRP only (rates gated GraphQL)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-nissan.mjs
+        run: node scripts/scrape-nissan.mjs || echo "nissan" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Nissan rates (Convertus dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-nissan-rates.mjs
+        run: node scripts/scrape-nissan-rates.mjs || echo "nissan-rates" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Infiniti — MSRP only
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-infiniti.mjs
+        run: node scripts/scrape-infiniti.mjs || echo "infiniti" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Volvo — MSRP only (model-level; per-trim gated)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-volvo.mjs
+        run: node scripts/scrape-volvo.mjs || echo "volvo" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Volkswagen — MSRP + finance/lease rates
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-vw.mjs
+        run: node scripts/scrape-vw.mjs || echo "vw" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: BMW — MSRP + finance/lease (via SM360 dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-bmw.mjs
+        run: node scripts/scrape-bmw.mjs || echo "bmw" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Infiniti rates (via SM360 dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-infiniti-rates.mjs
+        run: node scripts/scrape-infiniti-rates.mjs || echo "infiniti-rates" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: GM rates — Chevrolet/GMC/Buick (via SM360 dealer feed)
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: node scripts/scrape-gm-rates.mjs
+        run: node scripts/scrape-gm-rates.mjs || echo "gm-rates" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: Summary
         continue-on-error: true
         if: success()
@@ -193,13 +193,23 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      # Fault isolation means individual failures no longer abort the run, so
-      # they must still be VISIBLE: surface which makes failed. The catalog is
-      # better off refreshed for 25 makes with one gap than not refreshed at
-      # all -- which is what happened when Genesis crashed on 2026-08-10 and
-      # took Hyundai, Mazda, Honda, Acura, GM and Ford down with it.
-      - name: Report which makes failed
+      # Fault isolation means one bad make must not abort the other 25 -- that
+      # is why every make step is continue-on-error, and it stays. But it must
+      # not make the RUN look healthy: run 31793667241 on 2026-08-14 finished
+      # "completed success" with 14 failed steps inside it, while 471 catalog
+      # rows across 12 makes were being destroyed. Nobody was told, because
+      # nothing read the step outcomes. Green has to mean green.
+      - name: Fail the run if any make did not write
         if: always()
         run: |
-          echo "Individual make steps run with continue-on-error; check the step list above for any red X."
-          echo "A red step means that make kept its previous catalog rows -- stale, not wrong."
+          f="$RUNNER_TEMP/failed-makes.txt"
+          if [ -s "$f" ]; then
+            echo "::error title=Catalog refresh incomplete::$(wc -l < "$f") make(s) did not write: $(paste -sd' ' "$f")"
+            echo "Makes that failed to refresh:"; sed 's/^/  - /' "$f"
+            echo ""
+            echo "Their previous rows were left in place (replaceRows refuses a >50% collapse"
+            echo "and restores after a failed insert), so the catalog is STALE for these makes,"
+            echo "not empty. Read the step logs above for the underlying error."
+            exit 1
+          fi
+          echo "All makes wrote. Catalog refresh complete."

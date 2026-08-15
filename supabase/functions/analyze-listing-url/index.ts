@@ -69,6 +69,7 @@ import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
+import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -3427,6 +3428,17 @@ Deno.serve(async (req: Request) => {
         inputTokens: usage?.input_tokens,
         outputTokens: usage?.output_tokens,
         errorMessage: gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
+      });
+      // One row per checkpoint, so the ledger can report a real per-check
+      // failure rate instead of a single boolean that calls 12-of-13 a
+      // success. Host only, never the full URL. Fail-open.
+      let host: string | null = null;
+      try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { /* not a parseable URL */ }
+      await recordCheckpoints(supabase, {
+        reportId: analysis.reportId ?? null,
+        feature: "listing_url",
+        analysis,
+        listingHost: host,
       });
     }
 

@@ -58,6 +58,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -773,6 +774,13 @@ Deno.serve(async (req: Request) => {
       inputTokens: data?.usage?.input_tokens ?? null,
       outputTokens: data?.usage?.output_tokens ?? null,
       errorMessage: missing.length ? `degraded: missing ${missing.join(",")}` : null,
+    });
+    // One row per checkpoint, so the ledger can report a real per-check failure
+    // rate instead of a single boolean that calls 12-of-13 a success. Fail-open.
+    await recordCheckpoints(supabase, {
+      reportId: analysis.reportId ?? null,
+      feature: "quote",
+      analysis,
     });
     return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
