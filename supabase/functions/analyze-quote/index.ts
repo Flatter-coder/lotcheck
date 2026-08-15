@@ -302,9 +302,21 @@ async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts)
   throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
 }
 
-const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a photo of a paper quote). Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
+// focusVehicle: set when the person has already picked one car out of a
+// multi-vehicle image (see vehiclesOnPage below). It pins the extraction to
+// that car so the second pass can't drift to a neighbouring listing.
+function buildExtractionPrompt(focusVehicle?: string | null): string {
+  const focus = (focusVehicle ?? "").trim().slice(0, 200);
+  const focusBlock = focus
+    ? `\n\nIMPORTANT -- THIS IMAGE CONTAINS SEVERAL VEHICLES AND THE PERSON HAS ALREADY CHOSEN ONE:\nExtract ONLY this vehicle: "${focus}".\nIgnore every other vehicle in the image completely -- do not blend their prices, trims, fees or specs into your answer. Set "vehiclesOnPage" to null. If you genuinely cannot find that vehicle in the image, return nulls rather than substituting a different one.`
+    : "";
+  return EXTRACTION_PROMPT_BASE + focusBlock;
+}
+
+const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing, or a screenshot of one. Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
 
 {
+  "vehiclesOnPage": null | [ { "label": string, "year": number|null, "make": string|null, "model": string|null, "trim": string|null, "price": number|null, "dealerName": string|null } ],
   "year": number|null,
   "make": string|null,
   "model": string|null,
@@ -342,6 +354,7 @@ const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a ph
 }
 
 Field notes:
+- "vehiclesOnPage": THE FIRST THING TO DECIDE. Does this image show ONE vehicle being quoted/listed, or SEVERAL DIFFERENT vehicles side by side? Several-vehicle images are common: a Google "Sponsored Vehicles" ad carousel, a dealer search-results page, a comparison row, a screenshot of several listings. If there is MORE THAN ONE distinct vehicle for sale, return one entry per vehicle here -- "label" being how a person would recognise it on screen, e.g. "2026 Toyota RAV4 Plug-In Hybrid GR Sport AWD - $85,995 - Okotoks Toyota" -- and set EVERY other field in this object to null. Do NOT pick one of them, do not merge them, and do not average them. If the image shows exactly ONE vehicle (a quote, a window sticker, a single listing page), set this to null and fill in the rest normally. Multiple photos OF THE SAME car, or one car shown with several finance/lease term options, is still ONE vehicle -- return null.
 - "dealerName": the dealership's business name, if shown anywhere on the quote (letterhead, header/footer, contact block). Do not include the city as part of this field -- that's separate.
 - "dealerCity": the city (and province if visible, e.g. "Calgary, AB") of the dealership, if shown. Needed to tell apart dealers that share a common brand name -- there are many different "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
@@ -366,6 +379,11 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const { fileBase64, mediaType } = body;
+    // Set on the SECOND pass, after the person picked one car out of a
+    // multi-vehicle screenshot (see the vehiclesOnPage branch below).
+    const focusVehicle: string | null = typeof body?.focusVehicle === "string" && body.focusVehicle.trim()
+      ? body.focusVehicle.trim().slice(0, 200)
+      : null;
     // `images` (new): the client normalizes/slices photos to stay inside
     // Claude's vision limits and sends the tiles here, top-to-bottom. A tall
     // screenshot arrives as several slices of ONE page, not several pages.
@@ -495,7 +513,7 @@ Deno.serve(async (req: Request) => {
         // case; max_tokens is a ceiling, not a target.
         max_tokens: 4000,
         messages: [
-          { role: "user", content: [...docBlocks, ...sliceNote, { type: "text", text: EXTRACTION_PROMPT }] },
+          { role: "user", content: [...docBlocks, ...sliceNote, { type: "text", text: buildExtractionPrompt(focusVehicle) }] },
         ],
       }),
     }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
@@ -544,6 +562,44 @@ Deno.serve(async (req: Request) => {
         { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
+
+    // ---- Step 1b: several cars in one image -> ask, never guess ----
+    // A screenshot of a Google "Sponsored Vehicles" carousel or a dealer
+    // search-results page shows five cars at once. Silently reporting on
+    // whichever one the model happened to latch onto would put a real price
+    // against the wrong vehicle -- the exact class of misleading output the
+    // invariants exist to stop. So we return the list and let the person pick.
+    //
+    // CRITICALLY: no credit is charged here. The hold is released and the
+    // person pays only when they come back with a choice and get a real
+    // report (never-charge-for-a-report-we-couldn't-build).
+    const vehiclesOnPage = Array.isArray(extracted?.vehiclesOnPage)
+      ? extracted.vehiclesOnPage
+          .filter((v: any) => v && typeof v === "object")
+          .slice(0, 12)
+          .map((v: any) => ({
+            label: typeof v.label === "string" ? v.label.slice(0, 160) : null,
+            year: Number.isFinite(Number(v.year)) ? Number(v.year) : null,
+            make: typeof v.make === "string" ? v.make : null,
+            model: typeof v.model === "string" ? v.model : null,
+            trim: typeof v.trim === "string" ? v.trim : null,
+            price: Number(v.price) > 0 ? Number(v.price) : null,
+            dealerName: typeof v.dealerName === "string" ? v.dealerName : null,
+          }))
+          .filter((v: any) => v.label || v.model)
+      : [];
+    if (!focusVehicle && vehiclesOnPage.length > 1) {
+      await releaseCredit(holdId);
+      holdId = null;
+      await logUsage({ success: false, errorMessage: `multi-vehicle image: ${vehiclesOnPage.length} vehicles, awaiting choice (not charged)` });
+      console.log(`Multi-vehicle image: ${vehiclesOnPage.length} vehicles found; returning picker, no credit charged.`);
+      return new Response(
+        JSON.stringify({ needsVehicleChoice: true, vehicles: vehiclesOnPage }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+    // A single-vehicle read must never carry the multi-vehicle list forward.
+    delete extracted.vehiclesOnPage;
 
     // ---- Step 2: Verification -- look up the REAL MSRP in our own catalog ----
     // Resolve the vehicle's CANONICAL base model first (e.g. "Palisade Ultimate

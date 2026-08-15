@@ -8458,7 +8458,11 @@ function QuoteCheckPage(){
     })();
     return ()=>{ active=false; };
   },[user,giftPending]);
-  const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [status,setStatus]=useState("idle"); // idle | analyzing | choose | done | error
+  // Set when one uploaded image turned out to hold several different vehicles
+  // (a Google "Sponsored Vehicles" carousel, a dealer results page). We ask
+  // which one rather than reporting on whichever the model saw first.
+  const [vehicleChoices,setVehicleChoices]=useState(null);
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   // Brief (900ms) success beat shown in the full-screen ScanTakeover right as
   // a scan actually finishes -- tracked separately from `status` because the
@@ -8951,7 +8955,10 @@ function QuoteCheckPage(){
     return false;
   };
 
-  const handleFile=async(file)=>{
+  // focusVehicle: set when the person has picked one car out of a screenshot
+  // that showed several (see the "choose" status). It re-runs the SAME file,
+  // pinned to that vehicle -- this is the pass that actually costs a credit.
+  const handleFile=async(file,focusVehicle=null)=>{
     if(!file) return;
     if(!gateAttempt()) return;
     const heic=isHeic(file);
@@ -8973,6 +8980,7 @@ function QuoteCheckPage(){
     // Fresh email state per scan -- otherwise a second report in the same
     // session would inherit "sent" from the first and never auto-send again.
     setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
+    setVehicleChoices(null);
 
     try{
       // Convert HEIC/HEIF to JPEG entirely in the browser before anything
@@ -9012,9 +9020,12 @@ function QuoteCheckPage(){
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
         method:"POST",
         headers:await buildAnalyzeHeaders(),
-        body:JSON.stringify(images&&images.length
-          ? {images,mediaType:"image/jpeg",fileBase64:images[0].b64}
-          : {fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
+        body:JSON.stringify(Object.assign(
+          images&&images.length
+            ? {images,mediaType:"image/jpeg",fileBase64:images[0].b64}
+            : {fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"},
+          focusVehicle?{focusVehicle}:{},
+        )),
       });
 
       // Out of credits -> not an analysis failure. Return to idle and open the
@@ -9039,6 +9050,15 @@ function QuoteCheckPage(){
       if(!res.ok||data.error){
         setStatus("error");
         setErrorMsg(data.error||"Something went wrong analyzing that quote.");
+        return;
+      }
+      // Several cars in one image (a Google ad carousel, a dealer results
+      // page). We never guess which one — reporting a real price against the
+      // wrong vehicle is the worst thing this product can do. No credit was
+      // charged for this pass; the choice triggers the real, paid read.
+      if(data.needsVehicleChoice&&Array.isArray(data.vehicles)&&data.vehicles.length>1){
+        setVehicleChoices(data.vehicles);
+        setStatus("choose");
         return;
       }
       setAnalysis(await finalizeReport(data.analysis));
@@ -9145,6 +9165,7 @@ function QuoteCheckPage(){
     // Fresh email state per scan -- otherwise a second report in the same
     // session would inherit "sent" from the first and never auto-send again.
     setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
+    setVehicleChoices(null);
 
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
@@ -9227,6 +9248,7 @@ function QuoteCheckPage(){
     setErrorMsg("");
     setFileName("");
     setUrlInput("");
+    setVehicleChoices(null);
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -9574,7 +9596,24 @@ function QuoteCheckPage(){
               </div>
 
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes a couple of seconds to analyze</div>
+              <div style={{color:C.inkFaint,fontSize:13}}>PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB · takes a couple of seconds to analyze</div>
+              {/* Say what a good upload looks like BEFORE the attempt, not in an
+                  error afterwards. Every line here is a real failure we've seen
+                  and can prevent (own-the-process-no-user-limits). */}
+              <div style={{marginTop:14,textAlign:"left",display:"inline-block",background:C.tealBg,border:`1px solid ${C.teal}44`,borderRadius:12,padding:"12px 16px",maxWidth:420}}>
+                <div style={{fontSize:11.5,fontWeight:900,color:C.tealInk,letterSpacing:".5px",marginBottom:8}}>FOR A CLEAN SCAN</div>
+                {[
+                  "Include the price and any fee lines — that's what gets checked",
+                  "A full-page screenshot works better than a cropped one",
+                  "One vehicle per upload; if a page shows several, we'll ask which",
+                  "Straight-on and in focus — glare and angle hide the fine print",
+                ].map((tip,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:i===3?0:6}}>
+                    <span aria-hidden="true" style={{flex:"0 0 auto",width:5,height:5,borderRadius:"50%",background:C.teal,marginTop:6}}/>
+                    <span style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.5}}>{tip}</span>
+                  </div>
+                ))}
+              </div>
               {/* Scope, answered before it's asked: LotCheck covers every
                   condition — the #1 user question ("is this for new or used?")
                   should never need asking. Chips, not fine print. */}
@@ -9615,6 +9654,44 @@ function QuoteCheckPage(){
           {scanFlash&&(
             <ScanTakeover C={C} cardStyle={cardStyle} phase="success"
               attemptType={lastAttemptType} fileName={fileName}/>
+          )}
+
+          {/* Several cars in one screenshot -- ask which, never guess. Putting
+              a real price against the wrong vehicle is the worst failure this
+              product has, so this is a deliberate stop rather than a silent
+              pick. Nothing has been charged at this point. */}
+          {status==="choose"&&Array.isArray(vehicleChoices)&&(
+            <div style={{...cardStyle,padding:"26px 24px"}}>
+              <div style={{fontWeight:1000,fontSize:17,color:C.ink,marginBottom:6}}>
+                That screenshot shows {vehicleChoices.length} vehicles
+              </div>
+              <div style={{fontSize:13.5,color:C.inkSoft,marginBottom:4,lineHeight:1.6}}>
+                Pick the one you want checked and LotCheck will run the full report on it.
+              </div>
+              <div style={{fontSize:12,color:C.inkFaint,marginBottom:18}}>
+                Nothing has been used from your balance yet — you're only charged for the report you choose.
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {vehicleChoices.map((v,i)=>{
+                  const title=[v.year,v.make,v.model,v.trim].filter(Boolean).join(" ")||v.label||`Vehicle ${i+1}`;
+                  const sub=[v.dealerName,v.price?`$${Number(v.price).toLocaleString("en-CA")}`:null].filter(Boolean).join(" · ");
+                  return (
+                    <button key={i}
+                      onClick={()=>{ if(lastFile) handleFile(lastFile,v.label||title); }}
+                      style={{textAlign:"left",background:C.card,border:`2px solid ${C.line}`,borderRadius:12,padding:"13px 15px",cursor:"pointer",color:C.ink,transition:"border-color .15s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;}}
+                      onMouseLeave={e=>{e.currentTarget.style.borderColor=C.line;}}>
+                      <div style={{fontWeight:900,fontSize:14.5}}>{title}</div>
+                      {sub&&<div style={{fontSize:12.5,color:C.inkFaint,marginTop:3}}>{sub}</div>}
+                    </button>
+                  );
+                })}
+              </div>
+              <button onClick={reset}
+                style={{marginTop:16,background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 18px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                Upload something else
+              </button>
+            </div>
           )}
 
           {status==="error"&&(
