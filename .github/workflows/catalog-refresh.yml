@@ -5,6 +5,22 @@ name: Catalog refresh — daily FULL (MSRP + rates)
 # nothing. Rates are ALSO kept fresh by catalog-rates-daily.yml (rates-only).
 # Requires repo secrets SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Without
 # them the scripts dry-run.
+#
+# FRESH-WRITE GUARD. Scraper steps run with continue-on-error (fault isolation:
+# when Genesis crashed on 2026-08-10 it took Hyundai, Mazda, Honda, Acura, GM
+# and Ford down with it), but that made green meaningless — a step can crash or
+# scrape zero rows and the run still shows a green check. That is how Genesis's
+# API moved on ~2026-08-09 and the catalog silently froze at 2026-08-08 while
+# two runs "succeeded". So now: a snapshot step records per-make row counts +
+# max(id) before any scraper runs, and a "Guard:" step after each make compares
+# and FAILS when a make that has a scraper wrote no fresh rows (or its row
+# count collapsed — the Ford 78 -> 7 class). Guard steps have NO
+# continue-on-error; every step carries `if: !cancelled()` so one red make
+# never stops the others. Green now means "every make wrote fresh rows".
+# GM's MSRP guard is `optional` (warn-only): GM publishes no national MSRP and
+# the fractional-price gate rejects its computed postal-code prices by design
+# (scripts/COVERAGE.md); GM finance still comes reliably from the SM360 feed
+# and IS required.
 on:
   workflow_dispatch:
   schedule:
@@ -14,6 +30,9 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,184 +40,251 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # If this fails, every guard step fails too ("cannot verify" is not a
+      # pass) — but scrapers still run; a Supabase blip should not stop them.
+      - name: Snapshot pre-run catalog state (per-make counts + max id)
+        run: node scripts/catalog-refresh-guard.mjs snapshot
+
       - name: Toyota — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-toyota.mjs || echo "toyota" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Toyota wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Toyota" --makes="Toyota" --msrp=required --finance=required --lease=optional
+
       - name: Lexus — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-lexus.mjs || echo "lexus" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Lexus wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Lexus" --makes="Lexus" --msrp=required --finance=required --lease=optional
+
       - name: Stellantis (Jeep/Ram/Dodge/Chrysler/Fiat) — MSRP + finance/lease
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-stellantis.mjs || echo "stellantis" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Stellantis makes wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Stellantis" --makes="Jeep,Ram,Dodge,Chrysler,Fiat,Alfa Romeo" --msrp=required --finance=required --lease=optional
+
       - name: Genesis — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-genesis.mjs || echo "genesis" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Genesis wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Genesis" --makes="Genesis" --msrp=required --finance=required --lease=optional
+
       - name: Hyundai — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-hyundai.mjs || echo "hyundai" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Hyundai wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Hyundai" --makes="Hyundai" --msrp=required --finance=required --lease=optional
+
       - name: Mazda — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-mazda.mjs || echo "mazda" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mazda wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Mazda" --makes="Mazda" --msrp=required --finance=required --lease=optional
+
       - name: Honda — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-honda.mjs || echo "honda" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Honda wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Honda" --makes="Honda" --msrp=required --finance=required --lease=optional
+
       - name: Acura — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-acura.mjs || echo "acura" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Acura wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Acura" --makes="Acura" --msrp=required --finance=required --lease=optional
+
       - name: GM (Chevrolet/GMC/Buick/Cadillac) — MSRP only (rates gated)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-gm.mjs || echo "gm" >> "$RUNNER_TEMP/failed-makes.txt"
+      # optional: GM zero-writes are known/accepted (no national MSRP; the
+      # fractional gate rejects computed postal-code prices by design).
+      - name: "Guard: GM makes (warn-only — known source limits)"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="GM" --makes="Chevrolet,GMC,Buick,Cadillac" --msrp=optional
+
       - name: Ford — MSRP only (rates in separate app)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-ford.mjs || echo "ford" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Ford wrote fresh MSRP rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Ford" --makes="Ford" --msrp=required
+
       - name: Ford rates (Convertus dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-ford-rates.mjs || echo "ford-rates" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Ford wrote fresh rate rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Ford rates" --makes="Ford" --finance=required --lease=optional
+
       - name: Lincoln — MSRP only
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-lincoln.mjs || echo "lincoln" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Lincoln wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Lincoln" --makes="Lincoln" --msrp=required
+
       - name: Porsche — MSRP only (no financing exposed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-porsche.mjs || echo "porsche" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Porsche wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Porsche" --makes="Porsche" --msrp=required
+
       - name: MINI — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-mini.mjs || echo "mini" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mini wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="MINI" --makes="Mini" --msrp=required --finance=required --lease=optional
+
       - name: Mercedes-Benz — MSRP only (rates need estimator capture)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-mercedes.mjs || echo "mercedes" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mercedes-Benz wrote fresh MSRP rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Mercedes-Benz" --makes="Mercedes-Benz" --msrp=required
+
       - name: Mercedes-Benz rates (SM360 dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-mercedes-rates.mjs || echo "mercedes-rates" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mercedes-Benz wrote fresh rate rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Mercedes-Benz rates" --makes="Mercedes-Benz" --finance=required --lease=optional
+
       - name: Subaru — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-subaru.mjs || echo "subaru" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Subaru wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Subaru" --makes="Subaru" --msrp=required --finance=required --lease=optional
+
       - name: Kia — MSRP only (rates not exposed as clean API)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-kia.mjs || echo "kia" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Kia wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Kia" --makes="Kia" --msrp=required
+
       - name: Nissan — MSRP only (rates gated GraphQL)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-nissan.mjs || echo "nissan" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Nissan wrote fresh MSRP rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Nissan" --makes="Nissan" --msrp=required
+
       - name: Nissan rates (Convertus dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-nissan-rates.mjs || echo "nissan-rates" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Nissan wrote fresh rate rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Nissan rates" --makes="Nissan" --finance=required --lease=optional
+
       - name: Infiniti — MSRP only
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-infiniti.mjs || echo "infiniti" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Infiniti wrote fresh MSRP rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Infiniti" --makes="Infiniti" --msrp=required
+
       - name: Volvo — MSRP only (model-level; per-trim gated)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-volvo.mjs || echo "volvo" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Volvo wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Volvo" --makes="Volvo" --msrp=required
+
       - name: Volkswagen — MSRP + finance/lease rates
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-vw.mjs || echo "vw" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Volkswagen wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Volkswagen" --makes="Volkswagen" --msrp=required --finance=required --lease=optional
+
       - name: BMW — MSRP + finance/lease (via SM360 dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-bmw.mjs || echo "bmw" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: BMW wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="BMW" --makes="BMW" --msrp=required --finance=required --lease=optional
+
       - name: Infiniti rates (via SM360 dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-infiniti-rates.mjs || echo "infiniti-rates" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Infiniti wrote fresh rate rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Infiniti rates" --makes="Infiniti" --finance=required --lease=optional
+
       - name: GM rates — Chevrolet/GMC/Buick (via SM360 dealer feed)
+        if: ${{ !cancelled() }}
         continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/scrape-gm-rates.mjs || echo "gm-rates" >> "$RUNNER_TEMP/failed-makes.txt"
-      - name: Summary
-        continue-on-error: true
-        if: success()
-        run: echo "✅ Catalog refresh complete — $(date)"
+      - name: "Guard: GM makes wrote fresh rate rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="GM rates" --makes="Chevrolet,GMC,Buick" --finance=required --lease=optional
 
       # Cached reports embed catalog-derived MSRP, so a catalog refresh must
       # retire them -- otherwise a corrected figure keeps serving stale (this
       # bit us on 2026-08-11: the catalog was repaired but reports still showed
-      # the bad MSRP from cache).
+      # the bad MSRP from cache). Runs even when a guard step is red: the OTHER
+      # makes did write fresh rows, and their cached reports must still retire.
       - name: Invalidate cached reports
+        if: ${{ !cancelled() }}
         continue-on-error: true
         run: |
           curl -sf -X POST             "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query"             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"             -H "Content-Type: application/json"             -d '{"query":"delete from listing_analysis_cache;"}'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
 
-      # Fault isolation means one bad make must not abort the other 25 -- that
-      # is why every make step is continue-on-error, and it stays. But it must
-      # not make the RUN look healthy: run 31793667241 on 2026-08-14 finished
-      # "completed success" with 14 failed steps inside it, while 471 catalog
-      # rows across 12 makes were being destroyed. Nobody was told, because
-      # nothing read the step outcomes. Green has to mean green.
+      # Individual scraper failures no longer abort the run (fault isolation)
+      # AND no longer hide (the guard): a make that wrote nothing fails its
+      # "Guard:" step, so a green run means every make refreshed. The per-make
+      # verdict table is in the run's Summary tab.
+      - name: Report guard verdicts
+        if: always()
+        run: |
+          echo "Scraper steps run with continue-on-error; their 'Guard:' steps fail when a make wrote no fresh rows."
+          echo "See the Summary tab for the per-make verdict table. A red guard means that make kept its previous rows -- stale, not wrong."
+
+      # Belt AND braces, and they catch different failures: a "Guard:" step
+      # fails when a make wrote no FRESH ROWS (the Genesis silent-freeze class —
+      # its API moved on ~2026-08-09, the scraper exited 0, and the catalog sat
+      # frozen while two runs "succeeded"). This step fails when the scraper
+      # PROCESS died. The guard cannot report that cleanly if Supabase itself is
+      # unreachable, because then every guard fails "cannot verify" at once and
+      # the real cause is buried. This names it in one line.
       - name: Fail the run if any make did not write
         if: always()
         run: |

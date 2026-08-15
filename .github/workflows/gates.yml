@@ -79,6 +79,8 @@ jobs:
         run: npm run test:msrp-authority
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
+      - name: Catalog guard verdicts (green must mean "wrote fresh rows")
+        run: npm run test:catalog-guard
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
