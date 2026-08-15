@@ -39,10 +39,43 @@ const PRE_EXISTING = {
                          "price_basis", "source_url", "fetched_at", "created_at"],
 };
 
+// KNOWN, PRE-EXISTING ORDERING FAULTS — recorded, not hidden.
+//
+// These migrations insert into a table whose CREATE sorts AFTER them, so a
+// from-scratch replay in filename order fails. They are already applied in
+// production, where they were run by hand in a working order, so nothing is
+// broken today. What IS broken is disaster recovery: this history cannot
+// rebuild the database unaided.
+//
+// Listed here so the gate stays useful against NEW faults instead of being
+// switched off. Renaming an applied migration has its own risk, so the fix is a
+// deliberate decision, not something to slip into an unrelated change.
+// Recorded 2026-08-15.
+const KNOWN_ORDERING = new Set([
+  "20260730_admin_economics.sql::app_config",
+  "20260814_august_backfill.sql::founder_ledger",
+  "20260814_august_backfill.sql::statement_run",
+]);
+
 const schema = new Map(Object.entries(PRE_EXISTING).map(([t, c]) => [t, new Set(c)]));
 const problems = [];
+const knownFaults = [];
 
-for (const file of readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort()) {
+const FILES = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
+
+// Which migration CREATEs each table, so an insert that runs before its table
+// exists can be named precisely. accessory_catalog was inserted into by three
+// migrations while the one that creates it had never been run — 42P01, and the
+// column check above could not see it because the table was simply absent.
+const createdIn = new Map();
+for (const f of FILES) {
+  for (const m of strip(readFileSync(join(DIR, f), "utf8"))
+    .matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?([\w".]+)/gi)) {
+    if (!createdIn.has(norm(m[1]))) createdIn.set(norm(m[1]), f);
+  }
+}
+
+for (const file of FILES) {
   const sql = strip(readFileSync(join(DIR, file), "utf8"));
 
   // CREATE TABLE name ( col type, ... )
@@ -72,7 +105,17 @@ for (const file of readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort()) {
   for (const m of sql.matchAll(/insert\s+into\s+([\w".]+)\s*\(([^)]*)\)/gi)) {
     const t = norm(m[1]);
     const known = schema.get(t);
-    if (!known) continue; // table we cannot see; not this check's job to guess
+    if (!known) {
+      // The table is not in scope YET. If some migration creates it, this
+      // insert runs before its own table exists — a definite ordering fault.
+      // If nothing creates it, it predates tracked migrations; not our call.
+      if (createdIn.has(t)) {
+        const entry = { file, table: t, ordering: createdIn.get(t) };
+        if (KNOWN_ORDERING.has(`${file}::${t}`)) knownFaults.push(entry);
+        else problems.push(entry);
+      }
+      continue;
+    }
     for (const raw of m[2].split(",")) {
       const col = raw.trim().replace(/"/g, "").toLowerCase();
       if (!col) continue;
@@ -87,11 +130,23 @@ if (problems.length) {
   console.error(`\n${problems.length} migration column error(s) — these would fail with 42703 in the SQL editor:\n`);
   for (const p of problems) {
     console.error(`  ${p.file}`);
-    console.error(`    ${p.table} has no column "${p.col}"`);
-    console.error(`    columns at that point: ${p.known}\n`);
+    if (p.ordering) {
+      console.error(`    inserts into ${p.table}, but that table is not created until ${p.ordering}`);
+      console.error(`    -> 42P01 relation does not exist\n`);
+    } else {
+      console.error(`    ${p.table} has no column "${p.col}"`);
+      console.error(`    columns at that point: ${p.known}\n`);
+    }
   }
   console.error(`Add the column with an ALTER TABLE in an EARLIER-SORTING migration, or remove it from the insert.\n`);
   process.exit(1);
 }
 
 console.log(`migration columns OK — ${schema.size} tables tracked, every insert validated in filename order.`);
+if (knownFaults.length) {
+  // Never silent. An allowlist nobody sees is how a check quietly stops working.
+  console.log(`\n${knownFaults.length} KNOWN pre-existing ordering fault(s), already applied by hand in production:`);
+  for (const k of knownFaults) console.log(`  ${k.file} inserts into ${k.table}, created later in ${k.ordering}`);
+  console.log(`These do not break production. They DO mean this migration history cannot`);
+  console.log(`rebuild the database from scratch — worth fixing before it is ever needed.`);
+}
