@@ -914,7 +914,11 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
 // scripts/test-trim-match.mjs — run it after ANY change to the matcher.
 // Returns { msrp, trim, basis } where basis is "exact" (trim pinned) or
 // "starting_at" (honest floor, never a guess dressed as exact).
-interface CatalogMsrp { msrp: number; trim: string | null; basis: "exact" | "starting_at"; year?: number; sourceUrl?: string | null; priceBasis?: string | null; }
+interface CatalogMsrp { msrp: number; trim: string | null; basis: "exact" | "starting_at"; year?: number; sourceUrl?: string | null; priceBasis?: string | null;
+  /** The manufacturer's OWN all-in for the matched trim. Compare an AMVIC all-in advertised price against THIS, never against msrp. */
+  allIn?: number | null;
+  /** The model's highest all-in, across the whole trim ladder — the ceiling claim. */
+  ceiling?: { allIn: number; trim: string | null; trimsConsidered: number } | null; }
 async function lookupCatalogMsrp(
   year: number,
   make: string,
@@ -982,7 +986,18 @@ async function lookupCatalogMsrp(
     // row carries it) -- lets the report link the MSRP to its source.
     const srcRow = rows.find((r: any) => r.trim === (picked as any).trim && r.source_url) || rows.find((r: any) => r.source_url);
     const pbRow = rows.find((r: any) => r.trim === (picked as any).trim && r.price_basis) || rows.find((r: any) => r.price_basis);
-    const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear, sourceUrl: srcRow?.source_url || null, priceBasis: pbRow?.price_basis || null };
+    const aiRow = rows.find((r: any) => r.trim === (picked as any).trim && r.all_in_price);
+    // THE CEILING: the model's most expensive trim, priced all-in. A listing
+    // above it is marked up whichever trim it is — there is no higher grade to
+    // name, so a missing catalog row cannot explain it. Taken across the rows
+    // of THIS model year only; a ceiling from one row is not a ladder and
+    // qualifyCeilingClaim refuses it.
+    const ladder = rows.filter((r: any) => Number(r.all_in_price) > 0);
+    const topRow = ladder.reduce((best: any, r: any) =>
+      (!best || Number(r.all_in_price) > Number(best.all_in_price)) ? r : best, null);
+    const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear, sourceUrl: srcRow?.source_url || null, priceBasis: pbRow?.price_basis || null,
+      allIn: aiRow ? Number(aiRow.all_in_price) : null,
+      ceiling: topRow ? { allIn: Number(topRow.all_in_price), trim: topRow.trim || null, trimsConsidered: ladder.length } : null };
     // An adjacent-year figure is a reference, never an exact sticker for THIS
     // model year — force the honest "starting_at" basis.
     if (rowYear !== year) out.basis = "starting_at";
@@ -2352,6 +2367,11 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       if (catMsrp.year && catMsrp.year !== analysis.year) analysis.msrpYear = catMsrp.year; // adjacent-MY reference, surfaced honestly
       if (catMsrp.sourceUrl) analysis.msrpSourceUrl = catMsrp.sourceUrl; // provenance link for the report
       if (catMsrp.priceBasis) analysis.msrpPriceBasis = catMsrp.priceBasis;   // incl_freight | excl_freight
+      // The manufacturer's own all-in for this trim, and the model ceiling.
+      // Without these the report compares an AMVIC all-in advertised price
+      // against an ex-freight MSRP and counts ~$3,000 of freight as markup.
+      if (catMsrp.allIn) analysis.msrpAllIn = catMsrp.allIn;
+      if (catMsrp.ceiling) analysis.msrpCeiling = catMsrp.ceiling;
       // A USED car's catalog match is the price when it was NEW. That is useful
       // context ("this cost $X new") but it is NOT a sticker to measure today's
       // asking price against -- a 2014 truck is not "$35,000 under MSRP". Mark
@@ -3376,6 +3396,28 @@ Deno.serve(async (req: Request) => {
           console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
         }
       } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
+    }
+
+    // WHAT "PRICE VERIFIED" ACTUALLY MEANS. Until 2026-08-15 it meant nothing:
+    // `priceVerified` was READ in eight places across the app, the email and the
+    // PDF — where it escalated to "STATUS - VERIFIED QUOTE" — and ASSIGNED by
+    // nothing, so every reader fell through to `quotedPrice > 0`. A number we
+    // had merely read was being published as a number we had checked. That is a
+    // hollow claim on the most consequential card (claims-must-stay-backed).
+    //
+    // It now means one specific, defensible thing: the price came from the
+    // page's OWN machine-readable data — schema.org/JSON-LD, the platform's
+    // vehicle blob, or the dealer platform's inventory feed — rather than from
+    // reading rendered text. That is a real distinction a buyer benefits from,
+    // and one a dealer cannot dispute, because it is their own published data.
+    //
+    // Anything read out of page text is priceVerified: false. The surfaces
+    // already render "price not verified" for that case; it just never fired.
+    {
+      const src = String(analysis.quotedPriceSource || "");
+      analysis.priceVerified = Number(analysis.quotedPrice) > 0
+        && (src === "structured_data" || src === "sm360_feed" || src === "sm360_feed_fallback"
+            || src === "convertus_vms" || src === "d2c_vdp");
     }
 
     // ASSERT (render check done). The accusation gate lives in invariants.ts

@@ -33,8 +33,23 @@ export type MsrpBasis = "exact" | "starting_at" | "original_when_new" | "dealer_
 export type MsrpClaim = {
   /** May a surface print an over/under-MSRP figure at all? */
   comparable: boolean;
-  /** Signed delta (asking - msrp) when comparable, else null. NEVER recompute this. */
+  /** Signed delta (asking - reference) when comparable, else null. NEVER recompute this. */
   delta: number | null;
+  /**
+   * WHICH figure the delta was measured against, and the figure itself.
+   *
+   * An AMVIC all-in advertised price must be compared against the
+   * manufacturer's ALL-IN figure, never against the ex-freight MSRP — that
+   * comparison invents roughly $3,000 of markup that does not exist and is the
+   * single largest source of a wrong over/under claim. Toyota publishes both,
+   * so there is nothing to estimate: msrp_catalog.all_in_price holds theirs.
+   *
+   * Live example (Okotoks, 2026-08-15): $85,995 all-in was being measured
+   * against a $57,500 ex-freight MSRP. The honest reference is the $60,564
+   * all-in for that trim.
+   */
+  comparedAgainst: "all_in" | "ex_freight" | null;
+  reference: number | null;
   /** True when comparable AND the vehicle is priced above MSRP. */
   over: boolean;
   /** The MSRP figure itself, which is often still worth SHOWING even when it cannot be compared. */
@@ -54,6 +69,61 @@ const n = (v: unknown): number | null => {
   const x = Number(v);
   return Number.isFinite(x) && x > 0 ? x : null;
 };
+
+/**
+ * THE CEILING CLAIM — the finding that needs no trim.
+ *
+ * Pinning a trim is normally the precondition for any over/under claim, and it
+ * often fails: a 50%+ gap trips the implausibility guard, which exists because a
+ * MISSING catalog row once produced a false $18,900 accusation (IONIQ 9). That
+ * guard is right to fire on trim-level claims.
+ *
+ * But it has nothing to say about this: the model's MOST EXPENSIVE trim, priced
+ * all-in with the maximum dealer fee, is the most generous possible assumption
+ * in the dealer's favour. A listing above THAT is marked up whichever trim it
+ * is, because there is no higher grade left to name — so "the catalog is
+ * missing a row" cannot explain it. It is the one comparison a missing row
+ * cannot poison.
+ *
+ * Worked live (Okotoks Toyota, 2026-08-15): a 2026 RAV4 Plug-in Hybrid
+ * advertised at $85,995 all-in. Top trim is the XSE Technology Package at
+ * $62,414 all-in. $23,581 above the ceiling, and the trim never had to be
+ * pinned. The trim-level card correctly declined; this one does not have to.
+ */
+export type CeilingClaim = {
+  /** True only when the asking price provably exceeds every trim in the line. */
+  exceeds: boolean;
+  /** The model's highest all-in figure. */
+  ceiling: number | null;
+  /** Which trim that ceiling belongs to. */
+  trim: string | null;
+  /** asking − ceiling, when it exceeds. */
+  over: number | null;
+  /** How many trims the ceiling was taken across — 1 is not a ladder. */
+  trimsConsidered: number;
+};
+
+export function qualifyCeilingClaim(analysis: any): CeilingClaim {
+  const a = analysis ?? {};
+  const none: CeilingClaim = { exceeds: false, ceiling: null, trim: null, over: null, trimsConsidered: 0 };
+
+  const c = a.msrpCeiling;
+  const ceiling = n(c?.allIn);
+  const asking = n(a.quotedPrice);
+  const trims = Number(c?.trimsConsidered) || 0;
+
+  // Needs a real ladder. A "ceiling" taken across ONE row is just that row, and
+  // the missing-catalog-row explanation is wide open again.
+  if (!ceiling || !asking || trims < 2) return none;
+
+  // Only meaningful against an ALL-IN advertised price. Comparing an ex-freight
+  // quote to an all-in ceiling would understate the gap and, worse, could
+  // manufacture one where none exists.
+  if (!a.allInPricing) return { ...none, ceiling, trim: c?.trim ?? null, trimsConsidered: trims };
+
+  if (asking <= ceiling) return { exceeds: false, ceiling, trim: c?.trim ?? null, over: null, trimsConsidered: trims };
+  return { exceeds: true, ceiling, trim: c?.trim ?? null, over: asking - ceiling, trimsConsidered: trims };
+}
 
 /**
  * Did this figure come from the MANUFACTURER, or from the dealer?
@@ -83,7 +153,15 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
   const basis = (typeof a.msrpBasis === "string" ? a.msrpBasis : null) as MsrpBasis | null;
   const make = a.make || "the manufacturer";
 
-  const base = { msrp, basis, comparable: false, delta: null, over: false } as MsrpClaim;
+  const allIn = n(a.msrpAllIn);
+  // An AMVIC all-in advertised price is compared against the manufacturer's own
+  // all-in figure. Anything else is a basis mismatch worth roughly $3,000.
+  const useAllIn = !!a.allInPricing && !!allIn;
+  const reference = useAllIn ? allIn : msrp;
+  const comparedAgainst: "all_in" | "ex_freight" | null = msrp ? (useAllIn ? "all_in" : "ex_freight") : null;
+
+  const base = { msrp, basis, comparable: false, delta: null, over: false,
+                 comparedAgainst, reference: msrp ? reference : null } as MsrpClaim;
 
   if (!msrp) {
     return { ...base, label: "MSRP", refusal: null };
@@ -123,13 +201,26 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
     };
   }
 
-  const delta = asking - msrp;
+  // An all-in asking price with NO all-in reference cannot be compared soundly:
+  // measuring it against the ex-freight MSRP invents the freight as markup.
+  // Refuse rather than overstate — the ceiling claim still has something to say.
+  if (a.allInPricing && !allIn) {
+    return {
+      ...base,
+      label: labelFor(basis, a),
+      refusal: `This price is advertised all-in, but we hold only ${make}'s ex-freight MSRP for this trim — comparing the two would count freight and fees as markup, so no over/under-MSRP claim is made.`,
+    };
+  }
+
+  const delta = asking - reference;
   return {
     msrp,
     basis,
     comparable: true,
     delta,
     over: delta > 0,
+    comparedAgainst,
+    reference,
     label: labelFor(basis, a),
     refusal: null,
   };

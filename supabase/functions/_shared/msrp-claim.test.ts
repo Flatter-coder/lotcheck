@@ -9,7 +9,7 @@
 //
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts
-import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
+import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "./msrp-claim.ts";
 
 let pass = 0, fail = 0;
 const fails: string[] = [];
@@ -130,6 +130,48 @@ check(!isManufacturerFigure("original_when_new"),
   "an original-when-new figure is the manufacturer's, but the car is not new — excluded from 'starts at' phrasing");
 for (const b of [null, undefined, "", "EXACT", "unknown"]) {
   check(!isManufacturerFigure(b), `basis ${JSON.stringify(b)} is not attributable to the manufacturer`);
+}
+
+// ---------------------------------------------------------------------------
+// ALL-IN vs EX-FREIGHT — the "$57,500 is not truth" defect (Okotoks, 2026-08-15).
+// An AMVIC all-in advertised price measured against an ex-freight MSRP counts
+// ~$3,000 of freight and fees as dealer markup. Toyota publishes BOTH figures,
+// so there is nothing to estimate — msrp_catalog.all_in_price holds theirs.
+// ---------------------------------------------------------------------------
+{
+  const okotoks = { msrp: 57500, msrpAllIn: 60564, quotedPrice: 85995, msrpBasis: "exact",
+                    allInPricing: { body: "AMVIC" }, priceVerified: true, make: "Toyota", msrpTrim: "GR SPORT" };
+  const c = qualifyMsrpClaim(okotoks);
+  check(c.comparable && c.comparedAgainst === "all_in" && c.reference === 60564 && c.delta === 25431,
+    "an all-in asking price is measured against the manufacturer's ALL-IN figure", JSON.stringify(c));
+  check(qualifyMsrpClaim({ ...okotoks, allInPricing: null }).reference === 57500,
+    "an ex-freight quote is still measured against the ex-freight MSRP");
+}
+{
+  // The dangerous case: all-in asking, but we hold only the ex-freight MSRP.
+  const c = qualifyMsrpClaim({ msrp: 57500, quotedPrice: 85995, msrpBasis: "exact",
+                               allInPricing: { body: "AMVIC" }, priceVerified: true, make: "Toyota" });
+  check(!c.comparable && /all-in/i.test(String(c.refusal)),
+    "all-in asking with NO all-in reference REFUSES rather than counting freight as markup", JSON.stringify(c));
+}
+
+// ---------------------------------------------------------------------------
+// THE CEILING CLAIM — the finding that needs no trim pinned.
+// ---------------------------------------------------------------------------
+const CEIL = { allIn: 62414, trim: "XSE Technology Package", trimsConsidered: 4 };
+{
+  const c = qualifyCeilingClaim({ quotedPrice: 85995, allInPricing: { body: "AMVIC" }, msrpCeiling: CEIL });
+  check(c.exceeds && c.over === 23581 && c.trim === "XSE Technology Package",
+    "a listing above the model's top all-in trim is provably marked up", JSON.stringify(c));
+}
+check(!qualifyCeilingClaim({ quotedPrice: 60000, allInPricing: {}, msrpCeiling: CEIL }).exceeds,
+  "a listing UNDER the ceiling makes no claim");
+check(!qualifyCeilingClaim({ quotedPrice: 85995, allInPricing: {}, msrpCeiling: { ...CEIL, trimsConsidered: 1 } }).exceeds,
+  "one row is not a ladder — a ceiling taken across a single trim is refused");
+check(!qualifyCeilingClaim({ quotedPrice: 85995, msrpCeiling: CEIL }).exceeds,
+  "an ex-freight quote is never measured against an all-in ceiling");
+for (const bad of [{}, null, { quotedPrice: 85995 }, { quotedPrice: 85995, msrpCeiling: {} }] as any[]) {
+  check(!qualifyCeilingClaim(bad).exceeds, `no ceiling claim from ${JSON.stringify(bad)}`);
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} msrp claim gate: ${pass} passed, ${fail} failed`);
