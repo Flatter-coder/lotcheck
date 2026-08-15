@@ -71,6 +71,7 @@ import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
+import { powertrainCompatible } from "../_shared/model-identity.js";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -548,6 +549,15 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     const em = String(model).trim().toUpperCase(); let best: string | null = null;
     for (const row of data) {
       const cm = String(row.model || "").trim(); if (!cm) continue;
+      // Prefix-stripping is for TRIM noise, never for a powertrain suffix: an
+      // "Equinox EV" must not collapse onto the gasoline "Equinox" and inherit
+      // its sticker (measured 2026-08-12 — a BEV was reported at the gas RS's
+      // $44,942). Losing the match is the correct outcome when the catalog has
+      // no row for the actual vehicle. Dealers also write HEV and PHEV, and
+      // "Plug-in Hybrid" contains "Hybrid", so the marker set treats a plug-in
+      // as a plug-in and never reduces it to a conventional hybrid — on the
+      // 2026 RAV4 that distinction is $5,500.
+      if (!powertrainCompatible(model, cm)) continue;
       const cmU = cm.toUpperCase();
       if (em === cmU || em.startsWith(cmU + " ")) { if (!best || cm.length > best.length) best = cm; }
     }

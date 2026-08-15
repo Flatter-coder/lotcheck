@@ -31,6 +31,7 @@
     "test:quote-msrp": "node scripts/test-quote-msrp-authority.mjs",
     "test:checkpoints": "node --experimental-strip-types supabase/functions/_shared/verification-checkpoints.test.ts",
     "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
+    "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",
     "test:region-gate": "node scripts/test-region-gate.mjs"
   },
   "dependencies": {
