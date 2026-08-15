@@ -1001,20 +1001,46 @@ function useApiUsage(){
       try{
         const {data, error} = await supabase
           .from("api_usage_log")
-          .select("feature, success, input_tokens, output_tokens, cost_usd, created_at")
+          .select("feature, success, input_tokens, output_tokens, cost_usd, error_message, created_at")
           .order("created_at", {ascending:true})
           .limit(50000);
         if(error) throw error;
         if(!cancelled) setUsage(data||[]);
       }catch(err){
         console.warn("⚠️ api_usage_log fetch failed (did you run create_api_usage_log_table.sql?):", err.message);
-        if(!cancelled) setUsage([]);
+        // Blank ONLY on the very first read, where an empty panel is the honest
+        // "we have nothing" state. On a refresh, keep what we already have: a
+        // transient network blip must not wipe a populated ledger back to 0 and
+        // recreate the exact "it's not even showing" confusion this polling was
+        // added to fix.
+        if(!cancelled) setUsage(prev=>prev.length?prev:[]);
       }finally{
         if(!cancelled) setUsageLoading(false);
       }
     }
     fetchUsage();
-    return()=>{cancelled=true;};
+    // The Verification Ledger is labelled "● LIVE", but this used to fetch
+    // exactly once on mount and never again -- so a panel opened before a scan
+    // ran showed 0 checks forever and looked like nothing was happening
+    // (2026-08-15: two real rows existed, the ledger read 0). A surface that
+    // says LIVE has to actually re-read (live-data-green-dot); a one-shot
+    // snapshot wearing a live badge is the misleading-label class we keep
+    // fixing everywhere else.
+    //
+    // 45s is frequent enough that a scan shows up while you are still looking
+    // at the panel, and this is an admin-only, single-viewer surface. Also
+    // re-reads the moment the tab regains focus, which is when you actually
+    // look at it after running a scan in another window.
+    const id=setInterval(fetchUsage,45_000);
+    const onFocus=()=>{ if(document.visibilityState==="visible") fetchUsage(); };
+    document.addEventListener("visibilitychange",onFocus);
+    window.addEventListener("focus",onFocus);
+    return()=>{
+      cancelled=true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange",onFocus);
+      window.removeEventListener("focus",onFocus);
+    };
   },[]);
 
   return {usage, usageLoading};
@@ -4164,6 +4190,15 @@ function VerifExtrudedStack({C, intervals, peak, labelEvery}){
 // flat and quiet. State is a chip, not a shape — and `unmeasured` is hollow,
 // never green, because nothing writes those values yet and a green row for
 // something we do not measure is the false all-clear this panel exists to stop.
+//
+// `info` is NEUTRAL GREY, never green. It used to render teal-at-half-opacity,
+// which at 9px is just green: "URL scans 4" sat in the same colour as a passing
+// check while every actual checkpoint below it was hollow (Vic, 2026-08-15:
+// "4 scans 2 green look the things it miss how it can be green?"). A count is
+// not a verdict. Volume tells you something HAPPENED; it says nothing about
+// whether the reports were any good — which is exactly the false all-clear this
+// panel exists to prevent, one step removed. Green is reserved for a state
+// something actually passed.
 function VerifRowList({C, rows, picked, onPick}){
   return (
     <div>
@@ -4176,12 +4211,17 @@ function VerifRowList({C, rows, picked, onPick}){
                      borderBottom:`1px solid ${C.line}`,borderRadius:6,
                      background: picked === r.id ? C.tealBg : "transparent"}}>
           <span style={{width:9,height:9,borderRadius:2,flex:"none",
-            background: r.state === "unmeasured" ? "transparent" : r.state === "bad" ? C.coral : C.teal,
-            border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none",
-            opacity: r.state === "info" ? 0.5 : 1}}/>
+            background: r.state === "unmeasured" ? "transparent"
+                      : r.state === "bad" ? C.coral
+                      : r.state === "info" ? C.inkFaint
+                      : C.teal,
+            border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none"}}/>
           <span style={{fontSize:14,color:C.ink,flex:1}}>{r.name}</span>
           <span style={{fontSize:14,fontWeight:800,
-            color: r.state === "bad" ? C.coralInk : r.state === "unmeasured" ? C.inkFaint : C.tealInk}}>{r.value}</span>
+            color: r.state === "bad" ? C.coralInk
+                 : r.state === "unmeasured" ? C.inkFaint
+                 : r.state === "info" ? C.ink
+                 : C.tealInk}}>{r.value}</span>
           <span style={{fontSize:12.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",
                         minWidth:200,textAlign:"right"}}>{r.note}</span>
         </div>
@@ -5012,6 +5052,25 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   const totFail=intervals.reduce((a,r)=>a+r.fail,0);
   const tot=totOk+totFail;
   const rate=tot?((totOk/tot)*100).toFixed(1):null;
+  // Per-feature volume. `tot` above counts EVERY row, which was fine while
+  // analyze-listing-url was the only writer -- but analyze-quote started
+  // logging on 2026-08-15, so an upload would have been silently counted as a
+  // URL scan. Same window as the intervals, so the two agree.
+  const winStart=intervals.length?intervals[0].start.getTime():0;
+  const winEnd=intervals.length?intervals[intervals.length-1].end.getTime():0;
+  const inWindow=(apiUsage||[]).filter(r=>{
+    const t=new Date(r.created_at).getTime();
+    return !isNaN(t)&&t>=winStart&&t<winEnd;
+  });
+  const totUrl=inWindow.filter(r=>r.feature==="listing_url").length;
+  const totQuote=inWindow.filter(r=>r.feature==="quote").length;
+  // Delivered, but missing core points -- logged as success with a "degraded:"
+  // note. Counting these as clean successes is what made a hollow report look
+  // identical to a complete one.
+  const isDegraded=r=>r.success&&typeof r.error_message==="string"&&r.error_message.startsWith("degraded:");
+  const totDegraded=inWindow.filter(isDegraded).length;
+  const totUrlDegraded=inWindow.filter(r=>r.feature==="listing_url"&&isDegraded(r)).length;
+  const totQuoteDegraded=inWindow.filter(r=>r.feature==="quote"&&isDegraded(r)).length;
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
   const loaded=!apiUsageLoading;
 
@@ -5023,11 +5082,18 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       ({id, name, value:"—", note:needs, state:"unmeasured", proof});
     const rows = [
       {sec:"VOLUME"},
-      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(tot),
-       note:"api_usage_log", state:"info",
-       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run."},
-      unmeasured("file","Uploaded files (PDF path)","logUsage in analyze-quote",
-        "Invisible, not zero. analyze-quote writes no telemetry at all — not even api_usage_log — so uploaded quotes cannot be counted until logUsage is mirrored into it."),
+      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(totUrl),
+       // The count alone reads as an all-clear, so carry the health beside it.
+       note:totUrlDegraded>0?`${totUrlDegraded} incomplete · feature=listing_url`:"api_usage_log · feature=listing_url",
+       state:totUrlDegraded>0?"bad":"info",
+       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run. Counted by feature — before 2026-08-15 this figure counted EVERY row, so once uploads started logging they would have been miscounted as URL scans."},
+      {id:"degraded", name:"Delivered but incomplete", value:apiUsageLoading?"…":vnum(totDegraded),
+       note:"success=true · degraded", state:totDegraded>0?"bad":"info",
+       proof:"Reports that were delivered and charged for, but reached the buyer missing one or more core points (price, MSRP, VIN, recalls, APR). These log as success because a report WAS returned — this row is what stops a hollow report reading as a clean one. A non-zero count here is the number of people who paid and got less than the product promises."},
+      {id:"file", name:"Uploaded files (PDF path)", value:apiUsageLoading?"…":vnum(totQuote),
+       note:totQuoteDegraded>0?`${totQuoteDegraded} incomplete · feature=quote`:"api_usage_log · feature=quote",
+       state:totQuoteDegraded>0?"bad":"info",
+       proof:"Every upload analyze-quote logged in this window, pass and fail together. Wired 2026-08-15 — before that this path wrote no telemetry at all, which is why an expired API key took the product down unnoticed. A row logged success:true but carrying a 'degraded: missing …' note means a report was delivered without some of its core points (price, MSRP, VIN, recalls, APR) — delivered is not the same as complete."},
       {sec:"DELIVERY"},
     ];
     if (ledger) {
@@ -8458,7 +8524,11 @@ function QuoteCheckPage(){
     })();
     return ()=>{ active=false; };
   },[user,giftPending]);
-  const [status,setStatus]=useState("idle"); // idle | analyzing | done | error
+  const [status,setStatus]=useState("idle"); // idle | analyzing | choose | done | error
+  // Set when one uploaded image turned out to hold several different vehicles
+  // (a Google "Sponsored Vehicles" carousel, a dealer results page). We ask
+  // which one rather than reporting on whichever the model saw first.
+  const [vehicleChoices,setVehicleChoices]=useState(null);
   const [scanMsg,setScanMsg]=useState(""); // rotating progress line shown while status==="analyzing"
   // Brief (900ms) success beat shown in the full-screen ScanTakeover right as
   // a scan actually finishes -- tracked separately from `status` because the
@@ -8754,6 +8824,156 @@ function QuoteCheckPage(){
     return HEIC_EXTENSIONS.some(ext=>lower.endsWith(ext));
   }
 
+  // ── Vision normalization ───────────────────────────────────────────────────
+  // Claude's vision API hard-rejects a single image over ~5MB, and it scales
+  // anything past ~1568px on the long edge down before the model ever sees it.
+  // We were sending the raw file: the client allowed 15MB and the edge function
+  // allowed a 20M-char base64, so every upload in the ~5-15MB band sailed past
+  // both guards and came back a 400 from Anthropic, surfacing as the generic
+  // "The analysis service returned an error" card (confirmed 2026-08-15 on a
+  // PNG screenshot of a Google results page). Sending oversized bytes never
+  // bought detail -- it only bought that failure.
+  //
+  // Tall screenshots are THE primary upload here (screenshot-first directive),
+  // and naively fitting a 1920x9000 capture inside 1568 on the long edge would
+  // squeeze it to ~334px wide -- every number on it unreadable. So width is
+  // what we cap; height is SLICED into overlapping tiles that each stay within
+  // budget and each keep full horizontal resolution. Claude reads them as one
+  // continuous page (the server labels them top-to-bottom and says so).
+  const VISION_MAX_W=1568;        // Anthropic's own downscale target
+  const VISION_MAX_TILE_H=1568;   // keep each tile within the same budget
+  const VISION_TILE_OVERLAP=110;  // px repeated between tiles so a line of text
+                                  // split across a seam is whole in one of them
+  const VISION_MAX_TILES=8;       // hard ceiling on request weight
+  const VISION_JPEG_QUALITY=0.92;
+  // Tiling exists for SCROLLING SCREENSHOTS -- a capture of a whole web page,
+  // which is narrow and enormously tall. An ordinary phone photo of a paper
+  // quote is ~3:4 and reads fine as one downscaled image; slicing it would
+  // double the request weight and cost for the most common upload while
+  // helping nothing. So the trigger is the aspect ratio, not raw height.
+  const VISION_TALL_RATIO=2.2;
+  // Long edge of the cheap triage frame. Small enough to cost roughly a tenth
+  // of a full read, large enough to count distinct vehicle cards on a grid.
+  const VISION_TRIAGE_MAX_EDGE=800;
+
+  async function decodeImage(file){
+    // createImageBitmap is the fast path and avoids EXIF orientation quirks on
+    // iOS; the <img> fallback keeps older/locked-down browsers working rather
+    // than handing the person a dead end (own-the-process-no-user-limits).
+    if(typeof globalThis.createImageBitmap==="function"){
+      try{ return await globalThis.createImageBitmap(file); }catch{}
+    }
+    const url=URL.createObjectURL(file);
+    try{
+      return await new Promise((resolve,reject)=>{
+        const img=new Image();
+        img.onload=()=>resolve(img);
+        img.onerror=()=>reject(new Error("decode failed"));
+        img.src=url;
+      });
+    } finally { setTimeout(()=>URL.revokeObjectURL(url),0); }
+  }
+
+  function canvasToBase64(canvas,quality){
+    return new Promise((resolve,reject)=>{
+      if(canvas.toBlob){
+        canvas.toBlob((blob)=>{
+          if(!blob) return reject(new Error("encode failed"));
+          const reader=new FileReader();
+          reader.onload=()=>resolve(reader.result.split(",")[1]);
+          reader.onerror=()=>reject(new Error("encode read failed"));
+          reader.readAsDataURL(blob);
+        },"image/jpeg",quality);
+      } else {
+        try{ resolve(canvas.toDataURL("image/jpeg",quality).split(",")[1]); }
+        catch(e){ reject(e); }
+      }
+    });
+  }
+
+  // Returns [{b64, mediaType}] -- one entry for a normal image, several for a
+  // tall screenshot. Throws only if the image can't be decoded at all; the
+  // caller falls back to sending the original bytes so a normalization bug can
+  // never be the thing that blocks a report.
+  async function normalizeImageForVision(file){
+    const bmp=await decodeImage(file);
+    const srcW=bmp.width||bmp.naturalWidth, srcH=bmp.height||bmp.naturalHeight;
+    if(!srcW||!srcH) throw new Error("no dimensions");
+
+    const isTall=srcH/srcW>=VISION_TALL_RATIO;
+    let outW,outH;
+    if(isTall){
+      // Keep full horizontal detail and slice vertically (below).
+      const scale=Math.min(1,VISION_MAX_W/srcW);
+      outW=Math.max(1,Math.round(srcW*scale));
+      outH=Math.max(1,Math.round(srcH*scale));
+    } else {
+      // Ordinary photo/screenshot: one image, fit inside the long-edge cap.
+      const scale=Math.min(1,VISION_MAX_W/Math.max(srcW,srcH));
+      outW=Math.max(1,Math.round(srcW*scale));
+      outH=Math.max(1,Math.round(srcH*scale));
+    }
+
+    // A page so tall it would exceed the tile ceiling gets scaled down the rest
+    // of the way rather than truncated -- a shorter read of the WHOLE page beats
+    // a sharp read of its top third (report-never-empty).
+    const stride=VISION_MAX_TILE_H-VISION_TILE_OVERLAP;
+    if(isTall){
+      const tilesNeeded=outH<=VISION_MAX_TILE_H?1:Math.ceil((outH-VISION_TILE_OVERLAP)/stride);
+      if(tilesNeeded>VISION_MAX_TILES){
+        const maxH=VISION_MAX_TILE_H+stride*(VISION_MAX_TILES-1);
+        const extra=maxH/outH;
+        outW=Math.max(1,Math.round(outW*extra));
+        outH=Math.max(1,Math.round(outH*extra));
+      }
+    }
+
+    const canvas=document.createElement("canvas");
+    const ctx=canvas.getContext("2d");
+    const out=[];
+    if(!isTall||outH<=VISION_MAX_TILE_H){
+      canvas.width=outW; canvas.height=outH;
+      ctx.drawImage(bmp,0,0,srcW,srcH,0,0,outW,outH);
+      out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
+    } else {
+      for(let top=0,n=0;top<outH&&n<VISION_MAX_TILES;top+=stride,n++){
+        const h=Math.min(VISION_MAX_TILE_H,outH-top);
+        if(h<=0) break;
+        canvas.width=outW; canvas.height=h;
+        ctx.clearRect(0,0,outW,h);
+        // Map this destination slice back to its source rectangle.
+        const sy=(top/outH)*srcH, sh=(h/outH)*srcH;
+        ctx.drawImage(bmp,0,sy,srcW,sh,0,0,outW,h);
+        out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
+        if(top+h>=outH) break;
+      }
+    }
+    // Cheap triage frame: the WHOLE image at low resolution, used to answer
+    // one question before we pay for the expensive read -- "is this one
+    // vehicle or a page full of them?" A dealer inventory grid costs us a
+    // full multi-tile vision read today and returns a picker we deliberately
+    // don't charge for, so one credit could fund unlimited paid reads
+    // (cost-exploit-guards). Classifying on ~1/10th the tokens collapses that.
+    // Only produced when the upload is big enough to be worth screening --
+    // a single-tile phone photo of a quote skips this entirely and pays no
+    // latency for it.
+    let triage=null;
+    if(out.length>1){
+      try{
+        const tScale=Math.min(1,VISION_TRIAGE_MAX_EDGE/Math.max(srcW,srcH));
+        const tw=Math.max(1,Math.round(srcW*tScale)),th=Math.max(1,Math.round(srcH*tScale));
+        canvas.width=tw; canvas.height=th;
+        ctx.clearRect(0,0,tw,th);
+        ctx.drawImage(bmp,0,0,srcW,srcH,0,0,tw,th);
+        triage={b64:await canvasToBase64(canvas,0.8),mediaType:"image/jpeg"};
+      }catch(e){ /* triage is an optimization, never a requirement */ }
+    }
+
+    if(bmp.close) try{ bmp.close(); }catch{}
+    if(!out.length) throw new Error("no tiles");
+    return {tiles:out,triage};
+  }
+
   // Load the server-authoritative balance whenever auth changes. Signed-out ->
   // no balance (the header chip falls back to the free-check state). Signed-in ->
   // call fn_my_credits (RLS-scoped to the caller). Handles both a single-object
@@ -8825,7 +9045,10 @@ function QuoteCheckPage(){
     return false;
   };
 
-  const handleFile=async(file)=>{
+  // focusVehicle: set when the person has picked one car out of a screenshot
+  // that showed several (see the "choose" status). It re-runs the SAME file,
+  // pinned to that vehicle -- this is the pass that actually costs a credit.
+  const handleFile=async(file,focusVehicle=null)=>{
     if(!file) return;
     if(!gateAttempt()) return;
     const heic=isHeic(file);
@@ -8847,6 +9070,7 @@ function QuoteCheckPage(){
     // Fresh email state per scan -- otherwise a second report in the same
     // session would inherit "sent" from the first and never auto-send again.
     setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
+    setVehicleChoices(null);
 
     try{
       // Convert HEIC/HEIF to JPEG entirely in the browser before anything
@@ -8871,10 +9095,33 @@ function QuoteCheckPage(){
         reader.readAsDataURL(fileToSend);
       });
 
+      // Images get normalized/sliced to stay inside Claude's vision limits (see
+      // normalizeImageForVision). PDFs go through untouched -- they take the
+      // document path server-side, which has its own limits. Any failure here
+      // falls back to the original bytes: a normalization bug must never be the
+      // reason someone can't get a report.
+      const isPdfUpload=(fileToSend.type||"")==="application/pdf";
+      let images=null,triageImage=null;
+      if(!isPdfUpload){
+        try{
+          const norm=await normalizeImageForVision(fileToSend);
+          images=norm.tiles; triageImage=norm.triage;
+        }
+        catch(normErr){ console.warn("Image normalization failed; sending original bytes.",normErr); }
+      }
+
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
         method:"POST",
         headers:await buildAnalyzeHeaders(),
-        body:JSON.stringify({fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
+        body:JSON.stringify(Object.assign(
+          images&&images.length
+            ? {images,mediaType:"image/jpeg",fileBase64:images[0].b64}
+            : {fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"},
+          // Skipped once they've chosen — the second pass is already committed
+          // to one vehicle, so there's nothing left to triage.
+          triageImage&&!focusVehicle?{triageImage}:{},
+          focusVehicle?{focusVehicle}:{},
+        )),
       });
 
       // Out of credits -> not an analysis failure. Return to idle and open the
@@ -8899,6 +9146,15 @@ function QuoteCheckPage(){
       if(!res.ok||data.error){
         setStatus("error");
         setErrorMsg(data.error||"Something went wrong analyzing that quote.");
+        return;
+      }
+      // Several cars in one image (a Google ad carousel, a dealer results
+      // page). We never guess which one — reporting a real price against the
+      // wrong vehicle is the worst thing this product can do. No credit was
+      // charged for this pass; the choice triggers the real, paid read.
+      if(data.needsVehicleChoice&&Array.isArray(data.vehicles)&&data.vehicles.length){
+        setVehicleChoices({list:data.vehicles,pageKind:data.pageKind||"several_vehicles",totalSeen:data.totalSeen||data.vehicles.length});
+        setStatus("choose");
         return;
       }
       setAnalysis(await finalizeReport(data.analysis));
@@ -9005,6 +9261,7 @@ function QuoteCheckPage(){
     // Fresh email state per scan -- otherwise a second report in the same
     // session would inherit "sent" from the first and never auto-send again.
     setEmailInput(""); setEmailStatus("idle"); setEmailErr("");
+    setVehicleChoices(null);
 
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
@@ -9087,6 +9344,7 @@ function QuoteCheckPage(){
     setErrorMsg("");
     setFileName("");
     setUrlInput("");
+    setVehicleChoices(null);
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -9434,7 +9692,24 @@ function QuoteCheckPage(){
               </div>
 
               <div style={{color:C.ink,fontWeight:1000,marginBottom:6}}>Drop your quote here, paste a screenshot, or snap a photo</div>
-              <div style={{color:C.inkFaint,fontSize:13}}>PDF or photo of a paper quote — takes a couple of seconds to analyze</div>
+              <div style={{color:C.inkFaint,fontSize:13}}>PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB · takes a couple of seconds to analyze</div>
+              {/* Say what a good upload looks like BEFORE the attempt, not in an
+                  error afterwards. Every line here is a real failure we've seen
+                  and can prevent (own-the-process-no-user-limits). */}
+              <div style={{marginTop:14,textAlign:"left",display:"inline-block",background:C.tealBg,border:`1px solid ${C.teal}44`,borderRadius:12,padding:"12px 16px",maxWidth:420}}>
+                <div style={{fontSize:11.5,fontWeight:900,color:C.tealInk,letterSpacing:".5px",marginBottom:8}}>FOR A CLEAN SCAN</div>
+                {[
+                  "Include the price and any fee lines — that's what gets checked",
+                  "A full-page screenshot works better than a cropped one",
+                  "One vehicle per upload; if a page shows several, we'll ask which",
+                  "Straight-on and in focus — glare and angle hide the fine print",
+                ].map((tip,i)=>(
+                  <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:i===3?0:6}}>
+                    <span aria-hidden="true" style={{flex:"0 0 auto",width:5,height:5,borderRadius:"50%",background:C.teal,marginTop:6}}/>
+                    <span style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.5}}>{tip}</span>
+                  </div>
+                ))}
+              </div>
               {/* Scope, answered before it's asked: LotCheck covers every
                   condition — the #1 user question ("is this for new or used?")
                   should never need asking. Chips, not fine print. */}
@@ -9476,6 +9751,66 @@ function QuoteCheckPage(){
             <ScanTakeover C={C} cardStyle={cardStyle} phase="success"
               attemptType={lastAttemptType} fileName={fileName}/>
           )}
+
+          {/* Several cars in one screenshot -- ask which, never guess. Putting
+              a real price against the wrong vehicle is the worst failure this
+              product has, so this is a deliberate stop rather than a silent
+              pick. Nothing has been charged at this point. */}
+          {status==="choose"&&vehicleChoices&&Array.isArray(vehicleChoices.list)&&(()=>{
+            const isGrid=vehicleChoices.pageKind==="inventory_results";
+            return (
+            <div style={{...cardStyle,padding:"26px 24px"}}>
+              <div style={{fontWeight:1000,fontSize:17,color:C.ink,marginBottom:6}}>
+                {isGrid
+                  ? "That's a search results page, not one vehicle"
+                  : `That screenshot shows ${vehicleChoices.list.length} vehicles`}
+              </div>
+              <div style={{fontSize:13.5,color:C.inkSoft,marginBottom:4,lineHeight:1.6}}>
+                {isGrid
+                  ? <>It lists {vehicleChoices.totalSeen>vehicleChoices.list.length?`about ${vehicleChoices.totalSeen} cars`:"several cars"}, and the cards don't carry a VIN — so a report built from this page couldn't check recalls or confirm the exact car. <b>Open the vehicle you want and upload that page instead</b>, and you'll get the full report.</>
+                  : "Pick the one you want checked and LotCheck will run the full report on it."}
+              </div>
+              <div style={{fontSize:12,color:C.inkFaint,marginBottom:18}}>
+                Nothing has been used from your balance — you're only charged for a report you actually get.
+              </div>
+              {isGrid&&(
+                <div style={{fontSize:11.5,fontWeight:900,color:C.inkFaint,letterSpacing:".4px",marginBottom:8}}>
+                  WHAT WE READ ON THIS PAGE
+                </div>
+              )}
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {vehicleChoices.list.map((v,i)=>{
+                  const title=[v.year,v.make,v.model,v.trim].filter(Boolean).join(" ")||v.label||`Vehicle ${i+1}`;
+                  const sub=[
+                    v.price?`$${Number(v.price).toLocaleString("en-CA")}`:null,
+                    v.stockNumber?`Stock ${v.stockNumber}`:null,
+                    v.duplicateCount>1?`${v.duplicateCount} listed at this price`:null,
+                    v.dealerName,
+                  ].filter(Boolean).join(" · ");
+                  return (
+                    <button key={i}
+                      onClick={()=>{ if(lastFile) handleFile(lastFile,v.label||title); }}
+                      style={{textAlign:"left",background:C.card,border:`2px solid ${C.line}`,borderRadius:12,padding:"13px 15px",cursor:"pointer",color:C.ink,transition:"border-color .15s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal;}}
+                      onMouseLeave={e=>{e.currentTarget.style.borderColor=C.line;}}>
+                      <div style={{fontWeight:900,fontSize:14.5}}>{title}</div>
+                      {sub&&<div style={{fontSize:12.5,color:C.inkFaint,marginTop:3}}>{sub}</div>}
+                    </button>
+                  );
+                })}
+              </div>
+              {isGrid&&(
+                <div style={{fontSize:11.5,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+                  You can still pick one above — the report will cover that configuration, but without a VIN it can't include the VIN check or recall lookup for that exact car.
+                </div>
+              )}
+              <button onClick={reset}
+                style={{marginTop:16,background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 18px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:"pointer"}}>
+                Upload something else
+              </button>
+            </div>
+            );
+          })()}
 
           {status==="error"&&(
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>

@@ -57,6 +57,7 @@ import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
+import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +75,38 @@ const ANTHROPIC_MODEL = Deno.env.get("ANTHROPIC_MODEL") ?? "claude-sonnet-5";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+// ── Usage log ──────────────────────────────────────────────────────────────
+// This function had NO logging of any kind -- not on success, not on failure.
+// Every photo/PDF upload was invisible in api_usage_log, so when a real upload
+// failed in production (2026-08-15, an oversized PNG) there was literally
+// nothing to query and the cause had to be found by reading source. The URL
+// scanner has logged per-run since day one; the upload path -- the primary
+// path under screenshot-first -- never did. Same shape as
+// analyze-listing-url's so both features aggregate together, with
+// feature:"quote" to tell them apart.
+//
+// Fail-open by construction: a telemetry failure must never surface to the
+// person or cost them their report.
+async function logUsage(fields: {
+  success: boolean;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  errorMessage?: string | null;
+}) {
+  try {
+    const { error } = await supabase.from("api_usage_log").insert({
+      feature: "quote",
+      success: fields.success,
+      input_tokens: fields.inputTokens ?? null,
+      output_tokens: fields.outputTokens ?? null,
+      error_message: fields.errorMessage ?? null,
+    });
+    if (error) console.warn("api_usage_log insert failed:", error.message);
+  } catch (err) {
+    console.warn("api_usage_log insert threw:", err);
+  }
+}
 
 // ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
 // A personal credit is deducted ONLY after an accurate result is delivered,
@@ -270,9 +303,22 @@ async function fetchWithRetry(input: string, init: RequestInit, opts: RetryOpts)
   throw new Error(`fetchWithRetry exhausted its time budget (${opts.label ?? input})`);
 }
 
-const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a photo of a paper quote). Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
+// focusVehicle: set when the person has already picked one car out of a
+// multi-vehicle image (see vehiclesOnPage below). It pins the extraction to
+// that car so the second pass can't drift to a neighbouring listing.
+function buildExtractionPrompt(focusVehicle?: string | null): string {
+  const focus = (focusVehicle ?? "").trim().slice(0, 200);
+  const focusBlock = focus
+    ? `\n\nIMPORTANT -- THIS IMAGE CONTAINS SEVERAL VEHICLES AND THE PERSON HAS ALREADY CHOSEN ONE:\nExtract ONLY this vehicle: "${focus}".\nIgnore every other vehicle in the image completely -- do not blend their prices, trims, fees or specs into your answer. Set "vehiclesOnPage" to null. If you genuinely cannot find that vehicle in the image, return nulls rather than substituting a different one.`
+    : "";
+  return EXTRACTION_PROMPT_BASE + focusBlock;
+}
+
+const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing, or a screenshot of one. Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
 
 {
+  "pageKind": "single_vehicle"|"several_vehicles"|"inventory_results",
+  "vehiclesOnPage": null | [ { "label": string, "year": number|null, "make": string|null, "model": string|null, "trim": string|null, "price": number|null, "stockNumber": string|null, "dealerName": string|null } ],
   "year": number|null,
   "make": string|null,
   "model": string|null,
@@ -310,6 +356,11 @@ const EXTRACTION_PROMPT = `You are reading a car dealership quote (a PDF or a ph
 }
 
 Field notes:
+- "pageKind" and "vehiclesOnPage": THE FIRST THING TO DECIDE, before reading any number. How many DIFFERENT vehicles for sale does this image show?
+  * "single_vehicle" -- one car: a dealer quote, a window sticker, one listing/detail page. Several photos OF THE SAME car, or one car shown with several finance/lease term options, is still ONE vehicle. Set "vehiclesOnPage" to null and fill in every other field normally.
+  * "several_vehicles" -- a handful (roughly 2 to 8) of DIFFERENT cars shown side by side, e.g. a Google "Sponsored Vehicles" ad carousel or a small comparison row. List each one in "vehiclesOnPage" and set every other field to null.
+  * "inventory_results" -- a dealer's search-results / inventory grid: many vehicle cards in a grid, often with a result counter ("200 Items Matching"), pagination, filter controls, "Compare" checkboxes, or many near-identical cars of the same trim at the same price differing only by stock number. List what you can read in "vehiclesOnPage" and set every other field to null.
+  In BOTH multi-vehicle cases: do NOT pick one, do not merge them, do not average them. "label" is how a person would recognise the car on screen, e.g. "2026 Toyota RAV4 Plug-In Hybrid GR Sport AWD - $85,995 - Okotoks Toyota". Include "stockNumber" whenever a stock/inventory number is visible -- on an inventory grid it is often the ONLY thing distinguishing two otherwise identical cards, so it matters.
 - "dealerName": the dealership's business name, if shown anywhere on the quote (letterhead, header/footer, contact block). Do not include the city as part of this field -- that's separate.
 - "dealerCity": the city (and province if visible, e.g. "Calgary, AB") of the dealership, if shown. Needed to tell apart dealers that share a common brand name -- there are many different "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
@@ -332,7 +383,19 @@ Deno.serve(async (req: Request) => {
   let holdId: string | null = null;
 
   try {
-    const { fileBase64, mediaType } = await req.json();
+    const body = await req.json();
+    const { fileBase64, mediaType } = body;
+    // Set on the SECOND pass, after the person picked one car out of a
+    // multi-vehicle screenshot (see the vehiclesOnPage branch below).
+    const focusVehicle: string | null = typeof body?.focusVehicle === "string" && body.focusVehicle.trim()
+      ? body.focusVehicle.trim().slice(0, 200)
+      : null;
+    // `images` (new): the client normalizes/slices photos to stay inside
+    // Claude's vision limits and sends the tiles here, top-to-bottom. A tall
+    // screenshot arrives as several slices of ONE page, not several pages.
+    // `fileBase64` stays the only path for PDFs and the fallback for an older
+    // cached client, so this is additive.
+    const rawImages: any[] = Array.isArray(body?.images) ? body.images : [];
 
     if (!fileBase64 || !mediaType) {
       return new Response(JSON.stringify({ error: "Missing file data." }), {
@@ -348,6 +411,44 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
+    }
+
+    // Claude rejects any single image over ~5MB outright. This guard used to
+    // not exist, so an oversized upload sailed past the 20M-char check above,
+    // came back a 400 from Anthropic, and surfaced as the generic "analysis
+    // service returned an error" card with nothing logged (2026-08-15, a PNG
+    // screenshot of a Google results page). The client now slices images so
+    // this should be unreachable -- it stays as the belt-and-braces backstop
+    // that names the real problem instead of a mystery 502.
+    // Anthropic applies its per-image size limit to the BASE64 string, not the
+    // raw bytes, and separately hard-rejects anything over 8000px on a side.
+    // The exact byte cap is genuinely ambiguous: the docs say 10MB for the
+    // direct API, but the only rejection threshold anyone has actually
+    // OBSERVED in an error string is 5242880 (5 MiB), which is also still the
+    // live Bedrock/Vertex value. Rather than guess between them, this sits at
+    // the documented 10MB so we never falsely refuse an image Anthropic would
+    // have accepted -- and the logUsage call below now records the real
+    // Anthropic status, error text and payload size on every rejection, so if
+    // the true ceiling is 5MB the evidence will show up in api_usage_log and
+    // this can be tightened against data instead of assumption.
+    //
+    // Largely academic in practice: the client slices images into ~1568px
+    // tiles a few hundred KB each, so this only guards the fallback path where
+    // normalization failed and the original bytes went out.
+    const VISION_B64_CAP = 10_000_000;
+    const images = rawImages
+      .filter((im) => im && typeof im.b64 === "string" && im.b64.length > 0)
+      .slice(0, 8)
+      .map((im) => ({ b64: im.b64 as string, mediaType: typeof im.mediaType === "string" ? im.mediaType : "image/jpeg" }));
+    const oversized = images.find((im) => im.b64.length > VISION_B64_CAP)
+      || (!images.length && mediaType !== "application/pdf" && fileBase64.length > VISION_B64_CAP ? { b64: fileBase64 } : null);
+    if (oversized) {
+      console.error(`Image exceeds vision cap: ${oversized.b64.length} b64 chars (cap ${VISION_B64_CAP}).`);
+      await logUsage({ success: false, errorMessage: `image over vision cap (${oversized.b64.length} b64 chars)` });
+      return new Response(
+        JSON.stringify({ error: "That image is too large to analyze. Try a screenshot of just the pricing section, or save it as a JPG first." }),
+        { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
     }
 
     // Authorize a credit hold before any expensive work (signed-in only).
@@ -382,9 +483,69 @@ Deno.serve(async (req: Request) => {
     }
 
     const isPdf = mediaType === "application/pdf";
-    const docBlock = isPdf
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }
-      : { type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } };
+    // Multi-slice uploads carry a note so the model reads them as ONE tall page
+    // rather than several unrelated photos -- without it, a quote split across
+    // a seam reads as two partial documents and the totals stop reconciling.
+    const sliceNote = images.length > 1
+      ? [{ type: "text", text: `The ${images.length} images above are vertical slices of ONE tall page, in order from top to bottom, with a small overlap between consecutive slices. Read them together as a single continuous document -- do not treat them as separate vehicles, quotes, or pages, and do not double-count a line that appears in the overlap.` }]
+      : [];
+    const docBlocks = isPdf
+      ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }]
+      : images.length
+        ? images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.b64 } }))
+        : [{ type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } }];
+
+    // Set by the triage pass below when it proves this image can't produce a
+    // single-vehicle report; short-circuits the expensive read entirely.
+    let extractedFromTriage: any = null;
+
+    // ---- Step 0: cheap triage -- how many vehicles, before we pay to read ----
+    // A dealer inventory grid (House of Cars: 1198 results, ~16 different makes
+    // on one screen) used to cost a full multi-tile vision read and then return
+    // a picker we deliberately don't charge for. Since fn_release_quote DELETES
+    // the hold, the credit is never consumed -- so ONE credit could fund
+    // unlimited paid reads. This classifies first on a small frame at roughly a
+    // tenth of the tokens, so the abusive path costs cents-per-hundred instead
+    // of dollars, WITHOUT rate-limiting a real buyer (cost-exploit-guards).
+    //
+    // The client only sends triageImage for multi-tile uploads, so an ordinary
+    // phone photo of a quote pays neither the latency nor the tokens. Any
+    // failure here falls through to the full read -- a screening optimization
+    // must never be able to block a legitimate report.
+    const triageImage = body?.triageImage;
+    if (!focusVehicle && triageImage && typeof triageImage.b64 === "string" && triageImage.b64.length < VISION_B64_CAP) {
+      try {
+        const tRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: ANTHROPIC_MODEL,
+            max_tokens: 700,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: typeof triageImage.mediaType === "string" ? triageImage.mediaType : "image/jpeg", data: triageImage.b64 } },
+              { type: "text", text: `Look at this image of a car dealership page or document. Answer ONLY with this JSON, no prose, no code fences:\n{"pageKind":"single_vehicle"|"several_vehicles"|"inventory_results","vehiclesOnPage":null|[{"label":string,"year":number|null,"make":string|null,"model":string|null,"trim":string|null,"price":number|null,"stockNumber":string|null}]}\n\n"single_vehicle" = one car: a quote, a window sticker, one listing/detail page. Several photos of the SAME car, or one car with several finance/lease options, is still ONE vehicle -> set vehiclesOnPage to null.\n"several_vehicles" = roughly 2-8 DIFFERENT cars side by side, e.g. an ad carousel.\n"inventory_results" = a search-results / inventory grid: many vehicle cards, often a result counter ("1198 Results"), filters, pagination, or many near-identical cars differing only by stock number.\nFor the two multi-vehicle kinds, list what you can read. Ignore promotional banners and tiles that advertise offers rather than a specific car.` },
+            ] }],
+          }),
+        }, { timeoutMs: 25_000, maxAttempts: 1, budgetMs: 28_000, label: "anthropic-quote-triage" });
+        if (tRes.ok) {
+          const tData = await tRes.json();
+          const tText = (tData?.content?.find((b: any) => b?.type === "text")?.text ?? "").replace(/```json|```/g, "").trim();
+          const tParsed = JSON.parse(tText);
+          const tKind = typeof tParsed?.pageKind === "string" ? tParsed.pageKind : null;
+          const tList = Array.isArray(tParsed?.vehiclesOnPage) ? tParsed.vehiclesOnPage : [];
+          if (tKind === "several_vehicles" || tKind === "inventory_results" || tList.length > 1) {
+            // Stop here -- never pay for the full read on a page we can't report
+            // on anyway. extracted is synthesized so the existing multi-vehicle
+            // branch below handles the response in exactly one place.
+            extractedFromTriage = { pageKind: tKind ?? "several_vehicles", vehiclesOnPage: tList };
+            console.log(`Triage stopped an expensive read: ${tKind}, ${tList.length} vehicles (input_tokens=${tData?.usage?.input_tokens}).`);
+            await logUsage({ success: false, inputTokens: tData?.usage?.input_tokens ?? null, outputTokens: tData?.usage?.output_tokens ?? null, errorMessage: `triage: ${tKind}, ${tList.length} vehicles -- full read skipped (not charged)` });
+          }
+        }
+      } catch (e) {
+        console.warn("Triage pass failed (ignored, proceeding to full read):", (e as Error)?.message);
+      }
+    }
 
     // ---- Step 1: Claude reads the document ----
     // A big PDF can make this the slow part, so allow a generous per-attempt
@@ -392,7 +553,7 @@ Deno.serve(async (req: Request) => {
     // comfortably under Supabase's ~150s ceiling. On timeout/network exhaustion
     // fetchWithRetry throws → the outer catch releases the credit hold (no
     // strand); a spent-budget 5xx returns non-ok → the !ok branch below releases.
-    const anthropicRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
+    const anthropicRes = extractedFromTriage ? null : await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -410,14 +571,22 @@ Deno.serve(async (req: Request) => {
         // case; max_tokens is a ceiling, not a target.
         max_tokens: 4000,
         messages: [
-          { role: "user", content: [docBlock, { type: "text", text: EXTRACTION_PROMPT }] },
+          { role: "user", content: [...docBlocks, ...sliceNote, { type: "text", text: buildExtractionPrompt(focusVehicle) }] },
         ],
       }),
     }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
 
-    if (!anthropicRes.ok) {
+    if (anthropicRes && !anthropicRes.ok) {
       const errText = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errText);
+      // This path shipped a user-visible failure and logged NOTHING, so the
+      // 2026-08-15 PNG failure left zero rows in api_usage_log and had to be
+      // diagnosed by reading source instead of querying. A failure the user
+      // can see must always be a failure we can query.
+      await logUsage({
+        success: false,
+        errorMessage: `Anthropic HTTP ${anthropicRes.status}: ${errText.slice(0, 300)} | slices=${images.length || 1} | b64=${(images[0]?.b64 ?? fileBase64).length}`,
+      });
       await releaseCredit(holdId);
       holdId = null;
       return new Response(
@@ -426,13 +595,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const data = await anthropicRes.json();
-    const textBlock = data.content?.find((b: any) => b.type === "text");
+    const data = anthropicRes ? await anthropicRes.json() : null;
+    const textBlock = data?.content?.find((b: any) => b.type === "text");
     const rawText = textBlock?.text ?? "";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
 
     let extracted: any;
-    try {
+    if (extractedFromTriage) {
+      // Triage already proved this is a multi-vehicle page; the branch below
+      // turns it into the picker response. No expensive read was made.
+      extracted = extractedFromTriage;
+    } else try {
       extracted = JSON.parse(cleaned);
     } catch {
       // Same diagnostic shape added to analyze-listing-url after that
@@ -451,6 +624,71 @@ Deno.serve(async (req: Request) => {
         { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
+
+    // ---- Step 1b: several cars in one image -> ask, never guess ----
+    // A screenshot of a Google "Sponsored Vehicles" carousel or a dealer
+    // search-results page shows five cars at once. Silently reporting on
+    // whichever one the model happened to latch onto would put a real price
+    // against the wrong vehicle -- the exact class of misleading output the
+    // invariants exist to stop. So we return the list and let the person pick.
+    //
+    // CRITICALLY: no credit is charged here. The hold is released and the
+    // person pays only when they come back with a choice and get a real
+    // report (never-charge-for-a-report-we-couldn't-build).
+    const rawVehicles = Array.isArray(extracted?.vehiclesOnPage)
+      ? extracted.vehiclesOnPage
+          .filter((v: any) => v && typeof v === "object")
+          .slice(0, 40)
+          .map((v: any) => ({
+            label: typeof v.label === "string" ? v.label.slice(0, 160) : null,
+            year: Number.isFinite(Number(v.year)) ? Number(v.year) : null,
+            make: typeof v.make === "string" ? v.make : null,
+            model: typeof v.model === "string" ? v.model : null,
+            trim: typeof v.trim === "string" ? v.trim : null,
+            price: Number(v.price) > 0 ? Number(v.price) : null,
+            stockNumber: typeof v.stockNumber === "string" ? v.stockNumber.slice(0, 40) : null,
+            dealerName: typeof v.dealerName === "string" ? v.dealerName : null,
+          }))
+          .filter((v: any) => v.label || v.model)
+      : [];
+    // Collapse identical configurations. An inventory grid routinely shows the
+    // same trim at the same price five times over, differing only by stock
+    // number -- listing those as five separate choices is noise the person
+    // can't act on, and looks careless (dealers-are-adversaries). One row per
+    // distinct year+make+model+trim+price, carrying how many there were.
+    const byConfig = new Map<string, any>();
+    for (const v of rawVehicles) {
+      const key = [v.year, v.make, v.model, v.trim, v.price].map((x) => String(x ?? "")).join("|").toLowerCase();
+      const seen = byConfig.get(key);
+      if (seen) { seen.duplicateCount = (seen.duplicateCount ?? 1) + 1; continue; }
+      byConfig.set(key, { ...v, duplicateCount: 1 });
+    }
+    const vehiclesOnPage = [...byConfig.values()].slice(0, 12);
+    const pageKind = typeof extracted?.pageKind === "string" ? extracted.pageKind : null;
+    // An inventory grid can't produce a VIN-accurate report: the cards carry no
+    // VIN, and several identical cars share a price. Say so and point at the
+    // single-vehicle page rather than inviting a pick that would be a guess.
+    const isInventoryGrid = pageKind === "inventory_results"
+      || rawVehicles.length > 8
+      || rawVehicles.length > vehiclesOnPage.length; // duplicates present == a grid
+    if (!focusVehicle && (vehiclesOnPage.length > 1 || isInventoryGrid)) {
+      await releaseCredit(holdId);
+      holdId = null;
+      await logUsage({ success: false, errorMessage: `multi-vehicle image (${pageKind ?? "unknown"}): ${rawVehicles.length} seen / ${vehiclesOnPage.length} distinct, awaiting choice (not charged)` });
+      console.log(`Multi-vehicle image [${pageKind}]: ${rawVehicles.length} seen, ${vehiclesOnPage.length} distinct; returning picker, no credit charged.`);
+      return new Response(
+        JSON.stringify({
+          needsVehicleChoice: true,
+          pageKind: isInventoryGrid ? "inventory_results" : (pageKind ?? "several_vehicles"),
+          totalSeen: rawVehicles.length,
+          vehicles: vehiclesOnPage,
+        }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+    // A single-vehicle read must never carry the multi-vehicle scaffolding forward.
+    delete extracted.vehiclesOnPage;
+    delete extracted.pageKind;
 
     // ---- Step 2: Verification -- look up the REAL MSRP in our own catalog ----
     // Resolve the vehicle's CANONICAL base model first (e.g. "Palisade Ultimate
@@ -517,11 +755,31 @@ Deno.serve(async (req: Request) => {
     // release a hold we've decided to charge. `analysis` is unchanged either way.
     const credits = await captureCredit(holdId);
     holdId = null;
+    // "success" has meant "we returned HTTP 200", which is NOT the same as "the
+    // buyer got a report worth paying for". A read that recovers no price, no
+    // MSRP and no VIN still logged as a clean success, so the admin panel
+    // counted a hollow report exactly like a complete one (Vic, 2026-08-15:
+    // "that will 100% wrong and misleading"). Record WHAT was missing so a
+    // degraded delivery is visible as degraded. Note is written even on
+    // success -- error_message is the only free-text column this table has.
+    const missing: string[] = [];
+    if (!(Number(analysis.quotedPrice) > 0)) missing.push("price");
+    if (!(Number(analysis.msrp) > 0)) missing.push("msrp");
+    if (!analysis.vin) missing.push("vin");
+    if (!analysis.recalls) missing.push("recalls");
+    if (!(Number(analysis.financing?.rate) > 0)) missing.push("apr");
+    await logUsage({
+      success: true,
+      inputTokens: data?.usage?.input_tokens ?? null,
+      outputTokens: data?.usage?.output_tokens ?? null,
+      errorMessage: missing.length ? `degraded: missing ${missing.join(",")}` : null,
+    });
     return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("analyze-quote error:", err);
+    await logUsage({ success: false, errorMessage: String(err).slice(0, 400) });
     // Any throw after a hold was placed must not charge the user.
     await releaseCredit(holdId);
     holdId = null;
@@ -1044,7 +1302,13 @@ function computeLeverageScore(analysis: any): void {
   let score = 2.0;
   const msrp = Number(analysis.msrp) || null;
   const quoted = Number(analysis.quotedPrice) || null;
-  if (msrp && quoted) {
+  // An over/under-MSRP claim requires an EXACT trim match, same rule the report
+  // surfaces enforce via msrpBasis. Without this the score narrated "priced
+  // $23,900 over MSRP" off a base-trim FLOOR -- and did it inside a note that
+  // says "computed only from the verified findings above, not an opinion", so
+  // the report made the same false accusation twice, the second time branded
+  // as verified. A floor tells you nothing about how this unit is priced.
+  if (msrp && quoted && analysis.msrpBasis === "exact") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) { score += Math.min(2.5, deltaPct * 100 * 0.3); basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`); }
     else if (deltaPct < -0.02) { score -= 1.0; basis.push(`already priced below MSRP`); }
@@ -1071,24 +1335,47 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
 
   const vehicle = [year, make, model, trim].filter(Boolean).join(" ") || null;
 
+  // ONE rule for who wins between a dealer-stated MSRP and our catalog, shared
+  // with the listing path (_shared/msrp-authority.js). This path used to have
+  // its own unguarded copy, and it was the IONIQ 9 defamation bug still live:
+  // `verifiedMsrp ?? statedMsrpOnDocument` let ANY catalog hit win regardless
+  // of match quality, so a trim missing from the catalog fell through to
+  // "model_only_approximate" -- which returns the CHEAPEST row for the model --
+  // and then wrote, verbatim and signed, that a named dealer's $81,499 window
+  // sticker should have been $59,999. The 2026-08-13 fix only ever landed on
+  // analyze-listing-url; this path never imported the shared resolver at all.
+  //
+  // basis is the whole safeguard: only a genuine "exact" trim match may
+  // displace the dealer's number or support an inflation callout. A fuzzy
+  // substring match (ilike '%trim%', limit 1, no ordering) and a model-level
+  // floor are both "starting_at" -- honest references, never accusations.
   const verifiedMsrp = msrpLookup.value ?? null;
-  const msrp = verifiedMsrp ?? statedMsrpOnDocument ?? null;
+  const catalogBasis = msrpLookup.matchType === "exact" ? "exact" : "starting_at";
+  const decided = resolveMsrpAuthority({
+    statedMsrp: Number(statedMsrpOnDocument) || 0,
+    ref: verifiedMsrp != null
+      ? { msrp: Number(verifiedMsrp), trim: msrpLookup.trim ?? null, basis: catalogBasis, sourceUrl: null }
+      : null,
+    make: make ?? null,
+  });
+  const msrp = decided.msrp || null;
+  const msrpSource = decided.source;
+  const msrpBasis = decided.basis;
 
-  const msrpSource = verifiedMsrp
-    ? (msrpLookup.matchType === "exact" ? "verified" : "verified_approximate")
-    : (statedMsrpOnDocument ? "dealer_stated" : "unavailable");
-
-  const mismatch =
-    verifiedMsrp != null &&
-    statedMsrpOnDocument != null &&
-    Math.abs(statedMsrpOnDocument - verifiedMsrp) / verifiedMsrp > 0.02;
-
+  // The accusation now comes only from the resolver, which requires an EXACT
+  // trim match AND its own materiality floor (>3% and >$800) -- not the bare
+  // 2%-off-a-possibly-wrong-number test this used to run.
   let summary = extracted.summary || "";
-  if (mismatch) {
-    const direction = statedMsrpOnDocument > verifiedMsrp ? "higher" : "lower";
+  if (decided.inflation) {
     summary +=
       (summary ? " " : "") +
-      `Also worth flagging: this quote lists MSRP as $${statedMsrpOnDocument.toLocaleString()}, but the verified manufacturer MSRP for this trim is $${verifiedMsrp.toLocaleString()} -- ${direction} than what's shown.`;
+      `Also worth flagging: this quote lists MSRP as $${Number(decided.inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(decided.inflation.manufacturer).toLocaleString()} -- $${Number(decided.inflation.overBy).toLocaleString()} higher than the published figure.`;
+  } else if (decided.reference && Number(decided.reference.msrp) > 0) {
+    // A floor is context, not a claim: state it as the model's starting price
+    // and never call it "the verified MSRP for this trim".
+    summary +=
+      (summary ? " " : "") +
+      `For reference, ${decided.reference.make || make || "the manufacturer"} publishes this model${decided.reference.trim ? ` (${decided.reference.trim})` : ""} from $${Number(decided.reference.msrp).toLocaleString()} -- trim, options and drivetrain sit above that, so this isn't a like-for-like comparison with the quoted figure.`;
   }
 
   const addOns = Array.isArray(extracted.addOns) ? extracted.addOns : [];
@@ -1107,6 +1394,17 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     dealerName: dealerName ?? null,
     dealerCity: dealerCity ?? null,
     msrp,
+    // Top-level provenance, so the shared invariants actually APPLY to this
+    // path. They were written to catch exactly this bug but gated on
+    // msrpSource/msrpBasis/msrpInflation, which the quote path never set --
+    // it buried them in msrpVerification below, which nothing reads. That is
+    // why MSRP_HAS_PROVENANCE could fail on every quote report and still ship.
+    msrpSource,
+    msrpBasis,
+    ...(decided.trim ? { msrpTrim: decided.trim } : {}),
+    ...(decided.dealerStatedMsrp ? { dealerStatedMsrp: decided.dealerStatedMsrp } : {}),
+    ...(decided.inflation ? { msrpInflation: decided.inflation } : {}),
+    ...(decided.reference ? { msrpReference: decided.reference } : {}),
     quotedPrice: quotedPrice ?? null,
     vin: extracted.vin ?? null,
     odometerKm: extracted.odometerKm ?? null,
@@ -1119,10 +1417,12 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     // Not rendered yet -- available for the "Verified"/"Estimated" badge
     // whenever you're ready to build it. Harmless to include now.
     msrpVerification: {
-      source: msrpSource, // "verified" | "verified_approximate" | "dealer_stated" | "unavailable"
+      source: msrpSource,
+      basis: msrpBasis,
+      catalogMatchType: msrpLookup.matchType ?? null,
       verifiedValue: verifiedMsrp,
       statedOnDocument: statedMsrpOnDocument ?? null,
-      mismatch,
+      mismatch: !!decided.inflation,
       matchedTrim: msrpLookup.trim ?? null,
       verifiedAsOf: msrpLookup.fetchedAt ?? null,
     },
