@@ -92,6 +92,14 @@ jobs:
       # keeps a tall page both readable and inside the limit.
       - name: Vision tiling geometry (uploaded screenshots stay readable and in-budget)
         run: npm run test:vision-tiling
+      # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
+      # the LISTING path only; a dealer red-team found the identical accusation
+      # still live on the UPLOAD path, which carried its own unguarded copy and
+      # imported none of the shared MSRP modules. Both paths now share one rule:
+      # only an exact trim match may displace a dealer's stated MSRP or support
+      # an inflation callout. This pins that on the upload side specifically.
+      - name: Quote-path MSRP authority (a catalog floor is never an accusation)
+        run: npm run test:quote-msrp
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was

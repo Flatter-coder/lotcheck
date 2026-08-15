@@ -57,6 +57,7 @@ import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
+import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1283,7 +1284,13 @@ function computeLeverageScore(analysis: any): void {
   let score = 2.0;
   const msrp = Number(analysis.msrp) || null;
   const quoted = Number(analysis.quotedPrice) || null;
-  if (msrp && quoted) {
+  // An over/under-MSRP claim requires an EXACT trim match, same rule the report
+  // surfaces enforce via msrpBasis. Without this the score narrated "priced
+  // $23,900 over MSRP" off a base-trim FLOOR -- and did it inside a note that
+  // says "computed only from the verified findings above, not an opinion", so
+  // the report made the same false accusation twice, the second time branded
+  // as verified. A floor tells you nothing about how this unit is priced.
+  if (msrp && quoted && analysis.msrpBasis === "exact") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) { score += Math.min(2.5, deltaPct * 100 * 0.3); basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`); }
     else if (deltaPct < -0.02) { score -= 1.0; basis.push(`already priced below MSRP`); }
@@ -1310,24 +1317,47 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
 
   const vehicle = [year, make, model, trim].filter(Boolean).join(" ") || null;
 
+  // ONE rule for who wins between a dealer-stated MSRP and our catalog, shared
+  // with the listing path (_shared/msrp-authority.js). This path used to have
+  // its own unguarded copy, and it was the IONIQ 9 defamation bug still live:
+  // `verifiedMsrp ?? statedMsrpOnDocument` let ANY catalog hit win regardless
+  // of match quality, so a trim missing from the catalog fell through to
+  // "model_only_approximate" -- which returns the CHEAPEST row for the model --
+  // and then wrote, verbatim and signed, that a named dealer's $81,499 window
+  // sticker should have been $59,999. The 2026-08-13 fix only ever landed on
+  // analyze-listing-url; this path never imported the shared resolver at all.
+  //
+  // basis is the whole safeguard: only a genuine "exact" trim match may
+  // displace the dealer's number or support an inflation callout. A fuzzy
+  // substring match (ilike '%trim%', limit 1, no ordering) and a model-level
+  // floor are both "starting_at" -- honest references, never accusations.
   const verifiedMsrp = msrpLookup.value ?? null;
-  const msrp = verifiedMsrp ?? statedMsrpOnDocument ?? null;
+  const catalogBasis = msrpLookup.matchType === "exact" ? "exact" : "starting_at";
+  const decided = resolveMsrpAuthority({
+    statedMsrp: Number(statedMsrpOnDocument) || 0,
+    ref: verifiedMsrp != null
+      ? { msrp: Number(verifiedMsrp), trim: msrpLookup.trim ?? null, basis: catalogBasis, sourceUrl: null }
+      : null,
+    make: make ?? null,
+  });
+  const msrp = decided.msrp || null;
+  const msrpSource = decided.source;
+  const msrpBasis = decided.basis;
 
-  const msrpSource = verifiedMsrp
-    ? (msrpLookup.matchType === "exact" ? "verified" : "verified_approximate")
-    : (statedMsrpOnDocument ? "dealer_stated" : "unavailable");
-
-  const mismatch =
-    verifiedMsrp != null &&
-    statedMsrpOnDocument != null &&
-    Math.abs(statedMsrpOnDocument - verifiedMsrp) / verifiedMsrp > 0.02;
-
+  // The accusation now comes only from the resolver, which requires an EXACT
+  // trim match AND its own materiality floor (>3% and >$800) -- not the bare
+  // 2%-off-a-possibly-wrong-number test this used to run.
   let summary = extracted.summary || "";
-  if (mismatch) {
-    const direction = statedMsrpOnDocument > verifiedMsrp ? "higher" : "lower";
+  if (decided.inflation) {
     summary +=
       (summary ? " " : "") +
-      `Also worth flagging: this quote lists MSRP as $${statedMsrpOnDocument.toLocaleString()}, but the verified manufacturer MSRP for this trim is $${verifiedMsrp.toLocaleString()} -- ${direction} than what's shown.`;
+      `Also worth flagging: this quote lists MSRP as $${Number(decided.inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(decided.inflation.manufacturer).toLocaleString()} -- $${Number(decided.inflation.overBy).toLocaleString()} higher than the published figure.`;
+  } else if (decided.reference && Number(decided.reference.msrp) > 0) {
+    // A floor is context, not a claim: state it as the model's starting price
+    // and never call it "the verified MSRP for this trim".
+    summary +=
+      (summary ? " " : "") +
+      `For reference, ${decided.reference.make || make || "the manufacturer"} publishes this model${decided.reference.trim ? ` (${decided.reference.trim})` : ""} from $${Number(decided.reference.msrp).toLocaleString()} -- trim, options and drivetrain sit above that, so this isn't a like-for-like comparison with the quoted figure.`;
   }
 
   const addOns = Array.isArray(extracted.addOns) ? extracted.addOns : [];
@@ -1346,6 +1376,17 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     dealerName: dealerName ?? null,
     dealerCity: dealerCity ?? null,
     msrp,
+    // Top-level provenance, so the shared invariants actually APPLY to this
+    // path. They were written to catch exactly this bug but gated on
+    // msrpSource/msrpBasis/msrpInflation, which the quote path never set --
+    // it buried them in msrpVerification below, which nothing reads. That is
+    // why MSRP_HAS_PROVENANCE could fail on every quote report and still ship.
+    msrpSource,
+    msrpBasis,
+    ...(decided.trim ? { msrpTrim: decided.trim } : {}),
+    ...(decided.dealerStatedMsrp ? { dealerStatedMsrp: decided.dealerStatedMsrp } : {}),
+    ...(decided.inflation ? { msrpInflation: decided.inflation } : {}),
+    ...(decided.reference ? { msrpReference: decided.reference } : {}),
     quotedPrice: quotedPrice ?? null,
     vin: extracted.vin ?? null,
     odometerKm: extracted.odometerKm ?? null,
@@ -1358,10 +1399,12 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     // Not rendered yet -- available for the "Verified"/"Estimated" badge
     // whenever you're ready to build it. Harmless to include now.
     msrpVerification: {
-      source: msrpSource, // "verified" | "verified_approximate" | "dealer_stated" | "unavailable"
+      source: msrpSource,
+      basis: msrpBasis,
+      catalogMatchType: msrpLookup.matchType ?? null,
       verifiedValue: verifiedMsrp,
       statedOnDocument: statedMsrpOnDocument ?? null,
-      mismatch,
+      mismatch: !!decided.inflation,
       matchedTrim: msrpLookup.trim ?? null,
       verifiedAsOf: msrpLookup.fetchedAt ?? null,
     },

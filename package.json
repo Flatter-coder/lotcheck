@@ -27,7 +27,8 @@
     "test:flywheel": "node --experimental-strip-types supabase/functions/_shared/fee-vocab.test.ts",
     "test:jsonld-vehicle": "node scripts/test-jsonld-vehicle.mjs",
     "test:convertus-vms": "node scripts/test-convertus-vms.mjs",
-    "test:vision-tiling": "node scripts/test-vision-tiling.mjs"
+    "test:vision-tiling": "node scripts/test-vision-tiling.mjs",
+    "test:quote-msrp": "node scripts/test-quote-msrp-authority.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
