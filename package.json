@@ -36,7 +36,8 @@
     "test:region-gate": "node scripts/test-region-gate.mjs",
     "test:catalog-guard": "node scripts/test-catalog-guard.mjs",
     "test:bp-summary": "node scripts/test-bp-summary.mjs",
-    "test:supersede": "node scripts/test-supersede-enrichment.mjs"
+    "test:supersede": "node scripts/test-supersede-enrichment.mjs",
+    "check:migrations": "node scripts/check-migration-columns.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

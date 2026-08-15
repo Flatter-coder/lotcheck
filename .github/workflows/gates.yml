@@ -85,6 +85,8 @@ jobs:
         run: npm run test:bp-summary
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
+      - name: Migration columns exist (a 42703 must not reach the SQL editor)
+        run: npm run check:migrations
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
