@@ -75,18 +75,66 @@ export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
   return { rows: out, carried };
 }
 
-async function carryForward(table, rows, make, headers, url) {
-  if (table !== "msrp_catalog") return rows;
-  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}` +
-            `&select=year,model,trim,${CARRY_FORWARD.join(",")}&limit=5000`;
-  const res = await fetch(q, { headers });
-  if (!res.ok) { console.warn(`  ⚠️ carry-forward read failed (HTTP ${res.status}); enrichment may be lost.`); return rows; }
-  const { rows: out, carried } = mergeCarryForward(rows, await res.json());
-  if (carried) console.log(`  carried forward ${carried} enrichment value(s) for ${make}.`);
-  return out;
+// PostgREST bulk INSERT requires EVERY object in the array to carry an
+// identical key set; a batch whose objects disagree is rejected whole with
+// HTTP 400 PGRST102 "All object keys must match". mergeCarryForward produces
+// exactly that shape -- rows that matched a previous row gain `drivetrain` etc,
+// rows that matched nothing do not -- so the moment any enrichment carried
+// forward, that make's entire INSERT failed. Because the DELETE had already
+// committed, the make was left EMPTY. That is what destroyed 471 rows across
+// 12 makes on 2026-08-14 (Kia, Honda, Ford, Mazda, Nissan, Subaru, VW ... all
+// went to zero), and the daily/weekly refresh would have done it again.
+//
+// Normalising to the union of keys is the class fix: it holds for any future
+// column any code path adds conditionally, not just the four carried today.
+// `id` is never sent -- the database owns it.
+const NEVER_SEND = new Set(["id"]);
+export function uniformKeys(rows) {
+  const all = new Set();
+  for (const r of rows || []) for (const k of Object.keys(r)) if (!NEVER_SEND.has(k)) all.add(k);
+  const cols = [...all];
+  return (rows || []).map((r) => {
+    const out = {};
+    for (const c of cols) out[c] = r[c] === undefined ? null : r[c];
+    return out;
+  });
 }
 
-async function replaceRows(table, rows, make, { fatal = true, upsert = false } = {}) {
+// A scrape that returns SOME rows is not proof the source is healthy. Toyota's
+// lineup came back as 7 rows on 2026-08-14 (bZ, bZ Woodland, C-HR -- no RAV4,
+// Corolla, Camry, Highlander, Tacoma, Tundra, Sienna, Prius), the delete ran on
+// the strength of it, and the run reported "replaced with 7 rows" as success.
+// The pre-existing guard only fires at EXACTLY zero, so one row armed it.
+//
+// Refuse instead: a stale catalog is recoverable, a deleted one is not. A
+// genuine lineup cut (a make discontinuing half its models) is rare enough to
+// be worth a human confirming via CATALOG_ALLOW_COLLAPSE=1.
+export const COLLAPSE_FLOOR = 10;   // below this a make is too small to judge
+export const COLLAPSE_DROP  = 0.5;  // losing >50% of a make needs a human
+export function assessCollapse(prevCount, nextCount, { floor = COLLAPSE_FLOOR, drop = COLLAPSE_DROP } = {}) {
+  if (!(prevCount >= floor)) return { collapse: false };
+  if (nextCount >= prevCount * (1 - drop)) return { collapse: false };
+  return {
+    collapse: true,
+    reason: `would drop ${prevCount} -> ${nextCount} rows (${Math.round((1 - nextCount / prevCount) * 100)}% loss)`,
+  };
+}
+
+// Read the make's full current rows ONCE: they feed carry-forward, the collapse
+// check, and -- if the insert fails -- the restore.
+async function readExisting(table, make, headers, url) {
+  const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
+  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}&select=*&limit=5000`;
+  const res = await fetch(q, { headers });
+  if (!res.ok) return { ok: false, rows: [] };
+  return { ok: true, rows: await res.json() };
+}
+
+// Exported so the Toyota/Lexus (tci-stack) and FCA (fca-stack) scrapers use
+// THIS implementation instead of their own copies. Those copies had neither the
+// empty-scrape guard nor carry-forward, which is why Toyota was cut from a full
+// lineup to 7 rows on 2026-08-14 with the run still reporting success.
+export async function replaceRows(table, rows, make, { fatal = true, upsert = false } = {}) {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const headers = { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" };
   // An empty scrape must NEVER wipe good data. Delete-then-insert with zero
@@ -115,13 +163,48 @@ async function replaceRows(table, rows, make, { fatal = true, upsert = false } =
     // the manufacturer's own published page (Land Cruiser, Mach-E). A scraper
     // refresh must never wipe them -- exactly what happened on 2026-08-11.
     // Read the enrichment BEFORE the delete, or there is nothing left to read.
-    rows = await carryForward(table, rows, make, headers, url);
+    // Read the current rows BEFORE anything destructive: they are the
+    // enrichment source, the collapse baseline, and the restore copy.
+    const prev = await readExisting(table, make, headers, url);
+    if (!prev.ok) console.warn(`  ⚠️ could not read existing ${make} rows; enrichment may be lost and no restore is possible.`);
+    if (table === "msrp_catalog" && prev.rows.length) {
+      const { rows: merged, carried } = mergeCarryForward(rows, prev.rows);
+      if (carried) console.log(`  carried forward ${carried} enrichment value(s) for ${make}.`);
+      rows = merged;
+    }
+    // Must run AFTER the merge -- the merge is what makes the keys disagree.
+    rows = uniformKeys(rows);
+
+    const verdict = assessCollapse(prev.rows.length, rows.length);
+    if (verdict.collapse && process.env.CATALOG_ALLOW_COLLAPSE !== "1") {
+      throw new Error(
+        `REFUSED: ${table} (${make}) ${verdict.reason}. Existing rows kept untouched. ` +
+        `If the lineup really shrank, re-run with CATALOG_ALLOW_COLLAPSE=1.`);
+    }
+
     const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
     const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
-    for (let i = 0; i < rows.length; i += 500) {
-      const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
-      if (!ins.ok) throw new Error(`INSERT ${table} -> HTTP ${ins.status}: ${await ins.text()}`);
+    try {
+      for (let i = 0; i < rows.length; i += 500) {
+        const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
+        if (!ins.ok) throw new Error(`INSERT ${table} -> HTTP ${ins.status}: ${await ins.text()}`);
+      }
+    } catch (insErr) {
+      // DELETE and INSERT are two PostgREST calls with no transaction around
+      // them, so a failed insert has already destroyed the make. Put it back.
+      // This is a compensating restore, not atomicity -- but it turns silent
+      // permanent loss into a loud, recovered failure.
+      const back = uniformKeys(prev.rows);
+      let restored = 0;
+      for (let i = 0; i < back.length; i += 500) {
+        const res = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(back.slice(i, i + 500)) });
+        if (res.ok) restored += back.slice(i, i + 500).length;
+      }
+      const note = back.length === 0 ? "nothing to restore"
+        : restored === back.length ? `restored all ${restored} previous rows`
+        : `RESTORE INCOMPLETE — ${restored}/${back.length} rows recovered`;
+      throw new Error(`${insErr.message}\n  ↩ ${table} (${make}): ${note}.`);
     }
     console.log(`  ${table} (${make}): ${rows.length} rows.`);
   } catch (e) {
