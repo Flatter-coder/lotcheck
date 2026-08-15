@@ -93,6 +93,17 @@ const n = (v: unknown): number | null => {
 export type CeilingClaim = {
   /** True only when the asking price provably exceeds every trim in the line. */
   exceeds: boolean;
+  /**
+   * The model's CHEAPEST all-in figure. Together with `ceiling` this is the
+   * range the manufacturer actually charges, and it is the only MSRP figure
+   * that belongs beside an all-in asking price.
+   *
+   * An ex-freight MSRP does not: $57,500 is a real number for the GR SPORT, but
+   * it is not a price any customer can pay and Toyota publishes it nowhere as
+   * one. Printing it as "MSRP · STARTING AT" next to an $85,995 all-in ask
+   * invites exactly the comparison it cannot support.
+   */
+  floor: number | null;
   /** The model's highest all-in figure. */
   ceiling: number | null;
   /** Which trim that ceiling belongs to. */
@@ -105,10 +116,11 @@ export type CeilingClaim = {
 
 export function qualifyCeilingClaim(analysis: any): CeilingClaim {
   const a = analysis ?? {};
-  const none: CeilingClaim = { exceeds: false, ceiling: null, trim: null, over: null, trimsConsidered: 0 };
+  const none: CeilingClaim = { exceeds: false, floor: null, ceiling: null, trim: null, over: null, trimsConsidered: 0 };
 
   const c = a.msrpCeiling;
   const ceiling = n(c?.allIn);
+  const floor = n(c?.floorAllIn);
   const asking = n(a.quotedPrice);
   const trims = Number(c?.trimsConsidered) || 0;
 
@@ -119,10 +131,10 @@ export function qualifyCeilingClaim(analysis: any): CeilingClaim {
   // Only meaningful against an ALL-IN advertised price. Comparing an ex-freight
   // quote to an all-in ceiling would understate the gap and, worse, could
   // manufacture one where none exists.
-  if (!a.allInPricing) return { ...none, ceiling, trim: c?.trim ?? null, trimsConsidered: trims };
+  if (!a.allInPricing) return { ...none, floor, ceiling, trim: c?.trim ?? null, trimsConsidered: trims };
 
-  if (asking <= ceiling) return { exceeds: false, ceiling, trim: c?.trim ?? null, over: null, trimsConsidered: trims };
-  return { exceeds: true, ceiling, trim: c?.trim ?? null, over: asking - ceiling, trimsConsidered: trims };
+  if (asking <= ceiling) return { exceeds: false, floor, ceiling, trim: c?.trim ?? null, over: null, trimsConsidered: trims };
+  return { exceeds: true, floor, ceiling, trim: c?.trim ?? null, over: asking - ceiling, trimsConsidered: trims };
 }
 
 /**

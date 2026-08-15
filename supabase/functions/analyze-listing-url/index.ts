@@ -96,7 +96,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-15a";
+const CACHE_VER = "2026-08-15b";
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1003,7 +1003,8 @@ async function lookupCatalogMsrp(
       (!best || Number(r.all_in_price) > Number(best.all_in_price)) ? r : best, null);
     const out: CatalogMsrp = { ...(picked as CatalogMsrp), year: rowYear, sourceUrl: srcRow?.source_url || null, priceBasis: pbRow?.price_basis || null,
       allIn: aiRow ? Number(aiRow.all_in_price) : null,
-      ceiling: topRow ? { allIn: Number(topRow.all_in_price), trim: topRow.trim || null, trimsConsidered: ladder.length } : null };
+      ceiling: topRow ? { allIn: Number(topRow.all_in_price), trim: topRow.trim || null, trimsConsidered: ladder.length,
+        floorAllIn: Math.min(...ladder.map((r: any) => Number(r.all_in_price))) } : null };
     // An adjacent-year figure is a reference, never an exact sticker for THIS
     // model year — force the honest "starting_at" basis.
     if (rowYear !== year) out.basis = "starting_at";
