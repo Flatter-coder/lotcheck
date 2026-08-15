@@ -59,6 +59,7 @@ import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
+import { gateRequest } from "../_shared/region-gate.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -386,6 +387,25 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const { fileBase64, mediaType } = body;
+
+    // Alberta-only. Runs BEFORE the credit hold and before any vision call, so
+    // an out-of-province upload costs nothing. Region proven by an HMAC token
+    // minted by Vercel, never claimed by the browser. Fails OPEN when we cannot
+    // establish a location — see _shared/region-gate.js.
+    {
+      const gate = await gateRequest({
+        token: body?.regionToken,
+        secret: Deno.env.get("REGION_TOKEN_SECRET") ?? "",
+        selfDeclared: body?.regionSelfDeclared === true,
+      });
+      if (!gate.allow) {
+        return new Response(JSON.stringify({
+          error: "outside_service_area",
+          region: gate.region ?? null,
+          regionLabel: gate.regionLabel ?? null,
+        }), { status: 403, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+    }
     // Set on the SECOND pass, after the person picked one car out of a
     // multi-vehicle screenshot (see the vehiclesOnPage branch below).
     const focusVehicle: string | null = typeof body?.focusVehicle === "string" && body.focusVehicle.trim()

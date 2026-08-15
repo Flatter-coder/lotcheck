@@ -8,6 +8,143 @@ import heic2any from "heic2any";
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure } from "../supabase/functions/_shared/msrp-claim.ts";
 import DealOrrery from "./DealOrrery.jsx";
+
+// ---------------------------------------------------------------------------
+// Alberta-only access gate.
+//
+// LotCheck answers Alberta questions: AMVIC all-in advertising, Alberta EVAP,
+// the AMVIC dealer registry, Alberta fee benchmarks. Running a report for a
+// Manitoba buyer would give Alberta answers to a different province's question.
+//
+// /api/geo runs on Vercel, which terminates the connection and therefore is the
+// only part of the stack that sees the real IP. It returns a verdict plus a
+// short-lived HMAC token that the edge functions verify — the browser is never
+// trusted to state its own province, because the analyze functions spend real
+// vendor money.
+//
+// IP geolocation is not truth: Canadian carriers backhaul through regional
+// hubs, so a Calgary phone can resolve to Toronto. Everything below therefore
+// fails OPEN, and a visitor who is told they look out-of-province can say so
+// and continue. Refusing one paying Albertan is worse than serving a few
+// visitors we should not have.
+// ---------------------------------------------------------------------------
+const REGION_SELF_DECLARE_KEY = "lc-region-self-declared";
+let _regionState = null;
+
+function regionAttestation(){
+  return {
+    regionToken: _regionState?.token ?? null,
+    regionSelfDeclared: (()=>{ try{ return localStorage.getItem(REGION_SELF_DECLARE_KEY)==="1"; }catch{ return false; } })(),
+  };
+}
+
+function useRegionGate(){
+  const [state,setState]=useState(_regionState);
+  const [declared,setDeclared]=useState(()=>{ try{ return localStorage.getItem(REGION_SELF_DECLARE_KEY)==="1"; }catch{ return false; } });
+  useEffect(()=>{
+    if(_regionState){ setState(_regionState); return; }
+    let cancelled=false;
+    (async()=>{
+      try{
+        const res=await fetch("/api/geo",{headers:{Accept:"application/json"}});
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        _regionState=await res.json();
+      }catch(err){
+        // Fail open, loudly enough to find in the console but never to the user.
+        console.warn("region check unavailable — serving:",err?.message||err);
+        _regionState={served:true,reason:"unavailable",enforced:false,token:null,region:null,regionLabel:null};
+      }
+      if(!cancelled) setState(_regionState);
+    })();
+    return()=>{cancelled=true;};
+  },[]);
+  const declare=()=>{ try{ localStorage.setItem(REGION_SELF_DECLARE_KEY,"1"); }catch{} setDeclared(true); };
+  // Undecided (null) is NOT blocked — the check simply hasn't answered yet.
+  const blocked = !!state && state.served===false && !declared;
+  return { state, blocked, declared, declare };
+}
+
+// Shown instead of the check when a visitor resolves outside Alberta. It does
+// three jobs: say why plainly, capture the demand so an out-of-province visitor
+// becomes expansion inventory rather than a lost tab, and offer the appeal —
+// because geolocation is wrong often enough that a wall without a door would
+// cost real Alberta customers.
+function RegionBlockCard({ state, onDeclare }){
+  const [email,setEmail]=useState("");
+  const [sent,setSent]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const where = state?.regionLabel || (state?.reason==="other_country" ? "outside Canada" : "outside Alberta");
+
+  const join=async(e)=>{
+    e.preventDefault();
+    if(!email.trim()||busy) return;
+    setBusy(true);
+    try{
+      await supabase.from("region_waitlist").insert({
+        email: email.trim().toLowerCase(),
+        country: state?.country ?? null,
+        region: state?.region ?? null,
+      });
+      setSent(true);
+    }catch(err){
+      console.warn("waitlist insert failed:",err?.message||err);
+      setSent(true); // never show a failure for a signup; the address is captured or it isn't
+    }finally{ setBusy(false); }
+  };
+
+  return (
+    <div style={{maxWidth:620,margin:"48px auto",padding:"0 20px",fontFamily:"inherit"}}>
+      <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:16,padding:"28px 26px",color:"#e2e8f0"}}>
+        <div style={{fontSize:12,fontWeight:800,letterSpacing:1.4,color:"#f0997b",marginBottom:10}}>
+          ALBERTA ONLY
+        </div>
+        <h2 style={{fontSize:23,margin:"0 0 12px",lineHeight:1.3,color:"#fff"}}>
+          LotCheck isn&rsquo;t available in {where} yet
+        </h2>
+        <p style={{fontSize:15,lineHeight:1.65,color:"#cbd5e1",margin:"0 0 14px"}}>
+          Every answer LotCheck gives is an Alberta answer &mdash; AMVIC&rsquo;s all-in
+          advertising rule, Alberta EVAP rebates, the AMVIC dealer registry,
+          Alberta fee benchmarks. Running a report on a {where} listing would
+          give you Alberta answers to a different province&rsquo;s question, which is
+          worse than giving you nothing.
+        </p>
+        <p style={{fontSize:13.5,lineHeight:1.6,color:"#94a3b8",margin:"0 0 20px"}}>
+          Use outside Alberta is a breach of our{" "}
+          <a href="/terms.html" style={{color:"#16a34a"}}>Terms of Service</a>.
+        </p>
+
+        {!sent ? (
+          <form onSubmit={join} style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:18}}>
+            <input type="email" required value={email} onChange={(e)=>setEmail(e.target.value)}
+              placeholder="you@email.com" aria-label="Email for the waitlist"
+              style={{flex:"1 1 220px",background:"#020617",border:"1px solid #1e293b",borderRadius:10,
+                      padding:"12px 14px",color:"#e2e8f0",fontSize:15,fontFamily:"inherit",outline:"none"}}/>
+            <button type="submit" disabled={busy}
+              style={{background:busy?"#334155":"#16a34a",border:"none",borderRadius:10,padding:"12px 20px",
+                      color:"#fff",fontWeight:800,fontSize:15,fontFamily:"inherit",cursor:busy?"default":"pointer"}}>
+              {busy?"…":"Tell me when it opens"}
+            </button>
+          </form>
+        ) : (
+          <div style={{background:"rgba(22,163,74,.12)",border:"1px solid #16a34a",borderRadius:10,
+                       padding:"12px 14px",fontSize:14,color:"#bbf7d0",marginBottom:18}}>
+            You&rsquo;re on the list for {where}. We&rsquo;ll email you when LotCheck opens there.
+          </div>
+        )}
+
+        <div style={{borderTop:"1px solid #1e293b",paddingTop:16,fontSize:13.5,color:"#94a3b8",lineHeight:1.6}}>
+          Location is worked out from your network, and it gets it wrong &mdash;
+          Alberta carriers often route through other provinces.{" "}
+          <button onClick={onDeclare}
+            style={{background:"none",border:"none",padding:0,color:"#16a34a",fontSize:13.5,
+                    fontFamily:"inherit",fontWeight:700,textDecoration:"underline",cursor:"pointer"}}>
+            I&rsquo;m in Alberta &mdash; let me through
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 import PlanetAlerts from "./PlanetAlerts.jsx";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
@@ -8586,6 +8723,9 @@ function VerifyPage(){
 }
 
 function QuoteCheckPage(){
+  // Alberta-only gate. Hooks must run unconditionally, so this sits at the top
+  // and the early return happens after every other hook has been declared.
+  const region=useRegionGate();
   // Current signed-in user (magic-link). Single source of truth via the shared
   // hook; null when logged out. Drives the header entry point and the
   // result-first sign-in prompt below. No gating/enforcement here (Phase 2).
@@ -9249,6 +9389,9 @@ function QuoteCheckPage(){
           // to one vehicle, so there's nothing left to triage.
           triageImage&&!focusVehicle?{triageImage}:{},
           focusVehicle?{focusVehicle}:{},
+          // Alberta-only gate. The token is minted by /api/geo (Vercel sees the
+          // real IP); the browser never states its own province.
+          regionAttestation(),
         )),
       });
 
@@ -9395,7 +9538,7 @@ function QuoteCheckPage(){
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-listing-url",{
         method:"POST",
         headers:await buildAnalyzeHeaders(),
-        body:JSON.stringify({url}),
+        body:JSON.stringify({url,...regionAttestation()}),
       });
 
       // Out of credits -> not an analysis failure. Return to idle and open the
@@ -9599,6 +9742,20 @@ function QuoteCheckPage(){
   // are always genuine fees already labeled correctly).
   const addOnsHaveKind=analysis?.addOns?.some(a=>a.kind==="fee"||a.kind==="discount");
   const addOnsAreFees=addOnsHaveKind?analysis.addOns.some(a=>a.kind==="fee"):analysisSource!=="listing";
+
+  // Out of area: the check is replaced by the waitlist card. Placed AFTER every
+  // hook above so hook order never changes between renders.
+  if(region.blocked){
+    return(
+      <>
+        <style>{GLOBAL_CSS}</style>
+        <style>{QC_CSS}</style>
+        <div style={{minHeight:"100dvh",background:"#020617",fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+          <RegionBlockCard state={region.state} onDeclare={region.declare}/>
+        </div>
+      </>
+    );
+  }
 
   return(
     <>
