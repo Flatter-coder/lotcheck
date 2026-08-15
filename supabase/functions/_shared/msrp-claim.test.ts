@@ -9,7 +9,7 @@
 //
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts
-import { qualifyMsrpClaim } from "./msrp-claim.ts";
+import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
 
 let pass = 0, fail = 0;
 const fails: string[] = [];
@@ -115,6 +115,21 @@ for (const [input, label] of [
   check(comparable.length === 1 && comparable[0] === "exact",
     `EXACTLY ONE basis may ever support a claim, and it is "exact" (case-sensitive)`,
     `comparable bases: ${JSON.stringify(comparable)}`);
+}
+
+// ---- isManufacturerFigure: who gets NAMED in the copy ---------------------
+// Separate question from `comparable`. Some copy says "Ford's MSRP for this
+// model starts at $X" out loud. Saying that over a dealer-stated number hands
+// the buyer THIS DEALER's own figure relabelled as Ford's, to argue against
+// this dealer with, inside the report naming their price-gating tactic.
+check(isManufacturerFigure("exact"), "an exact MSRP may be attributed to the manufacturer by name");
+check(isManufacturerFigure("starting_at"), "a starting-at floor is still a manufacturer figure — 'starts at' is literally true");
+check(!isManufacturerFigure("dealer_stated"),
+  "a DEALER-STATED figure may NEVER be called the manufacturer's — this is the price-gating own-goal");
+check(!isManufacturerFigure("original_when_new"),
+  "an original-when-new figure is the manufacturer's, but the car is not new — excluded from 'starts at' phrasing");
+for (const b of [null, undefined, "", "EXACT", "unknown"]) {
+  check(!isManufacturerFigure(b), `basis ${JSON.stringify(b)} is not attributable to the manufacturer`);
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} msrp claim gate: ${pass} passed, ${fail} failed`);

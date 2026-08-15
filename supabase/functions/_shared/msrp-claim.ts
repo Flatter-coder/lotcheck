@@ -56,6 +56,22 @@ const n = (v: unknown): number | null => {
 };
 
 /**
+ * Did this figure come from the MANUFACTURER, or from the dealer?
+ *
+ * A separate question from `comparable`, and needed because some copy names the
+ * manufacturer out loud -- "Ford's MSRP for this model starts at $X". Saying
+ * that over a `dealer_stated` number hands the buyer the DEALER's own figure
+ * relabelled as Ford's, inside a report that is criticising that dealer's
+ * pricing. The rebuttal writes itself, and it lands.
+ *
+ * `original_when_new` IS a manufacturer figure but describes a car that is no
+ * longer new, so it is excluded from "starts at" phrasing on purpose.
+ */
+export function isManufacturerFigure(basis: unknown): boolean {
+  return basis === "exact" || basis === "starting_at";
+}
+
+/**
  * Pure. The one place that decides whether an MSRP comparison may be published.
  *
  * `analysis` is the finished analysis object from either analyze function.

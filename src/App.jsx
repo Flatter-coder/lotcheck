@@ -3,6 +3,10 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceL
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
 import heic2any from "heic2any";
+// THE SAME module the edge functions use. Not a copy — a copy is how six
+// surfaces ended up with six different answers to "may this MSRP support a
+// claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
+import { qualifyMsrpClaim, isManufacturerFigure } from "../supabase/functions/_shared/msrp-claim.ts";
 import DealOrrery from "./DealOrrery.jsx";
 import PlanetAlerts from "./PlanetAlerts.jsx";
 
@@ -7577,7 +7581,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // explanation can't drift from the evidence (claims-must-stay-backed).
   const explainFor = {
     "Price vs MSRP": priceGated
-      ? `The dealer chose not to publish a price — the page says "contact us" instead. That's a lead-capture tactic: they want you on the phone, where their salespeople control the conversation.${ms ? ` Your anchor is ${a.make || "the manufacturer"}'s MSRP, starting at ${money(ms)}.` : ""} Don't negotiate blind — get their full all-in price in writing before you visit.`
+      ? `The dealer chose not to publish a price — the page says "contact us" instead. That's a lead-capture tactic: they want you on the phone, where their salespeople control the conversation.${ms && isManufacturerFigure(a.msrpBasis) ? ` Your anchor is ${a.make || "the manufacturer"}'s MSRP, starting at ${money(ms)}.` : ""} Don't negotiate blind — get their full all-in price in writing before you visit.`
       : !qp
       ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
       : deltaOk
@@ -8447,7 +8451,15 @@ function VerifyPage(){
             {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
               const o=state.obj||{};
               const issued=o.issuedAt?new Date(o.issuedAt):null;
-              const delta=(o.price?.asking&&o.price?.msrp)?o.price.asking-o.price.msrp:0;
+              // This page is stamped "Signed & authentic — not one figure has
+              // changed", and it was publishing an over/under claim the report it
+              // authenticates explicitly refuses to make. A dealer opening the QR
+              // off the PDF saw LotCheck's own tamper-proof page assert a
+              // discount the report denied. Same rule as every other surface now.
+              const vclaim=qualifyMsrpClaim({msrp:o.price?.msrp,quotedPrice:o.price?.asking,
+                msrpBasis:o.basis?.b,msrpTrim:o.basis?.t,msrpYear:o.basis?.y,
+                year:o.year,priceVerified:o.price?.verified});
+              const delta=vclaim.delta??0;
               const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
@@ -8472,8 +8484,13 @@ function VerifyPage(){
                   <div style={{fontSize:15,fontWeight:700,color:T.heading}}>{o.vehicle||"Vehicle"}</div>
                   <div style={{fontSize:12.5,color:T.soft,fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
                   <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>
-                  {o.price?.msrp&&<Row t={o.basis?.b==="starting_at"?`MSRP · starting at${o.basis?.y?` (${o.basis.y} MY)`:""}`:(o.basis?.t?`MSRP · ${String(o.basis.t).toUpperCase()}`:(o.price.verified?"MSRP (verified)":"Catalog MSRP"))} v={money(o.price.msrp)} c={o.price.verified?"#34d399":T.soft}/>}
-                  {delta!==0&&o.basis?.b!=="starting_at"&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  {/* The label came from o.price.verified, which is the ASKING
+                      PRICE's flag, not the MSRP's — so a dealer's own unverified
+                      sticker was printed as "MSRP (verified)" in green on the
+                      verification page. The label now follows the BASIS. */}
+                  {o.price?.msrp&&<Row t={vclaim.label} v={money(o.price.msrp)} c={vclaim.comparable?"#34d399":T.soft}/>}
+                  {vclaim.comparable&&delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
+                  {!vclaim.comparable&&vclaim.refusal&&<div style={{fontSize:12,color:T.soft,lineHeight:1.5,marginTop:6}}>{vclaim.refusal}</div>}
                   <Row t="VIN" v={o.vin||"Not published — ask the dealer"} c={o.vin?undefined:T.soft}/>
                   {o.odo!=null&&<Row t="Odometer" v={`${Number(o.odo).toLocaleString()} km`}/>}
                   {o.dol&&<Row t="Days on lot" v={`${Number(o.dol.d).toLocaleString()} days${o.dol.s?` · since ${o.dol.s}`:""}`} c={o.dol.d>=90?"#f0997b":o.dol.d>=31?"#eab308":"#34d399"}/>}
@@ -10150,7 +10167,7 @@ function QuoteCheckPage(){
                     <div style={{fontSize:22,fontWeight:1000,color:gated?C.coralInk:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:gated?"Hidden by the dealer":"Not found"}</div>
                     {gated&&(
                       <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
-                        The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
+                        The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp&&isManufacturerFigure(analysis.msrpBasis)?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
                       </div>
                     )}
                     {hasMsrpCompare&&(
