@@ -8786,6 +8786,9 @@ function QuoteCheckPage(){
   // double the request weight and cost for the most common upload while
   // helping nothing. So the trigger is the aspect ratio, not raw height.
   const VISION_TALL_RATIO=2.2;
+  // Long edge of the cheap triage frame. Small enough to cost roughly a tenth
+  // of a full read, large enough to count distinct vehicle cards on a grid.
+  const VISION_TRIAGE_MAX_EDGE=800;
 
   async function decodeImage(file){
     // createImageBitmap is the fast path and avoids EXIF orientation quirks on
@@ -8879,9 +8882,30 @@ function QuoteCheckPage(){
         if(top+h>=outH) break;
       }
     }
+    // Cheap triage frame: the WHOLE image at low resolution, used to answer
+    // one question before we pay for the expensive read -- "is this one
+    // vehicle or a page full of them?" A dealer inventory grid costs us a
+    // full multi-tile vision read today and returns a picker we deliberately
+    // don't charge for, so one credit could fund unlimited paid reads
+    // (cost-exploit-guards). Classifying on ~1/10th the tokens collapses that.
+    // Only produced when the upload is big enough to be worth screening --
+    // a single-tile phone photo of a quote skips this entirely and pays no
+    // latency for it.
+    let triage=null;
+    if(out.length>1){
+      try{
+        const tScale=Math.min(1,VISION_TRIAGE_MAX_EDGE/Math.max(srcW,srcH));
+        const tw=Math.max(1,Math.round(srcW*tScale)),th=Math.max(1,Math.round(srcH*tScale));
+        canvas.width=tw; canvas.height=th;
+        ctx.clearRect(0,0,tw,th);
+        ctx.drawImage(bmp,0,0,srcW,srcH,0,0,tw,th);
+        triage={b64:await canvasToBase64(canvas,0.8),mediaType:"image/jpeg"};
+      }catch(e){ /* triage is an optimization, never a requirement */ }
+    }
+
     if(bmp.close) try{ bmp.close(); }catch{}
     if(!out.length) throw new Error("no tiles");
-    return out;
+    return {tiles:out,triage};
   }
 
   // Load the server-authoritative balance whenever auth changes. Signed-out ->
@@ -9011,9 +9035,12 @@ function QuoteCheckPage(){
       // falls back to the original bytes: a normalization bug must never be the
       // reason someone can't get a report.
       const isPdfUpload=(fileToSend.type||"")==="application/pdf";
-      let images=null;
+      let images=null,triageImage=null;
       if(!isPdfUpload){
-        try{ images=await normalizeImageForVision(fileToSend); }
+        try{
+          const norm=await normalizeImageForVision(fileToSend);
+          images=norm.tiles; triageImage=norm.triage;
+        }
         catch(normErr){ console.warn("Image normalization failed; sending original bytes.",normErr); }
       }
 
@@ -9024,6 +9051,9 @@ function QuoteCheckPage(){
           images&&images.length
             ? {images,mediaType:"image/jpeg",fileBase64:images[0].b64}
             : {fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"},
+          // Skipped once they've chosen — the second pass is already committed
+          // to one vehicle, so there's nothing left to triage.
+          triageImage&&!focusVehicle?{triageImage}:{},
           focusVehicle?{focusVehicle}:{},
         )),
       });

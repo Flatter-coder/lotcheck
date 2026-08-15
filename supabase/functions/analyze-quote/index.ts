@@ -494,13 +494,65 @@ Deno.serve(async (req: Request) => {
         ? images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.b64 } }))
         : [{ type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } }];
 
+    // Set by the triage pass below when it proves this image can't produce a
+    // single-vehicle report; short-circuits the expensive read entirely.
+    let extractedFromTriage: any = null;
+
+    // ---- Step 0: cheap triage -- how many vehicles, before we pay to read ----
+    // A dealer inventory grid (House of Cars: 1198 results, ~16 different makes
+    // on one screen) used to cost a full multi-tile vision read and then return
+    // a picker we deliberately don't charge for. Since fn_release_quote DELETES
+    // the hold, the credit is never consumed -- so ONE credit could fund
+    // unlimited paid reads. This classifies first on a small frame at roughly a
+    // tenth of the tokens, so the abusive path costs cents-per-hundred instead
+    // of dollars, WITHOUT rate-limiting a real buyer (cost-exploit-guards).
+    //
+    // The client only sends triageImage for multi-tile uploads, so an ordinary
+    // phone photo of a quote pays neither the latency nor the tokens. Any
+    // failure here falls through to the full read -- a screening optimization
+    // must never be able to block a legitimate report.
+    const triageImage = body?.triageImage;
+    if (!focusVehicle && triageImage && typeof triageImage.b64 === "string" && triageImage.b64.length < VISION_B64_CAP) {
+      try {
+        const tRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: ANTHROPIC_MODEL,
+            max_tokens: 700,
+            messages: [{ role: "user", content: [
+              { type: "image", source: { type: "base64", media_type: typeof triageImage.mediaType === "string" ? triageImage.mediaType : "image/jpeg", data: triageImage.b64 } },
+              { type: "text", text: `Look at this image of a car dealership page or document. Answer ONLY with this JSON, no prose, no code fences:\n{"pageKind":"single_vehicle"|"several_vehicles"|"inventory_results","vehiclesOnPage":null|[{"label":string,"year":number|null,"make":string|null,"model":string|null,"trim":string|null,"price":number|null,"stockNumber":string|null}]}\n\n"single_vehicle" = one car: a quote, a window sticker, one listing/detail page. Several photos of the SAME car, or one car with several finance/lease options, is still ONE vehicle -> set vehiclesOnPage to null.\n"several_vehicles" = roughly 2-8 DIFFERENT cars side by side, e.g. an ad carousel.\n"inventory_results" = a search-results / inventory grid: many vehicle cards, often a result counter ("1198 Results"), filters, pagination, or many near-identical cars differing only by stock number.\nFor the two multi-vehicle kinds, list what you can read. Ignore promotional banners and tiles that advertise offers rather than a specific car.` },
+            ] }],
+          }),
+        }, { timeoutMs: 25_000, maxAttempts: 1, budgetMs: 28_000, label: "anthropic-quote-triage" });
+        if (tRes.ok) {
+          const tData = await tRes.json();
+          const tText = (tData?.content?.find((b: any) => b?.type === "text")?.text ?? "").replace(/```json|```/g, "").trim();
+          const tParsed = JSON.parse(tText);
+          const tKind = typeof tParsed?.pageKind === "string" ? tParsed.pageKind : null;
+          const tList = Array.isArray(tParsed?.vehiclesOnPage) ? tParsed.vehiclesOnPage : [];
+          if (tKind === "several_vehicles" || tKind === "inventory_results" || tList.length > 1) {
+            // Stop here -- never pay for the full read on a page we can't report
+            // on anyway. extracted is synthesized so the existing multi-vehicle
+            // branch below handles the response in exactly one place.
+            extractedFromTriage = { pageKind: tKind ?? "several_vehicles", vehiclesOnPage: tList };
+            console.log(`Triage stopped an expensive read: ${tKind}, ${tList.length} vehicles (input_tokens=${tData?.usage?.input_tokens}).`);
+            await logUsage({ success: false, inputTokens: tData?.usage?.input_tokens ?? null, outputTokens: tData?.usage?.output_tokens ?? null, errorMessage: `triage: ${tKind}, ${tList.length} vehicles -- full read skipped (not charged)` });
+          }
+        }
+      } catch (e) {
+        console.warn("Triage pass failed (ignored, proceeding to full read):", (e as Error)?.message);
+      }
+    }
+
     // ---- Step 1: Claude reads the document ----
     // A big PDF can make this the slow part, so allow a generous per-attempt
     // timeout with one retry. Budget math: 2 × 60s + backoff ≈ 122s worst case,
     // comfortably under Supabase's ~150s ceiling. On timeout/network exhaustion
     // fetchWithRetry throws → the outer catch releases the credit hold (no
     // strand); a spent-budget 5xx returns non-ok → the !ok branch below releases.
-    const anthropicRes = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
+    const anthropicRes = extractedFromTriage ? null : await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -523,7 +575,7 @@ Deno.serve(async (req: Request) => {
       }),
     }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
 
-    if (!anthropicRes.ok) {
+    if (anthropicRes && !anthropicRes.ok) {
       const errText = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errText);
       // This path shipped a user-visible failure and logged NOTHING, so the
@@ -542,13 +594,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const data = await anthropicRes.json();
-    const textBlock = data.content?.find((b: any) => b.type === "text");
+    const data = anthropicRes ? await anthropicRes.json() : null;
+    const textBlock = data?.content?.find((b: any) => b.type === "text");
     const rawText = textBlock?.text ?? "";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
 
     let extracted: any;
-    try {
+    if (extractedFromTriage) {
+      // Triage already proved this is a multi-vehicle page; the branch below
+      // turns it into the picker response. No expensive read was made.
+      extracted = extractedFromTriage;
+    } else try {
       extracted = JSON.parse(cleaned);
     } catch {
       // Same diagnostic shape added to analyze-listing-url after that
