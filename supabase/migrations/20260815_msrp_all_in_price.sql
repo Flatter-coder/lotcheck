@@ -50,46 +50,7 @@ comment on column public.msrp_catalog.all_in_price is
   'hold only the MSRP, in which case no all-in comparison may be made. Never '
   'derive it by adding a constant — the adds vary by model and province.';
 
--- ---- 2026 RAV4 Plug-in Hybrid: complete, and reconciled to the dollar -------
--- Sources: Toyota Canada pricing release + Build & Price summaries for SE AWD,
--- XSE AWD and GR SPORT AWD (Alberta), captured 2026-08-15.
-update public.msrp_catalog set
-  all_in_price = case trim
-    when 'SE'                     then 51828
-    when 'XSE'                    then 59478
-    when 'GR SPORT'               then 60578
-    when 'XSE Technology Package' then 62428   -- 59,478 + $2,950 package
-  end,
-  attrs = coalesce(attrs, '{}'::jsonb) || jsonb_build_object(
-    'province', 'AB',
-    'all_in_breakdown', jsonb_build_object(
-      'delivery_destination', 1930,
-      'dealer_fees_max',       999,
-      'air_conditioning',      100,
-      'tire_levy',              25,
-      'ppsa_fee_finance',       14,
-      'amvic',                  10
-    ),
-    -- Toyota's own PDF carries the Alberta EVAP line as an incentive. It
-    -- appears on the SE and NOT on the XSE, which is the price ceiling doing
-    -- its work — worth surfacing rather than us re-deriving eligibility.
-    'evap_eligible', (trim = 'SE'),
-    'evap_amount',   case when trim = 'SE' then 2500 else null end,
-    'captured_from', 'toyota.ca Build & Price summary (Alberta)'
-  ),
-  fetched_at = now()
-where make ilike 'Toyota'
-  and model = 'RAV4 Plug-in Hybrid'
-  and year = 2026;
-
--- ---------------------------------------------------------------------------
--- What this makes possible, and it is the whole point:
---
--- The most expensive 2026 RAV4 Plug-in Hybrid Toyota sells is the XSE with the
--- Technology Package, at $62,428 all-in INCLUDING the maximum dealer fee. That
--- is the ceiling for this model line, from the manufacturer's own arithmetic.
---
--- A listing advertised at $85,995 all-in is $23,567 above it — and that holds
--- WITHOUT pinning the trim, because there is no higher grade to name. It is the
--- most generous possible assumption in the dealer's favour and it still lands.
--- ---------------------------------------------------------------------------
+-- NOTE: populating all_in_price for the RAV4 rows lives at the END of
+-- 20260815_seed_rav4_phev_msrp.sql, NOT here. It has to run AFTER the rows
+-- exist. Running it here matched zero rows on a fresh database and left every
+-- all_in_price null while reporting success (hit for real 2026-08-15).
