@@ -4752,33 +4752,47 @@ function VerifPackEconomics({C}){
                               fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.user_pays_per_scan)}</span>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:3}}>
-                <span style={{fontSize:12.5,color:C.inkFaint}}>Costs us / scan</span>
+                <span style={{fontSize:12.5,color:C.inkFaint}}>Scan cost (Claude)</span>
                 <span style={{fontSize:15,fontWeight:800,color:C.coralInk,
-                              fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.costs_us_per_scan,3)}</span>
+                              fontFamily:"ui-monospace,Menlo,monospace"}}>−{cad(p.scan_cost_per_pack)}</span>
+              </div>
+              {/* Stripe on its own line. On the $4.99 tier the processor costs
+                  more than fifteen times the compute — the flat 30c lands
+                  hardest on the smallest basket. */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginTop:3}}>
+                <span style={{fontSize:12.5,color:C.inkFaint}}>Stripe fee</span>
+                <span style={{fontSize:15,fontWeight:800,color:C.coralInk,
+                              fontFamily:"ui-monospace,Menlo,monospace"}}>−{cad(p.stripe_fee_cad)}</span>
+              </div>
+              <div style={{fontSize:11.5,color:C.inkFaint,textAlign:"right",marginTop:1}}>
+                {p.stripe_pct_of_price}% of the sale
               </div>
 
               <div style={{borderTop:`1px solid ${C.line}`,marginTop:9,paddingTop:9}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
-                  <span style={{fontSize:12.5,color:C.inkFaint}}>Profit / pack</span>
+                  <span style={{fontSize:12.5,color:C.inkFaint}}>Net profit / pack</span>
                   <span style={{fontSize:16,fontWeight:800,color:C.tealInk,
-                                fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.profit_per_pack)}</span>
+                                fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.net_profit_per_pack)}</span>
                 </div>
-                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.margin_pct}% margin</div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.net_margin_pct}% after both costs</div>
               </div>
 
               <div style={{marginTop:9,fontSize:12.5,color:C.ink,lineHeight:1.55}}>
                 <b>{vnum(p.packs_to_pay_bills)}</b> sold covers the month
-                <div style={{fontSize:11.5,color:C.inkFaint}}>= {vnum(p.scans_to_pay_bills)} scans</div>
               </div>
             </div>
           ))}
         </div>
 
         <div style={{fontSize:12.5,color:C.inkFaint,marginTop:12,lineHeight:1.65}}>
-          Cost per scan is <b>{d.cost_basis}</b> — Claude tokens for reading the listing. A report sells
-          for {cad(packs[0]?.user_pays_per_scan||0)}–{cad(packs[packs.length-1]?.user_pays_per_scan||0)} and
-          costs about {cad(d.cost_per_scan_cad,3)} to produce, so the fixed {cad(d.fixed_month_cad)} a month
-          is the entire battle. Cover it and the rest is margin.
+          Scan cost is <b>{d.cost_basis}</b> — Claude tokens for reading the listing, about{" "}
+          {cad(d.cost_per_scan_cad,3)} each. Stripe is {d.stripe_fee_pct}% + {cad(d.stripe_fee_fixed_cad)}
+          {" "}per sale, which on the smallest pack costs{" "}
+          <b style={{color:C.coralInk}}>
+            {packs[0] ? Math.round(Number(packs[0].stripe_fee_cad)/Math.max(Number(d.cost_per_scan_cad),0.0001)) : "—"}×
+          </b>{" "}
+          the compute — the flat {cad(d.stripe_fee_fixed_cad)} lands hardest on the smallest basket, which is
+          the argument for the 3- and 5-packs. Both rates live in admin_config; international cards cost more.
         </div>
       </>)}
     </div>
