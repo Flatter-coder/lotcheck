@@ -90,7 +90,13 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // Bump on ANY logic change that affects report content. Cached rows written
 // by an older version are treated as misses and re-scanned -- this replaces
 // the manual "DELETE FROM listing_analysis_cache" step after every deploy.
-const CACHE_VER = "2026-08-14e";
+// BUMP THIS WHENEVER ANALYSIS OUTPUT CHANGES. Cached reports are keyed by it,
+// so a logic fix that ships without a bump is a fix nobody sees — the stored
+// report is replayed instead, with the SAME report id, which makes it look like
+// the deploy failed. That happened on 2026-08-15: the all-in comparison, the
+// ceiling claim, priceVerified and the powertrain guard all shipped against a
+// stale key and a re-run returned the identical LC-DD3D-16F.
+const CACHE_VER = "2026-08-15a";
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

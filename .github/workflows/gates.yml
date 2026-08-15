@@ -48,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "24"      # --experimental-strip-types runs the .ts suite directly
@@ -135,6 +137,13 @@ jobs:
       # 2026-08-15; it is gated now so it cannot go missing again.
       - name: Model identity (a PHEV never inherits a hybrid's MSRP)
         run: npm run test:model-identity
+      # A logic fix that ships without a CACHE_VER bump is a fix nobody sees.
+      # Cached reports are keyed by it, so the stored report is replayed —
+      # same figures, same report id — and it looks exactly like a failed
+      # deploy. Cost half an hour on 2026-08-15 hunting a bug that was already
+      # fixed. Needs full history for the merge-base diff.
+      - name: Cache version bumped when analysis output changed
+        run: npm run check:cache-ver
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was
