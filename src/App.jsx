@@ -9056,8 +9056,8 @@ function QuoteCheckPage(){
       // page). We never guess which one — reporting a real price against the
       // wrong vehicle is the worst thing this product can do. No credit was
       // charged for this pass; the choice triggers the real, paid read.
-      if(data.needsVehicleChoice&&Array.isArray(data.vehicles)&&data.vehicles.length>1){
-        setVehicleChoices(data.vehicles);
+      if(data.needsVehicleChoice&&Array.isArray(data.vehicles)&&data.vehicles.length){
+        setVehicleChoices({list:data.vehicles,pageKind:data.pageKind||"several_vehicles",totalSeen:data.totalSeen||data.vehicles.length});
         setStatus("choose");
         return;
       }
@@ -9660,21 +9660,37 @@ function QuoteCheckPage(){
               a real price against the wrong vehicle is the worst failure this
               product has, so this is a deliberate stop rather than a silent
               pick. Nothing has been charged at this point. */}
-          {status==="choose"&&Array.isArray(vehicleChoices)&&(
+          {status==="choose"&&vehicleChoices&&Array.isArray(vehicleChoices.list)&&(()=>{
+            const isGrid=vehicleChoices.pageKind==="inventory_results";
+            return (
             <div style={{...cardStyle,padding:"26px 24px"}}>
               <div style={{fontWeight:1000,fontSize:17,color:C.ink,marginBottom:6}}>
-                That screenshot shows {vehicleChoices.length} vehicles
+                {isGrid
+                  ? "That's a search results page, not one vehicle"
+                  : `That screenshot shows ${vehicleChoices.list.length} vehicles`}
               </div>
               <div style={{fontSize:13.5,color:C.inkSoft,marginBottom:4,lineHeight:1.6}}>
-                Pick the one you want checked and LotCheck will run the full report on it.
+                {isGrid
+                  ? <>It lists {vehicleChoices.totalSeen>vehicleChoices.list.length?`about ${vehicleChoices.totalSeen} cars`:"several cars"}, and the cards don't carry a VIN — so a report built from this page couldn't check recalls or confirm the exact car. <b>Open the vehicle you want and upload that page instead</b>, and you'll get the full report.</>
+                  : "Pick the one you want checked and LotCheck will run the full report on it."}
               </div>
               <div style={{fontSize:12,color:C.inkFaint,marginBottom:18}}>
-                Nothing has been used from your balance yet — you're only charged for the report you choose.
+                Nothing has been used from your balance — you're only charged for a report you actually get.
               </div>
+              {isGrid&&(
+                <div style={{fontSize:11.5,fontWeight:900,color:C.inkFaint,letterSpacing:".4px",marginBottom:8}}>
+                  WHAT WE READ ON THIS PAGE
+                </div>
+              )}
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {vehicleChoices.map((v,i)=>{
+                {vehicleChoices.list.map((v,i)=>{
                   const title=[v.year,v.make,v.model,v.trim].filter(Boolean).join(" ")||v.label||`Vehicle ${i+1}`;
-                  const sub=[v.dealerName,v.price?`$${Number(v.price).toLocaleString("en-CA")}`:null].filter(Boolean).join(" · ");
+                  const sub=[
+                    v.price?`$${Number(v.price).toLocaleString("en-CA")}`:null,
+                    v.stockNumber?`Stock ${v.stockNumber}`:null,
+                    v.duplicateCount>1?`${v.duplicateCount} listed at this price`:null,
+                    v.dealerName,
+                  ].filter(Boolean).join(" · ");
                   return (
                     <button key={i}
                       onClick={()=>{ if(lastFile) handleFile(lastFile,v.label||title); }}
@@ -9687,12 +9703,18 @@ function QuoteCheckPage(){
                   );
                 })}
               </div>
+              {isGrid&&(
+                <div style={{fontSize:11.5,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>
+                  You can still pick one above — the report will cover that configuration, but without a VIN it can't include the VIN check or recall lookup for that exact car.
+                </div>
+              )}
               <button onClick={reset}
                 style={{marginTop:16,background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 18px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:"pointer"}}>
                 Upload something else
               </button>
             </div>
-          )}
+            );
+          })()}
 
           {status==="error"&&(
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>

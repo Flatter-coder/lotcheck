@@ -316,7 +316,8 @@ function buildExtractionPrompt(focusVehicle?: string | null): string {
 const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing, or a screenshot of one. Read it carefully and return ONLY this JSON object -- no other text, no markdown code fences.
 
 {
-  "vehiclesOnPage": null | [ { "label": string, "year": number|null, "make": string|null, "model": string|null, "trim": string|null, "price": number|null, "dealerName": string|null } ],
+  "pageKind": "single_vehicle"|"several_vehicles"|"inventory_results",
+  "vehiclesOnPage": null | [ { "label": string, "year": number|null, "make": string|null, "model": string|null, "trim": string|null, "price": number|null, "stockNumber": string|null, "dealerName": string|null } ],
   "year": number|null,
   "make": string|null,
   "model": string|null,
@@ -354,7 +355,11 @@ const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing,
 }
 
 Field notes:
-- "vehiclesOnPage": THE FIRST THING TO DECIDE. Does this image show ONE vehicle being quoted/listed, or SEVERAL DIFFERENT vehicles side by side? Several-vehicle images are common: a Google "Sponsored Vehicles" ad carousel, a dealer search-results page, a comparison row, a screenshot of several listings. If there is MORE THAN ONE distinct vehicle for sale, return one entry per vehicle here -- "label" being how a person would recognise it on screen, e.g. "2026 Toyota RAV4 Plug-In Hybrid GR Sport AWD - $85,995 - Okotoks Toyota" -- and set EVERY other field in this object to null. Do NOT pick one of them, do not merge them, and do not average them. If the image shows exactly ONE vehicle (a quote, a window sticker, a single listing page), set this to null and fill in the rest normally. Multiple photos OF THE SAME car, or one car shown with several finance/lease term options, is still ONE vehicle -- return null.
+- "pageKind" and "vehiclesOnPage": THE FIRST THING TO DECIDE, before reading any number. How many DIFFERENT vehicles for sale does this image show?
+  * "single_vehicle" -- one car: a dealer quote, a window sticker, one listing/detail page. Several photos OF THE SAME car, or one car shown with several finance/lease term options, is still ONE vehicle. Set "vehiclesOnPage" to null and fill in every other field normally.
+  * "several_vehicles" -- a handful (roughly 2 to 8) of DIFFERENT cars shown side by side, e.g. a Google "Sponsored Vehicles" ad carousel or a small comparison row. List each one in "vehiclesOnPage" and set every other field to null.
+  * "inventory_results" -- a dealer's search-results / inventory grid: many vehicle cards in a grid, often with a result counter ("200 Items Matching"), pagination, filter controls, "Compare" checkboxes, or many near-identical cars of the same trim at the same price differing only by stock number. List what you can read in "vehiclesOnPage" and set every other field to null.
+  In BOTH multi-vehicle cases: do NOT pick one, do not merge them, do not average them. "label" is how a person would recognise the car on screen, e.g. "2026 Toyota RAV4 Plug-In Hybrid GR Sport AWD - $85,995 - Okotoks Toyota". Include "stockNumber" whenever a stock/inventory number is visible -- on an inventory grid it is often the ONLY thing distinguishing two otherwise identical cards, so it matters.
 - "dealerName": the dealership's business name, if shown anywhere on the quote (letterhead, header/footer, contact block). Do not include the city as part of this field -- that's separate.
 - "dealerCity": the city (and province if visible, e.g. "Calgary, AB") of the dealership, if shown. Needed to tell apart dealers that share a common brand name -- there are many different "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
@@ -573,10 +578,10 @@ Deno.serve(async (req: Request) => {
     // CRITICALLY: no credit is charged here. The hold is released and the
     // person pays only when they come back with a choice and get a real
     // report (never-charge-for-a-report-we-couldn't-build).
-    const vehiclesOnPage = Array.isArray(extracted?.vehiclesOnPage)
+    const rawVehicles = Array.isArray(extracted?.vehiclesOnPage)
       ? extracted.vehiclesOnPage
           .filter((v: any) => v && typeof v === "object")
-          .slice(0, 12)
+          .slice(0, 40)
           .map((v: any) => ({
             label: typeof v.label === "string" ? v.label.slice(0, 160) : null,
             year: Number.isFinite(Number(v.year)) ? Number(v.year) : null,
@@ -584,22 +589,49 @@ Deno.serve(async (req: Request) => {
             model: typeof v.model === "string" ? v.model : null,
             trim: typeof v.trim === "string" ? v.trim : null,
             price: Number(v.price) > 0 ? Number(v.price) : null,
+            stockNumber: typeof v.stockNumber === "string" ? v.stockNumber.slice(0, 40) : null,
             dealerName: typeof v.dealerName === "string" ? v.dealerName : null,
           }))
           .filter((v: any) => v.label || v.model)
       : [];
-    if (!focusVehicle && vehiclesOnPage.length > 1) {
+    // Collapse identical configurations. An inventory grid routinely shows the
+    // same trim at the same price five times over, differing only by stock
+    // number -- listing those as five separate choices is noise the person
+    // can't act on, and looks careless (dealers-are-adversaries). One row per
+    // distinct year+make+model+trim+price, carrying how many there were.
+    const byConfig = new Map<string, any>();
+    for (const v of rawVehicles) {
+      const key = [v.year, v.make, v.model, v.trim, v.price].map((x) => String(x ?? "")).join("|").toLowerCase();
+      const seen = byConfig.get(key);
+      if (seen) { seen.duplicateCount = (seen.duplicateCount ?? 1) + 1; continue; }
+      byConfig.set(key, { ...v, duplicateCount: 1 });
+    }
+    const vehiclesOnPage = [...byConfig.values()].slice(0, 12);
+    const pageKind = typeof extracted?.pageKind === "string" ? extracted.pageKind : null;
+    // An inventory grid can't produce a VIN-accurate report: the cards carry no
+    // VIN, and several identical cars share a price. Say so and point at the
+    // single-vehicle page rather than inviting a pick that would be a guess.
+    const isInventoryGrid = pageKind === "inventory_results"
+      || rawVehicles.length > 8
+      || rawVehicles.length > vehiclesOnPage.length; // duplicates present == a grid
+    if (!focusVehicle && (vehiclesOnPage.length > 1 || isInventoryGrid)) {
       await releaseCredit(holdId);
       holdId = null;
-      await logUsage({ success: false, errorMessage: `multi-vehicle image: ${vehiclesOnPage.length} vehicles, awaiting choice (not charged)` });
-      console.log(`Multi-vehicle image: ${vehiclesOnPage.length} vehicles found; returning picker, no credit charged.`);
+      await logUsage({ success: false, errorMessage: `multi-vehicle image (${pageKind ?? "unknown"}): ${rawVehicles.length} seen / ${vehiclesOnPage.length} distinct, awaiting choice (not charged)` });
+      console.log(`Multi-vehicle image [${pageKind}]: ${rawVehicles.length} seen, ${vehiclesOnPage.length} distinct; returning picker, no credit charged.`);
       return new Response(
-        JSON.stringify({ needsVehicleChoice: true, vehicles: vehiclesOnPage }),
+        JSON.stringify({
+          needsVehicleChoice: true,
+          pageKind: isInventoryGrid ? "inventory_results" : (pageKind ?? "several_vehicles"),
+          totalSeen: rawVehicles.length,
+          vehicles: vehiclesOnPage,
+        }),
         { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
-    // A single-vehicle read must never carry the multi-vehicle list forward.
+    // A single-vehicle read must never carry the multi-vehicle scaffolding forward.
     delete extracted.vehiclesOnPage;
+    delete extracted.pageKind;
 
     // ---- Step 2: Verification -- look up the REAL MSRP in our own catalog ----
     // Resolve the vehicle's CANONICAL base model first (e.g. "Palisade Ultimate
