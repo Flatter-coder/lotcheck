@@ -10198,6 +10198,18 @@ function QuoteCheckPage(){
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
                   {vBtn("scroll","Scroll")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
                 </div>
+                {/* The delivery confirmation belongs on EVERY view, not just the
+                    two that happen to route through ReportViews. It lived only
+                    in that component's header, so Scroll, Book and 3D showed
+                    nothing at all once a report had been emailed — including on
+                    the auto-send path, which is the one most buyers hit. Same
+                    beat, same copy, so the surfaces agree. */}
+                {emailStatus==="sent"&&(
+                  <span style={{display:"inline-flex",alignItems:"center",gap:6,color:C.tealInk,fontWeight:700,fontSize:12.5}}>
+                    <DroneSentBeat compact body={C.inkFaint} accent={C.teal}/>
+                    <span className="lcSentFade" style={{animation:"lcSentFade .5s ease .9s both"}}>Emailed</span>
+                  </span>
+                )}
                 <button onClick={copyShareLink} style={{marginLeft:"auto",background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"8px 14px",color:C.inkSoft,fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{linkCopied?"Link copied":"Copy share link"}</button>
               </div>
             );
