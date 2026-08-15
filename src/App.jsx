@@ -4190,6 +4190,15 @@ function VerifExtrudedStack({C, intervals, peak, labelEvery}){
 // flat and quiet. State is a chip, not a shape — and `unmeasured` is hollow,
 // never green, because nothing writes those values yet and a green row for
 // something we do not measure is the false all-clear this panel exists to stop.
+//
+// `info` is NEUTRAL GREY, never green. It used to render teal-at-half-opacity,
+// which at 9px is just green: "URL scans 4" sat in the same colour as a passing
+// check while every actual checkpoint below it was hollow (Vic, 2026-08-15:
+// "4 scans 2 green look the things it miss how it can be green?"). A count is
+// not a verdict. Volume tells you something HAPPENED; it says nothing about
+// whether the reports were any good — which is exactly the false all-clear this
+// panel exists to prevent, one step removed. Green is reserved for a state
+// something actually passed.
 function VerifRowList({C, rows, picked, onPick}){
   return (
     <div>
@@ -4202,12 +4211,17 @@ function VerifRowList({C, rows, picked, onPick}){
                      borderBottom:`1px solid ${C.line}`,borderRadius:6,
                      background: picked === r.id ? C.tealBg : "transparent"}}>
           <span style={{width:9,height:9,borderRadius:2,flex:"none",
-            background: r.state === "unmeasured" ? "transparent" : r.state === "bad" ? C.coral : C.teal,
-            border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none",
-            opacity: r.state === "info" ? 0.5 : 1}}/>
+            background: r.state === "unmeasured" ? "transparent"
+                      : r.state === "bad" ? C.coral
+                      : r.state === "info" ? C.inkFaint
+                      : C.teal,
+            border: r.state === "unmeasured" ? `1px dashed ${C.inkFaint}` : "none"}}/>
           <span style={{fontSize:14,color:C.ink,flex:1}}>{r.name}</span>
           <span style={{fontSize:14,fontWeight:800,
-            color: r.state === "bad" ? C.coralInk : r.state === "unmeasured" ? C.inkFaint : C.tealInk}}>{r.value}</span>
+            color: r.state === "bad" ? C.coralInk
+                 : r.state === "unmeasured" ? C.inkFaint
+                 : r.state === "info" ? C.ink
+                 : C.tealInk}}>{r.value}</span>
           <span style={{fontSize:12.5,color:C.inkFaint,fontFamily:"ui-monospace,Menlo,monospace",
                         minWidth:200,textAlign:"right"}}>{r.note}</span>
         </div>
@@ -5053,7 +5067,10 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   // Delivered, but missing core points -- logged as success with a "degraded:"
   // note. Counting these as clean successes is what made a hollow report look
   // identical to a complete one.
-  const totDegraded=inWindow.filter(r=>r.success&&typeof r.error_message==="string"&&r.error_message.startsWith("degraded:")).length;
+  const isDegraded=r=>r.success&&typeof r.error_message==="string"&&r.error_message.startsWith("degraded:");
+  const totDegraded=inWindow.filter(isDegraded).length;
+  const totUrlDegraded=inWindow.filter(r=>r.feature==="listing_url"&&isDegraded(r)).length;
+  const totQuoteDegraded=inWindow.filter(r=>r.feature==="quote"&&isDegraded(r)).length;
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
   const loaded=!apiUsageLoading;
 
@@ -5066,13 +5083,16 @@ function VerificationTab({apiUsage, apiUsageLoading}){
     const rows = [
       {sec:"VOLUME"},
       {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(totUrl),
-       note:"api_usage_log · feature=listing_url", state:"info",
+       // The count alone reads as an all-clear, so carry the health beside it.
+       note:totUrlDegraded>0?`${totUrlDegraded} incomplete · feature=listing_url`:"api_usage_log · feature=listing_url",
+       state:totUrlDegraded>0?"bad":"info",
        proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run. Counted by feature — before 2026-08-15 this figure counted EVERY row, so once uploads started logging they would have been miscounted as URL scans."},
       {id:"degraded", name:"Delivered but incomplete", value:apiUsageLoading?"…":vnum(totDegraded),
        note:"success=true · degraded", state:totDegraded>0?"bad":"info",
        proof:"Reports that were delivered and charged for, but reached the buyer missing one or more core points (price, MSRP, VIN, recalls, APR). These log as success because a report WAS returned — this row is what stops a hollow report reading as a clean one. A non-zero count here is the number of people who paid and got less than the product promises."},
       {id:"file", name:"Uploaded files (PDF path)", value:apiUsageLoading?"…":vnum(totQuote),
-       note:"api_usage_log · feature=quote", state:"info",
+       note:totQuoteDegraded>0?`${totQuoteDegraded} incomplete · feature=quote`:"api_usage_log · feature=quote",
+       state:totQuoteDegraded>0?"bad":"info",
        proof:"Every upload analyze-quote logged in this window, pass and fail together. Wired 2026-08-15 — before that this path wrote no telemetry at all, which is why an expired API key took the product down unnoticed. A row logged success:true but carrying a 'degraded: missing …' note means a report was delivered without some of its core points (price, MSRP, VIN, recalls, APR) — delivered is not the same as complete."},
       {sec:"DELIVERY"},
     ];
