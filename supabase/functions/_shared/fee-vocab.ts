@@ -27,19 +27,19 @@ export interface FeeObservation {
 // Keep labels stable — they are the join keys for every downstream benchmark.
 const FEE_RULES: Array<[RegExp, string]> = [
   [/\b(nitrogen|n2)\b/i, "nitrogen"],
-  [/(market\s*adjustment|additional\s*dealer\s*mark|^adm\b|dealer\s*mark[- ]?up)/i, "market_adjustment"],
+  [/(market\s*(value\s*)?adjustment|additional\s*dealer\s*mark|^adm\b|dealer\s*mark[- ]?up)/i, "market_adjustment"],
   [/\brecon(dition(ing)?)?\b/i, "reconditioning"],
   [/(doc(ument(ation)?)?)\s*(fee|charge)|^doc\b/i, "documentation"],
   [/admin(istration|istrative)?\s*(fee|charge)?/i, "admin"],
   [/(paint|fabric|interior|exterior|appearance|protection\s*package|ceramic|sealant)/i, "protection_pkg"],
   [/(rust|undercoat|corrosion|rustproof)/i, "rustproofing"],
-  [/(tire\s*&?\s*(and)?\s*(wheel|rim)|wheel\s*&?\s*tire|road\s*hazard)/i, "tire_wheel"],
+  [/(tire\s*&?\s*(and)?\s*(wheel|rim)|wheel\s*&?\s*(and)?\s*tire|road\s*hazard)/i, "tire_wheel"],
   [/(theft|vin\s*etch|anti[- ]?theft|window\s*etch)/i, "theft_protection"],
   [/(gap|guaranteed\s*asset)/i, "gap"],
   [/(extended\s*warranty|service\s*contract|protection\s*plan|mechanical\s*breakdown|vsc\b)/i, "extended_warranty"],
   [/(freight|pdi|pre[- ]?delivery|destination|transport)/i, "freight_pdi"],
-  [/(amvic|omvic|regulatory|licen[sc]e|registration)/i, "regulatory"],
-  [/(tire\s*(levy|tax|fee|recycl)|environmental|green\s*levy|a\/?c\s*tax|luxury\s*tax|excise)/i, "levy_tax"],
+  [/(amvic|omvic|regulatory|licen[sc]\w*|registration)/i, "regulatory"],
+  [/(tire\s*(levy|tax|fee|recycl)|environmental|green\s*levy|(a\/?c|air\s*condition\w*)\s*tax|luxury\s*tax|excise)/i, "levy_tax"],
   [/(block\s*heater|wheel\s*lock|cargo|mats|accessor)/i, "accessories"],
   [/(delivery|dealer\s*prep|preparation)/i, "delivery_prep"],
 ];
