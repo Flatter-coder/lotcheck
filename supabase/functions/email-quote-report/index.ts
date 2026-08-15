@@ -76,11 +76,24 @@ async function ledgerRpc(fn: string, args: Record<string, unknown>): Promise<any
   }
 }
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Per-request CORS. This used to be a module-level constant with
+// "Access-Control-Allow-Origin: *", which told every browser on the internet
+// that any page was welcome to script this endpoint. It now echoes only an
+// allowlisted origin (corsOrigin falls back to lotcheck.ca), so another site
+// cannot drive a visitor's browser into minting LotCheck mail.
+//
+// Worth being clear about what this is and is not: CORS is enforced by
+// BROWSERS, and Origin is a header any non-browser client sets freely. This
+// closes the drive-by/embedded-page vector and nothing more. The control that
+// actually holds against a deliberate attacker is the signature gate below.
+function corsHeaders(origin: string | null): Record<string, string> {
+  return {
+    "Access-Control-Allow-Origin": corsOrigin(origin),
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
 
 function isValidEmail(v: string): boolean {
   // Same simple pattern as the client-side check -- catches obvious typos
@@ -191,9 +204,15 @@ function coverChip(txt: string, tone: string): string {
 // scroll to know the answer. Solid dark bg + solid bar fill (no gradient) for
 // Outlook. barColor: green >=7, amber >=4, rose below.
 function coverCard(a: any): string {
-  const hasCmp = !!(a.msrp && a.quotedPrice);
-  const over = hasCmp && a.quotedPrice > a.msrp;
-  const diff = hasCmp ? Math.abs(a.quotedPrice - a.msrp) : 0;
+  // The over/under claim is decided by _shared/msrp-claim.ts, never here. This
+  // used to be `a.quotedPrice > a.msrp` with a special case for "starting_at"
+  // only -- so a USED vehicle carrying `original_when_new` rendered
+  // "▼ $28,400 under MSRP" on this cover while the PDF inside the same email
+  // refused that exact claim. One signed report, two answers.
+  const claim = qualifyMsrpClaim(a);
+  const hasCmp = claim.comparable;
+  const over = claim.over;
+  const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
   const score = a.leverageScore?.computed ? Number(a.leverageScore.score) : null;
   const pct = score != null ? Math.max(4, Math.min(100, Math.round(score * 10))) : 0;
@@ -206,11 +225,14 @@ function coverCard(a: any): string {
   else if (rc?.checked && rc.count === 0 && rc.confirmed !== false) chips.push(coverChip("✓ No recalls", "ok"));
   if (a.vinCheck?.present && a.vinCheck.valid) chips.push(coverChip("✓ VIN valid", "ok"));
   if (a.financingCheck?.checked && a.financingCheck.consistent) chips.push(coverChip("✓ Math checks", "ok"));
+  // When the claim is refused the MSRP is still SHOWN -- refusing the
+  // comparison is not the same as hiding the number, and staying silent would
+  // itself read as "no gap", which is a claim of its own.
   const right = hasCmp
-    ? (a.msrpBasis === "starting_at"
-      ? `<div style="font-size:13px;font-weight:800;color:#c9c6e8;">base MSRP from ${money(a.msrp)} — options extra</div>`
-      : `<div style="font-size:15px;font-weight:900;color:${over ? "#fca5a5" : "#5eead4"};">${diff === 0 ? "= at MSRP" : over ? "▲ " + money(diff) + " over" : "▼ " + money(diff) + " under"} MSRP</div>`)
-    : (pv ? "" : `<div style="font-size:12px;color:#fca5a5;">price unverified</div>`);
+    ? `<div style="font-size:15px;font-weight:900;color:${over ? "#fca5a5" : "#5eead4"};">${diff === 0 ? "= at MSRP" : over ? "▲ " + money(diff) + " over" : "▼ " + money(diff) + " under"} MSRP</div>`
+    : claim.msrp
+      ? `<div style="font-size:13px;font-weight:800;color:#c9c6e8;">${escapeHtml(claim.label)} ${money(claim.msrp)}</div>${claim.refusal ? `<div style="font-size:11px;color:#a7a3d0;line-height:1.45;margin-top:3px;">no over/under-MSRP claim is made</div>` : ""}`
+      : (pv ? "" : `<div style="font-size:12px;color:#fca5a5;">price unverified</div>`);
   return `<div style="background:#211f3d;border-radius:18px;padding:20px;margin-bottom:14px;color:#fff;">
     <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#a7a3d0;font-weight:800;">The verdict${a.reportId ? " · " + escapeHtml(a.reportId) : ""}</div>
     <table style="width:100%;margin-top:10px;"><tr>
@@ -251,9 +273,13 @@ function deckCard(idx: number, total: number, label: string, tone: string, bodyH
 function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtml: string } {
   const a = analysis;
   const price = a.quotedPrice || a.msrp || 0;
-  const hasCmp = !!(a.msrp && a.quotedPrice);
-  const over = hasCmp && a.quotedPrice > a.msrp;
-  const diff = hasCmp ? Math.abs(a.quotedPrice - a.msrp) : 0;
+  // Same gate as the cover. This card previously checked NOTHING -- not even
+  // the "starting_at" case the cover handled -- so every non-exact basis
+  // produced an over/under figure here.
+  const claim = qualifyMsrpClaim(a);
+  const hasCmp = claim.comparable;
+  const over = claim.over;
+  const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
   const deck: Array<{ label: string; tone: string; glow: boolean; body: string }> = [];
@@ -264,7 +290,8 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     tone: !pv ? "flag" : (!hasCmp ? "muted" : over ? "flag" : "pass"),
     glow: false,
     body: `<div style="font-size:18px;font-weight:900;color:${!pv || over ? "#A63C25" : "#17756B"};">${hasCmp ? (diff === 0 ? "At MSRP" : over ? money(diff) + " over" : money(diff) + " under") : (a.quotedPrice ? money(a.quotedPrice) : "Price not shown")}</div>
-      <div style="font-size:12px;color:#706D96;margin-top:2px;">${a.quotedPrice ? money(a.quotedPrice) : "—"}${hasCmp ? " vs " + money(a.msrp) + " MSRP" : ""} · ${pv ? "price verified" : "price not verified"}</div>`,
+      <div style="font-size:12px;color:#706D96;margin-top:2px;">${a.quotedPrice ? money(a.quotedPrice) : "—"}${hasCmp ? " vs " + money(a.msrp) + " MSRP" : (claim.msrp ? ` · ${escapeHtml(claim.label)} ${money(claim.msrp)}` : "")} · ${pv ? "price verified" : "price not verified"}</div>
+      ${!hasCmp && claim.refusal ? `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(claim.refusal)}</div>` : ""}`,
   });
 
   // 2 -- Add-ons & fees (glow if anything flagged)
@@ -459,6 +486,8 @@ function u8ToB64(u8: Uint8Array): string {
 // Sealed listing capture — shape/size/magic-byte validation lives in the pure,
 // tested module (_shared/capture.ts, pinned by capture.test.ts).
 import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
+import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
+import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 
 // A capture the server has PROVEN is the sealed original: its SHA-256 was
 // recomputed here over the actual bytes AND that hash sits inside the report's
@@ -473,11 +502,10 @@ interface SealedShot extends ParsedShot {
   sourceUrl: string | null; // listing URL from the VERIFIED canonical
 }
 
-// Public verification keys — same registry the web app ships in App.jsx.
-// Public material, safe to embed; add retired keys here on rotation.
-const REPORT_PUBLIC_KEYS: Record<string, string> = {
-  k1: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAErEpWm/YsbAN9i9RkuGAPDadAp8BJ+i3j7V1WVUtvsQgmBN04hEQksYdyUksotL6LYOrPAnRkpqh6DXmMlTI7FA==",
-};
+// Public verification keys now live in _shared/report-auth.ts — ONE registry,
+// used by both the send gate and the sealed-capture check. Two copies would
+// drift on the next key rotation, and a stale copy here would mean captures
+// silently stop being treated as sealed while sends kept working.
 function b64urlToBytes(s: string): Uint8Array {
   s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "=";
   const bin = atob(s); const arr = new Uint8Array(bin.length);
@@ -576,7 +604,15 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
   else if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
   else if (ms && pv && msrpExactTp && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
-  else if (ms && !msrpExactTp) P.push({ t: "Price vs MSRP", v: "FROM " + money(ms), tone: "muted" }); // base "starting at" floor - no over/under claim
+  // No over/under claim on a non-exact basis -- but the WORDING has to match the
+  // basis too. "FROM $68,400" on a used car's original-when-new figure implies
+  // you could buy one from that price, which is its own false claim.
+  else if (ms && !msrpExactTp) P.push({ t: "Price vs MSRP",
+    v: a.msrpBasis === "original_when_new" ? money(ms) + " WHEN NEW"
+     : a.msrpBasis === "dealer_stated"     ? money(ms) + " AS STATED BY DEALER"
+     : a.msrpBasis === "starting_at"       ? "FROM " + money(ms)
+     :                                       money(ms) + " UNVERIFIED",
+    tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
@@ -623,7 +659,10 @@ function pointExplain(t: string, a: any): string | null {
         : delta === 0
           ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
           : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`;
-      if (ms) return `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`;
+      // Was hardcoded to the "starting at" story, which is wrong prose for a used
+      // car's original MSRP or a dealer-stated figure. The gate owns the reason.
+      if (ms) return qualifyMsrpClaim(a).refusal
+        ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`;
       return "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
     case "Transport Canada recalls":
       if (a.recalls?.checked && a.recalls.count > 0) return `A recall is a safety defect the manufacturer must fix free of charge. Have the dealer complete the repair${a.recalls.count > 1 ? "s" : ""} before delivery - it costs you nothing.`;
@@ -1180,16 +1219,46 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
 }
 
 Deno.serve(async (req: Request) => {
+  const origin = req.headers.get("origin");
+  const CORS_HEADERS = corsHeaders(origin);
+  const json = (body: unknown, status: number) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
 
+  // ── Gate 0: request shape ─────────────────────────────────────────────────
+  // Cheapest checks first, so a hostile caller is turned away before we spend
+  // anything. Nothing below this point runs for a request that fails here.
+  if (req.method !== "POST") {
+    return json({ error: "method_not_allowed", message: "POST only." }, 405);
+  }
+
+  // A browser-set Origin from a site that is not ours means another page is
+  // scripting this endpoint. Absent Origin is left to the signature gate (see
+  // originAllowed's note on why rejecting on absence buys nothing).
+  if (!originAllowed(origin)) {
+    console.warn("email-quote-report: refused origin", origin);
+    return json({ error: "origin_not_allowed", message: "This request didn't come from LotCheck." }, 403);
+  }
+
+  // Body cap BEFORE req.json(). The payload legitimately carries a base64
+  // full-page screenshot, so it is large by design — but unbounded it is a
+  // memory-exhaustion lever on an unauthenticated endpoint. Content-Length can
+  // be absent or lie; this catches the honest-but-huge and the lazy-hostile,
+  // and the JSON parse below is what bounds the rest.
+  const declaredLen = Number(req.headers.get("content-length") || 0);
+  if (declaredLen > MAX_BODY_BYTES) {
+    return json({ error: "payload_too_large", message: "That report is too large to email." }, 413);
+  }
+
   if (!RESEND_API_KEY) {
     console.error("RESEND_API_KEY is not set on this function.");
-    return new Response(
-      JSON.stringify({ error: "Email sending isn't configured yet." }),
-      { status: 500, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
-    );
+    return json({ error: "Email sending isn't configured yet." }, 500);
   }
 
   try {
@@ -1212,6 +1281,37 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: "No report to send — analyze a quote first." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
+    }
+
+    // ── Gate 1: PROOF OF SCAN ────────────────────────────────────────────────
+    // The one that holds. Every genuine report leaves the analyzer ECDSA-signed
+    // by a key only this project's server has, and the gate recomputes the
+    // canonical projection from THIS body before checking that signature — so
+    // passing it proves not merely that some LotCheck report exists, but that
+    // the exact vehicle, dealer, price, VIN and summary prose about to be
+    // rendered into a DKIM-signed lotcheck.ca email are the ones we produced.
+    //
+    // FAIL CLOSED, and note this is the deliberate opposite of the free-check
+    // breaker's fail-open stance (analyze-listing-url:157). That one guards
+    // spend, where a database blip must not block a real buyer. This one guards
+    // provenance, where degrading open means mailing an unverifiable document
+    // as though we stood behind it. Costs an honest buyer nothing: their report
+    // came from the analyzer seconds ago and is already signed.
+    //
+    // Placed before the capture parse, the PDF build and the Resend call, so a
+    // rejected request costs one signature verification (~1ms) and no spend.
+    const auth = await verifyReportAuthenticity(analysis, { keys: REPORT_PUBLIC_KEYS });
+    if (!auth.ok) {
+      // Logged with the machine code so the admin panel can show WHICH link
+      // failed and keep it open until fixed; the caller gets only the buyer
+      // sentence, which is identical across forgery causes by design.
+      console.warn("email-quote-report: send refused", JSON.stringify({
+        code: auth.code, ageMs: auth.ageMs, origin: origin || null,
+      }));
+      // 422, not 403: the request was well-formed and the caller may well be a
+      // real buyer holding a stale report — the body is what we won't stand
+      // behind, and the message tells them the (cheap, better) way forward.
+      return json({ error: auth.code, message: auth.message }, 422);
     }
 
     const subject = analysis.vehicle
