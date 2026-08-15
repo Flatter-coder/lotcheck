@@ -87,6 +87,8 @@ jobs:
         run: npm run test:supersede
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
+      - name: Every seeded model is reachable by the lookup
+        run: npm run test:reachable
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
