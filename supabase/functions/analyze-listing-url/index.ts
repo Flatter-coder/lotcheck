@@ -3411,11 +3411,24 @@ Deno.serve(async (req: Request) => {
       console.warn("Cache write failed:", err);
     }
 
-    await logUsage({
-      success: true,
-      inputTokens: usage?.input_tokens,
-      outputTokens: usage?.output_tokens,
-    });
+    // "success" means HTTP 200, not "the buyer got a complete report". Record
+    // which core points are missing so a hollow delivery is visible as hollow
+    // in the admin ledger instead of counting exactly like a full one
+    // (Vic, 2026-08-15). Mirrors the same note format analyze-quote writes.
+    {
+      const gaps: string[] = [];
+      if (!(Number(analysis.quotedPrice) > 0)) gaps.push("price");
+      if (!(Number(analysis.msrp) > 0)) gaps.push("msrp");
+      if (!analysis.vin) gaps.push("vin");
+      if (!analysis.recalls) gaps.push("recalls");
+      if (!(Number(analysis.financing?.rate) > 0)) gaps.push("apr");
+      await logUsage({
+        success: true,
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
+        errorMessage: gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
+      });
+    }
 
     // Delivered an accurate result -> capture the hold (signed-in only) and
     // include the new balance. Null holdId out first so a later throw can't

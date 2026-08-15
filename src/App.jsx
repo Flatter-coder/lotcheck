@@ -1001,20 +1001,46 @@ function useApiUsage(){
       try{
         const {data, error} = await supabase
           .from("api_usage_log")
-          .select("feature, success, input_tokens, output_tokens, cost_usd, created_at")
+          .select("feature, success, input_tokens, output_tokens, cost_usd, error_message, created_at")
           .order("created_at", {ascending:true})
           .limit(50000);
         if(error) throw error;
         if(!cancelled) setUsage(data||[]);
       }catch(err){
         console.warn("⚠️ api_usage_log fetch failed (did you run create_api_usage_log_table.sql?):", err.message);
-        if(!cancelled) setUsage([]);
+        // Blank ONLY on the very first read, where an empty panel is the honest
+        // "we have nothing" state. On a refresh, keep what we already have: a
+        // transient network blip must not wipe a populated ledger back to 0 and
+        // recreate the exact "it's not even showing" confusion this polling was
+        // added to fix.
+        if(!cancelled) setUsage(prev=>prev.length?prev:[]);
       }finally{
         if(!cancelled) setUsageLoading(false);
       }
     }
     fetchUsage();
-    return()=>{cancelled=true;};
+    // The Verification Ledger is labelled "● LIVE", but this used to fetch
+    // exactly once on mount and never again -- so a panel opened before a scan
+    // ran showed 0 checks forever and looked like nothing was happening
+    // (2026-08-15: two real rows existed, the ledger read 0). A surface that
+    // says LIVE has to actually re-read (live-data-green-dot); a one-shot
+    // snapshot wearing a live badge is the misleading-label class we keep
+    // fixing everywhere else.
+    //
+    // 45s is frequent enough that a scan shows up while you are still looking
+    // at the panel, and this is an admin-only, single-viewer surface. Also
+    // re-reads the moment the tab regains focus, which is when you actually
+    // look at it after running a scan in another window.
+    const id=setInterval(fetchUsage,45_000);
+    const onFocus=()=>{ if(document.visibilityState==="visible") fetchUsage(); };
+    document.addEventListener("visibilitychange",onFocus);
+    window.addEventListener("focus",onFocus);
+    return()=>{
+      cancelled=true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange",onFocus);
+      window.removeEventListener("focus",onFocus);
+    };
   },[]);
 
   return {usage, usageLoading};
@@ -5012,6 +5038,22 @@ function VerificationTab({apiUsage, apiUsageLoading}){
   const totFail=intervals.reduce((a,r)=>a+r.fail,0);
   const tot=totOk+totFail;
   const rate=tot?((totOk/tot)*100).toFixed(1):null;
+  // Per-feature volume. `tot` above counts EVERY row, which was fine while
+  // analyze-listing-url was the only writer -- but analyze-quote started
+  // logging on 2026-08-15, so an upload would have been silently counted as a
+  // URL scan. Same window as the intervals, so the two agree.
+  const winStart=intervals.length?intervals[0].start.getTime():0;
+  const winEnd=intervals.length?intervals[intervals.length-1].end.getTime():0;
+  const inWindow=(apiUsage||[]).filter(r=>{
+    const t=new Date(r.created_at).getTime();
+    return !isNaN(t)&&t>=winStart&&t<winEnd;
+  });
+  const totUrl=inWindow.filter(r=>r.feature==="listing_url").length;
+  const totQuote=inWindow.filter(r=>r.feature==="quote").length;
+  // Delivered, but missing core points -- logged as success with a "degraded:"
+  // note. Counting these as clean successes is what made a hollow report look
+  // identical to a complete one.
+  const totDegraded=inWindow.filter(r=>r.success&&typeof r.error_message==="string"&&r.error_message.startsWith("degraded:")).length;
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
   const loaded=!apiUsageLoading;
 
@@ -5023,11 +5065,15 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       ({id, name, value:"—", note:needs, state:"unmeasured", proof});
     const rows = [
       {sec:"VOLUME"},
-      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(tot),
-       note:"api_usage_log", state:"info",
-       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run."},
-      unmeasured("file","Uploaded files (PDF path)","logUsage in analyze-quote",
-        "Invisible, not zero. analyze-quote writes no telemetry at all — not even api_usage_log — so uploaded quotes cannot be counted until logUsage is mirrored into it."),
+      {id:"url", name:"URL scans", value:apiUsageLoading?"…":vnum(totUrl),
+       note:"api_usage_log · feature=listing_url", state:"info",
+       proof:"Every scan the URL path logged in this window, pass and fail together. Written by logUsage in analyze-listing-url on each run. Counted by feature — before 2026-08-15 this figure counted EVERY row, so once uploads started logging they would have been miscounted as URL scans."},
+      {id:"degraded", name:"Delivered but incomplete", value:apiUsageLoading?"…":vnum(totDegraded),
+       note:"success=true · degraded", state:totDegraded>0?"bad":"info",
+       proof:"Reports that were delivered and charged for, but reached the buyer missing one or more core points (price, MSRP, VIN, recalls, APR). These log as success because a report WAS returned — this row is what stops a hollow report reading as a clean one. A non-zero count here is the number of people who paid and got less than the product promises."},
+      {id:"file", name:"Uploaded files (PDF path)", value:apiUsageLoading?"…":vnum(totQuote),
+       note:"api_usage_log · feature=quote", state:"info",
+       proof:"Every upload analyze-quote logged in this window, pass and fail together. Wired 2026-08-15 — before that this path wrote no telemetry at all, which is why an expired API key took the product down unnoticed. A row logged success:true but carrying a 'degraded: missing …' note means a report was delivered without some of its core points (price, MSRP, VIN, recalls, APR) — delivered is not the same as complete."},
       {sec:"DELIVERY"},
     ];
     if (ledger) {

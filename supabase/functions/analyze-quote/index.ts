@@ -755,7 +755,25 @@ Deno.serve(async (req: Request) => {
     // release a hold we've decided to charge. `analysis` is unchanged either way.
     const credits = await captureCredit(holdId);
     holdId = null;
-    await logUsage({ success: true, inputTokens: data?.usage?.input_tokens ?? null, outputTokens: data?.usage?.output_tokens ?? null });
+    // "success" has meant "we returned HTTP 200", which is NOT the same as "the
+    // buyer got a report worth paying for". A read that recovers no price, no
+    // MSRP and no VIN still logged as a clean success, so the admin panel
+    // counted a hollow report exactly like a complete one (Vic, 2026-08-15:
+    // "that will 100% wrong and misleading"). Record WHAT was missing so a
+    // degraded delivery is visible as degraded. Note is written even on
+    // success -- error_message is the only free-text column this table has.
+    const missing: string[] = [];
+    if (!(Number(analysis.quotedPrice) > 0)) missing.push("price");
+    if (!(Number(analysis.msrp) > 0)) missing.push("msrp");
+    if (!analysis.vin) missing.push("vin");
+    if (!analysis.recalls) missing.push("recalls");
+    if (!(Number(analysis.financing?.rate) > 0)) missing.push("apr");
+    await logUsage({
+      success: true,
+      inputTokens: data?.usage?.input_tokens ?? null,
+      outputTokens: data?.usage?.output_tokens ?? null,
+      errorMessage: missing.length ? `degraded: missing ${missing.join(",")}` : null,
+    });
     return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
