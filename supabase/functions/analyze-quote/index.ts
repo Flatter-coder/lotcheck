@@ -332,7 +332,14 @@ Deno.serve(async (req: Request) => {
   let holdId: string | null = null;
 
   try {
-    const { fileBase64, mediaType } = await req.json();
+    const body = await req.json();
+    const { fileBase64, mediaType } = body;
+    // `images` (new): the client normalizes/slices photos to stay inside
+    // Claude's vision limits and sends the tiles here, top-to-bottom. A tall
+    // screenshot arrives as several slices of ONE page, not several pages.
+    // `fileBase64` stays the only path for PDFs and the fallback for an older
+    // cached client, so this is additive.
+    const rawImages: any[] = Array.isArray(body?.images) ? body.images : [];
 
     if (!fileBase64 || !mediaType) {
       return new Response(JSON.stringify({ error: "Missing file data." }), {
@@ -348,6 +355,29 @@ Deno.serve(async (req: Request) => {
         status: 400,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
       });
+    }
+
+    // Claude rejects any single image over ~5MB outright. This guard used to
+    // not exist, so an oversized upload sailed past the 20M-char check above,
+    // came back a 400 from Anthropic, and surfaced as the generic "analysis
+    // service returned an error" card with nothing logged (2026-08-15, a PNG
+    // screenshot of a Google results page). The client now slices images so
+    // this should be unreachable -- it stays as the belt-and-braces backstop
+    // that names the real problem instead of a mystery 502.
+    const VISION_B64_CAP = 5_000_000;
+    const images = rawImages
+      .filter((im) => im && typeof im.b64 === "string" && im.b64.length > 0)
+      .slice(0, 8)
+      .map((im) => ({ b64: im.b64 as string, mediaType: typeof im.mediaType === "string" ? im.mediaType : "image/jpeg" }));
+    const oversized = images.find((im) => im.b64.length > VISION_B64_CAP)
+      || (!images.length && mediaType !== "application/pdf" && fileBase64.length > VISION_B64_CAP ? { b64: fileBase64 } : null);
+    if (oversized) {
+      console.error(`Image exceeds vision cap: ${oversized.b64.length} b64 chars (cap ${VISION_B64_CAP}).`);
+      await logUsage({ success: false, errorMessage: `image over vision cap (${oversized.b64.length} b64 chars)` });
+      return new Response(
+        JSON.stringify({ error: "That image is too large to analyze. Try a screenshot of just the pricing section, or save it as a JPG first." }),
+        { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
     }
 
     // Authorize a credit hold before any expensive work (signed-in only).
@@ -382,9 +412,17 @@ Deno.serve(async (req: Request) => {
     }
 
     const isPdf = mediaType === "application/pdf";
-    const docBlock = isPdf
-      ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }
-      : { type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } };
+    // Multi-slice uploads carry a note so the model reads them as ONE tall page
+    // rather than several unrelated photos -- without it, a quote split across
+    // a seam reads as two partial documents and the totals stop reconciling.
+    const sliceNote = images.length > 1
+      ? [{ type: "text", text: `The ${images.length} images above are vertical slices of ONE tall page, in order from top to bottom, with a small overlap between consecutive slices. Read them together as a single continuous document -- do not treat them as separate vehicles, quotes, or pages, and do not double-count a line that appears in the overlap.` }]
+      : [];
+    const docBlocks = isPdf
+      ? [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: fileBase64 } }]
+      : images.length
+        ? images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mediaType, data: im.b64 } }))
+        : [{ type: "image", source: { type: "base64", media_type: mediaType, data: fileBase64 } }];
 
     // ---- Step 1: Claude reads the document ----
     // A big PDF can make this the slow part, so allow a generous per-attempt
@@ -410,7 +448,7 @@ Deno.serve(async (req: Request) => {
         // case; max_tokens is a ceiling, not a target.
         max_tokens: 4000,
         messages: [
-          { role: "user", content: [docBlock, { type: "text", text: EXTRACTION_PROMPT }] },
+          { role: "user", content: [...docBlocks, ...sliceNote, { type: "text", text: EXTRACTION_PROMPT }] },
         ],
       }),
     }, { timeoutMs: 60_000, maxAttempts: 2, budgetMs: 125_000, label: "anthropic-quote" });
@@ -418,6 +456,14 @@ Deno.serve(async (req: Request) => {
     if (!anthropicRes.ok) {
       const errText = await anthropicRes.text();
       console.error("Anthropic API error:", anthropicRes.status, errText);
+      // This path shipped a user-visible failure and logged NOTHING, so the
+      // 2026-08-15 PNG failure left zero rows in api_usage_log and had to be
+      // diagnosed by reading source instead of querying. A failure the user
+      // can see must always be a failure we can query.
+      await logUsage({
+        success: false,
+        errorMessage: `Anthropic HTTP ${anthropicRes.status}: ${errText.slice(0, 300)} | slices=${images.length || 1} | b64=${(images[0]?.b64 ?? fileBase64).length}`,
+      });
       await releaseCredit(holdId);
       holdId = null;
       return new Response(

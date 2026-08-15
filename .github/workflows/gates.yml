@@ -55,6 +55,14 @@ jobs:
         run: npm run test:invariants
       - name: Sealed capture (parse/magic-byte/page-count gates)
         run: npm run test:capture
+      # The report-email endpoint is unauthenticated: its ONLY proof that a real
+      # scan happened is the ECDSA signature gate. A regression there reopens an
+      # open mail relay on our own DKIM-signed domain, so it blocks like a
+      # correctness defect, not an advisory.
+      - name: Report auth (proof-of-scan gate on the email relay)
+        run: npm run test:report-auth
+      - name: Flywheel fee-vocab (join keys + de-identification invariant)
+        run: npm run test:flywheel
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
       - name: Report parity (client-derived cards render on every view)
@@ -77,6 +85,13 @@ jobs:
         run: npm run test:jsonld-vehicle
       - name: Convertus vmsData vehicle extraction (structured-data fallback)
         run: npm run test:convertus-vms
+      # Uploading a screenshot is the primary path (screenshot-first), and
+      # Claude hard-rejects a single image over ~5MB -- the client used to send
+      # raw bytes up to 15MB, so every upload in that band was a guaranteed
+      # failure surfacing as a generic error card. This pins the geometry that
+      # keeps a tall page both readable and inside the limit.
+      - name: Vision tiling geometry (uploaded screenshots stay readable and in-budget)
+        run: npm run test:vision-tiling
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was

@@ -8754,6 +8754,132 @@ function QuoteCheckPage(){
     return HEIC_EXTENSIONS.some(ext=>lower.endsWith(ext));
   }
 
+  // ── Vision normalization ───────────────────────────────────────────────────
+  // Claude's vision API hard-rejects a single image over ~5MB, and it scales
+  // anything past ~1568px on the long edge down before the model ever sees it.
+  // We were sending the raw file: the client allowed 15MB and the edge function
+  // allowed a 20M-char base64, so every upload in the ~5-15MB band sailed past
+  // both guards and came back a 400 from Anthropic, surfacing as the generic
+  // "The analysis service returned an error" card (confirmed 2026-08-15 on a
+  // PNG screenshot of a Google results page). Sending oversized bytes never
+  // bought detail -- it only bought that failure.
+  //
+  // Tall screenshots are THE primary upload here (screenshot-first directive),
+  // and naively fitting a 1920x9000 capture inside 1568 on the long edge would
+  // squeeze it to ~334px wide -- every number on it unreadable. So width is
+  // what we cap; height is SLICED into overlapping tiles that each stay within
+  // budget and each keep full horizontal resolution. Claude reads them as one
+  // continuous page (the server labels them top-to-bottom and says so).
+  const VISION_MAX_W=1568;        // Anthropic's own downscale target
+  const VISION_MAX_TILE_H=1568;   // keep each tile within the same budget
+  const VISION_TILE_OVERLAP=110;  // px repeated between tiles so a line of text
+                                  // split across a seam is whole in one of them
+  const VISION_MAX_TILES=8;       // hard ceiling on request weight
+  const VISION_JPEG_QUALITY=0.92;
+  // Tiling exists for SCROLLING SCREENSHOTS -- a capture of a whole web page,
+  // which is narrow and enormously tall. An ordinary phone photo of a paper
+  // quote is ~3:4 and reads fine as one downscaled image; slicing it would
+  // double the request weight and cost for the most common upload while
+  // helping nothing. So the trigger is the aspect ratio, not raw height.
+  const VISION_TALL_RATIO=2.2;
+
+  async function decodeImage(file){
+    // createImageBitmap is the fast path and avoids EXIF orientation quirks on
+    // iOS; the <img> fallback keeps older/locked-down browsers working rather
+    // than handing the person a dead end (own-the-process-no-user-limits).
+    if(typeof globalThis.createImageBitmap==="function"){
+      try{ return await globalThis.createImageBitmap(file); }catch{}
+    }
+    const url=URL.createObjectURL(file);
+    try{
+      return await new Promise((resolve,reject)=>{
+        const img=new Image();
+        img.onload=()=>resolve(img);
+        img.onerror=()=>reject(new Error("decode failed"));
+        img.src=url;
+      });
+    } finally { setTimeout(()=>URL.revokeObjectURL(url),0); }
+  }
+
+  function canvasToBase64(canvas,quality){
+    return new Promise((resolve,reject)=>{
+      if(canvas.toBlob){
+        canvas.toBlob((blob)=>{
+          if(!blob) return reject(new Error("encode failed"));
+          const reader=new FileReader();
+          reader.onload=()=>resolve(reader.result.split(",")[1]);
+          reader.onerror=()=>reject(new Error("encode read failed"));
+          reader.readAsDataURL(blob);
+        },"image/jpeg",quality);
+      } else {
+        try{ resolve(canvas.toDataURL("image/jpeg",quality).split(",")[1]); }
+        catch(e){ reject(e); }
+      }
+    });
+  }
+
+  // Returns [{b64, mediaType}] -- one entry for a normal image, several for a
+  // tall screenshot. Throws only if the image can't be decoded at all; the
+  // caller falls back to sending the original bytes so a normalization bug can
+  // never be the thing that blocks a report.
+  async function normalizeImageForVision(file){
+    const bmp=await decodeImage(file);
+    const srcW=bmp.width||bmp.naturalWidth, srcH=bmp.height||bmp.naturalHeight;
+    if(!srcW||!srcH) throw new Error("no dimensions");
+
+    const isTall=srcH/srcW>=VISION_TALL_RATIO;
+    let outW,outH;
+    if(isTall){
+      // Keep full horizontal detail and slice vertically (below).
+      const scale=Math.min(1,VISION_MAX_W/srcW);
+      outW=Math.max(1,Math.round(srcW*scale));
+      outH=Math.max(1,Math.round(srcH*scale));
+    } else {
+      // Ordinary photo/screenshot: one image, fit inside the long-edge cap.
+      const scale=Math.min(1,VISION_MAX_W/Math.max(srcW,srcH));
+      outW=Math.max(1,Math.round(srcW*scale));
+      outH=Math.max(1,Math.round(srcH*scale));
+    }
+
+    // A page so tall it would exceed the tile ceiling gets scaled down the rest
+    // of the way rather than truncated -- a shorter read of the WHOLE page beats
+    // a sharp read of its top third (report-never-empty).
+    const stride=VISION_MAX_TILE_H-VISION_TILE_OVERLAP;
+    if(isTall){
+      const tilesNeeded=outH<=VISION_MAX_TILE_H?1:Math.ceil((outH-VISION_TILE_OVERLAP)/stride);
+      if(tilesNeeded>VISION_MAX_TILES){
+        const maxH=VISION_MAX_TILE_H+stride*(VISION_MAX_TILES-1);
+        const extra=maxH/outH;
+        outW=Math.max(1,Math.round(outW*extra));
+        outH=Math.max(1,Math.round(outH*extra));
+      }
+    }
+
+    const canvas=document.createElement("canvas");
+    const ctx=canvas.getContext("2d");
+    const out=[];
+    if(!isTall||outH<=VISION_MAX_TILE_H){
+      canvas.width=outW; canvas.height=outH;
+      ctx.drawImage(bmp,0,0,srcW,srcH,0,0,outW,outH);
+      out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
+    } else {
+      for(let top=0,n=0;top<outH&&n<VISION_MAX_TILES;top+=stride,n++){
+        const h=Math.min(VISION_MAX_TILE_H,outH-top);
+        if(h<=0) break;
+        canvas.width=outW; canvas.height=h;
+        ctx.clearRect(0,0,outW,h);
+        // Map this destination slice back to its source rectangle.
+        const sy=(top/outH)*srcH, sh=(h/outH)*srcH;
+        ctx.drawImage(bmp,0,sy,srcW,sh,0,0,outW,h);
+        out.push({b64:await canvasToBase64(canvas,VISION_JPEG_QUALITY),mediaType:"image/jpeg"});
+        if(top+h>=outH) break;
+      }
+    }
+    if(bmp.close) try{ bmp.close(); }catch{}
+    if(!out.length) throw new Error("no tiles");
+    return out;
+  }
+
   // Load the server-authoritative balance whenever auth changes. Signed-out ->
   // no balance (the header chip falls back to the free-check state). Signed-in ->
   // call fn_my_credits (RLS-scoped to the caller). Handles both a single-object
@@ -8871,10 +8997,24 @@ function QuoteCheckPage(){
         reader.readAsDataURL(fileToSend);
       });
 
+      // Images get normalized/sliced to stay inside Claude's vision limits (see
+      // normalizeImageForVision). PDFs go through untouched -- they take the
+      // document path server-side, which has its own limits. Any failure here
+      // falls back to the original bytes: a normalization bug must never be the
+      // reason someone can't get a report.
+      const isPdfUpload=(fileToSend.type||"")==="application/pdf";
+      let images=null;
+      if(!isPdfUpload){
+        try{ images=await normalizeImageForVision(fileToSend); }
+        catch(normErr){ console.warn("Image normalization failed; sending original bytes.",normErr); }
+      }
+
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/analyze-quote",{
         method:"POST",
         headers:await buildAnalyzeHeaders(),
-        body:JSON.stringify({fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
+        body:JSON.stringify(images&&images.length
+          ? {images,mediaType:"image/jpeg",fileBase64:images[0].b64}
+          : {fileBase64:base64,mediaType:fileToSend.type||"image/jpeg"}),
       });
 
       // Out of credits -> not an analysis failure. Return to idle and open the
