@@ -3925,6 +3925,55 @@ const VERIF_CHECKPOINTS = [
 // Bucket rows into gap-filled intervals. Empty intervals MUST survive as zero
 // rows — a dead hour that vanishes from the list is the one thing you most need
 // to see, and dropping it makes the neighbours look adjacent.
+// A specific day / month / year picked from the calendar, rather than a rolling
+// "last N". Relative windows answer "how are we doing right now"; an anchored
+// one answers "what happened on the 11th", which is the question you have when
+// something looks wrong in hindsight. Both produce the same interval shape, so
+// everything downstream is unchanged.
+function buildAnchoredIntervals(anchor, rows){
+  const {mode, date} = anchor;
+  const edges=[]; let fmt, fmtShort;
+
+  if(mode==="day"){
+    for(let h=0;h<24;h++){
+      const d=new Date(date); d.setHours(h,0,0,0); edges.push(d);
+    }
+    fmt=d=>`${String(d.getHours()).padStart(2,"0")}:00 → ${String((d.getHours()+1)%24).padStart(2,"0")}:00`;
+    fmtShort=d=>`${String(d.getHours()).padStart(2,"0")}:00`;
+  }else if(mode==="month"){
+    const days=new Date(date.getFullYear(), date.getMonth()+1, 0).getDate();
+    for(let i=1;i<=days;i++){
+      const d=new Date(date.getFullYear(), date.getMonth(), i, 0,0,0,0); edges.push(d);
+    }
+    fmt=d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"});
+    fmtShort=d=>String(d.getDate());
+  }else{ // year
+    for(let m=0;m<12;m++) edges.push(new Date(date.getFullYear(), m, 1, 0,0,0,0));
+    fmt=d=>d.toLocaleDateString("en-CA",{month:"short",year:"numeric"});
+    fmtShort=d=>d.toLocaleDateString("en-CA",{month:"short"});
+  }
+
+  const out=edges.map((start,i)=>({
+    start, label:fmt(start), shortLabel:fmtShort(start),
+    end: i+1<edges.length ? edges[i+1] : (
+      mode==="day"   ? new Date(new Date(date).setHours(24,0,0,0))
+    : mode==="month" ? new Date(date.getFullYear(), date.getMonth()+1, 1)
+    :                  new Date(date.getFullYear()+1, 0, 1)),
+    ok:0, fail:0,
+  }));
+  for(const r of rows||[]){
+    const t=new Date(r.created_at).getTime();
+    if(isNaN(t)) continue;
+    for(let i=out.length-1;i>=0;i--){
+      if(t>=out[i].start.getTime() && t<out[i].end.getTime()){
+        if(r.success) out[i].ok++; else out[i].fail++;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 function buildVerifIntervals(bucket, rows){
   const edges=[]; let cur=bucket.floor(new Date());
   for(let i=0;i<bucket.n;i++){ edges.unshift(new Date(cur)); cur=bucket.prev(cur); }
@@ -3986,6 +4035,71 @@ const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
 // ledger cannot arise here — the only constraint is horizontal, and
 // w + dx = 0.84 * pitch guarantees no two columns ever touch, at any interval
 // count from 7 to 30.
+// Pick a specific day, month or year. Three levels, and each is one click:
+// the year strip picks a year, a month chip picks that month, a day cell picks
+// that day. Whichever you clicked last is what the chart shows, so "per year"
+// is not a separate mode to learn — it is just stopping earlier.
+function VerifCalendar({C, anchor, onPick, onClear}){
+  const today=new Date();
+  const [viewY,setViewY]=useState(()=>(anchor?.date||today).getFullYear());
+  const [viewM,setViewM]=useState(()=>(anchor?.date||today).getMonth());
+  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const firstDow=new Date(viewY,viewM,1).getDay();          // 0=Sun
+  const days=new Date(viewY,viewM+1,0).getDate();
+  const cells=[...Array((firstDow+6)%7).fill(null), ...Array.from({length:days},(_,i)=>i+1)];
+
+  const isSel=(kind,val)=>{
+    if(!anchor) return false;
+    const a=anchor.date;
+    if(kind==="year")  return anchor.mode==="year"  && a.getFullYear()===val;
+    if(kind==="month") return anchor.mode==="month" && a.getFullYear()===viewY && a.getMonth()===val;
+    return anchor.mode==="day" && a.getFullYear()===viewY && a.getMonth()===viewM && a.getDate()===val;
+  };
+  const btn=(sel)=>({
+    background: sel?C.teal:"transparent", color: sel?"#fff":C.ink,
+    border:`1px solid ${sel?C.teal:C.line}`, borderRadius:8, cursor:"pointer",
+    fontSize:12.5, fontWeight:sel?800:400, padding:"5px 0", fontFamily:"inherit",
+  });
+
+  return (
+    <div style={{background:C.paper2,borderRadius:12,padding:"12px 14px",marginBottom:14}}>
+      {/* Year */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <button onClick={()=>setViewY(y=>y-1)} style={{...btn(false),padding:"4px 10px"}}>‹</button>
+        <button onClick={()=>onPick({mode:"year",date:new Date(viewY,0,1)})}
+          style={{...btn(isSel("year",viewY)),padding:"5px 14px",fontWeight:800}}>{viewY}</button>
+        <button onClick={()=>setViewY(y=>y+1)} style={{...btn(false),padding:"4px 10px"}}>›</button>
+        <span style={{fontSize:11.5,color:C.inkFaint,marginLeft:4}}>click the year for all 12 months</span>
+        {anchor && (
+          <button onClick={onClear} style={{...btn(false),padding:"4px 12px",marginLeft:"auto",
+                   color:C.inkFaint}}>Back to rolling</button>
+        )}
+      </div>
+
+      {/* Months */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(12,1fr)",gap:4,marginBottom:8}}>
+        {MON.map((m,i)=>(
+          <button key={m} onClick={()=>{setViewM(i); onPick({mode:"month",date:new Date(viewY,i,1)});}}
+            style={btn(isSel("month",i))}>{m}</button>
+        ))}
+      </div>
+
+      {/* Days of the viewed month */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+        {["M","T","W","T","F","S","S"].map((d,i)=>(
+          <div key={i} style={{fontSize:10.5,color:C.inkFaint,textAlign:"center",fontWeight:800}}>{d}</div>
+        ))}
+        {cells.map((n,i)=> n===null
+          ? <div key={`b${i}`}/>
+          : <button key={n} onClick={()=>onPick({mode:"day",date:new Date(viewY,viewM,n)})}
+              style={btn(isSel("day",n))}>{n}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VerifExtrudedStack({C, intervals, peak, labelEvery}){
   const H = 152, BASE = H - 24, LEFT = 26, RIGHT = 10;
   const usable = 620 - LEFT - RIGHT;
@@ -4871,7 +4985,19 @@ function VerificationTab({apiUsage, apiUsageLoading}){
 
   const [picked,setPicked]=useState(null);
 
-  const intervals=useMemo(()=>buildVerifIntervals(bucket,apiUsage),[bucket,apiUsage]);
+  // A calendar pick overrides the rolling window. Null = rolling, which is the
+  // default because "how are we doing right now" is the everyday question.
+  const [anchor,setAnchor]=useState(null);
+  const [calOpen,setCalOpen]=useState(false);
+
+  const intervals=useMemo(
+    ()=> anchor ? buildAnchoredIntervals(anchor,apiUsage) : buildVerifIntervals(bucket,apiUsage),
+    [anchor,bucket,apiUsage]);
+
+  const anchorLabel = anchor && (
+    anchor.mode==="day"   ? anchor.date.toLocaleDateString("en-CA",{weekday:"long",month:"long",day:"numeric",year:"numeric"})
+  : anchor.mode==="month" ? anchor.date.toLocaleDateString("en-CA",{month:"long",year:"numeric"})
+  :                         String(anchor.date.getFullYear()));
   const totOk=intervals.reduce((a,r)=>a+r.ok,0);
   const totFail=intervals.reduce((a,r)=>a+r.fail,0);
   const tot=totOk+totFail;
@@ -4963,9 +5089,26 @@ function VerificationTab({apiUsage, apiUsageLoading}){
 
       {/* ---- every interval, separated ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-        <div style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8,marginBottom:8}}>
-          EVERY INTERVAL, SEPARATED — {bucket.label.toUpperCase()}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                     flexWrap:"wrap",gap:8,marginBottom:8}}>
+          <span style={{fontSize:13.5,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+            EVERY INTERVAL, SEPARATED — {(anchorLabel||bucket.label).toUpperCase()}
+          </span>
+          <button onClick={()=>setCalOpen(o=>!o)}
+            style={{background:calOpen||anchor?C.tealBg:"transparent",
+                    border:`1px solid ${calOpen||anchor?C.teal:C.line}`,borderRadius:999,
+                    padding:"5px 14px",fontSize:12.5,fontWeight:800,cursor:"pointer",
+                    color:calOpen||anchor?C.tealInk:C.inkSoft,fontFamily:"inherit"}}>
+            {anchor ? "Change date" : "Pick a day, month or year"}
+          </button>
         </div>
+
+        {calOpen && (
+          <VerifCalendar C={C} anchor={anchor}
+            onPick={a=>{setAnchor(a);}}
+            onClear={()=>{setAnchor(null); setCalOpen(false);}}/>
+        )}
+
         {apiUsageLoading ? (
           <div style={{color:C.inkFaint,fontSize:14,padding:"14px 0"}}>Reading api_usage_log…</div>
         ) : (
