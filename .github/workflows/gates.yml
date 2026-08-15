@@ -126,6 +126,15 @@ jobs:
       # because the analyze functions spend real vendor money.
       - name: Region gate (fails open for Albertans, closed to forgery)
         run: npm run test:region-gate
+      # A powertrain variant is a DIFFERENT VEHICLE, not a trim. A BEV was once
+      # reported at the gasoline model's sticker because the base-model resolver
+      # strips prefixes. Dealers write HEV and PHEV, and "Plug-in Hybrid"
+      # contains "Hybrid", so the stronger claim has to win — on the 2026 RAV4
+      # that single distinction is $5,500 (XSE: $50,900 hybrid vs $56,400
+      # plug-in). This guard was written 2026-08-12 and sat unmerged until
+      # 2026-08-15; it is gated now so it cannot go missing again.
+      - name: Model identity (a PHEV never inherits a hybrid's MSRP)
+        run: npm run test:model-identity
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was
