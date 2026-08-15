@@ -59,6 +59,7 @@ import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
+import { gateRequest } from "../_shared/region-gate.js";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -386,6 +387,25 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const { fileBase64, mediaType } = body;
+
+    // Alberta-only. Runs BEFORE the credit hold and before any vision call, so
+    // an out-of-province upload costs nothing. Region proven by an HMAC token
+    // minted by Vercel, never claimed by the browser. Fails OPEN when we cannot
+    // establish a location — see _shared/region-gate.js.
+    {
+      const gate = await gateRequest({
+        token: body?.regionToken,
+        secret: Deno.env.get("REGION_TOKEN_SECRET") ?? "",
+        selfDeclared: body?.regionSelfDeclared === true,
+      });
+      if (!gate.allow) {
+        return new Response(JSON.stringify({
+          error: "outside_service_area",
+          region: gate.region ?? null,
+          regionLabel: gate.regionLabel ?? null,
+        }), { status: 403, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+    }
     // Set on the SECOND pass, after the person picked one car out of a
     // multi-vehicle screenshot (see the vehiclesOnPage branch below).
     const focusVehicle: string | null = typeof body?.focusVehicle === "string" && body.focusVehicle.trim()
@@ -904,7 +924,7 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
     if (trim) {
       const { data: exact } = await supabase
         .from("msrp_catalog")
-        .select("msrp, trim, fetched_at")
+        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
         .eq("year", year)
         .ilike("make", make)
         .ilike("model", model)
@@ -914,12 +934,12 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
         .maybeSingle();
 
       if (exact?.msrp) {
-        return { value: exact.msrp, matchType: "exact", trim: exact.trim, fetchedAt: exact.fetched_at };
+        return { value: exact.msrp, matchType: "exact", trim: exact.trim, fetchedAt: exact.fetched_at, sourceUrl: exact.source_url ?? null, allInPrice: exact.all_in_price ?? null, priceBasis: exact.price_basis ?? null };
       }
 
       const { data: fuzzy } = await supabase
         .from("msrp_catalog")
-        .select("msrp, trim, fetched_at")
+        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
         .eq("year", year)
         .ilike("make", make)
         .ilike("model", model)
@@ -929,14 +949,14 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
         .maybeSingle();
 
       if (fuzzy?.msrp) {
-        return { value: fuzzy.msrp, matchType: "fuzzy_trim", trim: fuzzy.trim, fetchedAt: fuzzy.fetched_at };
+        return { value: fuzzy.msrp, matchType: "fuzzy_trim", trim: fuzzy.trim, fetchedAt: fuzzy.fetched_at, sourceUrl: fuzzy.source_url ?? null, allInPrice: fuzzy.all_in_price ?? null, priceBasis: fuzzy.price_basis ?? null };
       }
     }
 
     // Same year/make/model, any trim -- lowest MSRP as an approximate floor
     const { data: modelOnly } = await supabase
       .from("msrp_catalog")
-      .select("msrp, trim, fetched_at")
+      .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
       .eq("year", year)
       .ilike("make", make)
       .ilike("model", model)
@@ -951,6 +971,9 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
         matchType: "model_only_approximate",
         trim: modelOnly.trim,
         fetchedAt: modelOnly.fetched_at,
+        sourceUrl: modelOnly.source_url ?? null,
+        allInPrice: modelOnly.all_in_price ?? null,
+        priceBasis: modelOnly.price_basis ?? null,
       };
     }
   } catch (err) {
@@ -1362,7 +1385,11 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
   const decided = resolveMsrpAuthority({
     statedMsrp: Number(statedMsrpOnDocument) || 0,
     ref: verifiedMsrp != null
-      ? { msrp: Number(verifiedMsrp), trim: msrpLookup.trim ?? null, basis: catalogBasis, sourceUrl: null }
+      // sourceUrl was hardcoded null, so an uploaded quote could never cite the
+      // manufacturer's own page for its MSRP even when the catalog row held the
+      // link. The URL path has always carried it; every report feature ships to
+      // every surface, and "here is where to check it yourself" is the feature.
+      ? { msrp: Number(verifiedMsrp), trim: msrpLookup.trim ?? null, basis: catalogBasis, sourceUrl: msrpLookup.sourceUrl ?? null }
       : null,
     make: make ?? null,
   });
@@ -1434,5 +1461,13 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
       matchedTrim: msrpLookup.trim ?? null,
       verifiedAsOf: msrpLookup.fetchedAt ?? null,
     },
+    // The buyer's own way to check us. A claim the buyer cannot re-verify is a
+    // claim they have to take on trust, which is the opposite of the product.
+    msrpSourceUrl: decided.sourceUrl ?? msrpLookup.sourceUrl ?? null,
+    // The manufacturer's OWN all-in figure, when we hold it. An all-in
+    // advertised price must be compared against this, never against the
+    // ex-freight MSRP -- that comparison invents roughly $3,000 of markup.
+    msrpAllIn: msrpLookup.allInPrice ?? null,
+    msrpPriceBasis: msrpLookup.priceBasis ?? null,
   };
 }

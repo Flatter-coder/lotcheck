@@ -118,6 +118,14 @@ jobs:
       # do the subtraction itself.
       - name: MSRP claim gate (only an exact-trim basis may accuse)
         run: npm run test:msrp-claim
+      # Alberta-only access. The gate has to fail in the RIGHT direction: IP
+      # geolocation routinely misplaces Albertans (carriers backhaul through
+      # other provinces), and a blocked customer never tells you. So an unknown
+      # region, a missing secret and an absent token all SERVE, while a forged
+      # region token is rejected — the browser may not claim its own province,
+      # because the analyze functions spend real vendor money.
+      - name: Region gate (fails open for Albertans, closed to forgery)
+        run: npm run test:region-gate
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was

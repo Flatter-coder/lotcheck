@@ -70,6 +70,7 @@ import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
+import { gateRequest } from "../_shared/region-gate.js";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -915,7 +916,7 @@ async function lookupCatalogMsrp(
     let data: any[] | null = null;
     const full = await supabase
       .from("msrp_catalog")
-      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url, price_basis")
+      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url, price_basis, all_in_price")
       .in("year", years)
       .ilike("make", make)
       .ilike("model", model)
@@ -2574,12 +2575,33 @@ Deno.serve(async (req: Request) => {
   let holdId: string | null = null;
 
   try {
-    const { url } = await req.json();
+    const { url, regionToken, regionSelfDeclared } = await req.json();
     if (!url || typeof url !== "string") {
       return new Response(
         JSON.stringify({ error: "No listing URL received." }),
         { status: 400, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
+    }
+
+    // Alberta-only. Runs BEFORE the credit hold and before any vendor call, so
+    // an out-of-province visitor costs nothing. The region is proven by an HMAC
+    // token minted by Vercel (which actually sees the IP) — never claimed by
+    // the browser. Fails OPEN when we cannot establish a location, because
+    // IP geolocation routinely misplaces Albertans and refusing one paying
+    // customer is worse than serving a few visitors we should not have.
+    {
+      const gate = await gateRequest({
+        token: regionToken,
+        secret: Deno.env.get("REGION_TOKEN_SECRET") ?? "",
+        selfDeclared: regionSelfDeclared === true,
+      });
+      if (!gate.allow) {
+        return new Response(JSON.stringify({
+          error: "outside_service_area",
+          region: gate.region ?? null,
+          regionLabel: gate.regionLabel ?? null,
+        }), { status: 403, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
     }
 
     // Aggregator ToS gate. Runs before the credit hold and any scrape, so a

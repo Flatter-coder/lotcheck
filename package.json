@@ -30,7 +30,8 @@
     "test:vision-tiling": "node scripts/test-vision-tiling.mjs",
     "test:quote-msrp": "node scripts/test-quote-msrp-authority.mjs",
     "test:checkpoints": "node --experimental-strip-types supabase/functions/_shared/verification-checkpoints.test.ts",
-    "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts"
+    "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
+    "test:region-gate": "node scripts/test-region-gate.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

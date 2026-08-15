@@ -131,10 +131,85 @@ mis-identified trim produces a wrong MSRP, which is the IONIQ 9 failure class.
 
 ---
 
+---
+
+## The "From" price is the ALL-IN price (proven 2026-08-15)
+
+Three more Build & Price summaries (SE AWD, XSE AWD) plus the trim-selector
+cards settled the basis question outright.
+
+| trim | MSRP | + mandatory adds | = card "From" |
+|---|---:|---:|---:|
+| SE | $48,750 | $3,078 | **$51,828** |
+| XSE | $56,400 | $3,078 | **$59,478** |
+| GR SPORT | $57,500 | $3,078 | **$60,578** |
+| XSE + Technology Package | $59,350 | $3,078 | **$62,428** |
+
+Exact to the dollar, every trim. The $3,078 is itemised by Toyota:
+
+```
+Delivery & Destination   $1,930
+Dealer Fees (maximum)      $999
+Air Conditioning Charge    $100
+Tire Levy                   $25
+PPSA Fee (finance)          $14
+AMVIC                       $10
+```
+
+**So we never estimate freight and PDI again.** Compare the card's "From"
+against an all-in advertised listing; compare MSRP against an ex-freight quote.
+Both figures now live per row — `msrp_catalog.all_in_price`, added in
+`20260815_msrp_all_in_price.sql`.
+
+The adds are **not** a universal constant: Delivery & Destination varies by
+model, and the dealer-fee ceiling may vary by make and province. Capture per row
+from the manufacturer; never add a constant.
+
+### EVAP eligibility comes from the same document
+
+The SE summary carries an **"Electric Vehicle Affordability Program −$2,500.00"**
+incentive line; the XSE summary does not. That is Alberta's price ceiling doing
+its work, published by Toyota rather than re-derived by us. The trim card also
+shows an "Eligible for EVAP" badge.
+
+### The ceiling this establishes
+
+The most expensive 2026 RAV4 Plug-in Hybrid Toyota sells is the XSE with the
+Technology Package at **$62,428 all-in, including the maximum dealer fee**.
+
+The Okotoks listing at $85,995 all-in is **$23,567 above that ceiling** — and it
+holds without pinning the trim, because there is no higher grade to name.
+
+---
+
+## The URL pattern — answered 2026-08-15
+
+```
+/en/build-price/rav4-plug-in-hybrid/?year=2026&model=<TRIM>&package=<P>&exterior=<COLOUR>
+
+  model=SERAPC   SE          package=A      Standard Package
+  model=XERAPC   XSE         exterior=02VP  Pearl White  (+$905)
+  model=GRRAPC   GR SPORT    exterior=0M22
+```
+
+**The configuration space is enumerable** — trim code x package x exterior, each
+URL yielding one deterministic price. And it decodes the other way: the Build &
+Price PDF's `REFERENCE CODE: GRRAPC AE 02TB` is those same three fields, so a
+PDF a buyer forwards us identifies its exact configuration.
+
+`source_url` is now a **deep link per row**, so the report's "verify this on
+Toyota's page" link lands on the precise trim.
+
+**Cost caveat, measured:** the page is **client-rendered**. A plain fetch
+returns navigation and no dollar figures, so harvesting from these URLs needs a
+rendered page or the JSON endpoint behind it, not a cheap GET.
+
+**Premium paint is +$905** — exactly the gap between the published GR SPORT
+MSRP ($57,500) and the Build & Price summary ($58,405). Confirmed by Vic
+choosing Pearl White on the XSE.
+
 ## Open questions
 
-- Does the build-code URL pattern (`toyota.ca/build/XXXXXX`) allow cheap
-  enumeration of every trim, or is a code only minted per configuration session?
 - Which other makes publish an equivalent province-aware Build & Price summary
   with an itemised fee breakdown? (Expected: most; needs verification per make.)
 - Is the PDF generated client-side or fetched? Determines capture cost.

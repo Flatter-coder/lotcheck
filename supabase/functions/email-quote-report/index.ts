@@ -291,7 +291,8 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     glow: false,
     body: `<div style="font-size:18px;font-weight:900;color:${!pv || over ? "#A63C25" : "#17756B"};">${hasCmp ? (diff === 0 ? "At MSRP" : over ? money(diff) + " over" : money(diff) + " under") : (a.quotedPrice ? money(a.quotedPrice) : "Price not shown")}</div>
       <div style="font-size:12px;color:#706D96;margin-top:2px;">${a.quotedPrice ? money(a.quotedPrice) : "—"}${hasCmp ? " vs " + money(a.msrp) + " MSRP" : (claim.msrp ? ` · ${escapeHtml(claim.label)} ${money(claim.msrp)}` : "")} · ${pv ? "price verified" : "price not verified"}</div>
-      ${!hasCmp && claim.refusal ? `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(claim.refusal)}</div>` : ""}`,
+      ${!hasCmp && claim.refusal ? `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(claim.refusal)}</div>` : ""}
+      ${a.msrpSourceUrl ? `<div style="font-size:11.5px;margin-top:7px;"><a href="${escapeHtml(a.msrpSourceUrl)}" style="color:#17756B;">See ${escapeHtml(a.make || "the manufacturer")}'s own page for this MSRP →</a></div>` : ""}`,
   });
 
   // 2 -- Add-ons & fees (glow if anything flagged)
@@ -874,7 +875,11 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   Tat(qp ? money(qp) : "Not shown", figTop - 34, { size: 25, font: monoB, color: INK });
   Tat("before tax & fees", figTop - 48, { size: 8, font: sans, color: FAINT });
   const rx = M + colW + 14;
-  Tat(msrpExact ? "MSRP (VERIFIED)" : "CATALOG MSRP", figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
+  // "CATALOG MSRP" was printed over figures that came from the DEALER, which
+  // both overstates their provenance and contradicts the email wrapping this
+  // PDF. The label follows the basis now, from the one shared rule.
+  const pdfClaim = qualifyMsrpClaim(a);
+  Tat(msrpExact ? "MSRP (VERIFIED)" : pdfClaim.label.toUpperCase(), figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
   Tat(ms ? money(ms) : "-", figTop - 34, { x: rx, size: 25, font: monoB, color: msrpExact ? TEAL : SOFT });
   Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
@@ -884,6 +889,16 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     T(label, { size: 11, font: sansB, color: delta > 0 ? CORAL : TEAL });
     if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label, 11); Tat("(vs catalog MSRP - listing price not yet verified)", y - 11, { x: M + wl + 6, size: 8.5, font: sans, color: FAINT }); }
     y -= 22;
+  }
+  // Where the buyer checks us. The PDF is the artifact that gets forwarded to
+  // the dealer, so the citation has to travel WITH the number -- a figure the
+  // reader cannot re-verify is one they have to take on trust, and this whole
+  // product exists because nobody should have to.
+  if (a.msrpSourceUrl) {
+    for (const ln of wrap(`Verify this MSRP on ${a.make || "the manufacturer"}'s own page: ${a.msrpSourceUrl}`, sans, 8.5, W)) {
+      need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
+    }
+    y -= 6;
   }
   rule();
 
