@@ -12,8 +12,14 @@
 -- (`&source_url=is.null`) will never remove them. Hand-verified provenance
 -- outranks a scraper.
 --
--- SOURCE: Toyota Canada's own pricing announcement.
+-- SOURCE: Toyota Canada's pricing announcement, confirmed against three Build &
+-- Price summaries (SE AWD, XSE AWD, GR SPORT AWD).
 -- https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html
+--
+-- source_url points at the BUILD & PRICE page rather than the press release,
+-- because that is the page a buyer can open and check the number on themselves.
+-- The report links it, so a claim is never something the reader has to take on
+-- trust: https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/
 --
 -- BASIS: `excl_freight`. Toyota's release states the MSRP column is the vehicle
 -- price BEFORE freight/PDI, A/C charge, dealer fees and other charges — those
@@ -38,11 +44,11 @@ insert into public.msrp_catalog
   (year, make, model, trim, msrp, fuel_type, drivetrain, price_basis, source_url, fetched_at)
 values
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'SE',                     48750, 'PHEV', 'AWD', 'excl_freight',
-   'https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'XSE',                    56400, 'PHEV', 'AWD', 'excl_freight',
-   'https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'GR SPORT',               57500, 'PHEV', 'AWD', 'excl_freight',
-   'https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'XSE Technology Package', 59350, 'PHEV', 'AWD', 'excl_freight',
    'https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html', now())
 on conflict (year, make, model, trim) do update

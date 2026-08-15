@@ -915,7 +915,7 @@ async function lookupCatalogMsrp(
     let data: any[] | null = null;
     const full = await supabase
       .from("msrp_catalog")
-      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url, price_basis")
+      .select("year, trim, msrp, fuel_type, drivetrain, attrs, source_url, price_basis, all_in_price")
       .in("year", years)
       .ilike("make", make)
       .ilike("model", model)
