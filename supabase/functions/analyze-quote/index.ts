@@ -75,6 +75,38 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// ── Usage log ──────────────────────────────────────────────────────────────
+// This function had NO logging of any kind -- not on success, not on failure.
+// Every photo/PDF upload was invisible in api_usage_log, so when a real upload
+// failed in production (2026-08-15, an oversized PNG) there was literally
+// nothing to query and the cause had to be found by reading source. The URL
+// scanner has logged per-run since day one; the upload path -- the primary
+// path under screenshot-first -- never did. Same shape as
+// analyze-listing-url's so both features aggregate together, with
+// feature:"quote" to tell them apart.
+//
+// Fail-open by construction: a telemetry failure must never surface to the
+// person or cost them their report.
+async function logUsage(fields: {
+  success: boolean;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  errorMessage?: string | null;
+}) {
+  try {
+    const { error } = await supabase.from("api_usage_log").insert({
+      feature: "quote",
+      success: fields.success,
+      input_tokens: fields.inputTokens ?? null,
+      output_tokens: fields.outputTokens ?? null,
+      error_message: fields.errorMessage ?? null,
+    });
+    if (error) console.warn("api_usage_log insert failed:", error.message);
+  } catch (err) {
+    console.warn("api_usage_log insert threw:", err);
+  }
+}
+
 // ── Quote Check credit lifecycle (Phase 3) ─────────────────────────────────
 // A personal credit is deducted ONLY after an accurate result is delivered,
 // and ONLY for signed-in requests. Anonymous requests (no/invalid JWT — which
@@ -364,7 +396,12 @@ Deno.serve(async (req: Request) => {
     // screenshot of a Google results page). The client now slices images so
     // this should be unreachable -- it stays as the belt-and-braces backstop
     // that names the real problem instead of a mystery 502.
-    const VISION_B64_CAP = 5_000_000;
+    // Anthropic's direct Messages API caps a single image at 10MB of BASE64
+    // (not raw bytes) and hard-rejects anything over 8000px on a side. Matched
+    // to the real documented limit so this backstop only ever refuses what
+    // Anthropic would refuse anyway -- the client's slicing keeps every tile
+    // far below both ceilings, so this should be unreachable in practice.
+    const VISION_B64_CAP = 10_000_000;
     const images = rawImages
       .filter((im) => im && typeof im.b64 === "string" && im.b64.length > 0)
       .slice(0, 8)
@@ -563,11 +600,13 @@ Deno.serve(async (req: Request) => {
     // release a hold we've decided to charge. `analysis` is unchanged either way.
     const credits = await captureCredit(holdId);
     holdId = null;
+    await logUsage({ success: true, inputTokens: data?.usage?.input_tokens ?? null, outputTokens: data?.usage?.output_tokens ?? null });
     return new Response(JSON.stringify(credits ? { analysis, credits } : { analysis }), {
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("analyze-quote error:", err);
+    await logUsage({ success: false, errorMessage: String(err).slice(0, 400) });
     // Any throw after a hold was placed must not charge the user.
     await releaseCredit(holdId);
     holdId = null;
