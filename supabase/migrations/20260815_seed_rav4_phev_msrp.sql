@@ -16,10 +16,32 @@
 -- Price summaries (SE AWD, XSE AWD, GR SPORT AWD).
 -- https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html
 --
--- source_url points at the BUILD & PRICE page rather than the press release,
--- because that is the page a buyer can open and check the number on themselves.
--- The report links it, so a claim is never something the reader has to take on
--- trust: https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/
+-- source_url is a DEEP LINK to the exact configuration, not the model page, so
+-- a buyer clicking it lands on this precise trim rather than having to find it.
+-- The report renders the link, which is what makes a claim checkable instead of
+-- something the reader takes on trust.
+--
+-- THE URL PATTERN (Vic, 2026-08-15) — this is the important discovery:
+--
+--   /en/build-price/rav4-plug-in-hybrid/?year=2026&model=<TRIM>&package=<P>&exterior=<COLOUR>
+--
+--   model=SERAPC   SE          package=A   Standard Package
+--   model=XERAPC   XSE         exterior=02VP  Pearl White  (+$905)
+--   model=GRRAPC   GR SPORT    exterior=0M22
+--
+-- The configuration space is ENUMERABLE: trim code x package x exterior, each
+-- URL yielding one deterministic price. And it decodes the other direction too
+-- — a Build & Price PDF's "REFERENCE CODE: GRRAPC AE 02TB" is the same three
+-- fields, so a PDF a buyer forwards us identifies its exact configuration.
+--
+-- Caveat measured the same day: the page is CLIENT-RENDERED. A plain fetch
+-- returns navigation and no dollar figures, so harvesting prices from these
+-- URLs needs a rendered page (or the JSON endpoint behind it), not a cheap GET.
+-- That is the cost question for any enumeration plan.
+--
+-- Premium paint is +$905, which is exactly the gap between the published
+-- GR SPORT MSRP ($57,500) and the Build & Price summary Vic generated
+-- ($58,405). The catalog prices a TRIM; the buyer is looking at a CAR.
 --
 -- BASIS: `excl_freight`. Toyota's release states the MSRP column is the vehicle
 -- price BEFORE freight/PDI, A/C charge, dealer fees and other charges — those
@@ -44,13 +66,16 @@ insert into public.msrp_catalog
   (year, make, model, trim, msrp, fuel_type, drivetrain, price_basis, source_url, fetched_at)
 values
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'SE',                     48750, 'PHEV', 'AWD', 'excl_freight',
-   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/?year=2026&model=SERAPC&package=A', now()),
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'XSE',                    56400, 'PHEV', 'AWD', 'excl_freight',
-   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/?year=2026&model=XERAPC&package=A', now()),
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'GR SPORT',               57500, 'PHEV', 'AWD', 'excl_freight',
-   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/', now()),
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/?year=2026&model=GRRAPC&package=A', now()),
+  -- No package param: the Technology Package code is not known, and inventing
+  -- one would send a buyer to the wrong configuration. This lands them on the
+  -- XSE where both packages are shown. Missing beats wrong, links included.
   (2026, 'Toyota', 'RAV4 Plug-in Hybrid', 'XSE Technology Package', 59350, 'PHEV', 'AWD', 'excl_freight',
-   'https://media.toyota.ca/en/releases/2026/toyota-canada-announces-pricing-for-the-all-new-2026-toyota-rav4.html', now())
+   'https://www.toyota.ca/en/build-price/rav4-plug-in-hybrid/?year=2026&model=XERAPC', now())
 on conflict (year, make, model, trim) do update
   set msrp        = excluded.msrp,
       fuel_type   = excluded.fuel_type,

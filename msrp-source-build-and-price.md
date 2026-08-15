@@ -182,10 +182,34 @@ holds without pinning the trim, because there is no higher grade to name.
 
 ---
 
+## The URL pattern — answered 2026-08-15
+
+```
+/en/build-price/rav4-plug-in-hybrid/?year=2026&model=<TRIM>&package=<P>&exterior=<COLOUR>
+
+  model=SERAPC   SE          package=A      Standard Package
+  model=XERAPC   XSE         exterior=02VP  Pearl White  (+$905)
+  model=GRRAPC   GR SPORT    exterior=0M22
+```
+
+**The configuration space is enumerable** — trim code x package x exterior, each
+URL yielding one deterministic price. And it decodes the other way: the Build &
+Price PDF's `REFERENCE CODE: GRRAPC AE 02TB` is those same three fields, so a
+PDF a buyer forwards us identifies its exact configuration.
+
+`source_url` is now a **deep link per row**, so the report's "verify this on
+Toyota's page" link lands on the precise trim.
+
+**Cost caveat, measured:** the page is **client-rendered**. A plain fetch
+returns navigation and no dollar figures, so harvesting from these URLs needs a
+rendered page or the JSON endpoint behind it, not a cheap GET.
+
+**Premium paint is +$905** — exactly the gap between the published GR SPORT
+MSRP ($57,500) and the Build & Price summary ($58,405). Confirmed by Vic
+choosing Pearl White on the XSE.
+
 ## Open questions
 
-- Does the build-code URL pattern (`toyota.ca/build/XXXXXX`) allow cheap
-  enumeration of every trim, or is a code only minted per configuration session?
 - Which other makes publish an equivalent province-aware Build & Price summary
   with an itemised fee breakdown? (Expected: most; needs verification per make.)
 - Is the PDF generated client-side or fetched? Determines capture cost.
