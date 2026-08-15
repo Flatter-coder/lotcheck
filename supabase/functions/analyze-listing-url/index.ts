@@ -71,7 +71,7 @@ import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
-import { powertrainCompatible } from "../_shared/model-identity.js";
+import { powertrainCompatible, stripPowertrain } from "../_shared/model-identity.js";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const NIMBLE_API_KEY = Deno.env.get("NIMBLE_API_KEY");
@@ -546,7 +546,13 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
       .from("msrp_catalog").select("model")
       .in("year", [year - 1, year, year + 1]).ilike("make", make).not("model", "is", null).limit(400);
     if (!data?.length) return null;
-    const em = String(model).trim().toUpperCase(); let best: string | null = null;
+    // Match on the name with powertrain MODIFIERS removed, because dealers put
+    // the word wherever they like: "RAV4 Hybrid XLE", "RAV4 HEV XLE",
+    // "RAV4 XLE HYBRID" and "RAV4 XLE HEV" are one car, and a prefix test only
+    // ever matched the first of them. The powertrain decision itself is made by
+    // powertrainCompatible on the ORIGINAL strings, below — stripping here is
+    // about finding the base name, never about what powertrain it is.
+    const em = stripPowertrain(model).toUpperCase(); let best: string | null = null;
     for (const row of data) {
       const cm = String(row.model || "").trim(); if (!cm) continue;
       // Prefix-stripping is for TRIM noise, never for a powertrain suffix: an
@@ -558,7 +564,7 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
       // as a plug-in and never reduces it to a conventional hybrid — on the
       // 2026 RAV4 that distinction is $5,500.
       if (!powertrainCompatible(model, cm)) continue;
-      const cmU = cm.toUpperCase();
+      const cmU = stripPowertrain(cm).toUpperCase();
       if (em === cmU || em.startsWith(cmU + " ")) { if (!best || cm.length > best.length) best = cm; }
     }
     return best;

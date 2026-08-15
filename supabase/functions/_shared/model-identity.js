@@ -54,6 +54,32 @@ export function powertrainMarkers(s) {
  * @param {string} catalogModel  candidate model name from msrp_catalog
  * @returns {boolean}
  */
+// Powertrain words that are MODIFIERS, never a nameplate. Stripping these lets
+// the base-model match ignore where the dealer put the word.
+//
+// WHY (Vic, 2026-08-15): "RAV4 Hybrid XLE", "RAV4 HEV XLE", "RAV4 XLE HYBRID"
+// and "RAV4 XLE HEV" are the same car, and dealers write all four. The
+// base-model resolver matches on a PREFIX, so only the first ever matched a
+// catalog row called 'RAV4 Hybrid' — the other three silently found nothing and
+// the report lost its MSRP.
+//
+// Deliberately EXCLUDES markers that ARE the nameplate — bZ4X, Solterra, EV6,
+// EV9, Ioniq 5/6, Mach-E, Lightning, e-tron. Stripping those would erase the
+// model name itself and break matches that work today. `\bev\b` is safe: word
+// boundaries mean it takes the "EV" in "Equinox EV" and leaves "EV6" alone.
+const MODIFIER_RE = /\b(plug-?in\s+hybrid|plug-?in|phev|hybride|hybrid|hev|prime|4xe|recharge|ev)\b/gi;
+
+/**
+ * The model name with powertrain modifiers removed, for order-insensitive
+ * base-model matching. NEVER use this for the powertrain decision itself —
+ * that is powertrainCompatible's job, on the ORIGINAL strings.
+ * @param {string} s
+ * @returns {string}
+ */
+export function stripPowertrain(s) {
+  return String(s || "").replace(MODIFIER_RE, " ").replace(/\s+/g, " ").trim();
+}
+
 export function powertrainCompatible(listingModel, catalogModel) {
   const a = powertrainMarkers(listingModel);
   const b = powertrainMarkers(catalogModel);

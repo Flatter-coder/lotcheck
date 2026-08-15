@@ -8,7 +8,7 @@
 // worse than no sticker.
 //
 // Run:  npm run test:model-identity
-import { powertrainMarkers, powertrainCompatible } from "./model-identity.js";
+import { powertrainMarkers, powertrainCompatible, stripPowertrain } from "./model-identity.js";
 
 let pass = 0, fail = 0;
 function check(label: string, cond: boolean, detail?: string) {
@@ -87,6 +87,53 @@ check("'PHEV' resolves the same way as 'Plug-in Hybrid'",
   powertrainCompatible("RAV4 PHEV", "RAV4 Plug-in Hybrid"));
 check("a bare hybrid is not upgraded to a plug-in",
   !powertrainCompatible("RAV4 Hybrid", "RAV4 Plug-in Hybrid"));
+
+// ---------------------------------------------------------------------------
+// WORD ORDER (Vic, 2026-08-15): "RAV4 Hybrid XLE", "RAV4 HEV XLE",
+// "RAV4 XLE HYBRID" and "RAV4 XLE HEV" are the same car. The base-model
+// resolver matches on a PREFIX, so before stripPowertrain only the FIRST of the
+// four ever found a catalog row — the other three silently returned no MSRP.
+//
+// `resolve` below mirrors resolveBaseModel in analyze-listing-url exactly:
+// compatibility on the ORIGINAL strings, prefix match on the STRIPPED ones.
+// ---------------------------------------------------------------------------
+const resolve = (listing: string, cat: string) => {
+  if (!powertrainCompatible(listing, cat)) return false;
+  const em = stripPowertrain(listing).toUpperCase();
+  const cm = stripPowertrain(cat).toUpperCase();
+  return em === cm || em.startsWith(cm + " ");
+};
+
+console.log("\nword order — the marker can sit anywhere");
+for (const l of ["RAV4 Hybrid XLE", "RAV4 HEV XLE", "RAV4 XLE HYBRID", "RAV4 XLE HEV"]) {
+  check(`'${l}' resolves to 'RAV4 Hybrid'`, resolve(l, "RAV4 Hybrid"));
+}
+for (const l of ["RAV4 PHEV XSE", "RAV4 XSE PHEV", "RAV4 Plug-in Hybrid XSE", "RAV4 Prime XSE"]) {
+  check(`'${l}' resolves to 'RAV4 Plug-in Hybrid'`, resolve(l, "RAV4 Plug-in Hybrid"));
+}
+
+console.log("\nand order must NOT let a plug-in reach a hybrid row");
+check("'RAV4 XLE HEV' does not reach the plug-in row", !resolve("RAV4 XLE HEV", "RAV4 Plug-in Hybrid"));
+check("'RAV4 XSE PHEV' does not reach the hybrid row", !resolve("RAV4 XSE PHEV", "RAV4 Hybrid"));
+check("a bare 'RAV4 XLE' does not reach the hybrid row", !resolve("RAV4 XLE", "RAV4 Hybrid"));
+check("a bare 'RAV4 XLE' DOES reach the plain row", resolve("RAV4 XLE", "RAV4"));
+
+console.log("\nstripPowertrain must not eat a nameplate");
+check("bZ4X survives stripping", stripPowertrain("bZ4X XLE") === "bZ4X XLE");
+check("EV6 survives stripping", stripPowertrain("EV6 GT-Line") === "EV6 GT-Line");
+check("Mach-E survives stripping", stripPowertrain("Mustang Mach-E Premium") === "Mustang Mach-E Premium");
+check("Ioniq 5 survives stripping", stripPowertrain("Ioniq 5 Preferred") === "Ioniq 5 Preferred");
+check("'Equinox EV LT' loses only the modifier", stripPowertrain("Equinox EV LT") === "Equinox LT");
+check("'RAV4 Plug-in Hybrid' strips to the nameplate", stripPowertrain("RAV4 Plug-in Hybrid") === "RAV4");
+
+console.log("\nnameplate matches still resolve after the change");
+for (const [l, c] of [["bZ4X XLE", "bZ4X"], ["Mustang Mach-E Premium", "Mustang Mach-E"],
+                      ["Blazer EV RS", "Blazer EV"], ["Equinox EV LT", "Equinox EV"],
+                      ["Palisade Ultimate Calligraphy", "Palisade"],
+                      ["Grand Cherokee L Limited", "Grand Cherokee"]] as Array<[string, string]>) {
+  check(`'${l}' -> '${c}'`, resolve(l, c));
+}
+check("a gas Equinox still cannot reach the EV row", !resolve("Equinox LT", "Equinox EV"));
 
 console.log(`\n${pass} passed, ${fail} failed.`);
 if (fail) process.exit(1);
