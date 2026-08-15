@@ -33,8 +33,23 @@ export type MsrpBasis = "exact" | "starting_at" | "original_when_new" | "dealer_
 export type MsrpClaim = {
   /** May a surface print an over/under-MSRP figure at all? */
   comparable: boolean;
-  /** Signed delta (asking - msrp) when comparable, else null. NEVER recompute this. */
+  /** Signed delta (asking - reference) when comparable, else null. NEVER recompute this. */
   delta: number | null;
+  /**
+   * WHICH figure the delta was measured against, and the figure itself.
+   *
+   * An AMVIC all-in advertised price must be compared against the
+   * manufacturer's ALL-IN figure, never against the ex-freight MSRP — that
+   * comparison invents roughly $3,000 of markup that does not exist and is the
+   * single largest source of a wrong over/under claim. Toyota publishes both,
+   * so there is nothing to estimate: msrp_catalog.all_in_price holds theirs.
+   *
+   * Live example (Okotoks, 2026-08-15): $85,995 all-in was being measured
+   * against a $57,500 ex-freight MSRP. The honest reference is the $60,564
+   * all-in for that trim.
+   */
+  comparedAgainst: "all_in" | "ex_freight" | null;
+  reference: number | null;
   /** True when comparable AND the vehicle is priced above MSRP. */
   over: boolean;
   /** The MSRP figure itself, which is often still worth SHOWING even when it cannot be compared. */
@@ -138,7 +153,15 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
   const basis = (typeof a.msrpBasis === "string" ? a.msrpBasis : null) as MsrpBasis | null;
   const make = a.make || "the manufacturer";
 
-  const base = { msrp, basis, comparable: false, delta: null, over: false } as MsrpClaim;
+  const allIn = n(a.msrpAllIn);
+  // An AMVIC all-in advertised price is compared against the manufacturer's own
+  // all-in figure. Anything else is a basis mismatch worth roughly $3,000.
+  const useAllIn = !!a.allInPricing && !!allIn;
+  const reference = useAllIn ? allIn : msrp;
+  const comparedAgainst: "all_in" | "ex_freight" | null = msrp ? (useAllIn ? "all_in" : "ex_freight") : null;
+
+  const base = { msrp, basis, comparable: false, delta: null, over: false,
+                 comparedAgainst, reference: msrp ? reference : null } as MsrpClaim;
 
   if (!msrp) {
     return { ...base, label: "MSRP", refusal: null };
@@ -178,13 +201,26 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
     };
   }
 
-  const delta = asking - msrp;
+  // An all-in asking price with NO all-in reference cannot be compared soundly:
+  // measuring it against the ex-freight MSRP invents the freight as markup.
+  // Refuse rather than overstate — the ceiling claim still has something to say.
+  if (a.allInPricing && !allIn) {
+    return {
+      ...base,
+      label: labelFor(basis, a),
+      refusal: `This price is advertised all-in, but we hold only ${make}'s ex-freight MSRP for this trim — comparing the two would count freight and fees as markup, so no over/under-MSRP claim is made.`,
+    };
+  }
+
+  const delta = asking - reference;
   return {
     msrp,
     basis,
     comparable: true,
     delta,
     over: delta > 0,
+    comparedAgainst,
+    reference,
     label: labelFor(basis, a),
     refusal: null,
   };
