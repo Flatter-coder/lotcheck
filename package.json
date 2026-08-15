@@ -34,7 +34,8 @@
     "check:cache-ver": "node scripts/check-cache-ver.mjs",
     "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",
     "test:region-gate": "node scripts/test-region-gate.mjs",
-    "test:catalog-guard": "node scripts/test-catalog-guard.mjs"
+    "test:catalog-guard": "node scripts/test-catalog-guard.mjs",
+    "test:bp-summary": "node scripts/test-bp-summary.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
