@@ -17,17 +17,17 @@ const check = (label, cond, detail) => {
 // ---------------------------------------------------------------------------
 // SEEDABLE — a bare package line and a colour confirmed free.
 // ---------------------------------------------------------------------------
-const gas4Runner = { trim: "4Runner", msrpLine: 55520, exterior: "White", noCostExterior: true, blockHeater: 682, printedSubtotal: 59266 };
+const gas4Runner = { trim: "4Runner", msrpLine: 55520, exterior: "White", noCostExterior: true, blockHeater: 682, delivery: 1930, printedSubtotal: 59266 };
 check("4Runner gas base seeds (no package, free White)",
   assessSummary(gas4Runner).seedable && assessSummary(gas4Runner).msrp === 55520,
   JSON.stringify(assessSummary(gas4Runner)));
 
-const hyb4Runner = { trim: "4Runner Hybrid", msrpLine: 69207, exterior: "Black", noCostExterior: true, blockHeater: 682, printedSubtotal: 72953 };
+const hyb4Runner = { trim: "4Runner Hybrid", msrpLine: 69207, exterior: "Black", noCostExterior: true, blockHeater: 682, delivery: 1930, printedSubtotal: 72953 };
 check("4Runner Hybrid base seeds at 69207, not the gas 55520",
   assessSummary(hyb4Runner).msrp === 69207,
   JSON.stringify(assessSummary(hyb4Runner)));
 
-const trailhunter = { trim: "Trailhunter", msrpLine: 69207, packageLine: "Trailhunter", packagePrice: 16447, exterior: "Everest", noCostExterior: true, blockHeater: 682, printedSubtotal: 89400 };
+const trailhunter = { trim: "Trailhunter", msrpLine: 69207, packageLine: "Trailhunter", packagePrice: 16447, exterior: "Everest", noCostExterior: true, blockHeater: 682, delivery: 1930, printedSubtotal: 89400 };
 check("Trailhunter seeds at 85654 — bare package label, free colour",
   assessSummary(trailhunter).seedable && assessSummary(trailhunter).msrp === 85654,
   JSON.stringify(assessSummary(trailhunter)));
@@ -53,7 +53,7 @@ for (const [label, pkg, price, colour] of [
 // Limited has no package line, so a package-only check passes it, and it is
 // $905 too high.
 // ---------------------------------------------------------------------------
-const csTwoTone = { trim: "Limited", msrpLine: 59460, exterior: "Oxygen White with Black Roof", blockHeater: 717, printedSubtotal: 63241 };
+const csTwoTone = { trim: "Limited", msrpLine: 59460, exterior: "Oxygen White with Black Roof", blockHeater: 717, delivery: 1930, printedSubtotal: 63241 };
 check("REFUSED: Crown Signia two-tone — no package line, still $905 of paint",
   !assessSummary(csTwoTone).seedable,
   assessSummary(csTwoTone).reason);
@@ -78,13 +78,13 @@ check("REFUSED: exterior absent entirely",
 // Reconciliation catches a bad PARSE before it becomes a bad row.
 // ---------------------------------------------------------------------------
 check("REFUSED: figures that do not reconcile to the printed subtotal",
-  !assessSummary({ msrpLine: 55520, exterior: "White", noCostExterior: true, blockHeater: 682, printedSubtotal: 60000 }).seedable,
+  !assessSummary({ msrpLine: 55520, exterior: "White", noCostExterior: true, blockHeater: 682, delivery: 1930, printedSubtotal: 60000 }).seedable,
   "a mis-parsed line must fail loudly, not seed quietly");
 
 check("reconciliation is exact on the real 4Runner numbers",
-  reconciles({ msrpLine: 55520, blockHeater: 682, printedSubtotal: 59266 }).ok &&
-  Object.values(AB_STATUTORY).reduce((a, b) => a + b, 0) === 3064,
-  JSON.stringify(reconciles({ msrpLine: 55520, blockHeater: 682, printedSubtotal: 59266 })));
+  reconciles({ msrpLine: 55520, blockHeater: 682, delivery: 1930, printedSubtotal: 59266 }).ok &&
+  Object.values(AB_STATUTORY).reduce((a, b) => a + b, 0) + 1930 === 3064,
+  JSON.stringify(reconciles({ msrpLine: 55520, blockHeater: 682, delivery: 1930, printedSubtotal: 59266 })));
 
 // ---------------------------------------------------------------------------
 // The recovery path: two builds of one trim isolate the paint.
@@ -121,20 +121,41 @@ check("two-tone detection reads the roof, not the colour name",
 // SUPPLIES a number and a mis-parse goes undetected; the lineup page CHECKS it
 // from a different Toyota surface. This is what "price verified" needs to mean.
 // ---------------------------------------------------------------------------
-const cs = corroborateWithLineup({ baseMsrp: 58555, blockHeater: 717, lineupFrom: 62354 });
+const cs = corroborateWithLineup({ baseMsrp: 58555, blockHeater: 717, delivery: 1930, lineupFrom: 62354 });
 check("lineup page confirms Crown Signia base 58555 to the cent", cs.agrees, JSON.stringify(cs));
 
-const lc = corroborateWithLineup({ baseMsrp: 71670, blockHeater: 702, lineupFrom: 75454 });
+const lc = corroborateWithLineup({ baseMsrp: 71670, blockHeater: 702, delivery: 1930, lineupFrom: 75454 });
 check("lineup page confirms Land Cruiser 1958 base 71670 — unblocks a withheld trim",
   lc.agrees, JSON.stringify(lc));
 
 check("a base still carrying paint is caught as ABOVE Toyota's own floor",
-  corroborateWithLineup({ baseMsrp: 59460, blockHeater: 717, lineupFrom: 62354 }).delta === -905,
+  corroborateWithLineup({ baseMsrp: 59460, blockHeater: 717, delivery: 1930, lineupFrom: 62354 }).delta === -905,
   "the Crown Signia two-tone sits $905 over the published floor");
 
 check("a floor BELOW ours means a cheaper trim we have not captured",
-  /cheaper trim/.test(corroborateWithLineup({ baseMsrp: 80460, blockHeater: 702, lineupFrom: 75454 }).verdict),
+  /cheaper trim/.test(corroborateWithLineup({ baseMsrp: 80460, blockHeater: 702, delivery: 1930, lineupFrom: 75454 }).verdict),
   "Land Cruiser base 80460 against a 75454 floor — the 1958 sits underneath it");
+
+// ---------------------------------------------------------------------------
+// FREIGHT IS NOT A CONSTANT EITHER. The 2026 Crown prints $1,860 delivery where
+// every other model captured prints $1,930. It was hardcoded in AB_STATUTORY,
+// so every Crown figure computed from it was $70 wrong. Now required input.
+// ---------------------------------------------------------------------------
+const crown = { trim: "Limited", msrpLine: 55227, blockHeater: 709, delivery: 1860, printedSubtotal: 58930 };
+check("Crown reconciles on ITS OWN $1,860 freight", reconciles(crown).ok, JSON.stringify(reconciles(crown)));
+
+check("...and does NOT reconcile on the $1,930 every other model uses",
+  !reconciles({ ...crown, delivery: 1930 }).ok,
+  "a wrong freight figure must fail loudly, not absorb $70 into the MSRP");
+
+check("a summary with NO freight captured refuses instead of assuming one",
+  !reconciles({ ...crown, delivery: undefined }).ok &&
+  /delivery/.test(reconciles({ ...crown, delivery: undefined }).reason || ""),
+  JSON.stringify(reconciles({ ...crown, delivery: undefined })));
+
+check("corroboration also refuses without a freight figure",
+  !corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, lineupFrom: 58914 }).agrees,
+  "an absent freight figure must never silently borrow another model's");
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 process.exit(fail ? 1 : 0);

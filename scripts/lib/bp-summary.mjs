@@ -34,10 +34,31 @@
 // build of the same trim priced lower, or an explicit record that the colour is
 // free. Absent that, refuse. Missing beats wrong.
 
-// Alberta line items, captured per summary. Never assume a constant: the block
-// heater alone has six values across six models ($682 / $702 / $707 / $712 /
-// $717 / $797.40) and a plug-in ships with a cord instead.
-export const AB_STATUTORY = { delivery_destination: 1930, dealer_fees_max: 999, air_conditioning: 100, tire_levy: 25, amvic: 10 };
+// Alberta line items. ONLY the ones that have held on every summary captured so
+// far live here — and this list shrank once already, which is the point.
+//
+// delivery_destination WAS in this object at $1,930. The 2026 Crown prints
+// $1,860, so every Crown figure computed from the constant was $70 wrong. It is
+// now a REQUIRED per-summary input with no default: an absent freight figure
+// refuses instead of quietly substituting another model's.
+//
+// The block heater was never a constant and has seven values across seven
+// models ($682 / $702 / $707 / $709 / $712 / $717 / $797.40), plus none at all
+// on a plug-in, which ships with a cord.
+//
+// Treat the four below as observed-stable, not guaranteed. If a summary prints
+// a different A/C charge or dealer-fee cap, reconciles() will fail rather than
+// silently absorb it — which is how the freight difference surfaced.
+export const AB_STATUTORY = { dealer_fees_max: 999, air_conditioning: 100, tire_levy: 25, amvic: 10 };
+
+// PPSA applies only to a leased or financed deal, never to cash.
+export const PPSA_FINANCE_BASIS = 14 + 4;
+
+function addsOf(fees, delivery) {
+  const d = Number(delivery);
+  if (!Number.isFinite(d)) return null; // caller must refuse
+  return Object.values(fees).reduce((a, b) => a + b, 0) + d;
+}
 
 export const PAINT_SUFFIX_RE = /\bwith\s+Premium\s+Paint\s*$/i;
 
@@ -56,9 +77,14 @@ export function looksTwoTone(exterior) {
   return /\bwith\s+.*\bRoof\b/i.test(String(exterior ?? ""));
 }
 
-/** MSRP + package + accessories + Alberta adds must equal the printed subtotal. */
-export function reconciles({ msrpLine, packagePrice = 0, blockHeater = 0, fees = AB_STATUTORY, printedSubtotal }) {
-  const adds = Object.values(fees).reduce((a, b) => a + b, 0);
+/**
+ * MSRP + package + accessories + Alberta adds must equal the printed subtotal.
+ * `delivery` is REQUIRED — it varies by model ($1,930 on most, $1,860 on the
+ * Crown) and guessing it silently shifts every figure downstream.
+ */
+export function reconciles({ msrpLine, packagePrice = 0, blockHeater = 0, fees = AB_STATUTORY, delivery, printedSubtotal }) {
+  const adds = addsOf(fees, delivery);
+  if (adds === null) return { ok: false, calc: null, reason: "no delivery/destination charge captured — it varies by model and must be read from the summary" };
   const calc = Number(msrpLine) + Number(packagePrice) + Number(blockHeater) + adds;
   return { ok: Math.abs(calc - Number(printedSubtotal)) < 0.02, calc };
 }
@@ -131,10 +157,9 @@ export function deriveBaseFromPair(a, b) {
 //
 // LIMIT: it prices the cheapest trim only. Everything above base still needs a
 // summary. Page checks the floor, summary supplies the ladder.
-export const PPSA_FINANCE_BASIS = 14 + 4;
-
-export function corroborateWithLineup({ baseMsrp, blockHeater = 0, lineupFrom, fees = AB_STATUTORY }) {
-  const adds = Object.values(fees).reduce((a, b) => a + b, 0);
+export function corroborateWithLineup({ baseMsrp, blockHeater = 0, lineupFrom, delivery, fees = AB_STATUTORY }) {
+  const adds = addsOf(fees, delivery);
+  if (adds === null) return { agrees: false, delta: null, verdict: "no delivery/destination charge captured — cannot corroborate without it" };
   const expected = Number(baseMsrp) + Number(blockHeater) + adds + PPSA_FINANCE_BASIS;
   const delta = Number(lineupFrom) - expected;
   if (Math.abs(delta) < 0.02) return { agrees: true, delta: 0, verdict: "confirmed by a second Toyota surface" };
