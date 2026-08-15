@@ -27,8 +27,18 @@ const supabase = createClient(
 // the public pages are never mounted at the same time (App routes to exactly
 // one page by pathname), so these subscriptions never coexist or conflict.
 // The same magic-link OTP and password (admin) flows share this one client.
+// Returns: a user object when signed in, null when CONFIRMED signed out, and
+// `undefined` while getSession() is still in flight.
+//
+// That third state matters. getSession() is async, so on every page load there
+// is a window where a signed-in person reads as falsy. Code that treats falsy
+// as "signed out" will bounce a paying user to the sign-in modal during it —
+// which is exactly what happened when the free-check gate started trusting
+// this value synchronously. Both undefined and null are falsy, so every
+// existing `if(user)` check behaves identically; only code that needs to know
+// the difference tests for undefined.
 function useSupabaseUser(){
-  const [user,setUser]=useState(null);
+  const [user,setUser]=useState(undefined);
   useEffect(()=>{
     let active=true;
     supabase.auth.getSession().then(({data})=>{
@@ -8786,7 +8796,9 @@ function QuoteCheckPage(){
     if(data&&data.credits&&typeof data.credits.personal==="number"){
       setBalance(prev=>({personal:data.credits.personal,shareable:prev?.shareable??0}));
     }
-    if(!user){ markFreeCheckUsed(); setFreeUsed(true); }
+    // user===null, not !user: during the session-resolution window a signed-in
+    // user would otherwise have the local free-check flag stamped on them.
+    if(user===null){ markFreeCheckUsed(); setFreeUsed(true); }
   };
 
   // Gate an analyze attempt before any work runs. Signed-in -> always proceed
@@ -8804,6 +8816,11 @@ function QuoteCheckPage(){
   // pointless round trip; it is not the control.
   const gateAttempt=()=>{
     if(user) return true;
+    // Session not resolved yet — proceed and let the SERVER decide. It is the
+    // authority anyway: it returns 402 out_of_credits or 429 free_limit_reached
+    // and both are handled below. Bouncing on an unresolved session is how a
+    // signed-in user with credits got shown the sign-in modal for pasting a URL.
+    if(user===undefined) return true;
     setShowSignIn(true);
     return false;
   };
@@ -9581,7 +9598,7 @@ function QuoteCheckPage(){
                   renders below regardless. Only shown to logged-out visitors --
                   once signed in it disappears. No paywall, no enforcement
                   (Phase 2 is auth primitives only). */}
-              {!user&&(
+              {user===null&&(
                 <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,boxShadow:"none",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
                   <div style={{fontSize:26,flexShrink:0}}>🔖</div>
                   <div style={{flex:"1 1 200px",minWidth:0}}>
