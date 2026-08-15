@@ -106,3 +106,47 @@ export function deriveBaseFromPair(a, b) {
   if (lo === hi) return { ok: false, reason: "both builds state the same MSRP line — no paint charge is isolated" };
   return { ok: true, baseMsrp: lo, paintPremium: hi - lo };
 }
+
+// ---------------------------------------------------------------------------
+// THE LINEUP PAGE IS A SECOND SOURCE, and it is the one that was missing.
+//
+// toyota.ca's model grid prints "From $X" under every vehicle. That figure is
+// the model's CHEAPEST trim, all-in, on the FINANCE basis — Toyota's own
+// published formula plus PPSA:
+//
+//     From$ = base trim MSRP + block heater + Alberta statutory adds + $18 PPSA
+//
+// Verified to the cent on two independently-derived bases:
+//     Crown Signia Limited   58,555 + 717 + 3,064 + 18 = 62,354  = page
+//     Land Cruiser 1958      71,670 + 702 + 3,064 + 18 = 75,454  = page
+//
+// Why this matters more than another PDF: a Build & Price summary SUPPLIES a
+// number, so a mis-parse produces a confident wrong answer with nothing to
+// catch it. The lineup page CHECKS the number, from a different Toyota surface,
+// for every model at once. That is corroboration rather than repetition — and
+// it is what lets a base survive a dealer disputing it.
+//
+// It also RESOLVES withheld trims: if a summary's MSRP line agrees with the
+// page, its colour was free; if it exceeds it, the difference is the paint.
+//
+// LIMIT: it prices the cheapest trim only. Everything above base still needs a
+// summary. Page checks the floor, summary supplies the ladder.
+export const PPSA_FINANCE_BASIS = 14 + 4;
+
+export function corroborateWithLineup({ baseMsrp, blockHeater = 0, lineupFrom, fees = AB_STATUTORY }) {
+  const adds = Object.values(fees).reduce((a, b) => a + b, 0);
+  const expected = Number(baseMsrp) + Number(blockHeater) + adds + PPSA_FINANCE_BASIS;
+  const delta = Number(lineupFrom) - expected;
+  if (Math.abs(delta) < 0.02) return { agrees: true, delta: 0, verdict: "confirmed by a second Toyota surface" };
+  // Below the floor has TWO possible causes and this check cannot separate them:
+  // the MSRP line may carry paint, or a cheaper trim may exist that we have not
+  // captured. Say both. Naming one would be a guess wearing the badge of a check.
+  if (delta < 0) {
+    return { agrees: false, delta,
+      verdict: `sits $${(-delta).toFixed(2)} ABOVE Toyota's published floor — either this MSRP line carries paint, or a cheaper trim exists that we have not captured. Do not seed as the model's base until which one is established.` };
+  }
+  // Above the floor should be impossible: nothing can be cheaper than the
+  // cheapest trim. Our figure or our block heater is wrong.
+  return { agrees: false, delta,
+    verdict: `sits $${delta.toFixed(2)} BELOW Toyota's published floor, which cannot be true of any real trim — the MSRP or the block-heater figure is wrong.` };
+}

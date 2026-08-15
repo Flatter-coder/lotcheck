@@ -83,6 +83,8 @@ jobs:
         run: npm run test:catalog-guard
       - name: Build & Price gate (a premium colour must never seed as trim MSRP)
         run: npm run test:bp-summary
+      - name: Supersede must carry enrichment (replaceRows end-to-end)
+        run: npm run test:supersede
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)

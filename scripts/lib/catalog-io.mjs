@@ -135,9 +135,20 @@ export function assessCollapse(prevCount, nextCount, { floor = COLLAPSE_FLOOR, d
 
 // Read the make's full current rows ONCE: they feed carry-forward, the collapse
 // check, and -- if the insert fails -- the restore.
+// READ EVERY ROW, INCLUDING THE HAND-VERIFIED ONES. This used to carry
+// "&source_url=is.null", which was safe only while nothing ever deleted a
+// hand-verified row: the DELETE spared them, so not reading them cost nothing.
+// The supersede step below DOES delete them, and a filtered read means their
+// drivetrain / attrs / price_basis / source_url are never carried onto the
+// replacement — so superseding a row silently blanked exactly the columns
+// carry-forward exists to protect (drivetrain was 0/881 populated the last time
+// this went unnoticed). It also left them outside the restore set, so a failed
+// insert reported "restored all N previous rows" while they were gone for good.
+//
+// The source_url protection belongs on the DELETE, which still has it. A read
+// is not destructive and must see everything.
 async function readExisting(table, make, headers, url) {
-  const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
-  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}&select=*&limit=5000`;
+  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}&select=*&limit=5000`;
   const res = await fetch(q, { headers });
   if (!res.ok) return { ok: false, rows: [] };
   return { ok: true, rows: await res.json() };
@@ -224,6 +235,7 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
     // So where this run carries a manufacturer figure for the same key, the
     // live number supersedes and the stale row goes. Where it does not, the
     // verified row stays exactly as protected as before.
+    const supersededKeys = new Set();
     if (table === "msrp_catalog") {
       try {
         const res = await fetch(`${url}/rest/v1/${table}?select=id,year,model,trim,msrp&make=ilike.${encodeURIComponent(make)}`, { headers });
@@ -240,6 +252,8 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
           for (const r of stale) {
             const d = await fetch(`${url}/rest/v1/${table}?id=eq.${r.id}`, { method: "DELETE", headers });
             if (!d.ok && d.status !== 404) console.warn(`  ⚠️ could not supersede ${catKey(r)} (HTTP ${d.status}).`);
+            // Remember what we destroyed, so the restore below can put it back.
+            else supersededKeys.add(catKey(r));
           }
           if (stale.length) {
             console.log(`  ${table} (${make}): superseded ${stale.length} preserved row(s) with this run's manufacturer figures — e.g. ${stale.slice(0, 3).map((r) => `${r.model} ${r.trim ?? ""} was $${r.msrp}`).join("; ")}.`);
@@ -257,7 +271,15 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
       // them, so a failed insert has already destroyed the make. Put it back.
       // This is a compensating restore, not atomicity -- but it turns silent
       // permanent loss into a loud, recovered failure.
-      const back = uniformKeys(prev.rows);
+      // Restore exactly what was destroyed, and nothing else. Two things were:
+      // the rows the DELETE took (source_url null) and the rows supersede took.
+      // A hand-verified row that was neither is STILL IN THE TABLE — re-posting
+      // it would collide on UNIQUE(year,make,model,trim) and fail the batch,
+      // under-restoring the rows that actually needed recovery.
+      const destroyed = table === "msrp_catalog"
+        ? prev.rows.filter((r) => r.source_url == null || supersededKeys.has(catKey(r)))
+        : prev.rows;
+      const back = uniformKeys(destroyed);
       let restored = 0;
       for (let i = 0; i < back.length; i += 500) {
         const res = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(back.slice(i, i + 500)) });

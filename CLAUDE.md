@@ -22,7 +22,7 @@ There is no linter configured. Pure offline test gates exist (run in CI via
 `test:capture` (sealed listing capture), `test:trim`, `test:msrp-authority`,
 `test:carry-forward`, `test:catalog-guard` (refresh green must mean "wrote
 fresh rows"), `test:bp-summary` (a premium colour must never seed as trim
-MSRP), `test:incentives`, `test:finance-contingent`,
+MSRP), `test:supersede` (replaceRows end-to-end), `test:incentives`, `test:finance-contingent`,
 `test:jsonld-vehicle`, plus `check:copy` / `check:parity` / `check:undef`.
 
 ## Architecture

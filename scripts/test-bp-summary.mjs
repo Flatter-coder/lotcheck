@@ -6,7 +6,7 @@
 //
 // Run: node scripts/test-bp-summary.mjs
 
-import { assessSummary, deriveBaseFromPair, packageBundlesPaint, looksTwoTone, reconciles, AB_STATUTORY } from "./lib/bp-summary.mjs";
+import { assessSummary, deriveBaseFromPair, packageBundlesPaint, looksTwoTone, reconciles, AB_STATUTORY, corroborateWithLineup } from "./lib/bp-summary.mjs";
 
 let pass = 0, fail = 0;
 const check = (label, cond, detail) => {
@@ -115,6 +115,26 @@ check("two-tone detection reads the roof, not the colour name",
   looksTwoTone("Heritage Blue with Light Grey Roof") &&
   !looksTwoTone("Wind Chill Pearl") && !looksTwoTone("Everest"),
   "single-tone names must fall through to the evidence check, not be rejected here");
+
+// ---------------------------------------------------------------------------
+// Corroboration against toyota.ca's lineup page — the SECOND SOURCE. A summary
+// SUPPLIES a number and a mis-parse goes undetected; the lineup page CHECKS it
+// from a different Toyota surface. This is what "price verified" needs to mean.
+// ---------------------------------------------------------------------------
+const cs = corroborateWithLineup({ baseMsrp: 58555, blockHeater: 717, lineupFrom: 62354 });
+check("lineup page confirms Crown Signia base 58555 to the cent", cs.agrees, JSON.stringify(cs));
+
+const lc = corroborateWithLineup({ baseMsrp: 71670, blockHeater: 702, lineupFrom: 75454 });
+check("lineup page confirms Land Cruiser 1958 base 71670 — unblocks a withheld trim",
+  lc.agrees, JSON.stringify(lc));
+
+check("a base still carrying paint is caught as ABOVE Toyota's own floor",
+  corroborateWithLineup({ baseMsrp: 59460, blockHeater: 717, lineupFrom: 62354 }).delta === -905,
+  "the Crown Signia two-tone sits $905 over the published floor");
+
+check("a floor BELOW ours means a cheaper trim we have not captured",
+  /cheaper trim/.test(corroborateWithLineup({ baseMsrp: 80460, blockHeater: 702, lineupFrom: 75454 }).verdict),
+  "Land Cruiser base 80460 against a 75454 floor — the 1958 sits underneath it");
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 process.exit(fail ? 1 : 0);
