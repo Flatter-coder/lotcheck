@@ -56,6 +56,61 @@ const n = (v: unknown): number | null => {
 };
 
 /**
+ * THE CEILING CLAIM — the finding that needs no trim.
+ *
+ * Pinning a trim is normally the precondition for any over/under claim, and it
+ * often fails: a 50%+ gap trips the implausibility guard, which exists because a
+ * MISSING catalog row once produced a false $18,900 accusation (IONIQ 9). That
+ * guard is right to fire on trim-level claims.
+ *
+ * But it has nothing to say about this: the model's MOST EXPENSIVE trim, priced
+ * all-in with the maximum dealer fee, is the most generous possible assumption
+ * in the dealer's favour. A listing above THAT is marked up whichever trim it
+ * is, because there is no higher grade left to name — so "the catalog is
+ * missing a row" cannot explain it. It is the one comparison a missing row
+ * cannot poison.
+ *
+ * Worked live (Okotoks Toyota, 2026-08-15): a 2026 RAV4 Plug-in Hybrid
+ * advertised at $85,995 all-in. Top trim is the XSE Technology Package at
+ * $62,414 all-in. $23,581 above the ceiling, and the trim never had to be
+ * pinned. The trim-level card correctly declined; this one does not have to.
+ */
+export type CeilingClaim = {
+  /** True only when the asking price provably exceeds every trim in the line. */
+  exceeds: boolean;
+  /** The model's highest all-in figure. */
+  ceiling: number | null;
+  /** Which trim that ceiling belongs to. */
+  trim: string | null;
+  /** asking − ceiling, when it exceeds. */
+  over: number | null;
+  /** How many trims the ceiling was taken across — 1 is not a ladder. */
+  trimsConsidered: number;
+};
+
+export function qualifyCeilingClaim(analysis: any): CeilingClaim {
+  const a = analysis ?? {};
+  const none: CeilingClaim = { exceeds: false, ceiling: null, trim: null, over: null, trimsConsidered: 0 };
+
+  const c = a.msrpCeiling;
+  const ceiling = n(c?.allIn);
+  const asking = n(a.quotedPrice);
+  const trims = Number(c?.trimsConsidered) || 0;
+
+  // Needs a real ladder. A "ceiling" taken across ONE row is just that row, and
+  // the missing-catalog-row explanation is wide open again.
+  if (!ceiling || !asking || trims < 2) return none;
+
+  // Only meaningful against an ALL-IN advertised price. Comparing an ex-freight
+  // quote to an all-in ceiling would understate the gap and, worse, could
+  // manufacture one where none exists.
+  if (!a.allInPricing) return { ...none, ceiling, trim: c?.trim ?? null, trimsConsidered: trims };
+
+  if (asking <= ceiling) return { exceeds: false, ceiling, trim: c?.trim ?? null, over: null, trimsConsidered: trims };
+  return { exceeds: true, ceiling, trim: c?.trim ?? null, over: asking - ceiling, trimsConsidered: trims };
+}
+
+/**
  * Did this figure come from the MANUFACTURER, or from the dealer?
  *
  * A separate question from `comparable`, and needed because some copy names the
