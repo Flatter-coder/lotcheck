@@ -47,13 +47,34 @@ update public.msrp_catalog set
 where make ilike 'Toyota' and year = 2026 and model = 'RAV4 Plug-in Hybrid';
 
 -- Charging capability per trim.
+--
+-- TWO FIELDS, NOT ONE, and the distinction protects the buyer from Toyota's own
+-- table. `j1772_inlet` is what the comparison chart lists. `ac_level2_capable`
+-- is what the car can actually DO — and it is true on every trim, including the
+-- one the chart marks "—".
+--
+-- CCS1 is physically a J1772 inlet with two DC pins added below: the top five
+-- positions are a standard J1772 layout, so any J1772 EVSE charges a CCS1 car
+-- using only those pins. Compatibility runs ONE WAY — a CCS1 car takes a J1772
+-- plug, a J1772-only car cannot take a CCS1 plug.
+--
+-- So the chart's "J1772 — not available" on the XSE Technology Package means
+-- the inlet fitted is CCS1 rather than plain J1772. Read literally it implies
+-- the buyer cannot use Level 2 public charging, which is FALSE. Reporting that
+-- would be a wrong claim in the buyer's disfavour — and this one is worth
+-- getting right in the other direction too: it makes the pricier trim look
+-- better, which is exactly the kind of finding that earns trust.
 update public.msrp_catalog m set
   attrs = coalesce(m.attrs,'{}'::jsonb) || jsonb_build_object('charging', c.spec)
 from (values
-  ('SE',                     jsonb_build_object('j1772',true, 'dc_fast','no',            'ccs1','no',            'summary','Level 2 (J1772) only')),
-  ('XSE',                    jsonb_build_object('j1772',true, 'dc_fast','in_package',    'ccs1','in_package',    'summary','Level 2 standard; DC fast + CCS1 with the Technology Package')),
-  ('XSE Technology Package', jsonb_build_object('j1772',false,'dc_fast','standard',      'ccs1','standard',      'summary','DC fast charging and CCS1 standard; 11kW on-board charger')),
-  ('GR SPORT',               jsonb_build_object('j1772',true, 'dc_fast','no',            'ccs1','no',            'summary','Level 2 (J1772) only'))
+  ('SE',                     jsonb_build_object('j1772_inlet',true, 'ac_level2_capable',true,'dc_fast','no',        'ccs1','no',
+     'summary','Level 2 (J1772) only — no DC fast charging on this trim')),
+  ('XSE',                    jsonb_build_object('j1772_inlet',true, 'ac_level2_capable',true,'dc_fast','in_package','ccs1','in_package',
+     'summary','Level 2 (J1772) standard. DC fast charging and CCS1 only by adding the Technology Package')),
+  ('XSE Technology Package', jsonb_build_object('j1772_inlet',false,'ac_level2_capable',true,'dc_fast','standard',  'ccs1','standard',
+     'summary','DC fast charging (CCS1) and an 11kW on-board charger, standard. Toyota lists J1772 as "not available" because the inlet fitted is CCS1 — but CCS1 is a J1772 inlet with two DC pins added, so Level 2 J1772 charging still works')),
+  ('GR SPORT',               jsonb_build_object('j1772_inlet',true, 'ac_level2_capable',true,'dc_fast','no',        'ccs1','no',
+     'summary','Level 2 (J1772) only — no DC fast charging on this trim'))
 ) as c(trim_name, spec)
 where m.make ilike 'Toyota' and m.year = 2026
   and m.model = 'RAV4 Plug-in Hybrid'
