@@ -4854,17 +4854,17 @@ function VerifFounderLedger({C, readOnly}){
           <div key={f.email} style={{padding:"7px 2px",borderBottom:`1px solid ${C.line}`}}>
             <div style={{display:"flex",alignItems:"baseline",gap:10}}>
               <span style={{fontSize:14,color:C.ink,flex:1,fontWeight:700}}>{f.name}</span>
-              {/* Proof beside the payment it backs, not in a separate list
-                  nobody cross-references. A payment with no receipt is not
-                  wrong — it is unevidenced, and worth seeing at a glance. */}
+              {/* Proof beside the payment it backs. Only the POSITIVE case is
+                  shown: a receipt adds information, its absence does not. The
+                  "no proof" counterpart nagged on every row (nothing has been
+                  uploaded yet, so it was on all three) without telling anyone
+                  anything they could act on. fn_admin_unproven_payments still
+                  answers the question on demand. */}
               <span style={{fontSize:13,color:C.inkFaint}}>
                 paid {cad(f.paid_cad)}
-                {Number(f.paid_cad)>0 && (
-                  Number(f.receipts_total)>0
-                    ? <span title={`${f.receipts_total} receipt${f.receipts_total===1?"":"s"} on file`}
-                            style={{color:C.tealInk,fontWeight:800,marginLeft:6}}>· proof ✓</span>
-                    : <span title="No receipt uploaded for this founder"
-                            style={{color:C.butterInk,fontWeight:800,marginLeft:6}}>· no proof</span>
+                {Number(f.paid_cad)>0 && Number(f.receipts_total)>0 && (
+                  <span title={`${f.receipts_total} receipt${f.receipts_total===1?"":"s"} on file`}
+                        style={{color:C.tealInk,fontWeight:800,marginLeft:6}}>· proof ✓</span>
                 )}
               </span>
               <span style={{fontSize:14.5,fontWeight:800,fontFamily:"ui-monospace,Menlo,monospace",
@@ -5544,11 +5544,12 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
   // applied, which renders hollow rather than green.
   const [checks,setChecks]=useState(null);
   const [checksLoading,setChecksLoading]=useState(true);
+  const [checksError,setChecksError]=useState(null);
   useEffect(()=>{
     if(!winStart||!winEnd) return;
     let cancelled=false;
     (async()=>{
-      setChecksLoading(true);
+      setChecksLoading(true); setChecksError(null);
       try{
         const {data,error}=await supabase.rpc("fn_admin_verification_checks",{
           p_since:new Date(winStart).toISOString(),
@@ -5558,7 +5559,11 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
         if(!cancelled) setChecks(data||[]);
       }catch(err){
         console.warn("verification_check unavailable (migration applied?):",err?.message||err);
-        if(!cancelled) setChecks(null);
+        // Keep the REASON. Three different states — still loading, the read
+        // failed, nothing ran in this window — all rendered as the same hollow
+        // row, so a permission error was indistinguishable from an empty table.
+        // We chased that exact ambiguity three times in one evening.
+        if(!cancelled){ setChecks(null); setChecksError(err?.message||String(err)); }
       }finally{ if(!cancelled) setChecksLoading(false); }
     })();
     return()=>{cancelled=true;};
@@ -5671,8 +5676,17 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
       const key = needs.split(".")[1];
       const s = checkStats?.get(key);
       if (!checkStats) {
-        rows.push(unmeasured(needs, label, needs,
-          `verification_check is written by both analyze functions but the table is not applied yet — supabase/migrations/20260815_verification_check.sql. Until it runs, this row stays hollow rather than green: unmeasured is not passing.`));
+        // Say WHICH of the three it is. These used to render identically, so a
+        // mid-load screenshot, a permission error and an empty table were the
+        // same picture — and each one sent us looking in a different wrong place.
+        rows.push(checksLoading
+          ? unmeasured(needs, label, "checking…",
+              `Reading verification_check for this window. This row is not hollow — it has not been asked yet.`)
+          : checksError
+            ? unmeasured(needs, label, "read failed",
+                `The checkpoint read returned an error, so nothing here is a measurement — of anything, in either direction.\n\n${checksError}\n\nThis is NOT the same as the table being empty. If it mentions permission, the read is gated against this account; if it mentions a relation, the migration has not been applied.`)
+            : unmeasured(needs, label, needs,
+                `verification_check is written by both analyze functions but the table is not applied yet — supabase/migrations/20260815_verification_check.sql. Until it runs, this row stays hollow rather than green: unmeasured is not passing.`));
       } else if (!s || s.attempts === 0) {
         // No REPORTS in the window is different from no data: say which.
         rows.push(unmeasured(needs, label, s ? `${s.na} n/a · 0 judged` : needs,
