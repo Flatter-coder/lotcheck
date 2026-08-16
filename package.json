@@ -33,7 +33,13 @@
     "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
     "check:cache-ver": "node scripts/check-cache-ver.mjs",
     "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",
-    "test:region-gate": "node scripts/test-region-gate.mjs"
+    "test:region-gate": "node scripts/test-region-gate.mjs",
+    "test:catalog-guard": "node scripts/test-catalog-guard.mjs",
+    "test:bp-summary": "node scripts/test-bp-summary.mjs",
+    "test:supersede": "node scripts/test-supersede-enrichment.mjs",
+    "check:migrations": "node scripts/check-migration-columns.mjs",
+    "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
+    "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

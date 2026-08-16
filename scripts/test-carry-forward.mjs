@@ -57,17 +57,36 @@ check("a fresh value is never overwritten by the old one",
   mergeCarryForward(withDrive, existing).rows[0].drivetrain === "RWD",
   JSON.stringify(mergeCarryForward(withDrive, existing).rows[0]));
 
-// A trim the table has never seen passes through untouched.
+// A trim the table has never seen inherits nothing — but the key must still be
+// PRESENT (explicitly null), see the homogeneity case below.
 const newTrim = [{ year: 2026, model: "Camry", trim: "TRD", msrp: 45000 }];
-check("an unseen trim is passed through unchanged",
-  mergeCarryForward(newTrim, existing).rows[0].drivetrain === undefined,
+check("an unseen trim inherits nothing",
+  mergeCarryForward(newTrim, existing).rows[0].drivetrain === null,
   JSON.stringify(mergeCarryForward(newTrim, existing).rows[0]));
 
 // Model years are distinct vehicles; last year's drivetrain must not leak.
 const nextYear = [{ year: 2027, model: "Camry", trim: "XLE", msrp: 51000 }];
 check("a different model year does not inherit",
-  mergeCarryForward(nextYear, existing).rows[0].drivetrain === undefined,
+  mergeCarryForward(nextYear, existing).rows[0].drivetrain === null,
   JSON.stringify(mergeCarryForward(nextYear, existing).rows[0]));
+
+// PGRST102 regression (2026-08-13): PostgREST bulk INSERT requires every
+// object in the batch to share ONE key set. Carrying enrichment onto only the
+// rows that had a predecessor made the batch heterogeneous, the INSERT 400'd
+// with "All object keys must match" AFTER the DELETE had run, and eleven makes
+// (Mazda 74, Kia 106, Ford 78, …) left msrp_catalog in production. Every row
+// must leave the merge with every carry column present.
+{
+  const mixed = [
+    { year: 2026, model: "Camry", trim: "XLE", msrp: 49442 },  // has a predecessor -> carries
+    { year: 2026, model: "Camry", trim: "TRD", msrp: 45000 },  // brand new -> carries nothing
+  ];
+  const merged = mergeCarryForward(mixed, existing).rows;
+  const keySets = merged.map((r) => Object.keys(r).sort().join(","));
+  check("batch stays homogeneous when only some rows carry (PGRST102 class)",
+    new Set(keySets).size === 1 && CARRY_FORWARD.every((c) => c in merged[1]),
+    `key sets diverged: ${JSON.stringify(keySets)}`);
+}
 
 check("every enrichment column is covered by a case",
   CARRY_FORWARD.every((c) => ["drivetrain", "attrs", "price_basis", "source_url"].includes(c)),
@@ -89,9 +108,34 @@ check("empty inputs are safe",
 const keysOf = (rs) => rs.map((r) => Object.keys(r).sort().join(","));
 const allSame = (rs) => new Set(keysOf(rs)).size <= 1;
 
-check("THE BUG: merged rows have DISAGREEING key sets (what PostgREST rejects)",
-  !allSame(mergeCarryForward(scraped, existing).rows),
-  "if this ever passes, mergeCarryForward changed and the guard below may be dead code");
+// TWO INDEPENDENT LAYERS now stand between that batch and PostgREST, and both
+// are tested here because each covers a case the other does not.
+//
+// LAYER 1 — mergeCarryForward emits EVERY carry column on EVERY row, explicit
+// null where there is nothing to carry. This used to be the bug: only matched
+// rows gained keys. It is now the first line of defence.
+check("LAYER 1: mergeCarryForward alone emits homogeneous CARRY_FORWARD keys",
+  allSame(mergeCarryForward(scraped, existing).rows) &&
+  CARRY_FORWARD.every((c) => mergeCarryForward(scraped, existing).rows.every((r) => c in r)),
+  `key sets: ${[...new Set(keysOf(mergeCarryForward(scraped, existing).rows))].join("  |  ")}`);
+
+// LAYER 2 — uniformKeys is NOT redundant, and this is the proof. It normalises
+// EVERY key; mergeCarryForward only ever touches CARRY_FORWARD. A scraper that
+// emits a field on some rows and omits it on others (here: fuel_type) produces
+// exactly the PGRST102 shape, and layer 1 cannot see it.
+const ragged = [
+  { year: 2026, make: "Toyota", model: "Camry", trim: "XLE", msrp: 49442, fuel_type: "Hybrid" },
+  { year: 2026, make: "Toyota", model: "Camry", trim: "SE",  msrp: 38792 },  // no fuel_type
+];
+check("LAYER 2: a scraper field missing on some rows still diverges after layer 1",
+  !allSame(mergeCarryForward(ragged, existing).rows),
+  "if this passes, uniformKeys may now be dead code — check before deleting it");
+
+check("LAYER 2: uniformKeys catches what layer 1 cannot",
+  allSame(uniformKeys(mergeCarryForward(ragged, existing).rows)) &&
+  uniformKeys(mergeCarryForward(ragged, existing).rows)
+    .find((r) => r.trim === "SE").fuel_type === null,
+  `key sets: ${[...new Set(keysOf(uniformKeys(mergeCarryForward(ragged, existing).rows)))].join("  |  ")}`);
 
 const shipped = uniformKeys(mergeCarryForward(scraped, existing).rows);
 check("THE FIX: uniformKeys makes every row's key set identical",

@@ -60,17 +60,30 @@ export const CARRY_FORWARD = ["drivetrain", "attrs", "price_basis", "source_url"
 export const catKey = (r) => `${r.year}|${r.model}|${r.trim ?? ""}`;
 
 // Pure half, exported so it can be tested without a database.
+//
+// Every row leaves here with EVERY carry column present, explicitly null when
+// there is nothing to carry. PostgREST bulk INSERT requires all objects in a
+// batch to share one key set (PGRST102 "All object keys must match");
+// enriching only the rows that had a predecessor made the batch heterogeneous,
+// the INSERT 400'd after the DELETE had already run, and eleven makes left
+// msrp_catalog on 2026-08-13. A carried key must never decide whether its
+// neighbours insert.
 export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
   const prev = new Map();
   for (const r of prevRows || []) prev.set(catKey(r), r);
   let carried = 0;
   const out = (rows || []).map((r) => {
     const old = prev.get(catKey(r));
-    if (!old) return r;
-    const add = {};
-    // Only fill what the scraper left empty — a fresh scrape always wins.
-    for (const c of cols) if (r[c] == null && old[c] != null) { add[c] = old[c]; carried++; }
-    return Object.keys(add).length ? { ...r, ...add } : r;
+    const merged = { ...r };
+    for (const c of cols) {
+      if (merged[c] == null) {
+        // Only fill what the scraper left empty — a fresh scrape always wins.
+        const v = old && old[c] != null ? old[c] : null;
+        if (v != null) carried++;
+        merged[c] = v;
+      }
+    }
+    return merged;
   });
   return { rows: out, carried };
 }
@@ -122,9 +135,20 @@ export function assessCollapse(prevCount, nextCount, { floor = COLLAPSE_FLOOR, d
 
 // Read the make's full current rows ONCE: they feed carry-forward, the collapse
 // check, and -- if the insert fails -- the restore.
+// READ EVERY ROW, INCLUDING THE HAND-VERIFIED ONES. This used to carry
+// "&source_url=is.null", which was safe only while nothing ever deleted a
+// hand-verified row: the DELETE spared them, so not reading them cost nothing.
+// The supersede step below DOES delete them, and a filtered read means their
+// drivetrain / attrs / price_basis / source_url are never carried onto the
+// replacement — so superseding a row silently blanked exactly the columns
+// carry-forward exists to protect (drivetrain was 0/881 populated the last time
+// this went unnoticed). It also left them outside the restore set, so a failed
+// insert reported "restored all N previous rows" while they were gone for good.
+//
+// The source_url protection belongs on the DELETE, which still has it. A read
+// is not destructive and must see everything.
 async function readExisting(table, make, headers, url) {
-  const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
-  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}&select=*&limit=5000`;
+  const q = `${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}&select=*&limit=5000`;
   const res = await fetch(q, { headers });
   if (!res.ok) return { ok: false, rows: [] };
   return { ok: true, rows: await res.json() };
@@ -175,6 +199,20 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
     // Must run AFTER the merge -- the merge is what makes the keys disagree.
     rows = uniformKeys(rows);
 
+    // Two configurations can resolve to one grade name. Deduplicate BEFORE the
+    // collapse check so the guard measures what will actually be inserted, and
+    // before the DELETE so a colliding batch never destroys the lineup: on
+    // 2026-08-12 a Ford refresh deleted 78 rows, hit a duplicate "2026 Bronco
+    // Sport Heritage" against a preserved row, and left 7 Ford rows in prod.
+    if (table === "msrp_catalog") {
+      const seen = new Set();
+      const beforeBatch = rows.length;
+      rows = rows.filter((r) => (seen.has(catKey(r)) ? false : (seen.add(catKey(r)), true)));
+      if (beforeBatch !== rows.length) {
+        console.log(`  ${table} (${make}): collapsed ${beforeBatch - rows.length} duplicate key(s) within the batch.`);
+      }
+    }
+
     const verdict = assessCollapse(prev.rows.length, rows.length);
     if (verdict.collapse && process.env.CATALOG_ALLOW_COLLAPSE !== "1") {
       throw new Error(
@@ -185,6 +223,44 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
     const guard = table === "msrp_catalog" ? "&source_url=is.null" : "";
     const del = await fetch(`${url}/rest/v1/${table}?make=ilike.${encodeURIComponent(make)}${guard}`, { method: "DELETE", headers });
     if (!del.ok && del.status !== 404) throw new Error(`DELETE ${table} -> HTTP ${del.status}: ${await del.text()}`);
+
+    // The DELETE above deliberately SPARES hand-verified rows (source_url set).
+    // That protection is for keys the scraper CANNOT produce — it was never
+    // meant to freeze a price the manufacturer has since changed. A 2026
+    // Mustang Mach-E Premium sat at a hand-entered $47,638 while ford.ca
+    // published $49,990, and because the verified row survived every refresh it
+    // kept winning the lookup and was reported as an EXACT trim MSRP: a stale
+    // figure wearing the badge of the most authoritative one we have.
+    //
+    // So where this run carries a manufacturer figure for the same key, the
+    // live number supersedes and the stale row goes. Where it does not, the
+    // verified row stays exactly as protected as before.
+    const supersededKeys = new Set();
+    if (table === "msrp_catalog") {
+      try {
+        const res = await fetch(`${url}/rest/v1/${table}?select=id,year,model,trim,msrp&make=ilike.${encodeURIComponent(make)}`, { headers });
+        if (res.ok) {
+          const wanted = new Set(rows.map(catKey));
+          // A trim-less row is a "starting at" summary for the model-year. Once
+          // this run republishes that model-year's real trim ladder the summary
+          // is stale by construction — Ford's own base moved $45,778 -> $47,990
+          // while the old floor sat underneath it — so it goes too.
+          const republished = new Set(rows.map((r) => `${r.year}|${String(r.model ?? "")}`));
+          const stale = (await res.json()).filter((r) =>
+            wanted.has(catKey(r)) ||
+            (r.trim == null && republished.has(`${r.year}|${String(r.model ?? "")}`)));
+          for (const r of stale) {
+            const d = await fetch(`${url}/rest/v1/${table}?id=eq.${r.id}`, { method: "DELETE", headers });
+            if (!d.ok && d.status !== 404) console.warn(`  ⚠️ could not supersede ${catKey(r)} (HTTP ${d.status}).`);
+            // Remember what we destroyed, so the restore below can put it back.
+            else supersededKeys.add(catKey(r));
+          }
+          if (stale.length) {
+            console.log(`  ${table} (${make}): superseded ${stale.length} preserved row(s) with this run's manufacturer figures — e.g. ${stale.slice(0, 3).map((r) => `${r.model} ${r.trim ?? ""} was $${r.msrp}`).join("; ")}.`);
+          }
+        }
+      } catch { /* best-effort: a failed probe must not block the refresh */ }
+    }
     try {
       for (let i = 0; i < rows.length; i += 500) {
         const ins = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(rows.slice(i, i + 500)) });
@@ -195,7 +271,15 @@ export async function replaceRows(table, rows, make, { fatal = true, upsert = fa
       // them, so a failed insert has already destroyed the make. Put it back.
       // This is a compensating restore, not atomicity -- but it turns silent
       // permanent loss into a loud, recovered failure.
-      const back = uniformKeys(prev.rows);
+      // Restore exactly what was destroyed, and nothing else. Two things were:
+      // the rows the DELETE took (source_url null) and the rows supersede took.
+      // A hand-verified row that was neither is STILL IN THE TABLE — re-posting
+      // it would collide on UNIQUE(year,make,model,trim) and fail the batch,
+      // under-restoring the rows that actually needed recovery.
+      const destroyed = table === "msrp_catalog"
+        ? prev.rows.filter((r) => r.source_url == null || supersededKeys.has(catKey(r)))
+        : prev.rows;
+      const back = uniformKeys(destroyed);
       let restored = 0;
       for (let i = 0; i < back.length; i += 500) {
         const res = await fetch(`${url}/rest/v1/${table}`, { method: "POST", headers: { ...headers, Prefer: "return=minimal" }, body: JSON.stringify(back.slice(i, i + 500)) });

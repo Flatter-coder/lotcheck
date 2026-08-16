@@ -213,6 +213,26 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
     };
   }
 
+  // WE MUST KNOW WHICH BASIS THE ASKING PRICE IS ON. If the jurisdiction never
+  // resolved, `allInPricing` is null — and null used to fall through to the
+  // ex-freight branch, i.e. "we don't know" silently became "not all-in".
+  //
+  // That produced "$11,173 over MSRP" on a Charlesglen RAV4 PHEV GR SPORT whose
+  // real gap is $8,095: Alberta advertises all-in, the city failed to extract,
+  // and Toyota's own $3,078 of freight and levies was printed as the dealer's
+  // markup. The error only ever runs in the direction that accuses the dealer,
+  // which is the direction that gets the report discredited.
+  // Fires only on a POSITIVE finding that resolution was ATTEMPTED AND FAILED
+  // (analyze-listing-url sets basisUnknown). An absent field is not evidence —
+  // that conflation is the bug this whole change exists to remove.
+  if (a.basisUnknown === true && !allIn) {
+    return {
+      ...base,
+      label: labelFor(basis, a),
+      refusal: `We could not establish which province this dealer advertises in, and that decides whether the asking price already includes freight and fees. Comparing across bases would misstate the gap by roughly $3,000, so no over/under-MSRP claim is made.`,
+    };
+  }
+
   // An all-in asking price with NO all-in reference cannot be compared soundly:
   // measuring it against the ex-freight MSRP invents the freight as markup.
   // Refuse rather than overstate — the ceiling claim still has something to say.

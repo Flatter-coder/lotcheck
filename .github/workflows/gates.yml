@@ -79,6 +79,18 @@ jobs:
         run: npm run test:msrp-authority
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
+      - name: Catalog guard verdicts (green must mean "wrote fresh rows")
+        run: npm run test:catalog-guard
+      - name: Build & Price gate (a premium colour must never seed as trim MSRP)
+        run: npm run test:bp-summary
+      - name: Supersede must carry enrichment (replaceRows end-to-end)
+        run: npm run test:supersede
+      - name: Migration columns exist (a 42703 must not reach the SQL editor)
+        run: npm run check:migrations
+      - name: Every seeded model is reachable by the lookup
+        run: npm run test:reachable
+      - name: Report truth (never a claim the pipeline did not check)
+        run: npm run test:report-truth
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)

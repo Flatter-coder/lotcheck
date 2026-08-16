@@ -506,6 +506,7 @@ function u8ToB64(u8: Uint8Array): string {
 import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
+import { dealerReputationPoint } from "../_shared/point-state.ts";
 
 // A capture the server has PROVEN is the sealed original: its SHA-256 was
 // recomputed here over the actual bytes AND that hash sits inside the report's
@@ -655,8 +656,10 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   else P.push({ t: "EV / PHEV rebate", v: "N/A (GAS)", tone: "muted" });
   if (a.standardWarranty?.coverage) P.push({ t: "Included warranty", v: "INCLUDED", tone: "pass" });
   else P.push({ t: "Included warranty", v: "SEE FACTORY TERMS", tone: "muted" });
-  if (a.dealerSentiment?.rating) P.push({ t: "Dealer reputation", v: Number(a.dealerSentiment.rating).toFixed(1) + "* / " + Number(a.dealerSentiment.reviewCount || 0).toLocaleString(), tone: Number(a.dealerSentiment.rating) >= 4 ? "pass" : "muted" });
-  else P.push({ t: "Dealer reputation", v: "NOT FOUND", tone: "muted" });
+  // THREE states, not two. "NOT FOUND" used to cover a lookup that never ran,
+  // which printed "No public reviews were found" about Charlesglen Toyota --
+  // a dealer with 4.7 stars from 5,930 Google reviews.
+  { const dr = dealerReputationPoint(a.dealerSentiment); P.push({ t: "Dealer reputation", v: dr.value, tone: dr.tone }); }
   return P.slice(0, 10);
 }
 
@@ -717,9 +720,7 @@ function pointExplain(t: string, a: any): string | null {
         ? "Every new vehicle already includes the factory warranty at no charge. When the finance office pitches an extended warranty, remember this coverage is already yours for free."
         : "Factory warranty terms couldn't be confirmed from this listing. Ask exactly what's covered and for how long, in writing, before considering paid coverage.";
     case "Dealer reputation":
-      return a.dealerSentiment?.rating
-        ? "The dealer's public Google rating from real customers - how they treat people after the handshake."
-        : "No public reviews were found - not a red flag by itself, but you have no track record to lean on.";
+      return dealerReputationPoint(a.dealerSentiment).explain;
     default: return null;
   }
 }

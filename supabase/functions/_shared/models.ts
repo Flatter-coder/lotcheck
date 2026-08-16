@@ -21,9 +21,21 @@ import { canonicalMake } from "./makes.ts";
 // make (canonical) -> its base model nameplates. Not exhaustive by design; it
 // covers high-volume Canadian models plus the naming traps. Add rows freely.
 export const CANONICAL_MODELS: Record<string, string[]> = {
-  Toyota: ["bZ", "bZ4X", "Corolla Cross", "GR Corolla", "Corolla", "Grand Highlander", "Highlander",
-    "RAV4 Prime", "RAV4", "Camry", "Prius Prime", "Prius", "Sienna", "Tacoma", "Tundra", "4Runner",
-    "Sequoia", "Venza", "C-HR", "Crown", "Supra", "GR86", "Mirai", "Land Cruiser"],
+  // EVERY NAME msrp_catalog IS KEYED BY MUST APPEAR HERE, or its rows are dead.
+  // The lookup queries `model ilike <canonicalModel(...)>` with no wildcard, so
+  // a row stored as "RAV4 Hybrid" is never returned to a listing that resolves
+  // to "RAV4" — the seed looks done and the report finds nothing.
+  //
+  // "Crown Signia" is the dangerous one and the reason this is not cosmetic.
+  // Without it, "Crown Signia Limited" resolves to "Crown" — a DIFFERENT car
+  // (sedan, 2.5L THS vs Hybrid MAX, ~$3k apart at base) that also has a
+  // "Limited" trim. The lookup would find an exact trim match on the wrong
+  // vehicle and report it as authoritative. Same shape as the Mustang Mach-E
+  // trap this file was written for. Guarded by scripts/test-catalog-reachable.mjs.
+  Toyota: ["bZ", "bZ4X", "Corolla Cross Hybrid", "Corolla Cross", "GR Corolla", "Corolla",
+    "Grand Highlander", "Highlander", "RAV4 Plug-in Hybrid", "RAV4 Prime", "RAV4 Hybrid", "RAV4",
+    "Camry", "Prius Prime", "Prius", "Sienna", "Tacoma", "Tundra", "4Runner Hybrid", "4Runner",
+    "Sequoia", "Venza", "C-HR", "Crown Signia", "Crown", "Supra", "GR86", "Mirai", "Land Cruiser"],
   Honda: ["Civic", "Accord", "CR-V", "HR-V", "Pilot", "Passport", "Ridgeline", "Odyssey", "Prologue"],
   Hyundai: ["Ioniq 5 N", "Ioniq 5", "Ioniq 6", "Kona Electric", "Kona", "Tucson", "Santa Fe", "Santa Cruz",
     "Palisade", "Elantra", "Sonata", "Venue"],

@@ -20,8 +20,11 @@ npm run preview  # serve the built output locally
 There is no linter configured. Pure offline test gates exist (run in CI via
 `gates.yml` and again before edge-function deploys): `npm run test:invariants`,
 `test:capture` (sealed listing capture), `test:trim`, `test:msrp-authority`,
-`test:carry-forward`, `test:incentives`, `test:finance-contingent`,
-`test:jsonld-vehicle`, plus `check:copy` / `check:parity` / `check:undef`.
+`test:carry-forward`, `test:catalog-guard` (refresh green must mean "wrote
+fresh rows"), `test:bp-summary` (a premium colour must never seed as trim
+MSRP), `test:supersede` (replaceRows end-to-end), `test:incentives`, `test:finance-contingent`,
+`test:jsonld-vehicle`, plus `check:copy` / `check:parity` /
+`check:undef` / `check:migrations`.
 
 ## Architecture
 

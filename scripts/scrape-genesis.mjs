@@ -1,9 +1,16 @@
 // Genesis Canada MSRP + finance/lease-rate scraper.
-// Sitecore JSON API on acquisition.genesis.ca. MSRP and rates are separate
-// endpoints joined on extTrimId:
+// JSON API on acquisition.genesis.ca ("Genesis at home"). MSRP and rates are
+// separate endpoints joined on extTrimId:
 //   GetLatestYearModelsJson?province=ON            -> models (name + year)
 //   GetTrimsJson?province=ON&modelName=&year=      -> trims (extTrimId, msrp)
 //   GetPaymentOptions?language=en&extTrimId=&province=ON -> finance/lease by term
+//
+// The site was rebuilt from Sitecore to AEM around 2026-08-09 and the service
+// moved from /genesis/service/GenesisShowroom to /api/genesisbackend/…, which
+// 404'd every run from 2026-08-11 until 2026-08-13 (the refresh stayed green;
+// that gap is why catalog-refresh.yml now verifies fresh rows per make). Same
+// method names and shapes, except optionDictionary keys are now UPPERCASE
+// (FINANCE/LEASE) and the old anualKmList typo became annualKmList — read both.
 //
 // Usage: node scripts/scrape-genesis.mjs [--year=2026]
 //        SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/scrape-genesis.mjs
@@ -11,7 +18,7 @@
 import { getJson, sleep, inferFuelFromName, writeCatalogs, parseArgs } from "./lib/catalog-io.mjs";
 
 const MAKE = "Genesis";
-const BASE = "https://acquisition.genesis.ca/genesis/service/GenesisShowroom";
+const BASE = "https://acquisition.genesis.ca/api/genesisbackend/GenesisShowroom";
 const PROV = "ON";
 
 async function main() {
@@ -41,14 +48,15 @@ async function main() {
         try {
           const pay = await getJson(`${BASE}/GetPaymentOptions?language=en&extTrimId=${t.extTrimId}&province=${PROV}`);
           const od = pay.optionDictionary || {};
-          for (const f of (od.finance || [])) {
+          for (const f of (od.FINANCE || od.finance || [])) {
             const term = Number(f.term), apr = Number(f.rate);
             const k = `${model}|${term}`;
             if (term && Number.isFinite(apr) && !finSeen.has(k)) { finSeen.add(k); financeRows.push({ make: MAKE, model, apr, term_months: term, promo: false, effective_date: today }); }
           }
-          for (const l of (od.lease || [])) {
+          for (const l of (od.LEASE || od.lease || [])) {
             const term = Number(l.term), apr = Number(l.rate);
-            const km = Array.isArray(l.anualKmList) && l.anualKmList.length ? Number(l.anualKmList[Math.min(1, l.anualKmList.length - 1)]) : null; // a mid km bucket; Genesis rate is km-independent
+            const kms = l.annualKmList || l.anualKmList;
+            const km = Array.isArray(kms) && kms.length ? Number(kms[Math.min(1, kms.length - 1)]) : null; // a mid km bucket; Genesis rate is km-independent
             const k = `${model}|${term}`;
             if (term && Number.isFinite(apr) && !leaseSeen.has(k)) { leaseSeen.add(k); leaseRows.push({ make: MAKE, model, apr, term_months: term, annual_km: km, effective_date: today }); }
           }

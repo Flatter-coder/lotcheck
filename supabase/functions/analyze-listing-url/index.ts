@@ -66,6 +66,8 @@ import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
+import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
+import { stripSettledContradictions } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
@@ -96,7 +98,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-15b";
+const CACHE_VER = "2026-08-15c";  // basis fail-safe + settled-claim strip + dealer-reputation three-state
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2521,9 +2523,46 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
-  { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; } // S25 (all-in label + safeguard)
+  // S25. The city is ONE signal and it silently failed on Charlesglen, leaving
+  // allInPricing null -- and null meant "not all-in", printing Toyota's own
+  // $3,078 of freight as dealer markup. Ask every other province signal on the
+  // page, and leave it UNDEFINED rather than false when nothing answers, so
+  // qualifyMsrpClaim refuses instead of guessing a basis.
+  {
+    const ai = resolveAllInAuthority(analysis.dealerCity);
+    if (ai) analysis.allInPricing = ai;
+    else {
+      const { allIn, jurisdiction } = isAllInJurisdiction(analysis);
+      if (allIn === true) {
+        analysis.allInPricing = { code: jurisdiction.code, body: jurisdiction.code === "AB" ? "AMVIC" : "provincial regulator", source: `resolved from ${jurisdiction.source}` };
+      } else if (allIn === false) {
+        analysis.allInPricing = null;
+        analysis.allInResolved = jurisdiction;
+      }
+      else {
+        // We LOOKED and could not tell. Record that as a finding so the claim
+        // refuses; leaving it merely absent is what caused $11,173.
+        analysis.basisUnknown = true;
+        analysis.allInResolved = jurisdiction;
+      }
+    }
+  }
   { const dc = assessDisclaimer(analysis); if (dc) analysis.disclaimerCheck = dc; }             // S35 (fine print = our evidence)
   await checkDealerLicence(analysis);                                                          // #11 AMVIC licence (Alberta)
+  // LAST WORD GOES TO THE STRUCTURED VERDICTS. A RAV4 PHEV report shipped
+  // saying "NOT ELIGIBLE" in the rebate panel and, two pages later, "treat it
+  // as a PHEV for rebate-eligibility purposes -- worth confirming with the
+  // dealer". The prompt itself asked for that second sentence, so a prompt
+  // cannot be the fix; this runs after generation and is deterministic.
+  if (typeof analysis.summary === "string" && analysis.summary) {
+    const s = stripSettledContradictions(analysis.summary, analysis);
+    if (s.removed.length) {
+      analysis.summary = s.text;
+      analysis.summaryRedactions = s.removed;
+      console.log(`summary: removed ${s.removed.length} sentence(s) reopening settled topics: ${s.removed.map((r) => r.topic).join(", ")}`);
+    }
+  }
+
   analysis.counterScript = buildCounterScript(analysis);                                       // counter-script (last)
 }
 
