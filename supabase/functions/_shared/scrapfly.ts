@@ -141,6 +141,39 @@ async function scrapflyRenderOnce(
   }
 }
 
+// Is this a Scrapfly SHIELD failure — the transient kind it explicitly tells us
+// to retry?
+//
+//     ERR::ASP::SHIELD_PROTECTION_FAILED
+//     "Unable to bypass cloudflare, please retry in few seconds"
+//
+// Vic's dashboards for stampedetoyotacalgary.com and lethbridgetoyota.com show
+// the same shape on both: the exit geography VARIES PER ATTEMPT, and it decides
+// the outcome.
+//
+//     JP  403  cost 0        CA  200  cost 80
+//     AR  403  cost 0        US  200  cost 80
+//
+// Same URL, seconds apart. The request that failed went out as a Vietnamese-
+// locale Linux browser through a Mumbai Cloudflare edge, at a Calgary dealer;
+// Cloudflare scored it non-human. `country=ca` is set on our side and plainly
+// is not taking effect — even the successes came out of Canada and the US
+// rather than only Canada.
+//
+// THE COST COLUMN DECIDES THE FIX. A blocked attempt costs 0 credits; only a
+// success costs 80. So retrying a shield failure is FREE, the vendor asks us to
+// do it, and each retry is a fresh roll of the exit geography. We were treating
+// it as terminal and giving up after one attempt — which is why a page that
+// answers a plain curl in 1.4s produced no report at all.
+export function isShieldFailure(status: number, body: string): boolean {
+  if (/ERR::ASP::SHIELD_PROTECTION_FAILED/i.test(body)) return true;
+  if (/unable to bypass/i.test(body)) return true;
+  // A bare 403/429 from the target reaches us the same way and is the same
+  // dice-roll; 422 is Scrapfly refusing the request itself, which a retry
+  // cannot fix, so it is deliberately NOT here.
+  return status === 403 || status === 429;
+}
+
 export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { shot?: RenderShot } = {}): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
   const deadline = Date.now() + budgetMs;
@@ -171,7 +204,23 @@ export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { sho
 export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string } | null> {
   if (!SCRAPFLY_API_KEY) return null;
   const started = Date.now();
-  const shoot = async (fullpage: boolean, ms: number): Promise<{ b64: string; mime: string } | "too_large" | null> => {
+  // `asp` is the difference between the call that works and the one that does
+  // not. The /scrape render has always sent asp=true; this /screenshot call
+  // never did, so it took whatever proxy it was given. Vic's Scrapfly dashboard
+  // for 2026-08-16 shows exactly that:
+  //
+  //     JP  403  cost 0      CA  200  cost 80
+  //     AR  403  cost 0      US  200  cost 80
+  //
+  // Every 403 exits via Japan or Argentina, every 200 via Canada or the US, on
+  // the SAME url seconds apart. Block rate 50%. The dealer geo-blocks; ASP is
+  // what retries through a proxy that is not blocked.
+  //
+  // COST: ASP costs more per call, so it is NOT the default. The cheap
+  // unprotected shot is tried first and ASP is only paid for when that fails --
+  // i.e. only when the alternative is no evidence photo at all. On the happy
+  // path this change costs nothing.
+  const shoot = async (fullpage: boolean, ms: number, asp = false): Promise<{ b64: string; mime: string } | "too_large" | "shield" | null> => {
     try {
       const u = new URL("https://api.scrapfly.io/screenshot");
       u.searchParams.set("key", SCRAPFLY_API_KEY);
@@ -187,6 +236,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       u.searchParams.set("rendering_wait", "8000");
       u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("country", "ca");
+      if (asp) u.searchParams.set("asp", "true");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
       if (!res.ok) {
         // READ THE BODY. A 422 from Scrapfly names the reason -- bad params, ASP
@@ -195,7 +245,11 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
         // diagnose. Same lesson as the Claude 400 in the rescue path: the one
         // thing that explains the failure was fetched and thrown away.
         const body = await res.text().catch(() => "");
-        console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} HTTP ${res.status}: ${body.slice(0, 300)}`);
+        // Name the params too: a 422 is "unprocessable", and which parameter it
+        // objected to is the whole diagnosis.
+        const sent = [...u.searchParams.keys()].filter((k) => k !== "key").join(",");
+        console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"}${asp ? "+asp" : ""} HTTP ${res.status} [params: ${sent}]: ${body.slice(0, 300)}`);
+        if (isShieldFailure(res.status, body)) return "shield";
         return null;
       }
       const ct = res.headers.get("content-type") || "";
@@ -216,19 +270,44 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
   // (price + vehicle visible, always small) instead of losing the photo
   // entirely. The pricing fine print is separately captured verbatim as text,
   // so the bottom-of-page evidence survives the degrade.
-  const first = await shoot(true, budgetMs);
-  if (first && first !== "too_large") return first;
+  // A shield failure is a FREE re-roll of the exit geography (blocked = 0
+  // credits), and Scrapfly asks us to retry. Loop while the budget allows
+  // rather than giving up on the first Japanese exit.
+  const attempt = async (fullpage: boolean, ms: number, asp = false) => {
+    let r = await shoot(fullpage, ms, asp);
+    let tries = 1;
+    while (r === "shield" && tries < 3) {
+      const left = budgetMs - (Date.now() - started);
+      if (left < 8_000) { console.warn("captureListingScreenshot: shield failure, no budget left to re-roll."); break; }
+      await new Promise((res) => setTimeout(res, 1_500 * tries)); // "retry in few seconds"
+      console.log(`captureListingScreenshot: shield failure — re-rolling the exit (attempt ${tries + 1}, ${Math.round(left / 1000)}s left).`);
+      r = await shoot(fullpage, Math.min(ms, left), asp);
+      tries++;
+    }
+    return r;
+  };
+
+  const first = await attempt(true, budgetMs);
+  if (first && first !== "too_large" && first !== "shield") return first;
   // DEGRADE ON ANY FAILURE, not only on "too_large". A fullpage 422 used to
   // return null here and never try the viewport, so the report shipped with no
   // evidence photo at all -- which is what Vic kept seeing. A viewport shot of
   // the top of the listing (price + vehicle visible) is worth far more than
   // nothing, and it is the same ladder the render path now uses.
-  if (first === null) {
+  if (first === null || first === "shield") {
     const left = budgetMs - (Date.now() - started);
     if (left > 3_000) {
       console.log(`captureListingScreenshot: fullpage failed — trying a viewport shot with ${Math.round(left / 1000)}s left.`);
-      const vp = await shoot(false, left);
-      if (vp && vp !== "too_large") return vp;
+      const vp = await attempt(false, left);
+      if (vp && vp !== "too_large" && vp !== "shield") return vp;
+      // Both unprotected attempts failed. NOW pay for ASP -- the alternative at
+      // this point is shipping the report with no evidence photo.
+      const leftAsp = budgetMs - (Date.now() - started);
+      if (leftAsp > 5_000) {
+        console.log(`captureListingScreenshot: retrying viewport WITH asp (${Math.round(leftAsp / 1000)}s left) — a 403 from a non-CA proxy is the usual cause.`);
+        const withAsp = await attempt(false, leftAsp, true);
+        if (withAsp && withAsp !== "too_large" && withAsp !== "shield") return withAsp;
+      }
     } else {
       console.warn("captureListingScreenshot: fullpage failed and no budget left for a viewport shot.");
     }
