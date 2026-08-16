@@ -157,5 +157,18 @@ check("corroboration also refuses without a freight figure",
   !corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, lineupFrom: 58914 }).agrees,
   "an absent freight figure must never silently borrow another model's");
 
+// The formula is validated on the LINEUP GRID only. Applying it to a trim card
+// is what turned a surface mismatch into a recorded "unexplained $34".
+check("a TRIM CARD figure is refused, not force-fitted",
+  !corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, delivery: 1860, lineupFrom: 58914, surface: "trim card" }).agrees &&
+  /only validated against the lineup grid/.test(
+    corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, delivery: 1860, lineupFrom: 58914, surface: "trim card" }).verdict),
+  "two validating data points were both lineup-grid; zero were trim cards");
+
+check("the lineup default is unchanged for the two figures that DO validate it",
+  corroborateWithLineup({ baseMsrp: 58555, blockHeater: 717, delivery: 1930, lineupFrom: 62354 }).agrees &&
+  corroborateWithLineup({ baseMsrp: 71670, blockHeater: 702, delivery: 1930, lineupFrom: 75454 }).agrees,
+  "Crown Signia and Land Cruiser must still confirm");
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 process.exit(fail ? 1 : 0);

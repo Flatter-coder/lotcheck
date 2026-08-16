@@ -157,7 +157,21 @@ export function deriveBaseFromPair(a, b) {
 //
 // LIMIT: it prices the cheapest trim only. Everything above base still needs a
 // summary. Page checks the floor, summary supplies the ladder.
-export function corroborateWithLineup({ baseMsrp, blockHeater = 0, lineupFrom, delivery, fees = AB_STATUTORY }) {
+export function corroborateWithLineup({ baseMsrp, blockHeater = 0, lineupFrom, delivery, fees = AB_STATUTORY, surface = "lineup" }) {
+  // SURFACE MATTERS, and getting this wrong is how a $34 mismatch got recorded
+  // as "unexplained". The formula was validated on TWO figures, both from the
+  // LINEUP GRID (Crown Signia $62,354, Land Cruiser $75,454) — both exact. It
+  // was then applied to a TRIM CARD (Crown Limited $58,914) and missed by $34.
+  //
+  // A trim card is a different Toyota surface describing a slightly different
+  // build: its weekly lease reads $203.06 against the pricing table's $203.19,
+  // and over 260 payments that is $33.80 — the same gap, consistently. So the
+  // card is internally coherent; it simply is not the figure this formula
+  // models. Refuse rather than pretend otherwise.
+  if (surface !== "lineup") {
+    return { agrees: false, delta: null,
+      verdict: `this figure came from a ${surface}, and the formula is only validated against the lineup grid — no corroboration is claimed` };
+  }
   const adds = addsOf(fees, delivery);
   if (adds === null) return { agrees: false, delta: null, verdict: "no delivery/destination charge captured — cannot corroborate without it" };
   const expected = Number(baseMsrp) + Number(blockHeater) + adds + PPSA_FINANCE_BASIS;
