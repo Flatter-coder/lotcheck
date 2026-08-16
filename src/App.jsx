@@ -4154,16 +4154,50 @@ function buildAnchoredIntervals(anchor, rows){
   return out;
 }
 
+// Every timestamp we hand to Postgres goes through here.
+//
+// JS Dates run to year 275760 and serialise that as "+275760-09-13T...".
+// Postgres rejects the extended-year form outright, so one out-of-range Date
+// does not degrade a query — it kills it, and the panel shows a read failure
+// with nothing to say about which of the dozen moving parts was at fault.
+//
+// Clamping rather than throwing is deliberate: these are read windows, and a
+// window that reaches too far back or too far forward still returns exactly
+// the right rows. There is no reading to get wrong, so failing the whole
+// panel over a bound is the worse trade.
+export function pgTimestamp(v){
+  const t=v instanceof Date ? v.getTime() : Number(v);
+  if(!Number.isFinite(t)) return new Date(0).toISOString();
+  const MIN=Date.UTC(1970,0,1), MAX=Date.UTC(9999,11,31);
+  return new Date(Math.min(Math.max(t,MIN),MAX)).toISOString();
+}
+
 function buildVerifIntervals(bucket, rows){
   const edges=[]; let cur=bucket.floor(new Date());
   for(let i=0;i<bucket.n;i++){ edges.unshift(new Date(cur)); cur=bucket.prev(cur); }
+
+  // The last bucket is the one still in progress, so it has no natural next
+  // edge. It used to get JS's maximum Date as an open-ended sentinel, which
+  // was wrong for a reason nothing local could show: this end becomes p_until
+  // on fn_admin_verification_checks, and the maximum Date serialises to
+  // "+275760-09-13T00:00:00.000Z". Postgres cannot parse that extended year,
+  // so it rejected the call and EVERY rolling window read failed — all 13
+  // checkpoints read "read failed" while the calendar view, whose builder
+  // always had a real end, worked fine.
+  //
+  // A real date, one period past the start and never behind the clock, so the
+  // window always covers the rows being counted.
+  const lastStart=edges[edges.length-1];
+  const step=lastStart.getTime()-bucket.prev(new Date(lastStart)).getTime();
+  const tail=new Date(Math.max(lastStart.getTime()+step, Date.now()+60000));
+
   const out=edges.map((start,i)=>({
     start, label:bucket.fmt(start),
     // Short form for the column chart. "20:00 → 21:00" is right in a ledger
     // row and unreadable under 24 narrow columns, where it collides with its
     // neighbours into "21:0023:00".
     shortLabel:(bucket.fmtShort||bucket.fmt)(start),
-    end: i+1<edges.length ? edges[i+1] : new Date(8640000000000000),
+    end: i+1<edges.length ? edges[i+1] : tail,
     ok:0, fail:0,
   }));
   for(const r of rows||[]){
@@ -5552,8 +5586,8 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
       setChecksLoading(true); setChecksError(null);
       try{
         const {data,error}=await supabase.rpc("fn_admin_verification_checks",{
-          p_since:new Date(winStart).toISOString(),
-          p_until:new Date(winEnd).toISOString(),
+          p_since:pgTimestamp(winStart),
+          p_until:pgTimestamp(winEnd),
         });
         if(error) throw error;
         if(!cancelled) setChecks(data||[]);

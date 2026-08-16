@@ -42,7 +42,8 @@
     "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts",
     "test:vision-limits": "node --experimental-strip-types supabase/functions/_shared/vision-limits.test.ts",
     "test:scrapfly-render": "node --experimental-strip-types supabase/functions/_shared/scrapfly-render.test.ts",
-    "test:ref-financing": "node --experimental-strip-types supabase/functions/_shared/reference-financing.test.ts"
+    "test:ref-financing": "node --experimental-strip-types supabase/functions/_shared/reference-financing.test.ts",
+    "test:pg-timestamp": "node scripts/test-pg-timestamp.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
