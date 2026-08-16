@@ -1,29 +1,28 @@
 -- ============================================================================
--- Plug the 13 checkpoints into the panel.
+-- Plug the 13 checkpoints in — they were only ever a permissions problem.
 --
--- Everything behind them already worked: verification_check has been filling
--- since 20260815, both analyze functions call recordCheckpoints, and
--- fn_admin_verification_checks reads it. The panel just never asked. It shipped
--- with a hardcoded list of hollow rows and nothing ever replaced them, so the
--- one surface built to prove the checks run has been reporting that none of
--- them do.
+-- Everything behind them already worked. verification_check has been filling
+-- since 20260815, both analyze functions call recordCheckpoints, and the panel
+-- already fetches fn_admin_verification_checks and reduces it per checkpoint
+-- with a green/red/n-a breakdown and a 1% target.
 --
--- Two changes, both small:
+-- But that read gates on fn_is_admin(), and the founders panel runs as JC or
+-- Josh. They get 42501, the fetch throws, checkStats lands null, and EVERY
+-- checkpoint falls through to the hollow branch — which renders the table name
+-- as its note. That is exactly the screenshot: thirteen rows reading
+-- "verification_check.msrp", "verification_check.odometer", and so on.
 --
---   1. A ROLLUP. The existing read returns raw rows, up to 200k of them. A
---      panel wants counts per checkpoint, not a firehose it has to reduce in
---      the browser.
+-- So the panel was not unplugged. It was told it had no data, by the only
+-- error path that looks identical to having none.
 --
---   2. FOUNDERS CAN SEE IT. Gated on fn_can_read_costs() rather than
---      fn_is_admin(), like every other read on that page. JC and Josh fund the
---      thing; "do the checks actually run" is not a question they should have
---      to take on trust.
+-- One line: fn_can_read_costs() instead of fn_is_admin(), matching every other
+-- read on that page. Nothing else about the function changes — same signature,
+-- same rows, same limit — so the client needs no change at all.
 --
--- THE RATE EXCLUDES not_applicable, DELIBERATELY. A gas car has no EV rebate to
--- verify — counting that as a failure would make every petrol listing look
--- broken, and counting it as a pass would let absence buy a green. It is
--- neither, so it leaves the denominator entirely. That rule is pinned by
--- test:checkpoints; this function must agree with it.
+-- Deliberately NOT adding a server-side rollup. The client already reduces
+-- these rows and that code is pinned by test:checkpoints; at ~350 scans a month
+-- it is 4,500 rows, not a firehose. A second aggregation path would be a second
+-- place for the n/a rule to drift out of agreement with the test.
 -- ============================================================================
 
 create or replace function public.fn_admin_verification_checks(
@@ -51,55 +50,16 @@ begin
     limit greatest(1, least(coalesce(p_limit, 50000), 200000));
 end $$;
 
-create or replace function public.fn_admin_checkpoint_rollup(p_hours integer default 24)
-returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare
-  v jsonb;
-  v_since timestamptz := now() - make_interval(hours => greatest(1, coalesce(p_hours, 24)));
-  v_reports bigint := 0;
-begin
-  if not public.fn_can_read_costs() then raise exception 'not authorized' using errcode = '42501'; end if;
-
-  select count(distinct coalesce(report_id, created_at::text)) into v_reports
-    from verification_check where created_at >= v_since;
-
-  select jsonb_build_object(
-    'window_hours', p_hours,
-    'reports', v_reports,
-    'checkpoints', coalesce((
-      select jsonb_agg(jsonb_build_object(
-               'checkpoint', c.checkpoint,
-               'total',      c.total,
-               'green',      c.green,
-               'red',        c.red,
-               'na',         c.na,
-               -- Null, not 0, when every row was not_applicable: "never
-               -- applied to any car in this window" and "failed every time"
-               -- are opposite facts and must not render alike.
-               'pass_pct',   case when (c.green + c.red) > 0
-                                  then round(100.0 * c.green / (c.green + c.red), 1) end,
-               'worst_detail', c.worst_detail
-             ) order by c.checkpoint)
-        from (
-          select checkpoint,
-                 count(*) as total,
-                 count(*) filter (where outcome in ('verified','checked_no_match')) as green,
-                 count(*) filter (where outcome in ('error','not_attempted'))       as red,
-                 count(*) filter (where outcome = 'not_applicable')                 as na,
-                 (array_agg(detail order by created_at desc)
-                    filter (where outcome in ('error','not_attempted') and detail is not null))[1] as worst_detail
-            from verification_check
-           where created_at >= v_since
-           group by checkpoint
-        ) c
-    ), '[]'::jsonb)
-  ) into v;
-
-  return v;
-end $$;
-
 revoke all on function public.fn_admin_verification_checks(timestamptz, timestamptz, integer) from public, anon;
-revoke all on function public.fn_admin_checkpoint_rollup(integer)                             from public, anon;
 grant execute on function public.fn_admin_verification_checks(timestamptz, timestamptz, integer) to authenticated;
-grant execute on function public.fn_admin_checkpoint_rollup(integer)                             to authenticated, service_role;
+
+-- Sanity: the table these rows come from must exist, or the panel would keep
+-- reporting "no data" for a completely different reason and we would be back
+-- here in a week chasing the same screenshot.
+do $$
+begin
+  if to_regclass('public.verification_check') is null then
+    raise exception 'verification_check is missing — apply 20260815_verification_check.sql first, or the checkpoints stay hollow whatever the grant says';
+  end if;
+  raise notice 'verification_check present; checkpoint reads now open to founders';
+end $$;
