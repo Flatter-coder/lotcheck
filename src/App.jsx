@@ -8382,8 +8382,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // Days on lot — motivated-seller leverage from the dealer's OWN inventory
   // data (SM360 daysInInventory/dateEntry; later our observation network).
   // Uiverse-style 3D striped card (imtausef) with the traffic-light system:
-  // ≤30 green · 31–89 amber · 90–119 red · 120+ blinking red. Only rendered
-  // when real data exists — never estimated.
+  // ≤30 green · 31–89 amber · 90–119 red · 120+ blinking red. The NUMBER is
+  // never estimated — but the POINT always renders.
+  //
+  // It used to live entirely inside `if (a.daysOnLot)`, so on any platform we
+  // cannot read a lot date from, it vanished from the Sidebar, Scroll AND
+  // Heatmap and the buyer never learned the question had been asked. The
+  // emailed report was fixed for exactly this on 2026-08-16 and the on-screen
+  // views were not, so the surfaces disagreed — report-features-all-views is a
+  // hard rule precisely because a one-surface fix reads as done.
+  //
+  // A missing answer is information: "ask the dealer" is a usable instruction,
+  // an absent card is not. Same rule as VIN (vin-every-scan).
   let daysLotItem = null;
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Number(a.daysOnLot.days);
@@ -8450,6 +8460,21 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         </div>
         <div style={{ width: "min(320px, 100%)" }}>
           <ExplainBox txt={`This is how long this exact car has been sitting unsold — ${d.toLocaleString()} days, counted by the dealer's own inventory system (not our guess). Dealers pay interest on unsold cars every single week, so the longer one sits, the more motivated they are to move it. ${d >= 90 ? "At this age, you're doing them a favour by buying it — negotiate like it." : d >= 31 ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${d >= 31 ? " A car that sits also sits mechanically — the oil clock, the 12-volt battery and the tires all run on time, which is why the card suggests asking what lot care was done." : ""}`} />
+        </div>
+      </div>
+    )};
+  } else {
+    daysLotItem = { key: "dayslot", title: "Days on lot", tone: "muted", v: "Not published", body: (
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 320px", minWidth: 260 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: MUT2 }}>Not published — ask the dealer</div>
+          <div style={{ fontSize: 12.5, color: MUT2, marginTop: 6, lineHeight: 1.6 }}>
+            This dealer's platform doesn't expose an inventory date, and we haven't seen this VIN
+            in our own daily tracking yet. That is a gap in what we can read — not a sign the car is fresh.
+          </div>
+        </div>
+        <div style={{ width: "min(320px, 100%)" }}>
+          <ExplainBox txt={`Ask outright: "How long has this exact car been on your lot?" A car sitting 90+ days is costing the dealer money every week, and that is the single biggest source of discount leverage you have. If they won't answer, the listing's own photos and the price history usually will.`} />
         </div>
       </div>
     )};
@@ -8531,7 +8556,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days || 0).toLocaleString() + " days" }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
+  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
   // Every view that surfaces "things to watch" draws from this one pool, so a
   // new flag cannot reach one view and miss another (report-features-all-views).
   const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
