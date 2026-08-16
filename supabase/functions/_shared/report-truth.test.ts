@@ -6,7 +6,7 @@
 
 import { dealerReputationPoint, pointState, pageAbsenceCopy } from "./point-state.ts";
 import { stripSettledContradictions, settledTopics } from "./settled-claims.ts";
-import { resolveJurisdiction, isAllInJurisdiction } from "./jurisdiction.ts";
+import { resolveJurisdiction, isAllInJurisdiction, resolveCity } from "./jurisdiction.ts";
 import { qualifyMsrpClaim } from "./msrp-claim.ts";
 
 let pass = 0, fail = 0;
@@ -138,6 +138,28 @@ const noAllIn = qualifyMsrpClaim({ ...charlesglen, allInPricing: { code: "AB" },
 check("an all-in province with no all-in reference still refuses",
   !noAllIn.comparable && /freight and fees as markup/i.test(noAllIn.refusal || ""),
   JSON.stringify(noAllIn.refusal));
+
+// ---------------------------------------------------------------------------
+// 4. THE CITY THAT WAS SITTING IN THE HOSTNAME. Stampede Toyota came back
+// "NOT CHECKED" with 3,369 Google reviews, partly because the reputation
+// lookup received dealerCity: null. A dealer domain runs the words together,
+// so a word-boundary match never saw it.
+// ---------------------------------------------------------------------------
+const stampede = { dealerName: "Stampede Toyota", url: "https://www.stampedetoyotacalgary.com/inventory/x" };
+
+check("city is recovered from a run-together dealer domain",
+  resolveCity(stampede) === "Calgary", String(resolveCity(stampede)));
+
+check("...and so is the province, from that same hostname",
+  resolveJurisdiction(stampede).code === "AB", JSON.stringify(resolveJurisdiction(stampede)));
+
+check("an explicit dealerCity always wins over inference",
+  resolveCity({ dealerCity: "Red Deer", url: "https://somethingcalgary.com/x" }) === "Red Deer",
+  "a value we were given must never be overridden by a guess");
+
+check("no city signal returns null rather than a plausible guess",
+  resolveCity({ dealerName: "Some Motors", url: "https://example.com/x" }) === null,
+  "Places disambiguates better with nothing than with a wrong city");
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 if (fail) (globalThis as any).process?.exit?.(1);

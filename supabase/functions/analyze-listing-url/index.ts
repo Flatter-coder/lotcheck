@@ -68,6 +68,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
+import { resolveCity } from "../_shared/jurisdiction.ts";
 import { stripSettledContradictions } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
@@ -99,7 +100,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16b";  // + reference financing when the dealer quotes no terms
+const CACHE_VER = "2026-08-16c";  // + server-side dealer reputation + city resolution
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -791,6 +792,39 @@ function computeLeverageScore(analysis: any): void {
 //    (toyota.ca etc.). NOTE new-vs-used: manufacturer promo financing is a
 //    NEW-vehicle offer, so the frontend treats it as applicable only when the
 //    vehicle is new, and as a reference (not a real quote) when it's used.
+// Dealer reputation from get-dealer-sentiment, server-side. Never throws, and
+// carefully separates "we asked and found none" from "we never asked": only a
+// COMPLETED lookup sets checked:true. See _shared/point-state.ts.
+async function resolveDealerReputation(analysis: any): Promise<void> {
+  const name = String(analysis?.dealerName || "").trim();
+  if (!name) return;                              // nothing to look up -> unchecked
+  if (analysis.dealerSentiment?.rating) return;   // already resolved upstream
+  const base = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!base || !key) return;
+  try {
+    const res = await fetch(`${base}/functions/v1/get-dealer-sentiment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
+      // The city comes from the same signals as the province and was arriving
+      // null; Places disambiguates far better with one.
+      body: JSON.stringify({ dealerName: name, dealerCity: resolveCity(analysis) }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) {
+      console.warn(`dealer reputation: HTTP ${res.status} -- leaving UNCHECKED rather than implying none exist.`);
+      return;
+    }
+    const data: any = await res.json();
+    // A 200 IS a completed check, whether or not it found a rating.
+    analysis.dealerSentiment = { ...(data?.dealerSentiment ?? {}), checked: true };
+    console.log(`dealer reputation: ${name} -> ${data?.dealerSentiment?.rating ?? "none found"} (${data?.dealerSentiment?.reviewCount ?? 0} reviews)`);
+  } catch (e) {
+    // A failed call is NOT evidence about the dealer. Leave it unchecked.
+    console.warn("dealer reputation lookup failed (leaving UNCHECKED):", (e as Error)?.message);
+  }
+}
+
 // Attaches analysis.financeRates { dealer, manufacturer }. Never throws.
 async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
@@ -2574,6 +2608,20 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       console.log(`summary: removed ${s.removed.length} sentence(s) reopening settled topics: ${s.removed.map((r) => r.topic).join(", ")}`);
     }
   }
+
+  // DEALER REPUTATION, RESOLVED HERE rather than left to the frontend.
+  //
+  // get-dealer-sentiment is called by the BROWSER after the report renders, and
+  // its result is merged into React state. Three things follow: the EMAILED
+  // report races that call and usually loses, a failed call returns silently so
+  // nothing records that we tried, and the panel then reads absence as
+  // absence-of-reviews. That is how Stampede Toyota -- 4.5 stars from 3,369
+  // Google reviews -- reached a buyer as "NOT CHECKED", and Charlesglen (5,930
+  // reviews) reached one as "No public reviews were found".
+  //
+  // Resolving it in the pipeline puts it on the analysis object before ANY
+  // surface is built, so screen, email and PDF agree.
+  await resolveDealerReputation(analysis);
 
   // VIC'S RULE: no dealer terms -> use the manufacturer's APR and price and do
   // the math. Runs after the rates and the MSRP are resolved, and only when the
