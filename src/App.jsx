@@ -5102,6 +5102,21 @@ function VerifPackEconomics({C}){
                                 fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(p.net_profit_per_pack)}</span>
                 </div>
                 <div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{p.net_margin_pct}% after both costs</div>
+
+                {/* Whose money it is. Same share_bps as the monthly cost split,
+                    so what a founder is owed and what they owe move together. */}
+                {(p.profit_split||[]).length>0 && (
+                  <div style={{marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.line}`}}>
+                    {p.profit_split.map(f=>(
+                      <div key={f.name} style={{display:"flex",justifyContent:"space-between",
+                                   alignItems:"baseline",padding:"2px 0"}}>
+                        <span style={{fontSize:12.5,color:C.inkSoft}}>{f.name}</span>
+                        <span style={{fontSize:13.5,fontWeight:800,color:C.tealInk,
+                                      fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(f.profit_cad)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div style={{marginTop:9,fontSize:12.5,color:C.ink,lineHeight:1.55}}>
@@ -5157,6 +5172,85 @@ function VerifWhyWePay({C}){
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Realised profit over the three windows a founder thinks in, with each
+// person's third named. Reads CA$0.00 until Stripe is wired — zero sales is
+// zero profit, and an aspirational figure here would make the panel exactly as
+// trustworthy as the "checks sold" placeholders it replaced.
+function VerifProfitPeriods({C}){
+  const [d,setD]=useState(null);
+  const [state,setState]=useState("loading");
+
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_profit_periods");
+        if(error) throw error;
+        if(!cancelled){ setD(data||null); setState("ok"); }
+      }catch(err){
+        console.warn("profit periods unavailable:",err?.message||err);
+        if(!cancelled) setState("absent");
+      }
+    })();
+    return()=>{cancelled=true;};
+  },[]);
+
+  const cad=(n)=>`CA$${Number(n||0).toLocaleString("en-CA",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+  const WIN=[["day","Today"],["week","This week"],["month","This month"]];
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
+      <div style={{fontSize:12.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,marginBottom:10}}>
+        PROFIT — AFTER STRIPE AND COMPUTE
+      </div>
+
+      {state==="loading" && <div style={{color:C.inkFaint,fontSize:13.5}}>Loading…</div>}
+      {state==="absent" && (
+        <div style={{fontSize:12.5,color:C.inkFaint,lineHeight:1.6}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260816_profit_periods.sql</span>.
+        </div>
+      )}
+
+      {state==="ok" && d && (<>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+          {WIN.map(([k,label])=>{
+            const w=d[k]||{profit_cad:0,sales:0,per_founder:[]};
+            const zero=Number(w.profit_cad)===0;
+            return (
+              <div key={k}>
+                <div style={{fontSize:12,color:C.inkFaint,fontWeight:800,letterSpacing:.6,textTransform:"uppercase"}}>{label}</div>
+                <div style={{fontSize:22,fontWeight:800,marginTop:3,letterSpacing:-.8,
+                             color:zero?C.inkFaint:C.tealInk,fontFamily:"ui-monospace,Menlo,monospace"}}>
+                  {cad(w.profit_cad)}
+                </div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:1}}>
+                  {w.sales===0 ? "no sales" : `${w.sales} sale${w.sales===1?"":"s"}`}
+                </div>
+                {(w.per_founder||[]).length>0 && (
+                  <div style={{marginTop:6,paddingTop:6,borderTop:`1px dashed ${C.line}`}}>
+                    {w.per_founder.map(f=>(
+                      <div key={f.name} style={{display:"flex",justifyContent:"space-between",padding:"1px 0"}}>
+                        <span style={{fontSize:12,color:C.inkFaint}}>{f.name}</span>
+                        <span style={{fontSize:12.5,fontWeight:800,
+                                      color:Number(f.profit_cad)>0?C.tealInk:C.inkFaint,
+                                      fontFamily:"ui-monospace,Menlo,monospace"}}>{cad(f.profit_cad)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:12,color:C.inkFaint,marginTop:10,lineHeight:1.6}}>
+          Realised sales only, net of the Stripe fee and the Claude tokens the checks consumed.
+          Reads zero until payments are switched on — which is the honest number, not a placeholder.
+        </div>
+      </>)}
     </div>
   );
 }
@@ -5407,19 +5501,32 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
         </div>
       </div>
 
-      {/* ---- volume + pass rate, real, from api_usage_log ---- */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
-        {[
-          ["Checks", apiUsageLoading?"…":tot.toLocaleString("en-CA"), C.ink, bucket.label],
-          ["Verified", apiUsageLoading?"…":totOk.toLocaleString("en-CA"), C.tealInk, rate?`${rate}% of all checks`:"no checks in range"],
-          ["Failed", apiUsageLoading?"…":totFail.toLocaleString("en-CA"), totFail?C.coralInk:C.inkFaint, totFail?"each one is an open error code":"none in range"],
-        ].map(([k,v,col,sub])=>(
-          <div key={k} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px"}}>
-            <div style={{fontSize:12.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,textTransform:"uppercase"}}>{k}</div>
-            <div style={{fontSize:26,fontWeight:800,color:col,marginTop:4,letterSpacing:-1}}>{v}</div>
-            <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>{sub}</div>
+      {/* Two halves: what ran on the left, what it earned on the right. The
+          check counts alone answered "is it working" but never "was it worth
+          it", which is the question a founder funding a third of the bill
+          actually has. */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:12,marginBottom:16}}>
+
+        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
+          <div style={{fontSize:12.5,fontWeight:800,letterSpacing:1,color:C.inkFaint,marginBottom:10}}>
+            CHECKS — {(anchorLabel||bucket.label).toUpperCase()}
           </div>
-        ))}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+            {[
+              ["Checks", apiUsageLoading?"…":tot.toLocaleString("en-CA"), C.ink, "run"],
+              ["Verified", apiUsageLoading?"…":totOk.toLocaleString("en-CA"), C.tealInk, rate?`${rate}%`:"—"],
+              ["Failed", apiUsageLoading?"…":totFail.toLocaleString("en-CA"), totFail?C.coralInk:C.inkFaint, totFail?"open codes":"none"],
+            ].map(([k,v,col,sub])=>(
+              <div key={k}>
+                <div style={{fontSize:12,color:C.inkFaint,fontWeight:800,letterSpacing:.6,textTransform:"uppercase"}}>{k}</div>
+                <div style={{fontSize:26,fontWeight:800,color:col,marginTop:3,letterSpacing:-1}}>{v}</div>
+                <div style={{fontSize:12,color:C.inkFaint,marginTop:1}}>{sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <VerifProfitPeriods C={C}/>
       </div>
 
       {/* ---- every interval, separated ---- */}
