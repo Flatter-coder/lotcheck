@@ -5504,6 +5504,73 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
 //
 // Reuses AdminLogin and the admin theme so it is the same product, not a
 // separate-looking thing they have to learn.
+// Magic link, not a password. The admin panel uses signInWithPassword because
+// it predates the buyer-side auth, but that would mean Vic creating Supabase
+// users for JC and Josh and then sending them passwords — an account he has to
+// provision and a secret in a chat window, for two people who only ever read.
+// A magic link needs neither: Supabase creates the user on first use, and
+// fn_is_founder() matches on the email, so the founder list stays the only
+// thing that grants access.
+function FounderLogin({C}){
+  const [email,setEmail]=useState("");
+  const [phase,setPhase]=useState("form");  // form | sending | sent | error
+  const [err,setErr]=useState("");
+
+  async function send(){
+    const addr=email.trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)){
+      setPhase("error"); setErr("That doesn't look like a valid email address."); return;
+    }
+    setErr(""); setPhase("sending");
+    try{
+      const {error}=await supabase.auth.signInWithOtp({
+        email:addr,
+        options:{emailRedirectTo:`${window.location.origin}/founders`},
+      });
+      if(error) throw error;
+      setPhase("sent");
+    }catch(e){
+      setPhase("error");
+      setErr(e?.message||"Couldn't send that link. Try again in a moment.");
+    }
+  }
+
+  const input={width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${C.line}`,
+               background:C.paper2,color:C.ink,fontSize:15,fontFamily:"inherit"};
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:16,padding:"24px 26px",
+                 maxWidth:420,margin:"40px auto"}}>
+      <div style={{fontSize:19,fontWeight:800,color:C.ink,marginBottom:4}}>Founders sign-in</div>
+      <div style={{fontSize:13.5,color:C.inkSoft,lineHeight:1.6,marginBottom:16}}>
+        {phase==="sent"
+          ? <>We sent a sign-in link to <b style={{color:C.ink}}>{email.trim()}</b>. Open it on this
+             device — it signs you in and brings you straight back here.</>
+          : <>Enter the email your LotCheck share is billed to. We'll send a one-time sign-in link —
+             no password to remember or lose.</>}
+      </div>
+      {phase!=="sent" && (<>
+        <input type="email" inputMode="email" autoComplete="email" placeholder="you@lotcheck.ca"
+          value={email} onChange={e=>{setEmail(e.target.value); if(phase==="error")setPhase("form");}}
+          onKeyDown={e=>{if(e.key==="Enter"&&phase!=="sending")send();}} style={input}/>
+        {phase==="error" && (
+          <div style={{fontSize:12.5,color:C.coralInk,marginTop:8,fontWeight:700}}>{err}</div>
+        )}
+        <button onClick={send} disabled={phase==="sending"}
+          style={{width:"100%",marginTop:14,background:phase==="sending"?C.inkFaint:C.teal,border:"none",
+                  borderRadius:12,padding:"13px 0",color:"#fff",fontSize:15,fontWeight:800,
+                  cursor:phase==="sending"?"default":"pointer",fontFamily:"inherit"}}>
+          {phase==="sending"?"Sending…":"Email me a sign-in link →"}
+        </button>
+      </>)}
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:14,lineHeight:1.6}}>
+        Only addresses on the founder list can open this page — the same list the monthly split is
+        calculated from.
+      </div>
+    </div>
+  );
+}
+
 function FoundersPanel(){
   const [session,setSession]=useState(null);
   const [checkingSession,setCheckingSession]=useState(true);
@@ -5572,7 +5639,7 @@ function FoundersPanel(){
   );
 
   if(checkingSession) return shell(<div style={{color:C.inkFaint}}>Loading…</div>);
-  if(!session) return <AdminLogin/>;
+  if(!session) return shell(<FounderLogin C={C}/>);
   if(allowed===null) return shell(<div style={{color:C.inkFaint}}>Checking access…</div>);
 
   if(!allowed) return shell(
