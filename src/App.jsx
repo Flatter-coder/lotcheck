@@ -7761,7 +7761,10 @@ function encodeReport(a){
     sw:a.standardWarranty?.coverage?{c:a.standardWarranty.coverage}:null,
     sm:a.summary,
     rid:a.reportId||null,ia:a.issuedAt||null,vp:a.verifyPayload||null,sg:a.sig||null,kid:a.keyId||null,
-    dol:a.daysOnLot?{d:a.daysOnLot.days,s:a.daysOnLot.since||null,sl:a.daysOnLot.sourceLabel||null}:null,
+    // `al` carries atLeast. Without it a shared link would restate our own
+    // first-seen lower bound as an exact dealer inventory figure — the report
+    // would get MORE confident by being forwarded, which is backwards.
+    dol:a.daysOnLot?{d:a.daysOnLot.days,s:a.daysOnLot.since||null,sl:a.daysOnLot.sourceLabel||null,al:a.daysOnLot.atLeast===true?1:0}:null,
     pd:a.priceDisclosure||null,mb:a.msrpBasis||null,mt:a.msrpTrim||null,my:a.msrpYear||null,
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
@@ -7793,7 +7796,7 @@ function decodeReport(s){
       standardWarranty:c.sw?{coverage:c.sw.c}:null,
       summary:c.sm,
       reportId:c.rid||null,issuedAt:c.ia||null,verifyPayload:c.vp||null,sig:c.sg||null,keyId:c.kid||null,
-      daysOnLot:c.dol?{days:c.dol.d,since:c.dol.s||null,sourceLabel:c.dol.sl||null,source:"dealer_platform_feed"}:null,
+      daysOnLot:c.dol?{days:c.dol.d,since:c.dol.s||null,sourceLabel:c.dol.sl||null,atLeast:c.dol.al===1,source:c.dol.al===1?"lotcheck_first_seen":"dealer_platform_feed"}:null,
       priceDisclosure:c.pd||null,msrpBasis:c.mb||null,msrpTrim:c.mt||null,msrpYear:c.my||null,
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
@@ -8162,9 +8165,10 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
               {bulb(dolState === "green", "#8ed500")}
             </div>
             <div className="lc-dol-content">
-              <span className="lc-dol-title">{d.toLocaleString()} DAYS ON LOT</span>
+              <span className="lc-dol-title">{a.daysOnLot.atLeast?"AT LEAST ":""}{d.toLocaleString()} DAYS ON LOT</span>
               <div className="lc-dol-text">
-                {dolMonths ? `About ${dolMonths} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
+                {a.daysOnLot.atLeast?"At least ":""}{dolMonths ? `about ${dolMonths} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
+                {a.daysOnLot.atLeast ? " It may have been sitting longer before we first saw it, so this is a floor, not a total." : ""}
                 {d >= 90
                   ? " Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage."
                   : d >= 31
