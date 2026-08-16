@@ -128,6 +128,13 @@ jobs:
       # produce zero green AND zero n/a checkpoints.
       - name: Verification checkpoints (unmeasured is not passing)
         run: npm run test:checkpoints
+      # The panel above is only as good as its window. An open-ended sentinel
+      # end serialised to year 275760, Postgres refused to parse it, and all
+      # 13 checkpoints read "read failed" on every rolling window while the
+      # calendar view worked -- which sent us hunting grants, migrations and
+      # identity for days. Now clamped at the boundary and banned at source.
+      - name: Query windows (no Date Postgres cannot parse)
+        run: npm run test:pg-timestamp
       # An MSRP figure carries a BASIS, and only "exact" -- a verified
       # manufacturer price for THIS trim -- may support an over/under claim.
       # App.jsx always enforced that; the EMAIL did not, so a used vehicle's
