@@ -5180,6 +5180,209 @@ function VerifWhyWePay({C}){
 // person's third named. Reads CA$0.00 until Stripe is wired — zero sales is
 // zero profit, and an aspirational figure here would make the panel exactly as
 // trustworthy as the "checks sold" placeholders it replaced.
+// Collapsible section. The verification tab had grown to seven full-height
+// cards stacked vertically, so reaching the one thing you came for meant
+// scrolling past everything else. Each section now states its headline while
+// closed, making the page a summary you drill into rather than a wall.
+function VerifSection({C, title, summary, children, open:initialOpen=false, tone}){
+  const [open,setOpen]=useState(initialOpen);
+  const accent = tone==="warn" ? C.coralInk : tone==="ok" ? C.tealInk : C.inkFaint;
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} aria-expanded={open}
+        style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
+                background:"transparent",border:"none",cursor:"pointer",textAlign:"left",
+                fontFamily:"inherit",color:C.ink}}>
+        <span style={{fontSize:13,color:C.inkFaint,display:"inline-block",width:12,
+                      transform:open?"rotate(90deg)":"none",transition:"transform .15s ease"}}>▶</span>
+        <span style={{fontSize:13,fontWeight:800,letterSpacing:.8,color:accent}}>{title}</span>
+        {summary && <span style={{fontSize:13,color:C.inkFaint,marginLeft:"auto",textAlign:"right"}}>{summary}</span>}
+      </button>
+      {open && <div style={{padding:"0 16px 16px"}}>{children}</div>}
+    </div>
+  );
+}
+
+// Written for Josh, not for engineers. Each heading is a question a
+// non-technical co-founder would actually ask, in the order they'd ask it.
+function VerifAbuseExplainer({C}){
+  const Q=({q,children})=>(
+    <div style={{borderTop:`1px solid ${C.line}`,padding:"12px 0"}}>
+      <div style={{fontSize:15,fontWeight:800,color:C.ink,marginBottom:5}}>{q}</div>
+      <div style={{fontSize:14,color:C.inkSoft,lineHeight:1.7}}>{children}</div>
+    </div>
+  );
+  return (
+    <div>
+      <div style={{fontSize:14,color:C.inkSoft,lineHeight:1.7}}>
+        The first check is free. Free things get abused, so here is what stops that — and what we
+        deliberately chose <i>not</i> to do, because it would have punished real customers.
+      </div>
+
+      <Q q="Why give anything away at all?">
+        A buyer won't pay $4.99 to find out whether a tool is any good. One free check lets them see a
+        real report on their own car. In exchange we get a verified email address — worth more to us
+        than $4.99, because we can reach that person again.
+      </Q>
+
+      <Q q="What stops someone taking hundreds of free checks?">
+        You have to sign in to get one, and signing in means clicking a link we email you — so you must
+        control a real inbox. Before this, the free check needed nothing at all: no email, no account.
+        Clearing your browser data reset it, so one person could take as many as they liked, forever.
+      </Q>
+
+      <Q q="Can't they just make a new Gmail every time?">
+        They can, and that's the honest limit — nothing stops a determined person opening fresh
+        accounts. What we stopped is the <b>easy</b> version. Gmail lets you write your own address
+        several ways that all land in the same inbox:
+        <div style={{fontFamily:"ui-monospace,Menlo,monospace",fontSize:13,color:C.ink,
+                     background:C.paper2,borderRadius:8,padding:"8px 10px",margin:"7px 0"}}>
+          josh+1@gmail.com &nbsp; josh+2@gmail.com &nbsp; j.o.s.h@gmail.com
+        </div>
+        Three different addresses to a computer, one mailbox to a human. That took thirty seconds and
+        gave unlimited free checks. Now we work out which real inbox an address lands in and give
+        <b> one free check per inbox</b>. Opening genuinely new accounts is slow and annoying; typing
+        a "+2" is not. We removed the version that wasn't worth their time.
+      </Q>
+
+      <Q q="What about five people living in one house?">
+        They're fine, and this is the part worth understanding. The obvious defence is to limit by
+        internet connection — but a household shares one, so that would block a family of five while
+        barely slowing anyone actually cheating, since changing your connection takes one tap on a
+        phone. It punishes honest customers and stops nobody. So we deliberately do <b>not</b> limit by
+        connection. Five people, five real inboxes, five free checks — and five potential customers,
+        which is exactly what we want.
+      </Q>
+
+      <Q q="What does abuse cost us if some gets through?">
+        About four cents — the Claude cost of reading one listing. Worth caring about at scale, not
+        worth blocking real buyers to prevent. If someone burns ten free checks they cost us forty
+        cents, and we learned their email address.
+      </Q>
+
+      <Q q="What else is in the way?">
+        Throwaway "temporary inbox" services are blocked outright at sign-in. And every free check runs
+        through the same credit system as a paid one, so nobody takes a second without the ledger
+        knowing.
+      </Q>
+
+      <div style={{borderTop:`1px solid ${C.line}`,paddingTop:12,fontSize:13.5,color:C.inkFaint,lineHeight:1.7}}>
+        <b style={{color:C.inkSoft}}>Short version:</b> we stopped the cheap trick, we accept the
+        expensive one, and we refuse the defences that would cost us real customers.
+      </div>
+    </div>
+  );
+}
+
+// Receipt uploads. A payment used to exist because Vic typed it in — fine
+// between three people who trust each other, useless the moment anyone needs to
+// check. Uploading does NOT settle a balance: it is evidence attached to a
+// claim, and Vic still records the payment after looking at it. Otherwise a
+// screenshot of anything at all would clear money owed.
+function VerifReceipts({C}){
+  const [rows,setRows]=useState(null);
+  const [state,setState]=useState("loading");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+
+  const load=async()=>{
+    try{
+      const {data,error}=await supabase.rpc("fn_list_receipts",{p_limit:40});
+      if(error) throw error;
+      setRows(data||[]); setState("ok");
+    }catch(err){ console.warn("receipts unavailable:",err?.message||err); setState("absent"); }
+  };
+  useEffect(()=>{load();},[]);
+
+  const onPick=async(e)=>{
+    const file=e.target.files?.[0];
+    e.target.value="";
+    if(!file) return;
+    if(!/^image\/(png|jpe?g|webp|heic)$|^application\/pdf$/i.test(file.type)){
+      setMsg({ok:false,text:"Screenshots or PDF only."}); return;
+    }
+    if(file.size>10*1024*1024){ setMsg({ok:false,text:"Keep it under 10 MB."}); return; }
+    setBusy(true); setMsg(null);
+    try{
+      // The storage path's first segment must be the founder's own id — the
+      // storage policy and fn_record_receipt both enforce it, so a mismatch
+      // fails loudly rather than writing into someone else's folder.
+      const {data:fid,error:fidErr}=await supabase.rpc("fn_my_founder_id");
+      if(fidErr) throw fidErr;
+      if(!fid) throw new Error("Not a founder account.");
+      const ext=(file.name.split(".").pop()||"png").toLowerCase().slice(0,5);
+      const path=`${fid}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const {error:upErr}=await supabase.storage.from("receipts").upload(path,file,{contentType:file.type});
+      if(upErr) throw upErr;
+      const {error:recErr}=await supabase.rpc("fn_record_receipt",{
+        p_storage_path:path, p_period_month:null, p_mime:file.type, p_bytes:file.size,
+        p_amount_cad:null, p_note:file.name.slice(0,120),
+      });
+      if(recErr) throw recErr;
+      setMsg({ok:true,text:"Receipt uploaded — Vic will match it to a payment."});
+      await load();
+    }catch(err){ setMsg({ok:false,text:err?.message||String(err)}); }
+    finally{ setBusy(false); }
+  };
+
+  const open=async(p)=>{
+    try{
+      const {data,error}=await supabase.storage.from("receipts").createSignedUrl(p,120);
+      if(error) throw error;
+      if(data?.signedUrl) window.open(data.signedUrl,"_blank","noopener");
+    }catch(err){ setMsg({ok:false,text:err?.message||String(err)}); }
+  };
+
+  return (
+    <div>
+      {state==="absent" && (
+        <div style={{fontSize:13,color:C.inkFaint,lineHeight:1.65}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260816_payment_receipts.sql</span>.
+        </div>
+      )}
+      {state!=="absent" && (<>
+        <div style={{fontSize:13.5,color:C.inkSoft,lineHeight:1.7,marginBottom:10}}>
+          Paid your share? Attach the e-transfer screenshot here so the payment has proof next to it.
+          Uploading doesn't change a balance on its own — Vic records the payment once he's seen it.
+        </div>
+        <label style={{display:"inline-block",background:busy?C.inkFaint:C.teal,color:"#fff",
+                       borderRadius:10,padding:"9px 16px",fontSize:13.5,fontWeight:800,
+                       cursor:busy?"wait":"pointer"}}>
+          {busy?"Uploading…":"Upload a receipt"}
+          <input type="file" accept="image/*,application/pdf" onChange={onPick} disabled={busy}
+                 style={{display:"none"}}/>
+        </label>
+        {msg && (
+          <div style={{fontSize:13,marginTop:9,fontWeight:700,color:msg.ok?C.tealInk:C.coralInk}}>{msg.text}</div>
+        )}
+        <div style={{marginTop:12}}>
+          {state==="loading" && <div style={{fontSize:13,color:C.inkFaint}}>Loading…</div>}
+          {state==="ok" && (rows||[]).length===0 && (
+            <div style={{fontSize:13,color:C.inkFaint}}>No receipts yet.</div>
+          )}
+          {(rows||[]).map(r=>(
+            <div key={r.id} style={{display:"flex",alignItems:"baseline",gap:10,padding:"7px 0",
+                        borderBottom:`1px solid ${C.line}`}}>
+              <span style={{fontSize:13.5,color:C.ink,fontWeight:700,minWidth:56}}>{r.founder}</span>
+              <span style={{fontSize:13,color:C.inkFaint,flex:1}}>
+                {new Date(r.period_month+"T00:00:00").toLocaleDateString("en-CA",{month:"long",year:"numeric"})}
+                {r.note?` · ${r.note}`:""}
+              </span>
+              <span style={{fontSize:12.5,color:C.inkFaint}}>
+                {new Date(r.created_at).toLocaleDateString("en-CA")}
+              </span>
+              <button onClick={()=>open(r.storage_path)}
+                style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,
+                        padding:"4px 10px",fontSize:12.5,cursor:"pointer",color:C.inkSoft,
+                        fontFamily:"inherit"}}>View</button>
+            </div>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function VerifProfitPeriods({C}){
   const [d,setD]=useState(null);
   const [state,setState]=useState("loading");
@@ -5566,15 +5769,42 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
         )}
       </div>
 
-      <VerifOperationalCost C={C}/>
+      {/* Everything below is collapsible. Money first, because that is what a
+          founder opens this page for; the reference material sits closed. */}
+      <VerifSection C={C} title="OPERATIONAL COST vs USAGE" open
+        summary="what we pay, and what a report costs">
+        <VerifOperationalCost C={C}/>
+      </VerifSection>
 
-      <VerifFounderLedger C={C} readOnly={readOnly}/>
+      <VerifSection C={C} title="FOUNDER LEDGER" open
+        summary="balances, and who owes whom">
+        <VerifFounderLedger C={C} readOnly={readOnly}/>
+      </VerifSection>
 
-      <VerifPackEconomics C={C}/>
+      <VerifSection C={C} title="RECEIPTS"
+        summary="upload proof of a payment">
+        <VerifReceipts C={C}/>
+      </VerifSection>
 
-      <VerifWhyWePay C={C}/>
+      <VerifSection C={C} title="WHAT A SCAN COSTS vs WHAT THE USER PAYS"
+        summary="per pack, split three ways">
+        <VerifPackEconomics C={C}/>
+      </VerifSection>
 
-      <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
+      <VerifSection C={C} title="HOW WE STOP EMAIL ABUSE"
+        summary="plain English — why the free check is safe">
+        <VerifAbuseExplainer C={C}/>
+      </VerifSection>
+
+      <VerifSection C={C} title="WHAT WE PAY FOR, AND WHY"
+        summary="every service, and what breaks without it">
+        <VerifWhyWePay C={C}/>
+      </VerifSection>
+
+      <VerifSection C={C} title="PROVIDER COST + RELIABILITY"
+        summary="Claude, Scrapfly, Nimble">
+        <VerifProviderCosts C={C} hours={{"1h":1,"24h":24,"7d":168,"30d":720,"1y":8760}[range]||24}/>
+      </VerifSection>
 
       {/* ---- the ledger: volume + delivery + 13 checks ---- */}
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px"}}>
