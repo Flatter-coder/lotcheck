@@ -100,7 +100,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16d";  // + basis-aware refusal copy, range scoped to trims held
+const CACHE_VER = "2026-08-16e";  // + enrichment boundary guard, screenshot viewport fallback
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2435,7 +2435,30 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // individually defensive and skips itself when its inputs are absent, so a
 // partial fallback analysis (e.g. no financing, no MSRP) simply gets fewer
 // checks rather than erroring.
-async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
+// ENRICHMENT IS BY DEFINITION OPTIONAL. By the time this runs the report
+// already has the price, the VIN, the trim and the recalls -- everything that
+// makes it worth sending. Every step inside adds a POINT, and a point that
+// cannot be computed is a hollow point, not a failed report.
+//
+// It was called bare from six places. A Lethbridge Toyota scan died with
+// "Something went wrong analyzing that listing" because lookupManufacturerMsrp's
+// internal fetchWithRetry threw an AbortError on a slow manufacturer page --
+// one optional lookup, and the buyer lost a report that was otherwise complete.
+// Guarding each enricher individually would leave the next one added unguarded
+// by default; guarding the boundary covers every one of them, including the
+// ones nobody has written yet.
+async function enrichAnalysis(a: any, deadline: number): Promise<void> {
+  try {
+    await enrichAnalysisInner(a, deadline);
+  } catch (e) {
+    // Loud in the logs, invisible to the buyer beyond the points that stayed
+    // hollow -- which already say so honestly on their own.
+    console.warn("enrichAnalysis threw (report continues with whatever landed):", (e as Error)?.message);
+    a.enrichmentIncomplete = true;
+  }
+}
+
+async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<void> {
   await applyVerifiedWarranty(analysis);
   await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
@@ -2500,7 +2523,16 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
         analysis.msrpBasis = "original_when_new";
       }
     } else {
-      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline);
+      // AN OPTIONAL ENRICHMENT MUST NEVER TAKE THE SCAN DOWN. lookupManufacturerMsrp
+      // returns null on every failure it anticipates, but its internal
+      // fetchWithRetry THROWS when attempts or budget run out -- and that
+      // AbortError propagated through enrichAnalysis to the top-level handler,
+      // so a Lethbridge Toyota scan that already had the price, the VIN and the
+      // recalls died with "Something went wrong analyzing that listing."
+      // A missing manufacturer MSRP is one hollow point; it is not a failed
+      // report ([[report-never-empty]]).
+      const mfrMsrp = await lookupManufacturerMsrp(analysis.year, analysis.make, analysis.model, analysis.trim ?? null, deadline)
+        .catch((e: unknown) => { console.warn("lookupManufacturerMsrp threw (continuing without it):", (e as Error)?.message); return null; });
       if (mfrMsrp) {
         analysis.msrp = mfrMsrp;
         analysis.msrpSource = "manufacturer_site";

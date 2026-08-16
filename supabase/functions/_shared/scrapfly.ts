@@ -188,7 +188,16 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("country", "ca");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
-      if (!res.ok) { console.warn("captureListingScreenshot HTTP", res.status); return null; }
+      if (!res.ok) {
+        // READ THE BODY. A 422 from Scrapfly names the reason -- bad params, ASP
+        // failure, target error -- and logging only the number is why
+        // "captureListingScreenshot HTTP 422" cost Vic a round-trip to
+        // diagnose. Same lesson as the Claude 400 in the rescue path: the one
+        // thing that explains the failure was fetched and thrown away.
+        const body = await res.text().catch(() => "");
+        console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} HTTP ${res.status}: ${body.slice(0, 300)}`);
+        return null;
+      }
       const ct = res.headers.get("content-type") || "";
       if (!/image\//i.test(ct)) { console.warn("captureListingScreenshot non-image response:", ct); return null; }
       const bytes = new Uint8Array(await res.arrayBuffer());
@@ -209,6 +218,22 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
   // so the bottom-of-page evidence survives the degrade.
   const first = await shoot(true, budgetMs);
   if (first && first !== "too_large") return first;
+  // DEGRADE ON ANY FAILURE, not only on "too_large". A fullpage 422 used to
+  // return null here and never try the viewport, so the report shipped with no
+  // evidence photo at all -- which is what Vic kept seeing. A viewport shot of
+  // the top of the listing (price + vehicle visible) is worth far more than
+  // nothing, and it is the same ladder the render path now uses.
+  if (first === null) {
+    const left = budgetMs - (Date.now() - started);
+    if (left > 3_000) {
+      console.log(`captureListingScreenshot: fullpage failed — trying a viewport shot with ${Math.round(left / 1000)}s left.`);
+      const vp = await shoot(false, left);
+      if (vp && vp !== "too_large") return vp;
+    } else {
+      console.warn("captureListingScreenshot: fullpage failed and no budget left for a viewport shot.");
+    }
+    return null;
+  }
   if (first === "too_large") {
     const left = budgetMs - (Date.now() - started);
     if (left > 4_000) {
