@@ -360,14 +360,19 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   // not. Same rule as VIN (vin-every-scan).
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
-    const hot = d >= 90, warm = d >= 31 && d < 90;
-    const dolC = hot ? "#A63C25" : warm ? "#8a6a12" : "#17756B";
+    // FOUR tiers, matching the on-screen card. Email clients strip CSS
+    // animation, so the 120+ tier cannot lean on the blink the app uses --
+    // it carries the meaning in COLOUR and WORDS instead, which is what the
+    // reduced-motion path does on screen too. A tier that only exists as
+    // motion does not exist in a PDF.
+    const critical = d >= 120, hot = d >= 90, warm = d >= 31 && d < 90;
+    const dolC = critical ? "#8B1A1A" : hot ? "#A63C25" : warm ? "#8a6a12" : "#17756B";
     // `atLeast` marks our own first-seen tracker, which is a LOWER BOUND — the
     // car may have sat there before our crawl noticed it. Stating it as exact
     // is the kind of number a dealer would take apart, correctly.
     const atLeast = a.daysOnLot.atLeast === true;
     deck.push({ label: "Days on lot", tone: hot ? "flag" : warm ? "muted" : "pass", glow: hot, body:
-      `<div style="font-size:18px;font-weight:900;color:${dolC};">${atLeast ? "At least " : ""}${d.toLocaleString()} days on the lot</div>` +
+      `<div style="font-size:18px;font-weight:900;color:${dolC};">${atLeast ? "At least " : ""}${d.toLocaleString()} days on the lot${critical ? " — over four months" : ""}</div>` +
       `<div style="font-size:12px;color:#706D96;margin-top:2px;">${a.daysOnLot.since ? "First seen " + escapeHtml(a.daysOnLot.since) + " · " : ""}${escapeHtml(a.daysOnLot.sourceLabel || "dealer inventory data")}</div>` +
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${atLeast
         ? "This is how long we have seen this exact car listed — it may have been sitting longer before we first saw it, so treat it as a floor, not a total. "

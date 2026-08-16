@@ -8458,14 +8458,19 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Number(a.daysOnLot.days);
     const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
-    const dolState = d >= 90 ? "red" : d >= 31 ? "amber" : "green";
+    // FOUR tiers. The comment promised "120+ blinking red" and the code had
+    // three, so a 200-day car rendered identically to a 90-day one — the two
+    // are not the same conversation, and the older it is the more it is worth
+    // saying so. lc-blink already existed in the stylesheet, wired only to the
+    // live-ticker dot.
+    const dolState = d >= 120 ? "critical" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
     const ACC = dolState === "green" ? "#8ed500" : dolState === "amber" ? "#ffb020" : "#ff3b5c";
     const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
     const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
     const bulb = (on, color) => (
       <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none" }} />
     );
-    daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, body: (
+    daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, critical: d >= 120, body: (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <style>{`
           .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
@@ -8474,6 +8479,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
             width: 100%; position: relative;
             box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
           .lc-dol-card:hover { transform: rotate3d(0.5, 1, 0, 22deg); }
+          ${dolState === "critical" ? `
+          .lc-dol-card { animation: lc-dol-pulse 1.6s ease-in-out infinite; }
+          @keyframes lc-dol-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,92,.55); } 50% { box-shadow: 0 0 0 14px rgba(255,59,92,0); } }
+          /* Motion is an emphasis, never the only carrier of the meaning: the
+             colour and the "FOUR MONTHS+" wording say it without animation. */
+          @media (prefers-reduced-motion: reduce) { .lc-dol-card { animation: none; box-shadow: 0 0 0 3px rgba(255,59,92,.5); } }
+          ` : ""}
           .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
           .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
           .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
@@ -8514,7 +8526,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
                     : " Recently listed — limited sitting-time leverage on this unit."}
                 {dolCareAsk(d)}
               </div>
-              <span className="lc-dol-chip">{d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
+              <span className="lc-dol-chip">{d >= 120 ? "Four months+ — name your price" : d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
             </div>
           </div>
         </div>
