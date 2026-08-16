@@ -95,6 +95,8 @@ jobs:
         run: npm run test:vision-limits
       - name: Scrapfly render degrades instead of losing the HTML
         run: npm run test:scrapfly-render
+      - name: Reference financing (no dealer terms -> do the math)
+        run: npm run test:ref-financing
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)

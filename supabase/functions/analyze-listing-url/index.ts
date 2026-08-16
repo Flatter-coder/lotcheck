@@ -67,6 +67,7 @@ import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
+import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { stripSettledContradictions } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
@@ -98,7 +99,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16a";  // vision pre-flight + honest read-failure copy
+const CACHE_VER = "2026-08-16b";  // + reference financing when the dealer quotes no terms
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -813,7 +814,11 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
         if (pool.length) {
           const std = pool.filter((r: any) => !r.promo);
           const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
-          out.manufacturer = { apr: Number(pick.apr), promo: !!pick.promo, effectiveDate: pick.effective_date };
+          // termMonths MUST travel with the rate. This line used to drop it,
+          // and an APR with no term cannot amortize -- so the Financing-math
+          // point printed "NO TERMS QUOTED" while both halves of the
+          // calculation sat in our own tables. See reference-financing.ts.
+          out.manufacturer = { apr: Number(pick.apr), termMonths: Number(pick.term_months) || null, promo: !!pick.promo, effectiveDate: pick.effective_date };
         }
       }
     } catch (err) {
@@ -2567,6 +2572,17 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       analysis.summary = s.text;
       analysis.summaryRedactions = s.removed;
       console.log(`summary: removed ${s.removed.length} sentence(s) reopening settled topics: ${s.removed.map((r) => r.topic).join(", ")}`);
+    }
+  }
+
+  // VIC'S RULE: no dealer terms -> use the manufacturer's APR and price and do
+  // the math. Runs after the rates and the MSRP are resolved, and only when the
+  // dealer disclosed nothing of their own -- a real quoted payment always wins.
+  if (!analysis.financingCheck?.checked) {
+    const ref = computeReferenceFinancing(analysis);
+    if (ref) {
+      analysis.referenceFinancing = ref;
+      console.log(`reference financing: ${ref.apr}% / ${ref.termMonths}mo -> asking $${ref.atAsking?.monthly ?? "?"}/mo, delta ${ref.monthlyDelta ?? "n/a"}`);
     }
   }
 

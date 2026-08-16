@@ -645,6 +645,9 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   else if (fr?.manufacturer) P.push({ t: "Financing APR", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
   else P.push({ t: "Financing APR", v: "NONE ADVERTISED", tone: "muted" });
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
+  // No dealer terms is not "nothing to say": we hold the manufacturer's own
+  // published rate and price, so the payment is arithmetic we can do ourselves.
+  else if (a.referenceFinancing?.atAsking) P.push({ t: "Financing math", v: "$" + Math.round(a.referenceFinancing.atAsking.monthly).toLocaleString() + "/MO REF", tone: "muted" });
   else P.push({ t: "Financing math", v: "NO TERMS QUOTED", tone: "muted" });
   if (a.odometerCheck?.checked) P.push({ t: "Odometer", v: Number(a.odometerCheck.km).toLocaleString() + " km" + (a.odometerCheck.flag ? " FLAG" : ""), tone: a.odometerCheck.flag ? "flag" : "pass" });
   else P.push({ t: "Odometer", v: a.vehicleCondition === "new" ? "N/A (NEW)" : "NOT LISTED", tone: "muted" });
@@ -698,6 +701,8 @@ function pointExplain(t: string, a: any): string | null {
         ? "APR is the yearly interest rate on the loan. Compare it against your own bank or credit union before accepting - dealer rates often carry hidden markup."
         : "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
     case "Financing math":
+      if (!a.financingCheck?.checked && a.referenceFinancing?.note) return a.referenceFinancing.note;
+
       if (a.financingCheck?.checked) return a.financingCheck.consistent
         ? "We recomputed the advertised payment from the price, rate and term - the numbers line up."
         : "We recomputed the payment from the price, rate and term - and they don't line up. Ask them to show the calculation line by line.";
