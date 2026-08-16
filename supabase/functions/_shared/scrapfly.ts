@@ -53,7 +53,33 @@ function noteScrapflyError(msg: string): void {
 
 // Render a URL through Scrapfly's anti-scraping-protection engine. Returns the
 // rendered HTML and a full-page screenshot. null when disabled or on any error.
-export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<RenderResult | null> {
+// TWO ATTEMPTS, CHEAPEST-USEFUL FIRST. This used to make one maximally
+// expensive request -- render_js + auto_scroll + a FULLPAGE screenshot -- and
+// on a long dealer page that combination is what blew the budget:
+//
+//   scrapflyRender error: Signal timed out.        (stampedetoyotacalgary.com)
+//
+// The cost was not just the screenshot. A timeout loses the RENDERED HTML too,
+// and the HTML is the part that actually rescues a page: it carries the
+// schema.org JSON-LD and the Convertus vmsData blob that every fallback below
+// reads. So the run spent its entire budget producing an artifact that the size
+// guard would have discarded anyway, and threw away the one thing it needed.
+//
+// Asking for a FULLPAGE shot was always self-defeating here. A 17,729px capture
+// is past the vision API's ceiling by construction, so the best case was "spend
+// 70s, then drop it". A VIEWPORT shot is bounded, fast, and always within
+// limits -- and the dispute-proof full-page evidence photo is a SEPARATE,
+// cheaper call (captureListingScreenshot) that already has its own
+// fullpage->viewport ladder. This path never needed to duplicate it.
+//
+// Attempt 2 exists because a render can still overrun on a heavy page: drop the
+// screenshot entirely, drop auto_scroll, shorten the JS wait, and go for the
+// HTML alone. It only fires after a failure, so the common path stays one call.
+type RenderShot = "viewport" | "fullpage" | "none";
+
+async function scrapflyRenderOnce(
+  url: string, budgetMs: number, shot: RenderShot, autoScroll: boolean, waitMs: number,
+): Promise<RenderResult | null> {
   if (!SCRAPFLY_API_KEY) return null;
   const renderDeadline = Date.now() + budgetMs;
   try {
@@ -63,9 +89,9 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     u.searchParams.set("asp", "true");            // Anti-Scraping-Protection (defeats bot walls)
     u.searchParams.set("render_js", "true");      // execute JS so dynamic price loads
     u.searchParams.set("country", "ca");          // Canadian residential IP
-    u.searchParams.set("rendering_wait", "8000"); // give the price XHR time to land
-    u.searchParams.set("auto_scroll", "true");    // trigger lazy-loaded sections
-    u.searchParams.set("screenshots[main]", "fullpage");
+    u.searchParams.set("rendering_wait", String(waitMs));
+    if (autoScroll) u.searchParams.set("auto_scroll", "true"); // trigger lazy-loaded sections
+    if (shot !== "none") u.searchParams.set("screenshots[main]", shot);
     u.searchParams.set("format", "json");
 
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
@@ -85,34 +111,25 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     if (shotUrl) {
       try {
         const sep = shotUrl.includes("?") ? "&" : "?";
-        // Bounded by what's left of the caller's budgetMs, not a flat 20s on
-        // top of it -- a hardcoded extra timeout here is the same class of
-        // bug as the render/Claude-call doubling above: the caller computed
-        // budgetMs from their own deadline expecting THIS to be the total
-        // time this function takes, not total-plus-20s. Same minimum-1s
-        // floor so a render that used the whole budget still gets a real
-        // (if short) attempt instead of an instant abort.
+        // Bounded by what's LEFT of budgetMs, never a flat extra timeout on top:
+        // the caller computed budgetMs expecting it to be this function's total.
         const shotBudget = Math.max(1_000, Math.min(20_000, renderDeadline - Date.now()));
         const sr = await fetch(`${shotUrl}${sep}key=${SCRAPFLY_API_KEY}`, { signal: AbortSignal.timeout(shotBudget) });
         if (sr.ok) {
           const bytes = new Uint8Array(await sr.arrayBuffer());
           screenshotB64 = base64FromBytes(bytes);
-          // Detect from magic bytes so the vision call always sends the right media type.
           screenshotMime = (bytes[0] === 0x89 && bytes[1] === 0x50) ? "image/png" : (bytes[0] === 0xFF && bytes[1] === 0xD8) ? "image/jpeg" : (sr.headers.get("content-type") || "image/jpeg");
         }
-      } catch (e) { console.warn("scrapfly screenshot fetch failed:", (e as Error)?.message); }
+      } catch (e) {
+        // A screenshot is optional. Losing it must never lose the HTML.
+        console.warn("scrapflyRender: screenshot fetch failed (keeping the HTML):", (e as Error)?.message);
+      }
     }
-    // Claude's vision API rejects images past its own size/dimension ceiling.
-    // A "fullpage" capture of a long dealer page can run well past that --
-    // confirmed live on capitalchev.ca, whose listing page is 17,729px tall.
-    // That silently fails the vision call below (res.ok false -> null) and
-    // loses the WHOLE rescue even though Scrapfly's render itself succeeded.
-    // Same cutoff already proven safe for the sealed-evidence screenshot in
-    // captureListingScreenshot() below. Drop the oversized shot here so the
-    // caller falls back to the rendered HTML (text) path instead of a
-    // guaranteed-failing vision call.
+    // Belt and braces behind the viewport request: if a shot still comes back
+    // past the vision ceiling, drop it so the caller takes the text path rather
+    // than a guaranteed-failing vision call. See vision-limits.ts.
     if (screenshotB64 && screenshotB64.length > 1_500_000) {
-      console.warn(`scrapflyRender: full-page screenshot too large (${screenshotB64.length} b64 chars) -- dropping, falling back to rendered HTML.`);
+      console.warn(`scrapflyRender: screenshot too large (${screenshotB64.length} b64 chars) -- dropping, falling back to rendered HTML.`);
       screenshotB64 = null;
     }
     if (!html && !screenshotB64) return null;
@@ -122,6 +139,28 @@ export async function scrapflyRender(url: string, budgetMs = 70_000): Promise<Re
     console.warn("scrapflyRender error:", (e as Error)?.message);
     return null;
   }
+}
+
+export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { shot?: RenderShot } = {}): Promise<RenderResult | null> {
+  if (!SCRAPFLY_API_KEY) return null;
+  const deadline = Date.now() + budgetMs;
+
+  // Attempt 1: viewport shot. Bounded by construction, so it cannot produce the
+  // oversized capture the vision call refuses, and it renders far faster than a
+  // fullpage stitch of a 17,000px page.
+  const first = await scrapflyRenderOnce(url, budgetMs, opts.shot ?? "viewport", true, 8_000);
+  if (first?.html || first?.screenshotB64) return first;
+
+  // Attempt 2: HTML only. No screenshot, no auto_scroll, a short JS wait. This
+  // is the cheapest thing that still yields JSON-LD and vmsData, and it only
+  // runs after a failure -- the common path remains a single call.
+  const left = deadline - Date.now();
+  if (left < 6_000) {
+    console.warn("scrapflyRender: no budget left for the HTML-only retry.");
+    return first;
+  }
+  console.log(`scrapflyRender: first attempt yielded nothing; retrying HTML-only with ${Math.round(left / 1000)}s left.`);
+  return await scrapflyRenderOnce(url, left, "none", false, 2_500);
 }
 
 // Per-scan sealed screenshot via Scrapfly's dedicated Screenshot API

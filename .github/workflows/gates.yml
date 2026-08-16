@@ -93,6 +93,8 @@ jobs:
         run: npm run test:report-truth
       - name: Vision image limits (never post an image the API will refuse)
         run: npm run test:vision-limits
+      - name: Scrapfly render degrades instead of losing the HTML
+        run: npm run test:scrapfly-render
       - name: Stacked incentives (real captured dealer pages)
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
