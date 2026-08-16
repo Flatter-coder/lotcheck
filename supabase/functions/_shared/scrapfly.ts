@@ -21,6 +21,7 @@
 
 import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
 import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
+import { visionImageVerdict } from "./vision-limits.ts";
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
@@ -313,7 +314,16 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
 
     const userContent: any[] = [];
-    if (rendered.screenshotB64) {
+    // PRE-FLIGHT THE IMAGE. Anthropic rejects an oversized image with HTTP 400,
+    // and this call used to send whatever the render produced -- a 17,729px-tall
+    // capitalchev.ca screenshot, a 903 KB stampedetoyotacalgary.com page -- and
+    // take the 400. The text path below already works and is right there, so an
+    // image we KNOW will be refused should never be sent in its place.
+    const shotVerdict = visionImageVerdict(rendered.screenshotB64, rendered.screenshotMime);
+    if (rendered.screenshotB64 && !shotVerdict.ok) {
+      console.warn(`scrapfly-rescue: skipping the screenshot (${shotVerdict.reason}) and using the rendered text instead.`);
+    }
+    if (rendered.screenshotB64 && shotVerdict.ok) {
       userContent.push({ type: "image", source: { type: "base64", media_type: rendered.screenshotMime || "image/jpeg", data: rendered.screenshotB64 } });
       userContent.push({ type: "text", text: `Above is a full-page screenshot of a dealer listing page (URL: ${url}). Read every visible figure — asking price, MSRP, fees/add-ons, VIN, odometer, financing/lease terms — and return the JSON object described in your instructions. If a field isn't visible, use null; never invent a number.` });
     } else if (rendered.html) {
@@ -334,7 +344,16 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
       body: JSON.stringify({ model: opts.model, max_tokens: 8000, system: opts.systemPrompt, messages: [{ role: "user", content: userContent }] }),
       signal: AbortSignal.timeout(claudeBudget),
     });
-    if (!res.ok) console.warn("scrapfly-rescue Claude HTTP", res.status);
+    // READ THE BODY. A 400 from Anthropic is OUR malformed request and the body
+    // names the reason -- image too large, bad base64, token overflow. Logging
+    // only the status number is why "scrapfly-rescue Claude HTTP 400" cost a
+    // round-trip through Vic to diagnose: the one thing that explains it was
+    // fetched and discarded. Same rule as the usage-log breadcrumbs elsewhere
+    // in this codebase -- a failed PAID scan must be diagnosable from logs alone.
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.warn(`scrapfly-rescue Claude HTTP ${res.status}: ${body.slice(0, 400)}`);
+    }
     else {
       const data: any = await res.json();
       const text: string = data?.content?.[0]?.text ?? "";

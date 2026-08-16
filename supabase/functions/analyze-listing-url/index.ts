@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-15c";  // basis fail-safe + settled-claim strip + dealer-reputation three-state
+const CACHE_VER = "2026-08-16a";  // vision pre-flight + honest read-failure copy
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2087,7 +2087,14 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
       // Honesty flags the UI can surface: the page itself could not be read,
       // and this report was built from the dealer's own inventory feed.
       source: "sm360_feed_fallback",
-      sourceNote: "The dealer's listing page couldn't be loaded (its site was blocking automated access), so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page couldn't be read and aren't included here.",
+      // NEVER STATE THAT THE DEALER BLOCKED US. We do not know that, and on
+      // 2026-08-16 a Stampede Toyota listing returned HTTP 200 with the full
+      // 903 KB page and clean JSON-LD to a plain curl AFTER the scan told the
+      // buyer that dealer "may be blocking automated access". The read can fail
+      // for our reasons -- a vendor outage, our egress IP, a timeout -- and
+      // asserting a motive we have not established is a claim about a named
+      // business in a document that business may read.
+      sourceNote: "We couldn't read the dealer's listing page on this attempt, so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page aren't included here.",
       summary: `${vehicleStr ?? "This vehicle"}${price != null ? ` is listed at $${price.toLocaleString()}` : ""}. The dealer's listing page couldn't be loaded, so this report is based on the dealer's inventory feed rather than the full page -- itemized fees and the page's financing terms aren't included. Confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
 
@@ -3114,7 +3121,8 @@ Deno.serve(async (req: Request) => {
       await releaseCredit(holdId);
       holdId = null;
       return new Response(
-        JSON.stringify({ error: "Couldn't load that page after a few tries. This dealer site may be blocking automated access right now -- try again in a moment, or use the upload/screenshot option instead." }),
+        // Describes OUR failure, not the dealer's conduct. See the note above.
+        JSON.stringify({ error: "We couldn't read that page on this attempt -- that's on our end, not the dealer's. Try again in a moment, or upload a screenshot of the same page, which doesn't depend on the page loading for us at all." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
