@@ -42,9 +42,32 @@ const SURFACES = [
   "src/App.jsx",
   "src/DealOrrery.jsx",
   "src/PlanetAlerts.jsx",
+  // SERVER-SIDE COPY IS STILL COPY. The counter-script the buyer reads ALOUD at
+  // the dealership is generated in deal.ts, and this gate scanned only the
+  // frontend -- which is how "(the FTC CARS Rule in the US; AMVIC/OMVIC in
+  // Canada)" reached an Alberta buyer's script. Comments are stripped for
+  // non-HTML files above, so explanatory prose here is out of scope.
+  "supabase/functions/_shared/deal.ts",
+  "supabase/functions/_shared/msrp-claim.ts",
+  "supabase/functions/_shared/point-state.ts",
+  "supabase/functions/_shared/settled-claims.ts",
+  "supabase/functions/_shared/reference-financing.ts",
 ];
 
 const RULES = [
+  {
+    id: "no-foreign-regulator-citations",
+    ruleKey: "ab-amvic-all-in-advertising",
+    kind: "forbidden",
+    why: "LotCheck serves Alberta buyers. Citing a US statute at them -- the counter-script read 'under all-in pricing rules (the FTC CARS Rule in the US; AMVIC/OMVIC in Canada)' -- invites a salesperson to answer 'that's American' and discard an otherwise correct line. Name the ONE regulator with authority over THIS sale, resolved from the dealer's province, or name none.",
+    patterns: [
+      /FTC/,
+      /CARS Rule/i,
+      /Federal Trade Commission/i,
+      /in the US/i,
+      /Magnuson[- ]Moss/i,
+    ],
+  },
   {
     id: "no-self-declared-regulatory-status",
     ruleKey: "ab-amvic-business-registration",
@@ -72,7 +95,13 @@ const RULES = [
     kind: "forbidden",
     why: "The Competition Act's general-impression test means an absolute promise fails even when each figure is individually right.",
     patterns: [
-      /\bguarantee(d|s)?\b/i,
+      // A NEGATED guarantee is the opposite of a promise, and quoting a dealer's
+      // own hedge back at them is one of the strongest moves the counter-script
+      // has: `Your fine print says the price "can't be guaranteed" — so confirm
+      // it in writing`. Pointing this gate at server copy flagged that line, and
+      // suppressing the quote to satisfy a regex would have removed evidence,
+      // not a claim. The rule targets OUR promises, so exclude the negations.
+      /(?<!\b(?:can'?t|cannot|not|never|no|isn'?t|aren'?t|won'?t)\s(?:be\s)?)\bguarantee(d|s)?\b/i,
       /\b100%\s+(accurate|correct|reliable)\b/i,
       /\balways\s+(saves?|beats?|wins?)\b/i,
       /\bnever\s+wrong\b/i,

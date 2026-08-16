@@ -73,8 +73,12 @@ function scan(text: string): Jurisdiction | null {
   const ph = t.match(/(?:^|[^\d])\(?([2-9]\d{2})\)?[\s.-]\d{3}[\s.-]\d{4}(?!\d)/);
   if (ph && AREA_CODES[ph[1]]) return { code: AREA_CODES[ph[1]], source: `area code ${ph[1]}`, confident: true };
   // City name last: shared names exist ("London ON" vs UK), so lower trust.
+  // Match the run-together form too — a dealer domain has no word boundaries
+  // (stampedetoyotacalgary.com), and that is exactly the case that returned no
+  // province while the city sat in the hostname.
   for (const [city, code] of Object.entries(CITY_HINTS)) {
-    if (new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t)) {
+    const bounded = new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    if (bounded.test(t) || t.includes(city.replace(/\s+/g, ""))) {
       return { code, source: `city "${city}"`, confident: true };
     }
   }
@@ -115,3 +119,34 @@ export function isAllInJurisdiction(a: any): { allIn: boolean | null; jurisdicti
   if (!j.code) return { allIn: null, jurisdiction: j };
   return { allIn: ALL_IN_PROVINCES.has(j.code), jurisdiction: j };
 }
+
+/**
+ * The dealer's CITY, from the same signals as the province.
+ *
+ * Google Places disambiguates far better with one — "Stampede Toyota, Calgary"
+ * against a bare name — and the dealer-reputation lookup was receiving null
+ * here. That is how a dealer with 3,369 reviews came back unchecked while its
+ * city sat in the listing URL the whole time (stampedetoyotacalgary.com).
+ */
+export function resolveCity(a: any): string | null {
+  const direct = String(a?.dealerCity || "").trim();
+  if (direct) return direct;
+
+  const hay = [a?.dealerAddress, a?.dealerName, a?.url ?? a?.listingUrl, a?.pageTextSample]
+    .map((v) => String(v || "").toLowerCase()).join(" ");
+  if (!hay) return null;
+
+  // Longest name first so "medicine hat" wins over any shorter substring match
+  // and a compound city is never truncated to its first word.
+  const cities = Object.keys(CITY_HINTS).sort((x, y) => y.length - x.length);
+  const titleCase = (s: string) => s.replace(/\b\w/g, (m) => m.toUpperCase());
+
+  for (const c of cities) {
+    // A dealer domain runs the words together (stampedetoyotacalgary.com), so a
+    // word-boundary match would miss it. Check both the bare substring and a
+    // boundary-anchored form, which is enough for a Places disambiguation hint.
+    if (hay.includes(c) || hay.includes(c.replace(/\s+/g, ""))) return titleCase(c);
+  }
+  return null;
+}
+

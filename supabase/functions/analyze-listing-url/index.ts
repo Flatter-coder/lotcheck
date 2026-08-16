@@ -67,6 +67,8 @@ import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
+import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
+import { resolveCity } from "../_shared/jurisdiction.ts";
 import { stripSettledContradictions } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
@@ -98,7 +100,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-15c";  // basis fail-safe + settled-claim strip + dealer-reputation three-state
+const CACHE_VER = "2026-08-16d";  // + basis-aware refusal copy, range scoped to trims held
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -790,6 +792,39 @@ function computeLeverageScore(analysis: any): void {
 //    (toyota.ca etc.). NOTE new-vs-used: manufacturer promo financing is a
 //    NEW-vehicle offer, so the frontend treats it as applicable only when the
 //    vehicle is new, and as a reference (not a real quote) when it's used.
+// Dealer reputation from get-dealer-sentiment, server-side. Never throws, and
+// carefully separates "we asked and found none" from "we never asked": only a
+// COMPLETED lookup sets checked:true. See _shared/point-state.ts.
+async function resolveDealerReputation(analysis: any): Promise<void> {
+  const name = String(analysis?.dealerName || "").trim();
+  if (!name) return;                              // nothing to look up -> unchecked
+  if (analysis.dealerSentiment?.rating) return;   // already resolved upstream
+  const base = Deno.env.get("SUPABASE_URL");
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!base || !key) return;
+  try {
+    const res = await fetch(`${base}/functions/v1/get-dealer-sentiment`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
+      // The city comes from the same signals as the province and was arriving
+      // null; Places disambiguates far better with one.
+      body: JSON.stringify({ dealerName: name, dealerCity: resolveCity(analysis) }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) {
+      console.warn(`dealer reputation: HTTP ${res.status} -- leaving UNCHECKED rather than implying none exist.`);
+      return;
+    }
+    const data: any = await res.json();
+    // A 200 IS a completed check, whether or not it found a rating.
+    analysis.dealerSentiment = { ...(data?.dealerSentiment ?? {}), checked: true };
+    console.log(`dealer reputation: ${name} -> ${data?.dealerSentiment?.rating ?? "none found"} (${data?.dealerSentiment?.reviewCount ?? 0} reviews)`);
+  } catch (e) {
+    // A failed call is NOT evidence about the dealer. Leave it unchecked.
+    console.warn("dealer reputation lookup failed (leaving UNCHECKED):", (e as Error)?.message);
+  }
+}
+
 // Attaches analysis.financeRates { dealer, manufacturer }. Never throws.
 async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
@@ -813,7 +848,11 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
         if (pool.length) {
           const std = pool.filter((r: any) => !r.promo);
           const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
-          out.manufacturer = { apr: Number(pick.apr), promo: !!pick.promo, effectiveDate: pick.effective_date };
+          // termMonths MUST travel with the rate. This line used to drop it,
+          // and an APR with no term cannot amortize -- so the Financing-math
+          // point printed "NO TERMS QUOTED" while both halves of the
+          // calculation sat in our own tables. See reference-financing.ts.
+          out.manufacturer = { apr: Number(pick.apr), termMonths: Number(pick.term_months) || null, promo: !!pick.promo, effectiveDate: pick.effective_date };
         }
       }
     } catch (err) {
@@ -2101,7 +2140,14 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
       // Honesty flags the UI can surface: the page itself could not be read,
       // and this report was built from the dealer's own inventory feed.
       source: "sm360_feed_fallback",
-      sourceNote: "The dealer's listing page couldn't be loaded (its site was blocking automated access), so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page couldn't be read and aren't included here.",
+      // NEVER STATE THAT THE DEALER BLOCKED US. We do not know that, and on
+      // 2026-08-16 a Stampede Toyota listing returned HTTP 200 with the full
+      // 903 KB page and clean JSON-LD to a plain curl AFTER the scan told the
+      // buyer that dealer "may be blocking automated access". The read can fail
+      // for our reasons -- a vendor outage, our egress IP, a timeout -- and
+      // asserting a motive we have not established is a claim about a named
+      // business in a document that business may read.
+      sourceNote: "We couldn't read the dealer's listing page on this attempt, so this report was built from the dealer's own inventory feed instead. Core vehicle details and the advertised price come straight from that feed. Itemized fees and the financing terms shown on the page aren't included here.",
       summary: `${vehicleStr ?? "This vehicle"}${price != null ? ` is listed at $${price.toLocaleString()}` : ""}. The dealer's listing page couldn't be loaded, so this report is based on the dealer's inventory feed rather than the full page -- itemized fees and the page's financing terms aren't included. Confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
 
@@ -2574,6 +2620,31 @@ async function enrichAnalysis(analysis: any, deadline?: number): Promise<void> {
       analysis.summary = s.text;
       analysis.summaryRedactions = s.removed;
       console.log(`summary: removed ${s.removed.length} sentence(s) reopening settled topics: ${s.removed.map((r) => r.topic).join(", ")}`);
+    }
+  }
+
+  // DEALER REPUTATION, RESOLVED HERE rather than left to the frontend.
+  //
+  // get-dealer-sentiment is called by the BROWSER after the report renders, and
+  // its result is merged into React state. Three things follow: the EMAILED
+  // report races that call and usually loses, a failed call returns silently so
+  // nothing records that we tried, and the panel then reads absence as
+  // absence-of-reviews. That is how Stampede Toyota -- 4.5 stars from 3,369
+  // Google reviews -- reached a buyer as "NOT CHECKED", and Charlesglen (5,930
+  // reviews) reached one as "No public reviews were found".
+  //
+  // Resolving it in the pipeline puts it on the analysis object before ANY
+  // surface is built, so screen, email and PDF agree.
+  await resolveDealerReputation(analysis);
+
+  // VIC'S RULE: no dealer terms -> use the manufacturer's APR and price and do
+  // the math. Runs after the rates and the MSRP are resolved, and only when the
+  // dealer disclosed nothing of their own -- a real quoted payment always wins.
+  if (!analysis.financingCheck?.checked) {
+    const ref = computeReferenceFinancing(analysis);
+    if (ref) {
+      analysis.referenceFinancing = ref;
+      console.log(`reference financing: ${ref.apr}% / ${ref.termMonths}mo -> asking $${ref.atAsking?.monthly ?? "?"}/mo, delta ${ref.monthlyDelta ?? "n/a"}`);
     }
   }
 
@@ -3128,7 +3199,8 @@ Deno.serve(async (req: Request) => {
       await releaseCredit(holdId);
       holdId = null;
       return new Response(
-        JSON.stringify({ error: "Couldn't load that page after a few tries. This dealer site may be blocking automated access right now -- try again in a moment, or use the upload/screenshot option instead." }),
+        // Describes OUR failure, not the dealer's conduct. See the note above.
+        JSON.stringify({ error: "We couldn't read that page on this attempt -- that's on our end, not the dealer's. Try again in a moment, or upload a screenshot of the same page, which doesn't depend on the page loading for us at all." }),
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }

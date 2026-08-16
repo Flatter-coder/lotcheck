@@ -160,8 +160,22 @@ export function buildCounterScript(analysis: any): CounterScript {
   // S24 — all-in advertised price. Non-tax fees stacked on the price mean the
   // advertised number wasn't all-in. Name the authority so it's dispute-proof
   // (the AMVIC/OMVIC-specific doc-fee move above already covers the CA all-in case).
+  //
+  // NAME ONE REGULATOR — THE BUYER'S. This line used to read "(the FTC CARS Rule
+  // in the US; AMVIC/OMVIC in Canada)", which hands a Calgary buyer a US statute
+  // and an Ontario regulator to read aloud in an Alberta showroom. A salesperson
+  // only has to say "that's American" and the whole line is discredited — and
+  // the line is otherwise correct, which makes the damage worse. A script is
+  // read out loud; every word in it has to survive being read out loud.
+  //
+  // The authority comes from the same jurisdiction resolution the price basis
+  // uses, so it is never hardcoded per locale ([[locale-abstraction-rule]]).
   if (rec && rec.addedOnTop > 100 && !(df && df.kind === "allin")) {
-    moves.push({ topic: "All-in price", say: `The advertised price should already include every non-tax fee — under all-in pricing rules (the FTC CARS Rule in the US; AMVIC/OMVIC in Canada), only tax is added after. Quote me the true all-in out-the-door up front.` });
+    const body = String((analysis as any)?.allInPricing?.body || "").trim();
+    const authority = body
+      ? `under ${body}'s all-in advertising rules`
+      : `under all-in advertising rules`;   // jurisdiction unknown -> claim no regulator
+    moves.push({ topic: "All-in price", say: `The advertised price should already include every non-tax fee — ${authority}, only tax is added after. Quote me the true all-in out-the-door up front.` });
   }
   // S25 — all-in safeguard (Canada). In an all-in-advertising province the posted
   // price ALREADY includes every mandatory fee, so the only things that can legally
