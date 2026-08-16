@@ -155,8 +155,22 @@ expect({ standardWarranty: { verified: false }, make: "Rivian" }, "listing_url",
 expect({}, "listing_url", "warranty", "not_attempted", "no warranty resolved at all is not_attempted");
 
 // ---- Reputation -----------------------------------------------------------
-expect({ dealerName: "South Trail Kia" }, "listing_url", "reputation", "not_attempted",
-  "reputation is not resolved by the analyze function — get-dealer-sentiment has the last word");
+// ONE OWNER PER CHECKPOINT. This used to seed a red ("awaiting
+// get-dealer-sentiment") that only a later browser-initiated call could clear,
+// so a closed tab or a failed request left a permanent red — 3 of 5 reputation
+// checks were red for that reason alone. With a dealer name present the analyze
+// function now emits NOTHING and get-dealer-sentiment owns the row outright.
+record(
+  deriveCheckpoints({ dealerName: "South Trail Kia" }, "listing_url")
+    .every((r) => r.checkpoint !== "reputation"),
+  "reputation is NOT emitted when a dealer name exists — get-dealer-sentiment owns it",
+  "a row that exists only to be overwritten is a red until it is",
+);
+
+// The one case the analyze function CAN decide: no dealer name means there is
+// nothing for anyone to look up, and that is a real, final miss.
+expect({ quotedPrice: 30000 }, "listing_url", "reputation", "not_attempted",
+  "no dealer name is a real miss the analyze function may record");
 
 // ---- A GOOD report: the shape we are aiming at ---------------------------
 // Every checkpoint green or provably N/A. If this ever fails, the bar moved.

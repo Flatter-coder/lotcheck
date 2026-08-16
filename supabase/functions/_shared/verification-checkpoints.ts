@@ -150,11 +150,25 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
   // a price coming out of the same page. Without one this is a miss, not a
   // pass. (Caught by the empty-analysis case in the test harness, which is
   // exactly the leak this vocabulary was designed to prevent.)
+  // A dealer disclosing nothing is NOT the end of the check. Vic's rule: no
+  // dealer terms -> use the manufacturer's published APR and the asking price
+  // and do the math (computeReferenceFinancing, analyze-listing-url:2629). That
+  // work was already being done and the checkpoint could not see it, so every
+  // such listing scored not_applicable — 3 n/a, 0 judged, a checkpoint that had
+  // never once been exercised while the arithmetic behind it ran fine.
+  //
+  // n/a now has to be EARNED twice over: no dealer terms AND no reference we
+  // could compute from. Otherwise a checkpoint quietly excuses itself out of
+  // the denominator, which is the failure mode this whole vocabulary exists to
+  // stop — the same shape as a hollow row reading as a pass.
   const financing: CheckRow = a.financingCheck?.checked === true
     ? row("financing", "verified", a.financingCheck.consistent ? "reconciles" : "does NOT reconcile")
+    : a.referenceFinancing?.apr != null && pos(a.quotedPrice)
+      ? row("financing", "verified",
+            `no dealer terms — computed from the manufacturer's ${a.referenceFinancing.apr}% over ${a.referenceFinancing.termMonths ?? "?"}mo`)
     : a.financing == null
       ? (pos(a.quotedPrice)
-          ? row("financing", "not_applicable", "priced listing discloses no financing")
+          ? row("financing", "not_applicable", "priced listing discloses no financing, and no manufacturer rate to compute from")
           : row("financing", "not_attempted", "nothing read from the listing — absence of financing proves nothing"))
       : row("financing", "not_attempted", "financing disclosed but incomplete (need payment, term, frequency, total)");
 
@@ -172,8 +186,20 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
   // Fetched by the browser from get-dealer-sentiment, which writes its OWN row
   // against this report id. All that can be decided here is whether the lookup
   // was even possible; if it was, that function has the last word.
-  const reputation: CheckRow = a.dealerName
-    ? row("reputation", "not_attempted", "awaiting get-dealer-sentiment")
+  // TWO WRITERS, ONE ROW — and that was the defect. This seeded a RED
+  // ("awaiting get-dealer-sentiment") which only a LATER, browser-initiated
+  // call to that function could clear. If the buyer closed the tab, or the
+  // request failed, or the browser never fired it, the red stood forever. 3 of
+  // 5 reputation checks were red for exactly that reason: nothing had gone
+  // wrong with the lookup, it had simply never been answered.
+  //
+  // A checkpoint whose DEFAULT is failure and whose correction is best-effort
+  // measures the browser, not the dealer. So: one owner per checkpoint.
+  // get-dealer-sentiment writes reputation and this function does not — except
+  // where the answer is already decided here, with no dealer name there is
+  // nothing for anyone to look up and that is a real, final miss.
+  const reputation: CheckRow | null = a.dealerName
+    ? null
     : row("reputation", "not_attempted", "no dealer name — nothing to look up");
 
   // ---- 11. Leverage score -------------------------------------------------
@@ -208,7 +234,11 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
         ? row("amvic", "not_attempted", `no confident AMVIC match for "${a.dealerName}"`)
         : row("amvic", "not_attempted", "no dealer name — nothing to match");
 
-  return [msrp, odometer, recalls, fees, ev, vin, warranty, financing, apr, reputation, leverage, days, amvic];
+  // `reputation` is null when get-dealer-sentiment owns the answer. Filtered
+  // rather than emitted as a placeholder: a row that exists only to be
+  // overwritten is a red until it is, and unanswered is not the same as failed.
+  return [msrp, odometer, recalls, fees, ev, vin, warranty, financing, apr, reputation, leverage, days, amvic]
+    .filter((r): r is CheckRow => r !== null);
 }
 
 /**
