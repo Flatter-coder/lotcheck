@@ -36,11 +36,19 @@
 -- smallest premium colour ever observed is $350 (RAV4 Ruby Flare Pearl). A
 -- premium colour therefore cannot be hiding in the $55,227.
 --
--- THAT $16–$34 IS NOT EXPLAINED, and is recorded rather than rounded away. On
--- the Crown Signia and Land Cruiser the trim card sat exactly at
--- MSRP + block heater + adds + $18 PPSA. Here it does not, by a small amount,
--- so the lineup-corroboration formula is NOT claimed for this row. Worth
--- resolving before that formula is relied on more widely.
+-- THAT $34 IS NOW EXPLAINED, and the mistake was mine, not Toyota's. The
+-- corroboration formula was validated on TWO figures — Crown Signia $62,354 and
+-- Land Cruiser $75,454 — and BOTH came from the LINEUP GRID. The $58,914 here
+-- comes from a TRIM CARD, a different surface I had never validated against.
+--
+-- The card is internally consistent, which is the tell: it prints a weekly
+-- lease of $203.06 where the pricing table prints $203.19, and over 260
+-- payments that is $33.80 — the same $34. It describes a slightly different
+-- build, coherently. It simply is not the figure the formula models.
+--
+-- corroborateWithLineup() now takes a `surface` and refuses anything that is
+-- not the lineup grid, so a figure from an unvalidated surface can no longer be
+-- force-fitted and then recorded as an anomaly.
 -- ============================================================================
 
 insert into public.msrp_catalog
@@ -53,7 +61,7 @@ values
        'air_conditioning',100,'tire_levy',25,'amvic',10,'block_heater',709),
      'all_in_basis','printed CASH subtotal, read directly from the summary',
      'engine','2.5L Dynamic Force 4-cyl THS',
-     'unexplained_trim_card_delta','Toyota trim card reads From $58,914 vs $58,930 cash / $58,948 finance',
+     'trim_card_from', 58914, 'trim_card_note','a different Toyota surface describing a slightly different build; consistent with its own $203.06 weekly lease. Not corroboration — the formula is validated on the lineup grid only.',
      'captured_from','toyota.ca Build & Price pricing table (Alberta)'))
 on conflict (year, make, model, trim) do update
   set msrp         = excluded.msrp,

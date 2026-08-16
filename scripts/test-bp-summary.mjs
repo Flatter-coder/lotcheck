@@ -157,5 +157,54 @@ check("corroboration also refuses without a freight figure",
   !corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, lineupFrom: 58914 }).agrees,
   "an absent freight figure must never silently borrow another model's");
 
+// The formula is validated on the LINEUP GRID only. Applying it to a trim card
+// is what turned a surface mismatch into a recorded "unexplained $34".
+check("a TRIM CARD figure is refused, not force-fitted",
+  !corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, delivery: 1860, lineupFrom: 58914, surface: "trim card" }).agrees &&
+  /only validated against the lineup grid/.test(
+    corroborateWithLineup({ baseMsrp: 55227, blockHeater: 709, delivery: 1860, lineupFrom: 58914, surface: "trim card" }).verdict),
+  "two validating data points were both lineup-grid; zero were trim cards");
+
+check("the lineup default is unchanged for the two figures that DO validate it",
+  corroborateWithLineup({ baseMsrp: 58555, blockHeater: 717, delivery: 1930, lineupFrom: 62354 }).agrees &&
+  corroborateWithLineup({ baseMsrp: 71670, blockHeater: 702, delivery: 1930, lineupFrom: 75454 }).agrees,
+  "Crown Signia and Land Cruiser must still confirm");
+
+// ---------------------------------------------------------------------------
+// THE FOUR WITHHELD TRIMS, RELEASED 2026-08-16. Each was refused because its
+// package line read "<package> with Premium Paint". Recaptured in a no-cost
+// colour the line is BARE, which both releases the trim and isolates the
+// colour by subtraction. The rule paid for itself.
+// ---------------------------------------------------------------------------
+const released = [
+  ["4Runner Hybrid Platinum", 69207, "Platinum",                     5922,  682, 1930, 78875, 75129],
+  ["4Runner Hybrid TRD PRO",  69207, "TRD PRO",                     12731,  682, 1930, 85684, 81938],
+  ["Land Cruiser Premium",    80460, "Land Cruiser Premium Package", 6375,  702, 1930, 90601, 86835],
+];
+for (const [name, base, pkg, price, bh, freight, subtotal, expect] of released) {
+  const s = { msrpLine: base, packageLine: pkg, packagePrice: price, exterior: "no-cost",
+              noCostExterior: true, blockHeater: bh, delivery: freight, printedSubtotal: subtotal };
+  check(`${name} seeds at $${expect.toLocaleString()} on a bare package line`,
+    assessSummary(s).seedable && assessSummary(s).msrp === expect,
+    JSON.stringify(assessSummary(s)));
+}
+
+// Crown Platinum: no package line at all, and its own $1,860 freight.
+const crownPlat = { msrpLine: 64660, exterior: "no-cost", noCostExterior: true,
+                    blockHeater: 679, delivery: 1860, printedSubtotal: 68333 };
+check("Crown Platinum reconciles on Crown freight and an EIGHTH block-heater value",
+  assessSummary(crownPlat).seedable && assessSummary(crownPlat).msrp === 64660,
+  JSON.stringify(assessSummary(crownPlat)));
+
+check("...and would NOT reconcile on the Crown Limited's $709 heater",
+  !reconciles({ ...crownPlat, blockHeater: 709 }).ok,
+  "the block heater varies by TRIM inside one model — $709 Limited vs $679 Platinum");
+
+// The derivation method, confirmed from a second document.
+check("Land Cruiser paint: derived $390 on 08-15, confirmed by the bare line on 08-16",
+  6765 - 6375 === 390 &&
+  deriveBaseFromPair({ msrpLine: 80850 }, { msrpLine: 80460 }).paintPremium === 390,
+  "two independent documents, same figure — the pair-derivation method is sound");
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 process.exit(fail ? 1 : 0);

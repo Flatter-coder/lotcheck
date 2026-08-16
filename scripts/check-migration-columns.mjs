@@ -39,27 +39,27 @@ const PRE_EXISTING = {
                          "price_basis", "source_url", "fetched_at", "created_at"],
 };
 
-// KNOWN, PRE-EXISTING ORDERING FAULTS — recorded, not hidden.
+// ORDERING FAULTS ARE NOW FIXED, so there is no allowlist.
 //
-// These migrations insert into a table whose CREATE sorts AFTER them, so a
-// from-scratch replay in filename order fails. They are already applied in
-// production, where they were run by hand in a working order, so nothing is
-// broken today. What IS broken is disaster recovery: this history cannot
-// rebuild the database unaided.
+// Three existed when this check was written, and rather than list them forever
+// the two files were renamed so filename order matches dependency order:
 //
-// Listed here so the gate stays useful against NEW faults instead of being
-// switched off. Renaming an applied migration has its own risk, so the fix is a
-// deliberate decision, not something to slip into an unrelated change.
-// Recorded 2026-08-15.
-const KNOWN_ORDERING = new Set([
-  "20260730_admin_economics.sql::app_config",
-  "20260814_august_backfill.sql::founder_ledger",
-  "20260814_august_backfill.sql::statement_run",
-]);
+//   20260730_free_check_breaker.sql -> 20260729z_free_check_breaker.sql
+//     It CREATES app_config, which 20260730_admin_economics.sql inserts into,
+//     but "admin" sorts before "free". It creates and uses only its own two
+//     tables, so moving it earlier is safe in every direction.
+//
+//   20260814_august_backfill.sql -> 20260814z_august_backfill.sql
+//     It inserts into founder_ledger and statement_run, both created by
+//     later-sorting files. It creates nothing and nothing depends on it — and
+//     a backfill belongs after the schema it fills, by definition.
+//
+// Renaming has NO production effect: apply-migrations.mjs keeps no ledger of
+// what has run, and every migration is idempotent. What it buys is a history
+// that can rebuild the database from empty — which is exactly when you need it.
 
 const schema = new Map(Object.entries(PRE_EXISTING).map(([t, c]) => [t, new Set(c)]));
 const problems = [];
-const knownFaults = [];
 
 const FILES = readdirSync(DIR).filter((f) => f.endsWith(".sql")).sort();
 
@@ -111,8 +111,7 @@ for (const file of FILES) {
       // If nothing creates it, it predates tracked migrations; not our call.
       if (createdIn.has(t)) {
         const entry = { file, table: t, ordering: createdIn.get(t) };
-        if (KNOWN_ORDERING.has(`${file}::${t}`)) knownFaults.push(entry);
-        else problems.push(entry);
+        problems.push(entry);
       }
       continue;
     }
@@ -143,10 +142,3 @@ if (problems.length) {
 }
 
 console.log(`migration columns OK — ${schema.size} tables tracked, every insert validated in filename order.`);
-if (knownFaults.length) {
-  // Never silent. An allowlist nobody sees is how a check quietly stops working.
-  console.log(`\n${knownFaults.length} KNOWN pre-existing ordering fault(s), already applied by hand in production:`);
-  for (const k of knownFaults) console.log(`  ${k.file} inserts into ${k.table}, created later in ${k.ordering}`);
-  console.log(`These do not break production. They DO mean this migration history cannot`);
-  console.log(`rebuild the database from scratch — worth fixing before it is ever needed.`);
-}
