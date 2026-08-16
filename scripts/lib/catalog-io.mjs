@@ -334,10 +334,41 @@ export async function writeCatalogs(make, { msrpRows = [], financeRows = [], lea
   // CATALOG_RATES_ONLY=1 (daily job) or per-scraper via opts.ratesOnly (e.g. a
   // dealer-feed rate source layered on top of another make's MSRP source).
   const ratesOnly = opts.ratesOnly || process.env.CATALOG_RATES_ONLY === "1";
-  if (!ratesOnly) await replaceRows("msrp_catalog", msrpRows, make, { upsert: !!opts.upsert });
+  // THE THREE TABLES ARE INDEPENDENT DATA AND ARE WRITTEN INDEPENDENTLY.
+  //
+  // These used to be three bare awaits, so a throw on the FIRST one skipped the
+  // other two. On 2026-08-16 Toyota's MSRP scrape collapsed 44 -> 7 rows, the
+  // guard correctly REFUSED it, and that refusal threw -- taking down a finance
+  // write of 123 rows and a lease write of 120 rows that were both perfectly
+  // good and already in hand:
+  //
+  //     msrp_catalog          44 -> 44   FAIL   (refused, correctly)
+  //     finance_rate_catalog 125 -> 125  FAIL   (123 rows ready, never ran)
+  //     lease_rate_catalog   120 -> 120  warn   (120 rows ready, never ran)
+  //
+  // A collapsed MSRP lineup says nothing about the rates. And the rates are half
+  // the product -- the daily APR check is the other side of the reference-point
+  // model, so letting an MSRP failure freeze it means the APR half goes stale
+  // every day the MSRP half is broken, silently, for a reason unrelated to it.
+  //
+  // Each write is attempted; failures are collected and rethrown together, so
+  // the step still fails loudly and the fresh-write guard still reports it.
+  const failures = [];
+  const attempt = async (label, fn) => {
+    try { await fn(); } catch (e) { failures.push(`${label}: ${e.message}`); }
+  };
+
+  if (!ratesOnly) await attempt("msrp_catalog", () => replaceRows("msrp_catalog", msrpRows, make, { upsert: !!opts.upsert }));
   else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
-  await replaceRows("finance_rate_catalog", financeRows, make);
+  await attempt("finance_rate_catalog", () => replaceRows("finance_rate_catalog", financeRows, make));
+  // lease is already fatal:false — it never threw and never blocked anything.
   await replaceRows("lease_rate_catalog", leaseRows, make, { fatal: false });
+
+  if (failures.length) {
+    throw new Error(
+      `${make}: ${failures.length} of the catalog writes failed (the others still ran)\n  - ` +
+      failures.join("\n  - "));
+  }
   console.log("Done.");
 }
 
