@@ -48,14 +48,14 @@ do $$
 declare r record; n int := 0;
 begin
   for r in
-    select p.oid::regprocedure as sig, p.proname
+    select p.oid as fn_oid, p.oid::regprocedure as sig, p.proname
       from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
      where ns.nspname = 'public'
        and p.prosecdef
        and (p.proname like 'fn_log_%' or p.proname like 'fn_record_%')
   loop
-    if not has_function_privilege('service_role', r.oid, 'EXECUTE')
-       and not has_function_privilege('authenticated', r.oid, 'EXECUTE') then
+    if not has_function_privilege('service_role', r.fn_oid, 'EXECUTE')
+       and not has_function_privilege('authenticated', r.fn_oid, 'EXECUTE') then
       raise warning 'WRITER WITH NO GRANT: % — nothing can call it', r.sig;
       n := n + 1;
     end if;
