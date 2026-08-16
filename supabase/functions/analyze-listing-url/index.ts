@@ -1766,6 +1766,54 @@ async function detectTradeInWidget(url: string, analysis: any, textHint?: string
   } catch { /* best-effort, never sinks the scan */ }
 }
 
+// Days-on-lot, third path: OUR OWN first-seen tracker.
+//
+// The two paths above only fire on SM360 and Convertus. Every other dealer
+// platform — a Volkswagen store among them — produced no days-on-lot at all,
+// and the report simply omitted the section. Meanwhile the daily Alberta crawl
+// has been recording vehicle_listing.first_seen_on per VIN the whole time and
+// nothing ever read it. This is the vendor-free engine the feature was supposed
+// to be built on; it just was not connected.
+//
+// HONEST BY CONSTRUCTION. first_seen_on is when WE first saw the car, which is
+// a LOWER BOUND — it may have sat there before our crawl noticed it, or before
+// the crawl covered that dealer. So this reports "at least N days" and says so
+// on the card. Claiming a hard 90 days off a lower bound is exactly the kind of
+// number a dealer would take apart, and they would be right.
+async function captureOwnDaysOnLot(analysis: any): Promise<void> {
+  try {
+    if (analysis?.daysOnLot) return;                    // platform data wins: it is exact
+    const vin = String(analysis?.vin || "").toUpperCase();
+    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return;     // no VIN, nothing to join on
+
+    const { data, error } = await supabase
+      .from("vehicle_listing")
+      .select("first_seen_on, date_entry, days_in_inventory")
+      .eq("vin", vin)
+      .order("first_seen_on", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) { console.warn("own days-on-lot lookup failed:", error.message); return; }
+    if (!data?.first_seen_on) return;
+
+    const t = Date.parse(String(data.first_seen_on) + "T00:00:00Z");
+    if (!Number.isFinite(t)) return;
+    const days = Math.floor((Date.now() - t) / 86_400_000);
+    if (days <= 0 || days > 3650) return;
+
+    analysis.daysOnLot = {
+      days,
+      since: String(data.first_seen_on),
+      atLeast: true,                                     // renderers must not state this as exact
+      source: "lotcheck_first_seen",
+      sourceLabel: "LotCheck's own daily inventory tracking",
+    };
+    console.log(`Own days-on-lot: at least ${days} days (first seen ${data.first_seen_on}).`);
+  } catch (e) {
+    console.warn("own days-on-lot threw (non-fatal):", e);
+  }
+}
+
 async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;
@@ -3215,6 +3263,11 @@ Deno.serve(async (req: Request) => {
     // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
     // the SM360 feed already provided it, or the URL isn't that shape).
     await captureConvertusDaysOnLot(url, analysis);
+
+    // Last resort, and the only one that works on ANY dealer platform: our own
+    // crawl's first-seen date for this VIN. No-op when either path above
+    // already produced an exact figure.
+    await captureOwnDaysOnLot(analysis);
 
     // Advertised-APR backstop. The dealer's own rate was missing from 4 of 10
     // reports in the benchmark even where the page printed it, because only the

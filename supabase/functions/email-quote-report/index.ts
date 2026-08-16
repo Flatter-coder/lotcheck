@@ -351,15 +351,32 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
   if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
 
-  // 5b -- Days on lot (motivated-seller clock, dealer's own inventory data)
+  // 5b -- Days on lot (motivated-seller clock)
+  //
+  // ALWAYS RENDERS. It used to be inside `if (daysOnLot)`, so on any dealer
+  // platform we could not read — a VW store, 2026-08-16 — the card vanished and
+  // the buyer had no idea the question had even been asked. A missing answer is
+  // information: "ask the dealer" is a usable instruction, an absent card is
+  // not. Same rule as VIN (vin-every-scan).
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
     const hot = d >= 90, warm = d >= 31 && d < 90;
     const dolC = hot ? "#A63C25" : warm ? "#8a6a12" : "#17756B";
+    // `atLeast` marks our own first-seen tracker, which is a LOWER BOUND — the
+    // car may have sat there before our crawl noticed it. Stating it as exact
+    // is the kind of number a dealer would take apart, correctly.
+    const atLeast = a.daysOnLot.atLeast === true;
     deck.push({ label: "Days on lot", tone: hot ? "flag" : warm ? "muted" : "pass", glow: hot, body:
-      `<div style="font-size:18px;font-weight:900;color:${dolC};">${d.toLocaleString()} days on the lot</div>` +
+      `<div style="font-size:18px;font-weight:900;color:${dolC};">${atLeast ? "At least " : ""}${d.toLocaleString()} days on the lot</div>` +
       `<div style="font-size:12px;color:#706D96;margin-top:2px;">${a.daysOnLot.since ? "First seen " + escapeHtml(a.daysOnLot.since) + " · " : ""}${escapeHtml(a.daysOnLot.sourceLabel || "dealer inventory data")}</div>` +
-      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">This is how long this exact car has sat unsold — counted by the dealer's own inventory system. ${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${escapeHtml(dolCareAskTxt(d))}</div>` });
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${atLeast
+        ? "This is how long we have seen this exact car listed — it may have been sitting longer before we first saw it, so treat it as a floor, not a total. "
+        : "This is how long this exact car has sat unsold — counted by the dealer's own inventory system. "}${hot ? "At this age you're doing them a favour by buying it — negotiate like it." : warm ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${escapeHtml(dolCareAskTxt(d))}</div>` });
+  } else {
+    deck.push({ label: "Days on lot", tone: "muted", body:
+      `<div style="font-size:18px;font-weight:900;color:#706D96;">Not published — ask the dealer</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">This dealer's platform doesn't expose an inventory date, and we haven't seen this VIN in our own daily tracking yet</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Worth asking outright: <b>&ldquo;How long has this exact car been on your lot?&rdquo;</b> A car that has sat 90+ days is carrying real cost for them, and the answer is easy for them to give and awkward to dodge. We could not read it here, so we are not guessing at it.</div>` });
   }
 
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
@@ -1006,9 +1023,24 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     Tat(chipTxt, cy - CHIP_H + 1, { x: CX + PADX + 10, size: 8, font: sansB, color: ACC });
     y = top - CARD_H - 12;
 
-    para("This is how long this exact car has sat unsold, counted by the dealer's own inventory system - not our guess. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    para(a.daysOnLot.atLeast === true
+      ? "This is how long we have seen this exact car listed in our own daily tracking. It may have been sitting longer before we first saw it, so treat it as a floor rather than a total. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it."
+      : "This is how long this exact car has sat unsold, counted by the dealer's own inventory system - not our guess. Dealers pay interest on unsold stock every week, so the longer one sits, the more motivated they are to move it.",
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     const careAsk = dolCareAskTxt(d).trim();
     if (careAsk) { advance(3); para(careAsk, { size: 8.5, font: serif, color: SOFT, lead: 3 }); }
+    rule();
+  } else {
+    // The PDF omitted this section entirely when we could not read a date, so a
+    // buyer never learned the question existed. An unanswered check still gets
+    // its heading and a usable instruction.
+    need(60);
+    kicker("DAYS ON LOT");
+    T("Not published - ask the dealer", { size: 14, font: serifB, color: SOFT }); y -= 19;
+    para("This dealer's platform does not expose an inventory date, and we have not yet seen this VIN in our own daily tracking.", { size: 9, color: SOFT, lead: 4 });
+    advance(2);
+    para("Ask them outright: \"How long has this exact car been on your lot?\" A car that has sat 90+ days is carrying real cost for them, and it is an easy question to answer and an awkward one to dodge. We could not read it here, so we are not guessing at it.",
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }
 
