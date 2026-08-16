@@ -4854,7 +4854,19 @@ function VerifFounderLedger({C, readOnly}){
           <div key={f.email} style={{padding:"7px 2px",borderBottom:`1px solid ${C.line}`}}>
             <div style={{display:"flex",alignItems:"baseline",gap:10}}>
               <span style={{fontSize:14,color:C.ink,flex:1,fontWeight:700}}>{f.name}</span>
-              <span style={{fontSize:13,color:C.inkFaint}}>paid {cad(f.paid_cad)}</span>
+              {/* Proof beside the payment it backs, not in a separate list
+                  nobody cross-references. A payment with no receipt is not
+                  wrong — it is unevidenced, and worth seeing at a glance. */}
+              <span style={{fontSize:13,color:C.inkFaint}}>
+                paid {cad(f.paid_cad)}
+                {Number(f.paid_cad)>0 && (
+                  Number(f.receipts_total)>0
+                    ? <span title={`${f.receipts_total} receipt${f.receipts_total===1?"":"s"} on file`}
+                            style={{color:C.tealInk,fontWeight:800,marginLeft:6}}>· proof ✓</span>
+                    : <span title="No receipt uploaded for this founder"
+                            style={{color:C.butterInk,fontWeight:800,marginLeft:6}}>· no proof</span>
+                )}
+              </span>
               <span style={{fontSize:14.5,fontWeight:800,fontFamily:"ui-monospace,Menlo,monospace",
                             color:Number(f.balance_cad)>0.005?C.coralInk:C.tealInk,minWidth:88,textAlign:"right"}}>
                 {cad(f.balance_cad)}
