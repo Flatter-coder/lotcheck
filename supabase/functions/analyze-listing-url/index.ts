@@ -1788,17 +1788,31 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
     const vin = String(analysis?.vin || "").toUpperCase();
     if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return;     // no VIN, nothing to join on
 
+    // Two own sources, best first. vehicle_listing carries the dealer's own
+    // inventory date from the SM360 crawl — exact, but only for SM360 dealers.
+    // listing_seen carries the first time WE saw the VIN on any platform: less
+    // precise, but it cannot have a coverage gap, because it is written by the
+    // very scan that would otherwise find nothing.
+    let firstSeen: string | null = null;
+
     const { data, error } = await supabase
       .from("vehicle_listing")
-      .select("first_seen_on, date_entry, days_in_inventory")
+      .select("first_seen_on")
       .eq("vin", vin)
       .order("first_seen_on", { ascending: true })
       .limit(1)
       .maybeSingle();
-    if (error) { console.warn("own days-on-lot lookup failed:", error.message); return; }
-    if (!data?.first_seen_on) return;
+    if (error) console.warn("vehicle_listing days-on-lot lookup failed:", error.message);
+    if (data?.first_seen_on) firstSeen = String(data.first_seen_on) + "T00:00:00Z";
 
-    const t = Date.parse(String(data.first_seen_on) + "T00:00:00Z");
+    if (!firstSeen) {
+      const { data: seen, error: seenErr } = await supabase.rpc("fn_listing_first_seen", { p_vin: vin });
+      if (seenErr) console.warn("listing_seen lookup failed:", seenErr.message);
+      if (seen) firstSeen = String(seen);
+    }
+    if (!firstSeen) return;
+
+    const t = Date.parse(firstSeen);
     if (!Number.isFinite(t)) return;
     const days = Math.floor((Date.now() - t) / 86_400_000);
     if (days <= 0 || days > 3650) return;
@@ -3303,9 +3317,21 @@ Deno.serve(async (req: Request) => {
     // the SM360 feed already provided it, or the URL isn't that shape).
     await captureConvertusDaysOnLot(url, analysis);
 
+    // Note the VIN BEFORE reading it back, so the very first scan of a car
+    // starts its clock even though it can report nothing yet. This is what
+    // makes coverage platform-agnostic: no crawler to extend, no per-platform
+    // reader to maintain, and a brand-new dealer platform is covered the first
+    // time anyone runs a check on it.
+    try {
+      const vin = String(analysis?.vin || "").toUpperCase();
+      if (/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+        await supabase.rpc("fn_note_listing_seen", { p_vin: vin, p_host: hostOf(url) });
+      }
+    } catch (e) { console.warn("listing_seen note failed (non-fatal):", e); }
+
     // Last resort, and the only one that works on ANY dealer platform: our own
-    // crawl's first-seen date for this VIN. No-op when either path above
-    // already produced an exact figure.
+    // first-seen date for this VIN. No-op when either path above already
+    // produced an exact figure.
     await captureOwnDaysOnLot(analysis);
 
     // Advertised-APR backstop. The dealer's own rate was missing from 4 of 10
