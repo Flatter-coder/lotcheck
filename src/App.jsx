@@ -4731,7 +4731,7 @@ function VerifOperationalCost({C}){
 // and goes nowhere until it is approved HERE, with the frozen total shown
 // beside the current one so a mid-month cost jump is visible before JC and
 // Josh are billed rather than after.
-function VerifFounderLedger({C}){
+function VerifFounderLedger({C, readOnly}){
   const [runs,setRuns]=useState(null);
   const [bal,setBal]=useState(null);
   const [state,setState]=useState("loading");
@@ -4785,8 +4785,9 @@ function VerifFounderLedger({C}){
       )}
 
       {state==="ok" && (<>
-        {/* Approval — nothing reaches JC or Josh without this click. */}
-        {pending.length===0 ? (
+        {/* Approval — nothing reaches JC or Josh without this click. Hidden in
+            the founders view; the RPC would refuse them anyway. */}
+        {readOnly ? null : pending.length===0 ? (
           <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:12}}>
             No statement awaiting approval. The cron stages one on the 1st; nothing sends until you approve it here.
           </div>
@@ -4869,7 +4870,15 @@ function VerifFounderLedger({C}){
           </div>
         ))}
 
-        {/* Record a payment */}
+        {/* Record a payment — Vic only. fn_admin_record_payment gates on
+            fn_is_admin(), so this is a courtesy, not the control. */}
+        {readOnly ? (
+          <div style={{fontSize:12.5,color:C.inkFaint,marginTop:14,lineHeight:1.65}}>
+            Payments are recorded by Vic. If a figure here does not match what you have paid, tell him
+            rather than assuming it will sort itself out — the ledger is append-only, so a correction is
+            a new entry and the history stays intact.
+          </div>
+        ) : (<>
         <div style={{fontSize:12,fontWeight:800,letterSpacing:.8,color:C.inkFaint,margin:"14px 0 6px"}}>
           RECORD A PAYMENT
         </div>
@@ -4918,6 +4927,7 @@ function VerifFounderLedger({C}){
           outstanding, because that moves the debt to the founder who paid, it does not clear it.
           The ledger is append-only; a mistake is corrected with another entry, never an edit.
         </div>
+        </>)}
 
         {msg && (
           <div style={{fontSize:13.5,marginTop:9,color:msg.ok?C.tealInk:C.coralInk,fontWeight:700}}>
@@ -5151,7 +5161,7 @@ function VerifWhyWePay({C}){
   );
 }
 
-function VerificationTab({apiUsage, apiUsageLoading}){
+function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
   const {C}=useAdminTheme();
   const [range,setRange]=useState("24h");
   const bucket=VERIF_BUCKETS.find(b=>b.k===range)||VERIF_BUCKETS[1];
@@ -5451,7 +5461,7 @@ function VerificationTab({apiUsage, apiUsageLoading}){
 
       <VerifOperationalCost C={C}/>
 
-      <VerifFounderLedger C={C}/>
+      <VerifFounderLedger C={C} readOnly={readOnly}/>
 
       <VerifPackEconomics C={C}/>
 
@@ -5478,6 +5488,105 @@ function VerificationTab({apiUsage, apiUsageLoading}){
       </div>
     </div>
   );
+}
+
+// ── Founders panel (/founders) ───────────────────────────────────────────────
+// JC and Josh fund a third of the bill each, so they get to see what they are
+// paying for. This is the Verification tab and nothing else: making them admins
+// would hand over dealer records, the review queue, credit grants and the
+// free-check breaker, none of which is theirs to touch.
+//
+// READ-ONLY BY CONSTRUCTION, at both ends. The UI hides Vic-only controls, and
+// the database refuses them anyway — fn_can_read_costs() lets founders read,
+// while every write still gates on fn_is_admin() (20260815_founder_access.sql
+// asserts that rather than assuming it). Hiding a button is a courtesy; the
+// grant is the control.
+//
+// Reuses AdminLogin and the admin theme so it is the same product, not a
+// separate-looking thing they have to learn.
+function FoundersPanel(){
+  const [session,setSession]=useState(null);
+  const [checkingSession,setCheckingSession]=useState(true);
+  const [allowed,setAllowed]=useState(null);   // null = still checking
+  const themeState=useThemeState();
+  const {C}=themeState;
+  const {usage:apiUsage, usageLoading:apiUsageLoading}=useApiUsage();
+
+  useEffect(()=>{
+    let active=true;
+    supabase.auth.getSession().then(({data})=>{
+      if(!active) return;
+      setSession(data.session||null);
+      setCheckingSession(false);
+    });
+    const {data:sub}=supabase.auth.onAuthStateChange((_e,s)=>setSession(s||null));
+    return()=>{ active=false; sub.subscription.unsubscribe(); };
+  },[]);
+
+  // Ask the database, not the email string. A founder is whoever has an active
+  // row in `founder` — the same source the split and the statement use — so
+  // access can never drift from who is actually being billed.
+  useEffect(()=>{
+    if(!session){ setAllowed(null); return; }
+    let active=true;
+    (async()=>{
+      try{
+        const {data,error}=await supabase.rpc("fn_is_founder");
+        if(error) throw error;
+        if(active) setAllowed(!!data);
+      }catch(err){
+        console.warn("founder check failed:",err?.message||err);
+        if(active) setAllowed(false);
+      }
+    })();
+    return()=>{active=false;};
+  },[session]);
+
+  const shell=(inner)=>(
+    <AdminThemeContext.Provider value={themeState}>
+      <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontSize:15,
+                   fontFamily:"'Poppins',Helvetica,Arial,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                     flexWrap:"wrap",gap:12,maxWidth:1100,margin:"0 auto 20px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <LogoMark size={32}/>
+            <div>
+              <div style={{fontWeight:800,fontSize:18,color:C.ink}}>
+                LotCheck<sup style={{fontSize:"0.45em",fontWeight:700,marginLeft:2}}>™</sup> Founders
+              </div>
+              <div style={{fontSize:12,color:C.inkFaint}}>What the three of us are paying for</div>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <ThemeToggle/>
+            {session && (
+              <button onClick={()=>supabase.auth.signOut()} style={{background:C.card,
+                border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 14px",color:C.inkSoft,
+                fontSize:13.5,cursor:"pointer",fontFamily:"inherit"}}>Sign out</button>
+            )}
+          </div>
+        </div>
+        <div style={{maxWidth:1100,margin:"0 auto"}}>{inner}</div>
+      </div>
+    </AdminThemeContext.Provider>
+  );
+
+  if(checkingSession) return shell(<div style={{color:C.inkFaint}}>Loading…</div>);
+  if(!session) return <AdminLogin/>;
+  if(allowed===null) return shell(<div style={{color:C.inkFaint}}>Checking access…</div>);
+
+  if(!allowed) return shell(
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"20px 22px"}}>
+      <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>Not a founder account</div>
+      <div style={{fontSize:13.5,color:C.inkSoft,lineHeight:1.65}}>
+        This page is limited to the accounts that fund LotCheck's operating cost. If that should include
+        you, ask Vic to add your address to the founder list — access follows the same list the monthly
+        split is calculated from, so it cannot drift from who is actually being billed.
+      </div>
+    </div>
+  );
+
+  return shell(<VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} readOnly/>);
 }
 
 function AdminPanel(){
@@ -11472,7 +11581,8 @@ export default function App(){
   const path = window.location.pathname;
   return(
     <>
-      {path.startsWith("/admin") ? <AdminPanel/>
+      {path.startsWith("/founders") ? <FoundersPanel/>
+        : path.startsWith("/admin") ? <AdminPanel/>
         : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
