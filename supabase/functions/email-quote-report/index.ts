@@ -959,7 +959,16 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   kicker("10-POINT AUDIT");
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
   for (const p of tenPoints(a)) {
-    need(19); T(p.t, { size: 10.5, font: serif, color: p.tone === "muted" ? SOFT : INK }); right(p.v, { size: 9.5, font: monoB, color: toneColor[p.tone] || INK }); y -= 16.5;
+    // THE LABEL IS ALWAYS LEGIBLE. It used to render in SOFT whenever the tone
+    // was muted, so a muted row arrived as faded title + faint value + soft
+    // body -- the whole row receding at once. Vic caught it on a PDF where
+    // "Financing math -- $2,075/MO REF" was the most actionable number on the
+    // page and the hardest line to read on it.
+    //
+    // A row's LABEL carries no verdict; it is just the name of the check, and a
+    // reader scanning the audit has to be able to find it. Only the VALUE
+    // carries tone. Fixes every muted row, not just this one.
+    need(19); T(p.t, { size: 10.5, font: serif, color: INK }); right(p.v, { size: 9.5, font: monoB, color: toneColor[p.tone] || INK }); y -= 16.5;
     // "What this means" — the printed twin of the on-screen explanation box,
     // indented under its point in small italic so the audit stays scannable.
     const ex = pointExplain(p.t, a);
