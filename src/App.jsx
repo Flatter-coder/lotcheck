@@ -8,6 +8,10 @@ import heic2any from "heic2any";
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
 import DealOrrery from "./DealOrrery.jsx";
+// Every icon in the UI. Replaced the emoji that used to do this job — those
+// rendered as whatever glyph the device shipped, so the same report looked
+// like a different product on Android than on macOS.
+import { Icon3D } from "./icons3d.jsx";
 // A lit dot is a claim — one decision function, testable, with no way to force
 // a lit result without a timestamp from a read that actually returned.
 import { liveState } from "./lib/live-state.js";
@@ -1283,10 +1287,10 @@ function InfoTooltip({title, children}){
         onClick={handleToggle}
         style={{background:"none",border:"1px solid #334155",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#64748b",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0}}
         title={title}
-      >ℹ</button>
+      ><Icon3D name="info" size={13}/></button>
       {open&&pos&&(
         <div style={{position:"fixed",top:pos.top,left:pos.left,width:pos.width,zIndex:200,background:"#0d1526",border:"1px solid #1e3a5f",borderRadius:12,padding:"14px 16px",boxShadow:"0 8px 32px rgba(0,0,0,0.6)"}}>
-          <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}>ℹ️ {title}</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#3b82f6",marginBottom:8,letterSpacing:0.5}}><Icon3D name="info" size={14}/> {title}</div>
           <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.65}}>{children}</div>
           <button onClick={()=>setOpen(false)} style={{marginTop:10,background:"none",border:"none",color:"#475569",fontSize:11,cursor:"pointer",padding:0}}>Close ✕</button>
         </div>
@@ -1386,7 +1390,7 @@ function FuelTag({fuel}){
 }
 function EVAPTag({evap}){
   if(!evap)return null;
-  return<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e30"}}>⚡ ${evap.incentive.toLocaleString()}</span>;
+  return<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e30"}}><Icon3D name="bolt" size={14}/> ${evap.incentive.toLocaleString()}</span>;
 }
 
 function ConnectModal({listing,onClose}){
@@ -1429,12 +1433,12 @@ function ConnectModal({listing,onClose}){
       <div className="lc-modal">
         {step==="done"?(
           <div style={{textAlign:"center",padding:"16px 0"}}>
-            <div style={{fontSize:52,marginBottom:12}}>✅</div>
+            <div style={{marginBottom:12}}><Icon3D name="check" size={52}/></div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>LotChecked!</div>
             <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request received — we'll follow up with you directly about this listing.</div>
             {rebate.total>0&&(
               <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
-                <div style={{fontSize:13,color:"#22c55e",fontWeight:700,marginBottom:4}}>⚡ Remind the dealer about your rebate</div>
+                <div style={{fontSize:13,color:"#22c55e",fontWeight:700,marginBottom:4}}><Icon3D name="bolt" size={14}/> Remind the dealer about your rebate</div>
                 <div style={{fontSize:13,color:"#475569"}}>Up to <strong style={{color:"#22c55e"}}>${rebate.total.toLocaleString()}</strong> available. After rebates: ~<strong style={{color:"#22c55e"}}>${(listing.price-rebate.total).toLocaleString()}</strong></div>
               </div>
             )}
@@ -1452,14 +1456,14 @@ function ConnectModal({listing,onClose}){
                 <div style={{display:"flex",gap:6,alignItems:"center"}}><FuelTag fuel={listing.fuel}/><span style={{fontSize:13,color:"#64748b"}}>{listing.km.toLocaleString()} km</span></div>
                 <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9"}}>${listing.price.toLocaleString()}</div>
               </div>
-              {rebate.eligible&&rebate.total>0&&<div style={{fontSize:12,color:"#22c55e",fontWeight:600,marginTop:6}}>⚡ After rebates: ~${(listing.price-rebate.total).toLocaleString()}</div>}
+              {rebate.eligible&&rebate.total>0&&<div style={{fontSize:12,color:"#22c55e",fontWeight:600,marginTop:6}}><Icon3D name="bolt" size={14}/> After rebates: ~${(listing.price-rebate.total).toLocaleString()}</div>}
             </div>
             <div onClick={()=>setWantsDelivery(!wantsDelivery)} style={{display:"flex",alignItems:"center",gap:10,background:wantsDelivery?"#0d1e3a":"#0f172a",border:`1px solid ${wantsDelivery?"#1e3a5f":"#1e293b"}`,borderRadius:10,padding:"12px 14px",marginBottom:14,cursor:"pointer"}}>
               <div style={{width:20,height:20,borderRadius:6,border:`2px solid ${wantsDelivery?"#3b82f6":"#475569"}`,background:wantsDelivery?"#3b82f6":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
                 {wantsDelivery&&<span style={{color:"#fff",fontSize:12,fontWeight:900}}>✓</span>}
               </div>
               <div>
-                <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}>🚚 I'd like this delivered to me</div>
+                <div style={{fontSize:13,fontWeight:600,color:"#e2e8f0"}}><Icon3D name="truck" size={14}/> I'd like this delivered to me</div>
                 <div style={{fontSize:11,color:"#475569"}}>Ask the dealer about delivery — not all dealers offer this</div>
               </div>
             </div>
@@ -1533,11 +1537,11 @@ function TestDriveModal({listing,onClose}){
       <div className="lc-modal">
         {step==="done"?(
           <div style={{textAlign:"center",padding:"16px 0"}}>
-            <div style={{fontSize:52,marginBottom:12}}>🚗</div>
+            <div style={{marginBottom:12}}><Icon3D name="car" size={52}/></div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Test drive requested!</div>
             <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>Request received — we'll follow up with you directly to confirm a time.</div>
             <div style={{background:"#0d1e3a",border:"1px solid #1e3a5f",borderRadius:12,padding:"12px 16px",marginBottom:20,textAlign:"left"}}>
-              <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:6}}>🗓️ Your preference</div>
+              <div style={{fontSize:13,color:"#60a5fa",fontWeight:700,marginBottom:6}}><Icon3D name="calendar" size={14}/> Your preference</div>
               <div style={{fontSize:13,color:"#94a3b8"}}>{day} · {time}</div>
             </div>
             <button onClick={onClose} className="lc-modal-btn">Done</button>
@@ -1545,7 +1549,7 @@ function TestDriveModal({listing,onClose}){
         ):(
           <>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}>🚗 Book a test drive</div>
+              <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}><Icon3D name="car" size={14}/> Book a test drive</div>
               <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
             </div>
             <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:12,padding:"12px 14px",marginBottom:16}}>
@@ -1664,7 +1668,7 @@ function AppraisalModal({onClose}){
       <div className="lc-modal" style={{maxWidth:460}}>
         {step==="form"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}>💰 What's your car worth?</div>
+            <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}><Icon3D name="money" size={14}/> What's your car worth?</div>
             <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
           </div>
           <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>Free instant estimate · No obligation · Takes 30 seconds</div>
@@ -1740,7 +1744,7 @@ function AppraisalModal({onClose}){
 
         {step==="done"&&(
           <div style={{textAlign:"center",padding:"16px 0"}}>
-            <div style={{fontSize:52,marginBottom:10}}>✅</div>
+            <div style={{marginBottom:10}}><Icon3D name="check" size={52}/></div>
             <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request received!</div>
             <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>We'll follow up with you directly about your {year} {make} {model}.</div>
             <button onClick={onClose} className="lc-modal-btn">Done</button>
@@ -1800,7 +1804,7 @@ function DepreciationModal({onClose}){
     <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="lc-modal" style={{maxWidth:520}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}>📉 Depreciation planner</div>
+          <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}><Icon3D name="chartDown" size={14}/> Depreciation planner</div>
           <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:22,cursor:"pointer",lineHeight:1}}>✕</button>
         </div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>Model what a purchase is really worth over time — not a specific listing, just the math.</div>
@@ -1879,7 +1883,7 @@ function ProModal({onStart,onClose,trialStatus}){
         </div>
         <div style={{fontSize:20,fontWeight:800,color:"#f1f5f9",marginBottom:4,letterSpacing:"-0.5px"}}>Built for car professionals</div>
         <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>No credit card. Full access for 48 hours, once per browser. Then $9.99/mo CAD.</div>
-        {[["📊","LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],["🗓️","Market Intelligence","New arrivals by province, price-drop badges, and days-on-market — all real data, all in one place"],].map(([icon,title,sub])=>(
+        {[[<Icon3D name="chartBar" size={20}/>,"LotCheck Value Estimate","Our own retail/trade/wholesale estimate on every listing"],[<Icon3D name="calendar" size={20}/>,"Market Intelligence","New arrivals by province, price-drop badges, and days-on-market — all real data, all in one place"],].map(([icon,title,sub])=>(
           <div key={title} style={{display:"flex",gap:12,background:"#1e293b20",borderRadius:10,padding:"12px",marginBottom:8}}>
             <span style={{fontSize:20}}>{icon}</span>
             <div><div style={{fontSize:14,fontWeight:600,color:"#e2e8f0"}}>{title}</div><div style={{fontSize:12,color:"#475569"}}>{sub}</div></div>
@@ -1964,8 +1968,8 @@ function ArrivalsModal({liveListings, historyMap, onClose}){
 function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
   const [step,setStep]=useState("offer");
   const labels={
-    vin:{title:"Unlock VIN Lookup",icon:"🔍",desc:"Unlocks a direct link to CARFAX's official report page for this VIN. The CARFAX report itself is a separate ~$45 purchase with CARFAX."},
-    cbb:{title:"Unlock Value Estimate",icon:"📊",desc:"LotCheck's retail, trade-in, and wholesale estimate for this exact vehicle, based on asking price, mileage, and age."},
+    vin:{title:"Unlock VIN Lookup",icon:<Icon3D name="search" size={20}/>,desc:"Unlocks a direct link to CARFAX's official report page for this VIN. The CARFAX report itself is a separate ~$45 purchase with CARFAX."},
+    cbb:{title:"Unlock Value Estimate",icon:<Icon3D name="chartBar" size={20}/>,desc:"LotCheck's retail, trade-in, and wholesale estimate for this exact vehicle, based on asking price, mileage, and age."},
   };
   const info=labels[feature]||labels.vin;
 
@@ -1980,7 +1984,7 @@ function UnlockModal({feature, price, onUnlock, onClose, onUpgrade}){
       <div className="lc-modal" style={{maxWidth:420}}>
         {step==="done"?(
           <div style={{textAlign:"center",padding:"16px 0"}}>
-            <div style={{fontSize:48,marginBottom:10}}>✅</div>
+            <div style={{marginBottom:10}}><Icon3D name="check" size={48}/></div>
             <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9",marginBottom:6}}>Unlocked!</div>
             <button onClick={()=>{onUnlock();onClose();}} className="lc-modal-btn">Continue →</button>
           </div>
@@ -2043,7 +2047,7 @@ function VINHistoryPanel({listing}){
       </div>
       <button onClick={handleCheck} disabled={vin.length!==17}
         style={{width:"100%",background:vin.length===17?"#16a34a":"#1e3a5f",border:"none",borderRadius:12,padding:"14px 0",color:"#fff",fontSize:15,fontWeight:700,cursor:vin.length===17?"pointer":"not-allowed"}}>
-        🔍 Check Vehicle History →
+        <Icon3D name="search" size={15}/> Check Vehicle History →
       </button>
     </div>
   );
@@ -2061,7 +2065,7 @@ function InsurancePanel({listing}){
       </div>
       <a href={kanetixUrl} target="_blank" rel="noreferrer"
         style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%",background:"#f59e0b",border:"none",borderRadius:12,padding:"14px 0",color:"#020617",fontSize:15,fontWeight:700,textDecoration:"none",boxSizing:"border-box"}}>
-        🛡️ Compare Insurance Quotes →
+        <Icon3D name="shield" size={15}/> Compare Insurance Quotes →
       </a>
     </div>
   );
@@ -2103,7 +2107,7 @@ function EVAPRebateTab({listing, rebate}){
 
   if(!isEV) return(
     <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:20,textAlign:"center"}}>
-      <div style={{fontSize:28,marginBottom:8}}>⛽</div>
+      <div style={{marginBottom:8}}><Icon3D name="fuel" size={28}/></div>
       <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>No federal rebates for gas vehicles</div>
       <div style={{fontSize:12,color:"#475569"}}>EVAP applies to BEV and PHEV new purchases only.</div>
     </div>
@@ -2113,13 +2117,13 @@ function EVAPRebateTab({listing, rebate}){
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
       <div style={{background:"#1a0a00",border:"1px solid #f59e0b40",borderRadius:14,padding:"16px 18px"}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-          <span style={{fontSize:20}}>⚠️</span>
+          <Icon3D name="warning" size={20}/>
           <div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>Not eligible for EVAP rebate</div>
         </div>
         <div style={{fontSize:13,color:"#94a3b8",lineHeight:1.7,marginBottom:12}}>{rebate.ineligibleReason}</div>
         {rebate.newEquivalent&&(
           <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:10,padding:"12px 14px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#22c55e",marginBottom:8}}>💡 BUYING NEW INSTEAD?</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#22c55e",marginBottom:8}}><Icon3D name="bulb" size={14}/> BUYING NEW INSTEAD?</div>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
               <span style={{fontSize:13,color:"#94a3b8"}}>Federal EVAP (new)</span>
               <span style={{fontSize:14,fontWeight:700,color:"#22c55e"}}>${rebate.newEquivalent.federal.toLocaleString()}</span>
@@ -2137,7 +2141,7 @@ function EVAPRebateTab({listing, rebate}){
   return(
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#22c55e"}}>⚡ Federal EVAP Rebates · {PROVINCES[listing.province]||listing.province}</div>
+        <div style={{fontSize:13,fontWeight:700,color:"#22c55e"}}><Icon3D name="bolt" size={14}/> Federal EVAP Rebates · {PROVINCES[listing.province]||listing.province}</div>
         <InfoTooltip title="WHERE THIS COMES FROM">
           Federal and provincial EV rebate amounts are sourced directly from <strong style={{color:"#f1f5f9"}}>Transport Canada</strong> (tc.canada.ca) and manually verified against their official eligible-vehicle list.
           <br/><br/>
@@ -2166,7 +2170,7 @@ function EVAPRebateTab({listing, rebate}){
       )}
 
       <div style={{background:"#0d1526",border:"1px solid #f59e0b30",borderRadius:12,padding:"14px 16px"}}>
-        <div style={{fontSize:11,fontWeight:700,color:"#f59e0b",letterSpacing:0.8,marginBottom:8}}>⏳ REBATE DROPS JAN 1, 2027</div>
+        <div style={{fontSize:11,fontWeight:700,color:"#f59e0b",letterSpacing:0.8,marginBottom:8}}><Icon3D name="hourglass" size={14}/> REBATE DROPS JAN 1, 2027</div>
         {!timeLeft.expired&&(
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
             {[["DAYS",timeLeft.d],["HRS",timeLeft.h],["MIN",timeLeft.m],["SEC",timeLeft.s]].map(([label,val])=>(
@@ -2182,7 +2186,7 @@ function EVAPRebateTab({listing, rebate}){
       </div>
 
       <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
-        <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8,marginBottom:10}}>📉 EVAP DECLINING SCHEDULE</div>
+        <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8,marginBottom:10}}><Icon3D name="chartDown" size={14}/> EVAP DECLINING SCHEDULE</div>
         {schedule.map((s,i)=>(
           <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:4,padding:"8px 10px",borderRadius:8,marginBottom:4,background:s.active?"#0d2010":"transparent",border:s.active?"1px solid #16a34a30":"1px solid transparent"}}>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -2198,7 +2202,7 @@ function EVAPRebateTab({listing, rebate}){
 
       <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:12,padding:"14px 16px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8}}>📅 PROGRAM WINDOW</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",letterSpacing:0.8}}><Icon3D name="calendar" size={14}/> PROGRAM WINDOW</div>
           <div style={{fontSize:11,color:"#64748b"}}>{daysLeft.toLocaleString()} days remaining</div>
         </div>
         <div style={{height:6,background:"#1e293b",borderRadius:3,overflow:"hidden",marginBottom:6}}>
@@ -2309,7 +2313,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
         <ScorePill score={score} breakdown={scoreBreakdown}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
         <span className="badge" style={{background:"#1e293b",color:"#64748b"}}>{listing.city}, {listing.province}</span>
         <span className="badge" style={{background:"#1e293b",color:"#94a3b8"}}>
-          🕐 {daysTracked==null?"New on LotCheck":daysTracked===0?"Listed today":`${daysTracked}d on the market`}
+          <Icon3D name="clock" size={14}/> {daysTracked==null?"New on LotCheck":daysTracked===0?"Listed today":`${daysTracked}d on the market`}
         </span>
       </div>
       <div className="lc-price-hero">
@@ -2330,7 +2334,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
           not deliver a report LotCheck actually provides. VINHistoryPanel
           and its UnlockModal entry are left in place below, unused. */}
       <div className="lc-tabs">
-        {[["chart","📈 Chart"],["rebates","⚡ Rebates"],["cbb","📊 Value Est."],["insurance","🛡️ Insurance"]].map(([t,l])=>(
+        {[["chart",<><Icon3D name="chartUp" size={13}/> Chart</>],["rebates",<><Icon3D name="bolt" size={13}/> Rebates</>],["cbb",<><Icon3D name="chartBar" size={13}/> Value Est.</>],["insurance",<><Icon3D name="shield" size={13}/> Insurance</>]].map(([t,l])=>(
           <button key={t} className={`lc-tab${tab===t?" active":""}`} onClick={()=>setTab(t)}>
             {l}
           </button>
@@ -2359,7 +2363,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
           </div>
         ):(
           <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"28px 20px",textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:26,marginBottom:8}}>📈</div>
+            <div style={{marginBottom:8}}><Icon3D name="chartUp" size={26}/></div>
             <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>
               {historyLoading?"Loading price history…":"Not enough price history yet"}
             </div>
@@ -2390,7 +2394,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
           {comps.length>0?(
             <>
               <div style={{fontSize:11,color:"#60a5fa",marginBottom:12,lineHeight:1.5}}>
-                📊 Anchored against {comps.length} other live {listing.model} listing{comps.length===1?"":"s"} on LotCheck right now, averaging ${compAvgPrice.toLocaleString()}.
+                <Icon3D name="chartBar" size={14}/> Anchored against {comps.length} other live {listing.model} listing{comps.length===1?"":"s"} on LotCheck right now, averaging ${compAvgPrice.toLocaleString()}.
               </div>
               <div className="lc-stats">
                 {[["Retail",cbb.retail,"#22c55e","Dealer asking range"],["Trade-in",cbb.trade,"#f59e0b","What dealer pays"],["Wholesale",cbb.wholesale,"#94a3b8","Auction estimate"]].map(([l,v,c,sub])=>(
@@ -2404,7 +2408,7 @@ function DetailPanel({listing,liveListings,history,historyLoading,onConnect,onTe
             </>
           ):(
             <div style={{background:"#0a0f1e",border:"1px solid #1e293b",borderRadius:14,padding:"28px 20px",textAlign:"center"}}>
-              <div style={{fontSize:26,marginBottom:8}}>📊</div>
+              <div style={{marginBottom:8}}><Icon3D name="chartBar" size={26}/></div>
               <div style={{color:"#94a3b8",fontWeight:600,marginBottom:4}}>Not enough comps yet for a reliable estimate</div>
               <div style={{fontSize:12,color:"#475569"}}>No other live {listing.model} listings on LotCheck right now to anchor a Retail figure against. We'll show one here as soon as a real comp appears, rather than guess from the asking price alone.</div>
             </div>
@@ -2455,7 +2459,7 @@ function ListingCard({listing,liveListings,history,onClick,active}){
       <div className="lc-card-name">{listing.name}</div>
       <div className="lc-card-badges">
         <ScorePill score={score}/><FuelTag fuel={listing.fuel}/>{evap&&<EVAPTag evap={evap}/>}
-        {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}>🔻 ${dropAmount.toLocaleString()}</span>}
+        {hasDrop&&<span className="badge" style={{background:"#16a34a18",color:"#22c55e",border:"1px solid #22c55e35"}}><Icon3D name="chartDown" size={14}/> ${dropAmount.toLocaleString()}</span>}
       </div>
       <div className="lc-card-bottom">
         <div>
@@ -2748,21 +2752,28 @@ function useThemeState(){
   return { theme, C:LC_THEMES[theme], toggleTheme };
 }
 
+// The toggle draws from the shared icon set rather than carrying its own copy
+// of a moon and a sun. Both icons light themselves, which matters here more
+// than anywhere else: the pill swaps backgrounds underneath them -- dark when
+// Dark is active, light card when Bright is -- so an icon tinted from the
+// theme would go invisible on one of the two states.
 function ThemeToggle(){
   const {theme,C,toggleTheme}=useAdminTheme();
+  const btn={border:"none",borderRadius:6,padding:"5px 11px",fontSize:13.5,fontWeight:700,
+             cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,lineHeight:1};
   return (
     <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:9,padding:3}}>
-      <button onClick={()=>toggleTheme("dark")} style={{
+      <button onClick={()=>toggleTheme("dark")} aria-pressed={theme==="dark"} style={{
+        ...btn,
         background: theme==="dark" ? C.ink : "transparent",
         color: theme==="dark" ? C.paper : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
-      }}>🌙 Dark</button>
-      <button onClick={()=>toggleTheme("light")} style={{
+      }}><Icon3D name="moon" size={16} style={{opacity:theme==="dark"?1:.55}}/>Dark</button>
+      <button onClick={()=>toggleTheme("light")} aria-pressed={theme==="light"} style={{
+        ...btn,
         background: theme==="light" ? C.card : "transparent",
         color: theme==="light" ? C.ink : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
         boxShadow: theme==="light" ? "0 1px 4px rgba(51,48,90,.15)" : "none",
-      }}>☀️ Bright</button>
+      }}><Icon3D name="sun" size={16} style={{opacity:theme==="light"?1:.55}}/>Bright</button>
     </div>
   );
 }
@@ -2846,7 +2857,7 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
       {dealersLoading ? (
         <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
       ) : dealers.length===0 ? (
-        <AdminEmpty icon="🏢">No dealers yet — add your first one</AdminEmpty>
+        <AdminEmpty icon={<Icon3D name="building" size={40}/>}>No dealers yet — add your first one</AdminEmpty>
       ) : (
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:28}}>
           {dealers.map(d=>(
@@ -2857,7 +2868,7 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
                 <div style={{fontSize:13,color:C.inkFaint,marginTop:2}}>{d.makes||"—"}</div>
                 {d.amvic_number&&(
                   <div style={{fontSize:13,marginTop:4,fontWeight:800,color:d.amvic_verified?C.tealInk:C.butterInk}}>
-                    {d.amvic_verified?"✓":"⚠"} AMVIC {d.amvic_number}{!d.amvic_verified&&" -- unverified"}
+                    {d.amvic_verified?"✓":<Icon3D name="warning" size={13}/>} AMVIC {d.amvic_number}{!d.amvic_verified&&" -- unverified"}
                   </div>
                 )}
               </div>
@@ -2883,7 +2894,7 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
       {dealerListingsLoading ? (
         <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
       ) : dealerListings.length===0 ? (
-        <AdminEmpty icon="🚗">No dealer submissions yet</AdminEmpty>
+        <AdminEmpty icon={<Icon3D name="car" size={40}/>}>No dealer submissions yet</AdminEmpty>
       ) : (
         <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
           {dealerListings.map(v=>{
@@ -3002,7 +3013,7 @@ function RevenueTab({dealers, apiUsage, apiUsageLoading}){
       </div>
       <div style={{fontSize:13,color:C.inkFaint,marginBottom:10}}>USD is what you're actually billed — CAD is an estimate at a fixed 1 USD = {USD_TO_CAD} CAD rate (July 15, 2026), not a live conversion.</div>
       {!apiUsageLoading&&apiUsage.length===0?(
-        <AdminEmpty icon="📊">
+        <AdminEmpty icon={<Icon3D name="chartBar" size={40}/>}>
           No usage logged yet — this fills in the moment someone runs a real quote through Quote Check, once the analyze-quote function's logging is live.
         </AdminEmpty>
       ):(
@@ -3128,7 +3139,7 @@ function ProfitTrackerTab(){
     <div>
       <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>QUOTE CHECK PROFIT</div>
       <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:10,padding:"10px 14px",fontSize:13.5,color:C.coralInk,fontWeight:700,marginBottom:16,lineHeight:1.5}}>
-        ⚠ "Checks sold" below are sample placeholders, not real data -- there's no purchase-logging table yet, so nothing tracks actual sales per tier today. The pricing and profit math itself is real and will be correct the moment real counts flow in.
+        <Icon3D name="warning" size={14}/> "Checks sold" below are sample placeholders, not real data -- there's no purchase-logging table yet, so nothing tracks actual sales per tier today. The pricing and profit math itself is real and will be correct the moment real counts flow in.
       </div>
 
       <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:16,marginBottom:20}}>
@@ -3614,7 +3625,7 @@ function VisitorMap({pageViews}){
   if(!located.length){
     return(
       <div style={{textAlign:"center",padding:"32px 16px",color:C.inkFaint}}>
-        <div style={{fontSize:26,marginBottom:8}}>🗺️</div>
+        <div style={{marginBottom:8}}><Icon3D name="map" size={26}/></div>
         <div style={{fontWeight:700,color:C.inkSoft,marginBottom:4}}>No located visits yet</div>
         <div style={{fontSize:13.5}}>Geolocation just went live — every visit before this update was recorded without it. This fills in from here forward.</div>
       </div>
@@ -3902,7 +3913,7 @@ function PushCarPanel({C,onDispatched}){
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:16,marginBottom:16}}>
       <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-        <div style={{fontSize:14.5,fontWeight:900,color:C.ink}}>📣 Push a car → alert matching buyers</div>
+        <div style={{fontSize:14.5,fontWeight:900,color:C.ink}}><Icon3D name="megaphone" size={14}/> Push a car → alert matching buyers</div>
         <span style={{fontSize:13,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
       </div>
       {!open && <div style={{fontSize:13,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
@@ -4002,7 +4013,7 @@ function AlertFoldersTab(){
       <PushCarPanel C={C} onDispatched={load}/>
 
       {folders.length===0?(
-        <AdminEmpty icon="📭">No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
+        <AdminEmpty icon={<Icon3D name="inboxEmpty" size={40}/>}>No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
           {folders.map(f=>{
@@ -7151,7 +7162,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
         {priceSource === "msrp" && (
           <div style={{marginTop:14,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
             <div style={{fontSize:12.5,color:C.coralInk,fontWeight:800,lineHeight:1.55}}>
-              ⚠ We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
+              <Icon3D name="warning" size={14}/> We couldn't confirm this listing's actual price. The payments below are <b>ESTIMATED from the MSRP ({money(msrpVal)})</b> — the real price is usually higher, so your actual payments will differ. Enter the listing price for an accurate breakdown.
             </div>
             <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
               <span style={{fontSize:12,fontWeight:700,color:C.coralInk}}>Actual listing price:</span>
@@ -7254,7 +7265,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
           const extra = Math.round((pd-pm)*60);
           return (
             <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
-              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
+              <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}><Icon3D name="warning" size={14}/> This dealer's rate is {spread.toFixed(2)}% above {analysis.make}'s advertised rate — roughly ${extra.toLocaleString()} more over 60 months. Ask them to match the manufacturer rate.</div>
             </div>
           );
         })()}
@@ -7376,7 +7387,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
             extra-cost dollar figure). */}
         {leaseTwoSided && isNew && leaseSpread != null && leaseSpread > 0.1 && (
           <div style={{marginTop:12,background:C.coralBg,border:`1px solid ${C.coral}`,borderRadius:12,padding:"12px 14px"}}>
-            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}>⚠ This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
+            <div style={{fontSize:12,color:C.coralInk,fontWeight:800,lineHeight:1.5}}><Icon3D name="warning" size={14}/> This dealer's lease rate is {leaseSpread.toFixed(2)}% above {analysis.make}'s advertised lease rate. Ask them to match the manufacturer lease rate.</div>
           </div>
         )}
 
@@ -7440,7 +7451,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
         {analysis.financingCheck?.checked && analysis.financingCheck.note && (
           <div style={{...cardStyle,marginTop:12,marginBottom:0,background:analysis.financingCheck.consistent?C.tealBg:C.coralBg,border:`1px solid ${(analysis.financingCheck.consistent?C.teal:C.coral)}55`,boxShadow:"none"}}>
             <div style={{fontSize:12,fontWeight:800,color:analysis.financingCheck.consistent?C.tealInk:C.coralInk,marginBottom:4}}>
-              {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":"⚠️ Disclosed payments don't reconcile"}
+              {analysis.financingCheck.consistent?"✓ Disclosed payments reconcile":<><Icon3D name="warning" size={13}/> Disclosed payments don't reconcile</>}
             </div>
             <div style={{fontSize:12,color:C.ink,lineHeight:1.5}}>{analysis.financingCheck.note}</div>
           </div>
@@ -7448,7 +7459,7 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
 
         {ratesAsOf && (
           <div style={{fontSize:11,color:C.inkFaint,marginTop:12,display:"flex",alignItems:"center",gap:6}}>
-            <span>🕑</span>
+            <Icon3D name="clock" size={15}/>
             <span>Manufacturer {leaseRate!=null&&mfrRate!=null?"finance & lease ":mfrRate!=null?"finance ":"lease "}rates as of <b>{fmtDate(ratesAsOf)}</b>, from {analysis.make||"the maker"}'s advertised rates — refreshed daily.</span>
           </div>
         )}
@@ -8094,8 +8105,8 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       </>) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available.</div>}
       {(qp || ms) > 0 && <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
       <div style={{ marginTop: 14 }}>
-        {flagged.length > 0 && <Chip txt={`⚠ ${flagged.length} watch-out${flagged.length > 1 ? "s" : ""}`} tone="flag" />}
-        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={`⚠ ${a.recalls.count} recall${a.recalls.count > 1 ? "s" : ""}`} tone="flag" />}
+        {flagged.length > 0 && <Chip txt={<><Icon3D name="warning" size={12}/> {flagged.length} watch-out{flagged.length > 1 ? "s" : ""}</>} tone="flag" />}
+        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={<><Icon3D name="warning" size={12}/> {a.recalls.count} recall{a.recalls.count > 1 ? "s" : ""}</>} tone="flag" />}
         {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
         {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
       </div>
@@ -8107,7 +8118,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const P = [];
   // 1 Price vs MSRP
   P.push({ title: "Price vs MSRP", tone: priceGated ? "flag" : !priceVerified ? "flag" : (!ms ? "muted" : (deltaOk ? (delta > 0 ? "flag" : "pass") : "muted")), v: priceGated ? "HIDDEN BY DEALER" : deltaOk ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (ms ? "FROM " + money(ms) : (priceVerified ? "—" : "UNVERIFIED")),
-    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: (priceGated || !priceVerified) ? ROSE : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{priceGated ? "Hidden by the dealer" : deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling) return ` · ${money(cc.floor)}–${money(cc.ceiling)} all-in across the ${cc.trimsConsidered} ${a.make || ""} trims we hold`;return ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "";})()} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} />{(()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling && !msrpExact) return <KV k={`${a.make || "MSRP"} ALL-IN RANGE`.toUpperCase()} v={cc.floor===cc.ceiling?money(cc.ceiling):`${money(cc.floor)}–${money(cc.ceiling)}`} c={MUT2} />;return <KV k={a.msrpBasis === "original_when_new" ? "MSRP WHEN NEW" : a.msrpBasis === "dealer_stated" ? "MSRP · AS STATED BY DEALER" : a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (msrpExact ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={msrpExact ? "#fff" : MUT2} />;})()}</div>{a.msrpBasis === "original_when_new" && a.originalMsrp && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>That MSRP is what this {a.originalMsrp.year || a.year} {a.model || "vehicle"}{a.originalMsrp.trim ? ` (${a.originalMsrp.trim})` : ""} cost <strong style={{ color: "#fff" }}>when new</strong> — useful context, but it is not a sticker to measure a used price against, so no over/under-MSRP claim is made.</div>}{(()=>{const cc=qualifyCeilingClaim(a); if(!cc.exceeds) return null; return <div style={{ fontSize: 12.5, color: ROSE, marginTop: 12, lineHeight: 1.6, padding: "10px 12px", background: "rgba(242,131,107,.10)", borderRadius: 9, border: "1px solid rgba(242,131,107,.35)" }}><strong style={{ color: "#fff" }}>Above every trim {a.make || "the manufacturer"} sells.</strong> The most expensive {a.year} {a.model}{cc.trim ? ` (${cc.trim})` : ""} is <strong style={{ color: "#fff" }}>{money(cc.ceiling)}</strong> all-in, including the maximum dealer fee. This listing is <strong style={{ color: "#fff" }}>{money(cc.over)}</strong> above that ceiling — a figure that holds whichever trim this turns out to be, because there is no higher grade to compare it to.</div>;})()}{a.msrpUnavailable && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>{a.msrpUnavailable.note}</div>}{a.msrpBasis === "dealer_stated" && <div style={{ fontSize: 12, color: "#f0997b", marginTop: 10, lineHeight: 1.55 }}>This MSRP is the figure <strong>this dealer states on their own page</strong> — we could not verify it against {a.make || "the manufacturer"}'s published price, so no over/under-MSRP claim is made from it. Ask for the factory build sheet showing how it is made up.</div>}{a.msrpReference && a.msrpReference.msrp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>For reference, {a.msrpReference.make || "the manufacturer"} publishes this model{a.msrpReference.trim ? ` (${a.msrpReference.trim})` : ""} from <strong style={{ color: "#fff" }}>{money(a.msrpReference.msrp)}</strong>. Options, drivetrain and packages sit above that — ask which ones account for the difference.{a.msrpReference.sourceUrl ? <> <a href={a.msrpReference.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: CY }}>See their page ↗</a></> : null}</div>}{msrpExact && a.allInPricing && a.allInPricing.body && a.msrpPriceBasis !== "incl_freight" && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>Basis note: the asking price is <strong style={{ color: "#fff" }}>all-in</strong> ({a.allInPricing.body}), while a published MSRP normally <strong style={{ color: "#fff" }}>excludes freight &amp; PDI</strong> (typically $2,000–$2,600). Part of the gap above is that freight — ask the dealer to show freight and PDI as their own line.</div>}{a.msrpSourceUrl && <div style={{ marginTop: 10 }}><a href={a.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: CY, textDecoration: "underline" }}>See the manufacturer's own page for this MSRP ↗</a></div>}{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}>⚠ Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
+    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: (priceGated || !priceVerified) ? ROSE : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{priceGated ? "Hidden by the dealer" : deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling) return ` · ${money(cc.floor)}–${money(cc.ceiling)} all-in across the ${cc.trimsConsidered} ${a.make || ""} trims we hold`;return ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "";})()} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} />{(()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling && !msrpExact) return <KV k={`${a.make || "MSRP"} ALL-IN RANGE`.toUpperCase()} v={cc.floor===cc.ceiling?money(cc.ceiling):`${money(cc.floor)}–${money(cc.ceiling)}`} c={MUT2} />;return <KV k={a.msrpBasis === "original_when_new" ? "MSRP WHEN NEW" : a.msrpBasis === "dealer_stated" ? "MSRP · AS STATED BY DEALER" : a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (msrpExact ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={msrpExact ? "#fff" : MUT2} />;})()}</div>{a.msrpBasis === "original_when_new" && a.originalMsrp && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>That MSRP is what this {a.originalMsrp.year || a.year} {a.model || "vehicle"}{a.originalMsrp.trim ? ` (${a.originalMsrp.trim})` : ""} cost <strong style={{ color: "#fff" }}>when new</strong> — useful context, but it is not a sticker to measure a used price against, so no over/under-MSRP claim is made.</div>}{(()=>{const cc=qualifyCeilingClaim(a); if(!cc.exceeds) return null; return <div style={{ fontSize: 12.5, color: ROSE, marginTop: 12, lineHeight: 1.6, padding: "10px 12px", background: "rgba(242,131,107,.10)", borderRadius: 9, border: "1px solid rgba(242,131,107,.35)" }}><strong style={{ color: "#fff" }}>Above every trim {a.make || "the manufacturer"} sells.</strong> The most expensive {a.year} {a.model}{cc.trim ? ` (${cc.trim})` : ""} is <strong style={{ color: "#fff" }}>{money(cc.ceiling)}</strong> all-in, including the maximum dealer fee. This listing is <strong style={{ color: "#fff" }}>{money(cc.over)}</strong> above that ceiling — a figure that holds whichever trim this turns out to be, because there is no higher grade to compare it to.</div>;})()}{a.msrpUnavailable && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>{a.msrpUnavailable.note}</div>}{a.msrpBasis === "dealer_stated" && <div style={{ fontSize: 12, color: "#f0997b", marginTop: 10, lineHeight: 1.55 }}>This MSRP is the figure <strong>this dealer states on their own page</strong> — we could not verify it against {a.make || "the manufacturer"}'s published price, so no over/under-MSRP claim is made from it. Ask for the factory build sheet showing how it is made up.</div>}{a.msrpReference && a.msrpReference.msrp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>For reference, {a.msrpReference.make || "the manufacturer"} publishes this model{a.msrpReference.trim ? ` (${a.msrpReference.trim})` : ""} from <strong style={{ color: "#fff" }}>{money(a.msrpReference.msrp)}</strong>. Options, drivetrain and packages sit above that — ask which ones account for the difference.{a.msrpReference.sourceUrl ? <> <a href={a.msrpReference.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: CY }}>See their page ↗</a></> : null}</div>}{msrpExact && a.allInPricing && a.allInPricing.body && a.msrpPriceBasis !== "incl_freight" && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>Basis note: the asking price is <strong style={{ color: "#fff" }}>all-in</strong> ({a.allInPricing.body}), while a published MSRP normally <strong style={{ color: "#fff" }}>excludes freight &amp; PDI</strong> (typically $2,000–$2,600). Part of the gap above is that freight — ask the dealer to show freight and PDI as their own line.</div>}{a.msrpSourceUrl && <div style={{ marginTop: 10 }}><a href={a.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: CY, textDecoration: "underline" }}>See the manufacturer's own page for this MSRP ↗</a></div>}{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}><Icon3D name="warning" size={14}/> Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
   // 2 Recalls
   { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
     let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
@@ -8117,7 +8128,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     P.push({ title: "Transport Canada recalls", tone, v, body }); }
   // 3 Add-ons & fees
   { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : "NONE LISTED";
-    const body = (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? "🔻 " : ""}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
+    const body = (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
     P.push({ title: "Add-ons & fee audit", tone, v, body }); }
   // 4 Financing APR
   { const dr = a.financeRates?.dealer?.apr, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
@@ -8131,13 +8142,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : "muted";
     const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : (rf?.atAsking ? "$" + Math.round(rf.atAsking.monthly).toLocaleString() + "/MO REF" : "NOT CHECKED");
     if (rf?.atAsking) { P.push({ title: "Financing math", tone, v, body: <Simple big={"~$" + Math.round(rf.atAsking.monthly).toLocaleString() + "/mo at " + rf.apr + "% × " + rf.termMonths + "mo"} c={MUT2} note={rf.note} /> }); } else {
-    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : "⚠ Numbers don't add up") : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || (fc?.checked ? "The advertised payment, price, rate and term were cross-checked." : "Not enough financing detail was published to re-check the math.")} /> }); } }
+    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : <><Icon3D name="warning" size={13}/> Numbers don't add up</>) : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || (fc?.checked ? "The advertised payment, price, rate and term were cross-checked." : "Not enough financing detail was published to re-check the math.")} /> }); } }
   // 6 Odometer
   { const o = a.odometerCheck; const isNew = a.vehicleCondition === "new"; const tone = o?.checked ? (o.flag ? "flag" : "pass") : "muted"; const v = o?.checked ? Number(o.km).toLocaleString() + " km" + (o.flag ? " FLAG" : "") : (isNew ? "N/A (NEW)" : "NOT ON QUOTE");
     P.push({ title: "Odometer", tone, v, body: <Simple big={o?.checked ? Number(o.km).toLocaleString() + " km" : (isNew ? "N/A — new vehicle" : "Not on quote")} c={o?.flag ? ROSE : "#fff"} note={o?.note || (isNew ? "New vehicles carry delivery-only mileage." : "No odometer reading was on this quote.")} /> }); }
   // 7 VIN
   { const vc = a.vinCheck; const tone = vc?.present ? (vc.valid ? "pass" : "flag") : "muted"; const v = vc?.present ? (vc.valid ? "VALID" : "CHECK PATTERN") : "NOT ON QUOTE";
-    P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : "⚠ VIN doesn't validate") : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
+    P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : <><Icon3D name="warning" size={13}/> VIN doesn't validate</>) : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
   // 8 EV / PHEV rebate — via resolveEvap so this panel can never disagree with
   // the scroll view or the emailed report (it used to read a server field that
   // was never populated, rendering a dead "—" on every EV).
@@ -8331,7 +8342,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const bulb = (on, color) => (
       <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none" }} />
     );
-    daysLotItem = { key: "dayslot", title: d >= 90 ? "⚠ Days on lot" : "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, critical: d >= 120, body: (
+    daysLotItem = { key: "dayslot", title: "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, critical: d >= 120, body: (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
         <style>{`
           .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
@@ -8444,7 +8455,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   let financeContingentItem = null;
   if (a.financeContingent && a.financeContingent.contingent) {
     const F = a.financeContingent;
-    financeContingentItem = { key: "fincontingent", title: "⚠ Price depends on financing with the dealer", tone: "flag", glow: true, v: "Conditional", body: (
+    financeContingentItem = { key: "fincontingent", title: "Price depends on financing with the dealer", tone: "flag", glow: true, v: "Conditional", body: (
       <div>
         <div style={{ fontSize: 13.5, color: "#e2e8f0", lineHeight: 1.6 }}>
           This listing's own wording ties the advertised price to taking <b>the dealer's financing</b>.
@@ -8470,7 +8481,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   if (a.dealerLicence && a.dealerLicence.status) {
     const L = a.dealerLicence, st = L.state;
     const good = st === "valid";
-    const label = good ? "Dealer licence · AMVIC verified" : "⚠ Dealer licence · AMVIC";
+    const label = good ? "Dealer licence · AMVIC verified" : "Dealer licence · AMVIC";
     licItem = { key: "licence", title: label, tone: good ? "pass" : "flag", glow: !good, v: good ? "Valid" : (L.status || "Check"), body: (
       <div>
         <div style={{ fontSize: 22, fontWeight: 1000, color: good ? TEAL : ROSE, lineHeight: 1.15 }}>{L.status}</div>
@@ -9032,7 +9043,7 @@ function VerifyPage(){
   const mono='ui-monospace,"SF Mono",Menlo,Consolas,monospace';
   const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+v.toLocaleString("en-CA");};
   const idText=state.id||"LC-••••-•••";
-  const seal=authentic?{bg:"#0f6e56",bd:"#34d399",gl:P==="signed"?"🔏":"✓"}:isBad?{bg:"#7a2417",bd:"#f0997b",gl:"✕"}:{bg:"#2a2740",bd:"#7f77dd",gl:"🔒"};
+  const seal=authentic?{bg:"#0f6e56",bd:"#34d399"}:isBad?{bg:"#7a2417",bd:"#f0997b"}:{bg:"#2a2740",bd:"#7f77dd"};
   // Whole-card edge flashes green when the report verifies, red when it fails.
   const edgeBorder=authentic?"#10b981":isBad?"#f43f5e":T.cardBd;
   const edgeAnim=authentic?"vEdgeOk 1.15s ease-out 3 forwards":isBad?"vEdgeBad 1.15s ease-out 3 forwards":"none";
@@ -9064,7 +9075,7 @@ function VerifyPage(){
           <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
             {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
-          <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?"☀":"☾"}</button>
+          <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
       </nav>
@@ -10233,10 +10244,10 @@ function QuoteCheckPage(){
   // flagged fee, rebate, VIN check, warranty), not just one repeated idea.
   const EXAMPLES=[
     {icon:"✓",text:"MSRP verified",bg:C.tealBg,fg:C.tealInk,anim:"lc-iso-chip-1"},
-    {icon:"⚠",text:"Doc fee flagged — $599",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-2"},
+    {icon:<Icon3D name="warning" size={13}/>,text:"Doc fee flagged — $599",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-2"},
     {icon:"$",text:"$5,000 EVAP rebate found",bg:C.butterBg,fg:C.butterInk,anim:"lc-iso-chip-3"},
     {icon:"✓",text:"VIN pattern valid",bg:C.tealBg,fg:C.tealInk,anim:"lc-iso-chip-4"},
-    {icon:"⚠",text:"Extended warranty overpriced",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-5"},
+    {icon:<Icon3D name="warning" size={13}/>,text:"Extended warranty overpriced",bg:C.coralBg,fg:C.coralInk,anim:"lc-iso-chip-5"},
   ];
 
   const cardStyle={
@@ -10309,7 +10320,7 @@ function QuoteCheckPage(){
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
                 title="Re-run this report from scratch"
                 style={{display:"flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:10,background:C.paper2,border:`1px solid ${C.line}`,color:C.inkSoft,cursor:status==="analyzing"?"default":"pointer",opacity:status==="analyzing"?0.5:1,flexShrink:0,fontSize:15}}>
-                🔄
+                <Icon3D name="refresh" size={15}/>
               </button>
             )}
             <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3,flexShrink:0}}>
@@ -10430,7 +10441,7 @@ function QuoteCheckPage(){
                 Facebook) are blocked client-side (isAggregatorUrl) AND in the
                 edge function, pending legal sign-off — see Century 21 v. Zoocasa. */}
             <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:`2px solid ${C.teal}`,borderRadius:22,padding:"22px 22px",boxShadow:"0 18px 40px -18px rgba(51,48,90,.18)"}}>
-              <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:800,letterSpacing:.4,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"4px 11px",marginBottom:10}}>🔗 Fastest way</div>
+              <div style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:11,fontWeight:800,letterSpacing:.4,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"4px 11px",marginBottom:10}}><Icon3D name="link" size={14}/> Fastest way</div>
               <div style={{color:C.ink,fontWeight:1000,fontSize:18,marginBottom:6}}>Paste a dealer's website link</div>
               <div style={{fontSize:13,color:C.inkSoft,marginBottom:14,lineHeight:1.5}}>We open the live dealer page and read the price, fees, financing and specs — even on sites that load the price with scripts. Use the <strong>dealer's own website</strong>.</div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -10448,7 +10459,7 @@ function QuoteCheckPage(){
                 </button>
               </div>
               <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                <span aria-hidden="true">🚫</span>
+                <Icon3D name="blocked" size={15}/>
                 <span><strong>Don't use listing marketplaces</strong> — AutoTrader, CarGurus, Kijiji, eBay, or Facebook Marketplace links aren't supported here. Paste the dealer's own site, or upload a screenshot instead.</span>
               </div>
             </div>
@@ -10613,7 +10624,7 @@ function QuoteCheckPage(){
 
           {status==="error"&&(
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+              <div style={{marginBottom:12}}><Icon3D name="warning" size={32}/></div>
               <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
               {lastAttemptType==="url"?(
                 <>
@@ -10746,7 +10757,7 @@ function QuoteCheckPage(){
                   (Phase 2 is auth primitives only). */}
               {user===null&&(
                 <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,boxShadow:"none",display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-                  <div style={{fontSize:26,flexShrink:0}}>🔖</div>
+                  <div style={{flexShrink:0,display:"flex"}}><Icon3D name="bookmark" size={26}/></div>
                   <div style={{flex:"1 1 200px",minWidth:0}}>
                     <div style={{fontSize:14,fontWeight:800,color:C.ink,marginBottom:2}}>Sign in to save this report and run more checks</div>
                     <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>Keep a copy in your account and pick up where you left off — takes a few seconds, no password.</div>
@@ -11031,7 +11042,7 @@ function QuoteCheckPage(){
               {analysis.odometerCheck?.checked&&(
                 <div style={{...cardStyle,...(analysis.odometerCheck.flag?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
                   <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Odometer</div>
-                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?" ⚠":""}</div>
+                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?<> <Icon3D name="warning" size={14}/></>:null}</div>
                   <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.odometerCheck.note}</div>
                 </div>
               )}
@@ -11039,7 +11050,7 @@ function QuoteCheckPage(){
               {analysis.vinCheck?.present&&(
                 <div style={{...cardStyle,...(analysis.vinCheck.valid?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
                   <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>VIN check{analysis.vinCheck.vin?` · ${analysis.vinCheck.vin}`:""}</div>
-                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":"⚠ VIN doesn't validate"}</div>
+                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":<><Icon3D name="warning" size={13}/> VIN doesn't validate</>}</div>
                   <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.vinCheck.reason}</div>
                 </div>
               )}
@@ -11279,7 +11290,7 @@ function QuoteCheckPage(){
                   {evapShow&&(
                     <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
                       <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
-                        {rebate.eligible?"🎉 EVAP rebate eligible":"⚡ EV/PHEV rebate check"}
+                        {rebate.eligible?<><Icon3D name="celebrate" size={13}/> EVAP rebate eligible</>:<><Icon3D name="bolt" size={13}/> EV/PHEV rebate check</>}
                       </div>
                       {fuelMismatch&&(
                         <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
@@ -11433,7 +11444,7 @@ function QuoteCheckPage(){
                       </div>
                       {!!f.rate&&(<div style={{fontSize:13,color:C.inkSoft,marginBottom:14}}>at <span style={{fontWeight:800,color:C.ink}}>{f.rate}% APR</span></div>)}
                       <div style={{background:C.butterBg,border:`1px solid ${C.butter}55`,borderRadius:14,padding:"12px 14px"}}>
-                        <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}>⚡ Term and total cost not shown</div>
+                        <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}><Icon3D name="bolt" size={14}/> Term and total cost not shown</div>
                         <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>
                           This dealer's page uses an interactive calculator with no default term selected, so only the payment and rate above are confirmed. Ask for the exact term and total cost in writing before relying on this payment figure.
                         </div>
@@ -11504,7 +11515,7 @@ function QuoteCheckPage(){
                   <div style={{...cardStyle,border:`1px solid ${C.butter}`,background:C.butterBg}}>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
                       <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Extended warranty / protection plan</div>
-                      <span style={{fontSize:10.5,fontWeight:800,color:C.butterInk,background:C.butter+"66",borderRadius:5,padding:"2px 8px",letterSpacing:.3}}>⚠ OPTIONAL ADD-ON</span>
+                      <span style={{fontSize:10.5,fontWeight:800,color:C.butterInk,background:C.butter+"66",borderRadius:5,padding:"2px 8px",letterSpacing:.3}}><Icon3D name="warning" size={14}/> OPTIONAL ADD-ON</span>
                     </div>
                     <div style={{color:C.ink,fontSize:15,fontWeight:800,marginBottom:6}}>{w.offered}{price?` — ${price}`:""}</div>
                     {isNew&&sw?.coverage?(
@@ -11649,7 +11660,7 @@ function TrustPage(){
 
         <div className="tcols" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
           <div style={{...card,background:"rgba(127,119,221,.08)",borderColor:"rgba(127,119,221,.3)"}}>
-            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#a99ff0"}}>🔒 Why a fake can't pass</h3>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#a99ff0"}}><Icon3D name="lock" size={14}/> Why a fake can't pass</h3>
             <ul style={{margin:0,padding:0}}>
               {["Each report is cryptographically signed with a key only LotCheck holds — can't be forged.","The report ID is a fingerprint of its contents — change one figure and it stops matching.","The check runs on our site with our public key — a copycat site can't fake a pass.","We store nothing — the proof travels inside the link."].map((t,i)=>(
                 <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0}}>·</span>{t}</li>
@@ -11657,7 +11668,7 @@ function TrustPage(){
             </ul>
           </div>
           <div style={{...card,background:"rgba(240,153,123,.08)",borderColor:"rgba(240,153,123,.3)"}}>
-            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#f0b79b"}}>⚠ Red flags of a fake</h3>
+            <h3 style={{fontSize:13,margin:"0 0 10px",fontWeight:800,color:"#f0b79b"}}><Icon3D name="warning" size={14}/> Red flags of a fake</h3>
             <ul style={{margin:0,padding:0}}>
               {["Won't verify at lotcheck.ca/verify — or has no QR/link at all.","Shows a “verified” result on some other website.","Report ID fails or shows “altered.”","Came from a look-alike domain (the real site is lotcheck.ca).","Asks you to pay on an unfamiliar site."].map((t,i)=>(
                 <li key={i} style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,marginBottom:7,listStyle:"none",paddingLeft:16,position:"relative"}}><span style={{position:"absolute",left:0,color:"#f0997b"}}>›</span>{t}</li>
@@ -11876,7 +11887,7 @@ function MsrpAlertsPage(){
           <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
             {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
-          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?"☀":"☾"}</button>
+          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
       </nav>
@@ -11969,7 +11980,7 @@ function AlertConfirmPage(){
           <a href="/quote-check" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Check a quote now →</a>
         </>}
         {state==="bad" && <>
-          <div style={{fontSize:34,marginBottom:10}}>⚠️</div>
+          <div style={{marginBottom:10}}><Icon3D name="warning" size={34}/></div>
           <h1 style={{fontSize:22,fontWeight:800,margin:"0 0 10px"}}>That link didn't work.</h1>
           <p style={{fontSize:14,lineHeight:1.6,color:"#c7cee6",margin:"0 0 20px"}}>The confirmation link may have expired or already been used. You can sign up again in a moment.</p>
           <a href="/msrp-alerts" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Back to MSRP Alerts</a>
@@ -12080,7 +12091,7 @@ function LotCheckApp(){
             </div>
           </div>
           <a href="/quote-check" className="lc-header-right" style={{background:"#0175ff",border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontWeight:700,fontSize:13,textDecoration:"none",whiteSpace:"nowrap"}}>
-            📄 Check a quote
+            <Icon3D name="document" size={15}/> Check a quote
           </a>
         </header>
 
@@ -12110,11 +12121,11 @@ function LotCheckApp(){
             <div className="lc-listings">
               <div style={{fontSize:12,color:"#334155",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
                 {dataLoading
-                  ?<span style={{color:"#60a5fa",fontWeight:600}}>⏳ Loading live listings…</span>
+                  ?<span style={{color:"#60a5fa",fontWeight:600}}><Icon3D name="hourglass" size={14}/> Loading live listings…</span>
                   :<>
                     {isLive
                       ?<span className="lc-radar"><span className="lc-radar-ring"/><span className="lc-radar-ring delay"/><span className="lc-radar-core"/></span>
-                      :<span style={{color:"#475569"}}>⚪</span>
+                      :<span style={{width:8,height:8,borderRadius:"50%",background:"#475569",display:"inline-block"}}/>
                     }
                     {filtered.length} listings · {isLive?"Live · Canada":"Demo data"}
                   </>
@@ -12136,7 +12147,7 @@ function LotCheckApp(){
               <DetailPanel key={selected.id} listing={selected} liveListings={liveListings} history={historyMap[selected.external_id]} historyLoading={historyLoading} onConnect={()=>setShowConnect(true)} onTestDrive={()=>setShowTestDrive(true)}/>
             ):(
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",color:"#334155",textAlign:"center",padding:"40px 20px"}}>
-                <div style={{fontSize:48,marginBottom:16}}>✅</div>
+                <div style={{marginBottom:16}}><Icon3D name="check" size={48}/></div>
                 <div style={{fontSize:18,fontWeight:700,color:"#475569",marginBottom:8}}>Select a listing</div>
                 <div style={{fontSize:14,color:"#334155"}}>Choose any car from the left to see price history, rebates, and connect with a dealer</div>
               </div>

@@ -135,6 +135,18 @@ jobs:
       # identity for days. Now clamped at the boundary and banned at source.
       - name: Query windows (no Date Postgres cannot parse)
         run: npm run test:pg-timestamp
+      # An emoji renders as whatever glyph the device ships, so the same report
+      # looked like a different product on Android than on macOS -- and a report
+      # a dealer may dispute has to be the same artifact everywhere. 95 sites
+      # were swept at once; without this they come back one card at a time.
+      - name: No emoji in shipped UI (checkmarks and typography allowed)
+        run: npm run check:no-emoji
+      # A gradient id that does not resolve paints NOTHING -- the icon vanishes
+      # while everything around it still renders, so a broken warning icon reads
+      # as "no warning here". Also pins public/icons3d.css to the module, since
+      # the static pages keep their own copy of the keyframes.
+      - name: 3D icons (refs resolve, motion declared, no stylesheet drift)
+        run: npm run test:icons3d
       # An MSRP figure carries a BASIS, and only "exact" -- a verified
       # manufacturer price for THIS trim -- may support an over/under claim.
       # App.jsx always enforced that; the EMAIL did not, so a used vehicle's
