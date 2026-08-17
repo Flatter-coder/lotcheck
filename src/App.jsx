@@ -2847,61 +2847,6 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
   );
 }
 
-// ── Review queue tab ──────────────────────────────────────────────────────
-function ReviewTab({reviewListings,reviewLoading,rejectedListings,onApprove,onReject}){
-  const {C}=useAdminTheme();
-  return (
-    <div>
-      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-        PENDING REVIEW · {reviewLoading?"loading…":`${reviewListings.length} listing${reviewListings.length===1?"":"s"}`}
-      </div>
-      {reviewLoading ? (
-        <div style={{color:C.inkFaint,fontSize:14.5}}>Loading…</div>
-      ) : reviewListings.length===0 ? (
-        <AdminEmpty icon="✅">No listings pending review — pipeline approved everything</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginBottom:28}}>
-          {reviewListings.map(l=>{
-            const score=l.verification_score||0;
-            const scoreColor = score>=70?C.tealInk:score>=50?C.butterInk:C.coralInk;
-            const flags=(l.verification_flags||"").split(" | ").filter(Boolean);
-            return (
-              <div key={l.id} style={{padding:"14px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-                <div style={{flex:1,minWidth:200}}>
-                  <div style={{fontWeight:800,color:C.ink,fontSize:14}}>{l.name}</div>
-                  <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>{l.city}, {l.province} · ${(l.price||0).toLocaleString()} · <span style={{color:scoreColor,fontWeight:800}}>{score}</span></div>
-                  {flags.map((f,i)=>(<div key={i} style={{fontSize:13,color:C.butterInk,marginTop:2}}>⚠ {f}</div>))}
-                </div>
-                <div style={{display:"flex",gap:6}}>
-                  <button onClick={()=>onApprove(l.external_id,l.name)} style={{background:"none",border:`1px solid ${C.teal}`,borderRadius:6,padding:"6px 12px",color:C.tealInk,fontSize:13.5,cursor:"pointer"}}>✓ Approve</button>
-                  <button onClick={()=>onReject(l.external_id)} style={{background:"none",border:`1px solid ${C.coral}`,borderRadius:6,padding:"6px 12px",color:C.coralInk,fontSize:13.5,cursor:"pointer"}}>✗ Reject</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>
-        RECENTLY REJECTED · {rejectedListings.length}
-      </div>
-      {rejectedListings.length===0 ? (
-        <AdminEmpty>No rejected listings yet</AdminEmpty>
-      ) : (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden"}}>
-          {rejectedListings.map((l,i)=>(
-            <div key={i} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:14.5}}>
-              <span style={{color:C.ink}}>{l.name}</span>
-              <span style={{color:C.coralInk,fontWeight:800}}>{l.verification_score||0}</span>
-              <span style={{color:C.inkFaint,fontSize:13}}>{(l.verification_flags||"").split(" | ")[0]||"—"}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Revenue tab ────────────────────────────────────────────────────────────
 function RevenueTab({dealers, apiUsage, apiUsageLoading}){
   const featured = dealers.filter(d=>d.featured);
@@ -6063,10 +6008,7 @@ function AdminPanel(){
   const [pageViews,setPageViews]=useState([]);
   const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
-  const {listings:liveListings, loading:listingsLoading}=useListings();
-  const {historyMap}=usePriceHistoryMap();
   const {usage:apiUsage, usageLoading:apiUsageLoading}=useApiUsage();
-  const [listingsGranularity,setListingsGranularity]=useState("day");
 
   const [dealers,setDealers]=useState([]);
   const [dealersLoading,setDealersLoading]=useState(true);
@@ -6074,10 +6016,6 @@ function AdminPanel(){
 
   const [dealerListings,setDealerListings]=useState([]);
   const [dealerListingsLoading,setDealerListingsLoading]=useState(true);
-
-  const [reviewListings,setReviewListings]=useState([]);
-  const [rejectedListings,setRejectedListings]=useState([]);
-  const [reviewLoading,setReviewLoading]=useState(true);
 
   // Unit Economics: one admin-gated RPC snapshot of aggregate-only figures.
   const [econ,setEcon]=useState(null);
@@ -6164,28 +6102,6 @@ function AdminPanel(){
     }
   }
   useEffect(()=>{ if(session) fetchDealerListings(); else setDealerListings([]); },[session]);
-
-  async function fetchReview(){
-    setReviewLoading(true);
-    try{
-      const {data:review,error:e1}=await supabase.from("listings")
-        .select("id,external_id,name,price,fuel,source,city,province,verification_score,verification_flags,scraped_at")
-        .eq("status","review").order("scraped_at",{ascending:false}).limit(100);
-      if(e1) throw e1;
-      const {data:rejected,error:e2}=await supabase.from("listings")
-        .select("name,price,verification_score,verification_flags,scraped_at")
-        .eq("status","reject").order("scraped_at",{ascending:false}).limit(50);
-      if(e2) throw e2;
-      setReviewListings(review||[]);
-      setRejectedListings(rejected||[]);
-    }catch(err){
-      console.warn("⚠️ review queue fetch failed:",err.message);
-      setReviewListings([]); setRejectedListings([]);
-    }finally{
-      setReviewLoading(false);
-    }
-  }
-  useEffect(()=>{ if(session) fetchReview(); else { setReviewListings([]); setRejectedListings([]); } },[session]);
 
   async function fetchEcon(){
     setEconLoading(true); setEconError(null);
@@ -6325,19 +6241,6 @@ function AdminPanel(){
     fetchDealerListings();
   }
 
-  async function approveReview(externalId,name){
-    if(!confirm(`Approve "${name}" and publish to LotCheck?`)) return;
-    const {error}=await supabase.from("listings").update({status:"published"}).eq("external_id",externalId);
-    if(error){ alert("Couldn't update: "+error.message); return; }
-    fetchReview();
-  }
-
-  async function rejectReview(externalId){
-    const {error}=await supabase.from("listings").update({status:"reject"}).eq("external_id",externalId);
-    if(error){ alert("Couldn't update: "+error.message); return; }
-    fetchReview();
-  }
-
   const now=Date.now();
   const rollup=(windowMs)=>{
     const cutoff=now-windowMs;
@@ -6368,25 +6271,6 @@ function AdminPanel(){
   if(checkingSession) return <div style={{minHeight:"100dvh",background:C.paper,display:"flex",alignItems:"center",justifyContent:"center",color:C.inkFaint,fontFamily:"'Nunito',Helvetica,Arial,sans-serif"}}>Loading…</div>;
   if(!session) return <AdminLogin/>;
 
-  const byProvince={};
-  const byFuel={};
-  let evapCount=0;
-  const firstSeenTimestamps=[];
-  const daysOnMarketValues=[];
-  liveListings.forEach(l=>{
-    byProvince[l.province]=(byProvince[l.province]||0)+1;
-    byFuel[l.fuel]=(byFuel[l.fuel]||0)+1;
-    if(getEVAP(l)) evapCount++;
-    const h=historyMap[l.external_id];
-    if(h&&h.length){
-      const firstSeen=new Date(h[0].recorded_at).getTime();
-      firstSeenTimestamps.push(firstSeen);
-      daysOnMarketValues.push(Math.max(0,Math.floor((Date.now()-firstSeen)/86400000)));
-    }
-  });
-  const avgDaysOnMarket=daysOnMarketValues.length?Math.round(daysOnMarketValues.reduce((a,b)=>a+b,0)/daysOnMarketValues.length):null;
-  const bucketedListings=bucketByTime(firstSeenTimestamps,listingsGranularity);
-
   return(
     <AdminThemeContext.Provider value={themeState}>
     <div style={{minHeight:"100dvh",background:C.paper,color:C.ink,padding:"24px",fontSize:15,
@@ -6406,7 +6290,6 @@ function AdminPanel(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:10,padding:4}}>
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
-          <AdminTabButton active={tab==="review"} onClick={()=>setTab("review")}>Review</AdminTabButton>
           <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
@@ -6536,91 +6419,6 @@ function AdminPanel(){
             </>
           )}
 
-          <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10}}>LISTINGS · {listingsLoading?"loading…":`${liveListings.length} live`}</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:16}}>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{liveListings.length}</div>
-              <div style={{fontSize:13.5,color:C.inkFaint}}>Total live listings</div>
-            </div>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>{evapCount}</div>
-              <div style={{fontSize:13.5,color:C.inkFaint}}>EVAP-eligible (new, verified)</div>
-            </div>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{Object.keys(byProvince).length}</div>
-              <div style={{fontSize:13.5,color:C.inkFaint}}>Provinces covered</div>
-            </div>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{reportLeads.length}</div>
-              <div style={{fontSize:13.5,color:C.inkFaint}}>Report emails captured</div>
-            </div>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-              <div style={{fontSize:26,fontWeight:800,color:C.ink}}>{avgDaysOnMarket==null?"—":`${avgDaysOnMarket}d`}</div>
-              <div style={{fontSize:13.5,color:C.inkFaint}}>Avg. days on market</div>
-            </div>
-          </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:28}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>New listings tracked over time</div>
-              <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
-                {[["hour","1H"],["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
-                  <button key={key} onClick={()=>setListingsGranularity(key)}
-                    style={{background:listingsGranularity===key?C.tealBg:"transparent",color:listingsGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {firstSeenTimestamps.length===0?(
-              <div style={{color:C.inkFaint,fontSize:14.5,textAlign:"center",padding:"20px 0"}}>No listing history recorded yet.</div>
-            ):(
-              <>
-                <div style={{height:180}}>
-                  <ResponsiveContainer>
-                    <BarChart data={bucketedListings} margin={{top:4,right:4,bottom:0,left:0}}>
-                      <XAxis dataKey="label" tick={{fontSize:12,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                      <YAxis tick={{fontSize:13,fill:C.inkFaint}} tickLine={false} axisLine={false} width={30} allowDecimals={false}/>
-                      <Tooltip
-                        formatter={(v)=>[v,"New listings"]}
-                        contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:13.5,fontWeight:700,color:"#fff"}}
-                        labelStyle={{color:"#D9DBEF",fontSize:13}}
-                      />
-                      <Bar dataKey="count" radius={[3,3,0,0]}>
-                        {bucketedListings.map((entry,i)=>(
-                          <Cell key={i} fill={i===0||entry.count>=bucketedListings[i-1].count?C.teal:C.butter}/>
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div style={{display:"flex",gap:16,marginTop:8,fontSize:13,color:C.inkFaint}}>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.teal,marginRight:5}}/>Up from previous period</span>
-                  <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:C.butter,marginRight:5}}/>Down from previous period</span>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:28}}>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:13.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By province</div>
-              {Object.entries(byProvince).sort((a,b)=>b[1]-a[1]).map(([p,c])=>(
-                <div key={p} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:14.5}}>
-                  <span style={{color:C.inkSoft}}>{p}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px"}}>
-              <div style={{fontSize:13.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>By fuel type</div>
-              {Object.entries(byFuel).sort((a,b)=>b[1]-a[1]).map(([f,c])=>(
-                <div key={f} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.line}`,fontSize:14.5}}>
-                  <span style={{color:C.inkSoft}}>{f}</span><span style={{fontWeight:800,color:C.ink}}>{c}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:10,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
             <span>REPORT EMAILS · {reportLeadsLoading?"loading…":`${reportLeads.length} total`}</span>
             {!reportLeadsLoading&&reportLeads.length>0&&(
@@ -6650,14 +6448,6 @@ function AdminPanel(){
             </div>
           )}
         </>)}
-
-        {tab==="review" && (
-          <ReviewTab
-            reviewListings={reviewListings} reviewLoading={reviewLoading}
-            rejectedListings={rejectedListings}
-            onApprove={approveReview} onReject={rejectReview}
-          />
-        )}
 
         {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
         {tab==="profit" && <ProfitTrackerTab/>}
