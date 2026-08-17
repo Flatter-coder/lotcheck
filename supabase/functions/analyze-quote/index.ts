@@ -58,6 +58,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
 
@@ -748,6 +749,15 @@ Deno.serve(async (req: Request) => {
     // S25 — all-in label + safeguard: fires on any all-in-province listing, even a
     // clean one, so the report labels the price all-in and the script states the anchor.
     { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; }
+    // VIC'S RULE, on the QUOTE path too: no dealer terms -> use the
+    // manufacturer's APR and price and do the math. A pasted quote that shows a
+    // price but no financing is the same situation as a listing that shows
+    // none, and the buyer needs the same number to beat.
+    if (!analysis.financingCheck?.checked) {
+      const ref = computeReferenceFinancing(analysis);
+      if (ref) analysis.referenceFinancing = ref;
+    }
+
     // Counter-script — aggregate every safeguard's "say this" (runs LAST).
     analysis.counterScript = buildCounterScript(analysis);
 
@@ -1234,7 +1244,11 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
         if (pool.length) {
           const std = pool.filter((r: any) => !r.promo);
           const pick = std.find((r: any) => r.term_months === 60) || std[0] || pool[0];
-          out.manufacturer = { apr: Number(pick.apr), promo: !!pick.promo, effectiveDate: pick.effective_date };
+          // termMonths MUST travel with the rate. analyze-listing-url had the
+          // identical line and dropping the term made the payment impossible to
+          // compute; fixing it there and not here is exactly the one-call-site
+          // fix that report-features-all-views exists to prevent.
+          out.manufacturer = { apr: Number(pick.apr), termMonths: Number(pick.term_months) || null, promo: !!pick.promo, effectiveDate: pick.effective_date };
         }
       }
     } catch (err) {
