@@ -92,5 +92,32 @@ contract("isLive is actually passed to LiveTicker",
   /<LiveTicker[^>]*\bisLive=\{isLive\}/.test(app),
   "the prop exists but nothing supplies it — the gate would be permanently false");
 
+// EVERY call site, not just one. A timestamp that is threaded correctly through
+// one panel and dropped in another leaves that panel's badge permanently dark,
+// and every check above still passes: the hook exports it, the badge consumes
+// it, nothing reads `!apiUsageLoading`. Only counting the wiring catches it.
+//
+// This is not hypothetical. PR #220 (drop the Review tab) conflicted with this
+// change on the exact line that destructures useApiUsage, and GitHub's "Accept
+// current change" button resolves it to the pre-change version — silently
+// undoing the wiring in AdminPanel while leaving FoundersPanel intact. Verified:
+// the three contracts above all stayed green against that resolution.
+const useSites = app.match(/^.*=\s*useApiUsage\(\).*$/gm) || [];
+contract("every useApiUsage() call site destructures lastReadAt",
+  useSites.length > 0 && useSites.every((l) => /lastReadAt\s*:\s*apiUsageReadAt/.test(l)),
+  useSites.length === 0
+    ? "no useApiUsage() call sites found — the pattern moved and this check went blind"
+    : `${useSites.filter((l) => !/lastReadAt/.test(l)).length} of ${useSites.length} call site(s) drop it, ` +
+      `so that panel's badge can never light:\n       ` +
+      useSites.filter((l) => !/lastReadAt/.test(l)).map((l) => l.trim()).join("\n       "));
+
+const verifRenders = app.match(/<VerificationTab\b[^>]*>/g) || [];
+contract("every VerificationTab render is passed apiUsageReadAt",
+  verifRenders.length > 0 && verifRenders.every((r) => /apiUsageReadAt=\{apiUsageReadAt\}/.test(r)),
+  verifRenders.length === 0
+    ? "no <VerificationTab> renders found — this check went blind"
+    : `${verifRenders.filter((r) => !/apiUsageReadAt/.test(r)).length} render(s) omit it:\n       ` +
+      verifRenders.filter((r) => !/apiUsageReadAt/.test(r)).join("\n       "));
+
 console.log(`\n${fail ? "❌" : "✅"} live-dot: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
