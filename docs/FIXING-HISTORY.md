@@ -20,6 +20,9 @@ the next instance.
 
 | fix | what broke | class | guard now in place |
 |---|---|---|---|
+| `383532a` | **The verification ledger showed "● Live" over a read that failed.** It lit on `loaded = !apiUsageLoading`, and a FAILED read clears that flag too — `useApiUsage` catches, logs a warning, and clears loading in `finally` either way. So the badge claimed live over data it never received | green signal, no check | the hook reports `lastReadAt`, stamped only beside `setUsage` inside the `try`; a timestamp cannot be produced by a failure. `test:live-dot` asserts no badge is gated on `!apiUsageLoading` |
+| `383532a` | **LiveTicker blinked a green dot over `DEMO_LISTINGS`** — fourteen invented cars at invented prices, on the public landing page. Its guard was `listings.length > 0`, which **can never be false**: `useListings` *seeds* its state with `DEMO_LISTINGS`, so the demo array arrives through that same prop and the local fallback was dead code. The real answer already existed one hook away as `isLive`, set only inside `if(data && data.length > 0)` — it was simply never passed down | green signal, no check | gates on `isLive`; demo rows lose the dot and carry a "Sample" chip (not green, not animated — it is the opposite claim). `test:live-dot` asserts the gate AND that `isLive` is actually passed, since a prop nothing supplies leaves the gate permanently false |
+| `383532a` | `VerifLiveDot` **could only render lit.** It took a colour and nothing else, so every caller had to remember to gate it — and the one caller gated it wrong. The component that cannot express "not live" is the defect, not the call site | one-surface fix | deleted, not fixed. Replaced by `src/lib/live-state.js` — one decision function whose only input is `readAt`, with no argument that forces a lit result, and three states so `aged` is neither hidden nor called live. 14 unit tests incl. a FUTURE timestamp reading `unavailable`, so a skewed clock cannot pin a badge lit |
 | `7979db0` | **The Alberta map invented dealer counts and called them live.** `alberta.html` held a frozen per-city snapshot so a failed fetch could "fall back silently … so the map always renders". It summed to **527 against a real 405**, disagreed with OSM in **30 of 33 cities**, and showed Grande Prairie **24** where OSM finds **2** — under a hardcoded `Live dealers` badge, reached through three silent exits. One dealer screenshot of that discredits the product | absence read as knowledge | counts deleted from markup; `dealers` is null until a real read and every path renders "—"; badge ships neutral and JS lights it only after a successful read (live / aged / unavailable); `test:alberta-dealers` — all 5 markup assertions fail against the pre-fix file |
 | `7979db0` | Overpass answered **HTTP 406 to every mirror** because Node's fetch sends no descriptive User-Agent, which the API's policy requires. Four mirrors × four retry rounds could never have helped — the request shape was the bug, and Overpass was healthy throughout. 4 of the last 5 weekly runs lost to it | green signal, no check | descriptive `User-Agent` with a contact URL; `check:jobs` requires one on every third-party fetch in `scripts/` — it caught two more silent cases (StatCan, NRCan), both fixed in the same commit |
 | `7979db0` | The failure **always blamed the wrong mirror**. Only `lastErr` survived, so the error described whichever ran last — `overpass.osm.ch`, which fails *differently* (200 + empty body). Four runs printed "only 0 elements" and the 406 never appeared once. A report naming one of four failures is worse than none: it looks like a diagnosis | absence read as knowledge | every mirror's outcome collected and printed, de-duplicated, with an explicit "406/429 across the board means REFUSED, not down" note in the thrown error |
@@ -72,16 +75,16 @@ the next instance.
 - **`check:parity` checks report *surfaces*, not shared *helpers*.** It did not
   catch the dropped-term bug living in two functions. Extending it would close
   the one-surface class properly.
-- **Lit "Live" dots that are not gated on a successful read, outside the Alberta
-  map.** The 2026-08-17 sweep found two more: `App.jsx:2530`, where LiveTicker
-  blinks a green dot per row while showing `DEMO_LISTINGS`; and `App.jsx:5754`,
-  where the verification ledger shows "● Live" on `loaded = !apiUsageLoading`,
-  which is true after a *failed* read because `useApiUsage` swallows the error
-  and exposes no flag. Same class as the map badge — a lit dot is a claim, and
-  these two make it without a read behind them. Left out of `7979db0`
-  deliberately: different feature, own design decisions. The durable fix is one
-  shared primitive that **cannot render a lit dot without a successful-read
-  timestamp**, with the hand-written dots routed through it.
+- ~~Lit "Live" dots outside the Alberta map.~~ **Closed by `383532a`** — the
+  shared primitive named here now exists (`src/lib/live-state.js`) and both
+  instances route through it. Kept as a note because the *shape* is worth
+  remembering: all three surfaces failed the same way, by substituting something
+  merely **correlated** with a successful read for the read itself — static
+  markup, `!apiUsageLoading`, and `listings.length > 0`. When a live badge is
+  wrong, look first for the cheap proxy standing in for the real signal, and
+  check whether the honest answer already exists nearby. It did in both cases:
+  `useApiUsage` could have reported when a read returned, and `useListings`
+  already computed `isLive` and simply never passed it down.
 - **RAV4 and RAV4 Hybrid are still two keys for one car.** The resync converges
   their rows and `20260817` keeps their enrichment in step, but neither removes
   the duplication. The pair has now cost two distinct defects — a $6,299 wrong

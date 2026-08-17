@@ -8,6 +8,9 @@ import heic2any from "heic2any";
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
 import DealOrrery from "./DealOrrery.jsx";
+// A lit dot is a claim — one decision function, testable, with no way to force
+// a lit result without a timestamp from a read that actually returned.
+import { liveState } from "./lib/live-state.js";
 
 // ---------------------------------------------------------------------------
 // Alberta-only access gate.
@@ -280,6 +283,8 @@ const GLOBAL_CSS = `
   .lc-ticker-item .name { color: #94a3b8; }
   .lc-ticker-item .up { color: #22c55e; }
   .lc-ticker-item .down { color: #ef4444; }
+  /* Only rendered for REAL listings. It used to render for the demo array too,
+     which put a blinking "live" marker on fourteen invented cars. */
   .lc-ticker-dot {
     width: 5px; height: 5px; border-radius: 50%;
     background: #22c55e;
@@ -287,6 +292,15 @@ const GLOBAL_CSS = `
   }
   @keyframes lc-blink {
     0%, 100% { opacity: 1; } 50% { opacity: 0.25; }
+  }
+  /* Shown INSTEAD of the dots when the ticker is falling back to sample cars.
+     Deliberately not green and deliberately not animated -- it is the opposite
+     claim, so it must not borrow the visual language of the live marker. */
+  .lc-ticker-sample {
+    flex: none; align-self: center; margin-right: 10px; padding: 2px 7px;
+    border: 1px solid #475569; border-radius: 20px;
+    font-size: 9px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    color: #94a3b8; background: rgba(148,163,184,.08);
   }
 
   /* Radar ping — used where LotCheck is claiming genuinely live/real-time
@@ -1135,6 +1149,7 @@ function usePriceHistoryMap(){
 function useApiUsage(){
   const [usage, setUsage] = useState([]);
   const [usageLoading, setUsageLoading] = useState(true);
+  const [lastReadAt, setLastReadAt] = useState(null);   // set ONLY on a read that returned
 
   useEffect(()=>{
     let cancelled = false;
@@ -1146,7 +1161,7 @@ function useApiUsage(){
           .order("created_at", {ascending:true})
           .limit(50000);
         if(error) throw error;
-        if(!cancelled) setUsage(data||[]);
+        if(!cancelled){ setUsage(data||[]); setLastReadAt(Date.now()); }
       }catch(err){
         console.warn("⚠️ api_usage_log fetch failed (did you run create_api_usage_log_table.sql?):", err.message);
         // Blank ONLY on the very first read, where an empty panel is the honest
@@ -1184,7 +1199,12 @@ function useApiUsage(){
     };
   },[]);
 
-  return {usage, usageLoading};
+  // lastReadAt is the ONLY honest input to a live badge here. usageLoading says
+  // a request is not pending, which is equally true of a request that failed --
+  // the catch above logs and swallows, and `finally` clears the flag either way.
+  // The ledger lit its "● Live" dot on !usageLoading and so claimed live over a
+  // failed read. A timestamp cannot be produced by a failure.
+  return {usage, usageLoading, lastReadAt};
 }
 
 // NOTE: previously there was a `genHistory()` function here that generated a
@@ -2505,13 +2525,57 @@ function LiveBackground(){
   );
 }
 
-function LiveTicker({listings,onSelect}){
+// ── A LIT DOT IS A CLAIM ────────────────────────────────────────────────────
+// The rule is in src/lib/live-state.js so it can be unit-tested (test:live-dot)
+// rather than only asserted about. This is the standard rendering for a label +
+// dot: pass the timestamp of the last SUCCESSFUL read. There is deliberately no
+// prop that forces it lit.
+function LiveDot({readAt, maxAgeMs, color="#0f9b8e", dotColor, dimColor="#94a3b8", label="Live", title}){
+  const state = liveState(readAt, maxAgeMs);
+  const lit = state === "live";
+  const text = lit ? label : state === "aged" ? "Last read " + new Date(Number(readAt)).toLocaleTimeString("en-CA",{hour:"numeric",minute:"2-digit"}) : "Not reading";
+  return (
+    <span
+      title={title || (lit ? `${label} — read succeeded` : state === "aged"
+        ? "The last read succeeded but is no longer recent."
+        : "No successful read yet — this is not live.")}
+      style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:800,letterSpacing:1.2,color:lit?color:dimColor,textTransform:"uppercase"}}>
+      <style>{`
+        @keyframes lcLivePulse{0%,100%{opacity:1}50%{opacity:.22}}
+        .lc-live-dot.lit{animation:lcLivePulse 1.6s ease-in-out infinite}
+        @media (prefers-reduced-motion:reduce){.lc-live-dot.lit{animation:none}}
+      `}</style>
+      <i className={"lc-live-dot"+(lit?" lit":"")}
+         style={{width:6,height:6,borderRadius:"50%",background:lit?(dotColor||color):dimColor,display:"inline-block"}}/>
+      {text}
+    </span>
+  );
+}
+
+function LiveTicker({listings,isLive,onSelect}){
   // Shows real listings with real current prices, scrolling. No fabricated
   // price movement — a previous version randomly nudged prices every 2.5s
   // to simulate "live" ticks, which was fake data on real car names. Real
   // price changes will show once price_history has enough points per listing
   // to justify a real delta; until then this is a straight snapshot ticker.
-  const src=listings&&listings.length>0?listings:DEMO_LISTINGS;
+  // THE BLINKING GREEN DOT WAS ON THE DEMO CARS TOO.
+  // `.lc-ticker-dot` is a #22c55e dot on a 1.6s blink, and it rendered on every
+  // row unconditionally — including when this fell back to DEMO_LISTINGS, which
+  // is fourteen invented cars at invented prices. The comment above is careful
+  // that no price MOVEMENT is fabricated, and then the liveness indicator was
+  // fabricated instead. Same class as the Alberta map's "Live dealers" badge
+  // over counts nobody read.
+  //
+  // GATE ON isLive, NOT ON LENGTH. `listings.length > 0` cannot ever be false:
+  // useListings SEEDS its state with DEMO_LISTINGS and only replaces it when a
+  // query returns rows, so the demo array arrives through this very prop. The
+  // local fallback below was therefore dead code, and any liveness test built on
+  // it answers "live" for demo data. useListings already tracks the real answer
+  // in `isLive` — set only inside `if(data && data.length > 0)` — so USE it
+  // rather than invent a second, weaker test beside it. Same mistake as the
+  // ledger gating on `!apiUsageLoading`.
+  const isReal=!!isLive;
+  const src=isReal&&listings&&listings.length?listings:DEMO_LISTINGS;
   const items=src.map(l=>({id:l.id,listing:l,name:`${l.make} ${l.model}`,price:l.price}));
   const doubled=[...items,...items];
   // Duration was previously a fixed 38s regardless of item count. That was
@@ -2524,10 +2588,13 @@ function LiveTicker({listings,onSelect}){
   const duration=Math.max(MIN_DURATION, items.length*SECONDS_PER_ITEM);
   return(
     <div className="lc-ticker-wrap">
+      {!isReal && (
+        <span className="lc-ticker-sample" title="No live listings loaded — these are sample cars, not real inventory.">Sample</span>
+      )}
       <div className="lc-ticker-track" style={{animationDuration:`${duration}s`}}>
         {doubled.map((it,i)=>(
           <span key={i} className="lc-ticker-item" onClick={()=>onSelect&&onSelect(it.listing)} style={{cursor:"pointer"}}>
-            <span className="lc-ticker-dot"/>
+            {isReal && <span className="lc-ticker-dot"/>}
             <span className="name">{it.name}</span>
             <span style={{color:"#f1f5f9",fontWeight:600}}>${it.price.toLocaleString()}</span>
           </span>
@@ -4156,19 +4223,11 @@ function buildVerifIntervals(bucket, rows){
 }
 
 
-function VerifLiveDot({C}){
-  return (
-    <span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:800,letterSpacing:1.2,color:C.tealInk,textTransform:"uppercase"}}>
-      <style>{`
-        @keyframes lcVerifPulse{0%,100%{opacity:1}50%{opacity:.22}}
-        .lc-verif-dot{animation:lcVerifPulse 1.6s ease-in-out infinite}
-        @media (prefers-reduced-motion:reduce){.lc-verif-dot{animation:none}}
-      `}</style>
-      <i className="lc-verif-dot" style={{width:6,height:6,borderRadius:"50%",background:C.teal,display:"inline-block"}}/>
-      Live
-    </span>
-  );
-}
+// VerifLiveDot was here. It took only a colour and always rendered lit, so
+// every caller had to remember to gate it -- and the one caller gated it on
+// `!apiUsageLoading`, which a failed read satisfies too. Deleted rather than
+// fixed: a component that CAN render lit without evidence is the defect, and
+// LiveDot (see liveState) has no prop that forces it on.
 
 const vnum = (n) => Number(n || 0).toLocaleString("en-CA");
 
@@ -5449,7 +5508,7 @@ function VerifProfitPeriods({C}){
   );
 }
 
-function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
+function VerificationTab({apiUsage, apiUsageLoading, apiUsageReadAt, readOnly}){
   const {C}=useAdminTheme();
   const [range,setRange]=useState("24h");
   const bucket=VERIF_BUCKETS.find(b=>b.k===range)||VERIF_BUCKETS[1];
@@ -5514,7 +5573,10 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
   const totUrlDegraded=inWindow.filter(r=>r.feature==="listing_url"&&isDegraded(r)).length;
   const totQuoteDegraded=inWindow.filter(r=>r.feature==="quote"&&isDegraded(r)).length;
   const peak=Math.max(1,...intervals.map(r=>r.ok+r.fail));
-  const loaded=!apiUsageLoading;
+  // `loaded = !apiUsageLoading` used to live here and gate the "● Live" dot.
+  // It was wrong in the one case that matters: a FAILED read also clears the
+  // loading flag, so the ledger lit green over data it had not managed to fetch.
+  // The badge now takes apiUsageReadAt, which only a read that returned can set.
 
   // Per-checkpoint outcomes (20260815_verification_check.sql). Read over the
   // SAME window as the intervals above -- rolling or calendar-anchored, both
@@ -5696,7 +5758,7 @@ function VerificationTab({apiUsage, apiUsageLoading, readOnly}){
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:14}}>
         <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>
-          VERIFICATION LEDGER {loaded && <VerifLiveDot C={C}/>}
+          VERIFICATION LEDGER <LiveDot readAt={apiUsageReadAt} maxAgeMs={150000} color={C.tealInk} dotColor={C.teal}/>
         </div>
         <div style={{display:"flex",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:999,padding:3}}>
           {VERIF_BUCKETS.map(b=>(
@@ -5919,7 +5981,7 @@ function FoundersPanel(){
   const [allowed,setAllowed]=useState(null);   // null = still checking
   const themeState=useThemeState();
   const {C}=themeState;
-  const {usage:apiUsage, usageLoading:apiUsageLoading}=useApiUsage();
+  const {usage:apiUsage, usageLoading:apiUsageLoading, lastReadAt:apiUsageReadAt}=useApiUsage();
 
   useEffect(()=>{
     let active=true;
@@ -5995,7 +6057,7 @@ function FoundersPanel(){
     </div>
   );
 
-  return shell(<VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} readOnly/>);
+  return shell(<VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt} readOnly/>);
 }
 
 function AdminPanel(){
@@ -6008,7 +6070,16 @@ function AdminPanel(){
   const [pageViews,setPageViews]=useState([]);
   const [trafficGranularity,setTrafficGranularity]=useState("day");
   const [viewsLoading,setViewsLoading]=useState(true);
-  const {usage:apiUsage, usageLoading:apiUsageLoading}=useApiUsage();
+  // UNION MERGE. This branch drops the LISTINGS block, so liveListings,
+  // historyMap and listingsGranularity are correctly gone from this panel --
+  // but `lastReadAt` is not part of that block. It wires the verification
+  // ledger's "● Live" badge, which this branch keeps and still renders below
+  // as <VerificationTab ... apiUsageReadAt={apiUsageReadAt}/>.
+  //
+  // Taking either side alone is wrong: "current" drops the timestamp and the
+  // badge can never light again (silently -- it just reads "Not reading"),
+  // while "incoming" restores the very block this branch exists to remove.
+  const {usage:apiUsage, usageLoading:apiUsageLoading, lastReadAt:apiUsageReadAt}=useApiUsage();
 
   const [dealers,setDealers]=useState([]);
   const [dealersLoading,setDealersLoading]=useState(true);
@@ -6454,7 +6525,7 @@ function AdminPanel(){
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
         {tab==="alerts" && <AlertFoldersTab/>}
-        {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
+        {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
@@ -12013,7 +12084,7 @@ function LotCheckApp(){
           </a>
         </header>
 
-        <LiveTicker listings={liveListings} onSelect={handleSelect}/>
+        <LiveTicker listings={liveListings} isLive={isLive} onSelect={handleSelect}/>
 
         {/* Province filter — uses liveListings so only real provinces show */}
         <div className="lc-provinces">
