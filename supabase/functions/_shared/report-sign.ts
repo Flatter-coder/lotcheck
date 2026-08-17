@@ -26,12 +26,13 @@ function num(x: unknown): number | null {
 // client's canonicalReport(). This exact string is hashed AND signed.
 export function canonicalReport(a: any): any {
   return {
-    // v2: added leverage's traceable note (lvn) and each add-on's reason, so
+    // v3: also projects fcx + source, which had drifted onto the client copy
+    // only. v2 added leverage's traceable note (lvn) and each add-on's reason, so
     // /verify no longer shows a bare score or a fee flag with no basis. Safe,
     // additive-only bump -- /verify re-hashes whatever bytes are EMBEDDED in
     // its own link, never rebuilds canonicalReport() from a live object, so
     // links signed under v1 keep verifying exactly as issued.
-    v: 2,
+    v: 3,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -55,6 +56,15 @@ export function canonicalReport(a: any): any {
     basis: a.msrpBasis ? { b: a.msrpBasis, t: a.msrpTrim || null, y: a.msrpYear || null } : null,
     allIn: a.allInPricing?.body || null,
     disc: a.disclaimerCheck ? { e: !!a.disclaimerCheck.escapeHatch, x: !!a.disclaimerCheck.contradiction } : null,
+    // fcx + source were on the CLIENT copy only, since 4e3a733 ("Flag when the
+    // advertised price depends on financing with the dealer") added them there
+    // and never touched this file. The server COMPUTES financeContingent and
+    // simply never projected it, so the finance-contingent flag -- one of the
+    // dealer tactics this product exists to surface -- could not appear on
+    // /verify for any signed report. Same defect the v2 bump was fixing, two
+    // fields further down. Copied verbatim from the client so the shapes match.
+    fcx: a.financeContingent?.contingent ? { r: a.financeContingent.reasons || [] } : null,
+    source: (a.sourceUrl || a.capturedAt) ? { url: a.sourceUrl || null, capturedAt: a.capturedAt || null } : null,
     issuedAt: a.issuedAt || null,
   };
 }

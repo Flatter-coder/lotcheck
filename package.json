@@ -48,7 +48,8 @@
     "check:no-emoji": "node scripts/check-no-emoji-ui.mjs",
     "test:alberta-dealers": "node scripts/test-alberta-dealers.mjs",
     "check:jobs": "node scripts/check-scheduled-jobs.mjs",
-    "test:live-dot": "node scripts/test-live-dot.mjs"
+    "test:live-dot": "node scripts/test-live-dot.mjs",
+    "check:canonical": "node scripts/check-canonical-parity.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
