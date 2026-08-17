@@ -99,11 +99,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   .hero-title{font-size:22px}
 }
 </style>
+  <link rel="stylesheet" href="/icons3d.css">
 </head>
 <body>
 
 <div class="header">
-  <div class="logo">✅</div>
+  <div class="logo"><svg data-icon="check" width="34" height="34" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><radialGradient id="h-check" cx="34%" cy="27%" r="80%"><stop offset="0%" stop-color="#8FF3CE"/><stop offset="46%" stop-color="#2FCB92"/><stop offset="100%" stop-color="#0C7C56"/></radialGradient></defs><ellipse cx="12" cy="21.2" rx="7" ry="1.35" fill="#000" opacity="0.18"/><g class="i3-pulse"><circle cx="12" cy="11.4" r="8.4" fill="url(#h-check)"/><ellipse cx="9.3" cy="7.6" rx="2.9" ry="1.9" fill="#EAFFF6" opacity=".45"/><path d="M7.7 11.3l2.8 2.8 5.5-5.7" fill="none" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
   <div>
     <div class="logo-text">LotCheck Dealer Portal</div>
     <div class="logo-sub">List your inventory · Early access</div>
@@ -141,7 +142,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- DEALER INFO -->
   <div class="section">
     <div class="section-header">
-      <div class="section-title">🏢 Your Dealership</div>
+      <div class="section-title"><svg data-icon="building" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-bld" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#C6D2EA"/><stop offset="48%" stop-color="#8A98B8"/><stop offset="100%" stop-color="#4B5771"/></linearGradient></defs><ellipse cx="12" cy="20.6" rx="7.4" ry="1.35" fill="#000" opacity="0.2"/><rect x="4.4" y="6.4" width="8.4" height="13.4" rx="1" fill="url(#h-bld)"/><rect x="12.8" y="9.8" width="6.8" height="10" rx="1" fill="url(#h-bld)" opacity=".8"/><rect x="4.4" y="6.4" width="2.4" height="13.4" fill="#EEF3FC" opacity=".26"/><g fill="#22304A" opacity=".72"><rect x="6" y="8.3" width="1.9" height="1.9" rx=".35"/><rect x="9.3" y="8.3" width="1.9" height="1.9" rx=".35"/><rect x="6" y="11.7" width="1.9" height="1.9" rx=".35"/><rect x="9.3" y="11.7" width="1.9" height="1.9" rx=".35"/><rect x="14.3" y="11.6" width="1.7" height="1.7" rx=".3"/><rect x="16.8" y="11.6" width="1.7" height="1.7" rx=".3"/></g><rect class="i3-glow" x="9.3" y="15.1" width="1.9" height="1.9" rx=".35" fill="#7FE3C0"/></svg> Your Dealership</div>
       <div class="section-sub">Basic information about your store</div>
     </div>
     <div class="section-body">
@@ -185,7 +186,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- VEHICLE LISTING -->
   <div class="section">
     <div class="section-header">
-      <div class="section-title">🚗 Vehicle Details</div>
+      <div class="section-title"><svg data-icon="car" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-car" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#8FC2FF"/><stop offset="48%" stop-color="#3E86E8"/><stop offset="100%" stop-color="#1B4E9B"/></linearGradient><linearGradient id="h-car2" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#DCEBFF"/><stop offset="100%" stop-color="#9DC4F2"/></linearGradient></defs><ellipse cx="12" cy="20.4" rx="8" ry="1.35" fill="#000" opacity="0.2"/><g class="i3-drive"><path d="M4.2 15.4c0-1 .5-2.4 1.3-3l1.7-2.5C7.7 9 8.6 8.5 9.6 8.5h4.8c1 0 1.9.5 2.4 1.4l1.7 2.5c.8.6 1.3 2 1.3 3v1.5c0 .6-.5 1-1 1h-.9v.6c0 .6-.5 1-1.1 1h-1c-.6 0-1.1-.4-1.1-1v-.6H9.3v.6c0 .6-.5 1-1.1 1h-1c-.6 0-1.1-.4-1.1-1v-.6h-.8c-.6 0-1-.4-1-1z" fill="url(#h-car)"/><path d="M8.6 10.4c.2-.4.6-.6 1-.6h4.8c.4 0 .8.2 1 .6l1.3 2.1H7.3z" fill="url(#h-car2)"/><circle cx="8.5" cy="16.1" r="1.05" fill="#12305E"/><circle cx="15.5" cy="16.1" r="1.05" fill="#12305E"/></g></svg> Vehicle Details</div>
       <div class="section-sub">Add one vehicle at a time — you can submit multiple</div>
     </div>
     <div class="section-body">
@@ -258,7 +259,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
           ondragover="event.preventDefault();this.style.borderColor='var(--green)'"
           ondragleave="this.style.borderColor='var(--border)'"
           ondrop="handleDrop(event)">
-          <div class="photo-drop-icon">📸</div>
+          <div class="photo-drop-icon"><svg data-icon="camera" width="40" height="40" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-cam" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#4C5670"/><stop offset="48%" stop-color="#2E3648"/><stop offset="100%" stop-color="#171C28"/></linearGradient><radialGradient id="h-cam2" cx="34%" cy="27%" r="80%"><stop offset="0%" stop-color="#EAF3FF"/><stop offset="46%" stop-color="#5E93D8"/><stop offset="100%" stop-color="#1E3A66"/></radialGradient></defs><ellipse cx="12" cy="20.6" rx="7.6" ry="1.35" fill="#000" opacity="0.2"/><rect x="2.8" y="7.2" width="18.4" height="11.6" rx="2.4" fill="url(#h-cam)"/><path d="M8.6 7.2l1.2-2h4.4l1.2 2z" fill="url(#h-cam)"/><rect x="2.8" y="7.2" width="18.4" height="2.4" rx="2.2" fill="#7C879E" opacity=".28"/><circle cx="12" cy="13.2" r="4.3" fill="#0F1420"/><circle cx="12" cy="13.2" r="3.2" fill="url(#h-cam2)"/><ellipse cx="10.7" cy="11.9" rx="1.2" ry=".85" fill="#FFFFFF" opacity=".6"/><circle class="i3-glow" cx="18.4" cy="9.6" r="1" fill="#FF8A6B"/></svg></div>
           <div class="photo-drop-text">Drop photos here or click to upload</div>
           <div class="photo-drop-sub">JPG, PNG · Up to 10 photos · Max 5MB each</div>
         </div>
@@ -271,24 +272,24 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <!-- COMMISSION MODEL -->
   <div class="section">
     <div class="section-header">
-      <div class="section-title">💰 Choose Your Plan</div>
+      <div class="section-title"><svg data-icon="money" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><radialGradient id="h-mon" cx="34%" cy="27%" r="80%"><stop offset="0%" stop-color="#FFF3C2"/><stop offset="46%" stop-color="#F5C63A"/><stop offset="100%" stop-color="#A9740A"/></radialGradient></defs><ellipse cx="12" cy="20.6" rx="7" ry="1.35" fill="#000" opacity="0.2"/><g class="i3-bob"><ellipse cx="12" cy="16.6" rx="7" ry="2.5" fill="#8E6208"/><rect x="5" y="12.4" width="14" height="4.2" fill="#B9840D"/><ellipse cx="12" cy="12.4" rx="7" ry="2.5" fill="url(#h-mon)"/><ellipse cx="9.6" cy="11.5" rx="2" ry=".8" fill="#FFFDF0" opacity=".55"/></g></svg> Choose Your Plan</div>
       <div class="section-sub">Planned pricing — free to list during early access; these models only charge when you benefit</div>
     </div>
     <div class="section-body">
       <div class="plan-grid">
         <div class="plan selected" id="plan-lead" onclick="selectPlan('lead')">
-          <div class="plan-name">📋 Per Lead</div>
+          <div class="plan-name"><svg data-icon="clipboard" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-clip" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#FFF6E2"/><stop offset="48%" stop-color="#E8D6B0"/><stop offset="100%" stop-color="#A8926A"/></linearGradient><linearGradient id="h-clip2" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#C6D2EA"/><stop offset="100%" stop-color="#6C7794"/></linearGradient></defs><ellipse cx="12" cy="20.8" rx="6.6" ry="1.35" fill="#000" opacity="0.2"/><rect x="4.6" y="4.6" width="14.8" height="15.4" rx="1.9" fill="url(#h-clip)"/><rect x="4.6" y="4.6" width="3.2" height="15.4" fill="#FFFDF6" opacity=".38"/><rect x="8.4" y="2.9" width="7.2" height="3.4" rx="1.2" fill="url(#h-clip2)"/><g fill="#9A8763"><rect x="7.4" y="9.2" width="9.2" height="1.5" rx=".75"/><rect x="7.4" y="12.2" width="9.2" height="1.5" rx=".75"/><rect class="i3-fill" x="7.4" y="15.2" width="6" height="1.5" rx=".75"/></g></svg> Per Lead</div>
           <div class="plan-price">$100 <span style="font-size:13px;font-weight:400;color:var(--muted)">/lead</span></div>
           <div class="plan-desc">Pay per buyer connection — no monthly fees, cancel anytime. (Planned; free during early access.)</div>
         </div>
         <div class="plan" id="plan-commission" onclick="selectPlan('commission')">
-          <div class="plan-name">🤝 Commission</div>
+          <div class="plan-name"><svg data-icon="handshake" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-hs" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#FFD9BC"/><stop offset="48%" stop-color="#E09A62"/><stop offset="100%" stop-color="#8E5222"/></linearGradient><linearGradient id="h-hs2" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#FFE9D6"/><stop offset="48%" stop-color="#EFB98A"/><stop offset="100%" stop-color="#A0663A"/></linearGradient></defs><ellipse cx="12" cy="20.4" rx="7.6" ry="1.35" fill="#000" opacity="0.2"/><g class="i3-bob"><path d="M2.6 10.2l3.6-2.4 4.4 3.2-2.2 2.2a1.5 1.5 0 01-2 .1L2.6 10.2z" fill="url(#h-hs)"/><path d="M21.4 10.2l-3.6-2.4-4.4 3.2 2.2 2.2c.6.5 1.4.5 2 .1z" fill="url(#h-hs2)"/><path d="M8.4 11.6l2.6-2.2c.6-.5 1.4-.5 2 0l2.6 2.2-2.2 2.4c-.8.9-2.2.9-3 0z" fill="url(#h-hs2)"/></g></svg> Commission</div>
           <div class="plan-price">1% <span style="font-size:13px;font-weight:400;color:var(--muted)">of sale price</span></div>
           <div class="plan-desc">Pay nothing until a LotCheck buyer buys the car. Upload signed deal sheet to confirm. ~$450 on a $45K car.</div>
         </div>
       </div>
       <div class="commission-box">
-        <div class="commission-icon">✅</div>
+        <div class="commission-icon"><svg data-icon="check" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><radialGradient id="h-check" cx="34%" cy="27%" r="80%"><stop offset="0%" stop-color="#8FF3CE"/><stop offset="46%" stop-color="#2FCB92"/><stop offset="100%" stop-color="#0C7C56"/></radialGradient></defs><ellipse cx="12" cy="21.2" rx="7" ry="1.35" fill="#000" opacity="0.18"/><g class="i3-pulse"><circle cx="12" cy="11.4" r="8.4" fill="url(#h-check)"/><ellipse cx="9.3" cy="7.6" rx="2.9" ry="1.9" fill="#EAFFF6" opacity=".45"/><path d="M7.7 11.3l2.8 2.8 5.5-5.7" fill="none" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></g></svg></div>
         <div>
           <div class="commission-title">Your listing is always free</div>
           <div class="commission-sub">LotCheck never charges to list your inventory. No setup fees, no monthly minimum, no contracts. We earn when your cars sell — that's the only way we make money from dealer listings.</div>
@@ -309,7 +310,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   </div>
 
   <div class="success-box" id="success-box">
-    <div class="success-icon">🎉</div>
+    <div class="success-icon"><svg data-icon="celebrate" width="46" height="46" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-cel" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#FFE3A6"/><stop offset="48%" stop-color="#F0913C"/><stop offset="100%" stop-color="#9C4A07"/></linearGradient></defs><ellipse cx="12" cy="20.8" rx="6.8" ry="1.35" fill="#000" opacity="0.2"/><path d="M3.4 20.6l4.9-11.2 6.3 6.3z" fill="url(#h-cel)"/><path d="M3.4 20.6l4.9-11.2 1.9 1.9z" fill="#FFF0D8" opacity=".33"/><g class="i3-rise"><rect x="14.6" y="3.6" width="1.9" height="1.9" rx=".4" fill="#4FD8A6" transform="rotate(22 15.5 4.5)"/><rect x="18.2" y="7.4" width="1.7" height="1.7" rx=".4" fill="#F0648A" transform="rotate(-18 19 8.2)"/><circle cx="17" cy="12.2" r=".95" fill="#6FA8F0"/><circle cx="12.8" cy="5.4" r=".85" fill="#FFD34D"/></g></svg></div>
     <div class="success-title">Listing submitted!</div>
     <div class="success-sub">
       Your inventory has been sent to the LotCheck team at <strong>vic@lotcheck.ca</strong>.<br/>
@@ -334,7 +335,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
   <div class="section">
     <div class="section-header" style="display:flex;justify-content:space-between;align-items:center">
       <div>
-        <div class="section-title">📋 My Submitted Listings</div>
+        <div class="section-title"><svg data-icon="clipboard" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-clip" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#FFF6E2"/><stop offset="48%" stop-color="#E8D6B0"/><stop offset="100%" stop-color="#A8926A"/></linearGradient><linearGradient id="h-clip2" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#C6D2EA"/><stop offset="100%" stop-color="#6C7794"/></linearGradient></defs><ellipse cx="12" cy="20.8" rx="6.6" ry="1.35" fill="#000" opacity="0.2"/><rect x="4.6" y="4.6" width="14.8" height="15.4" rx="1.9" fill="url(#h-clip)"/><rect x="4.6" y="4.6" width="3.2" height="15.4" fill="#FFFDF6" opacity=".38"/><rect x="8.4" y="2.9" width="7.2" height="3.4" rx="1.2" fill="url(#h-clip2)"/><g fill="#9A8763"><rect x="7.4" y="9.2" width="9.2" height="1.5" rx=".75"/><rect x="7.4" y="12.2" width="9.2" height="1.5" rx=".75"/><rect class="i3-fill" x="7.4" y="15.2" width="6" height="1.5" rx=".75"/></g></svg> My Submitted Listings</div>
         <div class="section-sub">Mark a vehicle as sold to close the lead and log your commission</div>
       </div>
       <button onclick="loadMyListings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--muted);cursor:pointer;font-size:12px">↻ Refresh</button>
@@ -466,7 +467,7 @@ async function loadMyListings() {
     );
     const data = await res.json();
     if (!data.length) {
-      body.innerHTML = `<div class="empty"><div class="empty-icon">🚗</div>No listings yet</div>`;
+      body.innerHTML = `<div class="empty"><div class="empty-icon"><svg data-icon="car" width="40" height="40" viewBox="0 0 24 24" aria-hidden="true" style="display:inline-block;vertical-align:-0.15em;flex-shrink:0"><defs><linearGradient id="h-car" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#8FC2FF"/><stop offset="48%" stop-color="#3E86E8"/><stop offset="100%" stop-color="#1B4E9B"/></linearGradient><linearGradient id="h-car2" x1="18%" y1="6%" x2="82%" y2="96%"><stop offset="0%" stop-color="#DCEBFF"/><stop offset="100%" stop-color="#9DC4F2"/></linearGradient></defs><ellipse cx="12" cy="20.4" rx="8" ry="1.35" fill="#000" opacity="0.2"/><g class="i3-drive"><path d="M4.2 15.4c0-1 .5-2.4 1.3-3l1.7-2.5C7.7 9 8.6 8.5 9.6 8.5h4.8c1 0 1.9.5 2.4 1.4l1.7 2.5c.8.6 1.3 2 1.3 3v1.5c0 .6-.5 1-1 1h-.9v.6c0 .6-.5 1-1.1 1h-1c-.6 0-1.1-.4-1.1-1v-.6H9.3v.6c0 .6-.5 1-1.1 1h-1c-.6 0-1.1-.4-1.1-1v-.6h-.8c-.6 0-1-.4-1-1z" fill="url(#h-car)"/><path d="M8.6 10.4c.2-.4.6-.6 1-.6h4.8c.4 0 .8.2 1 .6l1.3 2.1H7.3z" fill="url(#h-car2)"/><circle cx="8.5" cy="16.1" r="1.05" fill="#12305E"/><circle cx="15.5" cy="16.1" r="1.05" fill="#12305E"/></g></svg></div>No listings yet</div>`;
       return;
     }
     body.innerHTML = data.map(v => {
@@ -523,7 +524,7 @@ async function markMySold(id, vehicle, price, plan) {
     }
   );
 
-  alert(`✅ ${vehicle} marked as sold!\n\nLotCheck will invoice you $${commission.toLocaleString()} for this sale.\nThank you for doing business with us!`);
+  alert(`${vehicle} marked as sold!\n\nLotCheck will invoice you $${commission.toLocaleString()} for this sale.\nThank you for doing business with us!`);
   loadMyListings();
 }
 

@@ -1,0 +1,48 @@
+/* The same keyframes as src/icons3d.jsx.
+   The static pages in public/ are plain HTML with no bundler, so they cannot
+   import the React module. test:icons3d pins the two copies to each other so
+   they cannot drift -- an animation that exists on one side and not the other
+   is a frozen icon on whichever page got the short end. */
+@keyframes i3Bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.1px)}}
+@keyframes i3Drive{0%{transform:translateX(-1.3px)}50%{transform:translateX(1.3px)}100%{transform:translateX(-1.3px)}}
+@keyframes i3Roll{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes i3Spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes i3Sweep{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes i3Tick{0%,100%{transform:rotate(0)}50%{transform:rotate(180deg)}}
+@keyframes i3Flash{0%,72%,100%{opacity:1}78%{opacity:.25}84%{opacity:1}90%{opacity:.4}}
+@keyframes i3Glow{0%,100%{opacity:.28}50%{opacity:.6}}
+@keyframes i3Pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.09)}}
+@keyframes i3Grow{0%{transform:scaleY(.45)}55%,100%{transform:scaleY(1)}}
+@keyframes i3Sand{0%{transform:translateY(-2px);opacity:0}25%{opacity:1}90%{transform:translateY(4px);opacity:1}100%{opacity:0}}
+@keyframes i3Flip{0%,100%{transform:rotate(0)}50%{transform:rotate(180deg)}}
+@keyframes i3Hunt{0%,100%{transform:translate(0,0)}30%{transform:translate(1.6px,-1.2px)}65%{transform:translate(-1.3px,1px)}}
+@keyframes i3Rise{0%{transform:translateY(2.5px);opacity:0}30%{opacity:1}100%{transform:translateY(-3.5px);opacity:0}}
+@keyframes i3Shake{0%,88%,100%{transform:rotate(0)}92%{transform:rotate(-7deg)}96%{transform:rotate(7deg)}}
+@keyframes i3Fill{0%{transform:scaleX(.25)}100%{transform:scaleX(1)}}
+@keyframes i3Shine{0%{transform:translateX(-14px)}55%,100%{transform:translateX(16px)}}
+@keyframes i3Wave{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(5deg)}}
+.i3-bob{animation:i3Bob 2.8s ease-in-out infinite}
+.i3-drive{animation:i3Drive 3.2s ease-in-out infinite}
+.i3-roll{animation:i3Roll 1.5s linear infinite;transform-box:fill-box;transform-origin:center}
+.i3-spin{animation:i3Spin 4.5s linear infinite;transform-box:fill-box;transform-origin:center}
+.i3-sweep{animation:i3Sweep 6s linear infinite;transform-box:fill-box;transform-origin:center}
+.i3-tick{animation:i3Tick 4s steps(2,end) infinite;transform-box:fill-box;transform-origin:center}
+.i3-flash{animation:i3Flash 3.4s ease-in-out infinite}
+.i3-glow{animation:i3Glow 3s ease-in-out infinite}
+.i3-pulse{animation:i3Pulse 2.6s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.i3-grow{animation:i3Grow 3s ease-in-out infinite;transform-box:fill-box;transform-origin:bottom}
+.i3-sand{animation:i3Sand 2.2s linear infinite}
+.i3-flip{animation:i3Flip 5s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+.i3-hunt{animation:i3Hunt 4.2s ease-in-out infinite}
+.i3-rise{animation:i3Rise 2.6s ease-in-out infinite}
+.i3-shake{animation:i3Shake 4.6s ease-in-out infinite;transform-box:fill-box;transform-origin:top center}
+.i3-fill{animation:i3Fill 3.4s ease-in-out infinite alternate;transform-box:fill-box;transform-origin:left}
+.i3-shine{animation:i3Shine 4.4s ease-in-out infinite}
+.i3-wave{animation:i3Wave 3s ease-in-out infinite;transform-box:fill-box;transform-origin:bottom center}
+.i3-d2{animation-delay:.28s}
+.i3-d3{animation-delay:.56s}
+.i3-d4{animation-delay:.84s}
+@media (prefers-reduced-motion:reduce){
+  .i3-bob,.i3-drive,.i3-roll,.i3-spin,.i3-sweep,.i3-tick,.i3-flash,.i3-glow,.i3-pulse,
+  .i3-grow,.i3-sand,.i3-flip,.i3-hunt,.i3-rise,.i3-shake,.i3-fill,.i3-shine,.i3-wave{animation:none}
+}

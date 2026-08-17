@@ -26,7 +26,7 @@ import _traverse from "@babel/traverse";
 
 const traverse = _traverse.default || _traverse;
 
-const FILES = ["src/App.jsx", "src/main.jsx", "src/scraper.js", "src/verify.js"];
+const FILES = ["src/App.jsx", "src/main.jsx", "src/scraper.js", "src/verify.js", "src/icons3d.jsx"];
 
 // Globals the browser (and our build) provide. Node's own globalThis covers the
 // language builtins; this list covers the DOM/browser surface Node lacks.
