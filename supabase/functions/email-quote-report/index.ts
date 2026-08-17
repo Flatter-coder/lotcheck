@@ -480,8 +480,9 @@ function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string, s
       <div style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;margin:6px 2px 8px;">The audit · ${total} card${total > 1 ? "s" : ""} · flagged cards glow</div>
       ${deckHtml}
       ${sayHtml}
-      <div style="text-align:center;margin-top:18px;font-size:11px;color:#706D96;">
-        Sent once to the address you entered — not saved on our end.
+      <div style="text-align:center;margin-top:18px;font-size:11px;color:#706D96;line-height:1.5;">
+        Read from the dealer's page by an automated system, including AI reading when it can't be parsed directly — verify the numbers against the original listing before you rely on them.
+        <br/>Sent once to the address you entered — not saved on our end.
         <br/><a href="https://lotcheck.ca/quote-check" style="color:#17756B;font-weight:700;">Check another quote</a>
       </div>
     </div>
@@ -1229,7 +1230,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
   const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
   const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
-  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
+  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
   need(40);
   { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
   y -= 30;

@@ -8767,7 +8767,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
     </div>); }
     if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
       <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
-      <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div className="rfb-r" key={i}><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>)}</div>
+      <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div key={i}><div className="rfb-r"><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>{x.verdict==="flagged"&&x.reason&&<div style={{fontSize:10.5,color:"#8a8399",padding:"0 0 6px",borderBottom:"1px solid #e7e0d2"}}>{x.reason}</div>}</div>)}</div>
       <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Add-ons total</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
     </div>);
     if(p.t==="rep"){ const d=a.dealerSentiment;
@@ -8780,7 +8780,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
     if(p.t==="bottom"){ const lv=a.leverageScore;
       return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f0eafc)"}}>{num}<div className="rfb-k">Bottom line</div>
       <h2 className="rfb-h2">{lv?`Leverage ${lv.score} / 10`:"The bottom line"}</h2>
-      {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">Computed only from the verified findings — not an opinion.</div></div>}
+      {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">{lv.note||"Computed only from the verified findings — not an opinion."}</div></div>}
       {a.summary&&<div className="rfb-lede" style={{marginTop:6}}>{a.summary}</div>}
     </div>); }
     return <div className="rfb-pg"/>;
@@ -8796,7 +8796,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       </div>
       <div className="rfb-book">
         <div className="rfb-base l"><div className="rfb-inside"><div className="rfb-vmark">LotCheck · Verified</div></div></div>
-        <div className="rfb-base r"><div className="rfb-end"><div style={{marginBottom:14}}><RealLogo width={52}/></div><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Analyzed once, never stored</div></div></div>
+        <div className="rfb-base r"><div className="rfb-end"><div style={{marginBottom:14}}><RealLogo width={52}/></div><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Read from the dealer's page by an automated system, including AI reading when it can't be parsed directly — verify against the original listing.</div><div className="rfb-fine" style={{marginTop:6}}>Analyzed once, never stored</div></div></div>
         {leaves.map((lf,i)=>(
           <div className={`rfb-leaf ${i<cur?"flipped":""}`} key={i} style={{zIndex:i<cur?i:N-i}}>
             <div className="rfb-face front"><Page p={lf[0]} side="r"/></div>
@@ -9317,6 +9317,7 @@ function VerifyPage(){
                     </div>
                   )}
                   {o.summary&&<div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:10,marginTop:4,fontSize:12.5,color:T.soft,lineHeight:1.6,fontStyle:"italic"}}>{o.summary}</div>}
+                  <div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:9,marginTop:4,fontSize:11,color:T.soft,lineHeight:1.5}}>Read from the dealer's page by an automated system, including AI reading when it can't be parsed directly — verify against the original listing before you rely on any number.</div>
                 </div>
                 {o.shot&&P==="signed"&&(()=>{
                   const pc=photoCheck;
@@ -10912,6 +10913,7 @@ function QuoteCheckPage(){
                     </div>
                   ))}
                 </div>
+                <div style={{fontSize:11,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>Read from the dealer's page by an automated system — including AI reading the page or a screenshot when it can't be parsed directly. Verify the numbers against the original listing before you rely on them.</div>
               </div>
 
               {/* Feed-fallback notice: the dealer page itself couldn't be read,
