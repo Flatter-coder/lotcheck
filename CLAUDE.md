@@ -42,8 +42,11 @@ Entry chain: `app.html` → `/src/main.jsx` → `src/App.jsx` (mounted on `#root
   `lotcheck-landing.html`, `dealer-portal.html`, `canada-map.html`,
   `statcan-zev-map.html`, `privacy.html`, `index.html`, plus `sw.js`
   (service worker), `manifest.json`, icons, and `data/statcan-zev.json`.
-- **`github/workflows/update-statcan-zev.yml`** — scheduled job that refreshes
-  the StatCan ZEV dataset.
+- **`.github/workflows/update-statcan-zev.yml`** — scheduled job that refreshes
+  the StatCan ZEV dataset. (It lived in a **dotless** `github/workflows/` until
+  2026-08-17, so GitHub never saw it and the "daily" job had not run once in the
+  46 days since the data was written. `check:workflows` now fails the build if a
+  workflow file appears anywhere but `.github/workflows/`.)
 
 ### Key dependencies
 `react` 18, `recharts` (charts), `@supabase/supabase-js`, `@vercel/analytics`,

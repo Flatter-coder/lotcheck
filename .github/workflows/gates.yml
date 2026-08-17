@@ -180,6 +180,21 @@ jobs:
       - name: Delivery gate is load-bearing (mutation test)
         run: npm run test:delivery
 
+      # Two failures that produce NO red signal anywhere, so nothing but a gate
+      # will ever surface them. A workflow in a dotless github/workflows/ is
+      # invisible to GitHub -- it never runs and so never fails; update-statcan-zev
+      # sat there through 46 days of a DAILY schedule. And a fetch without a
+      # User-Agent draws HTTP 406 from Overpass, which reads as "upstream is down"
+      # rather than "we were refused" -- the Alberta dealer map lost 4 of 5 weekly
+      # runs to it while Overpass was healthy the whole time.
+      - name: Scheduled jobs can actually run (workflow location + third-party User-Agent)
+        run: npm run check:jobs
+      # The dealer map may never publish a count it did not read: an output floor
+      # plus a >50% collapse refusal on the number actually written, and a lit
+      # "Live" badge that only JS may add after a successful read.
+      - name: Alberta dealer map never publishes an unread number
+        run: npm run test:alberta-dealers
+
   # Separate job ON PURPOSE. The gates above are offline and dependency-free, and
   # that is worth protecting -- they run in seconds and a red run always means a
   # real regression. This one needs node_modules (Babel's parser, for real scope

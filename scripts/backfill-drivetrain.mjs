@@ -80,7 +80,13 @@ async function main() {
   // 1) NRCan -> per (make, model-base) the set of drivetrains certified.
   const seen = new Map();   // "make|modelbase" -> Set(drivetrain|"none")
   for (const url of SOURCES) {
-    const res = await fetch(url, { redirect: "follow" });
+    // Identify ourselves to open.canada.ca. Not a live break today, but the
+    // Alberta dealer map assumed the same of Overpass and drew HTTP 406 from
+    // every mirror for four weeks running. See check:jobs.
+    const res = await fetch(url, {
+      redirect: "follow",
+      headers: { "User-Agent": "LotCheck/1.0 (NRCan drivetrain backfill; +https://lotcheck.ca)" },
+    });
     if (!res.ok) { console.warn(`  skip ${url.split("/").pop()} (HTTP ${res.status})`); continue; }
     const rows = parseCsv(await res.text());
     const head = rows[0].map((h) => h.trim().toLowerCase());
