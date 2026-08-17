@@ -16,6 +16,13 @@ the next instance.
 
 ---
 
+## 2026-08-17
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `d48aaca` | RAV4 Woodland reported `$47,000 · starting at` when the catalog holds its exact price. **Not a matching bug** — the null drivetrain was deliberate (no Build & Price summary states AWD/FWD, so the seed refused to guess) and `rowConfirmsConfig` was right to refuse `exact`. The real cause: NRCan pinned `rav4 hybrid → AWD` but not plain `rav4`, and the report resolved to the un-pinned key. Second cost of the same alias pair, after the $6,299 floor | one-surface fix | enrichment propagates symmetrically across the alias pair — NULLs only, idempotent, in whichever direction the knowledge arrived |
+| `3fec6a1` | Changed `analyze-quote` (analysis output) without bumping `CACHE_VER` — every cached report would replay old figures while the report id stayed the same, reading exactly like a failed deploy | green signal, no check | `check:cache-ver` caught it **on CI**, not locally; the gate diffs against the merge base |
+
 ## 2026-08-16
 
 | fix | what broke | class | guard now in place |
@@ -60,7 +67,11 @@ the next instance.
   catch the dropped-term bug living in two functions. Extending it would close
   the one-surface class properly.
 - **RAV4 and RAV4 Hybrid are still two keys for one car.** The resync converges
-  them; it does not remove the duplication.
+  their rows and `20260817` keeps their enrichment in step, but neither removes
+  the duplication. The pair has now cost two distinct defects — a $6,299 wrong
+  floor and an unearned `starting_at`. The permanent fix is to resolve both
+  names to ONE row set in the matcher; it interacts with the powertrain guard,
+  so it is a design call, not a patch.
 
 ---
 
