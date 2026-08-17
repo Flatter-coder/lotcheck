@@ -2748,21 +2748,102 @@ function useThemeState(){
   return { theme, C:LC_THEMES[theme], toggleTheme };
 }
 
+// Theme-toggle icons. No emoji in product UI, and an emoji was the wrong tool
+// here anyway: a crescent-moon or sun codepoint renders as whatever glyph the
+// device happens to ship, so the control looked like a different product on
+// Android than it did on macOS.
+//
+// These are lit objects rather than flat glyphs — an offset radial gradient
+// puts the light source up and to the left on both, a specular highlight sits
+// where that light would land, and a darker rim turns the disc away from the
+// viewer at its edge. The moon is a real crescent (a masked sphere, not a
+// crescent outline), so its craters sit on the lit face and fall off toward
+// the terminator the way they would on a ball.
+//
+// Each carries its own light because the pill swaps backgrounds underneath
+// them: dark when Dark is active, light card when Bright is. An icon tinted
+// from the theme would go invisible on one of the two.
+const THEME_ICON_CSS = `
+  @keyframes lcSunSpin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+  @keyframes lcMoonGlow{0%,100%{opacity:.26}50%{opacity:.52}}
+  .lc-sun-rays{transform-origin:12px 12px;animation:lcSunSpin 22s linear infinite}
+  .lc-moon-glow{animation:lcMoonGlow 3.6s ease-in-out infinite}
+  @media (prefers-reduced-motion:reduce){
+    .lc-sun-rays,.lc-moon-glow{animation:none}
+  }
+`;
+
+function MoonIcon3D({active}){
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"
+         style={{display:"block",opacity:active?1:.55,transition:"opacity .18s ease"}}>
+      <defs>
+        <radialGradient id="lcMoonBody" cx="34%" cy="27%" r="78%">
+          <stop offset="0%" stopColor="#FFFFFF"/>
+          <stop offset="52%" stopColor="#D6DAF2"/>
+          <stop offset="100%" stopColor="#848AB6"/>
+        </radialGradient>
+        {/* the crescent is the sphere minus an offset sphere — the bite is the
+            night side, so the lit edge curves like a real terminator */}
+        <mask id="lcMoonCrescent">
+          <rect width="24" height="24" fill="#000"/>
+          <circle cx="12" cy="12" r="8.2" fill="#fff"/>
+          <circle cx="17.6" cy="8.4" r="7.3" fill="#000"/>
+        </mask>
+      </defs>
+      <circle className="lc-moon-glow" cx="12" cy="12" r="9.7" fill="#AEB4E6"/>
+      <g mask="url(#lcMoonCrescent)">
+        <circle cx="12" cy="12" r="8.2" fill="url(#lcMoonBody)"/>
+        <ellipse cx="9.0" cy="14.7" rx="1.5" ry="1.15" fill="#8F95C2" opacity=".5"/>
+        <ellipse cx="7.5" cy="10.1" rx="1.0" ry=".8"  fill="#8F95C2" opacity=".42"/>
+        <ellipse cx="11.1" cy="17.5" rx=".8" ry=".6"  fill="#8F95C2" opacity=".34"/>
+      </g>
+    </svg>
+  );
+}
+
+function SunIcon3D({active}){
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"
+         style={{display:"block",opacity:active?1:.55,transition:"opacity .18s ease"}}>
+      <defs>
+        <radialGradient id="lcSunBody" cx="34%" cy="27%" r="80%">
+          <stop offset="0%" stopColor="#FFF6D0"/>
+          <stop offset="42%" stopColor="#FFC534"/>
+          <stop offset="100%" stopColor="#D97A00"/>
+        </radialGradient>
+      </defs>
+      <g className="lc-sun-rays" fill="#FFB020">
+        {[0,45,90,135,180,225,270,315].map(a=>(
+          <rect key={a} x="11.1" y="1.0" width="1.8" height="3.6" rx=".9"
+                transform={`rotate(${a} 12 12)`} opacity={a%90===0?.95:.58}/>
+        ))}
+      </g>
+      <circle cx="12" cy="12" r="5.6" fill="url(#lcSunBody)"/>
+      <ellipse cx="10.1" cy="9.9" rx="1.9" ry="1.35" fill="#FFFBE8" opacity=".6"/>
+      <circle cx="12" cy="12" r="5.6" fill="none" stroke="#A85B00" strokeOpacity=".3" strokeWidth=".7"/>
+    </svg>
+  );
+}
+
 function ThemeToggle(){
   const {theme,C,toggleTheme}=useAdminTheme();
+  const btn={border:"none",borderRadius:6,padding:"5px 11px",fontSize:13.5,fontWeight:700,
+             cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6,lineHeight:1};
   return (
     <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:9,padding:3}}>
-      <button onClick={()=>toggleTheme("dark")} style={{
+      <style>{THEME_ICON_CSS}</style>
+      <button onClick={()=>toggleTheme("dark")} aria-pressed={theme==="dark"} style={{
+        ...btn,
         background: theme==="dark" ? C.ink : "transparent",
         color: theme==="dark" ? C.paper : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
-      }}>🌙 Dark</button>
-      <button onClick={()=>toggleTheme("light")} style={{
+      }}><MoonIcon3D active={theme==="dark"}/>Dark</button>
+      <button onClick={()=>toggleTheme("light")} aria-pressed={theme==="light"} style={{
+        ...btn,
         background: theme==="light" ? C.card : "transparent",
         color: theme==="light" ? C.ink : C.inkFaint,
-        border:"none", borderRadius:6, padding:"5px 11px", fontSize:13.5, fontWeight:700, cursor:"pointer",
         boxShadow: theme==="light" ? "0 1px 4px rgba(51,48,90,.15)" : "none",
-      }}>☀️ Bright</button>
+      }}><SunIcon3D active={theme==="light"}/>Bright</button>
     </div>
   );
 }
