@@ -20,6 +20,11 @@ the next instance.
 
 | fix | what broke | class | guard now in place |
 |---|---|---|---|
+| `7979db0` | **The Alberta map invented dealer counts and called them live.** `alberta.html` held a frozen per-city snapshot so a failed fetch could "fall back silently … so the map always renders". It summed to **527 against a real 405**, disagreed with OSM in **30 of 33 cities**, and showed Grande Prairie **24** where OSM finds **2** — under a hardcoded `Live dealers` badge, reached through three silent exits. One dealer screenshot of that discredits the product | absence read as knowledge | counts deleted from markup; `dealers` is null until a real read and every path renders "—"; badge ships neutral and JS lights it only after a successful read (live / aged / unavailable); `test:alberta-dealers` — all 5 markup assertions fail against the pre-fix file |
+| `7979db0` | Overpass answered **HTTP 406 to every mirror** because Node's fetch sends no descriptive User-Agent, which the API's policy requires. Four mirrors × four retry rounds could never have helped — the request shape was the bug, and Overpass was healthy throughout. 4 of the last 5 weekly runs lost to it | green signal, no check | descriptive `User-Agent` with a contact URL; `check:jobs` requires one on every third-party fetch in `scripts/` — it caught two more silent cases (StatCan, NRCan), both fixed in the same commit |
+| `7979db0` | The failure **always blamed the wrong mirror**. Only `lastErr` survived, so the error described whichever ran last — `overpass.osm.ch`, which fails *differently* (200 + empty body). Four runs printed "only 0 elements" and the 406 never appeared once. A report naming one of four failures is worse than none: it looks like a diagnosis | absence read as knowledge | every mirror's outcome collected and printed, de-duplicated, with an explicit "406/429 across the board means REFUSED, not down" note in the thrown error |
+| `7979db0` | **A daily job that had never run.** `update-statcan-zev.yml` sat in a **dotless** `github/workflows/`. GitHub only reads `.github/workflows/`, so it never appeared in `gh workflow list`, never ran, and **never failed** — 46 days of a daily schedule, with `CLAUDE.md` documenting it as active. The script was fine; it passed first try once moved | green signal, no check | `check:jobs` fails on any workflow outside `.github/workflows/`; verified by re-creating the dotless directory and watching it catch |
+| `7979db0` | The refresh **floored two numbers and wrote a third**. `els` and `dealers` were checked; `assigned` — the count actually written — was not. 700 valid dealers all outside `MAX_KM` pass both and commit `"totalDealers": 0` at exit 0. The absolute floor of 50 is ~12% of a normal run, so 405 → 51 also commits green | green signal, no check | `assertOutputSane()` in `scripts/lib/dealer-output-guard.mjs` — absolute floor **plus** a >50% collapse refusal measured against what is on disk, reusing the catalog-refresh rule rather than reinventing it |
 | `f2a5b96` | In the emailed PDF a muted row rendered faded title + faint value + soft body, so the whole row receded — worst on "Financing math · $2,075/MO REF", the most actionable number on the page and the hardest line to read on it. The on-screen views colour only the DOT by tone and leave titles alone, so the PDF was the odd surface out | one-surface fix | the audit LABEL always renders in `INK`; only the VALUE carries tone |
 | `d48aaca` | RAV4 Woodland reported `$47,000 · starting at` when the catalog holds its exact price. **Not a matching bug** — the null drivetrain was deliberate (no Build & Price summary states AWD/FWD, so the seed refused to guess) and `rowConfirmsConfig` was right to refuse `exact`. The real cause: NRCan pinned `rav4 hybrid → AWD` but not plain `rav4`, and the report resolved to the un-pinned key. Second cost of the same alias pair, after the $6,299 floor | one-surface fix | enrichment propagates symmetrically across the alias pair — NULLs only, idempotent, in whichever direction the knowledge arrived |
 | `3fec6a1` | Changed `analyze-quote` (analysis output) without bumping `CACHE_VER` — every cached report would replay old figures while the report id stayed the same, reading exactly like a failed deploy | green signal, no check | `check:cache-ver` caught it **on CI**, not locally; the gate diffs against the merge base |
@@ -67,6 +72,16 @@ the next instance.
 - **`check:parity` checks report *surfaces*, not shared *helpers*.** It did not
   catch the dropped-term bug living in two functions. Extending it would close
   the one-surface class properly.
+- **Lit "Live" dots that are not gated on a successful read, outside the Alberta
+  map.** The 2026-08-17 sweep found two more: `App.jsx:2530`, where LiveTicker
+  blinks a green dot per row while showing `DEMO_LISTINGS`; and `App.jsx:5754`,
+  where the verification ledger shows "● Live" on `loaded = !apiUsageLoading`,
+  which is true after a *failed* read because `useApiUsage` swallows the error
+  and exposes no flag. Same class as the map badge — a lit dot is a claim, and
+  these two make it without a read behind them. Left out of `7979db0`
+  deliberately: different feature, own design decisions. The durable fix is one
+  shared primitive that **cannot render a lit dot without a successful-read
+  timestamp**, with the hand-written dots routed through it.
 - **RAV4 and RAV4 Hybrid are still two keys for one car.** The resync converges
   their rows and `20260817` keeps their enrichment in step, but neither removes
   the duplication. The pair has now cost two distinct defects — a $6,299 wrong
