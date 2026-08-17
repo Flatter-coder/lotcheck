@@ -29,10 +29,20 @@ const PROVINCE_ID_MAP = {
   "Newfoundland and Labrador": "NewfoundlandLabrador",
 };
 
+// Identify ourselves on every request, from the one place they all pass through.
+// StatCan currently serves an anonymous Node fetch fine, so this is not fixing a
+// live break — it is refusing to depend on that staying true. The Alberta dealer
+// map made exactly this assumption against Overpass and got HTTP 406 from every
+// mirror, which read as "the upstream is down" for four straight weekly runs.
+// Putting it in fetchWithRetry rather than at each call site means a new call
+// cannot forget it.
+const USER_AGENT = "LotCheck/1.0 (StatCan ZEV refresh; +https://lotcheck.ca)";
+
 async function fetchWithRetry(url, opts, attempts = 3) {
+  const withUA = { ...opts, headers: { ...(opts?.headers || {}), "User-Agent": USER_AGENT } };
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await fetch(url, opts);
+      const res = await fetch(url, withUA);
       if (res.ok) return res;
       if (i === attempts - 1) throw new Error(`Request failed: ${res.status}`);
     } catch (err) {

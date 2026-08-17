@@ -114,8 +114,17 @@
   .badges{display:flex;align-items:center;gap:10px}
   .pill{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:5px 11px;border-radius:20px;
     border:1px solid var(--hair);color:var(--dim)}
+  /* A LIT DOT IS A CLAIM. Geometry lives on .pill-dot so the badge never jumps
+     as it resolves; only COLOUR carries the verdict, and only .live is lit.
+     Ship the neutral state in the markup and let JS add .live after a
+     successful read — never the other way round. */
+  .pill.pill-dot{display:inline-flex;align-items:center;gap:6px}
+  .pill.pill-dot .dotc{width:7px;height:7px;border-radius:50%;background:var(--dimmer);box-shadow:none}
   .pill.live{color:var(--cyan);border-color:var(--cyan-dim);display:inline-flex;align-items:center;gap:6px}
   .pill.live .dotc{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan-dim)}
+  /* Read succeeded but the data is older than a refresh cycle: honest, not lit. */
+  .pill.aged{color:var(--wx-sun);border-color:rgba(230,182,103,.38)}
+  .pill.aged .dotc{background:var(--wx-sun);box-shadow:none}
   /* persistent site nav (matches the other pages) — themed with the page vars */
   .sitenav{position:sticky;top:0;z-index:300;background:var(--panel-solid);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
   .sitenav-in{max-width:1320px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:20px}
@@ -540,8 +549,13 @@
     <div><h1>Alberta — dealer network map</h1><div class="sub">LotCheck · 3D terrain view</div></div>
   </div>
   <div class="badges">
-    <span class="pill live" title="Dealer counts are live from OpenStreetMap"><span class="dotc"></span>Live dealers</span>
-    <span class="pill live" id="wxPill" title="Weather is live from Open-Meteo"><span class="dotc"></span>Live weather</span>
+    <!-- Ships NEUTRAL. setDealerPill() adds .live only once the data file has
+         actually been read and parsed; .aged if that read returned data older
+         than a refresh cycle. It was previously hardcoded .live, so it claimed
+         liveness before the fetch resolved, after it failed, and over the
+         invented counts the failure path used to render. -->
+    <span class="pill pill-dot" id="dealerPill" title="Checking dealer counts…"><span class="dotc"></span>Dealer counts</span>
+    <span class="pill pill-dot" id="wxPill" title="Checking weather…"><span class="dotc"></span>Weather</span>
   </div>
 </header>
 
@@ -672,7 +686,12 @@
 </div>
 
 <div class="foot">
-  ◆ <b>Dealer counts are live — <span id="dealerSource">real Alberta car dealerships from OpenStreetMap</span>, each binned to its nearest city.</b>
+  <!-- Ships WITHOUT the word "live": this is static prose that cannot know
+       whether the read succeeded. The success path rewrites #dealerSource with
+       the real total and the date it was read; the failure path rewrites this
+       whole line. It previously asserted "Dealer counts are live" from first
+       paint, and kept asserting it over invented numbers when the fetch died. -->
+  ◆ <b>Dealer counts — <span id="dealerSource">reading Alberta car dealerships from OpenStreetMap…</span>, each binned to its nearest city.</b>
   Weather (temperature, condition, day/night) is <b>live from Open-Meteo</b> (free, no key), labelled with its fetch time.
   The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (dealers' advertised prices measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
 </div>
@@ -696,20 +715,33 @@
     if(selected) drawGauge(selected,false);
   });
 
-  // ---- cities (name, lat, lon, approx dealership count) — VERBATIM from msrp-map-alberta ----
+  // ---- cities (name, lat, lon) — COORDINATES ONLY ----
+  // A COUNT WE DID NOT READ IS NOT A FALLBACK, IT IS A FABRICATION.
+  // Each entry used to carry a fourth number, an approximate dealer count, so
+  // that a failed fetch could "fall back silently … so the map always renders".
+  // Those numbers were a frozen snapshot and they drifted badly: they summed to
+  // 527 against a real 405 (+30%), disagreed with OpenStreetMap in 30 of 33
+  // cities, and claimed Grande Prairie had 24 dealerships where OSM finds 2 and
+  // Fort McMurray 15 where it finds 2. All of it rendered under a header badge
+  // reading "Live dealers", with no way for a buyer — or a dealer looking for a
+  // reason to discredit us — to tell the invented numbers from the read ones.
+  //
+  // Missing beats wrong. `dealers` is null until a real read fills it, and every
+  // render path below shows "—" rather than inventing a figure. A map that
+  // admits it has no counts is worth more than one that always has a number.
   var CITIES=[
-    ["Calgary",51.05,-114.07,138],["Edmonton",53.55,-113.49,129],["Red Deer",52.27,-113.81,34],
-    ["Lethbridge",49.69,-112.84,27],["Medicine Hat",50.04,-110.68,19],["Grande Prairie",55.17,-118.80,24],
-    ["Fort McMurray",56.73,-111.38,15],["Airdrie",51.29,-114.01,17],["Spruce Grove",53.54,-113.91,11],
-    ["Sherwood Park",53.54,-113.30,14],["St. Albert",53.63,-113.63,12],["Leduc",53.26,-113.55,9],
-    ["Camrose",53.02,-112.83,6],["Lloydminster",53.28,-110.00,8],["Cochrane",51.19,-114.47,7],
-    ["Okotoks",50.72,-113.98,6],["Wetaskiwin",52.97,-113.37,5],["Brooks",50.56,-111.90,3],
-    ["Cold Lake",54.46,-110.18,3],["Canmore",51.09,-115.36,3],["Hinton",53.40,-117.57,2],
-    ["Whitecourt",54.14,-115.69,3],["Peace River",56.23,-117.29,3],["High River",50.58,-113.87,3],
-    ["Fort Saskatchewan",53.71,-113.21,5],["Lacombe",52.47,-113.74,4],["Sylvan Lake",52.31,-114.10,3],
-    ["Drumheller",51.46,-112.72,2],["Taber",49.79,-112.15,2],["Bonnyville",54.27,-110.74,3],
-    ["Slave Lake",55.28,-114.77,2],["Rocky Mountain House",52.37,-114.92,2],["Strathmore",51.04,-113.40,3]
-  ].map(function(c,i){return {i:i,name:c[0],lat:c[1],lon:c[2],dealers:c[3]};});
+    ["Calgary",51.05,-114.07],["Edmonton",53.55,-113.49],["Red Deer",52.27,-113.81],
+    ["Lethbridge",49.69,-112.84],["Medicine Hat",50.04,-110.68],["Grande Prairie",55.17,-118.80],
+    ["Fort McMurray",56.73,-111.38],["Airdrie",51.29,-114.01],["Spruce Grove",53.54,-113.91],
+    ["Sherwood Park",53.54,-113.30],["St. Albert",53.63,-113.63],["Leduc",53.26,-113.55],
+    ["Camrose",53.02,-112.83],["Lloydminster",53.28,-110.00],["Cochrane",51.19,-114.47],
+    ["Okotoks",50.72,-113.98],["Wetaskiwin",52.97,-113.37],["Brooks",50.56,-111.90],
+    ["Cold Lake",54.46,-110.18],["Canmore",51.09,-115.36],["Hinton",53.40,-117.57],
+    ["Whitecourt",54.14,-115.69],["Peace River",56.23,-117.29],["High River",50.58,-113.87],
+    ["Fort Saskatchewan",53.71,-113.21],["Lacombe",52.47,-113.74],["Sylvan Lake",52.31,-114.10],
+    ["Drumheller",51.46,-112.72],["Taber",49.79,-112.15],["Bonnyville",54.27,-110.74],
+    ["Slave Lake",55.28,-114.77],["Rocky Mountain House",52.37,-114.92],["Strathmore",51.04,-113.40]
+  ].map(function(c,i){return {i:i,name:c[0],lat:c[1],lon:c[2],dealers:null};});
 
   // deterministic PRNG (mulberry32)
   function mulberry(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -864,7 +896,10 @@
   var pinsHost=document.getElementById("pins");
   function renderPins(){
     var rank={};
-    var ranked=CITIES.slice().sort(function(a,b){return b.dealers-a.dealers;});
+    // ||0 so an unread count sorts as unknown rather than NaN. With no data at
+    // all the sort is a no-op and array order stands, which is already
+    // largest-market-first, so the label de-clutter below still picks sensibly.
+    var ranked=CITIES.slice().sort(function(a,b){return (b.dealers||0)-(a.dealers||0);});
     ranked.forEach(function(c,idx){rank[c.i]=idx;});
 
     // ---- label placement: side-aware greedy de-clutter ----
@@ -894,7 +929,9 @@
     var frag=document.createDocumentFragment();
     CITIES.forEach(function(c){
       var x=(projX(c.lon)/PW*100), y=(projY(c.lat)/PH*100);
-      var head=Math.min(30, 9+Math.sqrt(c.dealers)*1.9);
+      // An unread count draws the base head — every pin the same size. Uniform
+      // pins read as "we don't know yet"; a sized pin is a claim about volume.
+      var head=Math.min(30, 9+Math.sqrt(c.dealers||0)*1.9);
       var stem=Math.round(head*1.35+10);
       var lc=lmap[c.i];
       var big=!!lc;            // labelled by the greedy de-clutter above; others reveal on hover/select
@@ -1062,11 +1099,19 @@
     if(weatherLive){
       st.classList.add("live");
       stt.innerHTML='<b>Live weather</b> · Open-Meteo · '+fmtTime(weatherTime);
+      // The pill now SHIPS neutral and is lit here, on the same signal that
+      // lights #wxStatus. It used to ship .live and merely be hidden on
+      // failure, so it read as live for the whole flight of the fetch.
       pill.style.display="";
+      pill.classList.add("live");
+      pill.textContent="";
+      pill.appendChild(Object.assign(document.createElement("span"),{className:"dotc"}));
+      pill.appendChild(document.createTextNode("Live weather"));
       pill.title="Weather is live from Open-Meteo, fetched "+fmtTime(weatherTime);
     } else {
       st.classList.remove("live");
       stt.innerHTML='Weather <b>(sample)</b> · Open-Meteo unavailable';
+      pill.classList.remove("live");
       pill.style.display="none";
     }
     // temp chips on the labelled (bigger) pins
@@ -1374,7 +1419,10 @@
       return;
     }
     rName.textContent=c.name+", AB";
-    rCount.innerHTML='<b>'+c.dealers+'</b> dealership'+(c.dealers===1?'':'s')+(isSel?' · selected':'');
+    // "—" when we have not read a count. Never print a number we did not read.
+    rCount.innerHTML = (c.dealers==null)
+      ? '<b>—</b> dealership count unavailable'+(isSel?' · selected':'')
+      : '<b>'+c.dealers+'</b> dealership'+(c.dealers===1?'':'s')+(isSel?' · selected':'');
     var wh=weatherHTML(c);
     if(wh){ rWeather.className="rw"; rWeather.innerHTML=wh; }
     else { rWeather.className="rw empty"; rWeather.innerHTML=""; }
@@ -1394,9 +1442,19 @@
   function renderDrill(c){
     var listEl=document.getElementById("drillList"), allBtn=document.getElementById("drillAll"); if(!listEl) return;
     var names=c.sample||[];
-    if(!names.length){ listEl.innerHTML='<div class="drill-empty">Loading dealer list…</div>'; if(allBtn) allBtn.hidden=true; return; }
+    if(!names.length){
+      // THREE STATES, NOT TWO. An empty list used to always say "Loading…",
+      // so a completed read of a city that genuinely has no mapped dealership
+      // (Sylvan Lake, Taber and Slave Lake are all 0 today) sat on a spinner
+      // forever — indistinguishable from a failed load. Say which it is.
+      listEl.innerHTML = (c.dealers==null)
+        ? '<div class="drill-empty">Dealer list unavailable</div>'
+        : '<div class="drill-empty">No dealerships recorded here in OpenStreetMap</div>';
+      if(allBtn) allBtn.hidden=true;
+      return;
+    }
     listEl.innerHTML=names.slice(0,3).map(function(n){ return dealerRow(n,c.name); }).join('');
-    if(allBtn){ allBtn.hidden=(c.dealers<=3); allBtn.textContent="View all "+c.dealers+" →"; }
+    if(allBtn){ allBtn.hidden=(c.dealers==null||c.dealers<=3); allBtn.textContent="View all "+c.dealers+" →"; }
   }
   // Full-list modal, opened from "View all".
   function openDealerModal(c){
@@ -1516,24 +1574,73 @@
   select(EDM);                 // default: Edmonton (readout + gauge + scene)
   loadWeather();               // live fetch (single allowed external call); updates UI + scene when done
 
-  // ---- live dealer counts: real Alberta car dealerships (OpenStreetMap), binned per city ----
-  // Same-origin static asset refreshed by a scheduled job; falls back silently to the
-  // built-in counts if it can't load, so the map always renders.
-  fetch("/data/alberta-dealers.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null;}).then(function(data){
-    if(!data||!Array.isArray(data.cities)) return;
+  // ---- dealer counts: real Alberta car dealerships (OpenStreetMap), binned per city ----
+  // ONE READ, ONE RENDER, THREE HONEST STATES: live / aged / unavailable.
+  // There is no silent fallback any more. The old version swallowed every
+  // failure (`r.ok?…:null`, an early `return`, and a bare `.catch(){}`) and left
+  // the invented counts on screen under a "Live dealers" badge.
+  //
+  // The shape check is load-bearing, not defensive noise: vercel.json rewrites
+  // everything but /api/* to /app.html, so a missing or renamed data file comes
+  // back as HTTP 200 carrying HTML. `r.ok` passes, and only parsing and then
+  // checking the shape catches it. Without this the file-missing case can never
+  // present as a failure at all.
+  var REFRESH_DAYS=7, AGED_AFTER_DAYS=15;   // weekly job; one missed run is tolerable, two is not
+  function setDealerPill(state, detail){
+    var el=document.getElementById("dealerPill"); if(!el) return;
+    el.classList.remove("live","aged");
+    var label = state==="live" ? "Live dealers" : state==="aged" ? "Dealer counts aged" : "Counts unavailable";
+    if(state==="live") el.classList.add("live");
+    if(state==="aged") el.classList.add("aged");
+    el.textContent="";
+    el.appendChild(Object.assign(document.createElement("span"),{className:"dotc"}));
+    el.appendChild(document.createTextNode(label));
+    el.title=detail;
+  }
+  function ageInDays(stamp){
+    if(!stamp) return null;
+    var t=Date.parse(stamp+"T00:00:00Z");             // generatedAt is a YYYY-MM-DD stamp
+    if(isNaN(t)) return null;
+    return Math.floor((Date.now()-t)/86400000);
+  }
+  function dealerDataUnavailable(why){
+    // Counts stay null, so every render path already shows "—". All this does is
+    // tell the truth in the badge and strip the liveness claim from the footer.
+    setDealerPill("unavailable","Dealer counts could not be loaded ("+why+"). No numbers are shown rather than stale ones.");
+    var src=document.getElementById("dealerSource");
+    var host=src&&src.parentElement;   // the <b> wrapping the footer claim
+    if(host) host.textContent="Dealer counts are unavailable right now — the map is showing city "+
+      "positions only. Counts return automatically once the OpenStreetMap refresh succeeds.";
+  }
+  fetch("/data/alberta-dealers.json",{cache:"no-store"}).then(function(r){
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return r.json();                                   // HTML from the SPA rewrite throws here
+  }).then(function(data){
+    if(!data||!Array.isArray(data.cities)||typeof data.totalDealers!=="number")
+      throw new Error("unexpected shape");
     var byName={}; data.cities.forEach(function(c){byName[c.name]=c;});
     var changed=false;
     CITIES.forEach(function(c){ var row=byName[c.name]; if(row&&typeof row.count==="number"){ c.dealers=row.count; c.sample=row.sample||[]; changed=true; } });
-    if(!changed) return;
+    if(!changed) throw new Error("no city matched");
+    var age=ageInDays(data.generatedAt);
+    if(age===null||age>AGED_AFTER_DAYS)
+      setDealerPill("aged", age===null
+        ? "Dealer counts loaded but carry no date stamp."
+        : "Dealer counts are "+age+" days old (refreshed weekly). Read on "+data.generatedAt+".");
+    else
+      setDealerPill("live","Dealer counts read from OpenStreetMap, generated "+data.generatedAt+".");
     var keep=selected?selected.i:EDM;
     sceneEl.style.setProperty("--pindur","0s");            // no entrance grow on this data refresh
     renderPins();
     pinsHost.querySelectorAll(".pin-stand").forEach(function(el){ el.style.transitionDelay="0ms"; });
     select(keep);                                          // re-render clears .sel — restore it
     var src=document.getElementById("dealerSource");
-    if(src&&data.totalDealers) src.textContent=data.totalDealers+" real car dealerships from OpenStreetMap"+(data.generatedAt?" · updated "+data.generatedAt:"");
+    // The date is not decoration — it is the only thing that lets a reader judge
+    // the number. It is always appended on the success path, never conditionally.
+    if(src) src.textContent=data.totalDealers+" real car dealerships from OpenStreetMap"+
+      (data.generatedAt?" · read "+data.generatedAt+(age!==null&&age>REFRESH_DAYS?" ("+age+" days ago)":""):"");
     setTimeout(function(){ sceneEl.style.setProperty("--pindur",".5s"); },60);
-  }).catch(function(){});
+  }).catch(function(e){ dealerDataUnavailable(e&&e.message?e.message:"unknown error"); });
   requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
   // after the entrance fly-in settles, drop the plane + pin durations to the snappy preset speed
   // and clear the per-pin stagger so angle switches are immediate (not staggered).

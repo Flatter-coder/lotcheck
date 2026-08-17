@@ -43,7 +43,9 @@
     "test:vision-limits": "node --experimental-strip-types supabase/functions/_shared/vision-limits.test.ts",
     "test:scrapfly-render": "node --experimental-strip-types supabase/functions/_shared/scrapfly-render.test.ts",
     "test:ref-financing": "node --experimental-strip-types supabase/functions/_shared/reference-financing.test.ts",
-    "test:pg-timestamp": "node scripts/test-pg-timestamp.mjs"
+    "test:pg-timestamp": "node scripts/test-pg-timestamp.mjs",
+    "test:alberta-dealers": "node scripts/test-alberta-dealers.mjs",
+    "check:jobs": "node scripts/check-scheduled-jobs.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
