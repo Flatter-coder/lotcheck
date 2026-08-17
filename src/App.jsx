@@ -8774,11 +8774,12 @@ function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fp
 function canonicalReport(a){
   const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
   return {
+    // v3: server now projects fcx + source too (they were client-only).
     // v2: added leverage's traceable note (lvn) and each add-on's reason.
     // Mirrors supabase/functions/_shared/report-sign.ts -- keep both in sync.
     // Additive-only: /verify re-hashes whatever bytes are embedded in its own
     // link, never rebuilds this from a live object, so v1 links still verify.
-    v:2,
+    v:3,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},

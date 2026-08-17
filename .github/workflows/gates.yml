@@ -63,6 +63,14 @@ jobs:
       # correctness defect, not an advisory.
       - name: Report auth (proof-of-scan gate on the email relay)
         run: npm run test:report-auth
+      # canonicalReport() exists twice -- report-sign.ts signs it, App.jsx
+      # rebuilds it on the unsigned fallback path -- and only a code comment
+      # said the two must match. They had already drifted: 4e3a733 added fcx
+      # and source to the client copy alone, so the finance-contingent flag
+      # was COMPUTED server-side and never projected into the signed record,
+      # and so could not show on /verify for any real report.
+      - name: Canonical report parity (the signed shape matches the client copy)
+        run: npm run check:canonical
       - name: Flywheel fee-vocab (join keys + de-identification invariant)
         run: npm run test:flywheel
       - name: Copy compliance (shipped claims)
