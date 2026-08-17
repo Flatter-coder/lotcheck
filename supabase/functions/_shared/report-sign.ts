@@ -26,13 +26,19 @@ function num(x: unknown): number | null {
 // client's canonicalReport(). This exact string is hashed AND signed.
 export function canonicalReport(a: any): any {
   return {
-    v: 1,
+    // v2: added leverage's traceable note (lvn) and each add-on's reason, so
+    // /verify no longer shows a bare score or a fee flag with no basis. Safe,
+    // additive-only bump -- /verify re-hashes whatever bytes are EMBEDDED in
+    // its own link, never rebuilds canonicalReport() from a live object, so
+    // links signed under v1 keep verifying exactly as issued.
+    v: 2,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
     leverage: a.leverageScore && a.leverageScore.score != null ? Number(a.leverageScore.score) : null,
+    lvn: a.leverageScore?.note || null,
     recalls: a.recalls && a.recalls.checked ? { count: a.recalls.count || 0, confirmed: a.recalls.confirmed !== false, items: (a.recalls.items || []).map((it: any) => ({ system: it.system || null, date: it.date || null })) } : null,
-    addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null })),
+    addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,
     reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
     marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null } : null,
