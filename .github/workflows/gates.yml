@@ -194,6 +194,13 @@ jobs:
       # "Live" badge that only JS may add after a successful read.
       - name: Alberta dealer map never publishes an unread number
         run: npm run test:alberta-dealers
+      # A lit "Live" dot must be backed by a read that actually returned. Three
+      # surfaces broke this at once by substituting something merely correlated
+      # with success: static markup, `!apiUsageLoading` (true after a FAILED
+      # read), and `listings.length>0` (never false -- the state is seeded with
+      # DEMO_LISTINGS, so it answered "live" over fourteen invented cars).
+      - name: A lit Live dot is backed by a successful read
+        run: npm run test:live-dot
 
   # Separate job ON PURPOSE. The gates above are offline and dependency-free, and
   # that is worth protecting -- they run in seconds and a red run always means a
