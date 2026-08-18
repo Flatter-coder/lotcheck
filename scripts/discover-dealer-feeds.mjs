@@ -208,6 +208,27 @@ async function probe(cand) {
   }
 }
 
+// Every row in amvic_licensees with a website, paginated (PostgREST caps a
+// response at 1000, and 21,866 licensees means a single unpaginated read
+// silently truncates to the first page and reads like a real, small result —
+// see the MUST-paginate note below). Shared by candidatesFromAmvic() (the
+// probe candidate list) and the write-time license cross-check, so there is
+// exactly one place that reads this table, not two copies that could drift.
+async function fetchAmvicLicenseesWithWebsite(supabase) {
+  const all = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("amvic_licensees").select("name,trade_name,city,website,facility_status,facility_type")
+      .not("website", "is", null)
+      .range(from, from + PAGE - 1);
+    if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
+    all.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  return all;
+}
+
 // The regulator's own roster of licensed Alberta dealers.
 //
 // facility_status holds AMVIC's OWN string, verbatim — "Issued" is the valid
@@ -225,22 +246,8 @@ async function candidatesFromAmvic() {
   if (!url || !key) { console.error("--source amvic needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"); process.exit(1); }
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(url, key);
-  // MUST paginate. PostgREST caps a response at 1000 rows by default, and the
-  // first run of this hit that cap exactly — 21,866 licensees in the table,
-  // 1000 returned, treated as the whole province. An arbitrary 1/20th slice
-  // reported 0 SM360 dealers, which read like a real finding rather than a
-  // truncated query. A silent cap is worse than an error.
-  const all = [];
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("amvic_licensees").select("name,trade_name,city,website,facility_status,facility_type")
-      .not("website", "is", null)
-      .range(from, from + PAGE - 1);
-    if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
-    all.push(...(data || []));
-    if (!data || data.length < PAGE) break;
-  }
+  // MUST paginate — see fetchAmvicLicenseesWithWebsite.
+  const all = await fetchAmvicLicenseesWithWebsite(supabase);
   const rows = all.filter((r) => /issued/i.test(r.facility_status || ""));
   const byStatus = new Map();
   for (const r of all) { const k = r.facility_status || "(none)"; byStatus.set(k, (byStatus.get(k) || 0) + 1); }
@@ -334,7 +341,7 @@ async function main() {
   // jsonld_itemlist/edealer must have yielded at least one real vehicle on
   // probe — without that a seeded host is unaddressable or empty, either way
   // a nightly no-op that looks like coverage.
-  const seed = [
+  let seed = [
     ...sm360.filter((r) => r.withVin > 0)
       .map((r) => ({ host: r.host, platform: "sm360", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new-inventory", "used-inventory"] })),
     ...convertus.filter((r) => r.cp)
@@ -345,9 +352,39 @@ async function main() {
       .map((r) => ({ host: r.host, platform: "edealer", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
   ];
   if (!seed.length) { console.log("nothing to seed"); return; }
+
+  // LICENSE GATE — non-negotiable, applies regardless of --source. Alberta law
+  // (the Fair Trading Act's AVSA rules, AMVIC's enabling regulation) requires a
+  // dealer to hold an Issued AMVIC facility license to sell vehicles at all, so
+  // a host we have no confirmed Issued license for is not a dealer we should be
+  // pointing a standing crawl at — feed-detection finding a working feed is not
+  // the same question as "is this business licensed to operate."
+  //
+  // --source osm has NO license signal at all (OpenStreetMap tags carry no
+  // regulatory status), so without this every OSM-found host would seed purely
+  // on "a feed answered." --source amvic already pre-filtered to Issued before
+  // probing, but this re-checks against a FRESH read rather than trusting the
+  // in-memory list from earlier in the same run — a license that lapsed in the
+  // minutes between probing and writing must not slip through on a stale copy.
+  console.log("\nCross-checking every seed candidate against a fresh amvic_licensees read (Issued only)...");
+  const licensees = await fetchAmvicLicenseesWithWebsite(supabase);
+  const issuedHosts = new Set(
+    licensees.filter((r) => /issued/i.test(r.facility_status || ""))
+      .map((r) => toOrigin(r.website)).filter(Boolean)
+  );
+  const beforeGate = seed.length;
+  const rejected = seed.filter((s) => !issuedHosts.has(s.host));
+  seed = seed.filter((s) => issuedHosts.has(s.host));
+  if (rejected.length) {
+    console.log(`  ${rejected.length} of ${beforeGate} candidate(s) REFUSED — no confirmed Issued AMVIC license for this host:`);
+    for (const r of rejected.slice(0, 20)) console.log(`    ${r.host}  (${r.platform}) ${r.name ?? ""}`);
+    if (rejected.length > 20) console.log(`    … and ${rejected.length - 20} more`);
+  }
+  if (!seed.length) { console.log("\nnothing left to seed after the license gate"); return; }
+
   const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }
-  console.log(`\nSeeded ${seed.length} confirmed dealers into dealer_source (${sm360.filter((r) => r.withVin > 0).length} sm360, ${convertus.filter((r) => r.cp).length} convertus, ${jsonldList.filter((r) => r.page1 > 0).length} jsonld_itemlist, ${edealerList.filter((r) => r.page1 > 0).length} edealer).`);
+  console.log(`\nSeeded ${seed.length} confirmed, AMVIC-Issued dealers into dealer_source (of ${beforeGate} platform-confirmed candidates).`);
 }
 
 await main();
