@@ -699,6 +699,11 @@
 
 <script>
 (function(){
+  // Supabase anon key — safe to ship in static HTML, same as live-price-index.html.
+  // RLS + the publishable gate baked into fn_city_price_index are the actual
+  // security boundary, not secrecy of this key.
+  var LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
+  var SUPA="https://debigtyjhjamipooajhk.supabase.co/rest/v1";
   var reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
   var money=function(x){return "$"+Math.round(x).toLocaleString("en-CA");};
   var signMoney=function(x){return (x>=0?"+$":"−$")+Math.abs(Math.round(x)).toLocaleString("en-CA");};
@@ -1673,25 +1678,27 @@
     setTimeout(function(){ sceneEl.style.setProperty("--pindur",".5s"); },60);
   }).catch(function(e){ dealerDataUnavailable(e&&e.message?e.message:"unknown error"); });
 
-  // ---- price index: real per-city price-vs-MSRP, once the pipeline has published it ----
-  // This file does not exist until someone deliberately runs
-  // scripts/publish-price-index-json.mjs (see that script's header for why it's
-  // a separate, manual step). Until then this fetch 404s and every city keeps
-  // its "sample" state untouched -- today's behaviour, unchanged. When the file
-  // DOES exist, cities it lists switch to live/aged with a real number; every
-  // OTHER city (never absent from CITIES, just absent from this file) switches
-  // to "unavailable" -- not enough tracked data, never a guessed number.
+  // ---- price index: real per-city price-vs-MSRP via fn_city_price_index ----
+  // Same posture as /live-price-index's fn_alberta_msrp_deviation: the
+  // underlying tables stay RLS-locked, this RPC is the only public surface,
+  // and it can only ever return rows that already cleared the publishable
+  // gate (computed once by scripts/build-city-price-index.mjs, stored on the
+  // row -- see 20260818_fn_city_price_index.sql). A city this RPC doesn't
+  // list is "unavailable", not a guessed number.
   var PRICE_AGED_AFTER_DAYS=3;   // this pipeline is meant to refresh daily; one missed cycle is tolerable, more is not
-  fetch("/data/alberta-price-index.json",{cache:"no-store"}).then(function(r){
+  fetch(SUPA+"/rpc/fn_city_price_index",{
+    method:"POST",
+    headers:{ apikey:LC_ANON, Authorization:"Bearer "+LC_ANON, "Content-Type":"application/json" },
+    body:"{}"
+  }).then(function(r){
     if(!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
-  }).then(function(data){
-    if(!data||!Array.isArray(data.cities)) throw new Error("unexpected shape");
-    var byName={}; data.cities.forEach(function(c){ if(c&&c.name) byName[c.name]=c; });
-    var fileAge=ageInDays(data.generatedAt);
+  }).then(function(rows){
+    if(!Array.isArray(rows)) throw new Error("unexpected shape");
+    var byName={}; rows.forEach(function(c){ if(c&&c.city) byName[c.city]=c; });
     CITIES.forEach(function(c){
       var row=byName[c.name];
-      if(!row || typeof row.index_pct!=="number" || !(row.avg_deviation_dollars>0 || row.avg_deviation_dollars<0)){
+      if(!row || typeof row.index_pct!=="number" || typeof row.avg_deviation_dollars!=="number"){
         c.priceState="unavailable";
         return;
       }
@@ -1701,21 +1708,21 @@
       // sentence stays internally consistent with the real numbers.
       c.avgMsrp=row.index_pct?Math.round(Math.abs(c.premium)/(Math.abs(row.index_pct)/100)):c.avgMsrp;
       c.priceDealers=row.n_dealers;
-      c.priceAsOf=row.as_of||data.generatedAt;
-      var rowAge=ageInDays(row.as_of)||fileAge;
+      c.priceAsOf=row.as_of;
+      var rowAge=ageInDays(row.as_of);
       c.priceState=(rowAge===null||rowAge>PRICE_AGED_AFTER_DAYS)?"aged":"live";
     });
     if(selected) drawGauge(selected,false);
     var fn=document.getElementById("priceFootnote");
     if(fn){
-      var live=CITIES.filter(function(c){return c.priceState==="live"||c.priceState==="aged";}).length;
-      fn.innerHTML = live
-        ? 'The <b>price-vs-MSRP gauge is real</b> for '+live+' Alberta market'+(live===1?'':'s')+' with enough tracked dealers/listings ('+
-          'dealers’ own advertised prices vs <span class="mono">msrp_catalog</span>, trim-matched, read '+(data.generatedAt||'')+'); '+
+      var liveCities=CITIES.filter(function(c){return c.priceState==="live"||c.priceState==="aged";});
+      fn.innerHTML = liveCities.length
+        ? 'The <b>price-vs-MSRP gauge is real</b> for '+liveCities.length+' Alberta market'+(liveCities.length===1?'':'s')+' with enough tracked dealers/listings ('+
+          'dealers’ own advertised prices vs <span class="mono">msrp_catalog</span>, trim-matched); '+
           'other cities show “not enough data” until coverage grows.'
         : 'The <b>price-vs-MSRP pipeline is live but no city has enough tracked data yet</b> (dealers’ advertised prices vs <span class="mono">msrp_catalog</span>) — every city shows “not enough data” rather than a guess.';
     }
-  }).catch(function(){ /* file not published yet -- every city stays "sample", exactly today's behaviour */ });
+  }).catch(function(){ /* RPC unreachable -- every city stays "sample", exactly today's fallback behaviour */ });
 
   requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
   // after the entrance fly-in settles, drop the plane + pin durations to the snappy preset speed
