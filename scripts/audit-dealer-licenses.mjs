@@ -65,7 +65,21 @@ async function main() {
   console.log(`${dealers.length} active dealer_source rows checked against ${issuedHosts.size} Issued AMVIC hosts.`);
   console.log(`  ${confirmed.length} confirmed licensed.`);
   console.log(`  ${unconfirmed.length} with NO confirmed Issued license:`);
-  for (const d of unconfirmed) console.log(`    id=${d.id}  ${d.host}  (${d.platform})  ${d.name ?? ""}`);
+  for (const d of unconfirmed) {
+    console.log(`    id=${d.id}  ${d.host}  (${d.platform})  ${d.name ?? ""}`);
+    // DIAGNOSTIC: is this a real absence, or a formatting mismatch (www vs
+    // bare, http vs https) between dealer_source.host and the AMVIC website
+    // field? Print any amvic_licensees row whose website contains this host's
+    // bare domain, whatever its exact formatting or status, so a false
+    // "unlicensed" from string mismatch is visible before anyone acts on it.
+    const bareDomain = d.host.replace(/^https?:\/\/(www\.)?/i, "");
+    const near = licensees.filter((r) => (r.website || "").toLowerCase().includes(bareDomain.toLowerCase()));
+    if (near.length) {
+      for (const r of near) console.log(`        near-match on file: website="${r.website}" status="${r.facility_status}"`);
+    } else {
+      console.log(`        no amvic_licensees row contains "${bareDomain}" in its website field at all`);
+    }
+  }
 
   if (!unconfirmed.length) { console.log("\nNothing to deactivate."); return; }
   if (DRY) { console.log("\nDRY RUN — nothing deactivated."); return; }
