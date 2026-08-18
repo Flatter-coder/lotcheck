@@ -58,7 +58,7 @@ jobs:
           echo "node scripts/crawl-alberta-inventory.mjs $ARGS"
           node --experimental-strip-types scripts/crawl-alberta-inventory.mjs $ARGS
       - name: Rebuild city price index
-        if: ${{ inputs.dry_run == 'false' }}
+        if: ${{ !inputs.dry_run }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

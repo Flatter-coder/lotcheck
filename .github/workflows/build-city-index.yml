@@ -1,0 +1,37 @@
+# Rebuilds city_dealer_index from whatever is already in vehicle_listing.
+#
+# READS AND WRITES OUR OWN TABLES ONLY -- no request ever leaves this job for
+# a dealer site, so it's not the activity that's with counsel and doesn't need
+# that sign-off. Useful standalone (tuning MIN_DEALERS/MIN_LISTINGS/STALE_DAYS,
+# or just inspecting current coverage) without paying for a fresh crawl.
+# crawl-inventory.yml also runs this same script automatically after a real
+# (non-dry-run) crawl -- this workflow exists for everything in between.
+name: Build city price index
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Compute and print, write nothing"
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Build index
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          node scripts/build-city-price-index.mjs $ARGS
