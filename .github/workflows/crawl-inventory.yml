@@ -11,6 +11,12 @@
 # legal_rule + legal_control rows recording what cleared it.
 #
 # Cost: free. GitHub-hosted runner, a few hundred JSON fetches, no vendor.
+#
+# THE INDEX-REBUILD STEP BELOW IS A DIFFERENT ACTIVITY FROM THE CRAWL ABOVE.
+# It reads our own vehicle_listing/dealer_source/msrp_catalog and writes our
+# own city_dealer_index -- no request ever leaves this job for a dealer site --
+# so it is not part of what's with counsel and does not need the same sign-off.
+# It only runs after a real (non-dry-run) crawl actually wrote something.
 name: Crawl Alberta inventory
 
 on:
@@ -51,3 +57,9 @@ jobs:
           if [ -n "${{ inputs.host }}" ]; then ARGS="$ARGS --host ${{ inputs.host }}"; fi
           echo "node scripts/crawl-alberta-inventory.mjs $ARGS"
           node --experimental-strip-types scripts/crawl-alberta-inventory.mjs $ARGS
+      - name: Rebuild city price index
+        if: ${{ !inputs.dry_run }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/build-city-price-index.mjs

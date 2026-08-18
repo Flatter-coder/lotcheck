@@ -5905,6 +5905,121 @@ function VerificationTab({apiUsage, apiUsageLoading, apiUsageReadAt, readOnly}){
   );
 }
 
+// ── Alberta price index — founders'/admin's own view (not the public one) ────
+// fn_city_price_index() (public, anon-callable) only ever returns cities that
+// already cleared the publishable gate. This reads fn_admin_city_price_index()
+// instead, which returns EVERY tracked city, gate status included, so Vic,
+// Josh and JC can watch coverage grow toward the threshold day to day — the
+// whole reason this got asked for before the page goes public.
+//
+// LIVE DOT: per the standing rule (live-data-green-dot), lights only after a
+// read actually succeeds, never on the first paint or a failed fetch. Polls on
+// the same cadence + tab-focus refetch as useApiUsage, so leaving this tab open
+// keeps proving the connection rather than freezing on the first successful read.
+function CityPriceIndexTab({C}){
+  const [rows,setRows]=useState([]);
+  const [state,setState]=useState("loading");   // loading | ok | absent
+  const [readAt,setReadAt]=useState(null);       // set ONLY on a read that returned
+
+  useEffect(()=>{
+    let cancelled=false;
+    async function fetchIndex(){
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_city_price_index");
+        if(error) throw error;
+        if(!cancelled){ setRows(data||[]); setReadAt(Date.now()); setState("ok"); }
+      }catch(err){
+        console.warn("city price index unavailable:",err?.message||err);
+        // Keep showing whatever we already had rather than blanking a
+        // populated table over one transient blip (same discipline as
+        // useApiUsage): only the very first, still-empty load shows "absent".
+        if(!cancelled) setState(prev=>prev==="ok"?prev:"absent");
+      }
+    }
+    fetchIndex();
+    const id=setInterval(fetchIndex,60_000);
+    const onFocus=()=>{ if(document.visibilityState==="visible") fetchIndex(); };
+    document.addEventListener("visibilitychange",onFocus);
+    window.addEventListener("focus",onFocus);
+    return()=>{
+      cancelled=true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange",onFocus);
+      window.removeEventListener("focus",onFocus);
+    };
+  },[]);
+
+  const pctS=(n)=> n==null ? "—" : (n>=0?"+":"−")+Math.abs(n).toFixed(1)+"%";
+  const money=(n)=> n==null ? "—" : "$"+Math.round(Math.abs(n)).toLocaleString("en-CA");
+  const publishable=rows.filter(r=>r.is_publishable);
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+          ALBERTA PRICE INDEX — DEALERS' OWN ADVERTISED PRICES VS MSRP_CATALOG
+        </div>
+        <LiveDot readAt={readAt} label="Live"/>
+      </div>
+
+      {state==="loading" && rows.length===0 && (
+        <div style={{color:C.inkFaint,fontSize:13,padding:"12px 0"}}>Loading…</div>
+      )}
+      {state==="absent" && rows.length===0 && (
+        <div style={{fontSize:12.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260818_fn_admin_city_price_index.sql</span>.
+        </div>
+      )}
+
+      {rows.length>0 && (<>
+        <div style={{fontSize:12.5,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+          {publishable.length} of {rows.length} tracked cit{rows.length===1?"y":"ies"} clear the publish gate
+          (n_dealers≥3, n_listings≥12, fresh within 7 days) — only those show on the public page once it goes
+          live. Cities with zero matched listings aren't tracked yet and don't appear below.
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{textAlign:"left",color:C.inkFaint,fontSize:11,letterSpacing:.6,textTransform:"uppercase"}}>
+                <th style={{padding:"4px 8px"}}>City</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Dealers</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Listings</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Index</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Avg $ vs MSRP</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>As of</th>
+                <th style={{padding:"4px 8px",textAlign:"center"}}>Gate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r=>(
+                <tr key={r.city} style={{borderTop:`1px solid ${C.line}`,opacity:r.is_publishable?1:.6}}>
+                  <td style={{padding:"7px 8px",fontWeight:700,color:C.ink}}>{r.city}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>{r.n_dealers}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>{r.n_listings}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace",fontWeight:700,
+                              color:r.is_publishable?C.tealInk:C.ink}}>{pctS(r.index_pct)}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>{money(r.avg_deviation_dollars)}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",color:C.inkFaint,fontSize:12}}>
+                    {r.max_updated_at?new Date(r.max_updated_at).toLocaleDateString("en-CA"):"—"}
+                  </td>
+                  <td style={{padding:"7px 8px",textAlign:"center"}}>
+                    {r.is_publishable
+                      ? <span style={{color:C.tealInk,fontWeight:800,fontSize:11}}>PASS</span>
+                      : <span style={{color:C.inkFaint,fontSize:11}}>not yet</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>)}
+      {rows.length===0 && state==="ok" && (
+        <div style={{fontSize:12.5,color:C.inkFaint,padding:"6px 0"}}>No listings matched to a confident MSRP yet.</div>
+      )}
+    </div>
+  );
+}
+
 // ── Founders panel (/founders) ───────────────────────────────────────────────
 // JC and Josh fund a third of the bill each, so they get to see what they are
 // paying for. This is the Verification tab and nothing else: making them admins
@@ -6068,7 +6183,10 @@ function FoundersPanel(){
     </div>
   );
 
-  return shell(<VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt} readOnly/>);
+  return shell(<>
+    <CityPriceIndexTab C={C}/>
+    <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt} readOnly/>
+  </>);
 }
 
 function AdminPanel(){
@@ -6378,6 +6496,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
           <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
           <AdminTabButton active={tab==="verification"} onClick={()=>setTab("verification")}>Verification</AdminTabButton>
+          <AdminTabButton active={tab==="price-index"} onClick={()=>setTab("price-index")}>Price Index</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -6537,6 +6656,7 @@ function AdminPanel(){
         {tab==="gifts" && <GiveCheckTab/>}
         {tab==="alerts" && <AlertFoldersTab/>}
         {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt}/>}
+        {tab==="price-index" && <CityPriceIndexTab C={C}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
