@@ -32,6 +32,7 @@
 //   node scripts/discover-dealer-feeds.mjs --write              # upsert confirmed SM360 hosts into dealer_source
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
 import { writeFileSync } from "node:fs";
+import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -138,6 +139,45 @@ async function tryConvertus(host) {
   return null;
 }
 
+// EDealer: the section's whole inventory sits in one `vehicleArray = {...}`
+// object on the /new/ page itself (confirmed live 2026-08-18, Rainbow Ford)
+// -- reuses the SAME parser the crawler runs, so "detected" and "crawlable"
+// can never drift apart the way a hand-duplicated detection regex would.
+async function tryEdealer(host) {
+  try {
+    const r = await fetch(`${host}/new/`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (!r.ok) return null;
+    const html = await r.text();
+    const rows = extractEdealerVehicles(html);
+    if (!rows.length) return null;
+    return { platform: "edealer", page1: rows.length };
+  } catch { return null; }
+}
+
+// jsonld_itemlist: vehicles live on model/category pages, not the /new/ index
+// itself (confirmed live 2026-08-18, Wolfe Chevrolet + Village Honda both
+// link category pages from /new/ with none of the vehicles inline there) --
+// so this probe follows ONE category link to confirm the platform actually
+// yields vehicles, not just that an ItemList of SOME kind exists somewhere.
+async function tryJsonLdItemList(host) {
+  try {
+    const r = await fetch(`${host}/new/`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (!r.ok) return null;
+    const indexHtml = await r.text();
+    // Some themes put vehicles directly on the index page too -- check before
+    // spending a second request.
+    const direct = extractJsonLdVehicles(indexHtml, "new");
+    if (direct.length) return { platform: "jsonld_itemlist", page1: direct.length };
+    const categories = discoverCategoryPages(indexHtml, host);
+    if (!categories.length) return null;
+    const r2 = await fetch(categories[0], { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (!r2.ok) return null;
+    const rows = extractJsonLdVehicles(await r2.text(), "new");
+    if (!rows.length) return null;
+    return { platform: "jsonld_itemlist", page1: rows.length };
+  } catch { return null; }
+}
+
 // Shape written to --out, both mid-run and at the end. `probed` makes a partial
 // file self-describing: you can see it covered 300 of 800 rather than guessing
 // whether 2 hits means a thin province or a killed job.
@@ -147,6 +187,8 @@ function snapshot(results) {
     probed: results.length,
     sm360: results.filter((r) => r.platform === "sm360"),
     convertus: results.filter((r) => r.platform === "convertus"),
+    jsonld_itemlist: results.filter((r) => r.platform === "jsonld_itemlist"),
+    edealer: results.filter((r) => r.platform === "edealer"),
   };
 }
 
@@ -156,6 +198,10 @@ async function probe(cand) {
     if (sm) return { ...cand, ...sm };
     const cv = await tryConvertus(cand.host);
     if (cv) return { ...cand, ...cv };
+    const jl = await tryJsonLdItemList(cand.host);
+    if (jl) return { ...cand, ...jl };
+    const ed = await tryEdealer(cand.host);
+    if (ed) return { ...cand, ...ed };
     return { ...cand, platform: null };
   } catch (e) {
     return { ...cand, platform: null, error: e.message };
@@ -257,6 +303,8 @@ async function main() {
 
   const sm360 = results.filter((r) => r.platform === "sm360");
   const convertus = results.filter((r) => r.platform === "convertus");
+  const jsonldList = results.filter((r) => r.platform === "jsonld_itemlist");
+  const edealerList = results.filter((r) => r.platform === "edealer");
 
   console.log(`\n── SM360 (crawlable today): ${sm360.length} ──`);
   for (const r of sm360.sort((a, b) => (b.pages || 0) - (a.pages || 0))) {
@@ -264,7 +312,11 @@ async function main() {
   }
   console.log(`\n── Convertus (crawlable when cp resolves): ${convertus.length} ──`);
   for (const r of convertus) console.log(`  ${r.host.padEnd(42)} cp=${r.cp ?? "NOT FOUND — not seedable"} · ${r.name ?? ""}`);
-  console.log(`\n── no feed detected: ${results.length - sm360.length - convertus.length} ──`);
+  console.log(`\n── JSON-LD ItemList (crawlable today): ${jsonldList.length} ──`);
+  for (const r of jsonldList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on first probed page · ${r.name ?? ""}`);
+  console.log(`\n── EDealer (crawlable today): ${edealerList.length} ──`);
+  for (const r of edealerList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on /new/ · ${r.name ?? ""}`);
+  console.log(`\n── no feed detected: ${results.length - sm360.length - convertus.length - jsonldList.length - edealerList.length} ──`);
 
   const estimated = sm360.reduce((n, r) => n + (r.pages || 1) * (r.page1 || 24), 0);
   console.log(`\nEstimated units reachable from SM360 dealers alone: ~${estimated.toLocaleString()}`);
@@ -278,19 +330,24 @@ async function main() {
   const { createClient } = await import("@supabase/supabase-js");
   const supabase = createClient(url, key);
   // Only hosts that returned something the crawler can actually use get seeded:
-  // SM360 must have produced VINs, and Convertus must have yielded a cp — without
-  // it the feed is unaddressable, so seeding one would just create a nightly
-  // no-op that looks like coverage.
+  // SM360 must have produced VINs, Convertus must have yielded a cp, and
+  // jsonld_itemlist/edealer must have yielded at least one real vehicle on
+  // probe — without that a seeded host is unaddressable or empty, either way
+  // a nightly no-op that looks like coverage.
   const seed = [
     ...sm360.filter((r) => r.withVin > 0)
       .map((r) => ({ host: r.host, platform: "sm360", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new-inventory", "used-inventory"] })),
     ...convertus.filter((r) => r.cp)
       .map((r) => ({ host: r.host, platform: "convertus", platform_id: r.cp, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+    ...jsonldList.filter((r) => r.page1 > 0)
+      .map((r) => ({ host: r.host, platform: "jsonld_itemlist", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+    ...edealerList.filter((r) => r.page1 > 0)
+      .map((r) => ({ host: r.host, platform: "edealer", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
   ];
   if (!seed.length) { console.log("nothing to seed"); return; }
   const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }
-  console.log(`\nSeeded ${seed.length} confirmed SM360 dealers into dealer_source.`);
+  console.log(`\nSeeded ${seed.length} confirmed dealers into dealer_source (${sm360.filter((r) => r.withVin > 0).length} sm360, ${convertus.filter((r) => r.cp).length} convertus, ${jsonldList.filter((r) => r.page1 > 0).length} jsonld_itemlist, ${edealerList.filter((r) => r.page1 > 0).length} edealer).`);
 }
 
 await main();
