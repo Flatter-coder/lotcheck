@@ -1,0 +1,35 @@
+# Re-checks every active dealer_source row against a fresh AMVIC Issued-license
+# read, deactivating any host we can no longer confirm is licensed to sell
+# vehicles in Alberta. See scripts/audit-dealer-licenses.mjs for why this
+# exists separately from discover-dealer-feeds.mjs's write-time gate.
+#
+# Cost: free. Reads our own DB + amvic_licensees, no external requests.
+name: Audit dealer licenses
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report only, deactivate nothing"
+        type: boolean
+        default: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Audit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          node scripts/audit-dealer-licenses.mjs $ARGS
