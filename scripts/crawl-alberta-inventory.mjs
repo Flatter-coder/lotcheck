@@ -26,6 +26,7 @@
 // edge functions' shared module rather than writing a second copy of VIN
 // validation. One definition, one place to fix.
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
+import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
@@ -224,6 +225,54 @@ async function crawlSection(host, section) {
   return { rows, partial };
 }
 
+// ── jsonld_itemlist ─────────────────────────────────────────────────────────
+// Confirmed live 2026-08-18: Wolfe Chevrolet (f/k/a Westgate Chev), Village
+// Honda. Two-level crawl -- the /new/ or /used/ index links to model/category
+// pages (e.g. /inventory/new-chevrolet-silverado_1500/), and EACH of those
+// carries its own ItemList (up to 20 vehicles) with rel="next" pagination.
+// See scripts/lib/structured-inventory.mjs for the parser itself.
+async function fetchHtml(url) {
+  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+async function crawlJsonLdSection(host, section) {
+  const indexHtml = await fetchHtml(`${host}/${section}/`); // throws -> caller treats as section failure, same as crawlSection's page-1 contract
+  const categories = discoverCategoryPages(indexHtml, host);
+  const rows = [];
+  let partial = false;
+  for (const catUrl of categories) {
+    let url = catUrl, pages = 0;
+    while (url && pages < PAGE_CAP) {
+      let html;
+      try {
+        html = await fetchHtml(url);
+      } catch (e) {
+        console.warn(`    ${section} ${catUrl}: FAILED (${e.message}) — keeping what this category already gave`);
+        partial = true;
+        break;
+      }
+      rows.push(...extractJsonLdVehicles(html, section === "used" ? "used" : "new"));
+      url = findNextPage(html);
+      pages++;
+      if (url) await sleep(REQUEST_DELAY_MS);
+    }
+    if (pages >= PAGE_CAP) { console.warn(`    ${section} ${catUrl}: exceeds page cap ${PAGE_CAP}`); partial = true; }
+    await sleep(REQUEST_DELAY_MS);
+  }
+  return { rows, partial };
+}
+
+// ── edealer ──────────────────────────────────────────────────────────────
+// Confirmed live 2026-08-18: Rainbow Ford. The whole section's inventory sits
+// in one `vehicleArray = {...}` object on the /new/ or /used/ page itself --
+// no further pagination observed, so this is a single fetch per section.
+async function crawlEdealerSection(host, section) {
+  const html = await fetchHtml(`${host}/${section}/`);
+  return { rows: extractEdealerVehicles(html), partial: false };
+}
+
 async function main() {
   let supabase = null;
   let dealers;
@@ -235,6 +284,8 @@ async function main() {
           { id: 0, host: "https://www.tazaparkvw.com", name: "Taza Park Volkswagen", platform: "sm360", sections: ["used-inventory"] },
           { id: 0, host: "https://www.denhamford.ca", name: "Denham Ford", platform: "convertus", platform_id: "1285", sections: ["new", "used"] },
           { id: 0, host: "https://www.northhillmazda.com", name: "North Hill Mazda", platform: "convertus", platform_id: "2246", sections: ["used"] },
+          { id: 0, host: "https://www.wolfechevrolet.com", name: "Wolfe Chevrolet", platform: "jsonld_itemlist", sections: ["new"] },
+          { id: 0, host: "https://www.rainbowford.ca", name: "Rainbow Ford", platform: "edealer", sections: ["new"] },
         ];
     console.log(`DRY RUN — fetching live feeds, writing nothing.\n`);
   } else {
@@ -244,7 +295,7 @@ async function main() {
     supabase = createClient(url, key);
     let q = supabase
       .from("dealer_source").select("id,host,name,sections,platform,platform_id")
-      .eq("active", true).in("platform", ["sm360", "convertus"]);
+      .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer"]);
     // --host re-crawls ONE dealer. Useful after raising a limit or fixing an
     // adapter: no reason to re-walk seven healthy lots to re-read the eighth.
     if (HOST_ARG) q = q.eq("host", HOST_ARG);
@@ -262,16 +313,19 @@ async function main() {
     let failed = false, partial = false;
 
     // Each platform names its sections differently: SM360 uses the URL segment
-    // (new-inventory), Convertus uses the sc= param value (new).
+    // (new-inventory), everything else uses the plain new/used it links to.
     const isCvt = d.platform === "convertus";
-    const sections = d.sections?.length ? d.sections : (isCvt ? ["new", "used"] : ["new-inventory", "used-inventory"]);
+    const isJsonLd = d.platform === "jsonld_itemlist";
+    const isEdealer = d.platform === "edealer";
+    const sections = d.sections?.length ? d.sections : (isCvt || isJsonLd || isEdealer ? ["new", "used"] : ["new-inventory", "used-inventory"]);
     if (isCvt && !d.platform_id) { console.warn(`    skipped: convertus dealer with no platform_id (cp)`); totals.failed++; totals.dealers++; continue; }
 
     for (const section of sections) {
       let result;
       try {
-        result = isCvt
-          ? await crawlConvertus(d.host, d.platform_id, section)
+        result = isCvt ? await crawlConvertus(d.host, d.platform_id, section)
+          : isJsonLd ? await crawlJsonLdSection(d.host, section)
+          : isEdealer ? await crawlEdealerSection(d.host, section)
           : await crawlSection(d.host, section);
       } catch (e) {
         console.warn(`    ${section}: FAILED (${e.message})`);
