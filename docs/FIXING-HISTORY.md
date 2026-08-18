@@ -16,6 +16,12 @@ the next instance.
 
 ---
 
+## 2026-08-18
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `6f3609b` | **The city-price-index rebuild step silently never ran.** I added `if: ${{ inputs.dry_run == 'false' }}` to `crawl-inventory.yml` to run the aggregation only after a real crawl. `inputs.dry_run` is a `type: boolean` workflow input, and GitHub Actions' expression comparison converts the string `'false'` to `NaN` when compared against a boolean's numeric form — the equality can never be true. Run `32097301467` crawled 9,571 units and the job reported ✅, but "Rebuild city price index" showed **skipped**, not run, and nothing caught it because a skipped step is not a failed one | green signal, no check | condition changed to `if: ${{ !inputs.dry_run }}`. Verified by re-dispatching (`32098012785`) and reading the step's own console output, not just its checkmark: 31 dealers, 6,672 listings, 2,115 matched, `city_dealer_index` written with real Edmonton/Calgary rows |
+
 ## 2026-08-17
 
 | fix | what broke | class | guard now in place |
