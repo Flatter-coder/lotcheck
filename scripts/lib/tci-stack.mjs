@@ -15,7 +15,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dedupeBy, replaceRows } from "./catalog-io.mjs";
+import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -143,10 +143,25 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
         const pkg = (Array.isArray(pkgs) && (pkgs.find(p => p.basePackage) || pkgs[0])) || null;
         const msrp = pkg?.vehicleStartPrice?.amount;
         if (!msrp) continue;
-        // A published MSRP is a whole dollar figure. Fractional values mean the
-        // API handed us a CALCULATED price (fees/levies folded in) rather than
-        // the advertised sticker -- the exact bug that put $83,586.92 on a
-        // Land Cruiser whose real MSRP is $90,615. Never store those.
+        // vehicleStartPrice IS NOT AN MSRP AND NO FILTER CAN MAKE IT ONE.
+        //
+        // The integer test that used to live here treated a whole-dollar value
+        // as evidence of a published sticker. Measured 2026-08-17, Land Cruiser
+        // BLCAJA 2026, one vehicle, thirteen provinces:
+        //
+        //   ON 74681.92   AB 75335   BC 74648   QC 74559.5   SK 75250.5
+        //   MB 75257.99   NS 74683.25  NB 74680.5  NL 74703  PE 74715.25
+        //   YT 74659      NT 74648   NU 74689.25
+        //
+        // Twelve distinct values. MSRP is national, so this field is by
+        // definition not it -- and note AB, BC, NL, YT and NT are all WHOLE
+        // DOLLARS and all disagree. The old gate therefore did not just reject
+        // good rows, it ADMITTED calculated ones: at province=ON it passed 7 of
+        // 76 rows (C-HR, bZ, bZ Woodland), every one an Ontario-calculated
+        // figure stored as though it were the manufacturer's price.
+        //
+        // Rows are still computed so this stays observable, but they are never
+        // written -- see the ratesOnly note in run() below.
         if (!Number.isInteger(Number(msrp))) { skipped.fractional++; continue; }
         const grade = await fetchGrade(host, brandFolder, s.seriesCode, year, modelCode);
         await sleep(100);
@@ -195,25 +210,45 @@ export async function run(config) {
   }));
   const { msrpRows, financeRows, leaseRows } = await scrapeBrand({ ...config, filterSeries: args.series, pinYear: args.year });
 
-  if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {
-    const outDir = join(__dirname, "..", "out");
-    mkdirSync(outDir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const file = join(outDir, `${config.makeName.toLowerCase()}-${stamp}.json`);
-    writeFileSync(file, JSON.stringify({ msrp_catalog: msrpRows, finance_rate_catalog: financeRows, lease_rate_catalog: leaseRows }, null, 2));
-    console.log(`\nDRY RUN (no SUPABASE_SERVICE_ROLE_KEY). Rows written to:\n  ${file}`);
-    console.table(msrpRows.slice(0, 6));
-    console.table(financeRows.slice(0, 6));
-    console.table(leaseRows.slice(0, 6));
-    return;
+  // WRITE THROUGH writeCatalogs, NOT THREE BARE AWAITS.
+  // 5f4259d fixed exactly this defect -- an MSRP write that throws must not take
+  // the finance and lease writes down with it -- and converted twenty scrapers
+  // to the shared helper. This file and fca-stack.mjs kept their own hand-rolled
+  // copy of the sequence and so kept the bug, which is why the Toyota run that
+  // motivated 5f4259d is STILL losing its rates: the collapse guard correctly
+  // refuses the MSRP rows, the refusal throws, and 123 finance + 120 lease rows
+  // that were already in hand never get written.
+  //
+  // writeCatalogs also brings the dry-run path, the dedupe, the quality gate and
+  // the ratesOnly option, all of which this file was duplicating or missing.
+  // RATES ONLY, ALWAYS, FOR EVERY BRAND ON THIS PLATFORM.
+  //
+  // Toyota Canada and Lexus Canada expose no published national MSRP that this
+  // scraper can reach. Checked 2026-08-17:
+  //   - price_calculation/prices.json  -> vehicleStartPrice only, and it varies
+  //     across all 13 provinces for the same vehicle, so it is a calculated
+  //     figure, not a sticker. Lexus RX/NX behave identically.
+  //   - the BnP-get-models GraphQL fragment -> grade/engine/body/options, no price
+  //   - the series list -> pricingData: null
+  //   - /bin/api/price_calculation/calculator.json -> 404
+  //   - the Build & Price and vehicle overview pages -> JS shells, no price in HTML
+  //
+  // An MSRP may only be published with a KNOWN BASIS. A province-calculated
+  // number relabelled as MSRP is exactly the wrong-denominator defect that
+  // makes every downstream claim wrong, so the honest move is to write none.
+  //
+  // msrp_catalog keeps its hand-seeded Build & Price rows, which carry a real
+  // basis and a dated capture. The rate tables ARE published and correct, and
+  // they keep refreshing daily -- which is the half of the reference-point
+  // model this job exists to serve.
+  //
+  // TO REVISIT: if Toyota ever publishes a national MSRP, the tell is
+  // vehicleStartPrice returning the SAME value for every province. Until then
+  // this stays rates-only.
+  if (msrpRows.length) {
+    console.log(`  ${msrpRows.length} MSRP row(s) computed but NOT written: vehicleStartPrice is a province-calculated price, not a published MSRP.`);
   }
-
-  console.log(`\nWriting ${config.makeName} to Supabase…`);
-  // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily run).
-  if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", msrpRows, config.makeName);
-  else console.log(`  (rates-only: msrp_catalog left unchanged for ${config.makeName})`);
-  await replaceRows("finance_rate_catalog", financeRows, config.makeName);
-  // lease_rate_catalog is a newer table; don't fail the run if it isn't created yet.
-  await replaceRows("lease_rate_catalog", leaseRows, config.makeName, { fatal: false });
-  console.log("Done.");
+  await writeCatalogs(config.makeName, { msrpRows: [], financeRows, leaseRows }, {
+    ratesOnly: true,
+  });
 }

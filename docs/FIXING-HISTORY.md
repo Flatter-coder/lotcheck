@@ -70,11 +70,19 @@ the next instance.
 
 ## Open
 
-- **Toyota scraper reads a calculated price.** 68 of 75 rows come back fractional
-  and the quality gate rightly rejects them, so the daily refresh refuses and
-  Toyota goes stale. **The gate is correct; the field is wrong.** The fix is to
-  source Toyota MSRP from Build & Price, where the figure is a whole-dollar
-  published number that reconciles to the printed subtotal.
+- ~~Toyota scraper reads a calculated price.~~ **Closed** — but the note above
+  was wrong in a way worth keeping. It said *"the gate is correct; the field is
+  wrong."* The field was wrong; **the gate was wrong too.** A whole-dollar value
+  is not evidence of a published MSRP: the same Land Cruiser returns twelve
+  distinct values across thirteen provinces, and AB/BC/NL/YT/NT are all whole
+  dollars that disagree with each other. At `province=ON` the gate therefore
+  ADMITTED 7 of 76 rows — every one an Ontario-calculated figure headed for
+  `msrp_catalog` as a manufacturer price. The rejection was doing the visible
+  work while the acceptance did the damage.
+  It also could not be fixed by re-sourcing: Toyota and Lexus publish no
+  machine-readable national MSRP anywhere reachable (prices.json, the
+  BnP-get-models fragment, the series list, calculator.json, the B&P page and
+  the vehicle overview page were all checked). So the platform now writes none.
 - **`country=ca` is not taking effect at Scrapfly.** Re-rolling makes it
   survivable, not deterministic.
 - **`check:parity` checks report *surfaces*, not shared *helpers*.** It did not

@@ -16,7 +16,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dedupeBy, replaceRows } from "./catalog-io.mjs";
+import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -133,12 +133,36 @@ export async function run() {
   }
   console.log("\nWriting Stellantis to Supabase…");
   // Group by make so delete-then-insert stays per-make.
+  //
+  // WRITE THROUGH writeCatalogs, AND DO NOT LET ONE MAKE END THE LOOP.
+  // This was three bare awaits inside the loop, which carried two separate
+  // versions of the 5f4259d defect. Within a make, an MSRP throw skipped that
+  // make's finance and lease writes. Worse, because the throw escaped the LOOP,
+  // it also skipped every make after it: a collapse on Jeep silently cost Ram,
+  // Dodge and Chrysler their entire refresh, MSRP and rates alike, for a reason
+  // that had nothing to do with them.
+  //
+  // writeCatalogs keeps the three tables independent within a make; the try here
+  // keeps the makes independent of each other. Failures are collected and
+  // rethrown together so the step still fails loudly and names every make.
+  const makeFailures = [];
   for (const make of [...new Set(all.msrpRows.map(r => r.make))]) {
-    // CATALOG_RATES_ONLY=1 refreshes only the rate tables (daily run).
-    if (process.env.CATALOG_RATES_ONLY !== "1") await replaceRows("msrp_catalog", dedupeBy(all.msrpRows.filter(r => r.make === make), r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp"), make);
-    else console.log(`  (rates-only: msrp_catalog left unchanged for ${make})`);
-    await replaceRows("finance_rate_catalog", all.financeRows.filter(r => r.make === make), make);
-    await replaceRows("lease_rate_catalog", all.leaseRows.filter(r => r.make === make), make, { fatal: false });
+    try {
+      await writeCatalogs(make, {
+        msrpRows: all.msrpRows.filter(r => r.make === make),
+        financeRows: all.financeRows.filter(r => r.make === make),
+        leaseRows: all.leaseRows.filter(r => r.make === make),
+      });
+    } catch (e) {
+      makeFailures.push(`${make}: ${e.message}`);
+    }
+  }
+  if (makeFailures.length) {
+    throw new Error(
+      `${makeFailures.length} of ${[...new Set(all.msrpRows.map(r => r.make))].length} FCA makes failed to write (the others still ran)
+  - ` +
+      makeFailures.join("
+  - "));
   }
   console.log("Done.");
 }

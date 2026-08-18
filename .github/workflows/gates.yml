@@ -89,6 +89,16 @@ jobs:
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
         run: npm run test:catalog-guard
+      # Two rules about how catalog data reaches Supabase. Every scraper must
+      # write through writeCatalogs(), because three bare awaits mean an MSRP
+      # refusal silently discards the finance and lease rows already in hand --
+      # tci-stack and fca-stack kept hand-rolled copies and so kept that bug.
+      # And the Toyota/Lexus platform must write NO msrp_catalog rows at all:
+      # its price endpoint returns a province-calculated figure (12 distinct
+      # values across 13 provinces for one vehicle), so no filter makes it an
+      # MSRP -- the old whole-dollar test even ADMITTED 7 calculated rows.
+      - name: Catalog writes (helper-only, and no calculated price stored as MSRP)
+        run: npm run test:catalog-writes
       - name: Build & Price gate (a premium colour must never seed as trim MSRP)
         run: npm run test:bp-summary
       - name: Supersede must carry enrichment (replaceRows end-to-end)
