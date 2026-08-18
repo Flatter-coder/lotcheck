@@ -8,7 +8,8 @@
 //
 // Endpoints (all public GETs):
 //   buildnprice.categories.json            -> full series lineup + fuel tag
-//   price_calculation/<brand>/prices.json  -> per-trim MSRP (vehicleStartPrice)
+//   price_calculation/from_prices.<BRAND>.<PROV>.json -> PUBLISHED national MSRP
+//   price_calculation/<brand>/prices.json  -> per-trim deltas (province-calculated)
 //   price_calculation/interest_rates.json  -> finance AND lease APR by term
 //   graphql BnP-get-models                 -> model code -> trim name ("XSE")
 
@@ -16,6 +17,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
+import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp } from "./tci-msrp.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -69,13 +71,21 @@ async function fetchSeriesList(host, seriesPageSlug) {
   return (all?.seriesItems || []).filter(s => !s.comingSoon && s.seriesCode && !seen.has(s.seriesCode) && seen.add(s.seriesCode));
 }
 
-async function fetchPrices(host, brand, seriesCode, year) {
+async function fetchPrices(host, brand, seriesCode, year, province = PROVINCE) {
   const brandPath = brand === "LEX" ? "lexus" : "toyota";
-  const url = `${host}/bin/api/price_calculation/${brandPath}/prices.json?brand=${brand}&series=${seriesCode}&year=${year}&province=${PROVINCE}`;
+  const url = `${host}/bin/api/price_calculation/${brandPath}/prices.json?brand=${brand}&series=${seriesCode}&year=${year}&province=${province}`;
   try {
     const data = await getJson(url);
-    return data?.[PROVINCE]?.[year]?.[seriesCode] || null;
+    return data?.[province]?.[year]?.[seriesCode] || null;
   } catch { return null; }
+}
+
+// The published, NATIONAL MSRP table. Assembled at runtime by the Build & Price
+// client, which is why it appears nowhere in the served HTML -- see tci-msrp.mjs
+// for the field path and the evidence that it is national and ex-freight.
+async function fetchFromPrices(host, brand, province) {
+  const url = `${host}/bin/api/price_calculation/from_prices.${brand}.${province}.json`;
+  try { return await getJson(url); } catch { return null; }
 }
 
 // interest_rates.json -> { finance: {term: apr}, lease: {term: {apr, km}} }.
@@ -104,16 +114,51 @@ async function fetchRates(host, brand, seriesCode, year) {
   return null;
 }
 
-const gradeCache = new Map();
-async function fetchGrade(host, brandFolder, seriesCode, year, modelCode) {
+const modelCache = new Map();
+// Returns { grade, packages: Map<packageCode, {name, isBase}> }.
+//
+// A package suffix is a real Canadian trim name, not a variant code: XERAPC
+// package B is literally "XSE Technology Package", which is exactly how the
+// hand-seeded Build & Price rows name it. Emitting only the base package
+// silently drops those trims, so package names are read from the same fragment
+// the grade already comes from.
+async function fetchModel(host, brandFolder, seriesCode, year, modelCode) {
   const key = `${host}-${seriesCode}-${year}-${modelCode}`;
-  if (gradeCache.has(key)) return gradeCache.get(key);
+  if (modelCache.has(key)) return modelCache.get(key);
   const modelPath = `/content/dam/tcidigital/vehicle-fragments/${brandFolder}/${seriesCode}/${year}-${modelCode.toLowerCase()}-models`;
   const url = `${host}/graphql/execute.json/tcidigital/BnP-get-models%3BmodelPath%3D${encodeURIComponent(modelPath)}%3b.json`;
-  let grade = null;
-  try { grade = (await getJson(url))?.data?.modelV2ByPath?.item?.grade || null; } catch { /* null */ }
-  gradeCache.set(key, grade);
-  return grade;
+  const out = { grade: null, packages: new Map() };
+  try {
+    const item = (await getJson(url))?.data?.modelV2ByPath?.item;
+    out.grade = item?.grade || null;
+    for (const p of item?.packagesFragmentPath || []) {
+      if (p?.packageSuffixCode) {
+        out.packages.set(p.packageSuffixCode, { name: p?.packageSuffixDescriptionEn?.plaintext || null, isBase: !!p.isBasePackage });
+      }
+    }
+  } catch { /* leave nulls */ }
+  modelCache.set(key, out);
+  return out;
+}
+
+// Toyota's own `grade` field is sometimes an INTERNAL code rather than the
+// Canadian marketing trim: the Land Cruiser's grades are "BX" and "WX" where
+// the showroom names are "1958" and "Cruiser", and GR86, C-HR, bZ Woodland,
+// Crown Signia and Tundra do the same with "HI", "MID" and "PLT".
+//
+// A catalog row named "BX" cannot match a listing -- no dealer and no buyer
+// ever writes that -- so at best it is dead weight and at worst it attaches an
+// MSRP to the wrong trim. Shipping those names is the 2026-08-11 Land Cruiser
+// regression in a new disguise, so they are refused instead. Every model still
+// keeps at least its base trim; only the code-named variants drop out.
+//
+// The allowlist is real Canadian trim vocabulary that merely LOOKS code-like.
+const REAL_SHORT_TRIMS = new Set(["SE", "XSE", "XLE", "LE", "SR", "SR5", "TRD", "GR", "BASE", "LTD", "GRMN", "XE", "XL"]);
+function looksLikeInternalCode(trim) {
+  const t = String(trim || "").trim();
+  if (!t) return true;
+  if (REAL_SHORT_TRIMS.has(t.toUpperCase())) return false;
+  return /^[A-Z]{2,4}(-[A-Z]{2,3})?$/.test(t);
 }
 
 function candidateYears(pinYear) {
@@ -129,47 +174,75 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   console.log(`[${makeName}] series to scrape: ${series.length}${filterSeries ? ` (filtered to ${filterSeries})` : ""}`);
 
   const msrpRows = [], financeRows = [], leaseRows = [];
-  const skipped = { noGrade: 0, fractional: 0 };
+  const skipped = { noGrade: 0, refused: 0 };
+  const refusals = [];
+
+  // The published national MSRP table, pulled once per cross-check province.
+  // Fetched up front because every series reads from the same payload.
+  const fromPricesByProv = {};
+  for (const p of CROSS_CHECK_PROVINCES) {
+    const fp = await fetchFromPrices(host, brand, p);
+    if (fp) fromPricesByProv[p] = fp;
+  }
+  if (Object.keys(fromPricesByProv).length < 2) {
+    // Refusing here is the point: one province cannot prove the fee stack
+    // cancelled, and an MSRP we cannot prove is one must not be published.
+    throw new Error(
+      `from_prices returned usable data for ${Object.keys(fromPricesByProv).length} of ${CROSS_CHECK_PROVINCES.length} provinces. ` +
+      `At least two are required -- cross-province agreement is the evidence that a derived trim price is a real MSRP.`);
+  }
+  console.log(`[${makeName}] national MSRP table read for ${Object.keys(fromPricesByProv).join(", ")}`);
 
   for (const s of series) {
     const fuel = inferFuel(s.name, s.tag);
     let hitYear = null;
     for (const year of candidateYears(pinYear)) {
-      const byModel = await fetchPrices(host, brand, s.seriesCode, year);
-      if (!byModel || !Object.keys(byModel).length) continue;
+      const pricesByProv = {};
+      for (const p of Object.keys(fromPricesByProv)) {
+        const byModel = await fetchPrices(host, brand, s.seriesCode, year, p);
+        if (byModel && Object.keys(byModel).length) pricesByProv[p] = byModel;
+      }
+      if (!Object.keys(pricesByProv).length) continue;
       hitYear = year;
 
-      for (const [modelCode, pkgs] of Object.entries(byModel)) {
-        const pkg = (Array.isArray(pkgs) && (pkgs.find(p => p.basePackage) || pkgs[0])) || null;
-        const msrp = pkg?.vehicleStartPrice?.amount;
-        if (!msrp) continue;
-        // vehicleStartPrice IS NOT AN MSRP AND NO FILTER CAN MAKE IT ONE.
-        //
-        // The integer test that used to live here treated a whole-dollar value
-        // as evidence of a published sticker. Measured 2026-08-17, Land Cruiser
-        // BLCAJA 2026, one vehicle, thirteen provinces:
-        //
-        //   ON 74681.92   AB 75335   BC 74648   QC 74559.5   SK 75250.5
-        //   MB 75257.99   NS 74683.25  NB 74680.5  NL 74703  PE 74715.25
-        //   YT 74659      NT 74648   NU 74689.25
-        //
-        // Twelve distinct values. MSRP is national, so this field is by
-        // definition not it -- and note AB, BC, NL, YT and NT are all WHOLE
-        // DOLLARS and all disagree. The old gate therefore did not just reject
-        // good rows, it ADMITTED calculated ones: at province=ON it passed 7 of
-        // 76 rows (C-HR, bZ, bZ Woodland), every one an Ontario-calculated
-        // figure stored as though it were the manufacturer's price.
-        //
-        // Rows are still computed so this stays observable, but they are never
-        // written -- see the ratesOnly note in run() below.
-        if (!Number.isInteger(Number(msrp))) { skipped.fractional++; continue; }
-        const grade = await fetchGrade(host, brandFolder, s.seriesCode, year, modelCode);
+      // MSRP comes from the published from_prices line for the base trim, and
+      // from a self-verifying difference for every other trim. See tci-msrp.mjs.
+      const { msrp: derived, refused } = deriveSeriesMsrp({
+        fromPricesByProv, pricesByProv, series: s.seriesCode, year,
+      });
+      for (const r of refused) { skipped.refused++; refusals.push(`${s.name} ${r.key}: ${r.reason}`); }
+
+      // One row per (model, package): a non-base package suffix IS the trim name
+      // in Canada ("XSE Technology Package"), and emitting only the base package
+      // silently drops those rows from the catalog.
+      const anyProv = pricesByProv[Object.keys(pricesByProv)[0]];
+      for (const [modelCode, pkgs] of Object.entries(anyProv)) {
+        const model = await fetchModel(host, brandFolder, s.seriesCode, year, modelCode);
         await sleep(100);
         // NEVER fall back to modelCode: internal codes ("BX", "WX", "HI") are not
         // Canadian marketing trims, can't be matched to a listing, and shipped
         // as real trim names once (2026-08-11 Land Cruiser regression).
-        if (!grade) { skipped.noGrade++; continue; }
-        msrpRows.push({ year, make: makeName, model: s.name, trim: grade, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+        if (!model.grade) { skipped.noGrade += (pkgs || []).length; continue; }
+        for (const pk of pkgs || []) {
+          const msrp = derived.get(`${modelCode}/${pk.packageCode}`);
+          if (!Number.isFinite(msrp)) continue;   // already counted in refusals
+          const info = model.packages.get(pk.packageCode);
+          // Base package -> the grade alone. Non-base -> its published name; a
+          // missing name is refused rather than invented, because a wrong trim
+          // name is a wrong MSRP for whoever matches a listing against it.
+          let trim = String(model.grade).trim();
+          if (info && !info.isBase) {
+            if (!info.name) { skipped.refused++; refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no published name`); continue; }
+            trim = String(info.name).trim();
+          }
+          trim = trim.trim();
+          if (looksLikeInternalCode(trim)) {
+            skipped.refused++;
+            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: grade "${trim}" is an internal code, not a Canadian trim name`);
+            continue;
+          }
+          msrpRows.push({ year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+        }
       }
 
       const rates = await fetchRates(host, brand, s.seriesCode, year);
@@ -187,7 +260,11 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   }
 
   console.log(`[${makeName}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  if (skipped.noGrade || skipped.fractional) console.log(`  quality gate rejected: ${skipped.noGrade} missing-grade, ${skipped.fractional} fractional-price`);
+  if (skipped.noGrade || skipped.refused) {
+    console.log(`  refused: ${skipped.noGrade} missing-grade, ${skipped.refused} unprovable MSRP`);
+    for (const r of refusals.slice(0, 8)) console.log(`    - ${r}`);
+    if (refusals.length > 8) console.log(`    - … +${refusals.length - 8} more`);
+  }
   // A grade can appear under two modelCodes (same year/model/trim) — collapse to
   // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
   return {
@@ -221,34 +298,25 @@ export async function run(config) {
   //
   // writeCatalogs also brings the dry-run path, the dedupe, the quality gate and
   // the ratesOnly option, all of which this file was duplicating or missing.
-  // RATES ONLY, ALWAYS, FOR EVERY BRAND ON THIS PLATFORM.
+  // MSRP here is the PUBLISHED national figure, not a calculated one.
   //
-  // Toyota Canada and Lexus Canada expose no published national MSRP that this
-  // scraper can reach. Checked 2026-08-17:
-  //   - price_calculation/prices.json  -> vehicleStartPrice only, and it varies
-  //     across all 13 provinces for the same vehicle, so it is a calculated
-  //     figure, not a sticker. Lexus RX/NX behave identically.
-  //   - the BnP-get-models GraphQL fragment -> grade/engine/body/options, no price
-  //   - the series list -> pricingData: null
-  //   - /bin/api/price_calculation/calculator.json -> 404
-  //   - the Build & Price and vehicle overview pages -> JS shells, no price in HTML
+  // This platform used to store pkg.vehicleStartPrice as MSRP. That is a
+  // province-calculated price -- twelve distinct values across thirteen
+  // provinces for one Land Cruiser -- and the whole-dollar filter that was
+  // supposed to catch it instead ADMITTED 7 calculated rows, because five
+  // provinces happen to return whole dollars that disagree with each other.
   //
-  // An MSRP may only be published with a KNOWN BASIS. A province-calculated
-  // number relabelled as MSRP is exactly the wrong-denominator defect that
-  // makes every downstream claim wrong, so the honest move is to write none.
+  // The real source is from_prices.<BRAND>.<PROVINCE>.json, whose MSRP line is
+  // identical in every province and whose fee stack reconciles to the printed
+  // subtotal. Base trims take it directly; other trims are reached by a
+  // difference that must produce the SAME whole-dollar figure in every
+  // cross-check province before it is allowed out. See tci-msrp.mjs.
   //
-  // msrp_catalog keeps its hand-seeded Build & Price rows, which carry a real
-  // basis and a dated capture. The rate tables ARE published and correct, and
-  // they keep refreshing daily -- which is the half of the reference-point
-  // model this job exists to serve.
-  //
-  // TO REVISIT: if Toyota ever publishes a national MSRP, the tell is
-  // vehicleStartPrice returning the SAME value for every province. Until then
-  // this stays rates-only.
-  if (msrpRows.length) {
-    console.log(`  ${msrpRows.length} MSRP row(s) computed but NOT written: vehicleStartPrice is a province-calculated price, not a published MSRP.`);
-  }
-  await writeCatalogs(config.makeName, { msrpRows: [], financeRows, leaseRows }, {
-    ratesOnly: true,
+  // price_basis is stamped excl_freight because the payload proves it:
+  // SUBTOTAL = MSRP + PACKAGE + DRF + FPD + AC + levies, so the MSRP line sits
+  // below freight. That matches the hand-seeded Build & Price rows, which this
+  // derivation reproduces exactly for all four 2026 RAV4 PHEV trims.
+  await writeCatalogs(config.makeName, { msrpRows, financeRows, leaseRows }, {
+    priceBasis: "excl_freight",
   });
 }
