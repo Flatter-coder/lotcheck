@@ -5955,11 +5955,14 @@ function CityPriceIndexTab({C}){
 
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
           ALBERTA PRICE INDEX — DEALERS' OWN ADVERTISED PRICES VS MSRP_CATALOG
         </div>
         <LiveDot readAt={readAt} label="Live"/>
+      </div>
+      <div style={{fontSize:11,fontWeight:800,letterSpacing:.6,color:C.inkFaint,marginBottom:10}}>
+        NEW VEHICLES ONLY — MSRP doesn't apply to used/demo/certified; that's a separate leverage/days-on-market tracker.
       </div>
 
       {state==="loading" && rows.length===0 && (
@@ -5972,6 +5975,17 @@ function CityPriceIndexTab({C}){
       )}
 
       {rows.length>0 && (<>
+        {/* Answers "which city is actually live" at a glance -- the Gate
+            column further down says the same thing per-row, but Vic asked
+            this exact question after the table already existed, so the
+            answer needed to be readable without scanning every row. */}
+        <div style={{background:publishable.length?C.tealBg:C.paper2,border:`1px solid ${publishable.length?C.teal:C.line}`,
+                     borderRadius:10,padding:"9px 12px",marginBottom:10,fontSize:13}}>
+          {publishable.length
+            ? <><span style={{fontWeight:800,color:C.tealInk}}>LIVE NOW:</span>{" "}
+                <span style={{fontWeight:700,color:C.ink}}>{publishable.map(r=>r.city).join(", ")}</span></>
+            : <span style={{color:C.inkFaint}}>No city is live yet — none has cleared the publish gate.</span>}
+        </div>
         <div style={{fontSize:12.5,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
           {publishable.length} of {rows.length} tracked cit{rows.length===1?"y":"ies"} clear the publish gate
           (n_dealers≥3, n_listings≥12, fresh within 7 days) — only those show on the public page once it goes
@@ -5987,7 +6001,7 @@ function CityPriceIndexTab({C}){
                 <th style={{padding:"4px 8px",textAlign:"right"}}>Index</th>
                 <th style={{padding:"4px 8px",textAlign:"right"}}>Avg $ vs MSRP</th>
                 <th style={{padding:"4px 8px",textAlign:"right"}}>As of</th>
-                <th style={{padding:"4px 8px",textAlign:"center"}}>Gate</th>
+                <th style={{padding:"4px 8px",textAlign:"center"}}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -6004,7 +6018,7 @@ function CityPriceIndexTab({C}){
                   </td>
                   <td style={{padding:"7px 8px",textAlign:"center"}}>
                     {r.is_publishable
-                      ? <span style={{color:C.tealInk,fontWeight:800,fontSize:11}}>PASS</span>
+                      ? <span style={{color:C.tealInk,fontWeight:800,fontSize:11}}>LIVE</span>
                       : <span style={{color:C.inkFaint,fontSize:11}}>not yet</span>}
                   </td>
                 </tr>
