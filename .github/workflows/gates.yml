@@ -53,6 +53,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"      # --experimental-strip-types runs the .ts suite directly
+      # Cheapest possible check, first. A patch to fca-stack.mjs once wrote a
+      # literal newline inside a template literal, so the file could not be
+      # parsed at all -- and nothing caught it, because the build only compiles
+      # src/ and the gate suite runs only some scripts. It shipped, and the
+      # daily catalog refresh found it the next morning by taking down Jeep,
+      # Ram, Dodge and Chrysler with SyntaxError.
+      - name: Every script parses
+        run: npm run check:syntax
       - name: Invariants (analysis object)
         run: npm run test:invariants
       - name: Sealed capture (parse/magic-byte/page-count gates)

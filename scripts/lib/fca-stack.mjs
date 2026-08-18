@@ -158,11 +158,10 @@ export async function run() {
     }
   }
   if (makeFailures.length) {
-    throw new Error(
-      `${makeFailures.length} of ${[...new Set(all.msrpRows.map(r => r.make))].length} FCA makes failed to write (the others still ran)
-  - ` +
-      makeFailures.join("
-  - "));
+      const total = [...new Set(all.msrpRows.map(r => r.make))].length;
+      throw new Error(
+        `${makeFailures.length} of ${total} FCA makes failed to write (the others still ran)` +
+        `\n  - ` + makeFailures.join(`\n  - `));
   }
   console.log("Done.");
 }
