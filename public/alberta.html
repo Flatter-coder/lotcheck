@@ -577,7 +577,7 @@
       </div>
       <!-- price gauge floats on the right -->
       <div class="hud gauge-hud" id="gaugeHud">
-        <div class="hud-lbl">Price vs MSRP <span class="hud-sample">sample</span></div>
+        <div class="hud-lbl">Price vs MSRP <span class="hud-sample" id="gStateTag">sample</span></div>
         <div class="gaugewrap">
           <svg class="gauge" id="gauge" viewBox="0 0 260 156" role="img" aria-label="Radial gauge of dealer price versus MSRP"></svg>
           <div class="g-center"><div class="gv mono" id="gVal">+0.0%</div><div class="gl mono" id="gSub">≈ $0 avg</div></div>
@@ -694,7 +694,7 @@
        paint, and kept asserting it over invented numbers when the fetch died. -->
   ◆ <b>Dealer counts — <span id="dealerSource">reading Alberta car dealerships from OpenStreetMap…</span>, each binned to its nearest city.</b>
   Weather (temperature, condition, day/night) is <b>live from Open-Meteo</b> (free, no key), labelled with its fetch time.
-  The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (dealers' advertised prices measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
+  <span id="priceFootnote">The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (dealers' advertised prices measured against <span class="mono">msrp_catalog</span>) is built.</span> City positions are real coordinates; terrain shading is stylized, not survey elevation.
 </div>
 
 <script>
@@ -763,6 +763,7 @@
       c.pricePct=+(0.4+rng()*3.4).toFixed(1);           // +0.4% .. +3.8%
     }
     c.premium=Math.round(c.avgMsrp*c.pricePct/100);      // dollar premium vs MSRP
+    c.priceState="sample";                                // overwritten to "live"/"aged"/"unavailable" if /data/alberta-price-index.json loads
   });
 
   // ---- projection: lon -120..-110 -> x, lat 60..49 -> y ----
@@ -1378,9 +1379,17 @@
     if(f<0.5){ c1=green;c2=amber;t=f/0.5; } else { c1=amber;c2=red;t=(f-0.5)/0.5; }
     return [0,1,2].map(function(i){ return Math.round(c1[i]+(c2[i]-c1[i])*t); });
   }
+  // Three states, same language as the dealer-count badge: "sample" (today's
+  // deterministic placeholder, unchanged), "live"/"aged" (a real city_dealer_index
+  // row read from /data/alberta-price-index.json), "unavailable" (the file loaded
+  // fine but THIS city never cleared the publishable gate -- not enough tracked
+  // dealers/listings yet). Unavailable renders "--", never a number: a thin
+  // city showing SOME figure is exactly the accuracy+defamation failure mode
+  // alberta-scope.md's publishable gate exists to prevent.
   function drawGauge(city,animate){
-    var mean=city.premium/city.avgMsrp*100;
-    var rgb=gaugeColor(mean), col='rgb('+rgb.join(',')+')';
+    var unavailable = city.priceState==="unavailable";
+    var mean = unavailable ? 0 : city.premium/city.avgMsrp*100;
+    var rgb=unavailable?[139,149,166]:gaugeColor(mean), col=unavailable?'var(--dim)':'rgb('+rgb.join(',')+')';
     var svg=document.getElementById("gauge");
     var html='';
     html+='<path d="'+arcPath(GMIN,GMAX,R)+'" fill="none" stroke="var(--hair)" stroke-width="13" stroke-linecap="round"/>';
@@ -1390,23 +1399,44 @@
       var lp=polarR(t,R+20);
       html+='<text x="'+lp.x.toFixed(1)+'" y="'+(lp.y+3).toFixed(1)+'" fill="var(--dim)" font-size="10" font-weight="700" text-anchor="middle" font-family="monospace">+'+t+'%</text>';
     });
-    var arc=arcPath(GMIN,mean,R);
-    html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="'+col+'" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
-    var p=polar(mean);
-    html+='<g class="g-needle">';
-    html+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x.toFixed(1)+'" y2="'+p.y.toFixed(1)+'" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>';
-    html+='<circle cx="'+CX+'" cy="'+CY+'" r="5" fill="var(--panel-solid)" stroke="var(--ink)" stroke-width="2"/></g>';
+    if(!unavailable){
+      var arc=arcPath(GMIN,mean,R);
+      html+='<path class="g-arc" d="'+arc+'" fill="none" stroke="'+col+'" stroke-width="13" stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="'+(animate&&!reduce?1:0)+'"/>';
+      var p=polar(mean);
+      html+='<g class="g-needle">';
+      html+='<line x1="'+CX+'" y1="'+CY+'" x2="'+p.x.toFixed(1)+'" y2="'+p.y.toFixed(1)+'" stroke="var(--ink)" stroke-width="2.2" stroke-linecap="round"/>';
+      html+='<circle cx="'+CX+'" cy="'+CY+'" r="5" fill="var(--panel-solid)" stroke="var(--ink)" stroke-width="2"/></g>';
+    } else {
+      html+='<circle cx="'+CX+'" cy="'+CY+'" r="5" fill="var(--panel-solid)" stroke="var(--dim)" stroke-width="2"/>';
+    }
     svg.innerHTML=html;
-    if(animate&&!reduce){
+    if(animate&&!reduce&&!unavailable){
       var arcEl=svg.querySelector(".g-arc");
       requestAnimationFrame(function(){requestAnimationFrame(function(){arcEl.style.strokeDashoffset="0";});});
     }
-    var gv=document.getElementById("gVal"); gv.textContent=pctS(mean);
-    gv.style.color=col; gv.style.textShadow='0 0 16px rgba('+rgb.join(',')+',.32)';
-    document.getElementById("gSub").textContent="≈ "+signMoney(city.premium)+" avg vs MSRP";
+    var gv=document.getElementById("gVal");
+    gv.textContent = unavailable ? "—" : pctS(mean);
+    gv.style.color=col; gv.style.textShadow=unavailable?"none":('0 0 16px rgba('+rgb.join(',')+',.32)');
+    document.getElementById("gSub").textContent = unavailable ? "not enough tracked data" : "≈ "+signMoney(city.premium)+" avg vs MSRP";
     document.getElementById("gCity").innerHTML=city.name+'<span>, AB</span>';
-    document.getElementById("gNote").innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
-      signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle.';
+    var tag=document.getElementById("gStateTag");
+    if(tag){
+      tag.className="hud-sample";
+      if(city.priceState==="live"||city.priceState==="aged") tag.textContent=city.priceState==="live"?"live":"aged";
+      else if(unavailable) tag.textContent="not enough data";
+      else tag.textContent="sample";
+    }
+    var note=document.getElementById("gNote");
+    if(unavailable){
+      note.innerHTML='Not enough tracked listings in <b>'+city.name+'</b> yet to publish a figure — check back as coverage grows.';
+    } else if(city.priceState==="live"||city.priceState==="aged"){
+      note.innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
+        signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle. '+
+        'n='+(city.priceDealers||"?")+' dealers'+(city.priceAsOf?', as of '+city.priceAsOf:'')+'.';
+    } else {
+      note.innerHTML='<b>'+city.name+'</b> dealers list <b>'+pctS(mean)+'</b> vs MSRP — about '+
+        signMoney(city.premium)+' on a '+money(city.avgMsrp)+' average new vehicle.';
+    }
   }
 
   // ---- interaction: hover readout + click selection ----
@@ -1642,6 +1672,51 @@
       (data.generatedAt?" · read "+data.generatedAt+(age!==null&&age>REFRESH_DAYS?" ("+age+" days ago)":""):"");
     setTimeout(function(){ sceneEl.style.setProperty("--pindur",".5s"); },60);
   }).catch(function(e){ dealerDataUnavailable(e&&e.message?e.message:"unknown error"); });
+
+  // ---- price index: real per-city price-vs-MSRP, once the pipeline has published it ----
+  // This file does not exist until someone deliberately runs
+  // scripts/publish-price-index-json.mjs (see that script's header for why it's
+  // a separate, manual step). Until then this fetch 404s and every city keeps
+  // its "sample" state untouched -- today's behaviour, unchanged. When the file
+  // DOES exist, cities it lists switch to live/aged with a real number; every
+  // OTHER city (never absent from CITIES, just absent from this file) switches
+  // to "unavailable" -- not enough tracked data, never a guessed number.
+  var PRICE_AGED_AFTER_DAYS=3;   // this pipeline is meant to refresh daily; one missed cycle is tolerable, more is not
+  fetch("/data/alberta-price-index.json",{cache:"no-store"}).then(function(r){
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return r.json();
+  }).then(function(data){
+    if(!data||!Array.isArray(data.cities)) throw new Error("unexpected shape");
+    var byName={}; data.cities.forEach(function(c){ if(c&&c.name) byName[c.name]=c; });
+    var fileAge=ageInDays(data.generatedAt);
+    CITIES.forEach(function(c){
+      var row=byName[c.name];
+      if(!row || typeof row.index_pct!=="number" || !(row.avg_deviation_dollars>0 || row.avg_deviation_dollars<0)){
+        c.priceState="unavailable";
+        return;
+      }
+      c.pricePct=row.index_pct;
+      c.premium=Math.round(row.avg_deviation_dollars);
+      // avgMsrp backed out from pct+premium so the "$X on a $Y average vehicle"
+      // sentence stays internally consistent with the real numbers.
+      c.avgMsrp=row.index_pct?Math.round(Math.abs(c.premium)/(Math.abs(row.index_pct)/100)):c.avgMsrp;
+      c.priceDealers=row.n_dealers;
+      c.priceAsOf=row.as_of||data.generatedAt;
+      var rowAge=ageInDays(row.as_of)||fileAge;
+      c.priceState=(rowAge===null||rowAge>PRICE_AGED_AFTER_DAYS)?"aged":"live";
+    });
+    if(selected) drawGauge(selected,false);
+    var fn=document.getElementById("priceFootnote");
+    if(fn){
+      var live=CITIES.filter(function(c){return c.priceState==="live"||c.priceState==="aged";}).length;
+      fn.innerHTML = live
+        ? 'The <b>price-vs-MSRP gauge is real</b> for '+live+' Alberta market'+(live===1?'':'s')+' with enough tracked dealers/listings ('+
+          'dealers’ own advertised prices vs <span class="mono">msrp_catalog</span>, trim-matched, read '+(data.generatedAt||'')+'); '+
+          'other cities show “not enough data” until coverage grows.'
+        : 'The <b>price-vs-MSRP pipeline is live but no city has enough tracked data yet</b> (dealers’ advertised prices vs <span class="mono">msrp_catalog</span>) — every city shows “not enough data” rather than a guess.';
+    }
+  }).catch(function(){ /* file not published yet -- every city stays "sample", exactly today's behaviour */ });
+
   requestAnimationFrame(function(){requestAnimationFrame(function(){scene.classList.add("ready");});});
   // after the entrance fly-in settles, drop the plane + pin durations to the snappy preset speed
   // and clear the per-pin stagger so angle switches are immediate (not staggered).
