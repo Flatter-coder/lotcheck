@@ -45,13 +45,19 @@ jobs:
       - name: Snapshot pre-run catalog state (per-make counts + max id)
         run: node scripts/catalog-refresh-guard.mjs snapshot
 
+      # msrp=preserved, not required: Toyota Canada publishes no national MSRP.
+      # Its price endpoint returns a province-calculated figure (12 distinct
+      # values across 13 provinces for one vehicle), so the scraper writes no
+      # msrp_catalog rows and the hand-seeded Build & Price rows stand. The
+      # 'preserved' level asserts BOTH halves of that — nothing new written, and
+      # nothing lost — rather than tolerating silence the way optional/skip do.
       - name: Toyota — MSRP + finance/lease rates
         if: ${{ !cancelled() }}
         continue-on-error: true
         run: node scripts/scrape-toyota.mjs || echo "toyota" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: "Guard: Toyota wrote fresh rows"
         if: ${{ !cancelled() }}
-        run: node scripts/catalog-refresh-guard.mjs verify --step="Toyota" --makes="Toyota" --msrp=required --finance=required --lease=optional
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Toyota" --makes="Toyota" --msrp=preserved --finance=required --lease=optional
 
       - name: Lexus — MSRP + finance/lease rates
         if: ${{ !cancelled() }}
@@ -59,7 +65,7 @@ jobs:
         run: node scripts/scrape-lexus.mjs || echo "lexus" >> "$RUNNER_TEMP/failed-makes.txt"
       - name: "Guard: Lexus wrote fresh rows"
         if: ${{ !cancelled() }}
-        run: node scripts/catalog-refresh-guard.mjs verify --step="Lexus" --makes="Lexus" --msrp=required --finance=required --lease=optional
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Lexus" --makes="Lexus" --msrp=preserved --finance=required --lease=optional
 
       - name: Stellantis (Jeep/Ram/Dodge/Chrysler/Fiat) — MSRP + finance/lease
         if: ${{ !cancelled() }}

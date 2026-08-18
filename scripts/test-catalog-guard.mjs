@@ -57,5 +57,27 @@ check("missing table fails a required check", v.status === "fail" && /does not e
 v = evaluateMake({ level: "optional", pre: undefined, post: undefined, tableMissing: true });
 check("missing table warns an optional check", v.status === "warn", `got ${v.status}`);
 
+// ── 'preserved': the make writes NOTHING and keeps what it has ──────────────
+// Toyota and Lexus publish no national MSRP -- their price endpoint returns a
+// province-calculated figure -- so those scrapers write no msrp_catalog rows
+// and the hand-seeded Build & Price rows stand. 'required' was wrong for them
+// (it demands a fresh write that will never come, so the job is red forever),
+// and 'optional'/'skip' are wrong too: both accept silence, which is exactly
+// what hides the two real failures below.
+v = evaluateMake({ level: "preserved", pre: { count: 48, maxId: 9224 }, post: { count: 48, maxId: 9224 } });
+check("preserved: nothing written and nothing lost is ok", v.status === "ok", `got ${v.status}: ${v.reasons}`);
+
+v = evaluateMake({ level: "preserved", pre: { count: 48, maxId: 9224 }, post: { count: 7, maxId: 9300 } });
+check("preserved: rows APPEARING fails (the rates-only rule was undone)", v.status === "fail", `got ${v.status}: ${v.reasons}`);
+
+v = evaluateMake({ level: "preserved", pre: { count: 48, maxId: 9224 }, post: { count: 12, maxId: 9224 } });
+check("preserved: rows DISAPPEARING fails (a preserved table keeps what it had)", v.status === "fail", `got ${v.status}: ${v.reasons}`);
+
+// The existing levels must be untouched by the addition.
+v = evaluateMake({ level: "required", pre: { count: 48, maxId: 9224 }, post: { count: 48, maxId: 9224 } });
+check("required still fails when nothing fresh was written", v.status === "fail", `got ${v.status}`);
+v = evaluateMake({ level: "optional", pre: { count: 48, maxId: 9224 }, post: { count: 48, maxId: 9224 } });
+check("optional still only warns", v.status === "warn", `got ${v.status}`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

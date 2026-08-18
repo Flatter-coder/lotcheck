@@ -77,8 +77,31 @@ async function fetchTableState(table, withFetchedAt) {
 }
 
 // Pure verdict for one make × table. Exported for scripts/test-catalog-guard.mjs.
-//   level: 'required' | 'optional'; pre/post: {count, maxId, maxFetchedAt} | undefined
+//   level: 'required' | 'optional' | 'preserved'; pre/post: {count, maxId, maxFetchedAt} | undefined
 export function evaluateMake({ level, pre, post, tableMissing }) {
+  // 'preserved' = this make is configured to write NOTHING to this table, and
+  // what is already there must survive. Toyota and Lexus are the case: their
+  // price endpoint publishes only a province-calculated figure, so the scraper
+  // writes no msrp_catalog rows and the hand-seeded Build & Price rows stand.
+  //
+  // Deliberately NOT 'optional' or 'skip'. Both of those accept silence, and
+  // silence is exactly what would hide the two things that can go wrong here:
+  // the rates-only rule being undone (rows appear again), or the seeded rows
+  // being deleted by something else (rows disappear). 'preserved' asserts the
+  // intended state in both directions instead of tolerating either.
+  if (level === "preserved") {
+    const p0 = pre || { count: 0, maxId: 0 };
+    const q0 = post || { count: 0, maxId: 0 };
+    const why = [];
+    if (tableMissing) why.push("table does not exist in the API schema");
+    if (q0.maxId > p0.maxId) {
+      why.push(`fresh rows WERE written (max id ${p0.maxId} -> ${q0.maxId}) — this make is configured to write none, so the rates-only rule has been undone`);
+    }
+    if (q0.count < p0.count) {
+      why.push(`rows were LOST (${p0.count} -> ${q0.count}) — a preserved table must keep everything it had`);
+    }
+    return { status: why.length ? "fail" : "ok", reasons: why };
+  }
   const escalate = level === "required" ? "fail" : "warn";
   if (tableMissing) {
     return { status: escalate, reasons: ["table does not exist in the API schema — every write to it fails (PGRST205) and fatal:false swallows it"] };
@@ -138,7 +161,7 @@ async function verify(args) {
   for (const [short, table] of Object.entries(TABLES)) {
     const level = args[short];
     if (!level || level === "skip") continue;
-    if (level !== "required" && level !== "optional") { console.error(`guard verify: --${short} must be required|optional|skip`); process.exit(1); }
+    if (!["required", "optional", "preserved"].includes(level)) { console.error(`guard verify: --${short} must be required|optional|preserved|skip`); process.exit(1); }
     const post = await fetchTableState(table, short === "msrp");
     const preTable = snap.tables[table] || { missing: false, makes: {} };
     for (const make of makes) {
