@@ -5955,11 +5955,14 @@ function CityPriceIndexTab({C}){
 
   return (
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
           ALBERTA PRICE INDEX — DEALERS' OWN ADVERTISED PRICES VS MSRP_CATALOG
         </div>
         <LiveDot readAt={readAt} label="Live"/>
+      </div>
+      <div style={{fontSize:11,fontWeight:800,letterSpacing:.6,color:C.inkFaint,marginBottom:10}}>
+        NEW VEHICLES ONLY — MSRP doesn't apply to used/demo/certified; that's a separate leverage/days-on-market tracker.
       </div>
 
       {state==="loading" && rows.length===0 && (
@@ -5972,6 +5975,17 @@ function CityPriceIndexTab({C}){
       )}
 
       {rows.length>0 && (<>
+        {/* Answers "which city is actually live" at a glance -- the Gate
+            column further down says the same thing per-row, but Vic asked
+            this exact question after the table already existed, so the
+            answer needed to be readable without scanning every row. */}
+        <div style={{background:publishable.length?C.tealBg:C.paper2,border:`1px solid ${publishable.length?C.teal:C.line}`,
+                     borderRadius:10,padding:"9px 12px",marginBottom:10,fontSize:13}}>
+          {publishable.length
+            ? <><span style={{fontWeight:800,color:C.tealInk}}>LIVE NOW:</span>{" "}
+                <span style={{fontWeight:700,color:C.ink}}>{publishable.map(r=>r.city).join(", ")}</span></>
+            : <span style={{color:C.inkFaint}}>No city is live yet — none has cleared the publish gate.</span>}
+        </div>
         <div style={{fontSize:12.5,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
           {publishable.length} of {rows.length} tracked cit{rows.length===1?"y":"ies"} clear the publish gate
           (n_dealers≥3, n_listings≥12, fresh within 7 days) — only those show on the public page once it goes
@@ -5987,7 +6001,7 @@ function CityPriceIndexTab({C}){
                 <th style={{padding:"4px 8px",textAlign:"right"}}>Index</th>
                 <th style={{padding:"4px 8px",textAlign:"right"}}>Avg $ vs MSRP</th>
                 <th style={{padding:"4px 8px",textAlign:"right"}}>As of</th>
-                <th style={{padding:"4px 8px",textAlign:"center"}}>Gate</th>
+                <th style={{padding:"4px 8px",textAlign:"center"}}>Status</th>
               </tr>
             </thead>
             <tbody>
@@ -6004,7 +6018,7 @@ function CityPriceIndexTab({C}){
                   </td>
                   <td style={{padding:"7px 8px",textAlign:"center"}}>
                     {r.is_publishable
-                      ? <span style={{color:C.tealInk,fontWeight:800,fontSize:11}}>PASS</span>
+                      ? <span style={{color:C.tealInk,fontWeight:800,fontSize:11}}>LIVE</span>
                       : <span style={{color:C.inkFaint,fontSize:11}}>not yet</span>}
                   </td>
                 </tr>
@@ -6015,6 +6029,124 @@ function CityPriceIndexTab({C}){
       </>)}
       {rows.length===0 && state==="ok" && (
         <div style={{fontSize:12.5,color:C.inkFaint,padding:"6px 0"}}>No listings matched to a confident MSRP yet.</div>
+      )}
+    </div>
+  );
+}
+
+// ── Days on market — new / used / certified / demo, broken out separately ────
+// MSRP-vs-price only ever means something for new inventory (CityPriceIndexTab
+// above), but "how long has this been sitting" is the leverage signal for
+// EVERY condition -- used, certified and demo units especially, since that's
+// where the days-on-lot end-of-month-quota pressure actually lives. Reads
+// fn_admin_lot_leverage_summary(), which buckets every live vehicle_listing
+// row by condition (demo > certified > new/used priority) and reports BOTH
+// the dealer's own stated days_in_inventory and our own first_seen_on-derived
+// observation -- see the migration for why neither number alone is enough.
+function LotLeverageTab({C}){
+  const [rows,setRows]=useState([]);
+  const [state,setState]=useState("loading");
+  const [readAt,setReadAt]=useState(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    async function fetchSummary(){
+      try{
+        const {data,error}=await supabase.rpc("fn_admin_lot_leverage_summary");
+        if(error) throw error;
+        if(!cancelled){ setRows(data||[]); setReadAt(Date.now()); setState("ok"); }
+      }catch(err){
+        console.warn("lot leverage summary unavailable:",err?.message||err);
+        if(!cancelled) setState(prev=>prev==="ok"?prev:"absent");
+      }
+    }
+    fetchSummary();
+    const id=setInterval(fetchSummary,60_000);
+    const onFocus=()=>{ if(document.visibilityState==="visible") fetchSummary(); };
+    document.addEventListener("visibilitychange",onFocus);
+    window.addEventListener("focus",onFocus);
+    return()=>{
+      cancelled=true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange",onFocus);
+      window.removeEventListener("focus",onFocus);
+    };
+  },[]);
+
+  const BUCKET_LABEL={new:"New",used:"Used",certified:"Certified",demo:"Demo"};
+  const BUCKET_COLOR={new:C.tealInk,used:C.inkSoft,certified:C.butter?"#9a7b1f":C.inkSoft,demo:C.coralInk||C.inkSoft};
+  const money=(n)=> n==null ? "—" : "$"+Math.round(Math.abs(n)).toLocaleString("en-CA");
+  const totalUnits=rows.reduce((s,r)=>s+(r.n_units||0),0);
+  const byBucket={};
+  for(const r of rows) byBucket[r.bucket]=(byBucket[r.bucket]||0)+(r.n_units||0);
+
+  return (
+    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"14px 16px",marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.8}}>
+          DAYS ON MARKET — NEW · USED · CERTIFIED · DEMO
+        </div>
+        <LiveDot readAt={readAt} label="Live"/>
+      </div>
+      <div style={{fontSize:11,fontWeight:800,letterSpacing:.6,color:C.inkFaint,marginBottom:10}}>
+        "Dealer-stated" is their own days_in_inventory field where the feed states one. "We've watched" is our own
+        first-seen tracking (current_date − first_seen_on) — reads near zero until the crawl has run repeatedly.
+      </div>
+
+      {state==="loading" && rows.length===0 && (
+        <div style={{color:C.inkFaint,fontSize:13,padding:"12px 0"}}>Loading…</div>
+      )}
+      {state==="absent" && rows.length===0 && (
+        <div style={{fontSize:12.5,color:C.inkFaint,lineHeight:1.65,padding:"6px 0"}}>
+          Not applied yet — <span style={{fontFamily:"ui-monospace,Menlo,monospace"}}>20260818_fn_admin_lot_leverage_summary.sql</span>.
+        </div>
+      )}
+
+      {rows.length>0 && (<>
+        <div style={{background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:"9px 12px",marginBottom:10,
+                     fontSize:13,display:"flex",gap:16,flexWrap:"wrap"}}>
+          <span><b style={{color:C.ink}}>{totalUnits}</b> tracked units</span>
+          {["new","used","certified","demo"].filter(b=>byBucket[b]).map(b=>(
+            <span key={b} style={{color:BUCKET_COLOR[b]}}><b>{byBucket[b]}</b> {BUCKET_LABEL[b]}</span>
+          ))}
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{textAlign:"left",color:C.inkFaint,fontSize:11,letterSpacing:.6,textTransform:"uppercase"}}>
+                <th style={{padding:"4px 8px"}}>City</th>
+                <th style={{padding:"4px 8px"}}>Condition</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Units</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Avg days (dealer-stated)</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Missing</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Avg days (we've watched)</th>
+                <th style={{padding:"4px 8px",textAlign:"right"}}>Avg cut-to-date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r=>(
+                <tr key={r.city+"|"+r.bucket} style={{borderTop:`1px solid ${C.line}`}}>
+                  <td style={{padding:"7px 8px",fontWeight:700,color:C.ink}}>{r.city}</td>
+                  <td style={{padding:"7px 8px",fontWeight:700,color:BUCKET_COLOR[r.bucket]||C.inkSoft}}>{BUCKET_LABEL[r.bucket]||r.bucket}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>{r.n_units}</td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>
+                    {r.avg_days_dealer_stated==null?"—":`${r.avg_days_dealer_stated}d`}
+                  </td>
+                  <td style={{padding:"7px 8px",textAlign:"right",color:C.inkFaint,fontSize:12}}>
+                    {r.n_missing_days_stated>0?`${r.n_missing_days_stated} of ${r.n_units}`:"—"}
+                  </td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>
+                    {r.avg_days_observed==null?"—":`${r.avg_days_observed}d`}
+                  </td>
+                  <td style={{padding:"7px 8px",textAlign:"right",fontFamily:"ui-monospace,Menlo,monospace"}}>{money(r.avg_cut_to_date_dollars)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>)}
+      {rows.length===0 && state==="ok" && (
+        <div style={{fontSize:12.5,color:C.inkFaint,padding:"6px 0"}}>No live listings tracked yet.</div>
       )}
     </div>
   );
@@ -6185,6 +6317,7 @@ function FoundersPanel(){
 
   return shell(<>
     <CityPriceIndexTab C={C}/>
+    <LotLeverageTab C={C}/>
     <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt} readOnly/>
   </>);
 }
@@ -6497,6 +6630,7 @@ function AdminPanel(){
           <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
           <AdminTabButton active={tab==="verification"} onClick={()=>setTab("verification")}>Verification</AdminTabButton>
           <AdminTabButton active={tab==="price-index"} onClick={()=>setTab("price-index")}>Price Index</AdminTabButton>
+          <AdminTabButton active={tab==="lot-leverage"} onClick={()=>setTab("lot-leverage")}>Days on Market</AdminTabButton>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <ThemeToggle/>
@@ -6657,6 +6791,7 @@ function AdminPanel(){
         {tab==="alerts" && <AlertFoldersTab/>}
         {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt}/>}
         {tab==="price-index" && <CityPriceIndexTab C={C}/>}
+        {tab==="lot-leverage" && <LotLeverageTab C={C}/>}
       </div>
     </div>
     </AdminThemeContext.Provider>
