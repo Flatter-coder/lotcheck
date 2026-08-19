@@ -26,7 +26,7 @@ const scraped = [
 // What is already in the table, enriched by hand / by the NRCan backfill.
 const existing = [
   { year: 2026, model: "Camry", trim: "XLE", drivetrain: "AWD", price_basis: "incl_freight", attrs: { digitalKey2: true } },
-  { year: 2026, model: "Camry", trim: "SE",  drivetrain: "FWD", source_url: "https://toyota.ca/..." },
+  { year: 2026, model: "Camry", trim: "SE",  drivetrain: "FWD", source_url: "https://toyota.ca/...", fuel_type: "Hybrid" },
   { year: 2026, model: "Camry", trim: null,  drivetrain: "FWD" },
 ];
 
@@ -45,6 +45,12 @@ check("attrs and price_basis carry too",
   JSON.stringify(byTrim("XLE")));
 
 check("source_url carries", byTrim("SE").source_url?.includes("toyota.ca"), JSON.stringify(byTrim("SE")));
+
+// fuel_type joined CARRY_FORWARD on 2026-08-19. Most scrapers cannot state it --
+// inferFuelFromName only fires on "hybrid"/"plug-in"/"EV" in the trim string --
+// so a value established from an authoritative source has to survive the next
+// delete-then-insert or the backfill is pointless.
+check("fuel_type carries", byTrim("SE").fuel_type === "Hybrid", JSON.stringify(byTrim("SE")));
 
 check("the scraper's own fields are untouched",
   byTrim("XLE").msrp === 49442 && byTrim("XLE").fuel_type === "Hybrid", JSON.stringify(byTrim("XLE")));
@@ -89,7 +95,7 @@ check("a different model year does not inherit",
 }
 
 check("every enrichment column is covered by a case",
-  CARRY_FORWARD.every((c) => ["drivetrain", "attrs", "price_basis", "source_url"].includes(c)),
+  CARRY_FORWARD.every((c) => ["drivetrain", "attrs", "price_basis", "source_url", "fuel_type"].includes(c)),
   `CARRY_FORWARD=${CARRY_FORWARD.join(",")} — add a case for any new column`);
 
 // Empty inputs must not throw: an empty scrape already emptied a table once.
@@ -123,9 +129,13 @@ check("LAYER 1: mergeCarryForward alone emits homogeneous CARRY_FORWARD keys",
 // EVERY key; mergeCarryForward only ever touches CARRY_FORWARD. A scraper that
 // emits a field on some rows and omits it on others (here: fuel_type) produces
 // exactly the PGRST102 shape, and layer 1 cannot see it.
+// Uses all_in_price, NOT fuel_type: fuel_type is now carried forward, so layer 1
+// fills it and the rows would no longer diverge -- which would quietly turn this
+// case into a no-op and make uniformKeys look like dead code. The point is a
+// SCRAPER field that carry-forward does not cover, and all_in_price is one.
 const ragged = [
-  { year: 2026, make: "Toyota", model: "Camry", trim: "XLE", msrp: 49442, fuel_type: "Hybrid" },
-  { year: 2026, make: "Toyota", model: "Camry", trim: "SE",  msrp: 38792 },  // no fuel_type
+  { year: 2026, make: "Toyota", model: "Camry", trim: "XLE", msrp: 49442, all_in_price: 52000 },
+  { year: 2026, make: "Toyota", model: "Camry", trim: "SE",  msrp: 38792 },  // no all_in_price
 ];
 check("LAYER 2: a scraper field missing on some rows still diverges after layer 1",
   !allSame(mergeCarryForward(ragged, existing).rows),
@@ -134,7 +144,7 @@ check("LAYER 2: a scraper field missing on some rows still diverges after layer 
 check("LAYER 2: uniformKeys catches what layer 1 cannot",
   allSame(uniformKeys(mergeCarryForward(ragged, existing).rows)) &&
   uniformKeys(mergeCarryForward(ragged, existing).rows)
-    .find((r) => r.trim === "SE").fuel_type === null,
+    .find((r) => r.trim === "SE").all_in_price === null,
   `key sets: ${[...new Set(keysOf(uniformKeys(mergeCarryForward(ragged, existing).rows)))].join("  |  ")}`);
 
 const shipped = uniformKeys(mergeCarryForward(scraped, existing).rows);
