@@ -103,18 +103,6 @@
     display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
   :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
 
-  /* ---------------- ticker ---------------- */
-  .ticker{display:flex;align-items:center;height:38px;background:var(--panel-solid);
-    backdrop-filter:blur(12px);border-bottom:1px solid var(--hair);overflow:hidden;
-    -webkit-mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent);
-    mask-image:linear-gradient(90deg,transparent,#000 4%,#000 96%,transparent)}
-  .track{display:flex;gap:34px;white-space:nowrap;animation:scroll 46s linear infinite;padding-left:26px}
-  .ticker:hover .track{animation-play-state:paused}
-  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-  @media (prefers-reduced-motion:reduce){.track{animation:none}}
-  .ti{display:inline-flex;align-items:center;gap:8px;font-size:12.5px}
-  .ti b{color:var(--dim);font-weight:500;letter-spacing:.3px}
-  .ti .v{color:var(--ink);font-weight:600}
 
   /* ---------------- page frame ---------------- */
   .wrap{max-width:1120px;margin:0 auto;padding:26px clamp(16px,3vw,28px) 0}
@@ -213,8 +201,8 @@
     background:color-mix(in srgb,var(--c) 20%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
   .ptrow .ico svg{width:18px;height:18px;color:var(--c)}
   .ptrow .nm{font-size:12.5px;color:var(--ink);font-weight:600;white-space:nowrap}
-  .ptrow .track{height:12px;border-radius:7px;background:var(--panel-2);overflow:hidden;min-width:40px}
-  .ptrow .fill{height:100%;border-radius:7px;width:var(--w);
+  .ptrow .ptbar{height:12px;border-radius:7px;background:var(--panel-2);overflow:hidden;min-width:40px}
+  .ptrow .ptfill{height:100%;border-radius:7px;width:var(--w);
     background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,#fff 12%),var(--c));
     transform-origin:left;animation:ptgrow .7s cubic-bezier(.22,1,.36,1) both}
   @keyframes ptgrow{from{transform:scaleX(.02)}to{transform:scaleX(1)}}
@@ -225,9 +213,9 @@
   @media (max-width:520px){
     .ptrow{grid-template-columns:28px 1fr auto;grid-template-areas:"i n c" "i t t";row-gap:6px}
     .ptrow .ico{grid-area:i;width:28px;height:28px} .ptrow .nm{grid-area:n}
-    .ptrow .ct{grid-area:c} .ptrow .track{grid-area:t}
+    .ptrow .ct{grid-area:c} .ptrow .ptbar{grid-area:t}
   }
-  @media (prefers-reduced-motion:reduce){.ptrow .fill{animation:none}}
+  @media (prefers-reduced-motion:reduce){.ptrow .ptfill{animation:none}}
 
   /* continuously-animated powertrain icons (the app's real FuelIcon set) */
   @keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}
@@ -324,7 +312,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   </div>
 </nav>
 
-<div class="ticker"><div class="track" id="track"></div></div>
 
 <div class="wrap">
   <h1>MSRP Live Index</h1>
@@ -497,23 +484,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
     });
   }
-  function renderTicker(){
-    var html;
-    if(catalog.loaded && catalog.byMake && catalog.byMake.length){
-      html=catalog.byMake.map(function(m){
-        return '<span class="ti"><b>'+esc(m.make.toUpperCase())+'</b> <span class="v mono">'+money(m.median)+'</span> '+
-               '<span class="mono" style="opacity:.5">'+(Number(m.n)||0)+' trims</span></span>';
-      }).join("");
-    }else if(catalog.loaded){
-      // Loaded but no make clears the 5-trim floor (a bad refresh can do
-      // this) — an honest state, never a perpetual "LOADING" claim.
-      html='<span class="ti"><b>PER-MAKE MEDIANS PUBLISH AT 5+ VERIFIED TRIMS PER MAKE</b></span>';
-    }else{
-      html='<span class="ti"><b>LOADING VERIFIED MSRP…</b></span>';
-    }
-    document.getElementById("track").innerHTML=html+html;
-  }
-
   /* ================= hero count-up ================= */
   function countUp(el,target,format){
     var f=format||function(v){ return Math.round(v).toLocaleString("en-CA"); };
@@ -614,7 +584,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       return '<div class="ptrow" style="--c:'+r.c+'">'+
         '<span class="ico">'+icon(r.key)+'</span>'+
         '<span class="nm">'+r.label+'</span>'+
-        '<span class="track"><span class="fill" style="--w:'+(r.n/max*100).toFixed(1)+'%"></span></span>'+
+        '<span class="ptbar"><span class="ptfill" style="--w:'+(r.n/max*100).toFixed(1)+'%"></span></span>'+
         '<span class="ct">'+r.n.toLocaleString("en-CA")+' <s>trim'+(r.n===1?"":"s")+'</s></span>'+
       '</div>';
     }).join("");
@@ -631,7 +601,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       "These counts describe what LotCheck has verified, not the share of cars on the road — "+
       "the recorded set is not a representative sample of the catalogue.";
 
-    renderTicker();
   }
 
 
@@ -941,7 +910,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     footBtn.setAttribute("aria-expanded",open?"true":"false");
   });
 
-  renderTicker();
   drawRadar(null); drawHist(null);
   document.querySelectorAll(".card").forEach(function(c,i){
     setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*70);
@@ -1000,13 +968,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
         "the market cards show what Alberta dealers advertise against it, from their own public listings.";
     })
     .catch(function(e){
-      // Every surface the catalog feeds says so — a ticker still scrolling
-      // "LOADING…" beside a failure notice would claim a read in progress.
+      // Every surface the catalog feeds says so, rather than leaving a stale
+      // figure standing beside a failure notice.
       console.warn("catalog read failed:",e.message);
       setLive("lv-cat",false);
       document.getElementById("fig").textContent="—";
-      document.getElementById("track").innerHTML=
-        '<span class="ti"><b>MSRP CATALOG UNAVAILABLE — RELOAD TO TRY AGAIN</b></span>';
       document.getElementById("ptTotal").textContent="catalog unavailable";
       document.getElementById("ptRows").innerHTML="";
       document.getElementById("ptNote").innerHTML=
