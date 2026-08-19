@@ -55,7 +55,13 @@ function gateMsrpRows(rows, make) {
 // Nissan Rogue) were wiped this way, and msrp_catalog.drivetrain was 0/881
 // populated by the time anyone looked. Backfilling without this fix just
 // queues the same loss for the next refresh.
-export const CARRY_FORWARD = ["drivetrain", "attrs", "price_basis", "source_url"];
+// fuel_type joined this list on 2026-08-19. It is not something most scrapers
+// can state: inferFuelFromName() reads the trim string, which only ever says
+// "hybrid"/"plug-in"/"EV", so a plain gas or hybrid nameplate returns null and
+// 613 of 1,000 rows carried no powertrain at all. Anything backfilled from an
+// authoritative source (NRCan) would then be deleted by the very next refresh,
+// exactly as the hand-seeded drivetrain values were before this list existed.
+export const CARRY_FORWARD = ["drivetrain", "attrs", "price_basis", "source_url", "fuel_type"];
 
 export const catKey = (r) => `${r.year}|${r.model}|${r.trim ?? ""}`;
 
