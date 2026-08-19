@@ -38,6 +38,11 @@ const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); retur
 const WRITE = process.argv.includes("--write");
 const SOURCE = (ARG("--source", "osm") || "osm").toLowerCase();
 const LIMIT = Number(ARG("--limit", "0")) || 0;
+// Resume point. The 2026-08-19 run hit the job's 45-minute cap at 1,580 of
+// 1,639 hosts, and there was no way to probe only the remainder — --limit takes
+// the FIRST n. Skip is applied before limit, so --skip 1500 --limit 200 covers
+// the tail without re-probing what already answered.
+const SKIP = Number(ARG("--skip", "0")) || 0;
 const OUT = ARG("--out");
 
 const UA = "LotCheckBot/1.0 (+https://lotcheck.ca/about; buyer-side vehicle price verification)";
@@ -218,9 +223,16 @@ async function fetchAmvicLicenseesWithWebsite(supabase) {
   const all = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
+    // ORDER BY is not decoration here. A paginated read with no ordering has
+    // NO guaranteed row order, so successive .range() windows can overlap and
+    // leave gaps — the candidate list silently loses licensees and gains
+    // duplicates, and "1,639 distinct hosts" stops being a number you can
+    // trust or reproduce. It also makes a capped run unresumable: --skip can
+    // only mean something if run N and run N+1 agree on the order.
     const { data, error } = await supabase
-      .from("amvic_licensees").select("name,trade_name,city,website,facility_status,facility_type")
+      .from("amvic_licensees").select("id,name,trade_name,city,website,facility_status,facility_type")
       .not("website", "is", null)
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
     if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
     all.push(...(data || []));
@@ -289,6 +301,12 @@ async function main() {
   }
   let candidates = [...byHost.values()];
   console.log(`${candidates.length} distinct usable hosts (source: ${SOURCE}).`);
+  if (SKIP) {
+    const before = candidates.length;
+    candidates = candidates.slice(SKIP);
+    console.log(`--skip ${SKIP}: resuming at host ${SKIP + 1} of ${before} (${candidates.length} left to probe).`);
+    if (!candidates.length) { console.log("nothing left after the skip — the list is shorter than you think."); return; }
+  }
   if (LIMIT) { candidates = candidates.slice(0, LIMIT); console.log(`--limit ${LIMIT}: probing a sample.`); }
 
   // Results are flushed to disk as we go. The first full run took 16 minutes for
