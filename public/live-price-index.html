@@ -195,29 +195,39 @@
   .chart-wait{display:flex;align-items:center;justify-content:center;text-align:center;
     min-height:180px;font-size:12.5px;color:var(--dim);line-height:1.6;padding:0 14px}
 
-  /* ---------------- powertrain: extruded slab bar ---------------- */
+  /* ---------------- powertrain: coverage rows ---------------- */
   .pt-card{padding:18px 18px 16px}
-  .pt-chip{position:absolute;top:14px;right:16px;font-size:10px;letter-spacing:.6px;color:var(--dim);
-    border:1px solid var(--hair-strong);border-radius:7px;padding:4px 9px;background:var(--panel-2)}
-  .ptw{perspective:1000px;margin-top:26px}
-  .pt-bar{display:flex;gap:6px;transform:rotateX(15deg);transform-style:preserve-3d}
-  .seg{position:relative;transform-style:preserve-3d;height:62px;border-radius:9px;flex:var(--f);min-width:6px;
-    background:linear-gradient(160deg,color-mix(in srgb,var(--c) 85%,#fff 10%),var(--c));
-    display:flex;align-items:center;justify-content:center;overflow:hidden;
-    box-shadow:0 12px 22px rgba(0,0,0,.35);transition:transform .35s;cursor:default}
-  :root[data-theme="light"] .seg{box-shadow:0 10px 18px rgba(22,32,52,.18)}
-  .seg::after{content:"";position:absolute;left:3px;right:3px;top:-7px;height:7px;border-radius:9px 9px 0 0;
-    background:color-mix(in srgb,var(--c) 60%,#fff);transform:rotateX(90deg);transform-origin:bottom;opacity:.85}
-  .seg:hover{transform:translateZ(20px)}
-  .seg svg{width:21px;height:21px;flex:none;color:rgba(8,12,20,.82)}
-  @media (prefers-reduced-motion:reduce){.seg:hover{transform:none}}
-  /* Legend row, NOT segment-aligned: with real proportions (one segment can be
-     75% of the bar) aligning labels under segments truncates them to "G…". */
-  .ptlab{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;font-size:10.5px;color:var(--dim)}
-  .ptlab span{display:inline-flex;gap:6px;align-items:center}
-  .ptlab i{width:7px;height:7px;border-radius:2px;background:var(--c);flex:none}
-  .ptlab em{font-style:normal;white-space:nowrap}
-  .ptlab em b{color:var(--ink);font-weight:600}
+  /* ONE ROW PER POWERTRAIN, NOT A STACKED BAR.
+     The stacked version devoted 64% of its width to an "Unrecorded" block --
+     695 of 1,084 trims -- which told a buyer nothing and crowded out the part
+     that does. Rescaling the recorded slice to full width was not the fix
+     either: powertrain is recorded for only 36% of the catalogue and that
+     subset is skewed (the untagged majority is overwhelmingly gas), so a
+     100%-stacked bar drawn from it invites "half the market is hybrid", which
+     is false. A stacked bar always implies a whole; separate rows imply none,
+     so no share can be read off this even carelessly. Bars are scaled to the
+     LARGEST RECORDED COUNT, which is a statement about our coverage only. */
+  .ptrows{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+  .ptrow{display:grid;grid-template-columns:34px minmax(84px,auto) 1fr auto;align-items:center;gap:12px}
+  .ptrow .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb,var(--c) 20%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
+  .ptrow .ico svg{width:18px;height:18px;color:var(--c)}
+  .ptrow .nm{font-size:12.5px;color:var(--ink);font-weight:600;white-space:nowrap}
+  .ptrow .track{height:12px;border-radius:7px;background:var(--panel-2);overflow:hidden;min-width:40px}
+  .ptrow .fill{height:100%;border-radius:7px;width:var(--w);
+    background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,#fff 12%),var(--c));
+    transform-origin:left;animation:ptgrow .7s cubic-bezier(.22,1,.36,1) both}
+  @keyframes ptgrow{from{transform:scaleX(.02)}to{transform:scaleX(1)}}
+  .ptrow .ct{font-size:12.5px;color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ptrow .ct s{text-decoration:none;color:var(--dim);font-weight:500}
+  .pt-note{margin:16px 0 0;font-size:11px;line-height:1.6;color:var(--dim);max-width:74ch}
+  .pt-note b{color:var(--ink);font-weight:600}
+  @media (max-width:520px){
+    .ptrow{grid-template-columns:28px 1fr auto;grid-template-areas:"i n c" "i t t";row-gap:6px}
+    .ptrow .ico{grid-area:i;width:28px;height:28px} .ptrow .nm{grid-area:n}
+    .ptrow .ct{grid-area:c} .ptrow .track{grid-area:t}
+  }
+  @media (prefers-reduced-motion:reduce){.ptrow .fill{animation:none}}
 
   /* continuously-animated powertrain icons (the app's real FuelIcon set) */
   @keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}
@@ -362,11 +372,10 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   </div>
 
   <!-- POWERTRAIN -->
-  <div class="sect-h"><span>By powertrain<span class="lv lv-cat"><i></i>Live</span></span><span class="n" id="ptTotal">total verified trims</span></div>
+  <div class="sect-h"><span>Verified trims by powertrain<span class="lv lv-cat"><i></i>Live</span></span><span class="n" id="ptTotal">—</span></div>
   <section class="card pt-card">
-    <div class="pt-chip mono" id="ptChip">recorded: —</div>
-    <div class="ptw"><div class="pt-bar" id="ptBar"></div></div>
-    <div class="ptlab" id="ptLab"></div>
+    <div class="ptrows" id="ptRows"></div>
+    <p class="pt-note" id="ptNote"></p>
   </section>
 
   <!-- MARKET INSIGHTS -->
@@ -566,56 +575,65 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       countUp(el, +el.dataset.t, el.dataset.m==="$"?money:null);
     });
 
-    // powertrain slab bar — COUNTS only, which are real at any coverage.
-    // Per-powertrain medians stay unpublished: the tagged slice is skewed
-    // (the untagged majority is overwhelmingly gas), so a median drawn from
-    // it would invert the answer. Counts state the coverage instead of
-    // papering over it, unrecorded segment included.
+    // POWERTRAIN COVERAGE — what LotCheck has verified, not what the market is.
+    //
+    // The old version was a 100%-stacked bar whose largest segment was
+    // "Unrecorded", 695 of 1,084 trims. Two things were wrong with it. It spent
+    // 64% of the width telling a buyer we do not know something, which is not
+    // information they can act on; and the remaining 36% is a SKEWED subset --
+    // the untagged majority is overwhelmingly gas -- so any reader who mentally
+    // rescaled the coloured part would conclude the market is mostly electrified.
+    // It is not. That is the same inversion the median figures are withheld for.
+    //
+    // Rows sized against the largest RECORDED count fix both: no whole is drawn,
+    // so no share can be inferred, and the numbers shown are exactly true -- these
+    // are the trims we hold a verified MSRP for. Coverage is stated once, in
+    // words, where it cannot be mistaken for a market claim.
     var FUELS=[
       ["Gas","var(--blue)"],["Hybrid","var(--teal)"],
       ["PHEV","var(--amber)","Plug-in Hybrid"],["BEV","var(--up)"]
     ];
-    var unrec=catalog.trims-catalog.fuelTagged;
-    var segs=[{key:"None",label:"Unrecorded",n:unrec,c:"color-mix(in srgb,var(--dim) 55%,var(--panel-solid))"}];
-    var known=0;
+    var rows=[], known=0;
     FUELS.forEach(function(f){
       var n=catalog.byFuel[f[0]]||0; known+=n;
-      segs.push({key:f[0],label:f[2]||f[0],n:n,c:f[1]});
+      if(n>0) rows.push({key:f[0],label:f[2]||f[0],n:n,c:f[1]});
     });
-    // A fuel_type outside the four mapped keys (an FCEV, a Diesel) must not
-    // vanish from the bar while still counting as "recorded" — the segments
-    // would stop summing to the verified-trims total. Bucket the remainder
-    // visibly instead.
+    // A fuel_type outside the four mapped keys (an FCEV, a Diesel) still counts
+    // as recorded, so it must appear rather than silently vanish.
     var other=catalog.fuelTagged-known;
-    if(other>0) segs.push({key:"Other",label:"Other fuel",n:other,c:"var(--gate)"});
-    segs=segs.filter(function(s){ return s.n>0; });
-    document.getElementById("ptBar").innerHTML=segs.map(function(s){
-      return '<div class="seg" style="--f:'+s.n+';--c:'+s.c+'" title="'+s.label+' · '+s.n+' trims">'+icon(s.key)+'</div>';
+    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"var(--gate)"});
+    // FIXED powertrain order, never sorted by count. Sorting produces a
+    // leaderboard, and a leaderboard of OUR coverage reads as a ranking of what
+    // is common on the road -- which is exactly the inference this panel must
+    // not invite. Gas -> Hybrid -> PHEV -> BEV is the conventional order and
+    // carries no claim; the bar lengths and printed counts do all the talking,
+    // and both are labelled as coverage.
+    var max=rows.reduce(function(m,r){ return Math.max(m,r.n); },1);
+
+    document.getElementById("ptRows").innerHTML=rows.map(function(r){
+      return '<div class="ptrow" style="--c:'+r.c+'">'+
+        '<span class="ico">'+icon(r.key)+'</span>'+
+        '<span class="nm">'+r.label+'</span>'+
+        '<span class="track"><span class="fill" style="--w:'+(r.n/max*100).toFixed(1)+'%"></span></span>'+
+        '<span class="ct">'+r.n.toLocaleString("en-CA")+' <s>trim'+(r.n===1?"":"s")+'</s></span>'+
+      '</div>';
     }).join("");
-    document.getElementById("ptLab").innerHTML=segs.map(function(s){
-      return '<span style="--f:'+s.n+';--c:'+s.c+'"><i></i><em>'+s.label+' <b>'+s.n+'</b> trims</em></span>';
-    }).join("");
-    fitPtIcons();
-    document.getElementById("ptChip").textContent=
-      "recorded: "+Math.round(catalog.fuelTagged/Math.max(1,catalog.trims)*100)+"%";
+
+    var unrec=catalog.trims-catalog.fuelTagged;
     document.getElementById("ptTotal").textContent=
-      catalog.trims.toLocaleString("en-CA")+" verified trims";
+      catalog.fuelTagged.toLocaleString("en-CA")+" of "+catalog.trims.toLocaleString("en-CA")+" trims";
+    // Stated in words, once. This is the honest version of the grey block: it
+    // says what is missing AND why the counts above are not a market share.
+    document.getElementById("ptNote").innerHTML=
+      "Powertrain is recorded for <b>"+catalog.fuelTagged.toLocaleString("en-CA")+"</b> of "+
+      "<b>"+catalog.trims.toLocaleString("en-CA")+"</b> verified trims. The other "+
+      "<b>"+unrec.toLocaleString("en-CA")+"</b> are not shown here. "+
+      "These counts describe what LotCheck has verified, not the share of cars on the road — "+
+      "the recorded set is not a representative sample of the catalogue.";
 
     renderTicker();
   }
 
-  // Icons only where they fit — a 6%-wide slab just crops them ugly. Re-run on
-  // resize so icons return when the viewport widens and hide when it narrows.
-  // Reads first, writes second: interleaving clientWidth reads with display
-  // writes forces a reflow per segment.
-  function fitPtIcons(){
-    var segs=[].slice.call(document.querySelectorAll("#ptBar .seg"));
-    var widths=segs.map(function(el){ return el.clientWidth; });
-    segs.forEach(function(el,i){
-      var sv=el.querySelector("svg");
-      if(sv) sv.style.display = widths[i]<32 ? "none" : "";
-    });
-  }
 
   /* ================= market reading: fn_alberta_msrp_deviation =================
      Aggregate-only RPC over current Alberta listings (dealers' own advertised
@@ -875,7 +893,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   var rzT;
   addEventListener("resize",function(){
     clearTimeout(rzT);
-    rzT=setTimeout(function(){ redrawHist(false); fitPtIcons(); },200);
+    rzT=setTimeout(function(){ redrawHist(false); },200);
   });
   ch.addEventListener("pointerdown",function(e){ dragging=true; lastX=e.clientX; ch.setPointerCapture(e.pointerId); });
   ch.addEventListener("pointerup",function(){ dragging=false; });
@@ -990,8 +1008,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       document.getElementById("track").innerHTML=
         '<span class="ti"><b>MSRP CATALOG UNAVAILABLE — RELOAD TO TRY AGAIN</b></span>';
       document.getElementById("ptTotal").textContent="catalog unavailable";
-      document.getElementById("ptLab").innerHTML=
-        '<span style="flex:1"><em style="white-space:normal;font-size:12.5px">Couldn&rsquo;t reach the MSRP catalog — reload to try again.</em></span>';
+      document.getElementById("ptRows").innerHTML="";
+      document.getElementById("ptNote").innerHTML=
+        "Couldn&rsquo;t reach the MSRP catalog — reload to try again.";
       document.getElementById("tiles").innerHTML=[
         ["Makes tracked","verified makes"],["Trims verified","current models"],["Median new MSRP","across all trims"]
       ].map(function(t){
