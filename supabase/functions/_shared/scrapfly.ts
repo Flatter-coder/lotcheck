@@ -26,6 +26,32 @@ import { visionImageVerdict } from "./vision-limits.ts";
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
 
+// Ground-truth price-gate CTA text, matched against the RAW rendered DOM --
+// independent of whether the screenshot capture was complete or the vision
+// pass actually saw the sidebar it lives in. Confirmed live 2026-08-13, Fish
+// Creek Nissan's Rock Creek listing: the page plainly shows "Contact Us For
+// Price" (screenshot-verified), but the sealed capture's own render came back
+// missing the sidebar it lives in, vision never saw it, and the accusation-
+// gate correctly refused to accuse on an incomplete read -- producing a false
+// CLEAN "not_shown" instead of an honest "couldn't verify". A plain regex
+// against the actual rendered HTML can't be fooled by an incomplete capture
+// the way a vision read of it can.
+export const PRICE_GATE_CTA_RE = /contact\s+us\s+for\s+price|call\s+for\s+price|get\s+e-?price|unlock\s+(the|this|your)\s+price|get\s+today'?s\s+price/i;
+
+// Cookie/privacy-consent overlays (OneTrust, TrustArc, Quantcast, and any
+// other IAB-TCF-based CMP) sit on top of the page until a human clicks
+// through -- a bot render never does, so both screenshot calls below can end
+// up capturing a blank consent backdrop instead of the listing. Confirmed
+// live 2026-08-13 on tazaparkvw.com: a full-page "Consent Management" dialog,
+// page behind it never visible in the capture. Rather than chase each CMP
+// vendor's own button selector (brittle, breaks silently when a vendor
+// changes markup), strip any fixed/sticky high-z-index element before the
+// shot -- covers consent banners, paywalls and sticky promo bars generically.
+// Best-effort: wrapped in try/catch so a page that rejects injected JS just
+// renders as before, never breaks the request.
+const DISMISS_OVERLAYS_JS = `(function(){try{document.querySelectorAll('*').forEach(function(el){var cs=getComputedStyle(el);if((cs.position==='fixed'||cs.position==='sticky')&&parseInt(cs.zIndex||'0',10)>999){el.remove();}});document.documentElement.style.overflow='auto';document.body.style.overflow='auto';}catch(e){}})();`;
+const DISMISS_OVERLAYS_JS_B64 = btoa(DISMISS_OVERLAYS_JS);
+
 export interface RenderResult {
   html: string | null;          // fully-rendered HTML (JS executed)
   screenshotB64: string | null; // full-page screenshot, base64
@@ -91,6 +117,7 @@ async function scrapflyRenderOnce(
     u.searchParams.set("country", "ca");          // Canadian residential IP
     u.searchParams.set("rendering_wait", String(waitMs));
     if (autoScroll) u.searchParams.set("auto_scroll", "true"); // trigger lazy-loaded sections
+    u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     if (shot !== "none") u.searchParams.set("screenshots[main]", shot);
     u.searchParams.set("format", "json");
 
@@ -235,6 +262,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       // ASP render already uses for the same reason.
       u.searchParams.set("rendering_wait", "8000");
       u.searchParams.set("auto_scroll", "true");
+      u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       if (asp) u.searchParams.set("asp", "true");
       const res = await fetch(u.toString(), { signal: AbortSignal.timeout(ms) });
@@ -456,6 +484,11 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // the one remaining source with nothing reading it. See convertus-vms.js.
     const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
 
+    // Ground-truth price-gate check against the RAW rendered DOM text -- runs
+    // regardless of whether the screenshot capture was complete or the vision
+    // call below actually saw the CTA. See PRICE_GATE_CTA_RE.
+    const renderGateCtaDetected = !!(rendered.html && PRICE_GATE_CTA_RE.test(rendered.html));
+
     const userContent: any[] = [];
     // PRE-FLIGHT THE IMAGE. Anthropic rejects an oversized image with HTTP 400,
     // and this call used to send whatever the render produced -- a 17,729px-tall
@@ -507,10 +540,13 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // a JSON-LD-only result rather than losing the whole rescue, exactly the
     // capitalchev.ca case (oversized screenshot -> vision 400 -> parsed stays
     // null, but the page's own structured data was sitting right there).
-    if (!parsed && !jsonLd && !cv) return null;
+    // A confirmed price-gate CTA is the same kind of signal worth keeping
+    // even when vision, JSON-LD and vmsData all came back empty.
+    if (!parsed && !jsonLd && !cv && !renderGateCtaDetected) return null;
     if (!parsed) parsed = {};
     parsed.extractionMethod = parsed.extractionMethod
       || (Object.keys(parsed).length === 0 && (jsonLd || cv) ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
+    parsed.renderGateCtaDetected = renderGateCtaDetected;
 
     if (jsonLd) fillFromJsonLd(parsed, jsonLd);
     // Runs AFTER JSON-LD on purpose: Convertus's own msrp/financing/fine-print

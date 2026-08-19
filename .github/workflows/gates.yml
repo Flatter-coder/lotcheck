@@ -85,6 +85,8 @@ jobs:
         run: npm run check:copy
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
+      - name: Scan accuracy (MSRP-basis label, ground-truth price-gate, consent-overlay strip)
+        run: npm run check:scan-accuracy
       # The two MSRP suites guard the same defect from both ends: trim-match
       # decides whether a catalog row may be called "exact", msrp-authority
       # decides whether an over-MSRP gap may be called inflation. Both existed

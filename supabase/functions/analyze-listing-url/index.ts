@@ -3105,8 +3105,12 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
-            if (rescued) mergeRescued(jsonLdFallback, rescued);
+            jlRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+            if (rescued) {
+              mergeRescued(jsonLdFallback, rescued);
+              if (jlRenderConfirmedGated && !(Number(jsonLdFallback.quotedPrice) > 0)) jsonLdFallback.priceDisclosure = "contact_for_price";
+            }
           } catch (e) { console.warn("JSON-LD-path rescue threw (ignored):", (e as Error)?.message); }
         }
         // ASSERT (render check done). Same gates as the main path, from the
@@ -3150,8 +3154,12 @@ Deno.serve(async (req: Request) => {
               systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
               budgetMs: Math.max(1_000, Math.min(70_000, REQUEST_DEADLINE - Date.now())),
             });
-            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
-            if (rescued) mergeRescued(convertusFallback, rescued);
+            cvRenderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+              && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+            if (rescued) {
+              mergeRescued(convertusFallback, rescued);
+              if (cvRenderConfirmedGated && !(Number(convertusFallback.quotedPrice) > 0)) convertusFallback.priceDisclosure = "contact_for_price";
+            }
           } catch (e) { console.warn("Convertus-path rescue threw (ignored):", (e as Error)?.message); }
         }
         assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
@@ -3190,8 +3198,17 @@ Deno.serve(async (req: Request) => {
             budgetMs: Math.max(1_000, Math.min(80_000, REQUEST_DEADLINE - Date.now())),
           });
           rescueTrace = rescued ? `rescued keys=${Object.keys(rescued).length}, price=${rescued.quotedPrice ?? "none"}` : "rescue returned null";
-          if (rescued) mergeRescued(renderOnly, rescued);
-          if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle) {
+          const gateCtaDetected = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+            && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
+          if (rescued) {
+            mergeRescued(renderOnly, rescued);
+            // A confirmed price gate is usable data even with nothing else --
+            // shipping "we couldn't read that page" over a page that plainly
+            // says "contact us for price" is the same class of bug this fix
+            // closes on the other three rescue paths.
+            if (gateCtaDetected) renderOnly.priceDisclosure = "contact_for_price";
+          }
+          if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle || gateCtaDetected) {
             await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
             await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
             await finalizeServerSide(renderOnly);
@@ -3597,12 +3614,18 @@ Deno.serve(async (req: Request) => {
           budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
         });
         // Confirmation means the vision pass READ the rendered page and itself
-        // reported the gating -- an empty/failed read is not confirmation.
-        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0) && (rescued as any)?.priceDisclosure === "contact_for_price";
+        // reported the gating -- an empty/failed read is not confirmation. A
+        // ground-truth CTA match against the raw rendered DOM counts too: a
+        // broken/incomplete screenshot can make vision miss the sidebar (Rock
+        // Creek, 2026-08-13), but a plain text match against the actual
+        // rendered HTML can't be fooled by a bad capture the same way.
+        renderConfirmedGated = !!rescued && !(Number((rescued as any)?.quotedPrice) > 0)
+          && ((rescued as any)?.priceDisclosure === "contact_for_price" || (rescued as any)?.renderGateCtaDetected === true);
         if (rescued) {
           const rescuedMsrp = Number(rescued.msrp) > 0 ? Number(rescued.msrp) : null;
           const hadTrim = !!analysis.trim;
           mergeRescued(analysis, rescued);
+          if (renderConfirmedGated && !(Number(analysis.quotedPrice) > 0)) analysis.priceDisclosure = "contact_for_price";
           // The rescue can recover identity the text pass missed (trim, VIN).
           // A catalog "starting_at" floor picked WITHOUT that identity is stale
           // -- drop it so enrich re-resolves with the full signals (fixes the
