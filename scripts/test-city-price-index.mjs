@@ -4,7 +4,7 @@
 // goes red before it reaches /alberta.
 //
 // Run: node scripts/test-city-price-index.mjs
-import { matchListingToMsrp, computeCityStats, gatePublishable, percentile, MIN_DEALERS, MIN_LISTINGS, STALE_DAYS } from "./build-city-price-index.mjs";
+import { matchListingToMsrp, computeCityStats, gatePublishable, percentile, cityKey, prettyCity, MIN_DEALERS, MIN_LISTINGS, STALE_DAYS } from "./build-city-price-index.mjs";
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -102,6 +102,50 @@ check("no data at all (null stats) is never publishable", gatePublishable(null) 
 
 check("zero listings city is never publishable", gatePublishable(computeCityStats([]), { now: freshNow }) === false,
   "gate accepted an empty city");
+
+
+// ---------------------------------------------------------------------------
+// City identity. dealer_source.city is free text off two rosters (AMVIC's
+// licensee list, OSM's addr:city), so one place arrives under several
+// spellings. Grouping on the raw string gave each spelling its own row, split
+// the dealers and listings between them, and could push a well-covered city
+// below the publish gate in EVERY fragment — invisible for no reason but
+// punctuation. Same shape as the RAV4 / RAV4 Hybrid split (9b9ba75).
+// ---------------------------------------------------------------------------
+const sameCity = [
+  ["St. Albert", "ST. ALBERT", "St Albert", "Saint Albert", "  st.  albert "],
+  ["Fort McMurray", "FORT MCMURRAY", "fort mcmurray"],
+  ["Leduc", "Leduc, AB", "LEDUC", "leduc"],
+  ["Grande Prairie", "GRANDE PRAIRIE"],
+  ["Lloydminster", "LLOYDMINSTER"],
+  ["High River", "HIGH RIVER", "high river"],
+  ["Rocky Mountain House", "ROCKY MOUNTAIN HOUSE"],
+];
+for (const spellings of sameCity) {
+  const keys = [...new Set(spellings.map(cityKey))];
+  check(`one city, one key: ${spellings[0]}`, keys.length === 1,
+    `${spellings.length} spellings produced ${keys.length} keys: ${JSON.stringify(keys)}`);
+}
+
+// The opposite failure: over-normalising until two real places collide.
+const distinct = ["St. Albert", "Sherwood Park", "Spruce Grove", "High River", "High Prairie",
+                  "High Level", "Red Deer", "Lloydminster", "Leduc", "Lacombe"];
+check("distinct cities keep distinct keys",
+  new Set(distinct.map(cityKey)).size === distinct.length,
+  `${distinct.length} cities collapsed to ${new Set(distinct.map(cityKey)).size} keys`);
+
+check("no city at all yields no key", cityKey(null) === null && cityKey("") === null &&
+  cityKey("   ") === null && cityKey(", AB") === null, "blank input produced a key");
+
+// The label a person reads must not be mangled by the rule that normalises it.
+check("display keeps intercaps a title-caser would destroy",
+  prettyCity(["FORT MCMURRAY", "Fort McMurray"]) === "Fort McMurray",
+  `got ${JSON.stringify(prettyCity(["FORT MCMURRAY", "Fort McMurray"]))}`);
+check("display prettifies when the roster only ever shouted",
+  prettyCity(["GRANDE PRAIRIE"]) === "Grande Prairie",
+  `got ${JSON.stringify(prettyCity(["GRANDE PRAIRIE"]))}`);
+check("display drops a province suffix the roster tacked on",
+  prettyCity(["LEDUC, AB"]) === "Leduc", `got ${JSON.stringify(prettyCity(["LEDUC, AB"]))}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

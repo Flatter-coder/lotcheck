@@ -39,6 +39,49 @@ export const STALE_DAYS = Number(process.env.CITY_INDEX_STALE_DAYS) || 7;
 // Ordinary (not interpolated) percentile -- fine at the sample sizes this gate
 // even allows through (a handful to a few hundred listings per city), and it
 // never invents a value between two real observations.
+// A city is ONE row, however its roster spells it.
+//
+// dealer_source.city is free text off two rosters — AMVIC's licensee list and
+// OpenStreetMap's addr:city — so the same place arrives as "St. Albert",
+// "ST. ALBERT", "St Albert" and "Saint Albert". Grouping on the raw string
+// makes each spelling its own city_dealer_index row (the unique constraint is
+// on (city, province), so they coexist happily), and each fragment carries a
+// share of the dealers and listings. A city with ample coverage can then sit
+// below the publish gate in every fragment and appear NOWHERE — invisible for
+// no reason but punctuation.
+//
+// Same shape as the RAV4 / RAV4 Hybrid split (9b9ba75): one thing, two keys,
+// and the answer depends on which name the lookup happened to hit.
+export function cityKey(raw) {
+  if (raw == null) return null;
+  let s = String(raw).normalize("NFKC").toLowerCase();
+  s = s.replace(/,\s*(ab|alta|alberta)\.?\s*$/, "");        // "Leduc, AB"
+  s = s.replace(/\bsainte\b|\bste\b/g, "ste");
+  s = s.replace(/\bsaint\b|\bst\b/g, "st");                 // St / St. / Saint
+  s = s.replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+  return s || null;
+}
+
+// The label a human reads. Prefers a spelling the roster actually used over a
+// reconstruction, so "Fort McMurray" keeps its capital M instead of being
+// title-cased into "Fort Mcmurray" by a rule that cannot know about it.
+export function prettyCity(variants) {
+  const seen = [...(variants || [])].filter(Boolean).map((v) => String(v).trim().replace(/\s+/g, " ")).filter(Boolean);
+  if (!seen.length) return null;
+  const clean = seen.map((v) => v.replace(/,\s*(AB|Alta|Alberta)\.?$/i, "").trim()).filter(Boolean);
+  const pool = clean.length ? clean : seen;
+  const mixed = pool.find((v) => v !== v.toUpperCase() && v !== v.toLowerCase());
+  if (mixed) return mixed;
+  return pool[0].split(" ").map((w) =>
+    w.split("-").map((p) => {
+      const t = p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+      return t.length > 3 && /^(Mc|Mac)[a-z]/.test(t)
+        ? t.replace(/^(Mc|Mac)([a-z])/, (_, a, b) => a + b.toUpperCase())
+        : t;
+    }).join("-")
+  ).join(" ");
+}
+
 export function percentile(sortedNums, p) {
   if (!sortedNums.length) return null;
   const idx = Math.min(sortedNums.length - 1, Math.max(0, Math.round((sortedNums.length - 1) * p)));
@@ -134,10 +177,18 @@ async function main() {
   }
 
   const byCity = new Map();
+  const cityNames = new Map();   // key -> the spellings the roster used for it
   let matched = 0, unmatched = 0, noCity = 0;
+  const noCityDealers = new Map();
   for (const l of listings) {
-    const city = dealerCity.get(l.dealer_id);
-    if (!city) { noCity++; continue; }
+    const raw = dealerCity.get(l.dealer_id);
+    const city = cityKey(raw);
+    // A dealer with no city silently removes its ENTIRE inventory from the
+    // index. Counting that is not enough — name the dealers, or real listings
+    // vanish from a published number with nothing to chase.
+    if (!city) { noCity++; noCityDealers.set(l.dealer_id, (noCityDealers.get(l.dealer_id) || 0) + 1); continue; }
+    if (!cityNames.has(city)) cityNames.set(city, new Set());
+    cityNames.get(city).add(raw);
     const key = `${l.year}|${(l.make || "").toLowerCase()}|${(l.model || "").toLowerCase()}`;
     const m = matchListingToMsrp(l, catalogByYMM.get(key));
     if (!m) { unmatched++; continue; }
@@ -146,12 +197,19 @@ async function main() {
     byCity.get(city).push({ dealer_id: l.dealer_id, deviationPct: m.deviationPct, deviationDollars: m.deviationDollars, updated_at: l.updated_at });
   }
   console.log(`  matched ${matched} listings to a confident MSRP, ${unmatched} unmatched/low-confidence, ${noCity} with no active dealer city.`);
+  if (noCityDealers.size) {
+    console.warn(`  ${noCityDealers.size} active dealer(s) have NO city and their listings are excluded entirely:`);
+    for (const [id, n] of [...noCityDealers].sort((a, b) => b[1] - a[1]).slice(0, 20)) {
+      console.warn(`    dealer_source.id=${id}  ${n} listing(s) dropped`);
+    }
+    console.warn("    Set dealer_source.city for these, or their inventory never reaches any city's index.");
+  }
 
   const rows = [];
   for (const [city, cityRows] of byCity) {
     const stats = computeCityStats(cityRows);
     const is_publishable = gatePublishable(stats);
-    rows.push({ city, province: "AB", computed_at: new Date().toISOString(), ...stats, is_publishable });
+    rows.push({ city: prettyCity(cityNames.get(city)) || city, province: "AB", computed_at: new Date().toISOString(), ...stats, is_publishable });
   }
   rows.sort((a, b) => b.n_listings - a.n_listings);
 
