@@ -83,6 +83,12 @@ jobs:
         run: npm run test:flywheel
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
+      # The powertrain panel reports COVERAGE of a skewed 36% subset, so any
+      # part-to-whole geometry lets a reader turn it into a market share. It also
+      # pins the class prefix: the bar was once <span class="track">, which
+      # inherited the ticker's marquee and dragged every bar sideways.
+      - name: Price-index panel (coverage, not market share)
+        run: npm run test:price-index
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
       - name: Scan accuracy (MSRP-basis label, ground-truth price-gate, consent-overlay strip)
