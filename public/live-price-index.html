@@ -185,56 +185,61 @@
 
   /* ---------------- powertrain: coverage rows ---------------- */
   .pt-card{padding:18px 18px 16px}
-  /* DEPTH RACK — five independent extruded rails on a swaying isometric stage.
-     NOT A STACKED BAR, and that is the whole point. The panel reports COVERAGE:
-     powertrain is recorded for ~36% of the catalogue and that subset is skewed
-     (the untagged majority is overwhelmingly gas), which is why per-powertrain
-     medians are withheld on this same panel. Any part-to-whole geometry lets a
-     reader convert our coverage into an apparent market share and conclude the
-     market is mostly electrified. It is not.
-     Separate rails share no container, so there is no whole to take a share of.
-     Each rail is a real volume: a front face, a receding top face (::before,
-     rotateX 90deg) and a right end cap (::after, rotateY 90deg), lifted on its
-     own delay so the rack breathes rather than marching in step.
-     Every class is ptr- prefixed. A bare name here once collided with the
-     ticker's global .track and dragged every bar sideways -- in a single-file
-     page an unprefixed class inherits whatever else in the file defines it. */
+  /* EXPLODED ISO STACK — five IDENTICAL plates drifting apart in Z, beside a
+     ledger that carries the numbers as text.
+     The plates are deliberately equal-sized and that is the entire point: they
+     encode no magnitude, so there is nothing on the geometry to misread. This
+     panel reports COVERAGE -- powertrain is recorded for ~36% of the catalogue
+     and that subset is skewed toward electrified, which is why per-powertrain
+     medians are withheld here -- so any shape carrying magnitude invites a
+     reader to convert our coverage into an apparent market share. Equal plates
+     cannot. The counts live in the ledger, labelled, where they are read rather
+     than estimated.
+     Every class is ptx- prefixed. A bare name once collided with the ticker's
+     global .track and dragged the whole panel sideways; in a single-file page an
+     unprefixed class inherits whatever else in the file defines it. */
   .ptrows{margin-top:2px}
-  .ptr-scene{perspective:1250px;perspective-origin:52% 44%;padding:6px 0 2px}
-  .ptr-stage{transform-style:preserve-3d;display:flex;flex-direction:column;gap:9px;
-    transform:rotateX(-9deg) rotateY(-13deg);animation:ptr-sway 14s ease-in-out infinite}
-  @keyframes ptr-sway{0%,100%{transform:rotateX(-11deg) rotateY(-17deg)}50%{transform:rotateX(-6deg) rotateY(-7deg)}}
-  .ptr-row{display:grid;grid-template-columns:minmax(96px,116px) minmax(80px,1fr) 74px;
-    align-items:center;gap:12px;height:32px;transform-style:preserve-3d;
-    animation:ptr-lift 8s ease-in-out infinite}
-  @keyframes ptr-lift{0%,100%{transform:translateZ(0)}50%{transform:translateZ(18px)}}
-  .ptr-name{text-align:right;font-size:12px;color:var(--ink);letter-spacing:.01em;white-space:nowrap}
-  /* The slot is fluid and the rail is a PERCENTAGE of it, so the rack keeps its
-     proportions from 360px to 2560px without the fixed 258px the concept used. */
-  .ptr-slot{position:relative;height:16px;transform-style:preserve-3d}
-  .ptr-block{position:absolute;left:0;top:0;display:block;width:var(--ptr-w);height:16px;min-width:5px;
-    background:linear-gradient(180deg,var(--ptr-c) 0%,var(--ptr-d) 100%);
-    transform-style:preserve-3d;box-shadow:0 10px 20px rgba(0,0,0,.55)}
-  .ptr-block::before{content:"";position:absolute;left:0;bottom:100%;width:100%;height:9px;
-    background:var(--ptr-t);transform-origin:0 100%;transform:rotateX(90deg)}
-  .ptr-block::after{content:"";position:absolute;top:0;left:100%;width:9px;height:100%;
-    background:var(--ptr-d);transform-origin:0 50%;transform:rotateY(90deg)}
-  .ptr-num{font-size:16px;font-weight:750;line-height:1.05;letter-spacing:-.01em;
-    font-variant-numeric:tabular-nums;color:var(--ink);text-shadow:0 2px 0 rgba(0,0,0,.55)}
-  .ptr-num s{display:block;text-decoration:none;font-size:8px;font-weight:600;letter-spacing:.13em;
-    text-transform:uppercase;color:var(--dim);text-shadow:none}
+  .ptx-body{display:flex;align-items:center;gap:18px}
+  .ptx-stage{flex:none;width:206px;height:212px;display:flex;align-items:center;justify-content:center;
+    perspective:900px;perspective-origin:50% 50%}
+  .ptx-stack{position:relative;width:120px;height:120px;transform-style:preserve-3d;
+    transform:rotateX(58deg) rotateZ(-44deg);animation:ptx-turn 15s ease-in-out infinite alternate}
+  @keyframes ptx-turn{from{transform:rotateX(58deg) rotateZ(-44deg)}to{transform:rotateX(58deg) rotateZ(-30deg)}}
+  .ptx-plate{position:absolute;left:8px;top:8px;width:104px;height:104px;border-radius:16px;
+    border:1px solid var(--ptx-b);background:var(--ptx-g);
+    box-shadow:0 6px 0 -2px rgba(4,6,12,.75),0 0 26px -8px var(--ptx-c);
+    transform:translateZ(var(--ptx-z));animation:ptx-float 6.2s ease-in-out infinite}
+  @keyframes ptx-float{0%,100%{transform:translateZ(var(--ptx-z))}50%{transform:translateZ(calc(var(--ptx-z) + 8px))}}
+  .ptx-plate::before{content:"";position:absolute;inset:14px;border-radius:8px;border:1px dashed rgba(231,236,243,.12)}
+  .ptx-list{flex:1;min-width:0;margin:0;padding:0;list-style:none;perspective:800px}
+  .ptx-row{display:flex;align-items:center;gap:10px;height:36px;padding:0 13px;margin-bottom:6px;
+    border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+    border:1px solid rgba(231,236,243,.08);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 8px 14px -10px rgba(0,0,0,.9);
+    transform-style:preserve-3d;transform:translateZ(0) rotateY(-4deg);
+    animation:ptx-slide 6.2s ease-in-out infinite}
+  .ptx-row:last-child{margin-bottom:0}
+  @keyframes ptx-slide{0%,100%{transform:translateZ(0) rotateY(-4deg)}50%{transform:translateZ(12px) rotateY(-4deg)}}
+  .ptx-chip{position:relative;width:19px;height:16px;flex:none;transform-style:preserve-3d}
+  .ptx-chip::before{content:"";position:absolute;left:3px;top:1px;width:13px;height:13px;border-radius:3px;
+    background:var(--ptx-c);box-shadow:0 0 12px -2px var(--ptx-c);transform:rotateX(52deg) rotateZ(-40deg)}
+  .ptx-lab{font-size:12px;font-weight:600;color:var(--ink)}
+  .ptx-num{margin-left:auto;font-size:17px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .ptx-unit{font-size:10px;color:var(--dim);min-width:26px}
   .pt-note{margin:16px 0 0;font-size:11px;line-height:1.6;color:var(--dim);max-width:74ch}
   .pt-note b{color:var(--ink);font-weight:600}
-  @media (max-width:560px){
-    /* Flatten the tilt on small screens: at this width the receding faces eat
-       the rail rather than describing it, and the label column cannot hold. */
-    .ptr-stage{transform:rotateX(-4deg) rotateY(-5deg);animation:none}
-    .ptr-row{grid-template-columns:1fr 62px;grid-template-areas:"n c" "s c";row-gap:4px;height:auto;animation:none}
-    .ptr-name{grid-area:n;text-align:left} .ptr-slot{grid-area:s} .ptr-num{grid-area:c;text-align:right}
+  @media (max-width:620px){
+    /* The exploded stack needs room to read as depth. Below this it becomes a
+       smudge beside a squeezed ledger, so it steps aside and the ledger -- which
+       is where the numbers actually live -- takes the full width. */
+    .ptx-body{flex-direction:column;align-items:stretch;gap:10px}
+    .ptx-stage{width:100%;height:150px}
+    .ptx-list{width:100%}
   }
   @media (prefers-reduced-motion:reduce){
-    .ptr-stage{animation:none;transform:rotateX(-9deg) rotateY(-13deg)}
-    .ptr-row{animation:none;transform:none}
+    .ptx-stack{animation:none;transform:rotateX(58deg) rotateZ(-38deg)}
+    .ptx-plate{animation:none;transform:translateZ(var(--ptx-z))}
+    .ptx-row{animation:none;transform:translateZ(0) rotateY(-4deg)}
   }
 
   /* continuously-animated powertrain icons (the app's real FuelIcon set) */
@@ -583,20 +588,20 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // the receding top face, and the darker right end cap. These are the app's
     // own accents (--blue/--teal/--amber/--up/--gate) with a lift and a shade.
     var FUELS=[
-      ["Gas",           "#4a80d4","#84acea","#2a4c80"],
-      ["Hybrid",        "#2dd4bf","#7fefe0","#14796e"],
-      ["PHEV",          "#f59e0b","#fbc75f","#8f5c07","Plug-in Hybrid"],
-      ["BEV",           "#3ecf8e","#87e8bc","#217a55"]
+      ["Gas",   "#4a80d4","rgba(74,128,212,.6)","linear-gradient(135deg,rgba(74,128,212,.34),rgba(74,128,212,.06))"],
+      ["Hybrid","#2dd4bf","rgba(45,212,191,.6)","linear-gradient(135deg,rgba(45,212,191,.32),rgba(45,212,191,.05))"],
+      ["PHEV",  "#f59e0b","rgba(245,158,11,.6)","linear-gradient(135deg,rgba(245,158,11,.30),rgba(245,158,11,.05))","Plug-in Hybrid"],
+      ["BEV",   "#3ecf8e","rgba(62,207,142,.6)","linear-gradient(135deg,rgba(62,207,142,.30),rgba(62,207,142,.05))"]
     ];
     var rows=[], known=0;
     FUELS.forEach(function(f){
       var n=catalog.byFuel[f[0]]||0; known+=n;
-      if(n>0) rows.push({key:f[0],label:f[4]||f[0],n:n,c:f[1],t:f[2],d:f[3]});
+      if(n>0) rows.push({key:f[0],label:f[4]||f[0],n:n,c:f[1],b:f[2],g:f[3]});
     });
     // A fuel_type outside the four mapped keys (an FCEV, a Diesel) still counts
     // as recorded, so it must appear rather than silently vanish.
     var other=catalog.fuelTagged-known;
-    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"#8b7bff",t:"#b8aeff",d:"#4d43a3"});
+    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"#8b7bff",b:"rgba(139,123,255,.6)",g:"linear-gradient(135deg,rgba(139,123,255,.30),rgba(139,123,255,.05))"});
     // FIXED powertrain order, never sorted by count. Sorting produces a
     // leaderboard, and a leaderboard of OUR coverage reads as a ranking of what
     // is common on the road -- which is exactly the inference this panel must
@@ -604,20 +609,31 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // both are labelled as coverage.
     var max=rows.reduce(function(m,r){ return Math.max(m,r.n); },1);
 
+    // The plates encode NO magnitude -- all five identical -- so the stack cannot
+    // be read as a share of anything. Depth order alone distinguishes them, and
+    // the ledger beside it carries the counts as text, where they are read.
     document.getElementById("ptRows").innerHTML=
-      '<div class="ptr-scene"><div class="ptr-stage">'+
-      rows.map(function(r,idx){
-        // Staggered negative delays so the rack is already mid-breath on load
-        // rather than every rail rising together from flat.
-        var w=Math.max(2,(r.n/max*100)).toFixed(1);
-        return '<div class="ptr-row" style="--ptr-c:'+r.c+';--ptr-t:'+r.t+';--ptr-d:'+r.d+';'+
-               '--ptr-w:'+w+'%;animation-delay:'+(-1.1*idx).toFixed(1)+'s">'+
-          '<span class="ptr-name">'+r.label+'</span>'+
-          '<span class="ptr-slot"><span class="ptr-block"></span></span>'+
-          '<span class="ptr-num">'+r.n.toLocaleString("en-CA")+'<s>trim'+(r.n===1?"":"s")+'</s></span>'+
-        '</div>';
-      }).join("")+
-      '</div></div>';
+      '<div class="ptx-body">'+
+        '<div class="ptx-stage"><div class="ptx-stack">'+
+          rows.map(function(r,idx){
+            // Evenly spaced in Z, centred on the middle plate: spacing is a
+            // constant, never derived from the counts.
+            var z=(2-idx)*26;
+            return '<div class="ptx-plate" style="--ptx-c:'+r.c+';--ptx-b:'+r.b+';--ptx-g:'+r.g+';'+
+                   '--ptx-z:'+z+'px;animation-delay:'+(idx*0.38).toFixed(2)+'s"></div>';
+          }).join("")+
+        '</div></div>'+
+        '<ul class="ptx-list">'+
+          rows.map(function(r,idx){
+            return '<li class="ptx-row" style="--ptx-c:'+r.c+';animation-delay:'+(idx*0.38).toFixed(2)+'s">'+
+              '<span class="ptx-chip"></span>'+
+              '<span class="ptx-lab">'+r.label+'</span>'+
+              '<span class="ptx-num">'+r.n.toLocaleString("en-CA")+'</span>'+
+              '<span class="ptx-unit">trim'+(r.n===1?"":"s")+'</span>'+
+            '</li>';
+          }).join("")+
+        '</ul>'+
+      '</div>';
 
     var unrec=catalog.trims-catalog.fuelTagged;
     document.getElementById("ptTotal").textContent=

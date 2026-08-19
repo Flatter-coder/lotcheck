@@ -89,22 +89,25 @@ t("the untagged count is still disclosed in words",
 // carry a pt- prefix, and this pins that so the next generic name cannot creep
 // back in and silently inherit somebody else's animation.
 t("panel classes are prefixed, not generic",
-  src.includes("ptr-") && !src.includes("class="+String.fromCharCode(34)+"track"+String.fromCharCode(34)),
-  "a generic .track collided with the ticker marquee and animated every bar sideways");
+  src.includes("ptx-") && !src.includes("class="+String.fromCharCode(34)+"track"+String.fromCharCode(34)),
+  "a generic .track once collided with the ticker marquee and dragged the panel sideways");
 
-// The rails ARE the geometry now: independent volumes sharing no container,
-// which is what makes a share unreadable off them.
-t("rails are independent volumes, not segments of one track",
-  src.includes("ptr-block") && src.includes("ptr-slot"),
-  "a shared track is a whole, and a whole can be divided into shares");
+// THE HONESTY PROPERTY OF THIS DESIGN. The plates are deliberately IDENTICAL:
+// they encode no magnitude, so there is nothing in the geometry to misread as a
+// share. The counts live in the ledger as text. If a future change ever sized a
+// plate by its count, the panel would start implying a distribution drawn from a
+// skewed 36% sample -- the exact inversion the medians are withheld to avoid.
+t("plates are a fixed size, never sized by their count",
+  /.ptx-plate{[^}]*width:104px[^}]*height:104px/.test(src.replace(/s+/g, "")),
+  "a plate whose size varies with n turns this back into a magnitude chart");
 
-t("each rail is drawn as a solid, not a flat bar",
-  src.includes("rotateX(90deg)") && src.includes("rotateY(90deg)"),
-  "the receding top face and end cap are what make it a volume, not a rectangle");
+t("plate depth comes from position, not from the data",
+  src.includes("var z=(2-idx)*26"),
+  "Z spacing must be a constant times the index; deriving it from n re-encodes magnitude");
 
-t("the rack sits in a real 3D context",
+t("the stack sits in a real 3D context",
   src.includes("preserve-3d") && src.includes("perspective:"),
-  "without perspective and preserve-3d the extrusion collapses to a flat outline");
+  "without perspective and preserve-3d the exploded stack collapses flat");
 
 t("no element in the panel carries a bare generic class",
   !/class="(track|fill|bar|row|item)"/.test(src),
