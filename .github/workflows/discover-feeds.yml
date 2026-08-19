@@ -28,11 +28,19 @@ on:
         description: "Probe only the first N hosts (blank = all)"
         type: string
         default: ""
+      skip:
+        description: "Resume: skip the first N hosts (blank = start at the beginning)"
+        type: string
+        default: ""
 
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 was not enough: the 2026-08-19 AMVIC run reached 1,580 of 1,639 hosts
+    # and was cancelled 59 short. The artifact survived (upload is if: always())
+    # but the tail was lost, and a probe that cannot finish its own candidate
+    # list reports a coverage answer that is really a clock answer.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,6 +55,7 @@ jobs:
         run: |
           ARGS="--source ${{ inputs.source }} --out discovered-feeds.json"
           if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          if [ -n "${{ inputs.skip }}" ]; then ARGS="$ARGS --skip ${{ inputs.skip }}"; fi
           if [ "${{ inputs.write }}" = "true" ]; then ARGS="$ARGS --write"; fi
           echo "Running: node scripts/discover-dealer-feeds.mjs $ARGS"
           node scripts/discover-dealer-feeds.mjs $ARGS
