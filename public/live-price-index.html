@@ -167,9 +167,88 @@
   .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:16px;margin-top:16px}
   .chart-card{padding:18px}
   .chart-card h2{font-size:13.5px;margin:0 0 10px;font-weight:600}
-  .radial{display:block;margin:0 auto;max-width:100%}
-  .radial .sweep{transform-origin:50% 50%;animation:sweep 7s linear infinite;transform-box:fill-box}
-  @keyframes sweep{to{transform:rotate(360deg)}}
+  /* STICKER TERRAIN — replaces the radar.
+     A radar was the wrong shape for this data. The bands are ordered magnitudes
+     on ONE axis, and bending an ordered axis into a circle makes the enclosed
+     area -- the most salient thing on a radar -- mean nothing. It also spent a
+     colour, a legend entry and a whole petal on "Above MSRP", which is 0
+     listings, while never showing the actual headline: that two thirds of
+     listings sit EXACTLY at sticker.
+     Here the strip teaches below / at / above to scale first, so the three
+     colours are learned before the chart below uses them. Then the discounted
+     third is broken out around the sticker wall, with DEPTH carrying the ordered
+     magnitude axis (nearest the viewer = closest to sticker) and HEIGHT carrying
+     count. Above-sticker keeps a permanent labelled home so it reads as an empty
+     container rather than a broken mark, and needs no layout change when it goes
+     non-zero.
+     Positions are FLUID, not the concept's fixed pixels: the terrain is a flex
+     row so it holds from a narrow card to a wide one. */
+  .mkt-card{display:flex;flex-direction:column}
+  .mkt-say{margin:9px 0 0;font-size:12.5px;line-height:1.4;color:var(--ink)}
+  .mkt-say b{color:#fff;font-weight:650}
+  .mkt-say .cy{color:var(--cyan)} .mkt-say .co{color:var(--down)}
+  .mkt-strip{display:flex;height:32px;margin-top:11px;border-radius:5px;overflow:hidden;background:var(--panel-2)}
+  .mkt-seg{display:flex;align-items:center;gap:7px;padding:0 9px;white-space:nowrap;overflow:hidden;min-width:0}
+  .mkt-seg b{font-size:14px;font-weight:700;letter-spacing:-.01em}
+  .mkt-seg em{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-style:normal}
+  .mkt-below{background:linear-gradient(180deg,rgba(58,224,255,.30),rgba(58,224,255,.13));border-right:1px solid var(--bg);color:#d7f4ff}
+  .mkt-below b{color:var(--cyan)}
+  .mkt-at{flex:1;background:linear-gradient(180deg,rgba(139,123,255,.42),rgba(139,123,255,.17));color:#e6e2ff}
+  .mkt-at b{color:#c6bcff}
+  .mkt-abovebar{width:3px;background:var(--down);box-shadow:0 0 10px rgba(240,104,138,.7)}
+  .mkt-cap{display:flex;justify-content:space-between;margin-top:5px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .mkt-cap i{font-style:normal;color:var(--down)}
+  /* the terrain: one flex row -- 7 discount columns, the wall, then one column
+     per above-sticker band that actually has listings */
+  /* Scrolls rather than crushes. Nothing is above sticker today, so the row is
+     seven columns and never scrolls -- but if every band on both sides fills, that
+     is fourteen columns of real counts and a narrow card cannot hold them. Dropping
+     or shrinking columns would hide real listings, so the terrain gives up its
+     width instead. */
+  .mkt-terr{position:relative;height:176px;margin-top:12px;display:flex;align-items:flex-end;
+    gap:2px;perspective:1000px;perspective-origin:50% 8%;
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;overscroll-behavior-x:contain}
+  .mkt-terr::-webkit-scrollbar{height:4px}
+  .mkt-terr::-webkit-scrollbar-thumb{background:rgba(150,170,255,.3);border-radius:2px}
+  .mkt-col{flex-shrink:0}
+  .mkt-col{position:relative;flex:1 0 auto;min-width:26px;display:flex;flex-direction:column;
+    justify-content:flex-end;align-items:center;height:100%;transform-style:preserve-3d;
+    transform:translateZ(calc(-1 * var(--mz,0px)))}
+  .mkt-bar{position:relative;width:78%;max-width:26px;height:var(--mh,0px);border-radius:2px 2px 0 0;
+    transform-style:preserve-3d;background:linear-gradient(180deg,#8aecff,var(--cyan) 42%,#1b93b8);
+    box-shadow:0 0 16px rgba(58,224,255,.22);animation:mkt-rise .9s cubic-bezier(.2,.85,.25,1) both;
+    animation-delay:var(--md,0s)}
+  .mkt-bar::before{content:"";position:absolute;left:0;right:0;top:0;height:10px;background:#bdf3ff;
+    transform:rotateX(-90deg);transform-origin:50% 0}
+  .mkt-bar::after{content:"";position:absolute;top:0;bottom:0;right:0;width:10px;
+    background:linear-gradient(180deg,#2b9bbd,#12596f);transform:rotateY(-90deg);transform-origin:100% 50%}
+  /* Absolutely positioned so a wide count ("1,446") cannot widen its column and
+     push the whole terrain into overflow -- the row is only as wide as the bars. */
+  .mkt-n{position:absolute;bottom:calc(var(--mh,0px) + 22px);left:50%;transform:translateX(-50%);
+    font-size:11px;font-weight:650;color:#eaf7ff;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}
+  .mkt-t{margin-top:5px;font-size:9px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mkt-above .mkt-t{color:rgba(240,104,138,.6)}
+  .mkt-wall{position:relative;flex:0 0 12px;height:70%;border-radius:3px 3px 0 0;align-self:flex-end;
+    background:linear-gradient(180deg,#dad5ff,var(--gate) 42%,#4b3fae);
+    box-shadow:0 0 22px rgba(139,123,255,.5);animation:mkt-glow 5s ease-in-out infinite}
+  .mkt-wall span{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:5px;
+    font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:#a99cff;white-space:nowrap}
+  .mkt-foot{margin:auto 0 0;padding-top:9px;font-size:9.5px;color:var(--dim)}
+  .mkt-wait{display:flex;align-items:center;justify-content:center;height:176px;margin-top:12px;
+    font-size:11.5px;color:var(--dim);text-align:center;padding:0 12px}
+  @keyframes mkt-rise{from{height:0;opacity:.3}}
+  @keyframes mkt-glow{0%,100%{opacity:.86}50%{opacity:1}}
+  /* Stands in for the whole above-sticker side when nothing is priced over
+     sticker. Shown at every width: it is a statement about the data, not a
+     small-screen fallback. */
+  .mkt-zero{display:flex;flex:0 0 auto;align-self:flex-end;margin-left:6px;padding:5px 8px;
+    border:1px dashed rgba(240,104,138,.36);border-radius:6px;font-size:9px;line-height:1.3;
+    color:rgba(240,104,138,.85);text-align:center;white-space:nowrap}
+  .mkt-zero b{display:block;font-size:13px;font-weight:700;color:var(--down)}
+  @media (max-width:560px){
+    .mkt-terr{height:150px} .mkt-n{font-size:9.5px} .mkt-t{font-size:8px}
+  }
+  @media (prefers-reduced-motion:reduce){.mkt-bar,.mkt-wall{animation:none}}
   .dash{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:draw 1.5s ease forwards .2s}
   @keyframes draw{to{stroke-dashoffset:0}}
   #chart3d{width:100%;height:300px;display:block;cursor:grab;touch-action:pan-y}
@@ -284,7 +363,6 @@
     .lc-gate-car,.lc-gate-window{animation:none!important}
     .pedestal .p-ring{animation:none!important}
     .idx-podium{transition:none!important}
-    .radial .sweep{animation:none}
     .dash{animation:none;stroke-dashoffset:0}
   }
 </style>
@@ -360,14 +438,13 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
   <!-- TWO MARKET CARDS -->
   <div class="two">
-    <section class="card chart-card">
-      <h2>Alberta market vs MSRP<span class="lv lv-mkt"><i></i>Live</span></h2>
-      <svg class="radial" id="rad" viewBox="0 0 260 210" style="height:210px" role="img"
-           aria-label="Radar of how far Alberta advertised prices sit below or above sticker"></svg>
-      <div class="lg">
-        <span><i style="background:var(--cyan)"></i>Below MSRP</span>
-        <span><i style="background:var(--down)"></i>Above MSRP</span>
-      </div>
+    <section class="card chart-card mkt-card">
+      <h2>Alberta asking price vs sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
+      <p class="mkt-say" id="mktSay"></p>
+      <div class="mkt-strip" id="mktStrip"></div>
+      <div class="mkt-cap" id="mktCap"></div>
+      <div class="mkt-terr" id="mktTerr"></div>
+      <p class="mkt-foot" id="mktFoot"></p>
     </section>
 
     <section class="card chart-card">
@@ -435,7 +512,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     theme = theme==="light" ? "dark" : "light"; applyTheme();
     try{ localStorage.setItem("lc-theme", theme); }catch(e){}
     redrawHist(false);          // recolor only — don't replay the entry animation
-    if(lastDev) drawRadar(lastDev);
+    if(lastDev) drawMarket(lastDev);
   });
   function tok(name,fb){
     var v=getComputedStyle(root).getPropertyValue(name).trim();
@@ -750,48 +827,87 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       "% vs MSRP. Band split approximated from the market's percentile curve; direction totals exact.";
   }
 
-  /* ---- radar: two petals over the shared magnitude bands ---- */
-  function drawRadar(dev){
-    var svg=document.getElementById("rad");
+  /* ---- sticker terrain: the strip teaches the split, the terrain breaks
+     out the discounted third. Replaces the radar; see the CSS note above for
+     why a radar could not carry this data honestly. ---- */
+  function drawMarket(dev){
+    var say=document.getElementById("mktSay"), strip=document.getElementById("mktStrip");
+    var cap=document.getElementById("mktCap"), terr=document.getElementById("mktTerr");
+    var foot=document.getElementById("mktFoot");
+    // Three distinct non-data states, never conflated -- loading, failed, and
+    // genuinely below the publication gate. A failed read must not render as
+    // "0 listings", which would fabricate a market count.
     if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
       var ln=mktMsg(dev);
-      svg.innerHTML='<text x="130" y="98" text-anchor="middle" fill="var(--dim)" font-size="11.5">'+ln[0]+'</text>'+
-        (ln[1]?'<text x="130" y="114" text-anchor="middle" fill="var(--dim)" font-size="11.5">'+ln[1]+'</text>':'');
+      say.textContent=""; strip.innerHTML=""; cap.textContent=""; foot.textContent="";
+      terr.className="mkt-wait"; terr.textContent=ln.filter(Boolean).join(" ");
       return;
     }
-    var cx=130,cy=100,R=84;
-    var below=bandCounts(dev,-1).slice(1), above=bandCounts(dev,1).slice(1); // 7 magnitude bands
-    var mx=1; below.concat(above).forEach(function(v){ mx=Math.max(mx,v); });
-    var N=below.length;
-    var s="";
-    [22,42,62,82].forEach(function(r){ s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="var(--grid)"/>'; });
-    for(var a=0;a<360;a+=360/N){
-      s+='<line x1="'+cx+'" y1="'+cy+'" x2="'+(cx+R*Math.cos(a*Math.PI/180)).toFixed(1)+'" y2="'+
-         (cy+R*Math.sin(a*Math.PI/180)).toFixed(1)+'" stroke="var(--grid)"/>';
+    terr.className="mkt-terr";
+
+    var n=Number(dev.n)||0, under=Number(dev.under_n)||0, over=Number(dev.over_n)||0;
+    var at=Math.max(0,n-under-over);
+    var pc=function(v){ return n?Math.round(v/n*100):0; };
+    var num=function(v){ return (Number(v)||0).toLocaleString("en-CA"); };
+    var med=Number(dev.median_discount);
+
+    // The sentence first: a reader who stops here still has the answer.
+    say.innerHTML="<b>"+pc(at)+"%</b> of Alberta listings are priced <b>exactly at sticker</b>. "+
+      "The <b>"+pc(under)+"%</b> that are discounted average about "+
+      "<b class='cy'>"+(isFinite(med)?Math.abs(med).toFixed(1):"—")+"% off</b>. "+
+      (over?("<b class='co'>"+num(over)+"</b> are above sticker."):"<b class='co'>None</b> are above sticker.");
+
+    // To-scale strip. Above keeps a visible sliver even at 0 so it reads as a
+    // container rather than a missing element.
+    strip.innerHTML=
+      '<div class="mkt-seg mkt-below" style="width:'+(n?under/n*100:0).toFixed(2)+'%">'+
+        '<b>'+num(under)+'</b><em>'+pc(under)+'% below</em></div>'+
+      '<div class="mkt-seg mkt-at"><b>'+num(at)+'</b><em>'+pc(at)+'% at sticker</em></div>'+
+      '<div class="mkt-abovebar"'+(over?' style="width:'+(over/n*100).toFixed(2)+'%"':'')+'></div>';
+    cap.innerHTML='<span>all '+num(n)+' listings, to scale</span><i>above sticker: '+num(over)+'</i>';
+
+    // Terrain. bandCounts returns [at, <=1%, <=2.5%, <=5%, <=10%, <=15%, <=25%, 25%+];
+    // index 0 is the at-sticker mass and belongs to the wall, not to a column.
+    var below=bandCounts(dev,-1).slice(1), above=bandCounts(dev,1).slice(1);
+    var labs=BAND_LABS.slice(1);
+    var max=Math.max(1,Math.max.apply(null,below.concat(above)));
+    var H=118;   // px available for the tallest column
+    var html="";
+    // Left side runs 25%+ .. <=1%, so the nearest column to the wall is the one
+    // closest to sticker and depth increases with distance. Order is fixed and
+    // never sorted by count.
+    for(var i=below.length-1;i>=0;i--){
+      var z=i*20, h=Math.round(below[i]/max*H);
+      html+='<div class="mkt-col" style="--mz:'+z+'px;--mh:'+h+'px">'+
+        '<span class="mkt-n">'+num(below[i])+'</span>'+
+        '<span class="mkt-bar" style="--mh:'+h+'px;--md:'+(0.06*(below.length-i))+'s"></span>'+
+        '<span class="mkt-t">'+labs[i]+'</span></div>';
     }
-    function petal(vals,col){
-      var pts=vals.map(function(v,i){
-        var ang=(-90+i*(360/N))*Math.PI/180, r=14+(v/mx)*(R-16);
-        return [cx+r*Math.cos(ang), cy+r*Math.sin(ang)];
-      });
-      var d=pts.map(function(p,i){ return (i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1); }).join(" ")+" Z";
-      return '<path d="'+d+'" fill="'+col+'" fill-opacity=".14" stroke="'+col+'" stroke-width="1.6" '+
-        'class="dash" style="--len:600" stroke-linejoin="round"/>';
+    html+='<div class="mkt-wall"><span>sticker 0%</span></div>';
+    // Only bands that actually hold listings get a column. Reserving a slot for
+    // every band painted seven empty placeholders whenever nothing was above
+    // sticker -- which is the usual case -- and those placeholders squeezed the
+    // real columns until their count labels bled outside the card. An empty band
+    // has nothing to say, so it gets no column at any width.
+    var drawn=0;
+    for(var j=0;j<above.length;j++){
+      if(!above[j]) continue;
+      var z2=j*20, h2=Math.round(above[j]/max*H);
+      drawn++;
+      html+='<div class="mkt-col mkt-above" style="--mz:'+z2+'px;--mh:'+h2+'px">'+
+        '<span class="mkt-n">'+num(above[j])+'</span>'+
+        '<span class="mkt-bar" style="--mh:'+h2+'px;--md:'+(0.06*(j+1))+'s"></span>'+
+        '<span class="mkt-t">'+labs[j]+'</span></div>';
     }
-    s+=petal(below,"var(--cyan)")+petal(above,"var(--down)");
-    // band labels on the spokes
-    BAND_LABS.slice(1).forEach(function(l,i){
-      var ang=(-90+i*(360/N))*Math.PI/180, r=R+13;
-      s+='<text x="'+(cx+r*Math.cos(ang)).toFixed(1)+'" y="'+(cy+r*Math.sin(ang)+3).toFixed(1)+
-        '" text-anchor="middle" fill="var(--dimmer)" font-size="8.5" font-family="ui-monospace,monospace">'+l+'</text>';
-    });
-    // the MSRP datum every band is measured from
-    s+='<circle cx="'+cx+'" cy="'+cy+'" r="12" fill="var(--panel-solid)" stroke="var(--up)" stroke-width="2"/>'+
-       '<text x="'+cx+'" y="'+(cy+3.4)+'" text-anchor="middle" fill="var(--up)" font-size="7.6" font-weight="700" '+
-       'font-family="ui-monospace,monospace">MSRP</text>'+
-       '<circle class="sweep" cx="'+cx+'" cy="'+cy+'" r="'+R+'" fill="none" stroke="var(--cyan)" '+
-       'stroke-opacity=".45" stroke-dasharray="2 12"/>';
-    svg.innerHTML=s;
+    // With no above-sticker column drawn the axis would just stop at the wall,
+    // which reads as a missing half rather than an empty one. Name the zero.
+    if(!drawn) html+='<div class="mkt-zero"><b>'+num(over)+'</b>above<br>sticker</div>';
+    terr.innerHTML=html;
+
+    var p25=Number(dev.p25);
+    foot.textContent="Ticks are distance from sticker, mirrored either side."+
+      (isFinite(med)?"  Median discount "+med.toFixed(2)+"%":"")+
+      (isFinite(p25)?" · 25th percentile "+p25.toFixed(1)+"%":"");
   }
 
   /* ---- 3D histogram: three series receding on a CATEGORY axis ----
@@ -956,7 +1072,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     footBtn.setAttribute("aria-expanded",open?"true":"false");
   });
 
-  drawRadar(null); drawHist(null);
+  drawMarket(null); drawHist(null);
   document.querySelectorAll(".card").forEach(function(c,i){
     setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*70);
   });
@@ -1040,7 +1156,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     .then(function(d){
       var v=validDev(d);
       if(!v) throw new Error("market payload failed shape validation");
-      lastDev=v; drawRadar(v); drawHist(v); updateFootMkt(v);
+      lastDev=v; drawMarket(v); drawHist(v); updateFootMkt(v);
       // The tracking is live even below the publication gate — the read
       // succeeded; the gate is about volume, not liveness.
       setLive("lv-mkt",true);
@@ -1049,7 +1165,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // A failed or malformed read is an error state, never "0 of 25 listings".
       console.warn("deviation read failed:",e.message);
       setLive("lv-mkt",false);
-      drawRadar(MKT_ERROR); drawHist(MKT_ERROR); updateFootMkt(MKT_ERROR);
+      drawMarket(MKT_ERROR); drawHist(MKT_ERROR); updateFootMkt(MKT_ERROR);
     });
 })();
 </script>

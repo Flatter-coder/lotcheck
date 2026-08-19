@@ -117,5 +117,61 @@ t("no orphaned bar helpers remain",
   !src.includes("fitPtIcons") && !src.includes('id="ptLab"') && !src.includes('id="ptChip"'),
   "helpers that measure elements which no longer exist");
 
+
+// ---------------------------------------------------------------------------
+// MARKET PANEL (the terrain that replaced the radar)
+// ---------------------------------------------------------------------------
+// The radar plotted seven discount bands as spokes on a filled polygon. A
+// polygon's AREA is what a reader takes from it, and that area is a product of
+// two unrelated bands -- it means nothing. The terrain replaces it with one
+// column per band against a wall at sticker, so height is the only encoding and
+// height is the count.
+
+t("the radar is gone, not merely hidden",
+  !src.includes("drawRadar") && !src.includes('id="rad"') && !src.includes(".radial{"),
+  "a polygon's area is a product of two unrelated bands and reads as a magnitude that does not exist");
+
+t("market panel classes are prefixed, not generic",
+  src.includes("mkt-") && !/class="(terr|col|bar|wall|strip|cap)"/.test(src),
+  "single-file page: a bare class name is global — this is how .track inherited the ticker marquee");
+
+// THE ONE THAT ACTUALLY BIT (this panel's version of it).
+// The above-sticker side was first drawn as seven fixed slots, empty ones shown
+// as dashed ghosts. Nothing in Alberta is priced above sticker, so seven of the
+// fourteen columns were permanent placeholders. They squeezed the seven REAL
+// columns to ~33px, and the count labels -- absolutely positioned and centred --
+// bled outside the card at every width including 1440px.
+//
+// The fix was to stop reserving space for bands that hold no listings. The
+// earlier attempt gated the collapse on a viewport media query, which was the
+// wrong axis entirely: the side is empty because of the DATA, not the screen.
+t("empty bands get no column",
+  src.includes("if(!above[j]) continue;"),
+  "reserving a slot per band painted seven placeholders that squeezed the real columns until their counts bled outside the card");
+
+t("no data column is ever hidden by width",
+  !/\.mkt-col[^{]*\{[^}]*display:\s*none/.test(src) && !src.includes(".mkt-col.mkt-above:not(.mkt-has)"),
+  "a column that holds listings must never be removed to make the row fit — that hides real counts");
+
+t("the terrain gives up width before it gives up a column",
+  src.includes("overflow-x:auto") && src.includes(".mkt-terr{"),
+  "fourteen populated bands cannot fit a 328px card; it must scroll rather than drop or crush columns");
+
+t("counts come from bandCounts, not recomputed",
+  src.includes("bandCounts(dev,-1)") && src.includes("bandCounts(dev,1)"),
+  "apportion() is what makes the columns sum to under_n/over_n exactly; a second derivation would drift from the headline");
+
+t("the empty above-side is named, not left blank",
+  src.includes('class="mkt-zero"') && src.includes("above<br>sticker"),
+  "an axis that just stops at the wall reads as a missing half rather than an empty one");
+
+t("a failed read never renders as a market count",
+  src.includes("mkt-wait") && src.includes("!dev.enough") && src.includes("dev.err"),
+  "loading, failed, and below-gate are three different states — collapsing them into '0 listings' fabricates a market");
+
+t("bands render in fixed order, never sorted by count",
+  !src.includes("below.sort(") && !src.includes("above.sort("),
+  "distance from sticker is an ordered axis; sorting it by count destroys the axis");
+
 console.log(`${NL}${fail ? "❌" : "✅"} price-index-panel: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
