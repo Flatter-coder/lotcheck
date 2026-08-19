@@ -88,9 +88,23 @@ t("the untagged count is still disclosed in words",
 // single-file page is shared by everything that ever uses it. Panel elements
 // carry a pt- prefix, and this pins that so the next generic name cannot creep
 // back in and silently inherit somebody else's animation.
-t("panel bar classes are prefixed, not generic",
-  src.includes("ptbar") && !/class="track"/.test(src) && !/.ptrow .track/.test(src),
-  "a generic .track collided with the ticker's marquee and animated every bar sideways");
+t("panel classes are prefixed, not generic",
+  src.includes("ptr-") && !src.includes("class="+String.fromCharCode(34)+"track"+String.fromCharCode(34)),
+  "a generic .track collided with the ticker marquee and animated every bar sideways");
+
+// The rails ARE the geometry now: independent volumes sharing no container,
+// which is what makes a share unreadable off them.
+t("rails are independent volumes, not segments of one track",
+  src.includes("ptr-block") && src.includes("ptr-slot"),
+  "a shared track is a whole, and a whole can be divided into shares");
+
+t("each rail is drawn as a solid, not a flat bar",
+  src.includes("rotateX(90deg)") && src.includes("rotateY(90deg)"),
+  "the receding top face and end cap are what make it a volume, not a rectangle");
+
+t("the rack sits in a real 3D context",
+  src.includes("preserve-3d") && src.includes("perspective:"),
+  "without perspective and preserve-3d the extrusion collapses to a flat outline");
 
 t("no element in the panel carries a bare generic class",
   !/class="(track|fill|bar|row|item)"/.test(src),

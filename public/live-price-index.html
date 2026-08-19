@@ -185,37 +185,57 @@
 
   /* ---------------- powertrain: coverage rows ---------------- */
   .pt-card{padding:18px 18px 16px}
-  /* ONE ROW PER POWERTRAIN, NOT A STACKED BAR.
-     The stacked version devoted 64% of its width to an "Unrecorded" block --
-     695 of 1,084 trims -- which told a buyer nothing and crowded out the part
-     that does. Rescaling the recorded slice to full width was not the fix
-     either: powertrain is recorded for only 36% of the catalogue and that
-     subset is skewed (the untagged majority is overwhelmingly gas), so a
-     100%-stacked bar drawn from it invites "half the market is hybrid", which
-     is false. A stacked bar always implies a whole; separate rows imply none,
-     so no share can be read off this even carelessly. Bars are scaled to the
-     LARGEST RECORDED COUNT, which is a statement about our coverage only. */
-  .ptrows{display:flex;flex-direction:column;gap:10px;margin-top:6px}
-  .ptrow{display:grid;grid-template-columns:34px minmax(84px,auto) 1fr auto;align-items:center;gap:12px}
-  .ptrow .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;
-    background:color-mix(in srgb,var(--c) 20%,transparent);border:1px solid color-mix(in srgb,var(--c) 38%,transparent)}
-  .ptrow .ico svg{width:18px;height:18px;color:var(--c)}
-  .ptrow .nm{font-size:12.5px;color:var(--ink);font-weight:600;white-space:nowrap}
-  .ptrow .ptbar{height:12px;border-radius:7px;background:var(--panel-2);overflow:hidden;min-width:40px}
-  .ptrow .ptfill{height:100%;border-radius:7px;width:var(--w);
-    background:linear-gradient(90deg,color-mix(in srgb,var(--c) 70%,#fff 12%),var(--c));
-    transform-origin:left;animation:ptgrow .7s cubic-bezier(.22,1,.36,1) both}
-  @keyframes ptgrow{from{transform:scaleX(.02)}to{transform:scaleX(1)}}
-  .ptrow .ct{font-size:12.5px;color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
-  .ptrow .ct s{text-decoration:none;color:var(--dim);font-weight:500}
+  /* DEPTH RACK — five independent extruded rails on a swaying isometric stage.
+     NOT A STACKED BAR, and that is the whole point. The panel reports COVERAGE:
+     powertrain is recorded for ~36% of the catalogue and that subset is skewed
+     (the untagged majority is overwhelmingly gas), which is why per-powertrain
+     medians are withheld on this same panel. Any part-to-whole geometry lets a
+     reader convert our coverage into an apparent market share and conclude the
+     market is mostly electrified. It is not.
+     Separate rails share no container, so there is no whole to take a share of.
+     Each rail is a real volume: a front face, a receding top face (::before,
+     rotateX 90deg) and a right end cap (::after, rotateY 90deg), lifted on its
+     own delay so the rack breathes rather than marching in step.
+     Every class is ptr- prefixed. A bare name here once collided with the
+     ticker's global .track and dragged every bar sideways -- in a single-file
+     page an unprefixed class inherits whatever else in the file defines it. */
+  .ptrows{margin-top:2px}
+  .ptr-scene{perspective:1250px;perspective-origin:52% 44%;padding:6px 0 2px}
+  .ptr-stage{transform-style:preserve-3d;display:flex;flex-direction:column;gap:9px;
+    transform:rotateX(-9deg) rotateY(-13deg);animation:ptr-sway 14s ease-in-out infinite}
+  @keyframes ptr-sway{0%,100%{transform:rotateX(-11deg) rotateY(-17deg)}50%{transform:rotateX(-6deg) rotateY(-7deg)}}
+  .ptr-row{display:grid;grid-template-columns:minmax(96px,116px) minmax(80px,1fr) 74px;
+    align-items:center;gap:12px;height:32px;transform-style:preserve-3d;
+    animation:ptr-lift 8s ease-in-out infinite}
+  @keyframes ptr-lift{0%,100%{transform:translateZ(0)}50%{transform:translateZ(18px)}}
+  .ptr-name{text-align:right;font-size:12px;color:var(--ink);letter-spacing:.01em;white-space:nowrap}
+  /* The slot is fluid and the rail is a PERCENTAGE of it, so the rack keeps its
+     proportions from 360px to 2560px without the fixed 258px the concept used. */
+  .ptr-slot{position:relative;height:16px;transform-style:preserve-3d}
+  .ptr-block{position:absolute;left:0;top:0;display:block;width:var(--ptr-w);height:16px;min-width:5px;
+    background:linear-gradient(180deg,var(--ptr-c) 0%,var(--ptr-d) 100%);
+    transform-style:preserve-3d;box-shadow:0 10px 20px rgba(0,0,0,.55)}
+  .ptr-block::before{content:"";position:absolute;left:0;bottom:100%;width:100%;height:9px;
+    background:var(--ptr-t);transform-origin:0 100%;transform:rotateX(90deg)}
+  .ptr-block::after{content:"";position:absolute;top:0;left:100%;width:9px;height:100%;
+    background:var(--ptr-d);transform-origin:0 50%;transform:rotateY(90deg)}
+  .ptr-num{font-size:16px;font-weight:750;line-height:1.05;letter-spacing:-.01em;
+    font-variant-numeric:tabular-nums;color:var(--ink);text-shadow:0 2px 0 rgba(0,0,0,.55)}
+  .ptr-num s{display:block;text-decoration:none;font-size:8px;font-weight:600;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--dim);text-shadow:none}
   .pt-note{margin:16px 0 0;font-size:11px;line-height:1.6;color:var(--dim);max-width:74ch}
   .pt-note b{color:var(--ink);font-weight:600}
-  @media (max-width:520px){
-    .ptrow{grid-template-columns:28px 1fr auto;grid-template-areas:"i n c" "i t t";row-gap:6px}
-    .ptrow .ico{grid-area:i;width:28px;height:28px} .ptrow .nm{grid-area:n}
-    .ptrow .ct{grid-area:c} .ptrow .ptbar{grid-area:t}
+  @media (max-width:560px){
+    /* Flatten the tilt on small screens: at this width the receding faces eat
+       the rail rather than describing it, and the label column cannot hold. */
+    .ptr-stage{transform:rotateX(-4deg) rotateY(-5deg);animation:none}
+    .ptr-row{grid-template-columns:1fr 62px;grid-template-areas:"n c" "s c";row-gap:4px;height:auto;animation:none}
+    .ptr-name{grid-area:n;text-align:left} .ptr-slot{grid-area:s} .ptr-num{grid-area:c;text-align:right}
   }
-  @media (prefers-reduced-motion:reduce){.ptrow .ptfill{animation:none}}
+  @media (prefers-reduced-motion:reduce){
+    .ptr-stage{animation:none;transform:rotateX(-9deg) rotateY(-13deg)}
+    .ptr-row{animation:none;transform:none}
+  }
 
   /* continuously-animated powertrain icons (the app's real FuelIcon set) */
   @keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}
@@ -559,35 +579,45 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // so no share can be inferred, and the numbers shown are exactly true -- these
     // are the trims we hold a verified MSRP for. Coverage is stated once, in
     // words, where it cannot be mistaken for a market claim.
+    // Each rail carries three tones because it is a solid: the lit front face,
+    // the receding top face, and the darker right end cap. These are the app's
+    // own accents (--blue/--teal/--amber/--up/--gate) with a lift and a shade.
     var FUELS=[
-      ["Gas","var(--blue)"],["Hybrid","var(--teal)"],
-      ["PHEV","var(--amber)","Plug-in Hybrid"],["BEV","var(--up)"]
+      ["Gas",           "#4a80d4","#84acea","#2a4c80"],
+      ["Hybrid",        "#2dd4bf","#7fefe0","#14796e"],
+      ["PHEV",          "#f59e0b","#fbc75f","#8f5c07","Plug-in Hybrid"],
+      ["BEV",           "#3ecf8e","#87e8bc","#217a55"]
     ];
     var rows=[], known=0;
     FUELS.forEach(function(f){
       var n=catalog.byFuel[f[0]]||0; known+=n;
-      if(n>0) rows.push({key:f[0],label:f[2]||f[0],n:n,c:f[1]});
+      if(n>0) rows.push({key:f[0],label:f[4]||f[0],n:n,c:f[1],t:f[2],d:f[3]});
     });
     // A fuel_type outside the four mapped keys (an FCEV, a Diesel) still counts
     // as recorded, so it must appear rather than silently vanish.
     var other=catalog.fuelTagged-known;
-    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"var(--gate)"});
+    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"#8b7bff",t:"#b8aeff",d:"#4d43a3"});
     // FIXED powertrain order, never sorted by count. Sorting produces a
     // leaderboard, and a leaderboard of OUR coverage reads as a ranking of what
     // is common on the road -- which is exactly the inference this panel must
-    // not invite. Gas -> Hybrid -> PHEV -> BEV is the conventional order and
-    // carries no claim; the bar lengths and printed counts do all the talking,
-    // and both are labelled as coverage.
+    // not invite. The rail lengths and printed counts do all the talking, and
+    // both are labelled as coverage.
     var max=rows.reduce(function(m,r){ return Math.max(m,r.n); },1);
 
-    document.getElementById("ptRows").innerHTML=rows.map(function(r){
-      return '<div class="ptrow" style="--c:'+r.c+'">'+
-        '<span class="ico">'+icon(r.key)+'</span>'+
-        '<span class="nm">'+r.label+'</span>'+
-        '<span class="ptbar"><span class="ptfill" style="--w:'+(r.n/max*100).toFixed(1)+'%"></span></span>'+
-        '<span class="ct">'+r.n.toLocaleString("en-CA")+' <s>trim'+(r.n===1?"":"s")+'</s></span>'+
-      '</div>';
-    }).join("");
+    document.getElementById("ptRows").innerHTML=
+      '<div class="ptr-scene"><div class="ptr-stage">'+
+      rows.map(function(r,idx){
+        // Staggered negative delays so the rack is already mid-breath on load
+        // rather than every rail rising together from flat.
+        var w=Math.max(2,(r.n/max*100)).toFixed(1);
+        return '<div class="ptr-row" style="--ptr-c:'+r.c+';--ptr-t:'+r.t+';--ptr-d:'+r.d+';'+
+               '--ptr-w:'+w+'%;animation-delay:'+(-1.1*idx).toFixed(1)+'s">'+
+          '<span class="ptr-name">'+r.label+'</span>'+
+          '<span class="ptr-slot"><span class="ptr-block"></span></span>'+
+          '<span class="ptr-num">'+r.n.toLocaleString("en-CA")+'<s>trim'+(r.n===1?"":"s")+'</s></span>'+
+        '</div>';
+      }).join("")+
+      '</div></div>';
 
     var unrec=catalog.trims-catalog.fuelTagged;
     document.getElementById("ptTotal").textContent=
