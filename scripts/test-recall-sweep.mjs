@@ -232,6 +232,29 @@ t("new recalls are grouped by recall, not listed per model-year",
   script.includes("byRecall") && script.includes("Covering ${allNew.length} model-year"),
   "one recall spans every affected year (Ford 2026339 covers EXPLORER 2020-2026); a row per year turns a few real events into a wall");
 
+// THE ONE THE OFFLINE GATE COULD NOT CATCH, AND THE FIRST LIVE RUN DID.
+// The helper read every response with `res.status === 204 ? null : res.json()`,
+// assuming an empty body only arrives as 204. PostgREST answers a write carrying
+// `Prefer: return=minimal` with 201 Created and an EMPTY body, so .json() was
+// handed "" and threw `Unexpected end of JSON input`. The first live run pulled
+// all 40,471 recalls from Transport Canada and then failed to write all 35 makes.
+//
+// Nothing here stubs Supabase and --dry-run skips the write path entirely, so
+// this is the branch a stubbed gate structurally cannot reach. Pinned at the
+// source level instead: read the body once as text, parse only if non-empty.
+// Comment-stripped for the negative half: the helper now documents the bug it
+// fixed, quoting `res.json()` in prose. Matching raw source failed the file for
+// explaining its own history — the same trap as test:live-dot, test:price-index
+// and test:recall-source. Fourth time; strip first, match second.
+const codeOnly = script.split(NL)
+  .map((l) => { const i = l.indexOf("//"); return i >= 0 ? l.slice(0, i) : l; })
+  .join(NL);
+t("a response body is read as text and parsed only when non-empty",
+  codeOnly.includes("const body = await res.text();") &&
+  codeOnly.includes("return body.trim() ? JSON.parse(body) : null;") &&
+  !codeOnly.includes("res.json()"),
+  "an empty body is not always 204 — PostgREST returns 201 with no body for return=minimal, and .json() throws on it");
+
 t("a partial sweep exits red",
   script.includes("process.exit(failures.length ? 1 : 0)"),
   "'didn't resolve' is RED, never neutral — a green run must mean every make was actually read");
