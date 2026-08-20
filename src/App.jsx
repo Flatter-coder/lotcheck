@@ -8317,17 +8317,20 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   useEffect(() => { setRecallPage(0); }, [a.reportId]);
 
   // Read-aloud. Browser-native (Web Speech API) -- no vendor, no per-character
-  // cost, works today. Prefers an installed British English voice; if none is
-  // installed on this device, still speaks (lang="en-GB" alone changes
-  // pronunciation in most engines even with no exact voice match) rather than
-  // refusing outright. Voice lists load asynchronously in some browsers
-  // (Chrome fires "voiceschanged" after the first empty getVoices() call), so
-  // one retry is given before falling back to whatever's default.
+  // cost, works today. Prefers Vic's chosen voice ("Susan" -- Microsoft's
+  // en-GB voice, confirmed installed and working during testing), then any
+  // other installed British English voice, then still speaks with lang=en-GB
+  // alone (changes pronunciation in most engines even with no exact voice
+  // match) rather than refusing outright. Voice lists load asynchronously in
+  // some browsers (Chrome fires "voiceschanged" after the first empty
+  // getVoices() call), so one retry is given before falling back to default.
   const [voiceState, setVoiceState] = useState("idle"); // idle | speaking
   const pickBritishVoice = () => {
     try {
       const voices = window.speechSynthesis.getVoices() || [];
-      return voices.find(v => /^en-GB/i.test(v.lang))
+      return voices.find(v => /susan/i.test(v.name) && /^en-GB/i.test(v.lang))
+        || voices.find(v => /susan/i.test(v.name))
+        || voices.find(v => /^en-GB/i.test(v.lang))
         || voices.find(v => /en[-_]gb/i.test(v.lang))
         || voices.find(v => /british/i.test(v.name))
         || null;
