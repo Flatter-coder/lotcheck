@@ -20,6 +20,8 @@ the next instance.
 
 | fix | what broke | class | guard now in place |
 |---|---|---|---|
+| `61dc293` | **The emailed report's 2 attachments had no clue what either one was.** `LotCheck-{vehicle}.pdf` and `LotCheck-{vehicle}-listing-capture.jpg` gave no indication in Gmail's attachment strip why there were two files or what each did — read as confusing duplication. Caught live from Vic's own inbox screenshot | — | renamed to `-Report.pdf` / `-Photo-Proof.{ext}`. Considered and explicitly rejected: replacing the cryptographic seal with a visible logo watermark — a stamp is trivially reproducible on any screenshot in an image editor and proves nothing, where the whole point is that a dealer can't dispute a report by claiming LotCheck never said it. Kept the crypto; fixed the naming, which was the actual complaint |
+| `dfa00f7` | see the "Closed" note under `a77052f` in Open, below — reserving vision-rescue a minimum budget instead of whatever `enrichAnalysis` left over | one-surface fix | — |
 | `a77052f` | **A real, page-stated APR was hidden as "Not shown" because an untrusted LLM guess got to the field first.** Both the page-text regex backstop and the Convertus VMS gap-fill guarded themselves with "only run if `analysis.financing.rate` isn't already set" — but the LLM's own unconfirmed read fills that exact field first, with no evidenced source. Once it did, the deterministic extractors were permanently blocked from ever running on the SAME page, even where they'd find the identical number with real proof behind it. Caught live on legacyautogroup.ca (2026 Ford Explorer): the page's own visible text plainly states "5.49% financing for 84 months ... @ 5.49% APR O.A.C." — `extractAdvertisedApr` finds it correctly given that exact text (verified directly) — but the report showed "Financing APR: Not shown" | one-surface fix | guard extracted into one testable helper, `hasTrustedFinanceRate()` in `_shared/deal.ts` (alongside the `TRUSTED_APR_SOURCES` set it now exports) — a backstop runs whenever there is no TRUSTED rate yet, regardless of whether an unproven guess already sits in the field. Both backstops now share it |
 | `18d31e1` | **Read Aloud always started at the verdict, ignoring what was on screen.** The speech queue was built from `P` (the raw 10-point array) starting at index 0 every time, with no awareness of `sel` (the sidebar view's current selection). Caught live: viewing "Transport Canada recalls," pressing Read Aloud narrated the verdict instead | one-surface fix | now reads from `items` (the same array the sidebar/heatmap nav lists from), starting at whatever point is on screen and wrapping from there; each utterance's `onstart` advances `sel` + a new `speakingIdx` state so the visible card and sidebar nav both highlight amber in sync with what's actually being read. Verified live: selecting recalls then Read Aloud starts with "Transport Canada recalls..." and the recalls nav button's computed styles confirm the amber highlight |
 | `8cf5a10` | **The recalls display cap `6489128` supposedly removed was still there.** `r.items.slice(0, 4)` was live in the "Transport Canada recalls" report point right up to this commit — a "9 open recalls" header still delivered exactly 4 full recall bodies, the identical symptom from the day before, caught live a second time by Vic on the same easytermauto.ca report. The 2026-08-19 fix evidently landed on a different recalls rendering surface (the compact share-link encoder's own separate `.slice(0, 6)`, untouched) and missed this one — the two were never the same code | one-surface fix | rebuilt as one-recall-per-page pagination (Back/Next at the top, "Recall N of M") rather than re-stacking all N in one long scroll, which was Vic's separate complaint about the same card. Clamps the page index to `items.length` and shows an honest "detail didn't come back with this scan" message rather than indexing out of bounds when the detail list runs shorter than the count. Verified live against a hand-built 6-recall test payload on a local dev server: correctly reports "Recall 2 of 6" against a "9 open recalls" header rather than silently claiming 9 |
@@ -136,35 +138,34 @@ the next instance.
 
 ## Open
 
-- **A report can claim its own extraction failed entirely while its OWN sealed
-  screenshot proves the data was there and readable.** `LC-B4CF-D00`
-  (legacyautogroup.ca, 2026 Ford Explorer, 2026-08-20): the report's "Bottom
-  Line" states the captured page content was only nav/footer/CARFAX
-  boilerplate, "Price vs MSRP" falls back to a catalog "starting at $54,895"
-  when the dealer's own page states MSRP $75,015, "Financing APR" falls back
-  to a 4.99% manufacturer reference when the page states 5.49%, and the
-  odometer reads 0 km against a real 508 — yet the report's own sealed
-  screenshot capture (attached to the same report, same signed payload)
-  clearly shows all of it: MSRP $75,015, Discount -$8,136, Legacy Price
-  $66,879, Est. Finance Payment $443/bw · 5.49% for 84 Months, Kilometres 508.
-  The page loads via a JS-heavy SPA that returns near-empty boilerplate to a
-  plain fetch (confirmed directly: 111KB of real content stripped from a
-  1.04MB raw response) — exactly the case the vision rescue exists for
-  (render through Scrapfly, read what a human sees). The screenshot proves
-  the render succeeded. Strongest working theory, NOT yet confirmed from real
-  logs: `rescueListingViaScrapfly`'s budget (`Math.max(1_000,
-  REQUEST_DEADLINE - Date.now())`) clamps to a 1-second floor once the 140s
-  REQUEST_DEADLINE has already passed — nowhere near enough for a real
-  render + Claude vision read — while the LATER, separately-budgeted, simpler
-  `attachSealedScreenshot` call (reusing an already-in-flight `shotPromise`)
-  still succeeds. `a77052f` added a log line at the vision-rescue call site
-  reporting the actual remaining budget, specifically so the next occurrence
-  is confirmable from logs instead of reconstructed from a PDF the way this
-  one was. Not fixed here — a genuine architecture question (should the
-  pipeline reserve budget for vision-rescue ahead of less-critical late-stage
-  enrichment? should it re-attempt vision against the ALREADY-SUCCESSFUL
-  sealed screenshot as a last resort before giving up?) that deserves real
-  timing data before changing.
+- ~~A report can claim its own extraction failed entirely while its OWN
+  sealed screenshot proves the data was there and readable.~~ **Closed by
+  `dfa00f7`, same day.** `LC-B4CF-D00` (legacyautogroup.ca, 2026 Ford
+  Explorer, 2026-08-20): the report's "Bottom Line" stated the captured page
+  content was only nav/footer/CARFAX boilerplate, "Price vs MSRP" fell back
+  to a catalog "starting at $54,895" when the dealer's own page states MSRP
+  $75,015, "Financing APR" fell back to a 4.99% manufacturer reference when
+  the page states 5.49%, and the odometer read 0 km against a real 508 —
+  yet the report's own sealed screenshot, attached to the same signed
+  report, clearly shows all of it. The page loads via a JS-heavy SPA that
+  returns near-empty boilerplate to a plain fetch (confirmed directly: 111KB
+  of real content stripped from a 1.04MB raw response) — exactly the case
+  the vision rescue exists for. First landed as an Open item with only
+  diagnostic logging (`a77052f`) because the exact mechanism wasn't
+  confirmed from real logs; pushed to an actual fix the same day. Root
+  cause: `enrichAnalysis()` was always handed the FULL remaining
+  `REQUEST_DEADLINE`, with nothing reserved for the vision-rescue step that
+  runs after it — on a slow listing, enrichment (recalls, catalog MSRP,
+  dealer reputation, financing lookups) could spend the entire budget,
+  leaving rescue's own calc clamped to its 1-second floor by the time its
+  turn came. Fixed by reserving rescue a 40s minimum BEFORE calling
+  enrichAnalysis, using enrichAnalysis's own existing deadline-awareness (it
+  already self-skips expensive sub-steps near its deadline) rather than
+  adding new skip logic — total budget unchanged, just no longer let one
+  step starve the other with no coordination between them. Not
+  independently verified against a live Scrapfly-enabled run; the diagnostic
+  log from `a77052f` stays in place so the next occurrence (if any) confirms
+  or corrects the theory from real timing data.
 - ~~Toyota scraper reads a calculated price.~~ **Closed** — but the note above
   was wrong in a way worth keeping. It said *"the gate is correct; the field is
   wrong."* The field was wrong; **the gate was wrong too.** A whole-dollar value
