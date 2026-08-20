@@ -354,7 +354,28 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
 // Attach a sealed screenshot to the analysis when it doesn't already carry one
 // (the vision rescue may have provided it). Hash computed over exactly the
 // attached bytes; MUST run before finalizeServerSide so the hash gets signed.
+//
+// Also stamps sourceUrl/capturedAt here, unconditionally and before the
+// early-returns below -- this is the one place every finalizeServerSide()
+// call site on the listing-URL path already calls with the real fetched
+// `url` in scope, so it is the single point that can make source/capturedAt
+// true (and therefore signable) for every branch at once. Before this, only
+// the CLIENT stamped these two fields (App.jsx, after receiving the response)
+// with its own url + Date.now() -- harmless while canonicalReport() ignored
+// them, but report-sign.ts's v3 bump started projecting them into the signed
+// canonical (see "source" there) without this side stamping the SAME values
+// server-side first. The result: every listing-URL report signed a `source`
+// of null, the client then unconditionally overwrote sourceUrl/capturedAt
+// with its own values before ever emailing, and email-quote-report's
+// recomputed canonical -- now non-null -- never matched the signature. Every
+// single listing-URL report was unemailable. Setting real values here BEFORE
+// signing, and only ever filling a gap the client left (`analysis.sourceUrl
+// || url`) client-side, closes the gap instead of racing it.
 export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<{ b64: string; mime: string } | null>): Promise<void> {
+  if (analysis) {
+    analysis.sourceUrl = analysis.sourceUrl || url;
+    if (!analysis.capturedAt) analysis.capturedAt = new Date().toISOString();
+  }
   try {
     if (!analysis || analysis.listingShot || !SCRAPFLY_API_KEY) return;
     // A pre-started capture (kicked off at the top of the scan, running in

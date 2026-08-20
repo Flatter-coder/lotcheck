@@ -93,5 +93,51 @@ function stub(behave: (n: number) => "timeout" | { html?: string | null; shotByt
     "this runs inside a paid scan; it must degrade, never crash the request");
 }
 
+// ---------------------------------------------------------------------------
+// 5. attachSealedScreenshot stamps sourceUrl/capturedAt BEFORE either early
+//    return -- these ride inside the signed canonical (report-sign.ts
+//    canonicalReport()'s `source` field), so a report must carry the real
+//    fetched URL and a real timestamp for its signature to mean anything,
+//    even when the screenshot itself is skipped or fails.
+//
+//    Regression for the 2026-08-20 incident: the server never stamped these
+//    on the listing-URL scan path, so canonicalReport() signed `source: null`
+//    for every report. The client then unconditionally overwrote
+//    analysis.sourceUrl/capturedAt with its own url + Date.now() before
+//    emailing (harmless before source was part of the signed canonical,
+//    silently fatal after). email-quote-report recomputed a non-null
+//    `source` against a signature made over `null` and rejected every
+//    single listing-URL report with "This report can't be verified as one
+//    of ours." Vic hit it live on the easytermauto.ca Bronco Sport listing.
+// ---------------------------------------------------------------------------
+{
+  const { attachSealedScreenshot } = await import("./scrapfly.ts");
+  const analysis: any = { listingShot: "data:image/jpeg;base64,alreadyset" };
+  await attachSealedScreenshot("https://dealer.example/vdp/123", analysis);
+  check("sourceUrl is stamped even when the screenshot step short-circuits (already has one)",
+    analysis.sourceUrl === "https://dealer.example/vdp/123", JSON.stringify(analysis));
+  check("capturedAt is stamped even when the screenshot step short-circuits",
+    typeof analysis.capturedAt === "string" && analysis.capturedAt.length > 0, JSON.stringify(analysis));
+}
+{
+  const { attachSealedScreenshot } = await import("./scrapfly.ts");
+  const analysis: any = {
+    listingShot: "data:image/jpeg;base64,x",
+    sourceUrl: "https://already-set.example/x",
+    capturedAt: "2020-01-01T00:00:00.000Z",
+  };
+  await attachSealedScreenshot("https://different-url.example/vdp", analysis);
+  check("an existing sourceUrl is never clobbered (idempotent across the six finalize call sites)",
+    analysis.sourceUrl === "https://already-set.example/x", analysis.sourceUrl);
+  check("an existing capturedAt is never clobbered",
+    analysis.capturedAt === "2020-01-01T00:00:00.000Z", analysis.capturedAt);
+}
+{
+  const { attachSealedScreenshot } = await import("./scrapfly.ts");
+  let threw = false;
+  try { await attachSealedScreenshot("https://x.example", null); } catch { threw = true; }
+  check("a null analysis does not throw", !threw);
+}
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 if (fail) (globalThis as any).process?.exit?.(1);

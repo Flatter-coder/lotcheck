@@ -31,6 +31,13 @@ const OUTPUT_SHAPING = [
   // could ship with no bump, and every cached report would replay the old answer
   // for six hours (CACHE_TTL_MS) while looking like a failed deploy.
   /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
+  // scrapfly joined this list on 2026-08-20, for the same reason recalls did
+  // the day before: attachSealedScreenshot() stamps sourceUrl/capturedAt onto
+  // `analysis` before it's signed, and a change to what it stamps (or when)
+  // changes what a cached report's signature covers -- exactly the shape of
+  // change this gate exists to catch, just living in a shared module instead
+  // of analyze-listing-url/index.ts itself.
+  /^supabase\/functions\/_shared\/scrapfly\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
