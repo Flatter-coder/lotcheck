@@ -1138,7 +1138,7 @@ function computeOdometerCheck(analysis: any): void {
     const low = age * 10000;
     if (km < low * 0.6) {
       flag = true;
-      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
     } else if (km > age * 30000) {
       note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
     } else {
@@ -1155,7 +1155,11 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
   const pageRate = Number(analysis?.financing?.rate);
   if (pageRate && pageRate > 0 && pageRate < 30) {
-    out.dealer = { apr: pageRate };
+    // Uploaded-quote path has no page-text/feed backstop to cross-check
+    // against -- every rate here is the LLM's own read of the photo/PDF, so
+    // it is always untrusted for the accusatory HIGH/dollar-gap claim. See
+    // the identical tag in analyze-listing-url/index.ts resolveFinanceRates.
+    out.dealer = { apr: pageRate, source: analysis.financing?.source || "llm" };
   }
   if (analysis.make) {
     try {

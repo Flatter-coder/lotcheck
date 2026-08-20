@@ -623,7 +623,7 @@ function computeOdometerCheck(analysis: any): void {
     const low = age * 10000;
     if (km < low * 0.6) {
       flag = true;
-      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
     } else if (km > age * 30000) {
       note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
     } else {
@@ -746,7 +746,16 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
   const pageRate = Number(analysis?.financing?.rate);
   if (pageRate && pageRate > 0 && pageRate < 30) {
-    out.dealer = { apr: pageRate };
+    // source travels with the rate so the frontend can tell "the page/feed
+    // genuinely says this" (sm360_feed, convertus_vms, page_text -- all three
+    // require real evidence, see apr-extract.js) from "the model's own read of
+    // the page, no cross-check" (llm -- the extraction prompt says never
+    // guess, but nothing downstream enforced that until this field existed).
+    // Only the former may power an accusatory HIGH/dollar-gap claim -- see
+    // App.jsx TRUSTED_APR_SOURCES. Confirmed live 2026-08-19 (easytermauto.ca
+    // Bronco Sport): a report accused a dealer of a 25% rate and quoted a
+    // $23,275 markup for a page that discloses no APR anywhere.
+    out.dealer = { apr: pageRate, source: analysis.financing?.source || "llm" };
   }
   if (analysis.make) {
     try {
@@ -3500,6 +3509,20 @@ Deno.serve(async (req: Request) => {
         }
       }
     } catch { /* the safety net must never sink the scan */ }
+
+    // Re-sync financeRates.dealer from analysis.financing NOW that both the
+    // page-text APR backstop (above) and the Convertus gap-fill (just above)
+    // have had their turn. resolveFinanceRates() ran much earlier and built
+    // financeRates.dealer from whatever the LLM's own read happened to be at
+    // that point -- so a rate either backstop found afterward could never
+    // reach the report at all, and the evidenced source tag they attach
+    // (page_text / convertus_vms) never overrode an untrusted LLM guess that
+    // arrived first. This makes the two deterministic, evidence-carrying
+    // sources actually able to inform what ships, with source preserved.
+    if (Number(analysis.financing?.rate) > 0) {
+      analysis.financeRates = analysis.financeRates || { dealer: null, manufacturer: null };
+      analysis.financeRates.dealer = { apr: Number(analysis.financing.rate), source: analysis.financing.source || "llm" };
+    }
 
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +

@@ -200,6 +200,22 @@ jobs:
       # produce zero green AND zero n/a checkpoints.
       - name: Verification checkpoints (unmeasured is not passing)
         run: npm run test:checkpoints
+      # The benchmark measures coverage; the golden set measures CORRECTNESS —
+      # every value graded against an answer key read independently off the
+      # dealer's own page. This gate locks the grading semantics (a false
+      # price-gating accusation must fail the whole report; a text-confidence
+      # key value must never grade; a hybrid must never match its gas sibling)
+      # and schema-validates the committed answer keys. All three shipped
+      # false accusations were caught by a human — this is the machine's turn.
+      - name: Golden-set grader (correctness, not coverage)
+        run: npm run test:golden
+      # Locks the dealer-APR trust gate: buildCounterScript and
+      # computeFinancingTrap may only turn a dealer's rate into an
+      # accusatory claim (counter-script line, dollar-savings estimate) when
+      # it carries real evidence. An LLM-only "25%" once accused a dealer of
+      # a $23,275 markup on a page with no APR anywhere (easytermauto.ca).
+      - name: Dealer-APR trust gate (deal.ts)
+        run: npm run test:deal
       # The panel above is only as good as its window. An open-ended sentinel
       # end serialised to year 275760, Postgres refused to parse it, and all
       # 13 checkpoints read "read failed" on every rolling window while the

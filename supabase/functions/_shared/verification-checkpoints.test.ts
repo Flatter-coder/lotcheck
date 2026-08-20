@@ -124,10 +124,20 @@ expect({}, "listing_url", "financing", "not_attempted",
   "no financing AND no price means we read nothing — absence must not buy an N/A");
 expect({ financing: { paymentAmount: 200 } }, "listing_url", "financing", "not_attempted",
   "financing disclosed but too incomplete to reconcile is RED");
-expect({ financeRates: { dealer: { apr: 6.99 } } }, "listing_url", "apr", "verified", "an advertised dealer APR resolves it");
+expect({ financeRates: { dealer: { apr: 6.99, source: "sm360_feed" } } }, "listing_url", "apr", "verified", "an EVIDENCED dealer APR resolves it");
+expect({ financeRates: { dealer: { apr: 6.99, source: "convertus_vms" } } }, "listing_url", "apr", "verified", "convertus_vms is also evidenced");
+expect({ financeRates: { dealer: { apr: 6.99, source: "page_text" } } }, "listing_url", "apr", "verified", "page_text (the deterministic regex backstop) is also evidenced");
 expect({ financeRates: { dealer: null, manufacturer: { apr: 3.99 } } }, "listing_url", "apr", "verified",
   "the manufacturer promo rate as a labelled reference also resolves it");
 expect({ financeRates: { dealer: null, manufacturer: null } }, "listing_url", "apr", "not_attempted", "no rate on either side is RED");
+// The regression this whole file exists to catch, live: a report accused a
+// dealer of a 25% rate and a $23,275 markup for a page with no APR anywhere
+// (2026-08-19, easytermauto.ca). The model's own unconfirmed read must not
+// log "verified" -- an unconfirmed number is not the same as a right one.
+expect({ financeRates: { dealer: { apr: 25, source: "llm" } }, financing: { rate: 25 } }, "listing_url", "apr", "not_attempted",
+  "an LLM-only rate with no page/feed evidence must NOT verify");
+expect({ financeRates: { dealer: { apr: 25 }, manufacturer: { apr: 4.99 } }, financing: { rate: 25 } }, "listing_url", "apr", "verified",
+  "no source tag at all (the pre-2026-08-19 shape) falls through to the manufacturer reference, not the untrusted number");
 
 // ---- Leverage: a score with nothing behind it is not a pass ---------------
 expect({ leverageScore: { computed: true, score: 7.5, basis: ["msrp", "days_on_lot"] } }, "listing_url", "leverage", "verified",
@@ -185,7 +195,7 @@ expect({ quotedPrice: 30000 }, "listing_url", "reputation", "not_attempted",
     vin: "5YFB4MDE8SP123456", vinCheck: { present: true, valid: true },
     standardWarranty: { verified: true, coverage: "3yr/60,000km" },
     financing: { rate: 6.99 }, financingCheck: { checked: true, consistent: true },
-    financeRates: { dealer: { apr: 6.99 }, manufacturer: { apr: 3.99 } },
+    financeRates: { dealer: { apr: 6.99, source: "sm360_feed" }, manufacturer: { apr: 3.99 } },
     leverageScore: { computed: true, score: 6.5, basis: ["msrp", "days_on_lot"] },
     daysOnLot: { days: 91, source: "dealer_platform_feed" },
     dealerName: "Country Hills Toyota", dealerLicence: { state: "licensed", licenceNumber: "12345" },

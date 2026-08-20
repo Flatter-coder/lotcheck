@@ -16,6 +16,22 @@
 const num = (x: unknown): number | null => { const v = Number(x); return Number.isFinite(v) ? v : null; };
 const norm = (s: unknown): string => (typeof s === "string" ? s : "").toLowerCase();
 
+// A dealer APR may only power a claim -- a counter-script line, a savings
+// estimate -- when the page/feed itself carries it (sm360_feed, convertus_vms,
+// page_text: all evidence-checked, see _shared/apr-extract.js). "llm" (or no
+// source at all, the pre-2026-08-19 shape) means only the model's own read of
+// the page, unconfirmed -- and the model can be wrong even when told not to
+// guess. Confirmed live: a report told a buyer to say "I'd want that, not
+// 25%" to a dealer whose page discloses no APR anywhere (easytermauto.ca).
+// Mirrors isManufacturerFigure's role for MSRP -- one gate, not one per call
+// site. Duplicated in App.jsx (client can't import a Deno module); keep both
+// in sync.
+const TRUSTED_APR_SOURCES = new Set(["sm360_feed", "convertus_vms", "page_text"]);
+const trustedDealerApr = (analysis: any): number | null => {
+  const d = analysis?.financeRates?.dealer;
+  return d?.apr != null && TRUSTED_APR_SOURCES.has(d.source) ? num(d.apr) : null;
+};
+
 // Unavoidable government / logistics pass-throughs.
 const FEE_RE = /\b(doc(ument(ation)?)?|registration|licen[sc]e|title|freight|pdi|destination|delivery|a\/?c (levy|tax)|air ?conditioning|tire (levy|tax|fee|recycl)|environment|omvic|amvic|govern|filing|excise|luxury tax|green levy|gst|pst|hst|qst|sales tax)\b/;
 // Dealer-markup add-ons: negotiable / removable, however they're framed.
@@ -203,7 +219,7 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (r && r.checked && r.count > 0) {
     moves.push({ topic: "Recalls", say: `There ${r.count > 1 ? "are" : "is"} ${r.count} open recall${r.count > 1 ? "s" : ""} on this VIN — please have ${r.count > 1 ? "them" : "it"} fixed before delivery.` });
   }
-  const dApr = num(analysis?.financeRates?.dealer?.apr), pApr = num(analysis?.financeRates?.manufacturer?.apr);
+  const dApr = trustedDealerApr(analysis), pApr = num(analysis?.financeRates?.manufacturer?.apr);
   if (dApr != null && pApr != null && dApr > pApr + 0.1 && !analysis?.financingTrap) {
     moves.push({ topic: "Rate", say: `I see a ${pApr}% promo rate advertised — I'd want that, not ${dApr}%.` });
   }
@@ -264,7 +280,7 @@ export function computeFinancingTrap(analysis: any): FinancingTrap | null {
   }
   if (!(discount > 0)) return null; // S11 only applies when there IS a discount
 
-  const dealerApr = num(analysis?.financeRates?.dealer?.apr ?? analysis?.financing?.rate);
+  const dealerApr = trustedDealerApr(analysis);
   const promoApr = num(analysis?.financeRates?.manufacturer?.apr);
   const term = num(analysis?.financing?.termMonths);
   const loan = selling; // full price proxy (down payment unknown)
