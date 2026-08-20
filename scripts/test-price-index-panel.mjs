@@ -173,5 +173,45 @@ t("bands render in fixed order, never sorted by count",
   !src.includes("below.sort(") && !src.includes("above.sort("),
   "distance from sticker is an ordered axis; sorting it by count destroys the axis");
 
+// ---------------------------------------------------------------------------
+// CATALOG-ANCHORED MARKET READ (replaced the dealer-stated reference)
+// ---------------------------------------------------------------------------
+// The old read measured asking price against the MSRP the DEALER stated on
+// their own page, so a dealer printing MSRP = asking price was invisible to
+// the over-sticker stat (Southpointe Toyota Tacoma Hybrid, 2026-08-19:
+// asking $89,130, page MSRP $89,130). The reference must be OURS.
+
+t("the market cards read the catalog-anchored RPC",
+  src.includes("fn_alberta_market_vs_catalog"),
+  "the page must read fn_alberta_market_vs_catalog — the read whose reference is our catalog");
+
+t("the dealer-stated read is gone, not merely unused",
+  !src.includes("fn_alberta_msrp_deviation"),
+  "any surviving call lets the dealer supply the reference again — the Tacoma blind spot");
+
+t("the card heading says whose sticker it measures",
+  src.includes("manufacturer-verified sticker"),
+  "an unqualified 'sticker' invites the reader to assume the factory figure whoever supplied it");
+
+t("the freight window is disclosed, never guessed into a direction",
+  src.includes("indeterminate_n") && src.includes("freight window"),
+  "listings inside the freight allowance back no directional claim; dropping them silently would fabricate certainty");
+
+t("percentages are shares of ALL matched listings, called or not",
+  src.includes("var total=n+ind;"),
+  "computing shares over directional calls alone inflates every percentage by hiding the indeterminate mass");
+
+t("a stale reading says so instead of posing as current",
+  src.includes("m.stale") && src.includes("stale:d.stale===true"),
+  "the row persists between pipeline runs; without the stale state a dead pipeline reads as a live market");
+
+t("dealer-sticker inflation is reported from the read, not recomputed",
+  src.includes("sticker_inflated_n") && src.includes("sticker_stated_n"),
+  "the stat exists so a self-ratified sticker is countable; the page must surface it");
+
+t("every distance is labelled a floor",
+  src.includes("never overstate"),
+  "window-based calls understate by construction; without the label a floor reads as an exact figure");
+
 console.log(`${NL}${fail ? "❌" : "✅"} price-index-panel: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
