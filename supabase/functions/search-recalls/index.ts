@@ -53,7 +53,7 @@ const JSON_HEADERS = { ...CORS_HEADERS, "Content-Type": "application/json" };
 // the cert problem. Confirmed 2026-07-22 in analyze-quote. Since this is a
 // read-only public dataset with no credentials or personal data on the wire,
 // plain http here is acceptable.
-c// Two-word makes we want to keep together when splitting free text. Everything
+// Two-word makes we want to keep together when splitting free text. Everything
 // else is treated as a single-token make followed by the model.
 const TWO_WORD_MAKES = new Set([
   "land rover", "alfa romeo", "aston martin", "general motors",
@@ -102,7 +102,7 @@ function titleCase(s: string): string {
 }
 
 // ── TC VRDB helpers (mirrors analyze-quote) ─────────────────────────────────
-f// TC dates arrive as "10/19/2023 12:00:00 AM". Trim the time and reformat to a
+// TC dates arrive as "10/19/2023 12:00:00 AM". Trim the time and reformat to a
 // friendly "Oct 2023". Manual parse to avoid any runtime timezone surprises.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function formatRecallDate(raw: string | null): string | null {
@@ -113,18 +113,6 @@ function formatRecallDate(raw: string | null): string | null {
   const year = m[3];
   if (month >= 1 && month <= 12) return `${MONTHS[month - 1]} ${year}`;
   return year;
-}
-
-a> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
-  } finally { clearTimeout(timer); }
 }
 
 // One VRDB list query for a given year range. Returns the distinct recall

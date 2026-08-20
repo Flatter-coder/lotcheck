@@ -509,37 +509,6 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
 // invariant that keeps analysis.vinCheck in sync with analysis.vin. It used to
 // be a byte-identical copy in this file AND in analyze-quote.
 
-// Open-recall lookup against Transport Canada's live Vehicle Recalls
-// Database (VRDB) -- the real federal registry, queried at report time,
-// NO API key required (confirmed 2026-07-22). This makes the "Open recalls
-// (Transport Canada)" stage a genuine check. Two steps: (1) list recalls
-// for this exact year/make/model, (2) fetch each recall's affected system +
-// plain-language summary. Never throws: any error/timeout yields
-// { checked:false } so the report still renders.
-// HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
-// trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
-// certificate: UnknownIssuer"), so an https fetch fails at connect time. The
-// endpoint serves the same JSON over plain http with no redirect, which
-// avoids the cert problem. Confirmed 2026-07-22.
-c
-c
-
-f
-
-a> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // Resolve the extracted model to its CANONICAL base model via our own
 // msrp_catalog ("Palisade Ultimate Calligraphy" -> "PALISADE"). Feeds both the
 // recall and MSRP lookups so trim in the model field can't break the exact
@@ -578,12 +547,9 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     return best;
   } catch { return null; }
 }
-f
-a
 // Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
 // CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
 // negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
-a
 
 // Financing math check: reconcile the dealer's OWN disclosed payment stream
 // against the stated total obligation. Deliberately conservative to avoid
