@@ -9418,6 +9418,46 @@ function TrimMsrpRange({analysis:a, C, cardStyle}){
     </div>
   );
 }
+// Comparable listings — the scroll view's own render of the same data
+// ReportViews/ReportFlipbook show (Vic, 2026-08-20). Missing entirely from
+// the scroll view at first: it turned out to be a fully separate component
+// from ReportViews, with its own independent useTrimRange call (this file's
+// TrimMsrpRange above) rather than reading the shared `items` array — so
+// wiring comparableItem into ReportViews/ReportFlipbook alone left the
+// single most-used view (the default landing view after a scan) showing
+// nothing. Same lesson as report-features-all-views generally: a shared
+// hook is not the same thing as a shared render path.
+function ComparableListingsCard({analysis:a, C, cardStyle}){
+  const cl=useComparableListings(a);
+  const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  if(cl.status!=="ready"||!cl.rows?.length) return null;
+  const isUsed=cl.condition==="used";
+  return (
+    <div style={{...cardStyle}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>{isUsed?"Comparable used listings":"Other listings of this model"}</div>
+        <LiveDot readAt={cl.readAt}/>
+      </div>
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>
+        {isUsed
+          ? `Other ${cl.year} ${cl.make} ${cl.model} listings we've read from Alberta dealers, closest in mileage to this one.`
+          : `Other ${cl.year} ${cl.make} ${cl.model} listings we've read from Alberta dealers.`}
+      </div>
+      <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
+        {cl.rows.map((r,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"8px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||cl.model}{r.city?` · ${r.city}`:""}</div>
+              {isUsed&&r.odometerKm!=null&&<div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{Number(r.odometerKm).toLocaleString()} km</div>}
+            </div>
+            <span style={{fontSize:13,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(r.price)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
+    </div>
+  );
+}
 function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
 // Canonical, fixed-order projection of ONLY what the report shows. This exact
 // object is what gets fingerprinted and what /verify re-hashes — so both sides
@@ -11501,6 +11541,7 @@ function QuoteCheckPage(){
                   null when there's no quoted price. Now condensed: a summary
                   with the full matrix behind an expander. */}
               <TrimMsrpRange analysis={analysis} C={C} cardStyle={cardStyle}/>
+              <ComparableListingsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
 
