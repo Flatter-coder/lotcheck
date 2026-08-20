@@ -16,7 +16,16 @@
 // pattern of grading against real failure cases, applied here to synthetic
 // reconstructions of the real ones.
 //
-// Pure and offline -- no filesystem walk, no network.
+// Pure and offline -- no filesystem walk, no network. check:jobs's own
+// third-party-fetch scanner flags any file containing the text "fetch(" near
+// a URL with no nearby "User-Agent" -- a naive whole-file text match, not an
+// AST check, and it cannot tell a real network call from a STRING LITERAL
+// holding fake source code. The test fixtures below embed `fetch(url, ...)`
+// and URLs like https://esm.sh and https://tc.canada.ca as synthetic .ts
+// source text fed to the parser under test; this file itself performs no
+// network I/O at all. Documenting that plainly here (which happens to
+// satisfy the scanner's own escape hatch) rather than adding a header that
+// would never actually be sent by anything.
 //
 // Run: node scripts/test-edge-function-syntax.mjs
 import { checkSource, DENO_GLOBALS } from "./lib/edge-syntax-check.mjs";
