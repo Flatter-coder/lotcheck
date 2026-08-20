@@ -320,5 +320,14 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Undefined identifiers (a green build does NOT catch these)
         run: npm run check:undef
+      # Same Babel-scope technique as the check above, pointed at
+      # supabase/functions/**/*.ts -- nothing else in this workflow parses
+      # that tree at all. A recall-lookup consolidation (4aca3c3, 2026-08-19)
+      # truncated several deleted lines to their bare first character and
+      # shipped through all 47 other gates; this is the gate that closes it.
+      - name: Edge function syntax + scope (regression harness first)
+        run: npm run test:edge-syntax
+      - name: Edge function syntax + scope (real tree)
+        run: npm run check:edge-syntax
       - name: Build must still succeed
         run: npm run build

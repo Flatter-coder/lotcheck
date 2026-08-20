@@ -12,6 +12,8 @@
     "check:copy": "node scripts/check-copy-compliance.mjs",
     "check:parity": "node scripts/check-report-parity.mjs",
     "check:undef": "node scripts/check-undefined-identifiers.mjs",
+    "check:edge-syntax": "node scripts/check-edge-function-syntax.mjs",
+    "test:edge-syntax": "node scripts/test-edge-function-syntax.mjs",
     "check:scan-accuracy": "node scripts/check-scan-accuracy.mjs",
     "check:delivery": "node scripts/check-delivery-guarantees.mjs",
     "test:delivery": "node scripts/test-delivery-guarantees.mjs",
