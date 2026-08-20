@@ -104,6 +104,13 @@ jobs:
       # zero, and the job stages what it finds without ever sending it.
       - name: Recall sweep (completeness, fail-safe, stages but never sends)
         run: npm run test:recall-sweep
+      # Four copies of the Transport Canada lookup drifted apart, and the only
+      # correct one was the module nothing imported -- so its regression harness
+      # proved nothing about what shipped. One declaration, every consumer
+      # reaching it by import, and a clean bill that the REGISTRY backs rather
+      # than our own catalogue.
+      - name: Recall lookup (single source, registry-backed clean bill)
+        run: npm run test:recall-source
       - name: Price-index panel (coverage, not market share)
         run: npm run test:price-index
       # The public market read anchors to OUR catalog, and the moment our

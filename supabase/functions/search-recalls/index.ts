@@ -21,12 +21,22 @@
 //     ]
 //   }
 //
-// The VRDB lookup logic here is lifted from analyze-quote's lookupRecalls(),
-// which is already live in production. Same endpoint, same http-not-https
-// workaround (see note on TC_VRDB_BASE below), same record parsing.
+// The VRDB primitives (base URL, record parsing, timed fetch) now come from
+// ../_shared/recalls.ts. They used to be copied into this file -- this header
+// said so, in as many words: "lifted from analyze-quote's lookupRecalls()".
+// That is how the codebase ended up with four copies, which then drifted.
 //
 // No secrets required. This function reads a public government API and touches
 // no Supabase table, so the injected SUPABASE_URL / SERVICE_ROLE_KEY are unused.
+
+// The three VRDB primitives come from the shared module. This file used to
+// declare its own TC_VRDB_BASE, tcRecordToObj and tcFetchJson — the header
+// below still says the logic was "lifted from analyze-quote", which is exactly
+// how four copies came to exist. What is NOT shared is deliberate: the list and
+// detail fetches here answer a different contract (free-text query, year
+// widening, page-shaped results), so they stay local rather than being bent to
+// fit lookupRecalls.
+import { TC_VRDB_BASE, tcRecordToObj, tcFetchJson } from "../_shared/recalls.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -43,9 +53,7 @@ const JSON_HEADERS = { ...CORS_HEADERS, "Content-Type": "application/json" };
 // the cert problem. Confirmed 2026-07-22 in analyze-quote. Since this is a
 // read-only public dataset with no credentials or personal data on the wire,
 // plain http here is acceptable.
-const TC_VRDB_BASE = "http://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
-
-// Two-word makes we want to keep together when splitting free text. Everything
+c// Two-word makes we want to keep together when splitting free text. Everything
 // else is treated as a single-token make followed by the model.
 const TWO_WORD_MAKES = new Set([
   "land rover", "alfa romeo", "aston martin", "general motors",
@@ -94,13 +102,7 @@ function titleCase(s: string): string {
 }
 
 // ── TC VRDB helpers (mirrors analyze-quote) ─────────────────────────────────
-function tcRecordToObj(record: any[]): Record<string, string> {
-  const o: Record<string, string> = {};
-  for (const f of record || []) { if (f?.Name) o[f.Name] = f?.Value?.Literal ?? ""; }
-  return o;
-}
-
-// TC dates arrive as "10/19/2023 12:00:00 AM". Trim the time and reformat to a
+f// TC dates arrive as "10/19/2023 12:00:00 AM". Trim the time and reformat to a
 // friendly "Oct 2023". Manual parse to avoid any runtime timezone surprises.
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function formatRecallDate(raw: string | null): string | null {
@@ -113,7 +115,7 @@ function formatRecallDate(raw: string | null): string | null {
   return year;
 }
 
-async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolean; data?: any; error?: string }> {
+a> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
