@@ -8913,12 +8913,41 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
+  // Comparable listings — other live listings of the same model, read from
+  // LotCheck's own crawled inventory, not a third-party estimate.
+  const comparables = useComparableListings(a);
+  let comparableItem = null;
+  if (comparables.status === "ready" && comparables.rows?.length) {
+    const isUsed = comparables.condition === "used";
+    comparableItem = { key: "comparables", title: isUsed ? "Comparable used listings" : "Other listings of this model", tone: "muted", v: `${comparables.rows.length} nearby`, body: (
+      <div>
+        <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>
+          {isUsed
+            ? `Other ${comparables.year} ${comparables.make} ${comparables.model} listings we've read from Alberta dealers, closest in mileage to this one.`
+            : `Other ${comparables.year} ${comparables.make} ${comparables.model} listings we've read from Alberta dealers.`}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {comparables.rows.map((r, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.trim || comparables.model}{r.city ? ` · ${r.city}` : ""}</div>
+                {isUsed && r.odometerKm != null && <div style={{ fontSize: 11, color: MUT2, marginTop: 2 }}>{Number(r.odometerKm).toLocaleString()} km</div>}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 800, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(r.price)}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: MUT, marginTop: 8, lineHeight: 1.5 }}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
+      </div>
+    )};
+  }
+
+  const heatItems = [...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(comparableItem ? [comparableItem] : []), ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
   // Every view that surfaces "things to watch" draws from this one pool, so a
   // new flag cannot reach one view and miss another (report-features-all-views).
   const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  const items = [verdictItem, ...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(comparableItem ? [comparableItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -8985,6 +9014,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
   const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
   const trimRange=useTrimRange(a);   // MSRP-per-trim page (standing req 2026-08-19)
+  const comparables=useComparableListings(a);   // comparable listings page (Vic, 2026-08-20)
   const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
   const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
   const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
@@ -9000,6 +9030,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   if(feeItems.length) P.push({t:"fees"});
   if(a.dealerSentiment?.rating) P.push({t:"rep"});
   if(trimRange.status==="ready"&&trimRange.trims?.length) P.push({t:"trims"});
+  if(comparables.status==="ready"&&comparables.rows?.length) P.push({t:"comparables"});
   if((Number(a.daysOnLot?.days)||0)>0||a.tradeInWidget?.detected) P.push({t:"lev"});
   if(a.leverageScore||a.summary) P.push({t:"bottom"});
   if(P.length%2) P.push({t:"blank"});
@@ -9068,6 +9099,19 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       </div>
       {qp>0&&<div className="rfb-sub" style={{marginTop:8}}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.</div>}
       {trimRange.src&&<a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:800,marginTop:8,display:"inline-block"}}>Source: the manufacturer's own site ↗</a>}
+      </div>);
+    }
+    if(p.t==="comparables"){ const rows=comparables.rows||[]; const isUsed=comparables.condition==="used";
+      return (<div className="rfb-pg">{num}<div className="rfb-k">{isUsed?"Other used listings":"Other listings"}</div>
+      <h2 className="rfb-h2">{isUsed?"Comparable used listings":"Other listings of this model"}</h2>
+      <div className="rfb-lede" style={{fontSize:12}}>{isUsed?`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers, closest in mileage to this one.`:`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers.`}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
+        {rows.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
+          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||comparables.model}{r.city?` · ${r.city}`:""}{isUsed&&r.odometerKm!=null?` · ${Number(r.odometerKm).toLocaleString()} km`:""}</span>
+          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(r.price)}</span>
+        </div>))}
+      </div>
+      <div className="rfb-sub" style={{marginTop:8}}>Read from each dealer's own public listing page — not a third-party valuation.</div>
       </div>);
     }
     if(p.t==="lev"){ const d=Math.round(Number(a.daysOnLot?.days)||0); const tiw=a.tradeInWidget;
@@ -9258,6 +9302,48 @@ function useTrimRange(a){
         const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims};
         trimRangeCache[key]=v; if(alive)setSt(v);
       }catch(e){ if(alive)setSt({status:"error",make,model}); }
+    })();
+    return ()=>{alive=false;};
+  },[key]);
+  return st;
+}
+// ── Comparable listings — real, live prices to compare against ──────────────
+// Vic, 2026-08-20, on a used 2022 RAV4 LE at 106,000 km: "i wish i have 3
+// more rav4 le used to compare pricing ... after that suggestion for new
+// vehicles." Answers it from LotCheck's own crawled inventory
+// (scripts/crawl-alberta-inventory.mjs -> vehicle_listing) via
+// fn_comparable_listings (20260820_fn_comparable_listings.sql) -- every row
+// traces to a dealer's own already-public listing, same source the rest of
+// the product reads. Works for both conditions: 'used' compares against
+// other used listings (ranked by odometer proximity, mileage being the
+// dominant used-price driver), 'new' compares against other new listings of
+// the same model (ranked by price, since trim/options vary more than age).
+// No true distance radius -- the schema has city/province text only, no
+// lat/lng -- so this is scoped to one province (Alberta, the only one
+// crawled today) rather than claiming a "within 100km" precision it can't
+// back.
+const comparableCache = {};
+function useComparableListings(a){
+  const year=a?.year, make=a?.make, model=a?.model, condition=a?.vehicleCondition;
+  const vin=a?.vin, trim=a?.trim, odo=a?.odometerKm!=null?Number(a.odometerKm):null;
+  const key=[year,make,model,condition].join("|");
+  const [st,setSt]=useState(comparableCache[key]||{status:"idle"});
+  useEffect(()=>{
+    if(!year||!make||!model||(condition!=="used"&&condition!=="new")){ setSt({status:"none"}); return; }
+    if(comparableCache[key]&&comparableCache[key].status!=="error"){ setSt(comparableCache[key]); return; }
+    let alive=true;
+    (async()=>{
+      try{
+        const { data, error } = await supabase.rpc("fn_comparable_listings", {
+          p_year:Number(year), p_make:make, p_model:model, p_condition:condition,
+          p_exclude_vin:vin||null, p_trim:trim||null, p_odometer_km:odo,
+          p_province:"AB", p_limit:3,
+        });
+        if(error) throw error;
+        const rows=Array.isArray(data)?data:[];
+        const v={status:rows.length?"ready":"empty",readAt:Date.now(),year,make,model,condition,rows};
+        comparableCache[key]=v; if(alive)setSt(v);
+      }catch(e){ if(alive)setSt({status:"error"}); }
     })();
     return ()=>{alive=false;};
   },[key]);
