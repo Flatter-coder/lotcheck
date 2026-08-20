@@ -10685,6 +10685,14 @@ function QuoteCheckPage(){
           setShowSignIn(true);
           return;
         }
+        // Repeat-attempt throttle: the SAME multi-vehicle upload resubmitted.
+        // No credit involved either way — res.json() can only run once, so
+        // this has to read from the already-parsed `body`, not fetch again.
+        if(body.error==="repeat_multivehicle_cooldown"){
+          setStatus("error");
+          setErrorMsg(body.message||"You've already tried this upload — it's a multi-vehicle page. Try a different one, or upload just the one vehicle you want checked.");
+          return;
+        }
       }
       const data=await res.json();
       if(!res.ok||data.error){
@@ -10831,6 +10839,14 @@ function QuoteCheckPage(){
           setShowSignIn(true);
           return;
         }
+        // Repeat-attempt throttle: the SAME multi-vehicle URL pasted again.
+        // No credit involved either way — read from the already-parsed
+        // `body`, since res.json() can only run once.
+        if(body.error==="repeat_multivehicle_cooldown"){
+          setStatus("error");
+          setErrorMsg(body.message||"Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing.");
+          return;
+        }
       }
       // The listing couldn't be read (JS-rendered / bot-protected dealer site,
       // no price found). NOT charged. Steer to the photo/PDF upload, which reads
@@ -10849,6 +10865,14 @@ function QuoteCheckPage(){
           // blocks these pre-flight via isAggregatorUrl).
           setStatus("error");
           setErrorMsg(body.message||"That listing marketplace can't be checked by link — paste the dealer's own website link, or upload a screenshot instead.");
+          return;
+        }
+        if(body.error==="multi_vehicle_page"){
+          // Deterministic VIN-count detection (analyze-listing-url) -- a
+          // pasted link to an inventory/search-results page rather than one
+          // vehicle's own page. Not charged.
+          setStatus("error");
+          setErrorMsg(body.message||"Sorry, we can't process a page with multiple vehicles. Paste the link to the ONE vehicle you want checked instead.");
           return;
         }
       }
