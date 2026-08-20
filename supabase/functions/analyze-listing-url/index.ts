@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16j";  // + page-text/Convertus APR backstops no longer blocked by an untrusted LLM guess already sitting in analysis.financing.rate
+const CACHE_VER = "2026-08-16k";  // + vision rescue now gets a reserved minimum budget instead of whatever enrichAnalysis left over
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3544,7 +3544,33 @@ Deno.serve(async (req: Request) => {
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
     // runs, so the two paths never drift apart.
-    await enrichAnalysis(analysis, REQUEST_DEADLINE);
+    //
+    // If the vision rescue below is already known to be needed (its own guard
+    // is the same "is quotedPrice still missing" check, which nothing in
+    // enrichAnalysis sets), reserve it a working minimum budget BEFORE
+    // enrichment spends the rest. enrichAnalysis is already deadline-aware --
+    // "the expensive step self-skips when there isn't enough budget left"
+    // (see its own comment above) -- so handing it a shorter deadline here is
+    // the SAME graceful degradation it already does for itself, just decided
+    // earlier and on purpose instead of by whatever happens to be left over.
+    // Without this, enrichment (recalls, catalog MSRP, dealer reputation,
+    // financing/lease-rate lookups) could spend the entire REQUEST_DEADLINE,
+    // leaving vision rescue's own budget clamped to a 1-second floor by the
+    // time its turn comes -- nowhere near enough for a real render + Claude
+    // vision read. Confirmed live 2026-08-20 (legacyautogroup.ca 2026
+    // Explorer): the report claimed its own extraction returned nothing but
+    // boilerplate while its OWN sealed screenshot -- captured moments later
+    // by a separate, much less expensive step -- clearly showed a real
+    // price, MSRP, 5.49% financing rate and 508 km odometer reading.
+    const VISION_RESCUE_RESERVE_MS = 40_000;
+    const willNeedVisionRescue = !(Number(analysis.quotedPrice) > 0) && scrapflyEnabled();
+    const enrichDeadline = willNeedVisionRescue
+      ? Math.min(REQUEST_DEADLINE, Math.max(Date.now() + 5_000, REQUEST_DEADLINE - VISION_RESCUE_RESERVE_MS))
+      : REQUEST_DEADLINE;
+    if (willNeedVisionRescue && enrichDeadline < REQUEST_DEADLINE) {
+      console.log(`Reserving ${VISION_RESCUE_RESERVE_MS}ms for vision rescue -- enrichAnalysis gets until ${new Date(enrichDeadline).toISOString()} instead of ${new Date(REQUEST_DEADLINE).toISOString()}.`);
+    }
+    await enrichAnalysis(analysis, enrichDeadline);
 
     // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
     // scrape can come back with no usable pricing. A report with no asking price
