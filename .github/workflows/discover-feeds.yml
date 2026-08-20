@@ -40,7 +40,11 @@ jobs:
     # and was cancelled 59 short. The artifact survived (upload is if: always())
     # but the tail was lost, and a probe that cannot finish its own candidate
     # list reports a coverage answer that is really a clock answer.
-    timeout-minutes: 90
+    # The rescue pass adds ~450 hosts at concurrency 5 (the Scrapfly plan ceiling)
+    # with a 45s per-call budget, on top of a ~47-minute direct pass. 90 would
+    # truncate it, and a truncated probe reports a clock answer as a coverage
+    # answer -- which has now happened twice.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
