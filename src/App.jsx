@@ -8919,6 +8919,16 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   let comparableItem = null;
   if (comparables.status === "ready" && comparables.rows?.length) {
     const isUsed = comparables.condition === "used";
+    // Same traffic-light convention as Days on lot: green = cheapest of
+    // these comparables, red = priciest, amber = anything in between.
+    const cPrices = [...new Set(comparables.rows.map(r => Number(r.price)))].sort((x, y) => x - y);
+    const cRankColor = (price) => {
+      if (cPrices.length < 2) return { bg: "rgba(15,23,42,.6)", bd: BORD, ink: "#e2e8f0" };
+      const rank = cPrices.indexOf(Number(price));
+      if (rank === 0) return { bg: "rgba(16,185,129,.12)", bd: TEAL, ink: TEAL };
+      if (rank === cPrices.length - 1) return { bg: "rgba(244,63,94,.12)", bd: ROSE, ink: ROSE };
+      return { bg: "rgba(15,23,42,.6)", bd: AMBER, ink: "#e2e8f0" };
+    };
     comparableItem = { key: "comparables", title: isUsed ? "Comparable used listings" : "Other listings of this model", tone: "muted", v: `${comparables.rows.length} nearby`, body: (
       <div>
         <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>
@@ -8927,17 +8937,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
             : `Other ${comparables.year} ${comparables.make} ${comparables.model} listings we've read from Alberta dealers.`}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {comparables.rows.map((r, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "8px 10px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
+          {comparables.rows.map((r, i) => { const rc = cRankColor(r.price); return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "8px 10px", borderRadius: 8, background: rc.bg, border: `1px solid ${rc.bd}55` }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.trim || comparables.model}{r.city ? ` · ${r.city}` : ""}</div>
                 {isUsed && r.odometerKm != null && <div style={{ fontSize: 11, color: MUT2, marginTop: 2 }}>{Number(r.odometerKm).toLocaleString()} km</div>}
               </div>
-              <span style={{ fontSize: 13, fontWeight: 800, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(r.price)}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, fontFamily: mono, color: rc.ink, whiteSpace: "nowrap" }}>{money(r.price)}</span>
             </div>
-          ))}
+          ); })}
         </div>
-        <div style={{ fontSize: 11, color: MUT, marginTop: 8, lineHeight: 1.5 }}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
+        <div style={{ fontSize: 11, color: MUT, marginTop: 6 }}>Green = cheapest of these, red = priciest.</div>
+        <div style={{ fontSize: 11, color: MUT, marginTop: 6, lineHeight: 1.5 }}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
       </div>
     )};
   }
@@ -9102,16 +9113,21 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       </div>);
     }
     if(p.t==="comparables"){ const rows=comparables.rows||[]; const isUsed=comparables.condition==="used";
+      // Same traffic-light palette as this page's own Days on lot card
+      // (#e0503c red / #c78a1e amber / #159e8f green): cheapest of these
+      // comparables to priciest, not time-based here.
+      const cPrices=[...new Set(rows.map(r=>Number(r.price)))].sort((x,y)=>x-y);
+      const cColor=(price)=>{ if(cPrices.length<2) return "#333"; const rank=cPrices.indexOf(Number(price)); return rank===0?"#159e8f":rank===cPrices.length-1?"#e0503c":"#c78a1e"; };
       return (<div className="rfb-pg">{num}<div className="rfb-k">{isUsed?"Other used listings":"Other listings"}</div>
       <h2 className="rfb-h2">{isUsed?"Comparable used listings":"Other listings of this model"}</h2>
       <div className="rfb-lede" style={{fontSize:12}}>{isUsed?`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers, closest in mileage to this one.`:`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers.`}</div>
       <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
         {rows.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
           <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||comparables.model}{r.city?` · ${r.city}`:""}{isUsed&&r.odometerKm!=null?` · ${Number(r.odometerKm).toLocaleString()} km`:""}</span>
-          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(r.price)}</span>
+          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",fontWeight:800,color:cColor(r.price)}}>{money(r.price)}</span>
         </div>))}
       </div>
-      <div className="rfb-sub" style={{marginTop:8}}>Read from each dealer's own public listing page — not a third-party valuation.</div>
+      <div className="rfb-sub" style={{marginTop:8}}>Green = cheapest of these, red = priciest. Read from each dealer's own public listing page — not a third-party valuation.</div>
       </div>);
     }
     if(p.t==="lev"){ const d=Math.round(Number(a.daysOnLot?.days)||0); const tiw=a.tradeInWidget;
@@ -9432,6 +9448,26 @@ function ComparableListingsCard({analysis:a, C, cardStyle}){
   const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
   if(cl.status!=="ready"||!cl.rows?.length) return null;
   const isUsed=cl.condition==="used";
+  // Same traffic-light INTENT as the Days on lot card (green = best for the
+  // buyer, amber = middle, red = worst), but with explicit green/red hex
+  // rather than reusing C.teal/C.coral: in this component's dark palette
+  // specifically, C.teal is repurposed as the brand's bright-cyan accent
+  // (#3ae0ff), not a green "good" signal -- confirmed live, the first pass
+  // of this rendered the cheapest row cyan/blue instead of green. C.coral is
+  // consistently red across every theme variant, so only teal needed a
+  // dedicated stand-in. Ranked cheapest of the comparables to priciest, not
+  // this app's usual "flag/pass" semantics. Ties share a rank (two rows at
+  // the identical price are both "cheapest" if they're the minimum), so a
+  // repeated price never looks arbitrarily different.
+  const GREEN="#10b981", GREEN_BG="rgba(16,185,129,.14)", GREEN_INK="#10b981";
+  const prices=[...new Set(cl.rows.map(r=>Number(r.price)))].sort((x,y)=>x-y);
+  const rankColor=(price)=>{
+    if(prices.length<2) return {bg:undefined,bd:C.line,ink:C.ink};
+    const rank=prices.indexOf(Number(price));
+    if(rank===0) return {bg:GREEN_BG,bd:GREEN,ink:GREEN_INK};
+    if(rank===prices.length-1) return {bg:C.coralBg,bd:C.coral,ink:C.coralInk};
+    return {bg:undefined,bd:"#ffb020",ink:C.ink};
+  };
   return (
     <div style={{...cardStyle}}>
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
@@ -9444,17 +9480,18 @@ function ComparableListingsCard({analysis:a, C, cardStyle}){
           : `Other ${cl.year} ${cl.make} ${cl.model} listings we've read from Alberta dealers.`}
       </div>
       <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
-        {cl.rows.map((r,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"8px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
+        {cl.rows.map((r,i)=>{ const rc=rankColor(r.price); return (
+          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"8px 10px",borderRadius:8,...(rc.bg?{background:rc.bg}:{background:C.paper2}),border:`1px solid ${rc.bd}55`}}>
             <div style={{minWidth:0}}>
               <div style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||cl.model}{r.city?` · ${r.city}`:""}</div>
               {isUsed&&r.odometerKm!=null&&<div style={{fontSize:11,color:C.inkFaint,marginTop:2}}>{Number(r.odometerKm).toLocaleString()} km</div>}
             </div>
-            <span style={{fontSize:13,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(r.price)}</span>
+            <span style={{fontSize:13,fontWeight:800,color:rc.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(r.price)}</span>
           </div>
-        ))}
+        ); })}
       </div>
-      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5}}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
+      <div style={{fontSize:11,color:C.inkFaint,marginTop:6}}>Green = cheapest of these, red = priciest.</div>
+      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
     </div>
   );
 }
@@ -11347,7 +11384,7 @@ function QuoteCheckPage(){
               {lastAttemptType==="url"?(
                 <>
                   <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
-                    Dealer sites occasionally can't be read automatically. Uploading a screenshot of the same page works even when the link doesn't, since it never depends on the dealer's site cooperating.
+                    Dealer sites occasionally can't be read automatically. Take a screenshot of the <b>whole page</b> (price, VIN and fine print all visible) and upload it instead — that works even when the link doesn't, since it never depends on the dealer's site cooperating. Accepts PDF, JPG, PNG, WEBP or HEIC, up to {MAX_FILE_SIZE_MB}MB.
                   </div>
                   <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
                   <div>
