@@ -115,6 +115,31 @@ function dolCareAskTxt(d: number): string {
   return "";
 }
 
+// ── MSRP per trim (standing requirement 2026-08-19) ─────────────────────────
+// The client attaches analysis.trimRange (catalog-derived, evapRebate
+// pattern). Shape-validated here, and the source link is built from THIS
+// server-owned map — a client-supplied URL never rides into a DKIM-signed
+// email (same rule as reportUrl/verifyUrl).
+const EMAIL_MAKE_SITE: Record<string, string> = {
+  Toyota: "https://www.toyota.ca", Lexus: "https://www.lexus.ca", Honda: "https://www.honda.ca",
+  Acura: "https://www.acura.ca", Mazda: "https://www.mazda.ca", Hyundai: "https://www.hyundaicanada.com",
+  Kia: "https://www.kia.ca", Genesis: "https://www.genesis.ca", Subaru: "https://www.subaru.ca",
+  Nissan: "https://www.nissan.ca", Infiniti: "https://www.infiniti.ca", Volkswagen: "https://www.vw.ca",
+  Ford: "https://www.ford.ca", Lincoln: "https://www.lincolncanada.com", Chevrolet: "https://www.chevrolet.ca",
+  GMC: "https://www.gmc.ca", Buick: "https://www.buick.ca", Cadillac: "https://www.cadillac.ca",
+  Jeep: "https://www.jeep.ca", Ram: "https://www.ramtruck.ca", Dodge: "https://www.dodge.ca",
+  Chrysler: "https://www.chrysler.ca", Fiat: "https://www.fiatcanada.com", "Alfa Romeo": "https://www.alfaromeo.ca",
+  "Mercedes-Benz": "https://www.mercedes-benz.ca", BMW: "https://www.bmw.ca", Mini: "https://www.mini.ca",
+  Porsche: "https://www.porsche.com", Volvo: "https://www.volvocars.com", "Land Rover": "https://www.landrover.ca",
+  Jaguar: "https://www.jaguar.ca", Mitsubishi: "https://www.mitsubishi-motors.ca",
+};
+function trimRangeOk(tr: any): boolean {
+  return !!tr && typeof tr === "object" && Number(tr.y) > 0 &&
+    typeof tr.mk === "string" && typeof tr.md === "string" &&
+    Array.isArray(tr.t) && tr.t.length > 0 && tr.t.length <= 14 &&
+    tr.t.every((x: any) => x && typeof x.n === "string" && Number(x.m) > 0);
+}
+
 function escapeHtml(s: unknown): string {
   if (s === null || s === undefined) return "";
   return String(s)
@@ -350,6 +375,23 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   if (a.warranty?.offered) checks.push(`• Protection plan offered: ${escapeHtml(a.warranty.offered)}${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}`);
   const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
   if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
+
+  // 5a2 -- MSRP per trim: the factory range (client-derived from the verified
+  // catalog, evapRebate pattern; source link is server-built, never client's).
+  if (trimRangeOk(a.trimRange)) {
+    const tr = a.trimRange;
+    const qpT = Number(a.quotedPrice) || 0;
+    const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
+    const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
+    const site = EMAIL_MAKE_SITE[tr.mk] || null;
+    const rows = tr.t.map((x: any) =>
+      `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
+    deck.push({ label: "MSRP per trim", tone: "muted", body:
+      `<div style="font-size:13px;font-weight:900;color:#33305A;">${tr.y} ${escapeHtml(tr.mk)} ${escapeHtml(tr.md)} — the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}</div>` +
+      `<div style="margin-top:6px;">${rows}</div>` +
+      (qpT > 0 ? `<div style="font-size:12px;color:#5B5885;margin-top:6px;">The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>` : "") +
+      (site ? `<div style="font-size:12px;margin-top:6px;"><a href="${site}" style="color:#17756B;font-weight:700;">Confirm the range on ${escapeHtml(tr.mk)}'s own site</a></div>` : "") });
+  }
 
   // 5b -- Days on lot (motivated-seller clock)
   //
@@ -976,6 +1018,29 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, x: M + 10, maxW: W - 10 }); advance(4); }
   }
   rule();
+
+  // ---- MSRP PER TRIM — the factory range (client-derived, shape-validated;
+  // standing requirement 2026-08-19: the buyer sees the manufacturer's range
+  // with the source named, even when the dealer hides the trim) ----
+  if (trimRangeOk(a.trimRange)) {
+    const tr = a.trimRange;
+    const qpT = Number(a.quotedPrice) || 0;
+    const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
+    const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
+    need(64 + tr.t.length * 13);
+    kicker("MSRP PER TRIM");
+    T(`${tr.y} ${pdfSafe(tr.mk)} ${pdfSafe(tr.md)} - the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}`, { size: 10.5, font: sansB }); y -= 18;
+    for (const x of tr.t) {
+      need(13);
+      T(pdfSafe(x.n), { size: 9, font: sans, color: SOFT });
+      right(`$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, { size: 9, font: sansB });
+      y -= 13;
+    }
+    if (qpT > 0) { advance(3); para(`The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees - compare like-for-like." : ""}`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
+    const site = EMAIL_MAKE_SITE[tr.mk];
+    if (site) { advance(2); T("Source: confirm the range at " + site.replace(/^https:\/\/(www\.)?/, ""), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+    rule();
+  }
 
   // ---- DAYS ON LOT — the motivated-seller clock (dealer's own inventory data)
   // Rendered as the same alert card the app shows (white frame, tier-coloured

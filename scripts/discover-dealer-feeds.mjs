@@ -65,6 +65,45 @@ const BATCH_PAUSE_MS = 250;
 // wall clock at the old timeout.
 const PROBE_TIMEOUT_MS = 5_000;
 
+// ---- rescue pass -----------------------------------------------------------
+// The probe runs on a GitHub runner, and a large share of dealer sites refuse
+// datacenter IPs outright. West Wind Honda (Lethbridge) answered 403 to all
+// SEVEN probes from CI and 200 from a normal connection, where our own parser
+// reads 15 vehicles with VINs off it. So "EDealer: 0 across Alberta" was
+// substantially a fact about our egress address, not about Alberta.
+//
+// 452 of 1,639 hosts (28%) never answered CI at all. Those get a second look
+// through Scrapfly's Canadian residential pool, which is already in the stack
+// for page render and is swappable plumbing under the vendor policy.
+//
+// DELIBERATELY CHEAP. Only hosts the direct pass could not reach are retried,
+// so a reachable host never costs a credit. One /new/ fetch serves all three
+// HTML detectors (EDealer, JSON-LD, Convertus) instead of one call each, and
+// SM360's JSON endpoint is only tried when that page yields nothing — at most
+// two billed calls per rescued host rather than seven.
+const RESCUE = process.argv.includes("--rescue");
+const SCRAPFLY_KEY = process.env.SCRAPFLY_API_KEY || "";
+const SCRAPFLY_CONCURRENCY = 5;      // the plan's hard ceiling
+const SCRAPFLY_TIMEOUT_MS = 45_000;  // asp negotiation is slow by design
+const RESCUABLE = new Set(["blocked", "unreachable", "timeout", "server-error"]);
+
+async function scrapflyGet(url, accept = "text/html") {
+  const u = new URL("https://api.scrapfly.io/scrape");
+  u.searchParams.set("key", SCRAPFLY_KEY);
+  u.searchParams.set("url", url);
+  u.searchParams.set("asp", "true");        // the bot wall is the whole point
+  u.searchParams.set("country", "ca");      // Canadian residential exit
+  const r = await fetch(u, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(SCRAPFLY_TIMEOUT_MS) });
+  if (!r.ok) throw new Error(`scrapfly HTTP ${r.status}`);
+  const j = await r.json();
+  const res = j?.result || {};
+  return {
+    status: Number(res.status_code) || 0,
+    contentType: String(res.content_type || accept),
+    body: typeof res.content === "string" ? res.content : "",
+  };
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchOverpass() {
@@ -103,34 +142,45 @@ function toOrigin(raw) {
   } catch { return null; }
 }
 
-async function trySM360(host) {
+// Why a host produced nothing is the whole diagnostic value of this probe, and
+// until now it was thrown away: every detector returned a bare null, so 1,607
+// of 1,639 hosts collapsed into a single "no feed detected" count. That made
+// "no dealer here runs EDealer" and "every EDealer request 403'd" the same
+// output — and the province-wide EDealer count of ZERO was believed for a day
+// on the strength of it, while a working EDealer dealer sat in Lethbridge.
+//
+// Absence has to say what kind of absence it is.
+const note = (trace, detector, msg) => { if (trace) trace.push(`${detector}: ${msg}`); };
+
+async function trySM360(host, trace) {
   for (const section of ["new-inventory", "used-inventory"]) {
     try {
       const r = await fetch(`${host}/en/${section}/api/listing?page=1`, {
         headers: { "User-Agent": UA, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
         signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       });
-      if (!r.ok) continue;
-      if (!/json/.test(r.headers.get("content-type") || "")) continue;
+      if (!r.ok) { note(trace, "sm360", `${section} HTTP ${r.status}`); continue; }
+      const ct = r.headers.get("content-type") || "";
+      if (!/json/.test(ct)) { note(trace, "sm360", `${section} not json (${ct.split(";")[0] || "no content-type"})`); continue; }
       const d = await r.json();
       const veh = d?.vehicles || [];
-      if (!veh.length) continue;
+      if (!veh.length) { note(trace, "sm360", `${section} 200 but 0 vehicles`); continue; }
       // Only count it as usable if the VIN is actually present — a feed without
       // serialNo is not the dataset we came for.
       const withVin = veh.filter((v) => typeof v?.serialNo === "string" && /^[A-HJ-NPR-Z0-9]{17}$/.test(v.serialNo.trim().toUpperCase())).length;
       return { platform: "sm360", section, page1: veh.length, withVin, pages: Number(d?.pagination?.numberOfPages) || 1 };
-    } catch { /* try the other section */ }
+    } catch (e) { note(trace, "sm360", `${section} ${e.name || e.message}`); }
   }
   return null;
 }
 
-async function tryConvertus(host) {
+async function tryConvertus(host, trace) {
   for (const path of ["/vehicles/new/", "/en/new-inventory/", "/"]) {
     try {
       const r = await fetch(`${host}${path}`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-      if (!r.ok) continue;
+      if (!r.ok) { note(trace, "convertus", `${path} HTTP ${r.status}`); continue; }
       const html = await r.text();
-      if (!/convertus-vms|convertus\.rocks/i.test(html)) continue;
+      if (!/convertus-vms|convertus\.rocks/i.test(html)) { note(trace, "convertus", `${path} 200, no convertus marker (${Math.round(html.length / 1024)}KB)`); continue; }
       // The dealer's cp is the page's inventoryId. Confirmed live against three
       // Alberta dealers 2026-08-11 — the older bare-`cp` pattern matched nothing
       // on any of them, which is why earlier probes all reported cp=?.
@@ -139,7 +189,7 @@ async function tryConvertus(host) {
              || html.match(/["']cp["']\s*:\s*["']?(\d{2,8})/)
              || html.match(/dealer[_-]?id["']?\s*[:=]\s*["']?(\d{2,8})/i);
       return { platform: "convertus", cp: m ? m[1] : null };
-    } catch { /* next path */ }
+    } catch (e) { note(trace, "convertus", `${path} ${e.name || e.message}`); }
   }
   return null;
 }
@@ -148,15 +198,24 @@ async function tryConvertus(host) {
 // object on the /new/ page itself (confirmed live 2026-08-18, Rainbow Ford)
 // -- reuses the SAME parser the crawler runs, so "detected" and "crawlable"
 // can never drift apart the way a hand-duplicated detection regex would.
-async function tryEdealer(host) {
+async function tryEdealer(host, trace) {
   try {
     const r = await fetch(`${host}/new/`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    if (!r.ok) return null;
+    if (!r.ok) { note(trace, "edealer", `/new/ HTTP ${r.status}`); return null; }
     const html = await r.text();
     const rows = extractEdealerVehicles(html);
-    if (!rows.length) return null;
+    if (!rows.length) {
+      // Distinguishes "not an EDealer site" from "an EDealer site our PARSER
+      // could not read" — the second is a bug on our side and used to look
+      // exactly like the first.
+      const marker = /vehicleArray\s*=\s*\{/.test(html);
+      note(trace, "edealer", marker
+        ? `/new/ 200 WITH vehicleArray but the parser returned 0 rows — PARSER BUG (${Math.round(html.length / 1024)}KB)`
+        : `/new/ 200, no vehicleArray (${Math.round(html.length / 1024)}KB)`);
+      return null;
+    }
     return { platform: "edealer", page1: rows.length };
-  } catch { return null; }
+  } catch (e) { note(trace, "edealer", `/new/ ${e.name || e.message}`); return null; }
 }
 
 // jsonld_itemlist: vehicles live on model/category pages, not the /new/ index
@@ -164,29 +223,32 @@ async function tryEdealer(host) {
 // link category pages from /new/ with none of the vehicles inline there) --
 // so this probe follows ONE category link to confirm the platform actually
 // yields vehicles, not just that an ItemList of SOME kind exists somewhere.
-async function tryJsonLdItemList(host) {
+async function tryJsonLdItemList(host, trace) {
   try {
     const r = await fetch(`${host}/new/`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    if (!r.ok) return null;
+    if (!r.ok) { note(trace, "jsonld", `/new/ HTTP ${r.status}`); return null; }
     const indexHtml = await r.text();
     // Some themes put vehicles directly on the index page too -- check before
     // spending a second request.
     const direct = extractJsonLdVehicles(indexHtml, "new");
     if (direct.length) return { platform: "jsonld_itemlist", page1: direct.length };
     const categories = discoverCategoryPages(indexHtml, host);
-    if (!categories.length) return null;
+    if (!categories.length) { note(trace, "jsonld", `/new/ 200, no JSON-LD vehicles and no category links (${Math.round(indexHtml.length / 1024)}KB)`); return null; }
     const r2 = await fetch(categories[0], { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    if (!r2.ok) return null;
+    if (!r2.ok) { note(trace, "jsonld", `category page HTTP ${r2.status}`); return null; }
     const rows = extractJsonLdVehicles(await r2.text(), "new");
-    if (!rows.length) return null;
+    if (!rows.length) { note(trace, "jsonld", "category page 200 but no JSON-LD vehicles"); return null; }
     return { platform: "jsonld_itemlist", page1: rows.length };
-  } catch { return null; }
+  } catch (e) { note(trace, "jsonld", `/new/ ${e.name || e.message}`); return null; }
 }
 
 // Shape written to --out, both mid-run and at the end. `probed` makes a partial
 // file self-describing: you can see it covered 300 of 800 rather than guessing
 // whether 2 hits means a thin province or a killed job.
 function snapshot(results) {
+  const misses = results.filter((r) => !r.platform);
+  const missBy = {};
+  for (const m of misses) missBy[m.miss || "unclassified"] = (missBy[m.miss || "unclassified"] || 0) + 1;
   return {
     generatedAt: new Date().toISOString().slice(0, 10),
     probed: results.length,
@@ -194,22 +256,90 @@ function snapshot(results) {
     convertus: results.filter((r) => r.platform === "convertus"),
     jsonld_itemlist: results.filter((r) => r.platform === "jsonld_itemlist"),
     edealer: results.filter((r) => r.platform === "edealer"),
+    // The misses used to be dropped from the artifact entirely, so a run that
+    // was refused by every host and a run that genuinely found nothing wrote
+    // an identical file. They are the larger half of the result and now ship
+    // with the reason attached.
+    missSummary: missBy,
+    misses: misses.map((m) => ({ host: m.host, city: m.city, name: m.name, miss: m.miss, trace: m.trace })),
   };
 }
 
-async function probe(cand) {
+// Classifies a miss so the totals can be read honestly. "No dealer here runs
+// EDealer" and "every request was refused" are different facts, and a bare
+// count cannot tell them apart.
+function classifyMiss(trace) {
+  const t = trace.join(" | ");
+  if (!trace.length) return "no-trace";
+  // Order matters, and it is evidence-first. A host that returned a real 200
+  // to ANY probe answered us — a 404 on one guessed path is an ordinary
+  // negative, not a refusal, and counting it as "blocked" overstates how much
+  // of the province is stonewalling us. Only 401/403/429 are refusals.
+  if (/PARSER BUG/.test(t)) return "parser-bug";
+  if (/200/.test(t)) return "responded-no-feed";
+  if (/HTTP (401|403|429)/.test(t)) return "blocked";
+  if (/HTTP 5\d\d/.test(t)) return "server-error";
+  if (/TimeoutError|AbortError/.test(t)) return "timeout";
+  if (/TypeError|ENOTFOUND|ECONNREFUSED|CertificateError|fetch failed/.test(t)) return "unreachable";
+  if (/HTTP 404/.test(t)) return "responded-no-feed";   // answered, just not there
+  return "responded-no-feed";
+}
+
+// One residential fetch of /new/, then every HTML detector reads that same
+// page. Keeps the billed call count at one for the common case and reuses the
+// SAME parsers the crawler runs, so "rescued" and "crawlable" cannot drift.
+async function rescueHost(cand) {
+  const trace = [];
   try {
-    const sm = await trySM360(cand.host);
-    if (sm) return { ...cand, ...sm };
-    const cv = await tryConvertus(cand.host);
-    if (cv) return { ...cand, ...cv };
-    const jl = await tryJsonLdItemList(cand.host);
-    if (jl) return { ...cand, ...jl };
-    const ed = await tryEdealer(cand.host);
-    if (ed) return { ...cand, ...ed };
-    return { ...cand, platform: null };
+    const page = await scrapflyGet(`${cand.host}/new/`);
+    if (page.status < 200 || page.status >= 300) {
+      note(trace, "rescue", `/new/ HTTP ${page.status} even via residential IP`);
+      return { ...cand, platform: null, miss: "blocked-everywhere", rescued: true, trace };
+    }
+    const html = page.body;
+    const ed = extractEdealerVehicles(html);
+    if (ed.length) return { ...cand, platform: "edealer", page1: ed.length, rescued: true };
+    const jl = extractJsonLdVehicles(html, "new");
+    if (jl.length) return { ...cand, platform: "jsonld_itemlist", page1: jl.length, rescued: true };
+    if (/convertus-vms|convertus\.rocks/i.test(html)) {
+      const m = html.match(/inventory[_-]?id["']?\s*[:=]\s*["']?(\d{2,8})/i) || html.match(/[?&]cp=(\d{2,8})/);
+      return { ...cand, platform: "convertus", cp: m ? m[1] : null, rescued: true };
+    }
+    // Only now is a second billed call worth it.
+    try {
+      const api = await scrapflyGet(`${cand.host}/en/new-inventory/api/listing?page=1`, "application/json");
+      if (api.status >= 200 && api.status < 300) {
+        const d = JSON.parse(api.body);
+        const veh = d?.vehicles || [];
+        if (veh.length) {
+          const withVin = veh.filter((v) => typeof v?.serialNo === "string" && /^[A-HJ-NPR-Z0-9]{17}$/.test(v.serialNo.trim().toUpperCase())).length;
+          return { ...cand, platform: "sm360", section: "new-inventory", page1: veh.length, withVin, pages: Number(d?.pagination?.numberOfPages) || 1, rescued: true };
+        }
+      }
+      note(trace, "rescue", `sm360 api HTTP ${api.status}`);
+    } catch (e) { note(trace, "rescue", `sm360 api ${e.message}`); }
+    note(trace, "rescue", `/new/ 200 via residential IP, no feed markers (${Math.round(html.length / 1024)}KB)`);
+    return { ...cand, platform: null, miss: "responded-no-feed", rescued: true, trace };
   } catch (e) {
-    return { ...cand, platform: null, error: e.message };
+    note(trace, "rescue", e.message);
+    return { ...cand, platform: null, miss: "rescue-failed", rescued: true, trace };
+  }
+}
+
+async function probe(cand) {
+  const trace = [];
+  try {
+    const sm = await trySM360(cand.host, trace);
+    if (sm) return { ...cand, ...sm };
+    const cv = await tryConvertus(cand.host, trace);
+    if (cv) return { ...cand, ...cv };
+    const jl = await tryJsonLdItemList(cand.host, trace);
+    if (jl) return { ...cand, ...jl };
+    const ed = await tryEdealer(cand.host, trace);
+    if (ed) return { ...cand, ...ed };
+    return { ...cand, platform: null, miss: classifyMiss(trace), trace };
+  } catch (e) {
+    return { ...cand, platform: null, miss: "probe-threw", error: e.message, trace };
   }
 }
 
@@ -326,6 +456,32 @@ async function main() {
   console.log("");
   flush();
 
+  if (RESCUE) {
+    const stuck = results.filter((r) => !r.platform && RESCUABLE.has(r.miss));
+    if (!SCRAPFLY_KEY) {
+      console.warn(`\n--rescue asked for but SCRAPFLY_API_KEY is not set — ${stuck.length} unreachable host(s) left unrescued.`);
+    } else if (!stuck.length) {
+      console.log("\n--rescue: every host answered directly, nothing to retry.");
+    } else {
+      console.log(`\n── rescue pass: ${stuck.length} host(s) that never answered, retried on a Canadian residential IP ──`);
+      const byHost = new Map(results.map((r, i) => [r.host, i]));
+      let done = 0, recovered = 0;
+      for (let i = 0; i < stuck.length; i += SCRAPFLY_CONCURRENCY) {
+        const batch = stuck.slice(i, i + SCRAPFLY_CONCURRENCY);
+        const out = await Promise.all(batch.map(rescueHost));
+        for (const r of out) {
+          results[byHost.get(r.host)] = r;
+          if (r.platform) { recovered++; console.log(`   RECOVERED  ${r.platform.padEnd(16)} ${r.host}  ${r.city ?? ""}`); }
+        }
+        done += batch.length;
+        process.stdout.write(`\r  rescued ${done}/${stuck.length}  (${recovered} feeds recovered)`);
+        flush();
+      }
+      console.log("");
+      console.log(`\n  ${recovered} feed(s) recovered that a datacenter IP could not see.`);
+    }
+  }
+
   const sm360 = results.filter((r) => r.platform === "sm360");
   const convertus = results.filter((r) => r.platform === "convertus");
   const jsonldList = results.filter((r) => r.platform === "jsonld_itemlist");
@@ -341,7 +497,24 @@ async function main() {
   for (const r of jsonldList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on first probed page · ${r.name ?? ""}`);
   console.log(`\n── EDealer (crawlable today): ${edealerList.length} ──`);
   for (const r of edealerList) console.log(`  ${r.host.padEnd(42)} ${r.page1} vehicles on /new/ · ${r.name ?? ""}`);
-  console.log(`\n── no feed detected: ${results.length - sm360.length - convertus.length - jsonldList.length - edealerList.length} ──`);
+  const misses = results.filter((r) => !r.platform);
+  console.log(`\n── no feed detected: ${misses.length} ──`);
+  // The point of this block: a zero in the lists above is only meaningful next
+  // to these numbers. A province-wide "EDealer: 0" means something completely
+  // different when 300 hosts refused the request than when they all answered.
+  const missBy = {};
+  for (const m of misses) missBy[m.miss || "unclassified"] = (missBy[m.miss || "unclassified"] || 0) + 1;
+  for (const [k, n] of Object.entries(missBy).sort((a, b) => b[1] - a[1])) {
+    console.log(`   ${String(n).padStart(5)}  ${k}`);
+  }
+  const parserBugs = misses.filter((m) => m.miss === "parser-bug");
+  if (parserBugs.length) {
+    console.log(`\n!! ${parserBugs.length} host(s) served a feed we RECOGNISED but could not parse — this is our bug, not theirs:`);
+    for (const p of parserBugs) console.log(`     ${p.host.padEnd(42)} ${p.city ?? ""}  ${(p.trace || []).find((t) => /PARSER BUG/.test(t)) || ""}`);
+  }
+  const reached = results.length - misses.filter((m) => ["blocked", "unreachable", "timeout", "server-error"].includes(m.miss)).length;
+  console.log(`\nCoverage of this run: ${reached}/${results.length} hosts actually answered. A platform count is only`);
+  console.log(`as good as that number — the rest were refused, unreachable or timed out.`);
 
   const estimated = sm360.reduce((n, r) => n + (r.pages || 1) * (r.page1 || 24), 0);
   console.log(`\nEstimated units reachable from SM360 dealers alone: ~${estimated.toLocaleString()}`);

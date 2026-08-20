@@ -2,8 +2,10 @@ name: Update Alberta dealers map data
 
 on:
   schedule:
-    # 14:00 UTC Mondays = ~7-8am Calgary. Dealership rosters change slowly, so weekly is plenty.
-    - cron: "0 14 * * 1"
+    # 14:00 UTC daily = ~7-8am Calgary (~6-7am during DST). Was weekly
+    # (Mondays only) -- Vic asked for the dealer count on /alberta to read
+    # as current as the rest of the page, not up to 6 days stale.
+    - cron: "0 14 * * *"
   workflow_dispatch: {}
 
 permissions:
