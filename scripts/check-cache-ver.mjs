@@ -23,7 +23,14 @@ const CACHE_FILE = "supabase/functions/analyze-listing-url/index.ts";
 const OUTPUT_SHAPING = [
   /^supabase\/functions\/analyze-listing-url\//,
   /^supabase\/functions\/analyze-quote\//,
-  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints)\./,
+  // `recalls` joined this list on 2026-08-19, when the recall lookup was
+  // consolidated out of the two analyze-* functions into _shared/recalls.ts.
+  // Before that move the logic lived inside paths this gate already watched, so
+  // the consolidation would silently have created a blind spot: a change to what
+  // a recall claim SAYS -- the confirmed semantics, the tri-state, the wording --
+  // could ship with no bump, and every cached report would replay the old answer
+  // for six hours (CACHE_TTL_MS) while looking like a failed deploy.
+  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
@@ -45,14 +52,30 @@ if (!shaping.length) {
   process.exit(0);
 }
 
-// Did CACHE_VER itself change in this range?
-const cacheDiff = sh(`git diff ${base}..HEAD -- ${CACHE_FILE}`);
-const bumped = /^\+const CACHE_VER = /m.test(cacheDiff);
+// Did the CACHE_VER VALUE change in this range?
+//
+// Comparing the two values, not merely asking whether the line appeared in the
+// diff. The line carries a trailing comment naming what changed, so editing only
+// that comment used to satisfy this check -- the diff showed a +const CACHE_VER
+// line, the gate went green, and the cache key was byte-identical. A gate that a
+// comment can satisfy is not guarding the thing it names.
+const readVer = (ref) => {
+  try {
+    const body = sh(`git show ${ref}:${CACHE_FILE}`);
+    return (body.match(/^const CACHE_VER = "([^"]+)"/m) || [])[1] || null;
+  } catch { return null; }
+};
+const before = readVer(base);
+const after = readVer("HEAD");
 
-if (bumped) {
-  const val = (cacheDiff.match(/^\+const CACHE_VER = "([^"]+)"/m) || [])[1];
-  console.log(`✅ cache-ver: analysis changed and CACHE_VER was bumped to "${val}".`);
+if (before !== null && after !== null && before !== after) {
+  console.log(`✅ cache-ver: analysis changed and CACHE_VER moved "${before}" -> "${after}".`);
   process.exit(0);
+}
+if (before === null || after === null) {
+  console.error(`❌ cache-ver: could not read CACHE_VER from ${CACHE_FILE} (base=${before}, head=${after}).`);
+  console.error(`   Refusing to pass on an unreadable key rather than assume it moved.`);
+  process.exit(1);
 }
 
 console.error("❌ cache-ver: analysis OUTPUT changed but CACHE_VER was not bumped.\n");
