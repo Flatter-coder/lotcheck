@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16l";  // + counter-script warranty move no longer says "plenty for now" when factory coverage is actually expired
+const CACHE_VER = "2026-08-16m";  // + multi-vehicle URL pages now rejected (VIN-count check) instead of attempting a single-vehicle extraction
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -147,6 +147,64 @@ async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
     return data.user;
   } catch (_e) {
     return null;
+  }
+}
+
+// ── Multi-vehicle-page detection (URL path) ─────────────────────────────────
+// analyze-quote (uploads) already rejects a multi-vehicle image without
+// charging. This is the URL-scan equivalent -- a pasted link to an inventory
+// or search-results page, not one vehicle's own page, had NO detection at
+// all until now (Vic, 2026-08-20: "reject with kind message ... some
+// professional"). Deterministic and cheap on purpose, run BEFORE the
+// expensive Claude extraction call: a single-vehicle detail page states
+// exactly one VIN; an inventory grid states several. Counting VINs rather
+// than re-running a vision classifier avoids a second paid model call just
+// to detect the same thing apr-extract.js's regex backstop already proves
+// works well for this class of signal -- deterministic, evidence-carrying,
+// never guesses. Checksum-VALID VINs only (validateVin), so a stray
+// 17-character stock/tracking number can't false-positive a real single-
+// vehicle page into a rejection.
+function countDistinctValidVins(text: string): string[] {
+  const seen = new Set<string>();
+  const re = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const check = validateVin(m[0]);
+    if (check.valid) seen.add(check.vin!);
+  }
+  return [...seen];
+}
+
+// ── Repeat multi-vehicle attempt throttle (shared with analyze-quote) ──────
+// Same table/RPCs as analyze-quote's (20260820_scan_attempt_throttle.sql) --
+// a signed-in caller re-pasting the SAME URL that's already been rejected as
+// multi-vehicle had no ceiling on how many times they could trigger that
+// (cheap, but non-zero) vendor spend again. Checked BEFORE the Claude call;
+// a blocked repeat costs nothing. Only a genuine multi-vehicle rejection
+// bumps the counter. 2nd hit on the same (identity, url) pair -> 2h
+// cooldown; 3rd+ -> 24h.
+async function sha256Hex(bytes: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function repeatIdentityKey(userId: string | null, req: Request): string {
+  return userId ? `user:${userId}` : `ip:${clientIp(req) ?? "unknown"}`;
+}
+async function checkRepeatCooldown(identityKey: string, inputHash: string): Promise<{ blocked: boolean; cooldownUntil?: string }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_check_repeat_cooldown", { p_identity: identityKey, p_input_hash: inputHash });
+    if (error) { console.error("fn_check_repeat_cooldown failed (failing open):", error.message); return { blocked: false }; }
+    return data?.blocked ? { blocked: true, cooldownUntil: data.cooldownUntil } : { blocked: false };
+  } catch (e) {
+    console.error("fn_check_repeat_cooldown threw (failing open):", e);
+    return { blocked: false };
+  }
+}
+async function recordMultiVehicleHit(identityKey: string, inputHash: string): Promise<void> {
+  try {
+    await supabase.rpc("fn_record_multivehicle_hit", { p_identity: identityKey, p_input_hash: inputHash });
+  } catch (e) {
+    console.warn("fn_record_multivehicle_hit threw (non-fatal):", e);
   }
 }
 
@@ -3231,6 +3289,38 @@ Deno.serve(async (req: Request) => {
     console.log(
       `Listing content fetched via driver=${nimbleResult.driver}, pageContent.length=${pageContent.length}, containsMSRP=${pageContent.toUpperCase().includes("MSRP")}, containsLeasePaymentsInclude=${/payments include/i.test(pageContent)}`,
     );
+
+    // Multi-vehicle-page rejection + its repeat-attempt throttle. Checked
+    // right here: pageContent is already in hand, and this must run BEFORE
+    // the expensive Claude call below, or the whole point (never pay to read
+    // a page we can't build a single-vehicle report from) is lost.
+    {
+      const repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
+      const repeatInputHash = await sha256Hex(url);
+      const cooldown = await checkRepeatCooldown(repeatIdentity, repeatInputHash);
+      if (cooldown.blocked) {
+        await releaseCredit(holdId);
+        holdId = null;
+        await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
+        return new Response(JSON.stringify({
+          error: "repeat_multivehicle_cooldown",
+          message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
+          cooldownUntil: cooldown.cooldownUntil,
+        }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+      const vins = countDistinctValidVins(pageContent);
+      if (vins.length > 1) {
+        await releaseCredit(holdId);
+        holdId = null;
+        await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
+        await logUsage({ success: false, errorMessage: `multi-vehicle page: ${vins.length} distinct VINs found (not charged)` });
+        console.log(`Multi-vehicle page detected via VIN count: ${vins.length} distinct VINs; rejecting, no credit charged.`);
+        return new Response(JSON.stringify({
+          error: "multi_vehicle_page",
+          message: "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead.",
+        }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+    }
 
     // Tighter per-attempt timeout than analyze-quote's (~45s) because the Nimble
     // chain above may already have consumed time; the budget is clamped to the

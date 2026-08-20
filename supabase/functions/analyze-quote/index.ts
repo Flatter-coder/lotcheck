@@ -175,6 +175,43 @@ async function tryFreeCheck(req: Request): Promise<boolean> {
   }
 }
 
+// ── Repeat multi-vehicle attempt throttle ───────────────────────────────────
+// The triage pass a few hundred lines down already makes each individual
+// multi-vehicle rejection cheap (a small-frame classify instead of a full
+// read) -- but nothing capped how many TIMES the SAME upload could be
+// resubmitted, so a signed-in caller (who never touches tryFreeCheck's
+// anonymous breaker above) had no ceiling at all on repeat attempts. Vic,
+// 2026-08-20: "it going to cost us money." Checked BEFORE any vendor spend,
+// including the cheap triage -- a blocked repeat costs nothing, not even
+// the reduced cost. Only a genuine multi-vehicle REJECTION bumps the
+// counter (see the two call sites below); a normal scan of a different
+// vehicle never touches this. 2nd hit on the same (identity, input) pair ->
+// 2h cooldown; 3rd+ -> 24h. See 20260820_scan_attempt_throttle.sql.
+async function sha256Hex(bytes: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bytes));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function repeatIdentityKey(userId: string | null, req: Request): string {
+  return userId ? `user:${userId}` : `ip:${clientIp(req) ?? "unknown"}`;
+}
+async function checkRepeatCooldown(identityKey: string, inputHash: string): Promise<{ blocked: boolean; cooldownUntil?: string }> {
+  try {
+    const { data, error } = await supabase.rpc("fn_check_repeat_cooldown", { p_identity: identityKey, p_input_hash: inputHash });
+    if (error) { console.error("fn_check_repeat_cooldown failed (failing open):", error.message); return { blocked: false }; }
+    return data?.blocked ? { blocked: true, cooldownUntil: data.cooldownUntil } : { blocked: false };
+  } catch (e) {
+    console.error("fn_check_repeat_cooldown threw (failing open):", e);
+    return { blocked: false };
+  }
+}
+async function recordMultiVehicleHit(identityKey: string, inputHash: string): Promise<void> {
+  try {
+    await supabase.rpc("fn_record_multivehicle_hit", { p_identity: identityKey, p_input_hash: inputHash });
+  } catch (e) {
+    console.warn("fn_record_multivehicle_hit threw (non-fatal):", e);
+  }
+}
+
 // Place a credit hold before any expensive work. null result → out of credits.
 async function authorizeCredit(
   userId: string,
@@ -416,6 +453,24 @@ Deno.serve(async (req: Request) => {
     const focusVehicle: string | null = typeof body?.focusVehicle === "string" && body.focusVehicle.trim()
       ? body.focusVehicle.trim().slice(0, 200)
       : null;
+
+    // Repeat-attempt throttle. Only applies to a blind resubmit of the SAME
+    // raw upload -- once the caller has picked a vehicle (focusVehicle set),
+    // this is a resolved, legitimate scan and must proceed normally. Checked
+    // before ANY vendor spend, including the cheap triage below, so a
+    // blocked repeat costs nothing at all.
+    const repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
+    const repeatInputHash = typeof fileBase64 === "string" ? await sha256Hex(fileBase64) : null;
+    if (!focusVehicle && repeatInputHash) {
+      const cooldown = await checkRepeatCooldown(repeatIdentity, repeatInputHash);
+      if (cooldown.blocked) {
+        return new Response(JSON.stringify({
+          error: "repeat_multivehicle_cooldown",
+          message: "You've already tried this upload and it's a multi-vehicle page LotCheck can't build a report from. Try a different listing, or upload the ONE vehicle you want checked.",
+          cooldownUntil: cooldown.cooldownUntil,
+        }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+    }
     // `images` (new): the client normalizes/slices photos to stay inside
     // Claude's vision limits and sends the tiles here, top-to-bottom. A tall
     // screenshot arrives as several slices of ONE page, not several pages.
@@ -700,6 +755,10 @@ Deno.serve(async (req: Request) => {
     if (!focusVehicle && (vehiclesOnPage.length > 1 || isInventoryGrid)) {
       await releaseCredit(holdId);
       holdId = null;
+      // Bump the repeat-attempt throttle -- a genuine multi-vehicle rejection,
+      // the only kind of hit this counts. Covers both this full-read detection
+      // and the cheap-triage stop above, which funnels into this same response.
+      if (repeatInputHash) await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
       await logUsage({ success: false, errorMessage: `multi-vehicle image (${pageKind ?? "unknown"}): ${rawVehicles.length} seen / ${vehiclesOnPage.length} distinct, awaiting choice (not charged)` });
       console.log(`Multi-vehicle image [${pageKind}]: ${rawVehicles.length} seen, ${vehiclesOnPage.length} distinct; returning picker, no credit charged.`);
       return new Response(
