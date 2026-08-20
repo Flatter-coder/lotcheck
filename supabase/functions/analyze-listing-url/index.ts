@@ -51,6 +51,10 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
+// The Transport Canada recall lookup. This file used to carry its own copy —
+// so did analyze-listing-url and search-recalls, four in all, and they had
+// already drifted apart. See _shared/recalls.ts for what the drift cost.
+import { lookupRecalls } from "../_shared/recalls.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
@@ -517,18 +521,12 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
 // certificate: UnknownIssuer"), so an https fetch fails at connect time. The
 // endpoint serves the same JSON over plain http with no redirect, which
 // avoids the cert problem. Confirmed 2026-07-22.
-const TC_VRDB_BASE = "http://data.tc.gc.ca/v1.3/api/eng/vehicle-recall-database";
-const TC_RECALLS_PAGE = "https://tc.canada.ca/en/road-transportation/defects-recalls-vehicles-tires-child-car-seats";
+c
+c
 
-function tcRecordToObj(record: any[]): Record<string, string> {
-  const o: Record<string, string> = {};
-  for (const f of record || []) {
-    if (f?.Name) o[f.Name] = f?.Value?.Literal ?? "";
-  }
-  return o;
-}
+f
 
-async function tcFetchJson(url: string, timeoutMs: number): Promise<{ ok: boolean; data?: any; error?: string }> {
+a> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -580,60 +578,12 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     return best;
   } catch { return null; }
 }
-function modelCandidates(model: string, baseModel?: string | null): string[] {
-  const seen = new Set<string>(); const out: string[] = [];
-  const push = (m?: string | null) => { const v = (m || "").trim(); if (v && !seen.has(v.toUpperCase())) { seen.add(v.toUpperCase()); out.push(v); } };
-  push(baseModel); push(model);
-  const toks = String(model || "").trim().split(/\s+/);
-  for (let n = toks.length - 1; n >= 1; n--) push(toks.slice(0, n).join(" "));
-  return out;
-}
-async function tcModelKnown(make: string, model: string, year: number): Promise<boolean> {
-  const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-  const res = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(model)}/year-range/${year - 10}-${year - 1}?format=json`, 10000);
-  return res.ok && (res.data?.ResultSet?.length ?? 0) > 0;
-}
+f
+a
 // Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
 // CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
 // negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
-async function lookupRecalls(year: number, make: string, model: string, baseModel?: string | null): Promise<any> {
-  try {
-    const enc = (s: string) => encodeURIComponent(String(s).trim().toUpperCase());
-    const candidates = modelCandidates(model, baseModel);
-    let anyOk = false, matchedModel: string | null = null;
-    let byNumber = new Map<string, { recallNumber: string; date: string | null }>();
-    for (const cand of candidates) {
-      const listRes = await tcFetchJson(`${TC_VRDB_BASE}/recall/make-name/${enc(make)}/model-name/${enc(cand)}/year-range/${year}-${year}?format=json`, 12000);
-      if (!listRes.ok) continue;
-      anyOk = true;
-      const m = new Map<string, { recallNumber: string; date: string | null }>();
-      for (const r of (listRes.data?.ResultSet ?? [])) {
-        const o = tcRecordToObj(r); const num = o["Recall number"];
-        if (num && !m.has(num)) m.set(num, { recallNumber: num, date: o["Recall date"] || null });
-      }
-      if (m.size > 0) { byNumber = m; matchedModel = cand; break; }
-    }
-    if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
-
-    if (byNumber.size > 0) {
-      const nums = Array.from(byNumber.keys()).slice(0, 8);
-      const items = await Promise.all(nums.map(async (num) => {
-        const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
-        const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
-        const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
-        return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
-          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
-      }));
-      return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-    }
-
-    const confirmed = !!baseModel || await tcModelKnown(make, baseModel || model, year);
-    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
-  } catch (err) {
-    console.warn("lookupRecalls threw:", err);
-    return { checked: false };
-  }
-}
+a
 
 // Financing math check: reconcile the dealer's OWN disclosed payment stream
 // against the stated total obligation. Deliberately conservative to avoid

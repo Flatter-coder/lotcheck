@@ -97,14 +97,36 @@ export async function lookupRecalls(year: number, make: string, model: string, b
     }
 
     // count:0 — a negative recall claim is only SAFE if the model is one TC
-    // actually tracks. baseModel (resolved canonically) proves that; otherwise
-    // try EACH candidate over the wider window, so a trim or renamed nameplate
-    // ("bZ Woodland" -> "bZ", which TC knows via the bZ4X history) still confirms
-    // clean instead of degrading to an unconfirmed "couldn't check". Only a model
-    // TC has never heard of stays confirmed:false. See make-recalls-fail-safe.
-    let confirmed = !!baseModel;
-    if (!confirmed) { for (const cand of candidates) { if (await tcModelKnown(make, cand, year)) { confirmed = true; break; } } }
-    return { checked: true, count: 0, items: [], confirmed, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
+    // actually tracks, so try EACH candidate over the wider window: a trim or a
+    // renamed nameplate ("bZ Woodland" -> "bZ", which TC knows via the bZ4X
+    // history) still confirms clean instead of degrading to "couldn't check".
+    // Only a model TC has never heard of stays confirmed:false.
+    //
+    // WHAT THIS USED TO SAY, AND WHY IT WAS WRONG. It began `let confirmed =
+    // !!baseModel`, on the reasoning that "baseModel (resolved canonically)
+    // proves" TC tracks the model. It proves no such thing. In production
+    // baseModel comes from each caller's resolveBaseModel(), which matches
+    // against rows in OUR OWN msrp_catalog; in the regression harness it comes
+    // from _shared/models.ts. Either way it is evidence about what LotCheck
+    // knows, never about what the registry knows. Wherever the two disagree,
+    // the short-circuit skipped the only question that matters and published a
+    // clean bill nobody had checked.
+    //
+    // They disagree on real cars. Measured against the live registry
+    // 2026-08-19: a 2026 Toyota 4Runner Hybrid resolves to base model
+    // "4Runner Hybrid", TC has no such nameplate (it files everything under
+    // "4RUNNER"), the year's list came back empty, and the buyer was told
+    // "No open recalls found" — confirmed — about a name the registry never
+    // matched. That is precisely the failure make-recalls-fail-safe exists to
+    // prevent: a lookup miss rendered as a clean bill.
+    //
+    // Now nothing is assumed. confirmedBy records WHICH name the registry
+    // actually recognised, so the claim carries its own provenance.
+    let confirmed = false, confirmedBy: string | null = null;
+    for (const cand of candidates) {
+      if (await tcModelKnown(make, cand, year)) { confirmed = true; confirmedBy = cand; break; }
+    }
+    return { checked: true, count: 0, items: [], confirmed, confirmedBy, queriedModel: baseModel || model, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
   } catch (err) {
     console.warn("lookupRecalls threw:", err);
     return { checked: false };

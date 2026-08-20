@@ -87,6 +87,13 @@ jobs:
       # part-to-whole geometry lets a reader turn it into a market share. It also
       # pins the class prefix: the bar was once <span class="track">, which
       # inherited the ticker's marquee and dragged every bar sideways.
+      # Four copies of the Transport Canada lookup drifted apart, and the only
+      # correct one was the module nothing imported -- so its regression harness
+      # proved nothing about what shipped. One declaration, every consumer
+      # reaching it by import, and a clean bill that the REGISTRY backs rather
+      # than our own catalogue.
+      - name: Recall lookup (single source, registry-backed clean bill)
+        run: npm run test:recall-source
       - name: Price-index panel (coverage, not market share)
         run: npm run test:price-index
       - name: Report parity (client-derived cards render on every view)
