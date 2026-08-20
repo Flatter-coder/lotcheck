@@ -16,6 +16,12 @@ the next instance.
 
 ---
 
+## 2026-08-19
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `8fe14dc` | **The public market read let the DEALER supply the reference, so a self-ratified sticker read as an honest one.** `fn_alberta_msrp_deviation` compared each listing's asking price against the MSRP the dealer stated on their own page — and a dealer printing MSRP = asking price is arithmetically invisible to the over-sticker count. Proven live: Southpointe Toyota Tacoma Hybrid, asking $89,130, page MSRP $89,130, trim hidden. PR #245 relabelled the card honestly as the interim step; this replaces the read. The replacement's own trap was the freight basis: once OUR catalog is the reference, an all-in advertised price sits a freight's-width above an ex-freight MSRP, and only 28 of 1,084 catalog rows hold the manufacturer's all-in figure — a point comparison would either fabricate markups or gate the read forever | absence read as knowledge | province read anchors to `msrp_catalog` (exact trim matches only) and judges each listing against a WINDOW `[msrp, msrp + ceiling]` guaranteed to contain the true all-in figure: **under** below it, **over** above it, **indeterminate** inside it — disclosed by count, never guessed into a direction. Every published % is a floor (cross-multiplication proof in the suite), so the read can understate a distance but never overstate one. The k-anonymity floor counts directional calls only — indeterminates cannot buy publication — and a stale row returns a dated pause instead of posing as current. First live run made the blind spot measurable: **199 of 1,721** exact matches ask above sticker plus the FULL freight-and-fees allowance, and **269 of 1,420** dealer-printed stickers exceed the manufacturer's ceiling for their exact trim (median floor +5.0%) — the class the old read necessarily reported as zero. `test:market-catalog` (40 cases) + 8 page pins in `test:price-index`; the dealer-stated RPC is pinned OUT of the page |
+
 ## 2026-08-18
 
 | fix | what broke | class | guard now in place |
