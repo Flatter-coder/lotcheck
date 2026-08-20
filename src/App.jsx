@@ -9254,7 +9254,22 @@ function useTrimRange(a){
         const wantY=Number(a?.year)||null;
         const years=[...new Set(rows.map(r=>r.year))];
         const year=wantY&&years.includes(wantY)?wantY:Math.max(...years);
-        const trims=rows.filter(r=>r.year===year);
+        // Catalog refresh runs can leave true duplicate rows for the same
+        // trim (repeated inserts rather than an upsert) -- caught live on a
+        // 2026 RAV4, where LE/XLE/XLE Premium/Woodland each printed twice at
+        // the identical price, padding "21 published trim prices" with
+        // redundant rows and making the panel look broken. Collapses EXACT
+        // duplicates only (same trim text, same price) -- two rows that
+        // genuinely disagree on price for a similarly-named trim (seen in
+        // the same panel: "LIMITED" $52,000 vs "Limited" $52,350) are a real
+        // data question this can't safely resolve, so those stay separate
+        // rather than silently picking one.
+        const seen=new Set();
+        const trims=rows.filter(r=>r.year===year).filter(r=>{
+          const k=String(r.trim).trim().toLowerCase()+"|"+Number(r.msrp);
+          if(seen.has(k)) return false;
+          seen.add(k); return true;
+        });
         const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims};
         trimRangeCache[key]=v; if(alive)setSt(v);
       }catch(e){ if(alive)setSt({status:"error",make,model}); }
