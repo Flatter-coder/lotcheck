@@ -85,13 +85,25 @@ export async function lookupRecalls(year: number, make: string, model: string, b
     if (!anyOk) { console.warn("Recall lookup unreachable for", make, model); return { checked: false, error: "registry unreachable", source: "Transport Canada VRDB" }; }
 
     if (byNumber.size > 0) {
-      const nums = Array.from(byNumber.keys()).slice(0, 8);
+      // 20 is headroom, not a real-world expectation -- open recalls on one
+      // model/year rarely reach double digits at all. Confirmed live
+      // 2026-08-19: a report said "9 open recalls" (byNumber.size, the real,
+      // honest count) but this cap sat at 8, so the 9th recall's detail was
+      // never even fetched, on top of the client separately re-truncating
+      // the fetched ones to 4. Recalls are safety information; "we said N
+      // but only checked N-1" is not acceptable however small the gap.
+      const nums = Array.from(byNumber.keys()).slice(0, 20);
       const items = await Promise.all(nums.map(async (num) => {
         const detRes = await tcFetchJson(`${TC_VRDB_BASE}/recall-summary/recall-number/${encodeURIComponent(num)}?format=json`, 12000);
         const o = detRes.ok && detRes.data?.ResultSet?.[0] ? tcRecordToObj(detRes.data.ResultSet[0]) : {};
         const comment = (o["COMMENT_ETXT"] || "").replace(/\s+/g, " ").trim();
+        // A cap is fine; a SILENT one on a government safety notice is not --
+        // 400 chars cut Transport Canada's own "Safety Risk:" text mid-word
+        // with nothing telling the reader it was cut. 2000 covers the real
+        // ones in full; the ellipsis is honest on the rare one that doesn't.
+        const summary = comment ? (comment.length > 2000 ? comment.slice(0, 2000) + "…" : comment) : null;
         return { recallNumber: num, date: byNumber.get(num)!.date, system: o["SYSTEM_TYPE_ETXT"] || null,
-          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary: comment ? comment.slice(0, 400) : null };
+          unitsAffected: o["UNIT_AFFECTED_NBR"] ? Number(o["UNIT_AFFECTED_NBR"]) : null, summary };
       }));
       return { checked: true, count: byNumber.size, items, confirmed: true, matchedModel, queriedModel: matchedModel, source: "Transport Canada VRDB", sourceUrl: TC_RECALLS_PAGE };
     }

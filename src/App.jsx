@@ -8932,6 +8932,11 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       {r.count>0?<>
         <div className="rfb-why"><div className="rfb-wh">Why you're seeing this</div><div className="rfb-wt">Open safety-recall campaigns <b>Transport Canada</b> publishes for this year/make/model — read live from the federal Vehicle Recall Database. Government data, not our opinion. Confirm by <b>VIN</b> with the dealer.</div></div>
         <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
+        {/* Fixed-page layout genuinely can't fit an unbounded list -- unlike
+            the scroll view's expandable section, which now shows every item.
+            The cap itself is fine; hiding that it's a cap is not (same
+            promised-vs-delivered gap that hit the scroll view, 2026-08-20). */}
+        {(r.items||[]).length>5&&<div className="rfb-lede" style={{marginTop:6,fontSize:11.5}}>+ {(r.items||[]).length-5} more — see the full report.</div>}
         <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
       </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
     </div>); }
@@ -11483,7 +11488,12 @@ function QuoteCheckPage(){
                       </div>
                     </div>
                     <DetailToggle C={C} moreLabel={`Show ${r.count} recall detail${r.count>1?"s":""}`} lessLabel="Hide recall details">
-                      {(r.items||[]).slice(0,4).map((it,i)=>(
+                      {/* Was slice(0,4): the button promises r.count details
+                          ("Show 9 recall details") and silently delivered 4 --
+                          confirmed live 2026-08-20. Show every item the server
+                          actually fetched; the server's own cap (20, generous
+                          headroom) is the only limit now. */}
+                      {(r.items||[]).map((it,i)=>(
                         <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
                           <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
                           {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
