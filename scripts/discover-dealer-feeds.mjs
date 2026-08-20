@@ -82,7 +82,12 @@ const PROBE_TIMEOUT_MS = 5_000;
 // SM360's JSON endpoint is only tried when that page yields nothing — at most
 // two billed calls per rescued host rather than seven.
 const RESCUE = process.argv.includes("--rescue");
-const SCRAPFLY_KEY = process.env.SCRAPFLY_API_KEY || "";
+// .trim() is not defensive clutter: a secret pasted into `gh secret set` or
+// the web form keeps whatever whitespace came with it, and a trailing newline
+// turns the key into %0A-suffixed garbage that the API answers with a flat
+// 401. That is indistinguishable from a wrong key, and it cost a full
+// 452-host rescue pass to find.
+const SCRAPFLY_KEY = (process.env.SCRAPFLY_API_KEY || "").trim();
 const SCRAPFLY_CONCURRENCY = 5;      // the plan's hard ceiling
 const SCRAPFLY_TIMEOUT_MS = 45_000;  // asp negotiation is slow by design
 const RESCUABLE = new Set(["blocked", "unreachable", "timeout", "server-error"]);
@@ -94,7 +99,14 @@ async function scrapflyGet(url, accept = "text/html") {
   u.searchParams.set("asp", "true");        // the bot wall is the whole point
   u.searchParams.set("country", "ca");      // Canadian residential exit
   const r = await fetch(u, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(SCRAPFLY_TIMEOUT_MS) });
-  if (!r.ok) throw new Error(`scrapfly HTTP ${r.status}`);
+  if (!r.ok) {
+    // Scrapfly puts the real reason in the body — ERR::AUTH::BAD_API_KEY reads
+    // very differently from a throttle, and a bare status code made 452
+    // identical failures say nothing about which one it was.
+    let why = "";
+    try { why = (await r.text()).slice(0, 200).replace(/s+/g, " "); } catch { /* body already gone */ }
+    throw new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
+  }
   const j = await r.json();
   const res = j?.result || {};
   return {
