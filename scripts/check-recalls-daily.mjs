@@ -59,10 +59,23 @@ const H = () => ({
   "Content-Type": "application/json",
 });
 
+// Read the body ONCE as text and parse only if there is something to parse.
+//
+// This used to be `res.status === 204 ? null : res.json()`, which assumed an
+// empty body only ever arrives as 204. PostgREST answers a write carrying
+// `Prefer: return=minimal` with **201 Created and an empty body**, so `.json()`
+// was handed "" and threw `Unexpected end of JSON input`. The first live run
+// read all 40,471 recalls from Transport Canada and then failed to write every
+// one of the 35 makes.
+//
+// The offline gate could not have caught it: it stubs fetch, and --dry-run skips
+// the Supabase path entirely, so the write was the one branch never exercised
+// against a real server.
 async function rest(path, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers: { ...H(), ...(init.headers || {}) } });
-  if (!res.ok) throw new Error(`${init.method || "GET"} ${path} -> HTTP ${res.status}: ${await res.text()}`);
-  return res.status === 204 ? null : res.json();
+  const body = await res.text();
+  if (!res.ok) throw new Error(`${init.method || "GET"} ${path} -> HTTP ${res.status}: ${body}`);
+  return body.trim() ? JSON.parse(body) : null;
 }
 
 // Everything we already know for one make, as a Set of recall keys.
