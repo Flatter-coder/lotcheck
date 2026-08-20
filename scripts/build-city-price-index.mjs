@@ -135,6 +135,162 @@ export function gatePublishable(stats, { minDealers = MIN_DEALERS, minListings =
   return ageMs <= staleDays * 86_400_000;
 }
 
+// ---- province-wide read vs the CATALOG sticker ------------------------------
+//
+// WHY. The public market cards used fn_alberta_msrp_deviation, which compares
+// asking price against the MSRP the DEALER states on their own page — so a
+// dealer who prints MSRP = asking price is invisible to the over-sticker stat
+// (proven 2026-08-19: Southpointe Toyota Tacoma Hybrid, asking $89,130, page
+// MSRP $89,130). This read anchors to OUR catalog instead, exact trim matches
+// only, and never lets the dealer supply the reference.
+//
+// BASIS-AWARE BY BOUNDS. An Alberta advertised price is all-in by regulation
+// (AMVIC); a catalog MSRP usually is not. Only 28 of 1,084 catalog rows hold
+// the manufacturer's own all_in_price (checked live 2026-08-19), so demanding
+// a point reference would gate the read forever. Instead every row yields a
+// WINDOW [msrp, msrp + ceiling] that is guaranteed to contain the true all-in
+// figure, and the three calls are made only where the window allows them:
+//   under  price below the window floor  — sound whatever the basis, because
+//          mandatory adds only ever RAISE the reference
+//   over   price above the window ceiling — sound whatever the basis
+//   at     only where the row IS the all-in figure (window is a point)
+//   indeterminate  inside the window — the row's exact freight figure would
+//          decide, and we do not hold it, so no direction is claimed
+// Every published percentage is a FLOOR of the true distance from the all-in
+// sticker: proven by cross-multiplication in test-market-vs-catalog.mjs, so
+// the read can understate a discount or a markup but never overstate one.
+
+export const PROVINCE_MIN_LISTINGS = Number(process.env.PROVINCE_INDEX_MIN_LISTINGS) || 25;
+
+// Ceilings on the mandatory adds a row's basis can omit. NOT an estimate of
+// any car's freight (msrp_all_in_price.sql forbids deriving all_in_price by
+// adding a constant) — an upper BOUND used only to refuse a call inside it.
+// The largest verified package: Land Cruiser $3,780 freight/PDI + Toyota's
+// $1,148 itemised fees = $4,928; the ceiling clears it with margin. Raising
+// it makes the read more conservative (more indeterminate), never wrong.
+export const FREIGHT_FEES_CEILING = 5500;  // excl_freight or unknown basis
+export const FEES_ONLY_CEILING = 1500;     // incl_freight: freight is in, fees are not
+export const AT_TOLERANCE_PCT = 0.05;      // same rounding shade fn_alberta_msrp_deviation uses
+
+// The price the dealer is actually asking. The crawler writes sale_price as
+// final ?? asking (see crawl-alberta-inventory.mjs), so sale_price is the
+// effective advertised price whenever any price exists — same column
+// fn_alberta_msrp_deviation reads.
+export function effectivePrice(l) {
+  if (Number(l?.sale_price) > 0) return Number(l.sale_price);
+  if (Number(l?.list_price) > 0) return Number(l.list_price);
+  return null;
+}
+
+// The window a catalog row bounds the true ALL-IN sticker into.
+// exact:true means the window is a point — the manufacturer's own figure.
+export function referenceWindow(row) {
+  if (Number(row?.all_in_price) > 0) {
+    const a = Number(row.all_in_price);
+    return { low: a, high: a, exact: true };
+  }
+  const msrp = Number(row?.msrp);
+  if (!(msrp > 0)) return null;
+  if (row.price_basis === "incl_freight") return { low: msrp, high: msrp + FEES_ONLY_CEILING, exact: false };
+  // excl_freight, or basis unknown — unknown is treated as the widest window,
+  // because guessing a basis is how a freight gap becomes a markup claim.
+  return { low: msrp, high: msrp + FREIGHT_FEES_CEILING, exact: false };
+}
+
+// One matched (listing price, catalog row) -> a directional call, or an honest
+// refusal to make one. floorPct is negative under, positive over, and always a
+// floor of the true distance from the all-in sticker.
+export function classifyVsCatalog(price, row) {
+  if (!(Number(price) > 0)) return null;
+  const w = referenceWindow(row);
+  if (!w) return null;
+  const pctLow = ((price - w.low) / w.low) * 100;
+  const pctHigh = ((price - w.high) / w.high) * 100;
+  if (pctLow < -AT_TOLERANCE_PCT) return { dir: "under", floorPct: pctLow, exact: w.exact };
+  if (pctHigh > AT_TOLERANCE_PCT) return { dir: "over", floorPct: pctHigh, exact: w.exact };
+  if (w.exact) return { dir: "at", floorPct: pctLow, exact: true };
+  return { dir: "indeterminate", floorPct: null, exact: false };
+}
+
+// Dealer-sticker inflation: the listing prints its OWN sticker above even the
+// highest legitimate all-in figure for that exact trim. Returns the floor of
+// the inflation percentage, or null when the stated sticker is absent or sits
+// at/below the ceiling (a dealer stating an all-in-basis sticker is not
+// inflating — that ambiguity is exactly what the ceiling absorbs).
+export function stickerInflationFloor(statedMsrp, row) {
+  const stated = Number(statedMsrp);
+  if (!(stated > 0)) return null;
+  const w = referenceWindow(row);
+  if (!w || !(stated > w.high)) return null;
+  return ((stated - w.high) / w.high) * 100;
+}
+
+// One vehicle_listing row -> the exact-basis catalog ROW it matched (the full
+// row, so basis columns travel with it), or null. Same contract as
+// matchListingToMsrp: candidates already scoped to year+make+model, and a
+// "starting_at" guess is excluded, never averaged in.
+export function pickExactCatalogRow(listing, catalogRows) {
+  const price = effectivePrice(listing);
+  if (!price) return null;
+  const match = pickTrimMsrp(catalogRows || [], { trim: listing?.trim, quotedPrice: price });
+  if (!match || match.basis !== "exact" || !(match.msrp > 0)) return null;
+  // pickTrimMsrp returns the figure, not the row; recover the row by its
+  // (trim, msrp) identity within this model's candidates. Among identical
+  // twins prefer the one whose window is tightest — an all-in figure beats a
+  // stamped basis beats an unknown one.
+  const rank = (r) => (Number(r.all_in_price) > 0 ? 0 : r.price_basis === "incl_freight" ? 1 : 2);
+  const twins = (catalogRows || [])
+    .filter((r) => Number(r?.msrp) === match.msrp && (r?.trim || null) === (match.trim || null))
+    .sort((a, b) => rank(a) - rank(b));
+  if (!twins.length) return null;
+  return { row: twins[0], price };
+}
+
+// provRows: [{ dealer_id, dir, floorPct, exact, statedMsrp, inflFloorPct, updated_at }]
+export function computeProvinceRead(provRows, { minListings = PROVINCE_MIN_LISTINGS, staleDays = STALE_DAYS, now = Date.now() } = {}) {
+  const rows = provRows || [];
+  const directional = rows.filter((r) => r.dir !== "indeterminate");
+  const byDir = (d) => rows.filter((r) => r.dir === d).length;
+  const pcts = directional.map((r) => r.floorPct).sort((a, b) => a - b);
+  const underPcts = rows.filter((r) => r.dir === "under").map((r) => r.floorPct).sort((a, b) => a - b);
+  const stated = rows.filter((r) => Number(r.statedMsrp) > 0);
+  const inflPcts = stated.filter((r) => r.inflFloorPct != null).map((r) => r.inflFloorPct).sort((a, b) => a - b);
+  const updates = rows.map((r) => new Date(r.updated_at).getTime()).filter(Number.isFinite);
+  const round2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
+  const stats = {
+    n_matched: rows.length,
+    n_directional: directional.length,
+    // paired with n_directional on the page ("N listings from D dealers"), so
+    // it counts dealers behind the DIRECTIONAL calls, not every match
+    n_dealers: new Set(directional.map((r) => r.dealer_id)).size,
+    under_n: byDir("under"),
+    at_n: byDir("at"),
+    over_n: byDir("over"),
+    indeterminate_n: byDir("indeterminate"),
+    all_in_n: rows.filter((r) => r.exact).length,
+    median_pct: round2(percentile(pcts, 0.5)),
+    p25_pct: round2(percentile(pcts, 0.25)),
+    p75_pct: round2(percentile(pcts, 0.75)),
+    median_discount_pct: round2(percentile(underPcts, 0.5)),
+    // same 21-point inverse-CDF shape fn_alberta_msrp_deviation returned, so
+    // the page's band math consumes it unchanged
+    curve: pcts.length >= 2 ? Array.from({ length: 21 }, (_, i) => round2(percentile(pcts, i / 20))) : null,
+    sticker_stated_n: stated.length,
+    sticker_inflated_n: inflPcts.length,
+    sticker_inflated_median_pct: round2(percentile(inflPcts, 0.5)),
+    min_updated_at: updates.length ? new Date(Math.min(...updates)).toISOString() : null,
+    max_updated_at: updates.length ? new Date(Math.max(...updates)).toISOString() : null,
+  };
+  // Same structural gate discipline as gatePublishable: the k-floor counts
+  // DIRECTIONAL calls only (indeterminate rows back no claim), and stale data
+  // never publishes.
+  stats.is_publishable =
+    stats.n_directional >= minListings &&
+    !!stats.max_updated_at &&
+    now - new Date(stats.max_updated_at).getTime() <= staleDays * 86_400_000;
+  return stats;
+}
+
 // ---- orchestration -----------------------------------------------------
 
 async function fetchAll(url, headers, table, params) {
@@ -160,12 +316,13 @@ async function main() {
   console.log("Reading dealer_source, vehicle_listing, msrp_catalog...");
   const [dealers, listings, catalog] = await Promise.all([
     fetchAll(url, headers, "dealer_source", "select=id,city,province,active&active=eq.true"),
-    fetchAll(url, headers, "vehicle_listing", "select=dealer_id,year,make,model,trim,list_price,updated_at,condition,delisted_on&condition=eq.new&delisted_on=is.null"),
-    fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs"),
+    fetchAll(url, headers, "vehicle_listing", "select=dealer_id,year,make,model,trim,list_price,sale_price,msrp,updated_at,condition,delisted_on&condition=eq.new&delisted_on=is.null"),
+    fetchAll(url, headers, "msrp_catalog", "select=year,make,model,trim,msrp,fuel_type,drivetrain,attrs,price_basis,all_in_price"),
   ]);
   console.log(`  ${dealers.length} active dealers, ${listings.length} live new-inventory listings, ${catalog.length} msrp_catalog rows.`);
 
   const dealerCity = new Map(dealers.map((d) => [d.id, d.city]));
+  const dealerProvince = new Map(dealers.map((d) => [d.id, d.province]));
 
   // Group msrp_catalog candidates by year|make|model so each listing's match
   // only searches its own model's trim ladder.
@@ -178,9 +335,34 @@ async function main() {
 
   const byCity = new Map();
   const cityNames = new Map();   // key -> the spellings the roster used for it
+  const provRows = [];           // province read — a city is NOT required here
   let matched = 0, unmatched = 0, noCity = 0;
   const noCityDealers = new Map();
   for (const l of listings) {
+    const key = `${l.year}|${(l.make || "").toLowerCase()}|${(l.model || "").toLowerCase()}`;
+
+    // Province-wide read vs the CATALOG sticker. Runs before the city gate on
+    // purpose: a dealer with no roster city still sells cars in Alberta, and
+    // dropping their inventory here would thin the very read the k-floor
+    // protects.
+    if (dealerProvince.get(l.dealer_id) === "AB") {
+      const picked = pickExactCatalogRow(l, catalogByYMM.get(key));
+      if (picked) {
+        const cls = classifyVsCatalog(picked.price, picked.row);
+        if (cls) {
+          provRows.push({
+            dealer_id: l.dealer_id,
+            dir: cls.dir,
+            floorPct: cls.floorPct,
+            exact: cls.exact,
+            statedMsrp: Number(l.msrp) > 0 ? Number(l.msrp) : null,
+            inflFloorPct: stickerInflationFloor(l.msrp, picked.row),
+            updated_at: l.updated_at,
+          });
+        }
+      }
+    }
+
     const raw = dealerCity.get(l.dealer_id);
     const city = cityKey(raw);
     // A dealer with no city silently removes its ENTIRE inventory from the
@@ -189,7 +371,6 @@ async function main() {
     if (!city) { noCity++; noCityDealers.set(l.dealer_id, (noCityDealers.get(l.dealer_id) || 0) + 1); continue; }
     if (!cityNames.has(city)) cityNames.set(city, new Set());
     cityNames.get(city).add(raw);
-    const key = `${l.year}|${(l.make || "").toLowerCase()}|${(l.model || "").toLowerCase()}`;
     const m = matchListingToMsrp(l, catalogByYMM.get(key));
     if (!m) { unmatched++; continue; }
     matched++;
@@ -220,15 +401,41 @@ async function main() {
   const publishableCount = rows.filter((r) => r.is_publishable).length;
   console.log(`\n${rows.length} cities with matched data, ${publishableCount} publishable (n_dealers>=${MIN_DEALERS}, n_listings>=${MIN_LISTINGS}, fresh within ${STALE_DAYS}d).`);
 
+  // Province read vs the catalog sticker (basis-aware — see the block above
+  // computeProvinceRead for why the calls are made from bounds, not points).
+  const prov = computeProvinceRead(provRows);
+  console.log(`\nAlberta vs catalog sticker: ${prov.n_matched} exact matches — ` +
+    `${prov.under_n} under, ${prov.at_n} at, ${prov.over_n} over, ` +
+    `${prov.indeterminate_n} indeterminate (inside the freight window), ` +
+    `${prov.all_in_n} judged against a manufacturer all-in figure.`);
+  console.log(`  dealer-stated stickers: ${prov.sticker_stated_n} printed, ` +
+    `${prov.sticker_inflated_n} above the window ceiling` +
+    (prov.sticker_inflated_n ? ` (median floor +${prov.sticker_inflated_median_pct}%)` : "") + ".");
+  console.log(`  publishable: ${prov.is_publishable} (n_directional=${prov.n_directional}, floor ${PROVINCE_MIN_LISTINGS}, fresh within ${STALE_DAYS}d).`);
+
   if (DRY) { console.log("\nDRY RUN — writing nothing."); return; }
-  if (!rows.length) { console.log("\nnothing matched — existing city_dealer_index rows left untouched."); return; }
 
   const writeHeaders = { ...headers, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" };
-  const res = await fetch(`${url}/rest/v1/city_dealer_index?on_conflict=city,province`, {
-    method: "POST", headers: writeHeaders, body: JSON.stringify(rows),
-  });
-  if (!res.ok) throw new Error(`write city_dealer_index -> HTTP ${res.status}: ${await res.text()}`);
-  console.log(`\nWrote ${rows.length} city_dealer_index rows.`);
+  if (!rows.length) {
+    console.log("\nnothing matched — existing city_dealer_index rows left untouched.");
+  } else {
+    const res = await fetch(`${url}/rest/v1/city_dealer_index?on_conflict=city,province`, {
+      method: "POST", headers: writeHeaders, body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(`write city_dealer_index -> HTTP ${res.status}: ${await res.text()}`);
+    console.log(`\nWrote ${rows.length} city_dealer_index rows.`);
+  }
+
+  if (!provRows.length) {
+    console.log("no exact catalog matches — existing province_market_read row left untouched.");
+  } else {
+    const res = await fetch(`${url}/rest/v1/province_market_read?on_conflict=province`, {
+      method: "POST", headers: writeHeaders,
+      body: JSON.stringify([{ province: "AB", computed_at: new Date().toISOString(), ...prov }]),
+    });
+    if (!res.ok) throw new Error(`write province_market_read -> HTTP ${res.status}: ${await res.text()}`);
+    console.log("Wrote the AB province_market_read row.");
+  }
 }
 
 // Only run when executed directly — test-city-price-index.mjs imports the
