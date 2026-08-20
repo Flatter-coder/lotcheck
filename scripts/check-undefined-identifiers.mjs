@@ -41,6 +41,7 @@ const BROWSER_GLOBALS = new Set([
   "caches", "indexedDB", "crypto", "performance", "screen", "frames", "self", "top", "parent",
   "DOMParser", "XMLHttpRequest", "getSelection", "scrollTo", "open", "close", "print",
   "ServiceWorkerRegistration", "Notification", "MediaQueryList", "DeviceOrientationEvent",
+  "SpeechSynthesisUtterance", "SpeechSynthesisEvent",
 ]);
 
 const failures = [];

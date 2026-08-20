@@ -8309,6 +8309,61 @@ function DroneSentBeat({compact,body,accent}){
 function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend }){
   const [mounted, setMounted] = useState(false);
   useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
+  // Recalls used to stack all N as one long scroll -- unreadable past 3-4 on
+  // a 9-recall vehicle. One recall per page instead, with next/back at the
+  // TOP so paging never requires a scroll first. Resets whenever a genuinely
+  // different report loads, so page 6 of the last car never carries over.
+  const [recallPage, setRecallPage] = useState(0);
+  useEffect(() => { setRecallPage(0); }, [a.reportId]);
+
+  // Read-aloud. Browser-native (Web Speech API) -- no vendor, no per-character
+  // cost, works today. Prefers an installed British English voice; if none is
+  // installed on this device, still speaks (lang="en-GB" alone changes
+  // pronunciation in most engines even with no exact voice match) rather than
+  // refusing outright. Voice lists load asynchronously in some browsers
+  // (Chrome fires "voiceschanged" after the first empty getVoices() call), so
+  // one retry is given before falling back to whatever's default.
+  const [voiceState, setVoiceState] = useState("idle"); // idle | speaking
+  const pickBritishVoice = () => {
+    try {
+      const voices = window.speechSynthesis.getVoices() || [];
+      return voices.find(v => /^en-GB/i.test(v.lang))
+        || voices.find(v => /en[-_]gb/i.test(v.lang))
+        || voices.find(v => /british/i.test(v.name))
+        || null;
+    } catch { return null; }
+  };
+  const speakWith = (voice) => {
+    try {
+      window.speechSynthesis.cancel();
+      const lines = [`${a.vehicle || "This vehicle"} report. ${a.summary || ""}`];
+      for (const p of P) {
+        const ex = explainFor[p.title];
+        if (p.title) lines.push(`${p.title}. ${p.v || ""}. ${ex || ""}`);
+      }
+      const spoken = lines.filter(Boolean);
+      spoken.forEach((text, i) => {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = voice ? voice.lang : "en-GB";
+        if (voice) u.voice = voice;
+        u.rate = 0.98;
+        if (i === spoken.length - 1) u.onend = () => setVoiceState("idle");
+        window.speechSynthesis.speak(u);
+      });
+      setVoiceState("speaking");
+    } catch { setVoiceState("idle"); }
+  };
+  const speakReport = () => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const existing = pickBritishVoice();
+    if (existing || (window.speechSynthesis.getVoices() || []).length) { speakWith(existing); return; }
+    // Voices not loaded yet -- wait for the one-time event, then go either way.
+    const onReady = () => { window.speechSynthesis.removeEventListener("voiceschanged", onReady); speakWith(pickBritishVoice()); };
+    window.speechSynthesis.addEventListener("voiceschanged", onReady);
+    setTimeout(onReady, 400); // some browsers never fire the event at all
+  };
+  const stopSpeaking = () => { try { window.speechSynthesis?.cancel(); } catch {} setVoiceState("idle"); };
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
 
   const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
@@ -8400,7 +8455,37 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // 2 Recalls
   { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
     let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
-    else if (r.count > 0) body = <div><div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{r.count} open recall{r.count > 1 ? "s" : ""}</div>{(r.items || []).slice(0, 4).map((it, i) => (<div key={i} style={{ padding: "9px 0", borderTop: `1px solid ${BORD}` }}><div style={{ fontSize: 13, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>{it.summary && <div style={{ fontSize: 12, color: MUT2, marginTop: 3, lineHeight: 1.5 }}>{it.summary}</div>}</div>))}<div style={{ fontSize: 11, color: MUT, marginTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div></div>;
+    else if (r.count > 0) {
+      const items = r.items || [];
+      // items can run shorter than r.count (a lookup gap, not a display cap --
+      // see [[recalls-detail-list-must-match-count]]): never index past what's
+      // really there.
+      const pageIdx = items.length ? Math.min(recallPage, items.length - 1) : 0;
+      const it = items[pageIdx];
+      body = <div>
+        <div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{r.count} open recall{r.count > 1 ? "s" : ""}</div>
+        {items.length > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 14 }}>
+            <button onClick={() => setRecallPage(p => Math.max(0, p - 1))} disabled={pageIdx === 0}
+              style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: pageIdx === 0 ? MUT : "#e2e8f0", fontSize: 12.5, fontWeight: 700, cursor: pageIdx === 0 ? "default" : "pointer", opacity: pageIdx === 0 ? .5 : 1 }}>
+              ← Back
+            </button>
+            <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, fontWeight: 700 }}>Recall {pageIdx + 1} of {items.length}</div>
+            <button onClick={() => setRecallPage(p => Math.min(items.length - 1, p + 1))} disabled={pageIdx === items.length - 1}
+              style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: pageIdx === items.length - 1 ? MUT : "#e2e8f0", fontSize: 12.5, fontWeight: 700, cursor: pageIdx === items.length - 1 ? "default" : "pointer", opacity: pageIdx === items.length - 1 ? .5 : 1 }}>
+              Next →
+            </button>
+          </div>
+        )}
+        {it ? (
+          <div style={{ padding: "14px 0 0" }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>
+            {it.summary && <div style={{ fontSize: 13, color: MUT2, marginTop: 6, lineHeight: 1.6 }}>{it.summary}</div>}
+          </div>
+        ) : <div style={{ padding: "14px 0 0", fontSize: 13, color: MUT2 }}>Transport Canada confirms {r.count} open recall{r.count > 1 ? "s" : ""} for this model; the per-recall detail didn't come back with this scan — check by VIN at Transport Canada for the individual bulletins.</div>}
+        <div style={{ fontSize: 11, color: MUT, marginTop: 12, borderTop: `1px solid ${BORD}`, paddingTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div>
+      </div>;
+    }
     else if (r.confirmed === false) body = <Simple big="Couldn't confirm this exact model" c={AMBER} note="Not an all-clear — check open recalls by VIN at Transport Canada before you sign." />;
     else body = <Simple big="✓ No open recalls found" c={TEAL} note="Transport Canada's registry shows none for this year/make/model." />;
     P.push({ title: "Transport Canada recalls", tone, v, body }); }
@@ -8531,9 +8616,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       : "We couldn't find public reviews for this dealer. That's not a red flag by itself — but walk in knowing you have no track record to lean on.",
   };
   const ExplainBox = ({ txt }) => txt ? (
-    <div style={{ marginTop: 16, background: "rgba(34,211,238,.06)", border: `1px solid rgba(34,211,238,.25)`, borderRadius: 12, padding: "12px 14px" }}>
-      <div style={{ fontSize: 10, letterSpacing: ".14em", textTransform: "uppercase", color: CY, fontWeight: 800, marginBottom: 6 }}>What this means</div>
-      <div style={{ fontSize: 13, color: "#dbeafe", lineHeight: 1.65 }}>{txt}</div>
+    <div style={{ marginTop: 16, background: "rgba(251,191,36,.12)", border: `2px solid ${AMBER}`, borderRadius: 12, padding: "14px 16px", boxShadow: "0 0 20px rgba(251,191,36,.28)" }}>
+      <div style={{ fontSize: 11.5, letterSpacing: ".14em", textTransform: "uppercase", color: AMBER, fontWeight: 800, marginBottom: 8 }}>What this means</div>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", lineHeight: 1.6 }}>{txt}</div>
     </div>
   ) : null;
 
@@ -8830,6 +8915,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
         <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
+        {typeof window !== "undefined" && !!window.speechSynthesis && (
+          <button onClick={voiceState === "speaking" ? stopSpeaking : speakReport}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, background: voiceState === "speaking" ? ROSE : "transparent", border: `1px solid ${voiceState === "speaking" ? ROSE : BORD}`, borderRadius: 10, padding: "8px 12px", color: voiceState === "speaking" ? "#fff" : TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+            <Icon3D name="megaphone" size={13}/> {voiceState === "speaking" ? "Stop reading" : "Read aloud"}
+          </button>
+        )}
         <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
         {emailStatus === "sent"
           ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: TEAL, fontWeight: 700, fontSize: 12.5 }}><DroneSentBeat compact body="#3b3f7a" accent={TEAL}/><span className="lcSentFade" style={{ animation: "lcSentFade .5s ease .9s both" }}>Emailed</span></span>
