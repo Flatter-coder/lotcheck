@@ -5,12 +5,16 @@
 //   GET https://nafta-service.mbusa.com/api/inv/v1/en_ca/new/models
 //   -> result.years.{YYYY}.classes.{CLASS}.models.{id}.{ msrp, modelName }
 import { inferFuelFromName, writeCatalogs, parseArgs } from "./lib/catalog-io.mjs";
+import { fetchRetry } from "./lib/fetch-retry.mjs";
 
 const MAKE = "Mercedes-Benz";
 
 async function main() {
   const args = parseArgs();
-  const res = await fetch("https://nafta-service.mbusa.com/api/inv/v1/en_ca/new/models", {
+  // fetchRetry: one transient 504 from this service killed the 2026-08-19
+  // daily refresh for the whole make. 5xx/429/network errors get 3 bounded
+  // attempts with backoff; a 4xx still fails fast below.
+  const res = await fetchRetry("https://nafta-service.mbusa.com/api/inv/v1/en_ca/new/models", {
     headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36", "Accept": "application/json", "Accept-Encoding": "gzip" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
