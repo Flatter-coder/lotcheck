@@ -104,7 +104,7 @@ async function scrapflyGet(url, accept = "text/html") {
     // very differently from a throttle, and a bare status code made 452
     // identical failures say nothing about which one it was.
     let why = "";
-    try { why = (await r.text()).slice(0, 200).replace(/s+/g, " "); } catch { /* body already gone */ }
+    try { why = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch { /* body already gone */ }
     throw new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
   }
   const j = await r.json();
