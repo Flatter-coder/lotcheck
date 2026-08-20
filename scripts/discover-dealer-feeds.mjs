@@ -210,25 +210,50 @@ async function tryConvertus(host, trace) {
 // object on the /new/ page itself (confirmed live 2026-08-18, Rainbow Ford)
 // -- reuses the SAME parser the crawler runs, so "detected" and "crawlable"
 // can never drift apart the way a hand-duplicated detection regex would.
+// EDealer hides behind whatever path the dealer's theme uses. SM360 and
+// Convertus detection both try several; this tried exactly one, /new/, and
+// that single assumption is half of why the probe reported ZERO EDealer sites
+// across 1,639 Alberta hosts.
+//
+// Ken Sargent GMC in Grande Prairie is an EDealer site (applications.edealer.ca
+// in its own privacy link) serving stock at /inventory/ — reachable, readable,
+// and invisible to a probe that only ever asked for /new/. The other half was
+// the datacenter IP block, which is a separate problem; this one is ours and
+// costs four extra requests on hosts that were going to answer nothing anyway.
+//
+// EDEALER_PATHS is ordered cheapest-first: /new/ still wins on the theme we
+// already support, so the common case costs exactly what it did before.
+const EDEALER_PATHS = ["/new/", "/inventory/", "/new-inventory/", "/inventory/new/", "/vehicles/"];
+
 async function tryEdealer(host, trace) {
-  try {
-    const r = await fetch(`${host}/new/`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    if (!r.ok) { note(trace, "edealer", `/new/ HTTP ${r.status}`); return null; }
-    const html = await r.text();
-    const rows = extractEdealerVehicles(html);
-    if (!rows.length) {
-      // Distinguishes "not an EDealer site" from "an EDealer site our PARSER
-      // could not read" — the second is a bug on our side and used to look
-      // exactly like the first.
-      const marker = /vehicleArray\s*=\s*\{/.test(html);
-      note(trace, "edealer", marker
-        ? `/new/ 200 WITH vehicleArray but the parser returned 0 rows — PARSER BUG (${Math.round(html.length / 1024)}KB)`
-        : `/new/ 200, no vehicleArray (${Math.round(html.length / 1024)}KB)`);
-      return null;
-    }
-    return { platform: "edealer", page1: rows.length };
-  } catch (e) { note(trace, "edealer", `/new/ ${e.name || e.message}`); return null; }
+  let sawEdealer = false;
+  for (const path of EDEALER_PATHS) {
+    try {
+      const r = await fetch(`${host}${path}`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+      if (!r.ok) { note(trace, "edealer", `${path} HTTP ${r.status}`); continue; }
+      const html = await r.text();
+      const rows = extractEdealerVehicles(html);
+      if (rows.length) return { platform: "edealer", section: path, page1: rows.length };
+
+      // Three different findings, and they used to look identical:
+      //   - a vehicleArray we could not read  -> OUR parser is broken
+      //   - an EDealer page with no array     -> a NEWER theme we cannot read yet
+      //   - neither                           -> simply not an EDealer site
+      const hasArray = /vehicleArray\s*=\s*\{/.test(html);
+      const isEdealer = /edealer/i.test(html);
+      if (isEdealer) sawEdealer = true;
+      const kb = Math.round(html.length / 1024);
+      note(trace, "edealer", hasArray
+        ? `${path} 200 WITH vehicleArray but the parser returned 0 rows — PARSER BUG (${kb}KB)`
+        : isEdealer
+          ? `${path} 200, EDealer markers but NO vehicleArray — newer theme, unsupported (${kb}KB)`
+          : `${path} 200, not EDealer (${kb}KB)`);
+    } catch (e) { note(trace, "edealer", `${path} ${e.name || e.message}`); }
+  }
+  if (sawEdealer) note(trace, "edealer", "host IS EDealer on some path but no page yielded vehicles");
+  return null;
 }
+
 
 // jsonld_itemlist: vehicles live on model/category pages, not the /new/ index
 // itself (confirmed live 2026-08-18, Wolfe Chevrolet + Village Honda both
