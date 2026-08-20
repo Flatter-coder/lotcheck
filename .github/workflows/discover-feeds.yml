@@ -28,6 +28,10 @@ on:
         description: "Probe only the first N hosts (blank = all)"
         type: string
         default: ""
+      rescue:
+        description: "Retry hosts that refused us, via a Canadian residential IP (uses Scrapfly credits)"
+        type: boolean
+        default: false
       skip:
         description: "Resume: skip the first N hosts (blank = start at the beginning)"
         type: string
@@ -52,10 +56,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
         run: |
           ARGS="--source ${{ inputs.source }} --out discovered-feeds.json"
           if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
           if [ -n "${{ inputs.skip }}" ]; then ARGS="$ARGS --skip ${{ inputs.skip }}"; fi
+          if [ "${{ inputs.rescue }}" = "true" ]; then ARGS="$ARGS --rescue"; fi
           if [ "${{ inputs.write }}" = "true" ]; then ARGS="$ARGS --write"; fi
           echo "Running: node scripts/discover-dealer-feeds.mjs $ARGS"
           node scripts/discover-dealer-feeds.mjs $ARGS
