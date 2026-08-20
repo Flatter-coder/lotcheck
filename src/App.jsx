@@ -8755,12 +8755,37 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
+  // MSRP per trim — the factory range card (standing requirement 2026-08-19:
+  // the buyer sees the manufacturer's per-trim range with a source link even
+  // when the dealer hides the trim or prints their own sticker).
+  const trimRange = useTrimRange(a);
+  let trimRangeItem = null;
+  if (trimRange.status === "ready" && trimRange.trims?.length) {
+    const trs = trimRange.trims, aboveN = qp > 0 ? trs.filter(t => qp > Number(t.msrp)).length : 0;
+    const allExcl = trs.every(t => t.price_basis === "excl_freight");
+    trimRangeItem = { key: "trimrange", title: "MSRP per trim", tone: "muted", v: `${trs.length} trims`, body: (
+      <div>
+        <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>{trimRange.year} {a.make} {a.model} — the manufacturer's price per trim{allExcl ? " (before freight & fees)" : ""}. The factory range the quote should be read against.</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {trs.map((t, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 9px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.trim}</span>
+              <span style={{ fontSize: 12, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(t.msrp)}{t.price_basis === "excl_freight" ? <span style={{ color: MUT }}> +frt</span> : null}</span>
+            </div>
+          ))}
+        </div>
+        {qp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.{allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>}
+        {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Source: confirm on the manufacturer's site ↗</a>}
+      </div>
+    )};
+  }
+
+  const heatItems = [...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
   // Every view that surfaces "things to watch" draws from this one pool, so a
   // new flag cannot reach one view and miss another (report-features-all-views).
   const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  const items = [verdictItem, ...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -8820,6 +8845,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   const [cur,setCur]=useState(0);
   const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
   const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
+  const trimRange=useTrimRange(a);   // MSRP-per-trim page (standing req 2026-08-19)
   const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
   const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
   const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
@@ -8834,6 +8860,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   if(a.recalls?.checked) P.push({t:"recalls"});
   if(feeItems.length) P.push({t:"fees"});
   if(a.dealerSentiment?.rating) P.push({t:"rep"});
+  if(trimRange.status==="ready"&&trimRange.trims?.length) P.push({t:"trims"});
   if((Number(a.daysOnLot?.days)||0)>0||a.tradeInWidget?.detected) P.push({t:"lev"});
   if(a.leverageScore||a.summary) P.push({t:"bottom"});
   if(P.length%2) P.push({t:"blank"});
@@ -8885,6 +8912,20 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
         <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
       </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
     </div>); }
+    if(p.t==="trims"){ const trs=trimRange.trims||[]; const aboveN=qp>0?trs.filter(t=>qp>Number(t.msrp)).length:0; const allExcl=trs.every(t=>t.price_basis==="excl_freight");
+      return (<div className="rfb-pg">{num}<div className="rfb-k">The factory range</div>
+      <h2 className="rfb-h2">MSRP per trim — {trimRange.year} {a.make} {a.model}</h2>
+      <div className="rfb-lede" style={{fontSize:12}}>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</div>
+      <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:10}}>
+        {trs.slice(0,10).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
+          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
+          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?" +frt":""}</span>
+        </div>))}
+      </div>
+      {qp>0&&<div className="rfb-sub" style={{marginTop:8}}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.</div>}
+      {trimRange.src&&<a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:800,marginTop:8,display:"inline-block"}}>Source: the manufacturer's own site ↗</a>}
+      </div>);
+    }
     if(p.t==="lev"){ const d=Math.round(Number(a.daysOnLot?.days)||0); const tiw=a.tradeInWidget;
       return (<div className="rfb-pg">{num}<div className="rfb-k">Leverage</div>
       <h2 className="rfb-h2">{d>0?`${d.toLocaleString()} days on the lot`:"Trade-in tool on this listing"}</h2>
@@ -9021,6 +9062,116 @@ function dolCareAsk(d){
   if(d>=90) return " Parked this long, the car sits mechanically too — ask when the oil was last changed (manufacturers cap oil life by time, not just km), whether the 12-volt battery was tested and the car moved every 30 days (GM's own dealer-inventory guidance calls for both), and ask to see the completed pre-delivery inspection sheet.";
   if(d>=31) return " Worth asking too: whether the 12-volt battery has been tested and the car moved during storage — manufacturer lot-care guidance calls for both every 30 days.";
   return "";
+}
+// ── MSRP per trim — the honest price range ──────────────────────────────────
+// STANDING REQUIREMENT (Vic 2026-08-19, the $89,130 Tacoma case): every check
+// shows the manufacturer's per-trim MSRP range for the vehicle's model with a
+// clickable manufacturer source, so the buyer sees the factory range even when
+// the dealer hides the trim or prints their own "MSRP" equal to the asking
+// price. The factory range is the reference the dealer cannot move.
+const MAKE_BP_SITE = {
+  Toyota:"https://www.toyota.ca/toyota/en/build-price", Lexus:"https://www.lexus.ca",
+  Honda:"https://www.honda.ca/en/build", Acura:"https://www.acura.ca",
+  Mazda:"https://www.mazda.ca/en/shopping-tools/build-and-price/",
+  Hyundai:"https://www.hyundaicanada.com/en/build-and-price", Kia:"https://www.kia.ca/en/build-and-price",
+  Genesis:"https://www.genesis.ca", Subaru:"https://www.subaru.ca",
+  Nissan:"https://www.nissan.ca/build-price.html", Infiniti:"https://www.infiniti.ca",
+  Volkswagen:"https://www.vw.ca/en/build-and-configure.html",
+  Ford:"https://shop.ford.ca/build/", Lincoln:"https://www.lincolncanada.com",
+  Chevrolet:"https://www.chevrolet.ca", GMC:"https://www.gmc.ca", Buick:"https://www.buick.ca",
+  Cadillac:"https://www.cadillac.ca", Jeep:"https://www.jeep.ca/en/build-and-price",
+  Ram:"https://www.ramtruck.ca/en/build-and-price", Dodge:"https://www.dodge.ca",
+  Chrysler:"https://www.chrysler.ca", Fiat:"https://www.fiatcanada.com",
+  "Alfa Romeo":"https://www.alfaromeo.ca", "Mercedes-Benz":"https://www.mercedes-benz.ca",
+  BMW:"https://www.bmw.ca", Mini:"https://www.mini.ca", Porsche:"https://www.porsche.com/canada/",
+  Volvo:"https://www.volvocars.com/en-ca/", "Land Rover":"https://www.landrover.ca",
+  Jaguar:"https://www.jaguar.ca", Mitsubishi:"https://www.mitsubishi-motors.ca",
+};
+// One in-module cache so scroll + heatmap/sidebar + flipbook + the email
+// payload all share ONE catalog read per make|model.
+const trimRangeCache = {};
+function useTrimRange(a){
+  const make=a?.make, model=a?.model;
+  const key=(make||"")+"|"+(model||"");
+  const [st,setSt]=useState(trimRangeCache[key]||{status:"idle"});
+  useEffect(()=>{
+    if(!make||!model){ setSt({status:"none"}); return; }
+    if(trimRangeCache[key]&&trimRangeCache[key].status!=="error"){ setSt(trimRangeCache[key]); return; }
+    let alive=true;
+    (async()=>{
+      try{
+        const { data, error } = await supabase.from("msrp_catalog")
+          .select("trim,msrp,year,price_basis")
+          .eq("make",make).ilike("model","%"+model+"%")
+          .gt("msrp",0).order("msrp",{ascending:true}).limit(48);
+        if(error) throw error;
+        const rows=(data||[]).filter(r=>r.trim&&Number(r.msrp)>0);
+        if(!rows.length){ const v={status:"empty",readAt:Date.now(),make,model}; trimRangeCache[key]=v; if(alive)setSt(v); return; }
+        const wantY=Number(a?.year)||null;
+        const years=[...new Set(rows.map(r=>r.year))];
+        const year=wantY&&years.includes(wantY)?wantY:Math.max(...years);
+        const trims=rows.filter(r=>r.year===year);
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims};
+        trimRangeCache[key]=v; if(alive)setSt(v);
+      }catch(e){ if(alive)setSt({status:"error",make,model}); }
+    })();
+    return ()=>{alive=false;};
+  },[key]);
+  return st;
+}
+// Compact payload for the emailed report (server renders HTML/PDF from it;
+// the server builds its own source link from its own make map — a client-
+// supplied URL never rides into a DKIM-signed email).
+function trimRangePayload(tr){
+  if(!tr||tr.status!=="ready"||!tr.trims?.length) return null;
+  return { y:tr.year, mk:tr.make, md:tr.model,
+    t:tr.trims.slice(0,12).map(t=>({ n:String(t.trim).slice(0,60), m:Number(t.msrp), b:t.price_basis==="excl_freight"?1:0 })) };
+}
+function TrimMsrpRange({analysis:a, C, cardStyle}){
+  const tr=useTrimRange(a);
+  const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const qp=Number(a?.quotedPrice)||0;
+  if(tr.status==="none"||tr.status==="idle") return null;
+  if(tr.status==="error"||tr.status==="empty"){
+    // Missing beats wrong: say the range isn't in the catalog, never guess one.
+    return (
+      <div style={{...cardStyle}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>MSRP per trim</div>
+        <div style={{fontSize:12.5,color:C.inkSoft,marginTop:8,lineHeight:1.55}}>
+          {tr.status==="empty"
+            ? <>LotCheck's verified catalog doesn't carry {a.make} {a.model} trim pricing yet. Ask the dealer for the manufacturer's window sticker, and confirm the trim's price on the manufacturer's own site before negotiating.</>
+            : <>Couldn't reach the verified MSRP catalog just now — reload to try again.</>}
+        </div>
+        {MAKE_BP_SITE[a?.make]&&<a href={MAKE_BP_SITE[a.make]} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:8,fontSize:12.5,fontWeight:800,color:C.tealInk}}>Source: {a.make}'s own build &amp; price →</a>}
+      </div>
+    );
+  }
+  const trims=tr.trims||[];
+  const above=qp>0?trims.filter(t=>qp>Number(t.msrp)).length:0;
+  const allExcl=trims.every(t=>t.price_basis==="excl_freight");
+  return (
+    <div style={{...cardStyle}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div style={{fontSize:14,fontWeight:800,color:C.ink}}>MSRP per trim — {tr.year} {a.make} {a.model}</div>
+        <LiveDot readAt={tr.readAt}/>
+      </div>
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</div>
+      <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+        {trims.map((t,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"6px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
+            <span style={{fontSize:12.5,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?<span style={{color:C.inkFaint,fontWeight:600}}> + freight</span>:null}</span>
+          </div>
+        ))}
+      </div>
+      {qp>0&&trims.length>0&&(
+        <div style={{fontSize:12.5,color:C.inkSoft,marginTop:10,lineHeight:1.55}}>
+          The asking price <b style={{color:C.ink}}>{money(qp)}</b> sits above <b style={{color:C.ink}}>{above} of {trims.length}</b> published trim prices{above===trims.length&&trims.length>1?" — above every trim price the manufacturer publishes for this model":""}.{allExcl?" Catalog prices exclude freight & fees, so compare like-for-like.":""}
+        </div>
+      )}
+      {tr.src&&<a href={tr.src} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:800,color:C.tealInk,textDecoration:"none"}}>Source: confirm on {String(a.make).toLowerCase().replace(/\s+/g,"")}.ca →</a>}
+    </div>
+  );
 }
 function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
 // Canonical, fixed-order projection of ONLY what the report shows. This exact
@@ -9598,6 +9749,9 @@ function QuoteCheckPage(){
   // "Report view"). `sharedReport` is true when the analysis was reconstructed
   // from a self-contained share link (#r=...), never fetched or stored.
   const [reportView,setReportView]=useState("scroll"); // the scroll is the default "full story" view (Bento/Deck/Scorecard/HUD removed 2026-08-12 — too many display modes)
+  // MSRP-per-trim range for the emailed report (same in-module cache the
+  // report surfaces read — one catalog fetch total).
+  const mainTrimRange=useTrimRange(analysis);
   const [sharedReport,setSharedReport]=useState(false);
   // Authenticity of an OPENED shared report: "valid" | "invalid" | null
   // (null = no signature to check / crypto unavailable — say "fingerprint only").
@@ -9741,6 +9895,13 @@ function QuoteCheckPage(){
     try{
       const {show,rebate}=resolveEvap(analysis);
       if(show&&rebate) emailAnalysis={...analysis,evapRebate:rebate};
+    }catch{}
+    try{
+      // Same pattern as evapRebate: client-derived, attached ONLY to the
+      // emailed payload; the server renders from it (and builds its own
+      // source link — a client URL never rides into a DKIM-signed email).
+      const trp=trimRangePayload(mainTrimRange);
+      if(trp) emailAnalysis={...emailAnalysis,trimRange:trp};
     }catch{}
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/email-quote-report",{
@@ -11082,6 +11243,8 @@ function QuoteCheckPage(){
                   replaces the earlier "Financing examples" card. Renders itself
                   null when there's no quoted price. Now condensed: a summary
                   with the full matrix behind an expander. */}
+              <TrimMsrpRange analysis={analysis} C={C} cardStyle={cardStyle}/>
+
               <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               {/* ── Detail cards in a 2-column grid on desktop, collapsing to a
