@@ -90,6 +90,40 @@ const BASE = {
   record(!cs.moves.find((m) => m.topic === "Rate"), "a trusted rate at/below the promo rate does not fire the Rate move");
 }
 
+// ---- buildCounterScript: the "Warranty" move ------------------------------
+// 2026-08-20 incident: a 2022 RAV4 at 106,000 km got the generic "I'll pass
+// on the extended warranty -- the factory coverage is plenty for now" line
+// even though Toyota's real basic (3yr/60,000km) and powertrain (5yr/
+// 100,000km) coverage would both already be expired on this exact car --
+// false reassurance aimed at the buyer who might most want the extended plan.
+{
+  const a = { ...BASE, warranty: { offered: true }, standardWarranty: { coverage: "5-year/100,000km" },
+    remainingWarranty: { basic: { active: false }, powertrain: { active: false } } };
+  const cs = buildCounterScript(a);
+  const move = cs.moves.find((m) => m.topic === "Warranty");
+  record(!!move && /already run out/.test(move.say) && !/plenty for now/.test(move.say),
+    "factory coverage confirmed EXPIRED (both basic and powertrain inactive) does not say 'plenty for now'",
+    JSON.stringify(move));
+}
+{
+  const a = { ...BASE, warranty: { offered: true }, standardWarranty: { coverage: "5-year/100,000km" },
+    remainingWarranty: { basic: { active: false }, powertrain: { active: true } } };
+  const cs = buildCounterScript(a);
+  const move = cs.moves.find((m) => m.topic === "Warranty");
+  record(!!move && /plenty for now/.test(move.say),
+    "powertrain coverage STILL active (even with basic expired) keeps the original 'pass on it' framing",
+    JSON.stringify(move));
+}
+{
+  // No remainingWarranty at all (unknown make, no odometer, etc.) -- must not
+  // assert expiry it can't back, keeps the original framing.
+  const a = { ...BASE, warranty: { offered: true }, standardWarranty: { coverage: "5-year/100,000km" } };
+  const cs = buildCounterScript(a);
+  const move = cs.moves.find((m) => m.topic === "Warranty");
+  record(!!move && /plenty for now/.test(move.say),
+    "unknown remaining-warranty status falls back to the original framing rather than guessing expired");
+}
+
 // ---- computeFinancingTrap: the dollar-savings / "trap" estimate -----------
 {
   const a = {

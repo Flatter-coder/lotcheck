@@ -229,7 +229,22 @@ export function buildCounterScript(analysis: any): CounterScript {
   }
   if (analysis?.warranty?.offered) {
     const sw = analysis?.standardWarranty?.coverage;
-    moves.push({ topic: "Warranty", say: `I'll pass on the extended warranty${sw ? ` — the ${sw} factory coverage is plenty for now` : ""}. It's optional.` });
+    // "The factory coverage is plenty for now" is only true advice when the
+    // factory coverage is actually still active on THIS car. On a high-
+    // mileage/older used vehicle it usually isn't -- caught live on a 2022
+    // RAV4 at 106,000 km (Toyota's basic coverage ends at 60,000 km, its
+    // powertrain coverage at 100,000): the generic line would have told a
+    // buyer whose factory warranty had already run out that it was "plenty,"
+    // a blanket "pass on it" that's actively bad advice for exactly the
+    // buyer who might most want the extended plan. Gated on remainingWarranty
+    // (analyze-listing-url's applyRemainingWarranty, computeRemainingWarranty
+    // in _shared/warranty.ts) when it's available; unknown coverage status
+    // keeps the original framing rather than asserting either way.
+    const rw = (analysis as any)?.remainingWarranty;
+    const factoryExpired = rw && rw.basic?.active === false && rw.powertrain?.active === false;
+    moves.push(factoryExpired
+      ? { topic: "Warranty", say: `The factory warranty on this one has already run out — worth actually comparing what an extended plan costs against the repairs most likely on a car this age/mileage before deciding, not an automatic pass.` }
+      : { topic: "Warranty", say: `I'll pass on the extended warranty${sw ? ` — the ${sw} factory coverage is plenty for now` : ""}. It's optional.` });
   }
   const r = analysis?.recalls;
   if (r && r.checked && r.count > 0) {
