@@ -25,6 +25,7 @@
     "build:city-index:dry": "node scripts/build-city-price-index.mjs --dry-run",
     "build:city-index": "node scripts/build-city-price-index.mjs",
     "test:city-index": "node scripts/test-city-price-index.mjs",
+    "test:market-catalog": "node scripts/test-market-vs-catalog.mjs",
     "test:structured-inventory": "node scripts/test-structured-inventory.mjs",
     "test:carry-forward": "node scripts/test-carry-forward.mjs",
     "test:capture": "node --experimental-strip-types supabase/functions/_shared/capture.test.ts",
@@ -58,7 +59,8 @@
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "check:syntax": "node scripts/check-script-syntax.mjs",
     "test:price-index": "node scripts/test-price-index-panel.mjs",
-    "test:recall-source": "node scripts/test-recall-single-source.mjs"
+    "test:recall-source": "node scripts/test-recall-single-source.mjs",
+    "test:fetch-retry": "node scripts/test-fetch-retry.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
