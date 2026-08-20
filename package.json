@@ -57,7 +57,8 @@
     "check:canonical": "node scripts/check-canonical-parity.mjs",
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "check:syntax": "node scripts/check-script-syntax.mjs",
-    "test:price-index": "node scripts/test-price-index-panel.mjs"
+    "test:price-index": "node scripts/test-price-index-panel.mjs",
+    "test:fetch-retry": "node scripts/test-fetch-retry.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
