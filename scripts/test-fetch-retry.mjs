@@ -62,12 +62,26 @@ const noSleep = () => Promise.resolve();
   const res = await fetchRetry("u", {}, { fetchImpl: f, sleep: noSleep });
   check("429 retries", res.ok && f.calls.length === 2);
 }
-// 7. Backoff grows: delays recorded between attempts are non-decreasing bases.
+// 7. Backoff grows. Jitter is injected as zero so the assertion is EXACT —
+// with the inline Math.random()*250 this was `delays[1] > delays[0]` over
+// bases 100/200, which is false whenever the first jitter draw beats the
+// second by 100ms+: an ~18% coin flip that went red on PR #249's merge-ref
+// run while green on main minutes earlier. A gate that can fail on a dice
+// roll trains everyone to re-run red, which is how a real red gets ignored.
 {
   const delays = [];
   const f = seq([R(500), R(500), R(200)]);
-  await fetchRetry("u", {}, { fetchImpl: f, sleep: (ms) => { delays.push(ms); return Promise.resolve(); }, baseDelayMs: 100 });
-  check("exponential backoff between attempts", delays.length === 2 && delays[0] >= 100 && delays[1] >= 200 && delays[1] > delays[0]);
+  await fetchRetry("u", {}, { fetchImpl: f, sleep: (ms) => { delays.push(ms); return Promise.resolve(); }, baseDelayMs: 100, jitter: () => 0 });
+  check("exponential backoff between attempts (deterministic: bases double)", delays.length === 2 && delays[0] === 100 && delays[1] === 200);
+}
+// 7b. The randomness lives ONLY behind the injectable seam — the delay
+// expression itself must call jitter(), not Math.random(), or the test above
+// silently goes back to asserting over a dice roll.
+{
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("scripts/lib/fetch-retry.mjs", "utf8");
+  check("delay uses the injectable jitter, no inline randomness",
+    src.includes("+ jitter());") && !/sleep\([^)]*Math\.random/.test(src));
 }
 // 8. Every attempt carries an abort signal (per-attempt timeout is wired).
 {

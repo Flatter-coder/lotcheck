@@ -7,14 +7,18 @@
 // A 4xx is a real answer and returns immediately — the caller's !res.ok
 // handling stays authoritative. Exponential backoff with jitter; every
 // attempt carries its own timeout so a hung socket can't stall the run.
-// `fetchImpl`/`sleep` are injectable so the regression test drives it
-// deterministically without network or real timers.
+// `fetchImpl`/`sleep`/`jitter` are injectable so the regression test drives it
+// deterministically without network, real timers, or randomness — an inline
+// Math.random() in the delay made the backoff-growth assertion an ~18% coin
+// flip (jitter spans 250ms, the first two bases differ by only 100ms), and it
+// flaked red on PR #249's merge-ref run while green on main minutes earlier.
 export async function fetchRetry(url, options = {}, {
   attempts = 3,
   baseDelayMs = 2000,
   timeoutMs = 45000,
   fetchImpl = fetch,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  jitter = () => Math.floor(Math.random() * 250),
   retryOn = (status) => status === 429 || (status >= 500 && status < 600),
 } = {}) {
   let lastErr;
@@ -31,7 +35,7 @@ export async function fetchRetry(url, options = {}, {
     } finally {
       clearTimeout(timer);
     }
-    await sleep(baseDelayMs * Math.pow(2, i) + Math.floor(Math.random() * 250));
+    await sleep(baseDelayMs * Math.pow(2, i) + jitter());
   }
   throw lastErr;
 }
