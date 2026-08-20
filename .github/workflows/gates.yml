@@ -89,6 +89,13 @@ jobs:
       # inherited the ticker's marquee and dragged every bar sideways.
       - name: Price-index panel (coverage, not market share)
         run: npm run test:price-index
+      # The public market read anchors to OUR catalog, and the moment our
+      # number is the reference a freight-basis mistake becomes a fabricated
+      # markup claim. This pins the window math: a freight-sized gap over an
+      # ex-freight row is indeterminate, never "over"; every published
+      # percentage is a floor; indeterminates never buy the k-anonymity gate.
+      - name: Market vs catalog (basis-aware window calls, floors, publish gate)
+        run: npm run test:market-catalog
       - name: Report parity (client-derived cards render on every view)
         run: npm run check:parity
       - name: Scan accuracy (MSRP-basis label, ground-truth price-gate, consent-overlay strip)

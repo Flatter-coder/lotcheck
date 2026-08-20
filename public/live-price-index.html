@@ -193,8 +193,12 @@
   .mkt-seg em{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-style:normal}
   .mkt-below{background:linear-gradient(180deg,rgba(58,224,255,.30),rgba(58,224,255,.13));border-right:1px solid var(--bg);color:#d7f4ff}
   .mkt-below b{color:var(--cyan)}
-  .mkt-at{flex:1;background:linear-gradient(180deg,rgba(139,123,255,.42),rgba(139,123,255,.17));color:#e6e2ff}
+  .mkt-at{background:linear-gradient(180deg,rgba(139,123,255,.42),rgba(139,123,255,.17));border-right:1px solid var(--bg);color:#e6e2ff}
   .mkt-at b{color:#c6bcff}
+  /* the freight window: matched, real, and deliberately UNCALLED — a neutral
+     tone so it never reads as either a discount or a markup */
+  .mkt-win{background:linear-gradient(180deg,rgba(139,149,166,.26),rgba(139,149,166,.09));color:var(--dim)}
+  .mkt-win b{color:var(--ink)}
   .mkt-abovebar{width:3px;background:var(--down);box-shadow:0 0 10px rgba(240,104,138,.7)}
   .mkt-cap{display:flex;justify-content:space-between;margin-top:5px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
   .mkt-cap i{font-style:normal;color:var(--down)}
@@ -439,7 +443,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   <!-- TWO MARKET CARDS -->
   <div class="two">
     <section class="card chart-card mkt-card">
-      <h2>Alberta asking price vs stated sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
+      <h2>Alberta asking price vs manufacturer-verified sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
       <p class="mkt-say" id="mktSay"></p>
       <div class="mkt-strip" id="mktStrip"></div>
       <div class="mkt-cap" id="mktCap"></div>
@@ -448,9 +452,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     </section>
 
     <section class="card chart-card">
-      <h2>Asking price against sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
+      <h2>Asking price against the manufacturer's sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
       <canvas id="chart3d" height="300" tabindex="0" role="img"
-        aria-label="3D bar chart of Alberta listings grouped by distance from sticker, split into below, at and above MSRP. Drag or use arrow keys to rotate."></canvas>
+        aria-label="3D bar chart of Alberta listings grouped by distance from the manufacturer-verified sticker, split into below, at and above. Drag or use arrow keys to rotate."></canvas>
       <div class="chart-wait" id="histWait" style="display:none"></div>
       <div class="lg">
         <span><i class="sq" style="background:var(--cyan)"></i>Below MSRP</span>
@@ -727,10 +731,17 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   }
 
 
-  /* ================= market reading: fn_alberta_msrp_deviation =================
-     Aggregate-only RPC over current Alberta listings (dealers' own advertised
-     prices vs the verified catalog). Gated below 25 listings — the cards say
-     they are waiting rather than invent a market. */
+  /* ================= market reading: fn_alberta_market_vs_catalog =============
+     Aggregate-only RPC: dealers' own advertised prices vs LotCheck's verified
+     MSRP catalog, exact trim matches only. THE REFERENCE IS OURS — the old
+     read (fn_alberta_msrp_deviation) measured against the sticker the DEALER
+     stated on their own page, so a dealer printing MSRP = asking price was
+     invisible to the over-sticker stat (an $89,130 Tacoma proved it).
+     Basis-aware: each listing is judged against a window that is guaranteed to
+     contain the true all-in figure, so every percentage here is a FLOOR of the
+     real distance — the read can understate, never overstate. Listings inside
+     the freight window are disclosed as their own count, not guessed into a
+     direction. Gated below 25 directional calls, and stale readings say so. */
   var lastDev=null;
 
   // Fraction of listings whose %-vs-sticker falls in [a,b), recovered from the
@@ -794,7 +805,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   function mktMsg(m){
     if(m&&m.err) return ["Couldn't reach the market reading —","reload to try again."];
     if(!m)       return ["Reading Alberta listings…",""];
-    return ["Awaiting Alberta listings — "+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" needed",
+    // A stale reading is a fourth state, not "awaiting": the data exists but
+    // has aged past the point where "live" would be honest.
+    if(m.stale)  return ["Market reading paused — last computed "+(m.as_of||"over a week ago")+";",
+                         "it republishes after the next inventory pass."];
+    return ["Awaiting Alberta listings — "+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" matched to the catalog",
             "before a market reading is published."];
   }
   // The RPC's response shape is validated before anything renders from it:
@@ -802,7 +817,8 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // charts or a fabricated "awaiting" count.
   function validDev(d){
     if(!d||typeof d!=="object"||Array.isArray(d)) return null;
-    if(d.enough!==true) return { enough:false, n:Number(d.n)||0, min:Number(d.min)||MIN_LISTINGS };
+    if(d.enough!==true) return { enough:false, n:Number(d.n)||0, min:Number(d.min)||MIN_LISTINGS,
+                                 stale:d.stale===true, as_of:typeof d.as_of==="string"?d.as_of:null };
     var ok=["n","dealers","median","under_n","over_n","at_n"].every(function(k){
       return isFinite(Number(d[k]));
     });
@@ -816,15 +832,22 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     if(m&&m.err){ el.textContent="Couldn't reach the market reading — reload to try again."; return; }
     if(!m){ el.textContent=""; return; }
     if(!m.enough){
+      if(m.stale){
+        el.textContent="The market reading was last computed "+(m.as_of||"over a week ago")+
+          " and is paused until the next inventory pass — a stale reading must not pose as current.";
+        return;
+      }
       el.textContent="A market reading publishes once at least "+(Number(m.min)||MIN_LISTINGS)+
-        " current listings are in ("+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" so far).";
+        " current listings match the verified catalog exactly ("+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" so far).";
       return;
     }
-    el.innerHTML="Market reading: <b>"+(Number(m.n)||0)+"</b> current listings from <b>"+(Number(m.dealers)||0)+
-      "</b> dealers — <b>"+(Number(m.under_n)||0)+"</b> below sticker, <b>"+(Number(m.at_n)||0)+
-      "</b> at sticker (within 0.05%), <b>"+(Number(m.over_n)||0)+
-      "</b> above; median "+(m.median>0?"+":"")+Number(m.median).toFixed(1)+
-      "% vs MSRP. Band split approximated from the market's percentile curve; direction totals exact.";
+    el.innerHTML="Market reading"+(m.as_of?" as of "+esc(m.as_of):"")+": <b>"+(Number(m.n)||0)+
+      "</b> exact-trim catalog matches called from <b>"+(Number(m.dealers)||0)+
+      "</b> dealers — <b>"+(Number(m.under_n)||0)+"</b> below the manufacturer-verified sticker, <b>"+(Number(m.at_n)||0)+
+      "</b> at it (callable only where the manufacturer's all-in figure is held), <b>"+(Number(m.over_n)||0)+
+      "</b> above it even after a full freight-and-fees allowance; a further <b>"+(Number(m.indeterminate_n)||0)+
+      "</b> sit inside that allowance and are not called either way. Distances are floors — the read can understate, "+
+      "never overstate. Band split approximated from the market's percentile curve; direction totals exact.";
   }
 
   /* ---- sticker terrain: the strip teaches the split, the terrain breaks
@@ -846,32 +869,49 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     terr.className="mkt-terr";
 
     var n=Number(dev.n)||0, under=Number(dev.under_n)||0, over=Number(dev.over_n)||0;
-    var at=Math.max(0,n-under-over);
-    var pc=function(v){ return n?Math.round(v/n*100):0; };
+    var at=Number(dev.at_n)||0, ind=Number(dev.indeterminate_n)||0;
+    var total=n+ind;   // every exact-matched listing, called or not
+    var pc=function(v){ return total?Math.round(v/total*100):0; };
     var num=function(v){ return (Number(v)||0).toLocaleString("en-CA"); };
     var med=Number(dev.median_discount);
 
     // The sentence first: a reader who stops here still has the answer.
-    // "Sticker" here is the MSRP the DEALER prints on their own listing — not
-    // our verified catalog figure. A dealer can state a sticker equal to (or
-    // above) the factory price, which makes over-sticker asking invisible to
-    // this read (proven: an $89,130 Tacoma whose page set MSRP = asking price).
-    // Said plainly on the surface until the catalog-anchored read ships —
-    // never let the dealer supply the reference silently.
-    say.innerHTML="<b>"+pc(at)+"%</b> of Alberta listings are priced <b>exactly at the sticker the dealer states</b>. "+
-      "The <b>"+pc(under)+"%</b> that are discounted average about "+
-      "<b class='cy'>"+(isFinite(med)?Math.abs(med).toFixed(1):"—")+"% off</b>. "+
-      (over?("<b class='co'>"+num(over)+"</b> are advertised above their stated sticker."):"<b class='co'>None</b> are advertised above their stated sticker.")+
-      " <span style='color:var(--dim)'>Sticker = the MSRP printed on the dealer's own listing; comparison against LotCheck's manufacturer-verified catalog is in the works.</span>";
+    // The reference is OURS — LotCheck's manufacturer-verified catalog, exact
+    // trim matches only — never the sticker the dealer states (a dealer can
+    // print MSRP = asking price, which made over-sticker asking invisible to
+    // the old read; an $89,130 Tacoma proved it). Every figure is a FLOOR:
+    // each listing is judged against a window guaranteed to contain the true
+    // all-in sticker, so a distance can be understated, never overstated.
+    var stk="";
+    var stated=Number(dev.sticker_stated_n)||0, inflN=Number(dev.sticker_inflated_n)||0;
+    var inflMed=Number(dev.sticker_inflated_median_pct);
+    if(stated){
+      stk=inflN
+        ? " Of <b>"+num(stated)+"</b> listings that print their own sticker, <b class='co'>"+num(inflN)+
+          "</b> print one above the manufacturer's figure for that exact trim"+
+          (isFinite(inflMed)&&inflMed>0?" — at least <b class='co'>+"+inflMed.toFixed(1)+"%</b> at the median":"")+"."
+        : " Of <b>"+num(stated)+"</b> listings that print their own sticker, none print one above the manufacturer's figure for that exact trim.";
+    }
+    say.innerHTML="<b>"+pc(under)+"%</b> of matched Alberta listings ask <b>less than the manufacturer-verified sticker</b>"+
+      (isFinite(med)&&med<0?" — at least <b class='cy'>"+Math.abs(med).toFixed(1)+"% off</b> at the median":"")+". "+
+      (over?("<b class='co'>"+num(over)+"</b> ask more than sticker plus a full freight-and-fees allowance.")
+           :"<b class='co'>None</b> ask more than sticker plus a full freight-and-fees allowance.")+
+      " <b>"+num(ind)+"</b> land inside that allowance, where only the row's exact freight figure could decide — so no call is made."+stk;
 
-    // To-scale strip. Above keeps a visible sliver even at 0 so it reads as a
-    // container rather than a missing element.
+    // To-scale strip over ALL matched listings. Zero-count segments are
+    // skipped (nothing to say), except Above, which keeps a visible sliver
+    // even at 0 so it reads as a container rather than a missing element.
+    var seg=function(cls,count,label){
+      if(!count) return "";
+      return '<div class="mkt-seg '+cls+'" style="width:'+(count/total*100).toFixed(2)+'%">'+
+        '<b>'+num(count)+'</b><em>'+label+'</em></div>';
+    };
     strip.innerHTML=
-      '<div class="mkt-seg mkt-below" style="width:'+(n?under/n*100:0).toFixed(2)+'%">'+
-        '<b>'+num(under)+'</b><em>'+pc(under)+'% below</em></div>'+
-      '<div class="mkt-seg mkt-at"><b>'+num(at)+'</b><em>'+pc(at)+'% at stated sticker</em></div>'+
-      '<div class="mkt-abovebar"'+(over?' style="width:'+(over/n*100).toFixed(2)+'%"':'')+'></div>';
-    cap.innerHTML='<span>all '+num(n)+' listings, to scale</span><i>above stated sticker: '+num(over)+'</i>';
+      seg("mkt-below",under,pc(under)+"% below")+
+      seg("mkt-at",at,"at sticker")+
+      seg("mkt-win",ind,"freight window")+
+      '<div class="mkt-abovebar"'+(over?' style="width:'+(over/total*100).toFixed(2)+'%"':'')+'></div>';
+    cap.innerHTML='<span>all '+num(total)+' matched listings, to scale</span><i>above sticker: '+num(over)+'</i>';
 
     // Terrain. bandCounts returns [at, <=1%, <=2.5%, <=5%, <=10%, <=15%, <=25%, 25%+];
     // index 0 is the at-sticker mass and belongs to the wall, not to a column.
@@ -912,8 +952,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     terr.innerHTML=html;
 
     var p25=Number(dev.p25);
-    foot.textContent="Ticks are distance from sticker, mirrored either side."+
-      (isFinite(med)?"  Median discount "+med.toFixed(2)+"%":"")+
+    foot.textContent="Ticks are distance from the manufacturer-verified sticker, mirrored either side — "+
+      "floors, so a bar can understate its distance, never overstate it."+
+      (isFinite(med)?"  Median discount at least "+Math.abs(med).toFixed(2)+"%":"")+
       (isFinite(p25)?" · 25th percentile "+p25.toFixed(1)+"%":"");
   }
 
@@ -1156,7 +1197,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
         "Couldn't reach the MSRP catalog — reload to try again.";
     });
 
-  fetch(SUPA+"/rpc/fn_alberta_msrp_deviation",
+  fetch(SUPA+"/rpc/fn_alberta_market_vs_catalog",
         { method:"POST", headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON,
           "Content-Type":"application/json" }, body:"{}" })
     .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
