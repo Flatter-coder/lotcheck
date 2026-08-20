@@ -8325,6 +8325,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // some browsers (Chrome fires "voiceschanged" after the first empty
   // getVoices() call), so one retry is given before falling back to default.
   const [voiceState, setVoiceState] = useState("idle"); // idle | speaking
+  // Which entry in `items` is being read RIGHT NOW (-1 = not reading). Drives
+  // both the sidebar highlight and which card is on screen, so Read Aloud
+  // stays in sync with what the listener sees instead of narrating one page
+  // while a different one sits on screen.
+  const [speakingIdx, setSpeakingIdx] = useState(-1);
   const pickBritishVoice = () => {
     try {
       const voices = window.speechSynthesis.getVoices() || [];
@@ -8336,25 +8341,42 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         || null;
     } catch { return null; }
   };
+  // Reads `items` (the SAME array the sidebar/heatmap nav lists and selects
+  // from -- verdict, the 10 points, plus whichever optional cards apply) --
+  // not a separate hand-built list -- so "what's highlighted" and "what's
+  // spoken" can never drift apart. Starts from whatever point is CURRENTLY
+  // on screen (sidebar view's `sel`) and wraps through the rest from there,
+  // rather than always restarting at the verdict: the bug Vic hit was
+  // opening the recalls point, pressing Read Aloud, and hearing the verdict
+  // instead of the page actually in front of him.
   const speakWith = (voice) => {
     try {
       window.speechSynthesis.cancel();
-      const lines = [`${a.vehicle || "This vehicle"} report. ${a.summary || ""}`];
-      for (const p of P) {
-        const ex = explainFor[p.title];
-        if (p.title) lines.push(`${p.title}. ${p.v || ""}. ${ex || ""}`);
-      }
-      const spoken = lines.filter(Boolean);
-      spoken.forEach((text, i) => {
+      const n = items.length;
+      const startAt = view === "sidebar" ? sel : 0;
+      const order = Array.from({ length: n }, (_, k) => (startAt + k) % n);
+      const queued = order
+        .map((idx) => {
+          const item = items[idx];
+          if (!item) return null;
+          const text = idx === 0
+            ? `${a.vehicle || "This vehicle"} report. ${a.summary || ""}`
+            : `${item.title}. ${item.v || ""}. ${explainFor[item.title] || ""}`;
+          return text.trim() ? { idx, text } : null;
+        })
+        .filter(Boolean);
+      if (!queued.length) return;
+      queued.forEach(({ idx, text }, seq) => {
         const u = new SpeechSynthesisUtterance(text);
         u.lang = voice ? voice.lang : "en-GB";
         if (voice) u.voice = voice;
         u.rate = 0.98;
-        if (i === spoken.length - 1) u.onend = () => setVoiceState("idle");
+        u.onstart = () => { setSpeakingIdx(idx); setSel(idx); };
+        if (seq === queued.length - 1) u.onend = () => { setVoiceState("idle"); setSpeakingIdx(-1); };
         window.speechSynthesis.speak(u);
       });
       setVoiceState("speaking");
-    } catch { setVoiceState("idle"); }
+    } catch { setVoiceState("idle"); setSpeakingIdx(-1); }
   };
   const speakReport = () => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -8365,7 +8387,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     window.speechSynthesis.addEventListener("voiceschanged", onReady);
     setTimeout(onReady, 400); // some browsers never fire the event at all
   };
-  const stopSpeaking = () => { try { window.speechSynthesis?.cancel(); } catch {} setVoiceState("idle"); };
+  const stopSpeaking = () => { try { window.speechSynthesis?.cancel(); } catch {} setVoiceState("idle"); setSpeakingIdx(-1); };
   useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
 
   const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
@@ -8938,9 +8960,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       {view === "sidebar" && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
           <div style={{ flex: "0 0 190px", minWidth: 150, display: "flex", flexDirection: "column", gap: 5 }}>
-            {items.map((c, i) => (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: sel === i ? "rgba(15,23,42,.85)" : "transparent", border: `1px solid ${sel === i ? (c.glow ? CY : BORD) : "transparent"}`, borderRadius: 10, padding: "9px 11px", color: sel === i ? "#fff" : MUT2, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>))}
+            {items.map((c, i) => { const speaking = speakingIdx === i; return (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: speaking ? "rgba(251,191,36,.14)" : (sel === i ? "rgba(15,23,42,.85)" : "transparent"), border: `1px solid ${speaking ? AMBER : (sel === i ? (c.glow ? CY : BORD) : "transparent")}`, borderRadius: 10, padding: "9px 11px", color: speaking ? "#fff" : (sel === i ? "#fff" : MUT2), fontSize: 12.5, fontWeight: 700, cursor: "pointer", boxShadow: speaking ? `0 0 10px rgba(251,191,36,.35)` : "none" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: speaking ? AMBER : toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>); })}
           </div>
-          <div style={{ flex: "1 1 260px", minWidth: 0 }}><div style={cardBox(items[sel])}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}><div style={{ ...cardBox(items[sel]), ...(speakingIdx === sel ? { border: `2px solid ${AMBER}`, boxShadow: `0 0 24px rgba(251,191,36,.3)` } : {}) }}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
         </div>
       )}
 
