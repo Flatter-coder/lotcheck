@@ -439,7 +439,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   <!-- TWO MARKET CARDS -->
   <div class="two">
     <section class="card chart-card mkt-card">
-      <h2>Alberta asking price vs sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
+      <h2>Alberta asking price vs stated sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
       <p class="mkt-say" id="mktSay"></p>
       <div class="mkt-strip" id="mktStrip"></div>
       <div class="mkt-cap" id="mktCap"></div>
@@ -852,19 +852,26 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var med=Number(dev.median_discount);
 
     // The sentence first: a reader who stops here still has the answer.
-    say.innerHTML="<b>"+pc(at)+"%</b> of Alberta listings are priced <b>exactly at sticker</b>. "+
+    // "Sticker" here is the MSRP the DEALER prints on their own listing — not
+    // our verified catalog figure. A dealer can state a sticker equal to (or
+    // above) the factory price, which makes over-sticker asking invisible to
+    // this read (proven: an $89,130 Tacoma whose page set MSRP = asking price).
+    // Said plainly on the surface until the catalog-anchored read ships —
+    // never let the dealer supply the reference silently.
+    say.innerHTML="<b>"+pc(at)+"%</b> of Alberta listings are priced <b>exactly at the sticker the dealer states</b>. "+
       "The <b>"+pc(under)+"%</b> that are discounted average about "+
       "<b class='cy'>"+(isFinite(med)?Math.abs(med).toFixed(1):"—")+"% off</b>. "+
-      (over?("<b class='co'>"+num(over)+"</b> are above sticker."):"<b class='co'>None</b> are above sticker.");
+      (over?("<b class='co'>"+num(over)+"</b> are advertised above their stated sticker."):"<b class='co'>None</b> are advertised above their stated sticker.")+
+      " <span style='color:var(--dim)'>Sticker = the MSRP printed on the dealer's own listing; comparison against LotCheck's manufacturer-verified catalog is in the works.</span>";
 
     // To-scale strip. Above keeps a visible sliver even at 0 so it reads as a
     // container rather than a missing element.
     strip.innerHTML=
       '<div class="mkt-seg mkt-below" style="width:'+(n?under/n*100:0).toFixed(2)+'%">'+
         '<b>'+num(under)+'</b><em>'+pc(under)+'% below</em></div>'+
-      '<div class="mkt-seg mkt-at"><b>'+num(at)+'</b><em>'+pc(at)+'% at sticker</em></div>'+
+      '<div class="mkt-seg mkt-at"><b>'+num(at)+'</b><em>'+pc(at)+'% at stated sticker</em></div>'+
       '<div class="mkt-abovebar"'+(over?' style="width:'+(over/n*100).toFixed(2)+'%"':'')+'></div>';
-    cap.innerHTML='<span>all '+num(n)+' listings, to scale</span><i>above sticker: '+num(over)+'</i>';
+    cap.innerHTML='<span>all '+num(n)+' listings, to scale</span><i>above stated sticker: '+num(over)+'</i>';
 
     // Terrain. bandCounts returns [at, <=1%, <=2.5%, <=5%, <=10%, <=15%, <=25%, 25%+];
     // index 0 is the at-sticker mass and belongs to the wall, not to a column.
