@@ -1536,12 +1536,20 @@ Deno.serve(async (req: Request) => {
         { status: 502, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
       );
     }
-    attachments.push({ filename: `LotCheck-${fnameVeh}.pdf`, content: u8ToB64(pdfBytes) });
+    attachments.push({ filename: `LotCheck-${fnameVeh}-Report.pdf`, content: u8ToB64(pdfBytes) });
     // The buyer's portable copy of what the page looked like at report time.
     // The browser session that generated the report is the ONLY other place
     // this image exists (nothing stored server-side) — this attachment is what
-    // makes the emailed report self-contained evidence.
-    if (sealedShot) attachments.push({ filename: `LotCheck-${fnameVeh}-listing-capture.${sealedShot.ext}`, content: sealedShot.b64 });
+    // makes the emailed report self-contained evidence. It has to be the
+    // RAW captured bytes, not a copy re-encoded into the PDF: the sealed
+    // SHA-256 (printed on the PDF's own capture page, and checked at
+    // lotcheck.ca/verify) is over exactly this file, and re-embedding an
+    // image into a PDF re-compresses it, which would change its hash and
+    // break that check. That's also why it can't just be dropped in favour
+    // of the copy already inside the PDF -- distinct from the naming
+    // confusion this filename change addresses (2026-08-20), a real,
+    // separate purpose (byte-exact tamper-check) is still why 2 files ship.
+    if (sealedShot) attachments.push({ filename: `LotCheck-${fnameVeh}-Photo-Proof.${sealedShot.ext}`, content: sealedShot.b64 });
 
     const emailHtml = buildEmailHtml(analysis, reportUrl, verifyUrl, sealedShot);
 
