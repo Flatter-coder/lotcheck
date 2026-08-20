@@ -693,7 +693,7 @@
        paint, and kept asserting it over invented numbers when the fetch died. -->
   ◆ <b>Dealer counts — <span id="dealerSource">reading Alberta car dealerships from OpenStreetMap…</span>, each binned to its nearest city.</b>
   Weather (temperature, condition, day/night) is <b>live from Open-Meteo</b> (free, no key), labelled with its fetch time.
-  The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (dealers' advertised prices measured against <span class="mono">msrp_catalog</span>) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
+  The <b>price-vs-MSRP gauge is still sample data</b> — it goes live once the market-price pipeline (dealers' advertised prices measured against verified manufacturer MSRP) is built. City positions are real coordinates; terrain shading is stylized, not survey elevation.
 </div>
 
 <script>
@@ -1585,7 +1585,7 @@
   // back as HTTP 200 carrying HTML. `r.ok` passes, and only parsing and then
   // checking the shape catches it. Without this the file-missing case can never
   // present as a failure at all.
-  var REFRESH_DAYS=7, AGED_AFTER_DAYS=15;   // weekly job; one missed run is tolerable, two is not
+  var REFRESH_DAYS=1, AGED_AFTER_DAYS=3;   // daily job; one missed run is tolerable, three is not
   function setDealerPill(state, detail){
     var el=document.getElementById("dealerPill"); if(!el) return;
     el.classList.remove("live","aged");
