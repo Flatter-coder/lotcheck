@@ -176,8 +176,18 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
   // Either side counts: when the dealer advertises no rate we fill the
   // manufacturer's published promo rate as a labelled reference, and that IS
   // the check resolving.
-  const apr: CheckRow = pos(a.financeRates?.dealer?.apr)
-    ? row("apr", "verified", `dealer ${a.financeRates.dealer.apr}%`)
+  // "verified" on the dealer side requires an EVIDENCED source (the feed, a
+  // platform data blob, or matched page text -- see apr-extract.js). The
+  // model's own unconfirmed read ("llm", or no source at all) resolving to
+  // some number is not the same as the rate being right -- this checkpoint
+  // logged green for a report that told a buyer to accuse a dealer of a 25%
+  // rate the page never advertised (2026-08-19, easytermauto.ca). Falls
+  // through to the manufacturer reference exactly as if the dealer had
+  // disclosed nothing, matching every display surface's fallback.
+  const dealerAprTrusted = pos(a.financeRates?.dealer?.apr) && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source)
+    ? a.financeRates.dealer.apr : null;
+  const apr: CheckRow = dealerAprTrusted != null
+    ? row("apr", "verified", `dealer ${dealerAprTrusted}%`)
     : pos(a.financeRates?.manufacturer?.apr)
       ? row("apr", "verified", `manufacturer reference ${a.financeRates.manufacturer.apr}%`)
       : row("apr", "not_attempted", `no advertised rate and no ${a.make ?? "make"} row in finance_rate_catalog`);

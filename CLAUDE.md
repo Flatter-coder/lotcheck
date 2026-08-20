@@ -32,7 +32,7 @@ Entry chain: `app.html` → `/src/main.jsx` → `src/App.jsx` (mounted on `#root
 
 - **`app.html`** — the real app shell and Vite build input (see `vite.config.js`
   `rollupOptions.input.app`). Holds all `<head>` SEO/OG/PWA metadata.
-- **`src/App.jsx`** — ~4,700-line monolith. This is where nearly all UI and app
+- **`src/App.jsx`** — ~12,000-line monolith. This is where nearly all UI and app
   logic lives; the git history is almost entirely "Update App.jsx" churn. Any
   runtime bug most likely lives here.
 - **`src/main.jsx`** — React root bootstrap (StrictMode).
@@ -45,8 +45,11 @@ Entry chain: `app.html` → `/src/main.jsx` → `src/App.jsx` (mounted on `#root
 - **`.github/workflows/update-statcan-zev.yml`** — scheduled job that refreshes
   the StatCan ZEV dataset. (It lived in a **dotless** `github/workflows/` until
   2026-08-17, so GitHub never saw it and the "daily" job had not run once in the
-  46 days since the data was written. `check:workflows` now fails the build if a
-  workflow file appears anywhere but `.github/workflows/`.)
+  46 days since the data was written. `check:jobs`
+  (`scripts/check-scheduled-jobs.mjs`) now fails the build if a workflow file
+  appears anywhere but `.github/workflows/`, and also requires every
+  third-party fetch in `scripts/` to send a User-Agent header — anonymous
+  Overpass requests drew 406/429 and silently lost 4 of 5 weekly runs.)
 
 ### Key dependencies
 `react` 18, `recharts` (charts), `@supabase/supabase-js`, `@vercel/analytics`,

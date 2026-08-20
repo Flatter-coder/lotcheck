@@ -334,15 +334,22 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   }
 
   // 3 -- Financing APR (compact; glow if the dealer rate beats the maker's advertised)
+  // Dealer APR only powers the "high"/dollar-gap claim when it carries
+  // evidence (sm360_feed/convertus_vms/page_text -- see App.jsx
+  // TRUSTED_APR_SOURCES and _shared/deal.ts's trustedDealerApr, kept in
+  // sync). An unconfirmed LLM read ("llm", or the pre-2026-08-19 shape with
+  // no source) accused a dealer of a 25% rate and a $23,275 markup for a
+  // page that discloses no APR anywhere (easytermauto.ca).
   const fr = a.financeRates;
-  if (fr && (fr.dealer || fr.manufacturer)) {
-    const high = fr.dealer && fr.manufacturer && (fr.dealer.apr - fr.manufacturer.apr > 0.1);
+  const frDealerTrusted = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
+  if (fr && (frDealerTrusted != null || fr.manufacturer)) {
+    const high = frDealerTrusted != null && fr.manufacturer && (frDealerTrusted - fr.manufacturer.apr > 0.1);
     let body = "";
-    if (fr.dealer) body += `<div style="font-size:18px;font-weight:900;color:${high ? "#A63C25" : "#33305A"};">${fr.dealer.apr}% APR <span style="font-size:12px;font-weight:700;color:${high ? "#A63C25" : "#706D96"};">${high ? "· high" : "· this dealer"}</span></div>`;
+    if (frDealerTrusted != null) body += `<div style="font-size:18px;font-weight:900;color:${high ? "#A63C25" : "#33305A"};">${frDealerTrusted}% APR <span style="font-size:12px;font-weight:700;color:${high ? "#A63C25" : "#706D96"};">${high ? "· high" : "· this dealer"}</span></div>`;
     if (high) {
-      const rd = fr.dealer.apr / 1200, rm = fr.manufacturer.apr / 1200;
+      const rd = frDealerTrusted / 1200, rm = fr.manufacturer.apr / 1200;
       const extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60);
-      body += `<div style="font-size:12.5px;color:#33305A;margin-top:5px;line-height:1.5;">${(fr.dealer.apr - fr.manufacturer.apr).toFixed(2)}% above ${escapeHtml(a.make || "the manufacturer")}'s advertised ${fr.manufacturer.apr}% — about <b>${money(extra)}</b> more over 60 months. Ask them to match it.</div>`;
+      body += `<div style="font-size:12.5px;color:#33305A;margin-top:5px;line-height:1.5;">${(frDealerTrusted - fr.manufacturer.apr).toFixed(2)}% above ${escapeHtml(a.make || "the manufacturer")}'s advertised ${fr.manufacturer.apr}% — about <b>${money(extra)}</b> more over 60 months. Ask them to match it.</div>`;
     } else if (fr.manufacturer) {
       body += `<div style="font-size:12px;color:#706D96;margin-top:4px;">${escapeHtml(a.make || "Manufacturer")} advertises ${fr.manufacturer.apr}% on new.</div>`;
     }
@@ -689,7 +696,11 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if ((a.addOns || []).length) { const fl = a.addOns.filter((x: any) => x.verdict === "flagged").length; P.push({ t: "Add-ons & fee audit", v: fl ? fl + " FLAGGED" : "TRANSPARENT", tone: fl ? "flag" : "pass" }); }
   else P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
   const fr = a.financeRates;
-  if (fr?.dealer) { const high = fr.manufacturer && fr.dealer.apr - fr.manufacturer.apr > 0.1; P.push({ t: "Financing APR (this dealer)", v: fr.dealer.apr + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
+  // See the fuller comment at the deck-card version above: an untrusted
+  // (LLM-only) dealer APR falls through to the same states as if none were
+  // disclosed at all, same as every other surface.
+  const frDealerVerified = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
+  if (frDealerVerified != null) { const high = fr.manufacturer && frDealerVerified - fr.manufacturer.apr > 0.1; P.push({ t: "Financing APR (this dealer)", v: frDealerVerified + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
   else if (fr?.manufacturer) P.push({ t: "Financing APR", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
   else P.push({ t: "Financing APR", v: "NONE ADVERTISED", tone: "muted" });
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
@@ -745,7 +756,7 @@ function pointExplain(t: string, a: any): string | null {
         ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
         : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";
     case "Financing APR": case "Financing APR (this dealer)":
-      return a.financeRates?.dealer?.apr != null
+      return (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source))
         ? "APR is the yearly interest rate on the loan. Compare it against your own bank or credit union before accepting - dealer rates often carry hidden markup."
         : "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
     case "Financing math":

@@ -1069,43 +1069,21 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
 // _shared/invariants.ts. It used to be a byte-identical copy in this file AND
 // in analyze-listing-url, so a correction to one silently missed the other.
 
-// HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
-// trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
-// certificate: UnknownIssuer"), so an https fetch fails at connect time. The
-// endpoint serves the same JSON over plain http with no redirect, which
-// avoids the cert problem. Confirmed 2026-07-22.
-c
-c
-f
-a> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
-  } finally { clearTimeout(timer); }
-}
 // Candidate model strings, most-authoritative first. TC's model-name match is
 // EXACT, so "Palisade Ultimate Calligraphy" returns zero while "Palisade"
 // returns the real recalls. We try the catalog-canonical base model first, then
 // the full string, then progressively drop trailing (trim) words -- stopping at
 // the first candidate that TC recognises. Multi-word base models ("Santa Fe",
 // "Grand Cherokee", "Cross Sport") survive because we stop at the first hit.
-f
 // Does TC recognise this make/model at all? Distinguishes a CONFIRMED clean bill
 // from a lookup miss. Queries a PAST window (year-10..year-1) to dodge the TC
 // quirk where a range ending in the newest model year silently drops that year.
-a
 // Returns a tri-state:
 //   { checked:false }                       -> registry unreachable ("couldn't verify")
 //   { checked:true, count:N>0, items }       -> recalls found
 //   { checked:true, count:0, confirmed:true} -> CONFIRMED clean (model matched TC)
 //   { checked:true, count:0, confirmed:false}-> zero, but model never matched -> "couldn't confirm"
 // A negative safety claim ("no open recalls") is ONLY safe when confirmed=true.
-a
 
 function computeFinancingCheck(analysis: any): void {
   const f = analysis?.financing;
@@ -1160,7 +1138,7 @@ function computeOdometerCheck(analysis: any): void {
     const low = age * 10000;
     if (km < low * 0.6) {
       flag = true;
-      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
     } else if (km > age * 30000) {
       note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
     } else {
@@ -1177,7 +1155,11 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
   const pageRate = Number(analysis?.financing?.rate);
   if (pageRate && pageRate > 0 && pageRate < 30) {
-    out.dealer = { apr: pageRate };
+    // Uploaded-quote path has no page-text/feed backstop to cross-check
+    // against -- every rate here is the LLM's own read of the photo/PDF, so
+    // it is always untrusted for the accusatory HIGH/dollar-gap claim. See
+    // the identical tag in analyze-listing-url/index.ts resolveFinanceRates.
+    out.dealer = { apr: pageRate, source: analysis.financing?.source || "llm" };
   }
   if (analysis.make) {
     try {

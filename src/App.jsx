@@ -4076,7 +4076,11 @@ function AlertFoldersTab(){
 //                analyze-listing-url and get-dealer-sentiment. THE TARGET IS
 //                UNDER 1% FAILURE, measured per checkpoint rather than per
 //                request, because 12 of 13 delivered is a failure of the 13th.
-//   Missing      report_delivery — email send + PDF hash + provider receipt
+//                report_delivery(_event) — email send + PDF SHA-256 + provider
+//                receipt (20260814_report_delivery.sql), read via
+//                fn_admin_delivery_ledger below; if the migration is not
+//                applied in the target database the rows render as
+//                "not instrumented", never as green.
 const VERIF_BUCKETS = [
   { k:"1h",  label:"Last hour",      n:12,
     floor:d=>{const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/5)*5); return x;},
@@ -6994,6 +6998,15 @@ const FILE_SCAN_STAGES = [
 // manufacturer rate the backend already resolved (finance_rate_catalog), and
 // the Bank of Canada policy rate fetched LIVE from the BoC Valet API (dated,
 // with a source link). No illustrative payment is ever labelled a firm offer.
+// Sources that carry real evidence for a dealer's advertised APR (the feed,
+// a platform data blob, or literal page text tied to financing -- see
+// supabase/functions/_shared/apr-extract.js). "llm" (the model's own
+// unconfirmed read) or no source at all may never power an accusatory
+// dealer-vs-manufacturer comparison, a counter-script line, or a savings
+// claim. Kept in sync with _shared/deal.ts's identical set -- App.jsx can't
+// import a Deno module, so this is duplicated on purpose, not by mistake.
+const TRUSTED_APR_SOURCES = new Set(["sm360_feed", "convertus_vms", "page_text"]);
+
 const FIN_DOWN = [0, 5000, 10000, 15000, 20000];
 const FIN_TERMS = [24, 36, 48, 60, 72, 84];
 const FIN_FREQS = [
@@ -7063,9 +7076,19 @@ function FinancingBreakdown({ analysis, C, cardStyle }){
   const disclosedRate = Number(analysis?.financing?.rate) || null;
   const mfr = analysis?.financeRates?.manufacturer || null;
   const mfrRate = mfr?.apr != null ? Number(mfr.apr) : null;
-  const dealerRate = analysis?.financeRates?.dealer?.apr != null
+  // Dealer APR only counts as THIS car's real rate, for the manufacturer
+  // comparison below, when it carries evidence (the dealer's own feed, a
+  // platform data blob, or literal page text tied to financing -- see
+  // TRUSTED_APR_SOURCES on the Financing APR report point and
+  // _shared/deal.ts's trustedDealerApr, kept in sync with this set). The
+  // model's own unconfirmed read of the page (source "llm", or no source at
+  // all) is not enough -- it accused a dealer of a 25% rate and a $23,275
+  // markup for a page that discloses no APR anywhere (2026-08-19,
+  // easytermauto.ca). Missing beats wrong.
+  const dealerAprSource = analysis?.financeRates?.dealer?.source;
+  const dealerRate = (analysis?.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(dealerAprSource))
     ? Number(analysis.financeRates.dealer.apr)
-    : (disclosedRate || null);
+    : null;
   const lease = analysis?.leaseRates?.manufacturer || null;
   const leaseRate = lease?.apr != null ? Number(lease.apr) : null;
   const leaseKm = lease?.annualKm || null;
@@ -8169,7 +8192,7 @@ function encodeReport(a){
   const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
     qp:a.quotedPrice,ms:a.msrp,
     fin:a.financing?{p:a.financing.paymentAmount,f:a.financing.paymentFrequency,r:a.financing.rate,t:a.financing.termMonths}:null,
-    fr:a.financeRates?{d:a.financeRates.dealer?.apr??null,m:a.financeRates.manufacturer?.apr??null}:null,
+    fr:a.financeRates?{d:a.financeRates.dealer?.apr??null,ds:a.financeRates.dealer?.source??null,m:a.financeRates.manufacturer?.apr??null}:null,
     rc:a.recalls?.checked?{n:a.recalls.count,it:(a.recalls.items||[]).slice(0,6).map(x=>({s:x.system,d:x.date}))}:null,
     ao:(a.addOns||[]).map(x=>({n:x.name,p:x.price,vd:x.verdict||(x.flagged?"flagged":"standard")})),
     tf:a.totalFlaggedCost,
@@ -8204,7 +8227,7 @@ function decodeReport(s){
     return {vehicle:c.v,year:c.y,make:c.mk,model:c.md,trim:c.tr,dealerName:c.dn,dealerCity:c.dc,vehicleCondition:c.cond,
       quotedPrice:c.qp,msrp:c.ms,
       financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
-      financeRates:c.fr?{dealer:c.fr.d!=null?{apr:c.fr.d}:null,manufacturer:c.fr.m!=null?{apr:c.fr.m}:null}:null,
+      financeRates:c.fr?{dealer:c.fr.d!=null?{apr:c.fr.d,source:c.fr.ds||null}:null,manufacturer:c.fr.m!=null?{apr:c.fr.m}:null}:null,
       recalls:c.rc?{checked:true,count:c.rc.n,items:(c.rc.it||[]).map(x=>({system:x.s,date:x.d})),source:"Transport Canada VRDB"}:null,
       addOns:(c.ao||[]).map(x=>({name:x.n,price:x.p,verdict:x.vd})),
       totalFlaggedCost:c.tf,
@@ -8386,7 +8409,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const body = (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
     P.push({ title: "Add-ons & fee audit", tone, v, body }); }
   // 4 Financing APR
-  { const dr = a.financeRates?.dealer?.apr, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
+  { const dr = (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
     const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" }; const tone = high ? "flag" : "muted"; const v = dr != null ? dr + "%" + (high ? " HIGH" : "") : (mr != null ? mr + "% OEM REF" : "NONE ADVERTISED");
     const body = (dr != null || a.financing?.paymentAmount) ? <div>{a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}{dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}{high ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div> : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}</div> : <Simple big="Not shown" c={MUT2} note="No financing rate was quoted." />;
     P.push({ title: "Financing APR", tone, v, body }); }
@@ -8479,7 +8502,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     "Add-ons & fee audit": (a.addOns || []).length
       ? "These are things the DEALER added on top of the car's price — packages, accessories, protection products. They're where dealers make extra margin, and you can say no to most of them. Every line here is one you're allowed to question."
       : "The listing doesn't itemize any dealer extras. That doesn't mean there are none — ask for the full out-the-door breakdown in writing before you agree to anything.",
-    "Financing APR": a.financeRates?.dealer?.apr != null
+    "Financing APR": (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source))
       ? `APR is the yearly interest rate on the loan. This dealer advertises ${a.financeRates.dealer.apr}% — compare it against your own bank or credit union before accepting, because dealer rates often carry hidden markup.`
       : "The listing doesn't advertise a financing rate. Get the APR in writing and compare it with your own bank before you sign anything in the finance office.",
     "Financing math": a.financingCheck?.checked
@@ -8892,7 +8915,7 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       {ms>0&&<div className="rfb-stat"><div className="rfb-lab">{exactFb?"Verified MSRP":"MSRP · starting at"}</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{exactFb&&delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}{!exactFb&&<div className="rfb-sub">base model — this unit's options are extra</div>}</div>}
       <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
     </div>); }
-    if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=a.financeRates?.dealer?.apr, mRate=a.financeRates?.manufacturer?.apr;
+    if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=(a.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source))?a.financeRates.dealer.apr:null, mRate=a.financeRates?.manufacturer?.apr;
       return (<div className="rfb-pg">{num}<div className="rfb-k">Financing</div>
       <h2 className="rfb-h2">{dRate&&mRate&&dRate>mRate?`Rate is ${(dRate-mRate).toFixed(2)}% over ${a.make}'s`:"Payment breakdown"}</h2>
       {fin?.paymentAmount&&fin?.paymentFrequency&&<div className="rfb-stat"><div className="rfb-lab">On your quote</div><div className="rfb-big">{money(fin.paymentAmount)}<span style={{fontSize:16,color:"#9a94b4"}}>{fSuf[fin.paymentFrequency]}</span></div><div className="rfb-sub">{r?`${r}% APR · `:""}{fin.termMonths?`${fin.termMonths} months`:""}</div></div>}
@@ -8909,6 +8932,11 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       {r.count>0?<>
         <div className="rfb-why"><div className="rfb-wh">Why you're seeing this</div><div className="rfb-wt">Open safety-recall campaigns <b>Transport Canada</b> publishes for this year/make/model — read live from the federal Vehicle Recall Database. Government data, not our opinion. Confirm by <b>VIN</b> with the dealer.</div></div>
         <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
+        {/* Fixed-page layout genuinely can't fit an unbounded list -- unlike
+            the scroll view's expandable section, which now shows every item.
+            The cap itself is fine; hiding that it's a cap is not (same
+            promised-vs-delivered gap that hit the scroll view, 2026-08-20). */}
+        {(r.items||[]).length>5&&<div className="rfb-lede" style={{marginTop:6,fontSize:11.5}}>+ {(r.items||[]).length-5} more — see the full report.</div>}
         <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
       </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
     </div>); }
@@ -11104,7 +11132,12 @@ function QuoteCheckPage(){
                 tiles.push({label:fLbl[fr]||"Payment",value:`$${Math.round(analysis.financing.paymentAmount).toLocaleString()}`,valueSuffix:fSuf[fr]||"",sub:`${analysis.financing.rate?`${analysis.financing.rate}% · `:""}disclosed on quote`});
                 return;
               }
-              const rate=analysis.financeRates?.dealer?.apr??analysis.financing?.rate??analysis.financeRates?.manufacturer?.apr??null;
+              // Never estimate a payment off an unconfirmed rate when a
+              // trustworthy manufacturer reference is sitting right there --
+              // same TRUSTED_APR_SOURCES gate as the Financing APR report
+              // point, so this tile can't quietly show a fabricated APR the
+              // badge above it already refused to show.
+              const rate=(analysis.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(analysis.financeRates.dealer.source))?analysis.financeRates.dealer.apr:analysis.financeRates?.manufacturer?.apr??null;
               if(qPrice>0&&rate!=null){
                 const termRaw=Number(analysis.financing?.termMonths)||0;
                 const term=FIN_TERMS.includes(termRaw)?termRaw:60;
@@ -11455,7 +11488,12 @@ function QuoteCheckPage(){
                       </div>
                     </div>
                     <DetailToggle C={C} moreLabel={`Show ${r.count} recall detail${r.count>1?"s":""}`} lessLabel="Hide recall details">
-                      {(r.items||[]).slice(0,4).map((it,i)=>(
+                      {/* Was slice(0,4): the button promises r.count details
+                          ("Show 9 recall details") and silently delivered 4 --
+                          confirmed live 2026-08-20. Show every item the server
+                          actually fetched; the server's own cap (20, generous
+                          headroom) is the only limit now. */}
+                      {(r.items||[]).map((it,i)=>(
                         <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
                           <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
                           {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}

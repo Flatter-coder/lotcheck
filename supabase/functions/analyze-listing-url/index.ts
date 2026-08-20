@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16g";  // + recall confirmed now registry-backed, carries confirmedBy
+const CACHE_VER = "2026-08-16h";  // + dealer APR trust gate, recall detail cap 8->20 + no silent truncation
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -509,37 +509,6 @@ async function applyVerifiedFuelType(analysis: any): Promise<void> {
 // invariant that keeps analysis.vinCheck in sync with analysis.vin. It used to
 // be a byte-identical copy in this file AND in analyze-quote.
 
-// Open-recall lookup against Transport Canada's live Vehicle Recalls
-// Database (VRDB) -- the real federal registry, queried at report time,
-// NO API key required (confirmed 2026-07-22). This makes the "Open recalls
-// (Transport Canada)" stage a genuine check. Two steps: (1) list recalls
-// for this exact year/make/model, (2) fetch each recall's affected system +
-// plain-language summary. Never throws: any error/timeout yields
-// { checked:false } so the report still renders.
-// HTTP (not HTTPS) on purpose: the Supabase edge runtime (Deno) does not
-// trust data.tc.gc.ca's Government-of-Canada TLS certificate ("invalid peer
-// certificate: UnknownIssuer"), so an https fetch fails at connect time. The
-// endpoint serves the same JSON over plain http with no redirect, which
-// avoids the cert problem. Confirmed 2026-07-22.
-c
-c
-
-f
-
-a> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    return { ok: true, data: await res.json() };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 // Resolve the extracted model to its CANONICAL base model via our own
 // msrp_catalog ("Palisade Ultimate Calligraphy" -> "PALISADE"). Feeds both the
 // recall and MSRP lookups so trim in the model field can't break the exact
@@ -578,12 +547,9 @@ async function resolveBaseModel(year: number, make: string, model: string): Prom
     return best;
   } catch { return null; }
 }
-f
-a
 // Tri-state: {checked:false}=unreachable; {count>0}=found; {count:0,confirmed:true}=
 // CONFIRMED clean; {count:0,confirmed:false}=zero but model never matched. A
 // negative safety claim is ONLY safe when confirmed=true. See make-recalls-fail-safe.
-a
 
 // Financing math check: reconcile the dealer's OWN disclosed payment stream
 // against the stated total obligation. Deliberately conservative to avoid
@@ -657,7 +623,7 @@ function computeOdometerCheck(analysis: any): void {
     const low = age * 10000;
     if (km < low * 0.6) {
       flag = true;
-      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is a genuine selling point — but confirm it against a VIN history report, since implausibly low mileage is also the classic sign of an odometer rollback.`;
+      note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
     } else if (km > age * 30000) {
       note = `${km.toLocaleString()} km is higher than average for its age (typical is around ${typical.toLocaleString()} km) — factor the extra wear and reduced remaining warranty into the price.`;
     } else {
@@ -780,7 +746,16 @@ async function resolveFinanceRates(analysis: any): Promise<void> {
   const out: any = { dealer: null, manufacturer: null };
   const pageRate = Number(analysis?.financing?.rate);
   if (pageRate && pageRate > 0 && pageRate < 30) {
-    out.dealer = { apr: pageRate };
+    // source travels with the rate so the frontend can tell "the page/feed
+    // genuinely says this" (sm360_feed, convertus_vms, page_text -- all three
+    // require real evidence, see apr-extract.js) from "the model's own read of
+    // the page, no cross-check" (llm -- the extraction prompt says never
+    // guess, but nothing downstream enforced that until this field existed).
+    // Only the former may power an accusatory HIGH/dollar-gap claim -- see
+    // App.jsx TRUSTED_APR_SOURCES. Confirmed live 2026-08-19 (easytermauto.ca
+    // Bronco Sport): a report accused a dealer of a 25% rate and quoted a
+    // $23,275 markup for a page that discloses no APR anywhere.
+    out.dealer = { apr: pageRate, source: analysis.financing?.source || "llm" };
   }
   if (analysis.make) {
     try {
@@ -3534,6 +3509,20 @@ Deno.serve(async (req: Request) => {
         }
       }
     } catch { /* the safety net must never sink the scan */ }
+
+    // Re-sync financeRates.dealer from analysis.financing NOW that both the
+    // page-text APR backstop (above) and the Convertus gap-fill (just above)
+    // have had their turn. resolveFinanceRates() ran much earlier and built
+    // financeRates.dealer from whatever the LLM's own read happened to be at
+    // that point -- so a rate either backstop found afterward could never
+    // reach the report at all, and the evidenced source tag they attach
+    // (page_text / convertus_vms) never overrode an untrusted LLM guess that
+    // arrived first. This makes the two deterministic, evidence-carrying
+    // sources actually able to inform what ships, with source preserved.
+    if (Number(analysis.financing?.rate) > 0) {
+      analysis.financeRates = analysis.financeRates || { dealer: null, manufacturer: null };
+      analysis.financeRates.dealer = { apr: Number(analysis.financing.rate), source: analysis.financing.source || "llm" };
+    }
 
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
