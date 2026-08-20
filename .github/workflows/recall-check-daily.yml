@@ -1,0 +1,45 @@
+name: Recall check (daily)
+# Sweeps Transport Canada's VRDB for every make we cover, stores what it finds,
+# and STAGES any newly-appeared recall into the run summary.
+#
+# IT SENDS NOTHING. The job computes and stages; delivering a recall notice to
+# anyone is a separate, human-approved act. Nothing in here has an outbound path.
+#
+# WHY THIS EXISTS. The recall lookup already runs live inside every report, so a
+# report is always fresh. What it cannot do is tell a buyer about a recall issued
+# the day AFTER their report — they hold a signed document that was true when it
+# was signed. Detecting "new" needs yesterday to still exist, which is what
+# vehicle_recall is for.
+#
+# 4am Calgary, ahead of the day's traffic and after catalog-rates-daily (10:00
+# UTC) so a heavy morning is not two jobs wide.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Sweep and print, but write nothing"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "30 10 * * *"   # daily, 10:30 UTC (~4:30am Calgary)
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # The offline guards run first and cost nothing. A sweep that would write
+      # a truncated response is worse than a sweep that does not run.
+      - name: Guard — sweep contract
+        run: npm run test:recall-sweep
+
+      - name: Sweep Transport Canada
+        run: node scripts/check-recalls-daily.mjs ${{ inputs.dry_run && '--dry-run' || '' }}

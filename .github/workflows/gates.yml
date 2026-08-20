@@ -36,6 +36,12 @@
 # NOT included: test:recalls. It queries Transport Canada live, so putting it on
 # every push would hammer a government API and make the signal weather-dependent.
 # Run it by hand when touching recall code (it self-SKIPs when TC is unreachable).
+# That exclusion is why it sat red on main for a week after aa6183a — nothing was
+# watching the one gate nothing runs.
+#
+# test:recall-sweep IS included: it is the offline contract for the daily recall
+# sweep and touches no network at all (stub fetch throughout). The daily job runs
+# it again as its own first step, so a broken sweep cannot reach the registry.
 name: Gates
 
 on:
@@ -91,6 +97,13 @@ jobs:
       # part-to-whole geometry lets a reader turn it into a market share. It also
       # pins the class prefix: the bar was once <span class="track">, which
       # inherited the ticker's marquee and dragged every bar sideways.
+      # The daily Transport Canada sweep must never report "no new recalls" when
+      # there are some. TC caps a response with no count and no "hasMore" flag —
+      # at the default the cap hides 43% of Toyota's recalls — so completeness has
+      # to be proven, an unreadable make must stay unreadable rather than become
+      # zero, and the job stages what it finds without ever sending it.
+      - name: Recall sweep (completeness, fail-safe, stages but never sends)
+        run: npm run test:recall-sweep
       # Four copies of the Transport Canada lookup drifted apart, and the only
       # correct one was the module nothing imported -- so its regression harness
       # proved nothing about what shipped. One declaration, every consumer
