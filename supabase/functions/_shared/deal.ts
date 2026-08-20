@@ -26,11 +26,27 @@ const norm = (s: unknown): string => (typeof s === "string" ? s : "").toLowerCas
 // Mirrors isManufacturerFigure's role for MSRP -- one gate, not one per call
 // site. Duplicated in App.jsx (client can't import a Deno module); keep both
 // in sync.
-const TRUSTED_APR_SOURCES = new Set(["sm360_feed", "convertus_vms", "page_text"]);
+export const TRUSTED_APR_SOURCES = new Set(["sm360_feed", "convertus_vms", "page_text"]);
 const trustedDealerApr = (analysis: any): number | null => {
   const d = analysis?.financeRates?.dealer;
   return d?.apr != null && TRUSTED_APR_SOURCES.has(d.source) ? num(d.apr) : null;
 };
+
+// Guards the deterministic backstops in analyze-listing-url (page-text regex,
+// Convertus VMS gap-fill): they should run whenever there is NOT already a
+// TRUSTED rate, so they can upgrade or correct an unproven guess. The bug this
+// closes: both backstops used to skip whenever analysis.financing.rate was
+// simply already a positive number, regardless of source -- so an untrusted
+// LLM guess landing first (same field, same shape) permanently blocked the
+// deterministic extractor from ever running, even on pages that plainly state
+// the rate in their own visible text. Confirmed live 2026-08-20
+// (legacyautogroup.ca 2026 Explorer): "5.49% financing for 84 months ... @
+// 5.49% APR O.A.C." sits in the page's own description text --
+// extractAdvertisedApr finds it correctly given that text -- but the guard
+// never let it run, because the LLM had already set financing.rate first.
+export function hasTrustedFinanceRate(financing: any): boolean {
+  return Number(financing?.rate) > 0 && TRUSTED_APR_SOURCES.has(financing?.source);
+}
 
 // Unavoidable government / logistics pass-throughs.
 const FEE_RE = /\b(doc(ument(ation)?)?|registration|licen[sc]e|title|freight|pdi|destination|delivery|a\/?c (levy|tax)|air ?conditioning|tire (levy|tax|fee|recycl)|environment|omvic|amvic|govern|filing|excise|luxury tax|green levy|gst|pst|hst|qst|sales tax)\b/;

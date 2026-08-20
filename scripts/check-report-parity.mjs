@@ -161,7 +161,7 @@ const SURFACES = [
     email: {
       "email capture box":     "Attached: the listing, as it looked at report time",
       "PDF evidence pages":    "SEALED LISTING CAPTURE",
-      "attachment push":       "-listing-capture.",
+      "attachment push":       "-Photo-Proof.",
       "verified seal gate":    "async function verifySealedShot",
     },
   },

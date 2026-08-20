@@ -68,7 +68,7 @@ import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
-import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16i";  // + sourceUrl/capturedAt now stamped server-side before signing (email-send signature fix)
+const CACHE_VER = "2026-08-16k";  // + vision rescue now gets a reserved minimum budget instead of whatever enrichAnalysis left over
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3383,8 +3383,19 @@ Deno.serve(async (req: Request) => {
     // Advertised-APR backstop. The dealer's own rate was missing from 4 of 10
     // reports in the benchmark even where the page printed it, because only the
     // SM360 feed and the LLM pass supplied it. Deterministic, finance-context
-    // only, and it never overwrites a rate we already have.
-    if (!(Number(analysis.financing?.rate) > 0) && typeof pageContent === "string") {
+    // only, and it never overwrites a rate we already have -- from a TRUSTED
+    // source. The guard used to be "skip if ANY rate is already set", which
+    // meant an LLM guess (analysis.financing.rate set with no evidenced
+    // source) permanently blocked this from ever running, even when it would
+    // have found the exact same number with real evidence behind it. Confirmed
+    // live 2026-08-20 (legacyautogroup.ca 2026 Explorer): the page plainly
+    // states "5.49% financing for 84 months ... @ 5.49% APR O.A.C." in its own
+    // visible description text -- extractAdvertisedApr finds it correctly when
+    // given that exact text -- but the LLM pass had already populated
+    // analysis.financing.rate first, so this never ran, financeRates.dealer
+    // stayed source:"llm", and the trust gate correctly (but needlessly) hid a
+    // real, correct, page-stated rate as "Not shown".
+    if (!hasTrustedFinanceRate(analysis.financing) && typeof pageContent === "string") {
       const hit = extractAdvertisedApr(pageContent);
       if (hit) {
         analysis.financing = { ...(analysis.financing || {}), rate: hit.apr, source: "page_text" };
@@ -3499,7 +3510,12 @@ Deno.serve(async (req: Request) => {
         // "Financing APR: Not shown" and a missing disclaimer, while the page
         // headlined "6.69% for 96 Months" and carried a full Alberta Winter
         // Package fine-print paragraph vmsData had the whole time.
-        if (!(Number(analysis.financing?.rate) > 0) && cv.financeApr != null) {
+        //
+        // Same "any rate blocks this" guard bug as the page-text backstop
+        // below, fixed the same way: only a rate from an already-TRUSTED
+        // source should block the deterministic VMS read, not an unproven
+        // LLM guess sitting in the same field first.
+        if (!hasTrustedFinanceRate(analysis.financing) && cv.financeApr != null) {
           analysis.financing = { ...(analysis.financing || {}), rate: cv.financeApr, termMonths: cv.financeTermMonths ?? (analysis.financing as any)?.termMonths ?? null, source: "convertus_vms" };
           console.log("Convertus identity gap-fill: financing.rate.");
         }
@@ -3528,7 +3544,33 @@ Deno.serve(async (req: Request) => {
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
     // runs, so the two paths never drift apart.
-    await enrichAnalysis(analysis, REQUEST_DEADLINE);
+    //
+    // If the vision rescue below is already known to be needed (its own guard
+    // is the same "is quotedPrice still missing" check, which nothing in
+    // enrichAnalysis sets), reserve it a working minimum budget BEFORE
+    // enrichment spends the rest. enrichAnalysis is already deadline-aware --
+    // "the expensive step self-skips when there isn't enough budget left"
+    // (see its own comment above) -- so handing it a shorter deadline here is
+    // the SAME graceful degradation it already does for itself, just decided
+    // earlier and on purpose instead of by whatever happens to be left over.
+    // Without this, enrichment (recalls, catalog MSRP, dealer reputation,
+    // financing/lease-rate lookups) could spend the entire REQUEST_DEADLINE,
+    // leaving vision rescue's own budget clamped to a 1-second floor by the
+    // time its turn comes -- nowhere near enough for a real render + Claude
+    // vision read. Confirmed live 2026-08-20 (legacyautogroup.ca 2026
+    // Explorer): the report claimed its own extraction returned nothing but
+    // boilerplate while its OWN sealed screenshot -- captured moments later
+    // by a separate, much less expensive step -- clearly showed a real
+    // price, MSRP, 5.49% financing rate and 508 km odometer reading.
+    const VISION_RESCUE_RESERVE_MS = 40_000;
+    const willNeedVisionRescue = !(Number(analysis.quotedPrice) > 0) && scrapflyEnabled();
+    const enrichDeadline = willNeedVisionRescue
+      ? Math.min(REQUEST_DEADLINE, Math.max(Date.now() + 5_000, REQUEST_DEADLINE - VISION_RESCUE_RESERVE_MS))
+      : REQUEST_DEADLINE;
+    if (willNeedVisionRescue && enrichDeadline < REQUEST_DEADLINE) {
+      console.log(`Reserving ${VISION_RESCUE_RESERVE_MS}ms for vision rescue -- enrichAnalysis gets until ${new Date(enrichDeadline).toISOString()} instead of ${new Date(REQUEST_DEADLINE).toISOString()}.`);
+    }
+    await enrichAnalysis(analysis, enrichDeadline);
 
     // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
     // scrape can come back with no usable pricing. A report with no asking price
@@ -3548,9 +3590,27 @@ Deno.serve(async (req: Request) => {
     let renderConfirmedGated = false; // vision saw the rendered page and found NO price
     if (!(Number(analysis.quotedPrice) > 0) && scrapflyEnabled()) {
       try {
+        // Logged because "vision rescue found nothing" is indistinguishable
+        // from "vision rescue got starved of budget by everything upstream"
+        // without this number. Confirmed live 2026-08-20 (legacyautogroup.ca
+        // 2026 Explorer): the report's own summary said the captured page
+        // content was empty boilerplate and every price/APR/km point fell
+        // back to a wrong catalog/reference figure, while the SEALED
+        // SCREENSHOT attached to the SAME report clearly shows a real price,
+        // MSRP, 5.49% financing and 508 km -- the data was there, findable,
+        // and even successfully screenshotted, but apparently never reached
+        // by a vision pass with enough budget to read it. This clamps to a
+        // 1000ms floor when REQUEST_DEADLINE has already passed, which is not
+        // enough time for a real render + Claude vision read to complete --
+        // this line turns that suspicion into a number the next occurrence
+        // can confirm from logs instead of reconstructing from a PDF.
+        const rescueBudgetMs = Math.max(1_000, REQUEST_DEADLINE - Date.now());
+        if (rescueBudgetMs <= 5_000) {
+          console.warn(`Vision rescue starting with only ${rescueBudgetMs}ms left (REQUEST_DEADLINE already ${Date.now() > REQUEST_DEADLINE ? "passed" : "nearly reached"}) -- likely to fail from starvation, not a genuine "nothing on the page" read.`);
+        }
         const rescued = await rescueListingViaScrapfly(url, {
           systemPrompt: SYSTEM_PROMPT, anthropicKey: ANTHROPIC_API_KEY, model: CLAUDE_MODEL, preRendered: earlyRender, fallbackShot: shotPromise,
-          budgetMs: Math.max(1_000, REQUEST_DEADLINE - Date.now()),
+          budgetMs: rescueBudgetMs,
         });
         // Confirmation means the vision pass READ the rendered page and itself
         // reported the gating -- an empty/failed read is not confirmation. A
