@@ -10564,7 +10564,14 @@ function QuoteCheckPage(){
         setErrorMsg(data.error||"Something went wrong analyzing that listing.");
         return;
       }
-      setAnalysis(await finalizeReport({ ...data.analysis, sourceUrl: url, capturedAt: new Date().toISOString() }));
+      // sourceUrl/capturedAt are now stamped server-side (attachSealedScreenshot,
+      // before signing) on every listing-URL report, so they already ride
+      // inside the signed canonical. Only fill a gap the server left (an
+      // older cached/unsigned response) -- overwriting them unconditionally
+      // here, as this used to, changes what canonicalReport() recomputes at
+      // email-send time and breaks the signature against every fresh report.
+      // See the comment on attachSealedScreenshot in _shared/scrapfly.ts.
+      setAnalysis(await finalizeReport({ ...data.analysis, sourceUrl: data.analysis?.sourceUrl || url, capturedAt: data.analysis?.capturedAt || new Date().toISOString() }));
       setAnalysisSource("listing");
       fetchDealerSentiment(data.analysis?.dealerName,data.analysis?.dealerCity,data.analysis?.reportId);
       applyCheckSuccess(data);
