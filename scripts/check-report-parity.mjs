@@ -124,6 +124,22 @@ const SURFACES = [
     },
   },
   {
+    field: "trimRange (MSRP per trim, standing req 2026-08-19)",
+    app: {
+      "shared hook + cache":        "function useTrimRange",
+      "scroll view card":           "<TrimMsrpRange analysis={analysis}",
+      "heatmap/sidebar pool item":  'key: "trimrange"',
+      "flipbook page":              'if(p.t==="trims")',
+      "email payload attach":       "trimRangePayload(mainTrimRange)",
+    },
+    email: {
+      "shape validation":     "function trimRangeOk",
+      "server source map":    "EMAIL_MAKE_SITE",
+      "emailed HTML card":    'deck.push({ label: "MSRP per trim"',
+      "emailed PDF section":  'kicker("MSRP PER TRIM")',
+    },
+  },
+  {
     field: "daysOnLot parked-time care-asks",
     app: {
       "shared care-ask helper":      "function dolCareAsk",
