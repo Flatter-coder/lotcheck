@@ -20,6 +20,8 @@ the next instance.
 
 | fix | what broke | class | guard now in place |
 |---|---|---|---|
+| `bb15acd` | **The counter-script told a buyer with an already-expired factory warranty it was "plenty for now."** The "I'll pass on the extended warranty" move fired unconditionally whenever a dealer offered one, regardless of whether factory coverage was still active on THAT vehicle. Caught live: a 2022 RAV4 at 106,000 km — Toyota's real basic (3yr/60,000km) and powertrain (5yr/100,000km) coverage would both already be expired, so the reflexive "pass on it" is bad advice aimed at exactly the buyer who might most want to consider the extended plan | one-surface fix | gated on `analysis.remainingWarranty` (already computed, already shown elsewhere in the UI, just not threaded into this script before) — confirmed-expired gets a different line (compare cost vs. likely repairs, not an automatic pass); any coverage still active, or status unknown, keeps the original framing. 3 new `deal.test.ts` cases, 12/12 pass |
+| `0c8342f` | **"MSRP per trim" padded a 14-trim list out to 21 with exact duplicate rows.** LE, XLE, XLE Premium and Woodland each printed twice at the identical price, back to back — a catalog refresh leaving true duplicate inserts instead of an upsert, surfaced directly in the report. Caught live on a 2026 Toyota RAV4 | green signal, no check | dedupe by (trim text, msrp) in the one shared hook every surface reads from — deliberately conservative, only collapses EXACT duplicates; two rows genuinely disagreeing on price for a similar name (same report: "LIMITED" $52,000 vs "Limited" $52,350) stay separate rather than guessing which is right. Verified live against the real production catalog: 21 rows → 14 |
 | `61dc293` | **The emailed report's 2 attachments had no clue what either one was.** `LotCheck-{vehicle}.pdf` and `LotCheck-{vehicle}-listing-capture.jpg` gave no indication in Gmail's attachment strip why there were two files or what each did — read as confusing duplication. Caught live from Vic's own inbox screenshot | — | renamed to `-Report.pdf` / `-Photo-Proof.{ext}`. Considered and explicitly rejected: replacing the cryptographic seal with a visible logo watermark — a stamp is trivially reproducible on any screenshot in an image editor and proves nothing, where the whole point is that a dealer can't dispute a report by claiming LotCheck never said it. Kept the crypto; fixed the naming, which was the actual complaint |
 | `dfa00f7` | see the "Closed" note under `a77052f` in Open, below — reserving vision-rescue a minimum budget instead of whatever `enrichAnalysis` left over | one-surface fix | — |
 | `a77052f` | **A real, page-stated APR was hidden as "Not shown" because an untrusted LLM guess got to the field first.** Both the page-text regex backstop and the Convertus VMS gap-fill guarded themselves with "only run if `analysis.financing.rate` isn't already set" — but the LLM's own unconfirmed read fills that exact field first, with no evidenced source. Once it did, the deterministic extractors were permanently blocked from ever running on the SAME page, even where they'd find the identical number with real proof behind it. Caught live on legacyautogroup.ca (2026 Ford Explorer): the page's own visible text plainly states "5.49% financing for 84 months ... @ 5.49% APR O.A.C." — `extractAdvertisedApr` finds it correctly given that exact text (verified directly) — but the report showed "Financing APR: Not shown" | one-surface fix | guard extracted into one testable helper, `hasTrustedFinanceRate()` in `_shared/deal.ts` (alongside the `TRUSTED_APR_SOURCES` set it now exports) — a backstop runs whenever there is no TRUSTED rate yet, regardless of whether an unproven guess already sits in the field. Both backstops now share it |
@@ -138,6 +140,18 @@ the next instance.
 
 ## Open
 
+- **`msrp_catalog` likely holds true duplicate rows for the same trim, not
+  just display-layer clutter.** `0c8342f` (same day) fixed the SYMPTOM —
+  the "MSRP per trim" panel rendering every row with no dedup — but the
+  underlying catalog data itself wasn't touched, and the same panel still
+  shows genuinely conflicting entries for a similar trim name at DIFFERENT
+  prices (2026 RAV4: "LIMITED" $52,000 vs "Limited" $52,350; "XSE" at both
+  $50,900 and $56,400) that the display fix correctly declined to silently
+  resolve. Worth a real data-hygiene pass on the catalog refresh/upsert
+  path — what constraint (if any) prevents a re-run from inserting a second
+  row for the same make/model/year/trim, and are the casing-variant rows
+  ("LIMITED" vs "Limited") actually the same trim from two source runs that
+  never normalized to one key.
 - ~~A report can claim its own extraction failed entirely while its OWN
   sealed screenshot proves the data was there and readable.~~ **Closed by
   `dfa00f7`, same day.** `LC-B4CF-D00` (legacyautogroup.ca, 2026 Ford
