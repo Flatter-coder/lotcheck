@@ -65,6 +65,45 @@ const BATCH_PAUSE_MS = 250;
 // wall clock at the old timeout.
 const PROBE_TIMEOUT_MS = 5_000;
 
+// ---- rescue pass -----------------------------------------------------------
+// The probe runs on a GitHub runner, and a large share of dealer sites refuse
+// datacenter IPs outright. West Wind Honda (Lethbridge) answered 403 to all
+// SEVEN probes from CI and 200 from a normal connection, where our own parser
+// reads 15 vehicles with VINs off it. So "EDealer: 0 across Alberta" was
+// substantially a fact about our egress address, not about Alberta.
+//
+// 452 of 1,639 hosts (28%) never answered CI at all. Those get a second look
+// through Scrapfly's Canadian residential pool, which is already in the stack
+// for page render and is swappable plumbing under the vendor policy.
+//
+// DELIBERATELY CHEAP. Only hosts the direct pass could not reach are retried,
+// so a reachable host never costs a credit. One /new/ fetch serves all three
+// HTML detectors (EDealer, JSON-LD, Convertus) instead of one call each, and
+// SM360's JSON endpoint is only tried when that page yields nothing — at most
+// two billed calls per rescued host rather than seven.
+const RESCUE = process.argv.includes("--rescue");
+const SCRAPFLY_KEY = process.env.SCRAPFLY_API_KEY || "";
+const SCRAPFLY_CONCURRENCY = 5;      // the plan's hard ceiling
+const SCRAPFLY_TIMEOUT_MS = 45_000;  // asp negotiation is slow by design
+const RESCUABLE = new Set(["blocked", "unreachable", "timeout", "server-error"]);
+
+async function scrapflyGet(url, accept = "text/html") {
+  const u = new URL("https://api.scrapfly.io/scrape");
+  u.searchParams.set("key", SCRAPFLY_KEY);
+  u.searchParams.set("url", url);
+  u.searchParams.set("asp", "true");        // the bot wall is the whole point
+  u.searchParams.set("country", "ca");      // Canadian residential exit
+  const r = await fetch(u, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(SCRAPFLY_TIMEOUT_MS) });
+  if (!r.ok) throw new Error(`scrapfly HTTP ${r.status}`);
+  const j = await r.json();
+  const res = j?.result || {};
+  return {
+    status: Number(res.status_code) || 0,
+    contentType: String(res.content_type || accept),
+    body: typeof res.content === "string" ? res.content : "",
+  };
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchOverpass() {
@@ -246,6 +285,47 @@ function classifyMiss(trace) {
   return "responded-no-feed";
 }
 
+// One residential fetch of /new/, then every HTML detector reads that same
+// page. Keeps the billed call count at one for the common case and reuses the
+// SAME parsers the crawler runs, so "rescued" and "crawlable" cannot drift.
+async function rescueHost(cand) {
+  const trace = [];
+  try {
+    const page = await scrapflyGet(`${cand.host}/new/`);
+    if (page.status < 200 || page.status >= 300) {
+      note(trace, "rescue", `/new/ HTTP ${page.status} even via residential IP`);
+      return { ...cand, platform: null, miss: "blocked-everywhere", rescued: true, trace };
+    }
+    const html = page.body;
+    const ed = extractEdealerVehicles(html);
+    if (ed.length) return { ...cand, platform: "edealer", page1: ed.length, rescued: true };
+    const jl = extractJsonLdVehicles(html, "new");
+    if (jl.length) return { ...cand, platform: "jsonld_itemlist", page1: jl.length, rescued: true };
+    if (/convertus-vms|convertus\.rocks/i.test(html)) {
+      const m = html.match(/inventory[_-]?id["']?\s*[:=]\s*["']?(\d{2,8})/i) || html.match(/[?&]cp=(\d{2,8})/);
+      return { ...cand, platform: "convertus", cp: m ? m[1] : null, rescued: true };
+    }
+    // Only now is a second billed call worth it.
+    try {
+      const api = await scrapflyGet(`${cand.host}/en/new-inventory/api/listing?page=1`, "application/json");
+      if (api.status >= 200 && api.status < 300) {
+        const d = JSON.parse(api.body);
+        const veh = d?.vehicles || [];
+        if (veh.length) {
+          const withVin = veh.filter((v) => typeof v?.serialNo === "string" && /^[A-HJ-NPR-Z0-9]{17}$/.test(v.serialNo.trim().toUpperCase())).length;
+          return { ...cand, platform: "sm360", section: "new-inventory", page1: veh.length, withVin, pages: Number(d?.pagination?.numberOfPages) || 1, rescued: true };
+        }
+      }
+      note(trace, "rescue", `sm360 api HTTP ${api.status}`);
+    } catch (e) { note(trace, "rescue", `sm360 api ${e.message}`); }
+    note(trace, "rescue", `/new/ 200 via residential IP, no feed markers (${Math.round(html.length / 1024)}KB)`);
+    return { ...cand, platform: null, miss: "responded-no-feed", rescued: true, trace };
+  } catch (e) {
+    note(trace, "rescue", e.message);
+    return { ...cand, platform: null, miss: "rescue-failed", rescued: true, trace };
+  }
+}
+
 async function probe(cand) {
   const trace = [];
   try {
@@ -375,6 +455,32 @@ async function main() {
   }
   console.log("");
   flush();
+
+  if (RESCUE) {
+    const stuck = results.filter((r) => !r.platform && RESCUABLE.has(r.miss));
+    if (!SCRAPFLY_KEY) {
+      console.warn(`\n--rescue asked for but SCRAPFLY_API_KEY is not set — ${stuck.length} unreachable host(s) left unrescued.`);
+    } else if (!stuck.length) {
+      console.log("\n--rescue: every host answered directly, nothing to retry.");
+    } else {
+      console.log(`\n── rescue pass: ${stuck.length} host(s) that never answered, retried on a Canadian residential IP ──`);
+      const byHost = new Map(results.map((r, i) => [r.host, i]));
+      let done = 0, recovered = 0;
+      for (let i = 0; i < stuck.length; i += SCRAPFLY_CONCURRENCY) {
+        const batch = stuck.slice(i, i + SCRAPFLY_CONCURRENCY);
+        const out = await Promise.all(batch.map(rescueHost));
+        for (const r of out) {
+          results[byHost.get(r.host)] = r;
+          if (r.platform) { recovered++; console.log(`   RECOVERED  ${r.platform.padEnd(16)} ${r.host}  ${r.city ?? ""}`); }
+        }
+        done += batch.length;
+        process.stdout.write(`\r  rescued ${done}/${stuck.length}  (${recovered} feeds recovered)`);
+        flush();
+      }
+      console.log("");
+      console.log(`\n  ${recovered} feed(s) recovered that a datacenter IP could not see.`);
+    }
+  }
 
   const sm360 = results.filter((r) => r.platform === "sm360");
   const convertus = results.filter((r) => r.platform === "convertus");

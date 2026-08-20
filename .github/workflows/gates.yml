@@ -65,6 +65,10 @@ jobs:
         run: npm run test:invariants
       - name: Sealed capture (parse/magic-byte/page-count gates)
         run: npm run test:capture
+      # One transient 504 must never kill a make's daily refresh (Mercedes,
+      # 2026-08-19): scraper fetches retry bounded on 5xx/429/network only.
+      - name: Scraper fetch retry (5xx/429 bounded backoff)
+        run: npm run test:fetch-retry
       # The report-email endpoint is unauthenticated: its ONLY proof that a real
       # scan happened is the ECDSA signature gate. A regression there reopens an
       # open mail relay on our own DKIM-signed domain, so it blocks like a
