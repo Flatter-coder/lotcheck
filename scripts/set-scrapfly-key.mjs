@@ -53,7 +53,10 @@ try {
   const u = new URL("https://api.scrapfly.io/scrape");
   u.searchParams.set("key", key);
   u.searchParams.set("url", "https://example.com");
-  const r = await fetch(u, { signal: AbortSignal.timeout(30_000) });
+  const r = await fetch(u, {
+    headers: { "User-Agent": "LotCheck/1.0 (Scrapfly key verification; +https://lotcheck.ca)" },
+    signal: AbortSignal.timeout(30_000),
+  });
   code = r.status;
   if (!r.ok) body = (await r.text()).slice(0, 200).replace(/\s+/g, " ");
 } catch (e) {
