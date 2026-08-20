@@ -32,6 +32,7 @@
     "test:report-auth": "node --experimental-strip-types supabase/functions/_shared/report-auth.test.ts",
     "test:flywheel": "node --experimental-strip-types supabase/functions/_shared/fee-vocab.test.ts",
     "test:jsonld-vehicle": "node scripts/test-jsonld-vehicle.mjs",
+    "test:goauto": "node scripts/test-goauto-inventory.mjs",
     "test:convertus-vms": "node scripts/test-convertus-vms.mjs",
     "test:vision-tiling": "node scripts/test-vision-tiling.mjs",
     "test:quote-msrp": "node scripts/test-quote-msrp-authority.mjs",

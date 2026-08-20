@@ -168,6 +168,13 @@ jobs:
         run: npm run test:finance-contingent
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
         run: npm run test:jsonld-vehicle
+      # Go Auto is 70+ dealerships across AB and BC behind ONE endpoint, and
+      # every one was invisible to us: the probe guesses /new/, they serve
+      # /vehicles. Each card names its dealership AND city -- the attribution
+      # the price index has been starving for -- so a silent parser regression
+      # here would quietly empty whole cities rather than fail loudly.
+      - name: Go Auto inventory (one endpoint, every store, city attached)
+        run: npm run test:goauto
       - name: Convertus vmsData vehicle extraction (structured-data fallback)
         run: npm run test:convertus-vms
       # Uploading a screenshot is the primary path (screenshot-first), and
