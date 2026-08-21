@@ -9985,6 +9985,39 @@ function VerifyPage(){
   );
 }
 
+// Live countdown for the repeat-multi-vehicle-attempt cooldown (2026-08-20).
+// The server already computes and enforces the 2h/24h cooldown
+// (fn_check_repeat_cooldown) -- this is purely the display: ticks every
+// second toward `until` (an ISO timestamp), calls onExpire once when it
+// reaches zero so the caller can let the person try again immediately
+// instead of making them guess when to retry or manually refresh.
+function CountdownTimer({until,onExpire,C}){
+  const target=useMemo(()=>Date.parse(until),[until]);
+  const [remainingMs,setRemainingMs]=useState(()=>Math.max(0,target-Date.now()));
+  const firedRef=useRef(false);
+  useEffect(()=>{
+    firedRef.current=false;
+    setRemainingMs(Math.max(0,target-Date.now()));
+    if(!Number.isFinite(target)) return;
+    const id=setInterval(()=>{
+      const left=Math.max(0,target-Date.now());
+      setRemainingMs(left);
+      if(left<=0&&!firedRef.current){ firedRef.current=true; clearInterval(id); onExpire&&onExpire(); }
+    },1000);
+    return ()=>clearInterval(id);
+  },[target]);
+  if(!Number.isFinite(target)) return null;
+  const totalSec=Math.ceil(remainingMs/1000);
+  const h=Math.floor(totalSec/3600), m=Math.floor((totalSec%3600)/60), s=totalSec%60;
+  const label=h>0?`${h}h ${m}m`:m>0?`${m}m ${s}s`:`${s}s`;
+  return (
+    <div style={{display:"inline-flex",alignItems:"center",gap:8,marginTop:2,marginBottom:12,padding:"8px 16px",borderRadius:999,background:"rgba(0,0,0,.06)",fontFamily:"monospace",fontWeight:800,color:C.ink,fontSize:14}}>
+      <span style={{width:7,height:7,borderRadius:99,background:C.coral,flexShrink:0}}/>
+      Try again in {label}
+    </div>
+  );
+}
+
 function QuoteCheckPage(){
   // Alberta-only gate. Hooks must run unconditionally, so this sits at the top
   // and the early return happens after every other hook has been declared.
@@ -10116,6 +10149,11 @@ function QuoteCheckPage(){
   // opposite real-world meaning, so the wording needs to match the source.
   const [analysisSource,setAnalysisSource]=useState(null); // "quote" | "listing"
   const [errorMsg,setErrorMsg]=useState("");
+  // Set only for the repeat-multi-vehicle-attempt cooldown (analyze-quote /
+  // analyze-listing-url's fn_check_repeat_cooldown, 2026-08-20). An ISO
+  // timestamp string when a live countdown should render below errorMsg;
+  // null for every other error, which just shows the plain message.
+  const [cooldownUntil,setCooldownUntil]=useState(null);
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
@@ -10592,6 +10630,7 @@ function QuoteCheckPage(){
   const handleFile=async(file,focusVehicle=null)=>{
     if(!file) return;
     if(!gateAttempt()) return;
+    setCooldownUntil(null); // clear any stale countdown from a prior attempt
     const heic=isHeic(file);
     if(!heic&&!ACCEPTED_TYPES.includes(file.type)){
       setStatus("error");
@@ -10691,6 +10730,7 @@ function QuoteCheckPage(){
         if(body.error==="repeat_multivehicle_cooldown"){
           setStatus("error");
           setErrorMsg(body.message||"You've already tried this upload — it's a multi-vehicle page. Try a different one, or upload just the one vehicle you want checked.");
+          setCooldownUntil(body.cooldownUntil||null);
           return;
         }
       }
@@ -10792,6 +10832,7 @@ function QuoteCheckPage(){
 
   const handleUrlAnalyze=async()=>{
     const url=urlInput.trim();
+    setCooldownUntil(null); // clear any stale countdown from a prior attempt
     if(!isValidUrl(url)){
       setStatus("error");
       setErrorMsg("That doesn't look like a valid URL — paste the full link, starting with http:// or https://.");
@@ -10845,6 +10886,7 @@ function QuoteCheckPage(){
         if(body.error==="repeat_multivehicle_cooldown"){
           setStatus("error");
           setErrorMsg(body.message||"Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing.");
+          setCooldownUntil(body.cooldownUntil||null);
           return;
         }
       }
@@ -10917,6 +10959,7 @@ function QuoteCheckPage(){
     setAnalysis(null);
     setAnalysisSource(null);
     setErrorMsg("");
+    setCooldownUntil(null);
     setFileName("");
     setUrlInput("");
     setVehicleChoices(null);
@@ -11405,6 +11448,7 @@ function QuoteCheckPage(){
             <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
               <div style={{marginBottom:12}}><Icon3D name="warning" size={32}/></div>
               <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
+              {cooldownUntil&&<CountdownTimer until={cooldownUntil} C={C} onExpire={()=>setCooldownUntil(null)}/>}
               {lastAttemptType==="url"?(
                 <>
                   <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
