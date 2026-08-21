@@ -602,9 +602,21 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
 // only fill blanks, but always prefer a real rescued price/MSRP over null.
 export function mergeRescued(analysis: any, rescued: any): void {
   if (!analysis || !rescued) return;
+  const hadNoQuotedPrice = !(Number(analysis.quotedPrice) > 0);
   const preferKeys = ["quotedPrice", "msrp"];
   for (const k of preferKeys) {
     if ((analysis[k] == null || Number(analysis[k]) <= 0) && Number(rescued[k]) > 0) analysis[k] = rescued[k];
+  }
+  // quotedPriceSource rides along with quotedPrice above -- without it, a
+  // rescue-path Convertus price (fillFromConvertusVms now tags it
+  // "convertus_vms") gets the right number but silently drops the provenance
+  // tag priceVerified checks for, same bug as the main-path gap-fill it
+  // mirrors. Gated on hadNoQuotedPrice (captured before the loop above), not
+  // just "analysis.quotedPrice is now positive" -- otherwise an already-present
+  // LLM-guessed price that happens to match rescued's number would wrongly
+  // inherit rescued's "verified" source tag instead of staying unverified.
+  if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.quotedPriceSource) {
+    analysis.quotedPriceSource = rescued.quotedPriceSource;
   }
   const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {

@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16m";  // + multi-vehicle URL pages now rejected (VIN-count check) instead of attempting a single-vehicle extraction
+const CACHE_VER = "2026-08-16n";  // + Convertus vmsData gap-fill now actually fills quotedPrice (was extracted correctly but never written to analysis)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3591,6 +3591,22 @@ Deno.serve(async (req: Request) => {
           const alt = (cv as any)[k];
           const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
           if (missing && alt != null && alt !== "") { (analysis as any)[k] = alt; console.log(`Convertus identity gap-fill: ${k}.`); }
+        }
+        // The one field this whole extractor exists for, and the one field its
+        // OWN gap-fill loop above never filled: `quotedPrice` isn't in that
+        // loop's key list, so a Convertus-sourced asking price sat correctly
+        // extracted in `cv` and was never written to `analysis` -- confirmed
+        // live 2026-08-21 (albertahonda.com, 2026 Civic Sedan LX CVT): the
+        // report shipped "No asking price could be read from this listing"
+        // while cv.quotedPrice held the page's own real $31,595 the whole
+        // time. `quotedPriceSource: "convertus_vms"` is not cosmetic -- the
+        // priceVerified gate a few hundred lines down already recognizes this
+        // exact string as an evidenced source; without it, even a correctly
+        // filled quotedPrice would report as unverified.
+        if (!(Number(analysis.quotedPrice) > 0) && Number(cv.quotedPrice) > 0) {
+          analysis.quotedPrice = cv.quotedPrice;
+          analysis.quotedPriceSource = "convertus_vms";
+          console.log("Convertus identity gap-fill: quotedPrice.");
         }
         if (!analysis.vehicleCondition && cv.condition) analysis.vehicleCondition = cv.condition;
         // Same gap this whole extractor exists for -- the dealer's own
