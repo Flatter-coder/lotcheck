@@ -172,7 +172,10 @@ export function extractConvertusVmsVehicle(html) {
 // read came back empty.
 export function fillFromConvertusVms(parsed, cv) {
   if (!parsed || !cv) return parsed;
-  if ((parsed.quotedPrice == null || Number(parsed.quotedPrice) <= 0) && Number(cv.quotedPrice) > 0) parsed.quotedPrice = cv.quotedPrice;
+  if ((parsed.quotedPrice == null || Number(parsed.quotedPrice) <= 0) && Number(cv.quotedPrice) > 0) {
+    parsed.quotedPrice = cv.quotedPrice;
+    parsed.quotedPriceSource = "convertus_vms";
+  }
   if ((parsed.msrp == null || Number(parsed.msrp) <= 0) && Number(cv.msrp) > 0) parsed.msrp = cv.msrp;
   if (!parsed.vin && cv.vin) parsed.vin = cv.vin;
   if (!parsed.year && cv.year) parsed.year = cv.year;

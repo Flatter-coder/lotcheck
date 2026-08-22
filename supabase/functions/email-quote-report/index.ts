@@ -980,6 +980,20 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     for (const ln of wrap(`Verify this MSRP on ${a.make || "the manufacturer"}'s own page: ${a.msrpSourceUrl}`, sans, 8.5, W)) {
       need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
     }
+    // That linked page shows the manufacturer's ALL-IN "from" price (freight/
+    // PDI, A/C charge, tire levy, etc. already added in), not this ex-freight
+    // trim MSRP -- the two numbers are EXPECTED to differ. Without this line,
+    // a reader who clicks through sees a bigger number and reasonably reads it
+    // as this report being wrong. Confirmed live 2026-08-21 (Vic, RAV4 PHEV GR
+    // SPORT AWD): the linked Toyota page shows $60,578 against this card's
+    // $57,500 -- both correct, on different bases (msrpAllIn is the same
+    // hand-verified catalog row, not a re-derived guess).
+    if (Number(a.msrpAllIn) > (Number(ms) || 0)) {
+      const gap = Math.round(Number(a.msrpAllIn) - (Number(ms) || 0));
+      for (const ln of wrap(`That page shows the ALL-IN total, ${money(a.msrpAllIn)} -- about ${money(gap)} more, covering freight/PDI, the A/C charge and other levies on top of the ${money(ms)} base MSRP above. Same trim, different basis, not a mismatch.`, sans, 8.5, W)) {
+        need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
+      }
+    }
     y -= 6;
   }
   rule();
@@ -1348,7 +1362,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
         y -= 15;
         if (k === 0) {
           para("Full-page photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-          if (sealedShot.sourceUrl) { const src = String(sealedShot.sourceUrl); T("Listing address (sealed in the signed report): " + (src.length > 80 ? src.slice(0, 77) + "..." : src), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          // wrap(), not a single T() -- a long dealer URL (Okotoks Toyota,
+          // 2026-08-21: "...2026-Toyota-RAV4_Plug_In_Hybri" cut off mid-word,
+          // no "...", nothing wrong with the 80-char slice below it) simply
+          // ran past the page's content width at 7.5pt mono and off the
+          // printable margin. T() draws whatever string it's given at full
+          // width with no wrap or clip -- it was never the slice that failed.
+          if (sealedShot.sourceUrl) {
+            const src = String(sealedShot.sourceUrl);
+            const label = "Listing address (sealed in the signed report): " + (src.length > 80 ? src.slice(0, 77) + "..." : src);
+            for (const ln of wrap(label, mono, 7.5, W)) { T(ln, { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          }
           T("SHA-256 " + sealedShot.sha.slice(0, 64), { size: 7.5, font: mono, color: FAINT }); y -= 11;
         }
         off += slice; k++;

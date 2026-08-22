@@ -261,7 +261,18 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       // figure with grey boxes where the car should be. Matches the 8s the
       // ASP render already uses for the same reason.
       u.searchParams.set("rendering_wait", "8000");
-      u.searchParams.set("auto_scroll", "true");
+      // auto_scroll only for the fullpage capture, which stitches the WHOLE
+      // page and needs it to trigger below-the-fold lazy images (the HR-V
+      // grey-box case above). On the viewport degrade path -- which exists
+      // specifically to show "the top of the listing (price + vehicle
+      // visible)" per the comment below -- auto_scroll actively defeats that:
+      // it leaves the page scrolled to wherever it stopped, and the viewport
+      // shot then captures THAT position, not the top. Confirmed live
+      // 2026-08-21 (Okotoks Toyota, the exact dealer already named above as
+      // the known too_large/degrade case): the sealed capture showed the
+      // Specifications/Key features section, not the price/VIN/vehicle photo
+      // at the top -- the report's most important evidence, missing.
+      if (fullpage) u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       if (asp) u.searchParams.set("asp", "true");
@@ -602,9 +613,21 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
 // only fill blanks, but always prefer a real rescued price/MSRP over null.
 export function mergeRescued(analysis: any, rescued: any): void {
   if (!analysis || !rescued) return;
+  const hadNoQuotedPrice = !(Number(analysis.quotedPrice) > 0);
   const preferKeys = ["quotedPrice", "msrp"];
   for (const k of preferKeys) {
     if ((analysis[k] == null || Number(analysis[k]) <= 0) && Number(rescued[k]) > 0) analysis[k] = rescued[k];
+  }
+  // quotedPriceSource rides along with quotedPrice above -- without it, a
+  // rescue-path Convertus price (fillFromConvertusVms now tags it
+  // "convertus_vms") gets the right number but silently drops the provenance
+  // tag priceVerified checks for, same bug as the main-path gap-fill it
+  // mirrors. Gated on hadNoQuotedPrice (captured before the loop above), not
+  // just "analysis.quotedPrice is now positive" -- otherwise an already-present
+  // LLM-guessed price that happens to match rescued's number would wrongly
+  // inherit rescued's "verified" source tag instead of staying unverified.
+  if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.quotedPriceSource) {
+    analysis.quotedPriceSource = rescued.quotedPriceSource;
   }
   const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {
