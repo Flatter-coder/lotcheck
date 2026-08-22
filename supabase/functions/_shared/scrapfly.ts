@@ -261,7 +261,18 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       // figure with grey boxes where the car should be. Matches the 8s the
       // ASP render already uses for the same reason.
       u.searchParams.set("rendering_wait", "8000");
-      u.searchParams.set("auto_scroll", "true");
+      // auto_scroll only for the fullpage capture, which stitches the WHOLE
+      // page and needs it to trigger below-the-fold lazy images (the HR-V
+      // grey-box case above). On the viewport degrade path -- which exists
+      // specifically to show "the top of the listing (price + vehicle
+      // visible)" per the comment below -- auto_scroll actively defeats that:
+      // it leaves the page scrolled to wherever it stopped, and the viewport
+      // shot then captures THAT position, not the top. Confirmed live
+      // 2026-08-21 (Okotoks Toyota, the exact dealer already named above as
+      // the known too_large/degrade case): the sealed capture showed the
+      // Specifications/Key features section, not the price/VIN/vehicle photo
+      // at the top -- the report's most important evidence, missing.
+      if (fullpage) u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       if (asp) u.searchParams.set("asp", "true");

@@ -104,7 +104,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16n";  // + Convertus vmsData gap-fill now actually fills quotedPrice (was extracted correctly but never written to analysis)
+const CACHE_VER = "2026-08-16o";  // + sealed screenshot no longer auto-scrolls past the top on the viewport-degrade path (was capturing specs/features, missing price/VIN/vehicle)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
