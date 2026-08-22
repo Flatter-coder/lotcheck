@@ -10830,6 +10830,41 @@ function QuoteCheckPage(){
     return AGGREGATOR_HOSTS.some(d=>host===d||host.endsWith("."+d));
   }
 
+  // Early, NON-blocking detection for a URL that looks INCOMPLETE -- pasted
+  // as just the domain, or visibly cut off mid-slug. Doesn't stop Analyze
+  // (either signal can false-positive on a genuinely short/odd real URL);
+  // it just warns before someone burns an attempt on a link that was never
+  // going to resolve. Vic, 2026-08-22: demoing at work, every pasted URL
+  // came back a bare "try again" -- his own diagnosis was a partial paste,
+  // and real dealer slugs run long enough (hit ourselves this exact session
+  // -- albertahonda.com/okotokstoyota.ca listing URLs both run 70+ chars
+  // past the domain) that a copy/select stopping short is a real, easy
+  // mistake, especially off a narrow address bar or a forwarded chat link.
+  function urlCompletenessHint(v){
+    let u; try{ u=new URL(v.trim()); }catch{ return null; }
+    if(u.protocol!=="http:"&&u.protocol!=="https:") return null;
+    const path=u.pathname.replace(/\/+$/,"");
+    if(!path) return "That's just the dealer's homepage — copy the link from the specific vehicle's own page instead.";
+    // A path ending on a bare separator has no natural terminator (a real
+    // slug ends on a word, id, or file extension) -- the clearest signal a
+    // selection/copy stopped mid-token rather than at the link's real end.
+    if(/[-_]$/.test(path)) return "This link looks like it might be cut off partway through — try copying it again, making sure you grab the whole address.";
+    // Narrow, curated dictionary of common vehicle-listing terminal words --
+    // this WON'T catch every truncation (that needs knowing the real word,
+    // impossible in general), but it catches the actual real-world case:
+    // Vic's own Okotoks Toyota RAV4 PHEV link this same session was cut to
+    // "...RAV4_Plug_In_Hybri", one letter short of "Hybrid", ending clean on
+    // a letter with no separator to catch it. If the final word-chunk is a
+    // real prefix (3+ chars, shorter than the whole word) of one of these,
+    // it is far more likely a cut mid-word than a coincidental real ending.
+    const COMMON_TERMINAL_WORDS=["hybrid","electric","plugin","gasoline","diesel","automatic","manual","sedan","coupe","hatchback","wagon","convertible","crossover","touring","premium","limited","platinum","luxury","sport","edition","package","hybride","electrique"];
+    const lastWord=path.split(/[-_/]/).pop().toLowerCase();
+    if(lastWord.length>=3&&COMMON_TERMINAL_WORDS.some(w=>w.length>lastWord.length&&w.startsWith(lastWord))){
+      return "This link looks like it might be cut off partway through — try copying it again, making sure you grab the whole address.";
+    }
+    return null;
+  }
+
   const handleUrlAnalyze=async()=>{
     const url=urlInput.trim();
     setCooldownUntil(null); // clear any stale countdown from a prior attempt
@@ -10937,8 +10972,17 @@ function QuoteCheckPage(){
       applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
+      // This is the fetch to OUR OWN endpoint throwing (network/DNS/CORS,
+      // or `res.json()` choking on a non-JSON response) -- everything the
+      // server itself can identify already returns a specific message above
+      // (unreadable listing, multi-vehicle, etc.), so reaching this branch
+      // means we genuinely don't know why. Naming both real possibilities
+      // beats a bare "try again": Vic, 2026-08-22, demoing on a work network
+      // -- every pasted URL landed here, and a corporate firewall/proxy on
+      // the connection to Supabase is just as plausible a cause as anything
+      // about the link itself, so this doesn't only blame the paste.
       setStatus("error");
-      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
+      setErrorMsg("Couldn't reach the analysis service. Double-check the FULL link was pasted (long dealer URLs are easy to copy short), and that nothing on your network — a work VPN or firewall — is blocking the connection, then try again.");
     }
   };
 
@@ -11280,6 +11324,15 @@ function QuoteCheckPage(){
                   Analyze →
                 </button>
               </div>
+              {/* Non-blocking -- a hint, not a gate. Only shown once there's
+                  something to judge, and cleared instantly if they keep typing
+                  past whatever tripped it. */}
+              {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
+                <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                  <Icon3D name="warning" size={14}/>
+                  <span>{urlCompletenessHint(urlInput)}</span>
+                </div>
+              )}
               <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
                 <Icon3D name="blocked" size={15}/>
                 <span><strong>Don't use listing marketplaces</strong> — AutoTrader, CarGurus, Kijiji, eBay, or Facebook Marketplace links aren't supported here. Paste the dealer's own site, or upload a screenshot instead.</span>
