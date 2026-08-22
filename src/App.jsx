@@ -8404,6 +8404,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // (detected from the page's own call-to-action text). A tactic, not a miss.
   const priceGated = !qp && a.priceDisclosure === "contact_for_price";
   const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  // The page ITSELF gated the price ("Call for pricing" or similar) but its
+  // own machine-readable data (D2C's window.__vdpJSON, see d2c-vdp.js)
+  // carried the real ask -- a verifiable claim about what the page's source
+  // contains, not an inference about intent. Only meaningful once qp is
+  // actually populated (priceGated above already covers the case where
+  // nothing was recoverable at all). Confirmed live 2026-08-22, Okotoks
+  // Toyota RAV4 PHEV GR Sport AWD: rendered page shows "Call for pricing",
+  // window.__vdpJSON's price field holds $85,995 -- also published to
+  // Google Vehicle Ads, so this is public information either way.
+  const gatedRecoveredNote = (qp && a.priceGatedButRecovered)
+    ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+    : "";
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
   const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
@@ -8563,7 +8575,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       : !qp
       ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
       : deltaOk
-        ? (delta > 0
+        ? gatedRecoveredNote + (delta > 0
           ? `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(delta)} MORE than that sticker. Anything over sticker is pure negotiation room.`
           : delta === 0
             ? "MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking exactly the sticker — not a markup, but not a deal either."
@@ -8589,7 +8601,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
            disagreed. One source now. */
         : (() => {
             const refusal = qualifyMsrpClaim(a).refusal;
-            if (refusal) return refusal;
+            if (refusal) return gatedRecoveredNote + refusal;
             const cc = qualifyCeilingClaim(a);
             const floor = a.allInPricing && cc.floor ? cc.floor : null;
             if (floor)
@@ -8599,10 +8611,10 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
                  LE row, so the floor was the bottom of OUR ladder, $6,285 high.
                  A floor from a partial ladder is not the manufacturer's floor,
                  and trimsConsidered >= 2 never established completeness. */
-              return `Across the ${cc.trimsConsidered} ${a.make || ""} trims in our catalogue this model runs ${money(floor)}${cc.ceiling && cc.ceiling !== floor ? `–${money(cc.ceiling)}` : ""} all-in — cheaper trims may exist that we don't hold. This car's exact trim was not pinned down, so we don't call it "over" or "under"; use that range as a reference and make the dealer say which trim this is.`;
+              return gatedRecoveredNote + `Across the ${cc.trimsConsidered} ${a.make || ""} trims in our catalogue this model runs ${money(floor)}${cc.ceiling && cc.ceiling !== floor ? `–${money(cc.ceiling)}` : ""} all-in — cheaper trims may exist that we don't hold. This car's exact trim was not pinned down, so we don't call it "over" or "under"; use that range as a reference and make the dealer say which trim this is.`;
             if (ms)
-              return `${a.make || "The manufacturer"}'s price for this model starts at ${money(ms)} for the base version. This car's exact trim and options were not pinned down, so we don't call it "over" or "under" — use the base figure as your reference and make the dealer justify everything above it.`;
-            return "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.";
+              return gatedRecoveredNote + `${a.make || "The manufacturer"}'s price for this model starts at ${money(ms)} for the base version. This car's exact trim and options were not pinned down, so we don't call it "over" or "under" — use the base figure as your reference and make the dealer justify everything above it.`;
+            return gatedRecoveredNote + "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.";
           })(),
     "Transport Canada recalls": a.recalls?.checked && a.recalls.count > 0
       ? `A recall means the manufacturer found a safety defect and must fix it FREE of charge. This vehicle's model has ${a.recalls.count} unfixed recall${a.recalls.count > 1 ? "s" : ""} on record — tell the dealer to complete the repair before you take delivery. It costs you nothing.`

@@ -734,19 +734,34 @@ function pointExplain(t: string, a: any): string | null {
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
   const exact = ms > 0 && a.msrpBasis === "exact";
   switch (t) {
-    case "Price vs MSRP":
+    case "Price vs MSRP": {
+      // The page itself gated the price ("Call for pricing" or similar) but
+      // its own machine-readable data carried the real ask -- a verifiable
+      // claim about what the page's own source contains, not an inference
+      // about intent (gated-price-recovery memory, point 3). Prefixed onto
+      // whichever branch below fires, so the "how" of the comparison stays
+      // exactly as accurate as it already was; only the "where this number
+      // came from" note is new. Confirmed live 2026-08-22, Okotoks Toyota
+      // RAV4 PHEV GR Sport AWD (VIN JTM7ERAV1TD018440): the rendered page
+      // shows "Call for pricing" while window.__vdpJSON's own price field
+      // held $85,995 the whole time -- also published to Google Vehicle Ads,
+      // so this is public information, not a private number LotCheck leaked.
+      const gatedNote = (qp && a.priceGatedButRecovered)
+        ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+        : "";
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
-      if (qp && ms && exact) return delta > 0
+      if (qp && ms && exact) return gatedNote + (delta > 0
         ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(delta)} more than sticker - anything over sticker is pure negotiation room.`
         : delta === 0
           ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
-          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`;
+          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`);
       // Was hardcoded to the "starting at" story, which is wrong prose for a used
       // car's original MSRP or a dealer-stated figure. The gate owns the reason.
-      if (ms) return qualifyMsrpClaim(a).refusal
-        ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`;
-      return "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+      if (ms) return gatedNote + (qualifyMsrpClaim(a).refusal
+        ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`);
+      return gatedNote + "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+    }
     case "Transport Canada recalls":
       if (a.recalls?.checked && a.recalls.count > 0) return `A recall is a safety defect the manufacturer must fix free of charge. Have the dealer complete the repair${a.recalls.count > 1 ? "s" : ""} before delivery - it costs you nothing.`;
       if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
