@@ -60,6 +60,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
+import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
@@ -105,7 +106,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16p";  // + leverage score & Price-vs-MSRP explainer now surface a real gap under starting_at basis (ceiling claim, or a hedged fallback) instead of staying silent
+const CACHE_VER = "2026-08-16q";  // + D2C Media window.__vdpJSON extractor built (was specified 2026-08-15, never wired in) -- recovers a real quoted price the page's own "Call for pricing" template hides
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3043,6 +3044,15 @@ Deno.serve(async (req: Request) => {
     // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
     // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
     const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
+    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
+    // nothing extra. Specified 2026-08-15, never actually wired in until now
+    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
+    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
+    // pricing" over the real fields it renders, but priceWithoutCustomFees
+    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
+    // [[gated-price-recovery]] memory for the full mechanism.
+    const earlyD2cVdp: Promise<any | null> = directHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
     // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
     // fails (all retries exhausted) -- the strongest early signal the rescue
     // will be needed. Started here, ~20-50s into the request, it runs in
@@ -3064,26 +3074,35 @@ Deno.serve(async (req: Request) => {
     // have -- notably msrp, which buildJsonLdFallbackAnalysis never sets
     // (schema.org listings essentially never carry MSRP, only the asking
     // price). A page with neither source resolves this to null, same as today.
-    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms]).then(([jl, cv]) => {
-      if (!jl && !cv) return null;
-      if (!cv) return jl;
-      if (!jl) {
-        return {
-          quotedPrice: cv.quotedPrice, msrp: cv.msrp, vin: cv.vin,
-          vehicle: [cv.year, cv.make, cv.model, cv.trim].filter(Boolean).join(" ") || null,
-          odometerKm: cv.odometerKm, vehicleCondition: cv.condition,
-          dealerName: cv.dealerName, dealerCity: cv.dealerCity,
-        };
-      }
+    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms, earlyD2cVdp]).then(([jl, cv, dv]) => {
+      // A page only ever matches ONE platform's declaration (Convertus's
+      // vmsData vs. D2C's __vdpJSON are mutually exclusive in practice), so
+      // picking whichever blob resolved non-null is fill-only, never a real
+      // conflict between the two.
+      const blob = cv || dv;
+      if (!jl && !blob) return null;
+      const blobFacts = blob ? {
+        quotedPrice: blob.quotedPrice, msrp: blob.msrp ?? null, vin: blob.vin,
+        vehicle: [blob.year, blob.make, blob.model, blob.trim].filter(Boolean).join(" ") || null,
+        odometerKm: blob.odometerKm, vehicleCondition: blob.condition,
+        dealerName: blob.dealerName, dealerCity: blob.dealerCity ?? null,
+        // Only D2C's extractor sets these (a real "the page says X but the
+        // page's own data says Y" tell, not a guess -- see d2c-vdp.js).
+        priceGatedButRecovered: blob.priceGated || null, priceGateMessage: blob.priceGateMessage || null,
+      } : null;
+      if (!blobFacts) return jl;
+      if (!jl) return blobFacts;
       return {
         ...jl,
-        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : cv.quotedPrice,
-        msrp: Number(jl.msrp) > 0 ? jl.msrp : cv.msrp,
-        vin: jl.vin || cv.vin,
-        odometerKm: jl.odometerKm ?? cv.odometerKm,
-        vehicleCondition: jl.vehicleCondition || cv.condition,
-        dealerName: jl.dealerName || cv.dealerName,
-        dealerCity: jl.dealerCity || cv.dealerCity,
+        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : blobFacts.quotedPrice,
+        msrp: Number(jl.msrp) > 0 ? jl.msrp : blobFacts.msrp,
+        vin: jl.vin || blobFacts.vin,
+        odometerKm: jl.odometerKm ?? blobFacts.odometerKm,
+        vehicleCondition: jl.vehicleCondition || blobFacts.vehicleCondition,
+        dealerName: jl.dealerName || blobFacts.dealerName,
+        dealerCity: jl.dealerCity || blobFacts.dealerCity,
+        priceGatedButRecovered: blobFacts.priceGatedButRecovered,
+        priceGateMessage: blobFacts.priceGateMessage,
       };
     }).catch(() => null);
 
@@ -3864,6 +3883,14 @@ Deno.serve(async (req: Request) => {
           }
         }
         if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
+        // Carry the D2C "page says Call for pricing, blob says $X" tell
+        // through -- fill-only, only when THIS gap-fill is what actually
+        // supplied the price (never claim a gate was recovered for a price
+        // that was on the page/Claude's own read the whole time).
+        if (early.priceGatedButRecovered && Number(analysis.quotedPrice) === Number(early.quotedPrice)) {
+          analysis.priceGatedButRecovered = true;
+          analysis.priceGateMessage = early.priceGateMessage;
+        }
         gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
       }
     } catch { /* the safety net must never sink the scan */ }

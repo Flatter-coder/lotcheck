@@ -21,6 +21,7 @@
 
 import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
 import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
+import { extractD2cVdpVehicle, fillFromD2cVdp } from "./d2c-vdp.js";
 import { visionImageVerdict } from "./vision-limits.ts";
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
@@ -515,6 +516,11 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // also misses them (long page, oversized screenshot, whatever), this was
     // the one remaining source with nothing reading it. See convertus-vms.js.
     const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
+    // D2C Media's window.__vdpJSON -- same reasoning as Convertus above, a
+    // second platform whose real price/identity fields never reach JSON-LD
+    // or vision when the page templates a "Call for pricing" gate over them.
+    // See d2c-vdp.js.
+    const dv = rendered.html ? extractD2cVdpVehicle(rendered.html) : null;
 
     // Ground-truth price-gate check against the RAW rendered DOM text -- runs
     // regardless of whether the screenshot capture was complete or the vision
@@ -574,7 +580,7 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // null, but the page's own structured data was sitting right there).
     // A confirmed price-gate CTA is the same kind of signal worth keeping
     // even when vision, JSON-LD and vmsData all came back empty.
-    if (!parsed && !jsonLd && !cv && !renderGateCtaDetected) return null;
+    if (!parsed && !jsonLd && !cv && !dv && !renderGateCtaDetected) return null;
     if (!parsed) parsed = {};
     parsed.extractionMethod = parsed.extractionMethod
       || (Object.keys(parsed).length === 0 && (jsonLd || cv) ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
@@ -585,6 +591,7 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // fields have no schema.org equivalent, so this only ever fills gaps
     // JSON-LD genuinely couldn't -- never overwrites what fillFromJsonLd set.
     if (cv) fillFromConvertusVms(parsed, cv);
+    if (dv) fillFromD2cVdp(parsed, dv);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
     // and seal its SHA-256 into the signed canonical (report-sign.ts reads
     // listingShotSha256). Proves what the page looked like at that moment --
@@ -628,6 +635,13 @@ export function mergeRescued(analysis: any, rescued: any): void {
   // inherit rescued's "verified" source tag instead of staying unverified.
   if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.quotedPriceSource) {
     analysis.quotedPriceSource = rescued.quotedPriceSource;
+  }
+  // Same reasoning, same gate: the D2C "page says Call for pricing, blob
+  // says $X" tell (fillFromD2cVdp) only means something if THIS merge is
+  // what actually supplied the price.
+  if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.priceGatedButRecovered) {
+    analysis.priceGatedButRecovered = true;
+    analysis.priceGateMessage = rescued.priceGateMessage;
   }
   const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {

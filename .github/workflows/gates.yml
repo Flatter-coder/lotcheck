@@ -28,10 +28,19 @@
 #                    scraped page reported "price not shown" and a wrong
 #                    generic MSRP while this exact data sat unread the whole
 #                    time (southtrailkia.com, 2026-08-13).
+#   test:d2c-vdp     D2C Media platform vehicle-data read (_shared/d2c-vdp.js):
+#                    a `window.__vdpJSON = {...}` blob, D2C's analogue of
+#                    Convertus's vmsData. The platform templates a "Call for
+#                    pricing" lead-capture message over the price fields it
+#                    RENDERS while priceWithoutCustomFees keeps the real ask —
+#                    specified 2026-08-15 (Okotoks Toyota RAV4 PHEV GR Sport,
+#                    $85,995), never actually wired into the pipeline, hit
+#                    live again on the SAME listing 2026-08-22.
 #
-# Both are offline and take milliseconds — no network, no clock, no secrets, and
-# no npm install, because neither uses a dependency. There is no reason for this
-# workflow to be slow or flaky, so a red run always means a real regression.
+# All three are offline and take milliseconds — no network, no clock, no
+# secrets, and no npm install, because none uses a dependency. There is no
+# reason for this workflow to be slow or flaky, so a red run always means a
+# real regression.
 #
 # NOT included: test:recalls. It queries Transport Canada live, so putting it on
 # every push would hammer a government API and make the signal weather-dependent.
@@ -177,6 +186,11 @@ jobs:
         run: npm run test:goauto
       - name: Convertus vmsData vehicle extraction (structured-data fallback)
         run: npm run test:convertus-vms
+      # D2C Media's window.__vdpJSON: specified 2026-08-15, never wired in --
+      # confirmed live TWICE on the same listing (Okotoks Toyota RAV4 PHEV,
+      # 2026-08-15 and 2026-08-22) before this gate existed. See d2c-vdp.js.
+      - name: D2C Media vdpJSON vehicle extraction (gated-price recovery)
+        run: npm run test:d2c-vdp
       # Uploading a screenshot is the primary path (screenshot-first), and
       # Claude hard-rejects a single image over ~5MB -- the client used to send
       # raw bytes up to 15MB, so every upload in that band was a guaranteed
