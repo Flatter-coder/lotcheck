@@ -2,7 +2,7 @@
   "source": "Statistics Canada. Table 20-10-0086-01, New motor vehicle sales, by vehicle type, annual. Statistics Canada Open Licence.",
   "year": "2025",
   "data_release_time": "2026-03-16T08:30",
-  "last_checked_at": "2026-08-21T13:35:56.218Z",
+  "last_checked_at": "2026-08-22T13:22:39.345Z",
   "data": {
     "NewfoundlandLabrador": {
       "totalSales": 36421,
