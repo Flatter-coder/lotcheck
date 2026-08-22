@@ -62,6 +62,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
@@ -801,7 +802,6 @@ Deno.serve(async (req: Request) => {
     computeOdometerCheck(analysis);
     await resolveFinanceRates(analysis);
     await resolveLeaseRates(analysis);
-    computeLeverageScore(analysis);
     // S3 — deal reconciliation: split fees vs negotiable dealer add-ons so the
     // report shows the real out-the-door + how much markup is removable.
     { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }
@@ -812,6 +812,13 @@ Deno.serve(async (req: Request) => {
     // S25 — all-in label + safeguard: fires on any all-in-province listing, even a
     // clean one, so the report labels the price all-in and the script states the anchor.
     { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; }
+    // Moved here (was right after resolveLeaseRates, before allInPricing
+    // above was even resolved) -- same fix as analyze-listing-url:
+    // computeLeverageScore's over-MSRP delta needs allInPricing/msrpAllIn
+    // to compare an AMVIC all-in advertised price against the correct
+    // all-in reference, not the ex-freight MSRP (qualifyMsrpClaim's own
+    // "$3,078 of freight printed as dealer markup" lesson, msrp-claim.ts).
+    computeLeverageScore(analysis);
     // VIC'S RULE, on the QUOTE path too: no dealer terms -> use the
     // manufacturer's APR and price and do the math. A pasted quote that shows a
     // price but no financing is the same situation as a listing that shows
@@ -1337,8 +1344,16 @@ async function resolveLeaseRates(analysis: any): Promise<void> {
 function computeLeverageScore(analysis: any): void {
   const basis: string[] = [];
   let score = 2.0;
-  const msrp = Number(analysis.msrp) || null;
   const quoted = Number(analysis.quotedPrice) || null;
+  // The reference figure, not raw analysis.msrp: an AMVIC all-in advertised
+  // price (quoted) must be measured against the manufacturer's ALL-IN
+  // figure, never the ex-freight MSRP -- see msrp-claim.ts's own docstring
+  // for why (Charlesglen, $11,173 invented markup). This function used to
+  // run BEFORE analysis.allInPricing was even resolved (moved above, see the
+  // call-site comment), so it always compared against the wrong number when
+  // applicable.
+  const claim = qualifyMsrpClaim(analysis);
+  const msrp = Number(claim.reference) || null;
   // An over/under-MSRP claim requires an EXACT trim match, same rule the report
   // surfaces enforce via msrpBasis. Without this the score narrated "priced
   // $23,900 over MSRP" off a base-trim FLOOR -- and did it inside a note that
@@ -1349,6 +1364,41 @@ function computeLeverageScore(analysis: any): void {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) { score += Math.min(2.5, deltaPct * 100 * 0.3); basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} over MSRP`); }
     else if (deltaPct < -0.02) { score -= 1.0; basis.push(`already priced below MSRP`); }
+  } else if (msrp && quoted && analysis.msrpBasis === "starting_at") {
+    // Mirrors analyze-listing-url's same fix, confirmed live 2026-08-21
+    // (Okotoks Toyota RAV4 PHEV GR Sport AWD) -- a real gap against a
+    // catalog-complete, hand-verified trim MSRP reported "no pricing red
+    // flags" because trim-match.js's priceImplausible() downgrades "exact" to
+    // "starting_at" whenever it can't rule out a missing catalog trim (the
+    // IONIQ 9 false-accusation case). That downgrade must stand -- this
+    // doesn't touch it -- but staying completely silent on a gap this large
+    // is its own failure.
+    //
+    // qualifyCeilingClaim first (a stronger, no-hedge-needed claim: is the
+    // asking price above the WHOLE lineup's top trim, which has no "missing
+    // higher trim" escape hatch) -- NOTE this path (analyze-quote) never
+    // populates analysis.msrpCeiling today, unlike analyze-listing-url, so
+    // this branch is a no-op here until that gap is closed; kept for parity
+    // so it activates automatically once it is, rather than needing a second
+    // fix later.
+    const ceilingClaim = qualifyCeilingClaim(analysis);
+    if (ceilingClaim.exceeds && Number(ceilingClaim.over) > 0) {
+      score += Math.min(2.5, (Number(ceilingClaim.over) / Number(ceilingClaim.ceiling)) * 100 * 0.3);
+      basis.push(`priced $${Math.round(Number(ceilingClaim.over)).toLocaleString()} above the top of the ${ceilingClaim.trimsConsidered}-trim ${analysis.make || ""} lineup ($${Math.round(Number(ceilingClaim.ceiling)).toLocaleString()}, ${ceilingClaim.trim || "the priciest trim"}, all-in) — no combination of real trims in our catalog reaches this price`);
+    } else {
+      // Fallback: no usable ceiling data. Same threshold as priceImplausible()
+      // (>20% AND >$6,000) -- below that, "options sit above the floor"
+      // genuinely covers it. At or above it, surfaced as a number to ask
+      // about, never as a claim about why it's there -- capped lower than
+      // either claim above because which of the two explanations applies is
+      // not confirmed.
+      const gap = quoted - msrp;
+      if (gap > msrp * 0.20 && gap > 6000) {
+        score += Math.min(1.5, (gap / msrp) * 100 * 0.15);
+        const refNote = claim.comparedAgainst === "all_in" ? "all-in MSRP" : "base MSRP";
+        basis.push(`asking price sits $${Math.round(gap).toLocaleString()} above this trim's $${Math.round(msrp).toLocaleString()} ${refNote} (not confirmed as markup — could be options/packages atop the base trim, or a catalog gap; ask the dealer to itemize what's added)`);
+      }
+    }
   }
   const flagged = Number(analysis.totalFlaggedCost) || 0;
   if (flagged > 0) { score += Math.min(2.0, flagged / 1000); basis.push(`$${flagged.toLocaleString()} in flagged fees`); }

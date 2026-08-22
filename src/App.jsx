@@ -11668,7 +11668,21 @@ function QuoteCheckPage(){
                 {analysis.msrpUnavailable&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.msrpUnavailable.note}</div>}
                 {analysis.msrpBasis==="dealer_stated"&&<div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This is the figure the dealer states on their own page — not verified against {analysis.make||"the manufacturer"}'s published price, so no over/under-MSRP claim is made from it.</div>}
                 {analysis.msrpReference&&analysis.msrpReference.msrp>0&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>For reference, {analysis.msrpReference.make||"the manufacturer"} publishes this model{analysis.msrpReference.trim?` (${analysis.msrpReference.trim})`:""} from <b>{money(analysis.msrpReference.msrp)}</b> — options and drivetrain sit above that. Ask which ones make up the difference.</div>}
-                {analysis.msrpBasis==="starting_at"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>}
+                {/* Same shared logic as qualifyMsrpClaim's refusal (msrp-claim.ts)
+                    -- this card had its own separate hardcoded copy of the SAME
+                    "no over/under-MSRP claim is made" text, so it kept saying
+                    that even after the leverage panel below started surfacing a
+                    real ceiling-exceeded gap for the identical report (confirmed
+                    live 2026-08-21, Okotoks RAV4 PHEV GR Sport AWD -- $23,581
+                    over the top of the 4-trim lineup). Two cards, one report,
+                    disagreeing about the same car -- the exact class of bug this
+                    whole product exists to prevent dealers from getting away
+                    with, now happening to us. */}
+                {analysis.msrpBasis==="starting_at"&&(()=>{
+                  const cc=qualifyCeilingClaim(analysis);
+                  if(cc.exceeds&&Number(cc.over)>0) return <div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This exact trim isn't pinned down, but the asking price is <b>{money(cc.over)}</b> above {money(cc.ceiling)} — the all-in price of {cc.trim||"the most expensive trim"}, the priciest of the {cc.trimsConsidered} real {analysis.make||"manufacturer"} trims in our catalog. No combination of options on any of them reaches this price.</div>;
+                  return <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>;
+                })()}
                 {analysis.msrpSourceUrl&&<a href={analysis.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:6,fontSize:12,color:C.tealInk,textDecoration:"underline"}}>See the manufacturer's own page for this MSRP ↗</a>}
                 {/* Same fix as the PDF: that linked page shows the ALL-IN "from"
                     price (freight/PDI/A-C/levies already added), not this

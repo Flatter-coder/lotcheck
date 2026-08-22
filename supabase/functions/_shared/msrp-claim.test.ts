@@ -156,6 +156,39 @@ for (const b of [null, undefined, "", "EXACT", "unknown"]) {
 }
 
 // ---------------------------------------------------------------------------
+// qualifyMsrpClaim + THE CEILING, TOGETHER — the actual Okotoks report,
+// confirmed live 2026-08-21. GR SPORT could not be pinned exact (priceImplausible
+// downgraded it to starting_at, correctly — a single row can't rule out a
+// missing higher trim), so this line used to say "no over/under-MSRP claim is
+// made" while the SAME report's leverage panel (a separate call site,
+// computeLeverageScore) said "no pricing red flags" too — both silent on a
+// real $23,581 gap the ceiling claim (4 real trims, none of them reach this
+// price) can support without needing the exact row at all. One report, two
+// surfaces, one true answer now.
+// ---------------------------------------------------------------------------
+{
+  const okotoksStartingAt = {
+    msrp: 57500, msrpBasis: "starting_at", quotedPrice: 85995,
+    allInPricing: { body: "AMVIC" }, make: "Toyota",
+    msrpCeiling: { allIn: 62414, floorAllIn: 51814, trim: "XSE Technology Package", trimsConsidered: 4 },
+  };
+  const c = qualifyMsrpClaim(okotoksStartingAt);
+  check(!c.comparable && /\$23,581/.test(String(c.refusal)) && /XSE Technology Package/.test(String(c.refusal)) && /4/.test(String(c.refusal)),
+    "starting_at + an exceeded ceiling enriches the refusal text with the real gap, not a silent 'no claim made'", JSON.stringify(c));
+  check(!/no over\/under-MSRP claim is made/.test(String(qualifyMsrpClaim(okotoksStartingAt).refusal)),
+    "the plain 'no claim made' text is replaced, not appended alongside a contradictory number");
+  // Below the ceiling: the plain starting_at refusal must still stand exactly
+  // as before — this is additive, not a replacement of the whole basis.
+  const underCeiling = { ...okotoksStartingAt, quotedPrice: 60000 };
+  check(/no over\/under-MSRP claim is made/.test(String(qualifyMsrpClaim(underCeiling).refusal)),
+    "under the ceiling, the original starting_at refusal is untouched");
+  // No ceiling data at all: same, must fall back to the plain refusal, not throw.
+  const noCeilingData = { msrp: 57500, msrpBasis: "starting_at", quotedPrice: 85995, allInPricing: { body: "AMVIC" }, make: "Toyota" };
+  check(/no over\/under-MSRP claim is made/.test(String(qualifyMsrpClaim(noCeilingData).refusal)),
+    "no msrpCeiling on the analysis -> falls back to the plain starting_at refusal");
+}
+
+// ---------------------------------------------------------------------------
 // THE CEILING CLAIM — the finding that needs no trim pinned.
 // ---------------------------------------------------------------------------
 const CEIL = { allIn: 62414, trim: "XSE Technology Package", trimsConsidered: 4 };

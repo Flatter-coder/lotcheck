@@ -183,6 +183,24 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
   // figure as exact is how an unverified number acquires authority by default;
   // absence of a basis is absence of verification, so it refuses like the rest.
   if (basis !== "exact") {
+    // A single-row "starting_at" match can't rule out a missing higher trim,
+    // so it stays a refusal -- but qualifyCeilingClaim asks a DIFFERENT
+    // question with no "missing trim" escape hatch: is the asking price
+    // above the entire lineup's most expensive real trim? Confirmed live
+    // 2026-08-21 (Okotoks Toyota RAV4 PHEV GR Sport AWD): this line said "no
+    // over/under-MSRP claim is made" on the SAME report whose leverage panel
+    // (computeLeverageScore, both analyze functions) now correctly surfaces
+    // a $23,581 ceiling-exceeded finding -- two surfaces of one report
+    // disagreeing about the same car is exactly the class of bug this
+    // module exists to prevent (see the file header). One rule, here too.
+    const ceiling = basis === "starting_at" ? qualifyCeilingClaim(a) : null;
+    if (ceiling?.exceeds && Number(ceiling.over) > 0) {
+      return {
+        ...base,
+        label: labelFor(basis, a),
+        refusal: `This exact trim isn't pinned down, but the asking price is $${Math.round(Number(ceiling.over)).toLocaleString()} above $${Math.round(Number(ceiling.ceiling)).toLocaleString()} — the all-in price of ${ceiling.trim || "the most expensive trim"}, the priciest of the ${ceiling.trimsConsidered} real ${make} trims in our catalog. No combination of options on any of them reaches this price.`,
+      };
+    }
     const refusals: Record<string, string> = {
       starting_at:
         `That is ${make}'s base price for this model — this unit's options and drivetrain sit on top of it, so no over/under-MSRP claim is made from it.`,
