@@ -60,10 +60,12 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
+import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
@@ -104,7 +106,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16m";  // + multi-vehicle URL pages now rejected (VIN-count check) instead of attempting a single-vehicle extraction
+const CACHE_VER = "2026-08-16q";  // + D2C Media window.__vdpJSON extractor built (was specified 2026-08-15, never wired in) -- recovers a real quoted price the page's own "Call for pricing" template hides
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -703,8 +705,19 @@ function computeLeverageScore(analysis: any): void {
   const basis: string[] = [];
   let score = 2.0; // a clean, fair deal has little documented leverage
 
-  const msrp = Number(analysis.msrp) || null;
   const quoted = Number(analysis.quotedPrice) || null;
+  // The reference figure, not raw analysis.msrp: an AMVIC all-in advertised
+  // price (quoted) must be measured against the manufacturer's ALL-IN
+  // figure, never the ex-freight MSRP -- that mismatch invents roughly
+  // $3,000 of markup that isn't there, the exact class of error
+  // msrp-claim.ts's own docstring names (Charlesglen, $11,173; Okotoks,
+  // $85,995 vs a $57,500 ex-freight figure when the honest reference is
+  // $60,578 all-in). This function used to run BEFORE analysis.allInPricing
+  // was even resolved (moved below, see the call-site comment), so it always
+  // compared against the wrong number when applicable -- not just for the
+  // starting_at branch added below, but for every "exact" report too.
+  const claim = qualifyMsrpClaim(analysis);
+  const msrp = Number(claim.reference) || null;
   // Only an EXACT trim MSRP can support an over/under-MSRP claim. A
   // "starting_at" floor (base trim / adjacent MY) says nothing about THIS
   // unit's sticker — an option-loaded car above the base floor isn't "over
@@ -717,6 +730,43 @@ function computeLeverageScore(analysis: any): void {
     } else if (deltaPct < -0.02) {
       score -= 1.0;
       basis.push(`already priced below MSRP`);
+    }
+  } else if (msrp && quoted && analysis.msrpBasis === "starting_at") {
+    // trim-match.js's priceImplausible() already downgraded this from "exact"
+    // specifically because a SINGLE row can't tell "real markup" from "the
+    // catalog is missing a higher trim" (the IONIQ 9 false accusation this
+    // whole gate exists to prevent), and that stays true here. But hiding the
+    // gap entirely is its own failure: confirmed live 2026-08-21, Okotoks
+    // Toyota RAV4 PHEV GR Sport AWD -- $85,995 asking against a hand-verified
+    // trim MSRP reported "no pricing red flags" on a real gap.
+    //
+    // Two tiers, strongest evidence first. qualifyCeilingClaim asks a
+    // DIFFERENT, stronger question than a single-row match: is the asking
+    // price above the ENTIRE lineup's most expensive real trim (>=2 trims
+    // considered)? That question has no "missing higher trim" escape hatch --
+    // there is no trim above the top of the ladder we already hold, by
+    // definition -- so it can support a real claim, not just a hedge. Already
+    // built, tested (msrp-claim.test.ts) and wired into the on-screen report;
+    // simply never consulted here before.
+    const ceilingClaim = qualifyCeilingClaim(analysis);
+    if (ceilingClaim.exceeds && Number(ceilingClaim.over) > 0) {
+      score += Math.min(2.5, (Number(ceilingClaim.over) / Number(ceilingClaim.ceiling)) * 100 * 0.3);
+      basis.push(`priced $${Math.round(Number(ceilingClaim.over)).toLocaleString()} above the top of the ${ceilingClaim.trimsConsidered}-trim ${analysis.make || ""} lineup ($${Math.round(Number(ceilingClaim.ceiling)).toLocaleString()}, ${ceilingClaim.trim || "the priciest trim"}, all-in) — no combination of real trims in our catalog reaches this price`);
+    } else {
+      // Fallback: no usable ceiling data. Same threshold as
+      // priceImplausible() (>20% AND >$6,000) -- below that, "options sit
+      // above the floor" genuinely covers it and this must stay silent, same
+      // as before. At or above it, the gap is worth a buyer's question
+      // regardless of which explanation is true, so it's surfaced as a
+      // number to ask about, never as a stated fact about why it's there.
+      // Capped lower than either claim above: the underlying number is real,
+      // but which of two explanations applies is not.
+      const gap = quoted - msrp;
+      if (gap > msrp * 0.20 && gap > 6000) {
+        score += Math.min(1.5, (gap / msrp) * 100 * 0.15);
+        const refNote = claim.comparedAgainst === "all_in" ? "all-in MSRP" : "base MSRP";
+        basis.push(`asking price sits $${Math.round(gap).toLocaleString()} above this trim's $${Math.round(msrp).toLocaleString()} ${refNote} (not confirmed as markup — could be options/packages atop the base trim, or a catalog gap; ask the dealer to itemize what's added)`);
+      }
     }
   }
   const flagged = Number(analysis.totalFlaggedCost) || 0;
@@ -2445,9 +2495,17 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   await applyVerifiedWarranty(analysis);
   await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
-  // Auto market value (best-effort). Inert until MARKETVALUE_PROVIDER is set to
-  // a real provider; returns null and the report omits the module.
-  if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
+  // Auto market value (best-effort) from our OWN crawl (lotcheck provider, the
+  // default): needs the VIN plus ymm + condition to build the comparable set,
+  // and returns null on thin coverage so the report omits the module.
+  if (analysis.vin) {
+    const mv = await fetchMarketValue(
+      analysis.vin,
+      analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
+      { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition },
+    );
+    if (mv) analysis.marketValue = mv;
+  }
   analysis.vinCheck = validateVin(analysis.vin);
   // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
   // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model
@@ -2593,7 +2651,6 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   computeOdometerCheck(analysis);
   await resolveFinanceRates(analysis);
   await resolveLeaseRates(analysis);
-  computeLeverageScore(analysis);
   // Deal Decoder — run AFTER msrp + finance rates are resolved.
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
@@ -2622,6 +2679,14 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       }
     }
   }
+  // Moved here (was right after resolveLeaseRates, before allInPricing above
+  // was even resolved) -- computeLeverageScore's over-MSRP delta needs
+  // analysis.allInPricing/msrpAllIn to compare an AMVIC all-in advertised
+  // price against the correct all-in reference, not the ex-freight MSRP
+  // (qualifyMsrpClaim's own "$3,078 of freight printed as dealer markup"
+  // lesson, msrp-claim.ts) -- it was silently running before either field
+  // existed, every single time, for every report.
+  computeLeverageScore(analysis);
   { const dc = assessDisclaimer(analysis); if (dc) analysis.disclaimerCheck = dc; }             // S35 (fine print = our evidence)
   await checkDealerLicence(analysis);                                                          // #11 AMVIC licence (Alberta)
   // LAST WORD GOES TO THE STRUCTURED VERDICTS. A RAV4 PHEV report shipped
@@ -2987,6 +3052,15 @@ Deno.serve(async (req: Request) => {
     // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
     // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
     const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
+    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
+    // nothing extra. Specified 2026-08-15, never actually wired in until now
+    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
+    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
+    // pricing" over the real fields it renders, but priceWithoutCustomFees
+    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
+    // [[gated-price-recovery]] memory for the full mechanism.
+    const earlyD2cVdp: Promise<any | null> = directHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
     // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
     // fails (all retries exhausted) -- the strongest early signal the rescue
     // will be needed. Started here, ~20-50s into the request, it runs in
@@ -3008,26 +3082,35 @@ Deno.serve(async (req: Request) => {
     // have -- notably msrp, which buildJsonLdFallbackAnalysis never sets
     // (schema.org listings essentially never carry MSRP, only the asking
     // price). A page with neither source resolves this to null, same as today.
-    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms]).then(([jl, cv]) => {
-      if (!jl && !cv) return null;
-      if (!cv) return jl;
-      if (!jl) {
-        return {
-          quotedPrice: cv.quotedPrice, msrp: cv.msrp, vin: cv.vin,
-          vehicle: [cv.year, cv.make, cv.model, cv.trim].filter(Boolean).join(" ") || null,
-          odometerKm: cv.odometerKm, vehicleCondition: cv.condition,
-          dealerName: cv.dealerName, dealerCity: cv.dealerCity,
-        };
-      }
+    const earlyStructuredFacts: Promise<any | null> = Promise.all([earlyJsonLd, earlyConvertusVms, earlyD2cVdp]).then(([jl, cv, dv]) => {
+      // A page only ever matches ONE platform's declaration (Convertus's
+      // vmsData vs. D2C's __vdpJSON are mutually exclusive in practice), so
+      // picking whichever blob resolved non-null is fill-only, never a real
+      // conflict between the two.
+      const blob = cv || dv;
+      if (!jl && !blob) return null;
+      const blobFacts = blob ? {
+        quotedPrice: blob.quotedPrice, msrp: blob.msrp ?? null, vin: blob.vin,
+        vehicle: [blob.year, blob.make, blob.model, blob.trim].filter(Boolean).join(" ") || null,
+        odometerKm: blob.odometerKm, vehicleCondition: blob.condition,
+        dealerName: blob.dealerName, dealerCity: blob.dealerCity ?? null,
+        // Only D2C's extractor sets these (a real "the page says X but the
+        // page's own data says Y" tell, not a guess -- see d2c-vdp.js).
+        priceGatedButRecovered: blob.priceGated || null, priceGateMessage: blob.priceGateMessage || null,
+      } : null;
+      if (!blobFacts) return jl;
+      if (!jl) return blobFacts;
       return {
         ...jl,
-        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : cv.quotedPrice,
-        msrp: Number(jl.msrp) > 0 ? jl.msrp : cv.msrp,
-        vin: jl.vin || cv.vin,
-        odometerKm: jl.odometerKm ?? cv.odometerKm,
-        vehicleCondition: jl.vehicleCondition || cv.condition,
-        dealerName: jl.dealerName || cv.dealerName,
-        dealerCity: jl.dealerCity || cv.dealerCity,
+        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : blobFacts.quotedPrice,
+        msrp: Number(jl.msrp) > 0 ? jl.msrp : blobFacts.msrp,
+        vin: jl.vin || blobFacts.vin,
+        odometerKm: jl.odometerKm ?? blobFacts.odometerKm,
+        vehicleCondition: jl.vehicleCondition || blobFacts.vehicleCondition,
+        dealerName: jl.dealerName || blobFacts.dealerName,
+        dealerCity: jl.dealerCity || blobFacts.dealerCity,
+        priceGatedButRecovered: blobFacts.priceGatedButRecovered,
+        priceGateMessage: blobFacts.priceGateMessage,
       };
     }).catch(() => null);
 
@@ -3592,6 +3675,22 @@ Deno.serve(async (req: Request) => {
           const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
           if (missing && alt != null && alt !== "") { (analysis as any)[k] = alt; console.log(`Convertus identity gap-fill: ${k}.`); }
         }
+        // The one field this whole extractor exists for, and the one field its
+        // OWN gap-fill loop above never filled: `quotedPrice` isn't in that
+        // loop's key list, so a Convertus-sourced asking price sat correctly
+        // extracted in `cv` and was never written to `analysis` -- confirmed
+        // live 2026-08-21 (albertahonda.com, 2026 Civic Sedan LX CVT): the
+        // report shipped "No asking price could be read from this listing"
+        // while cv.quotedPrice held the page's own real $31,595 the whole
+        // time. `quotedPriceSource: "convertus_vms"` is not cosmetic -- the
+        // priceVerified gate a few hundred lines down already recognizes this
+        // exact string as an evidenced source; without it, even a correctly
+        // filled quotedPrice would report as unverified.
+        if (!(Number(analysis.quotedPrice) > 0) && Number(cv.quotedPrice) > 0) {
+          analysis.quotedPrice = cv.quotedPrice;
+          analysis.quotedPriceSource = "convertus_vms";
+          console.log("Convertus identity gap-fill: quotedPrice.");
+        }
         if (!analysis.vehicleCondition && cv.condition) analysis.vehicleCondition = cv.condition;
         // Same gap this whole extractor exists for -- the dealer's own
         // advertised finance rate and pricing fine print live in the SAME
@@ -3792,6 +3891,14 @@ Deno.serve(async (req: Request) => {
           }
         }
         if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
+        // Carry the D2C "page says Call for pricing, blob says $X" tell
+        // through -- fill-only, only when THIS gap-fill is what actually
+        // supplied the price (never claim a gate was recovered for a price
+        // that was on the page/Claude's own read the whole time).
+        if (early.priceGatedButRecovered && Number(analysis.quotedPrice) === Number(early.quotedPrice)) {
+          analysis.priceGatedButRecovered = true;
+          analysis.priceGateMessage = early.priceGateMessage;
+        }
         gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
       }
     } catch { /* the safety net must never sink the scan */ }

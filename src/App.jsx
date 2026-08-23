@@ -8404,6 +8404,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // (detected from the page's own call-to-action text). A tactic, not a miss.
   const priceGated = !qp && a.priceDisclosure === "contact_for_price";
   const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  // The page ITSELF gated the price ("Call for pricing" or similar) but its
+  // own machine-readable data (D2C's window.__vdpJSON, see d2c-vdp.js)
+  // carried the real ask -- a verifiable claim about what the page's source
+  // contains, not an inference about intent. Only meaningful once qp is
+  // actually populated (priceGated above already covers the case where
+  // nothing was recoverable at all). Confirmed live 2026-08-22, Okotoks
+  // Toyota RAV4 PHEV GR Sport AWD: rendered page shows "Call for pricing",
+  // window.__vdpJSON's price field holds $85,995 -- also published to
+  // Google Vehicle Ads, so this is public information either way.
+  const gatedRecoveredNote = (qp && a.priceGatedButRecovered)
+    ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+    : "";
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
   const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
@@ -8563,7 +8575,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       : !qp
       ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
       : deltaOk
-        ? (delta > 0
+        ? gatedRecoveredNote + (delta > 0
           ? `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(delta)} MORE than that sticker. Anything over sticker is pure negotiation room.`
           : delta === 0
             ? "MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking exactly the sticker — not a markup, but not a deal either."
@@ -8589,7 +8601,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
            disagreed. One source now. */
         : (() => {
             const refusal = qualifyMsrpClaim(a).refusal;
-            if (refusal) return refusal;
+            if (refusal) return gatedRecoveredNote + refusal;
             const cc = qualifyCeilingClaim(a);
             const floor = a.allInPricing && cc.floor ? cc.floor : null;
             if (floor)
@@ -8599,10 +8611,10 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
                  LE row, so the floor was the bottom of OUR ladder, $6,285 high.
                  A floor from a partial ladder is not the manufacturer's floor,
                  and trimsConsidered >= 2 never established completeness. */
-              return `Across the ${cc.trimsConsidered} ${a.make || ""} trims in our catalogue this model runs ${money(floor)}${cc.ceiling && cc.ceiling !== floor ? `–${money(cc.ceiling)}` : ""} all-in — cheaper trims may exist that we don't hold. This car's exact trim was not pinned down, so we don't call it "over" or "under"; use that range as a reference and make the dealer say which trim this is.`;
+              return gatedRecoveredNote + `Across the ${cc.trimsConsidered} ${a.make || ""} trims in our catalogue this model runs ${money(floor)}${cc.ceiling && cc.ceiling !== floor ? `–${money(cc.ceiling)}` : ""} all-in — cheaper trims may exist that we don't hold. This car's exact trim was not pinned down, so we don't call it "over" or "under"; use that range as a reference and make the dealer say which trim this is.`;
             if (ms)
-              return `${a.make || "The manufacturer"}'s price for this model starts at ${money(ms)} for the base version. This car's exact trim and options were not pinned down, so we don't call it "over" or "under" — use the base figure as your reference and make the dealer justify everything above it.`;
-            return "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.";
+              return gatedRecoveredNote + `${a.make || "The manufacturer"}'s price for this model starts at ${money(ms)} for the base version. This car's exact trim and options were not pinned down, so we don't call it "over" or "under" — use the base figure as your reference and make the dealer justify everything above it.`;
+            return gatedRecoveredNote + "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.";
           })(),
     "Transport Canada recalls": a.recalls?.checked && a.recalls.count > 0
       ? `A recall means the manufacturer found a safety defect and must fix it FREE of charge. This vehicle's model has ${a.recalls.count} unfixed recall${a.recalls.count > 1 ? "s" : ""} on record — tell the dealer to complete the repair before you take delivery. It costs you nothing.`
@@ -9380,6 +9392,74 @@ function useComparableListings(a){
   },[key]);
   return st;
 }
+// Used-market value, shown as design 10 — a radial band gauge in dollars, never
+// a score. The dealer's asking price rides on a low→median→high arc so the buyer
+// sees exactly where it sits with nothing to explain (design-must-not-create-
+// questions). Reads only signed fields (avg/lo/hi/below/above/n/as) + the signed
+// asking price, so it renders identically wherever marketValue travels.
+function MarketBandGauge({mv, asking, C, cardStyle}){
+  const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const AMBER="#f2a84b";
+  // Accept both shapes: the live report object (average/low/high/comps/asOf) and
+  // the signed /verify payload (avg/lo/hi/n/as).
+  const median=Number(mv.avg!=null?mv.avg:mv.average)||0;
+  const low=Number(mv.lo!=null?mv.lo:(mv.low!=null?mv.low:mv.below))||0;
+  const high=Number(mv.hi!=null?mv.hi:(mv.high!=null?mv.high:mv.above))||0;
+  const comps=mv.n!=null?mv.n:mv.comps;
+  const asOf=mv.as!=null?mv.as:mv.asOf;
+  const ask=Number(asking)||0;
+  if(!median||!low||!high) return null;
+  // Domain always includes the dealer's price so its marker is on the arc.
+  const lo0=Math.min(low, ask>0?ask:low), hi0=Math.max(high, ask>0?ask:high);
+  const pad=Math.max(1,(hi0-lo0)*0.10), d0=lo0-pad, d1=hi0+pad;
+  const frac=v=>Math.max(0,Math.min(1,(v-d0)/((d1-d0)||1)));
+  const LEN=Math.PI*2*115*270/360; // full-arc length for the progress dash
+  const rot=f=>`rotate(${(f*270).toFixed(2)}deg)`;
+  const org={transformOrigin:"170px 160px",transformBox:"view-box"};
+  const delta=(ask&&median)?ask-median:0, inBand=ask>=low&&ask<=high;
+  const pos=delta===0?"at the local median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} the local median`;
+  const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
+  return (
+    <div style={{...cardStyle}}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Used market value · {mv.source||"LotCheck market"}</div>
+      <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(ask||median)}, ${pos}. Market range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
+          <defs>
+            <linearGradient id="mvArcGrad" gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
+              <stop offset="0" stopColor="#4fd0c9"/><stop offset="0.5" stopColor="#8b6cf0"/><stop offset="1" stopColor={AMBER}/>
+            </linearGradient>
+          </defs>
+          <path d={TRACK} fill="none" stroke="rgba(147,164,194,.18)" strokeWidth="9" strokeLinecap="round"/>
+          <path d={TRACK} fill="none" stroke="url(#mvArcGrad)" strokeWidth="9" strokeLinecap="round" style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
+          <g style={{transform:rot(frac(median)),...org}}>
+            <circle cx="88.68" cy="241.32" r="4.6" fill="#4fd0c9" stroke="#0d131e" strokeWidth="1.4"/>
+          </g>
+          <g style={{transform:rot(frac(ask||median)),...org}}>
+            <circle cx="88.68" cy="241.32" r="8.5" fill={AMBER} stroke="#fff2df" strokeWidth="1.6"/>
+          </g>
+          <text x="66" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(low)}</text>
+          <text x="274" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(high)}</text>
+        </svg>
+        <div style={{position:"absolute",left:"50%",top:"57%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
+          <div style={{fontSize:10,letterSpacing:".14em",color:C.inkFaint,textTransform:"uppercase"}}>Dealer asking</div>
+          <div style={{fontSize:33,fontWeight:1000,color:C.ink,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{money(ask||median)}</div>
+          <div style={{fontSize:11.5,color:inBand?C.tealInk:AMBER,marginTop:4,fontWeight:700,lineHeight:1.35}}>{ask?pos:"market median"}{ask&&!inBand?" · outside the range":""}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6}}>
+        {[["Low",low],["Median",median],["High",high]].map(([l,v],i)=>(
+          <div key={i} style={{flex:1,textAlign:"center",padding:"7px 4px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,textTransform:"uppercase"}}>{l}</div>
+            <div style={{fontSize:13.5,fontWeight:800,color:l==="Median"?C.tealInk:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>
+        {comps?`${Number(comps).toLocaleString()} comparable used listings`:"Comparable used listings"}{mv.mileage?` near ${Number(mv.mileage).toLocaleString()} km`:""}{asOf?` · captured ${asOf}`:""}. Asking prices read from dealers' own listings, not confirmed sales — this is the market, not the dealer's trade-in number.
+      </div>
+    </div>
+  );
+}
 // Compact payload for the emailed report (server renders HTML/PDF from it;
 // the server builds its own source link from its own make map — a client-
 // supplied URL never rides into a DKIM-signed email).
@@ -9502,12 +9582,14 @@ function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fp
 function canonicalReport(a){
   const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
   return {
+    // v4: marketValue also carries true low/high (lo/hi), comp count (n) and
+    // capture date (as) so /verify shows the used-value band, not a bare median.
     // v3: server now projects fcx + source too (they were client-only).
     // v2: added leverage's traceable note (lvn) and each add-on's reason.
     // Mirrors supabase/functions/_shared/report-sign.ts -- keep both in sync.
     // Additive-only: /verify re-hashes whatever bytes are embedded in its own
-    // link, never rebuilds this from a live object, so v1 links still verify.
-    v:3,
+    // link, never rebuilds this from a live object, so v1..v3 links still verify.
+    v:4,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9517,7 +9599,7 @@ function canonicalReport(a){
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null,reason:x.reason||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
-    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
+    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),lo:num(a.marketValue.low),hi:num(a.marketValue.high),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null,n:num(a.marketValue.comps),as:a.marketValue.asOf||null}:null,
     summary:a.summary||null,
     shot:a.listingShotSha256||null,
     vin:a.vin||null,
@@ -9896,7 +9978,11 @@ function VerifyPage(){
                   {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
-                  {o.marketValue&&o.marketValue.avg!=null&&<Row t={`Market value · ${o.marketValue.source||"independent"}`} v={money(o.marketValue.avg)}/>}
+                  {o.marketValue&&o.marketValue.avg!=null&&(()=>{
+                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, d=(ask&&med)?ask-med:0;
+                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={ask?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
+                  })()}
+                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""}</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
                   {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/
@@ -10830,6 +10916,41 @@ function QuoteCheckPage(){
     return AGGREGATOR_HOSTS.some(d=>host===d||host.endsWith("."+d));
   }
 
+  // Early, NON-blocking detection for a URL that looks INCOMPLETE -- pasted
+  // as just the domain, or visibly cut off mid-slug. Doesn't stop Analyze
+  // (either signal can false-positive on a genuinely short/odd real URL);
+  // it just warns before someone burns an attempt on a link that was never
+  // going to resolve. Vic, 2026-08-22: demoing at work, every pasted URL
+  // came back a bare "try again" -- his own diagnosis was a partial paste,
+  // and real dealer slugs run long enough (hit ourselves this exact session
+  // -- albertahonda.com/okotokstoyota.ca listing URLs both run 70+ chars
+  // past the domain) that a copy/select stopping short is a real, easy
+  // mistake, especially off a narrow address bar or a forwarded chat link.
+  function urlCompletenessHint(v){
+    let u; try{ u=new URL(v.trim()); }catch{ return null; }
+    if(u.protocol!=="http:"&&u.protocol!=="https:") return null;
+    const path=u.pathname.replace(/\/+$/,"");
+    if(!path) return "That's just the dealer's homepage — copy the link from the specific vehicle's own page instead.";
+    // A path ending on a bare separator has no natural terminator (a real
+    // slug ends on a word, id, or file extension) -- the clearest signal a
+    // selection/copy stopped mid-token rather than at the link's real end.
+    if(/[-_]$/.test(path)) return "This link looks like it might be cut off partway through — try copying it again, making sure you grab the whole address.";
+    // Narrow, curated dictionary of common vehicle-listing terminal words --
+    // this WON'T catch every truncation (that needs knowing the real word,
+    // impossible in general), but it catches the actual real-world case:
+    // Vic's own Okotoks Toyota RAV4 PHEV link this same session was cut to
+    // "...RAV4_Plug_In_Hybri", one letter short of "Hybrid", ending clean on
+    // a letter with no separator to catch it. If the final word-chunk is a
+    // real prefix (3+ chars, shorter than the whole word) of one of these,
+    // it is far more likely a cut mid-word than a coincidental real ending.
+    const COMMON_TERMINAL_WORDS=["hybrid","electric","plugin","gasoline","diesel","automatic","manual","sedan","coupe","hatchback","wagon","convertible","crossover","touring","premium","limited","platinum","luxury","sport","edition","package","hybride","electrique"];
+    const lastWord=path.split(/[-_/]/).pop().toLowerCase();
+    if(lastWord.length>=3&&COMMON_TERMINAL_WORDS.some(w=>w.length>lastWord.length&&w.startsWith(lastWord))){
+      return "This link looks like it might be cut off partway through — try copying it again, making sure you grab the whole address.";
+    }
+    return null;
+  }
+
   const handleUrlAnalyze=async()=>{
     const url=urlInput.trim();
     setCooldownUntil(null); // clear any stale countdown from a prior attempt
@@ -10937,8 +11058,17 @@ function QuoteCheckPage(){
       applyCheckSuccess(data);
       setStatus("done");
     }catch(err){
+      // This is the fetch to OUR OWN endpoint throwing (network/DNS/CORS,
+      // or `res.json()` choking on a non-JSON response) -- everything the
+      // server itself can identify already returns a specific message above
+      // (unreadable listing, multi-vehicle, etc.), so reaching this branch
+      // means we genuinely don't know why. Naming both real possibilities
+      // beats a bare "try again": Vic, 2026-08-22, demoing on a work network
+      // -- every pasted URL landed here, and a corporate firewall/proxy on
+      // the connection to Supabase is just as plausible a cause as anything
+      // about the link itself, so this doesn't only blame the paste.
       setStatus("error");
-      setErrorMsg("Couldn't reach the analysis service. Check your connection and try again.");
+      setErrorMsg("Couldn't reach the analysis service. Double-check the FULL link was pasted (long dealer URLs are easy to copy short), and that nothing on your network — a work VPN or firewall — is blocking the connection, then try again.");
     }
   };
 
@@ -11280,6 +11410,15 @@ function QuoteCheckPage(){
                   Analyze →
                 </button>
               </div>
+              {/* Non-blocking -- a hint, not a gate. Only shown once there's
+                  something to judge, and cleared instantly if they keep typing
+                  past whatever tripped it. */}
+              {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
+                <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                  <Icon3D name="warning" size={14}/>
+                  <span>{urlCompletenessHint(urlInput)}</span>
+                </div>
+              )}
               <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
                 <Icon3D name="blocked" size={15}/>
                 <span><strong>Don't use listing marketplaces</strong> — AutoTrader, CarGurus, Kijiji, eBay, or Facebook Marketplace links aren't supported here. Paste the dealer's own site, or upload a screenshot instead.</span>
@@ -11668,8 +11807,31 @@ function QuoteCheckPage(){
                 {analysis.msrpUnavailable&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.msrpUnavailable.note}</div>}
                 {analysis.msrpBasis==="dealer_stated"&&<div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This is the figure the dealer states on their own page — not verified against {analysis.make||"the manufacturer"}'s published price, so no over/under-MSRP claim is made from it.</div>}
                 {analysis.msrpReference&&analysis.msrpReference.msrp>0&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>For reference, {analysis.msrpReference.make||"the manufacturer"} publishes this model{analysis.msrpReference.trim?` (${analysis.msrpReference.trim})`:""} from <b>{money(analysis.msrpReference.msrp)}</b> — options and drivetrain sit above that. Ask which ones make up the difference.</div>}
-                {analysis.msrpBasis==="starting_at"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>}
+                {/* Same shared logic as qualifyMsrpClaim's refusal (msrp-claim.ts)
+                    -- this card had its own separate hardcoded copy of the SAME
+                    "no over/under-MSRP claim is made" text, so it kept saying
+                    that even after the leverage panel below started surfacing a
+                    real ceiling-exceeded gap for the identical report (confirmed
+                    live 2026-08-21, Okotoks RAV4 PHEV GR Sport AWD -- $23,581
+                    over the top of the 4-trim lineup). Two cards, one report,
+                    disagreeing about the same car -- the exact class of bug this
+                    whole product exists to prevent dealers from getting away
+                    with, now happening to us. */}
+                {analysis.msrpBasis==="starting_at"&&(()=>{
+                  const cc=qualifyCeilingClaim(analysis);
+                  if(cc.exceeds&&Number(cc.over)>0) return <div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This exact trim isn't pinned down, but the asking price is <b>{money(cc.over)}</b> above {money(cc.ceiling)} — the all-in price of {cc.trim||"the most expensive trim"}, the priciest of the {cc.trimsConsidered} real {analysis.make||"manufacturer"} trims in our catalog. No combination of options on any of them reaches this price.</div>;
+                  return <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>;
+                })()}
                 {analysis.msrpSourceUrl&&<a href={analysis.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:6,fontSize:12,color:C.tealInk,textDecoration:"underline"}}>See the manufacturer's own page for this MSRP ↗</a>}
+                {/* Same fix as the PDF: that linked page shows the ALL-IN "from"
+                    price (freight/PDI/A-C/levies already added), not this
+                    ex-freight trim MSRP -- confirmed live 2026-08-21, a RAV4
+                    PHEV GR SPORT AWD where the linked Toyota page reads $60,578
+                    against this card's correct $57,500. Without this note a
+                    reader who clicks through reasonably reads the bigger number
+                    as this report being wrong. msrpAllIn is the same
+                    hand-verified catalog row, never re-derived here. */}
+                {analysis.msrpSourceUrl&&Number(analysis.msrpAllIn)>(Number(analysis.msrp)||0)&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>That page shows the all-in total, {money(analysis.msrpAllIn)} — about {money(Math.round(analysis.msrpAllIn-(analysis.msrp||0)))} more, covering freight/PDI, the A/C charge and other levies on top of the MSRP above. Same trim, different basis, not a mismatch.</div>}
               </div>
 
               {/* Quoted price colored against MSRP: teal/green at-or-under
@@ -11718,24 +11880,9 @@ function QuoteCheckPage(){
                   VIN is present + a market-value provider is live). Buyer-side
                   value anchor — NOT the dealer's trade-in number. Source label
                   comes from the data so it stays accurate as providers change. */}
-              {analysis.marketValue&&analysis.marketValue.average!=null&&(()=>{
-                const mv=analysis.marketValue;
-                const asking=Number(analysis.quotedPrice)||0;
-                const avg=Number(mv.average);
-                const delta=(asking&&avg)?asking-avg:0;
-                const good=delta<=0;
-                return (
-                  <div style={{...cardStyle,background:good?C.tealBg:C.coralBg,border:`1px solid ${(good?C.teal:C.coral)}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · {mv.source||"independent"}</div>
-                    <div style={{fontSize:18,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.1}}>
-                      {(asking&&avg)?`Asking is ${delta<=0?`$${Math.abs(delta).toLocaleString()} under`:`$${delta.toLocaleString()} over`} market`:`Market average $${avg.toLocaleString()}`}
-                    </div>
-                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
-                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{(mv.comps||mv.count)?`, from ${Number(mv.comps||mv.count).toLocaleString()} recent listings`:""}. This is the independent market value — not the dealer's trade-in number.
-                    </div>
-                  </div>
-                );
-              })()}
+              {analysis.marketValue&&analysis.marketValue.average!=null&&(
+                <MarketBandGauge mv={analysis.marketValue} asking={Number(analysis.quotedPrice)||0} C={C} cardStyle={cardStyle}/>
+              )}
 
               {analysis.leverageScore?.computed&&(
                 <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>

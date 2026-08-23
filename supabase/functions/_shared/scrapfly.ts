@@ -21,6 +21,7 @@
 
 import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
 import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
+import { extractD2cVdpVehicle, fillFromD2cVdp } from "./d2c-vdp.js";
 import { visionImageVerdict } from "./vision-limits.ts";
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
@@ -261,7 +262,18 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       // figure with grey boxes where the car should be. Matches the 8s the
       // ASP render already uses for the same reason.
       u.searchParams.set("rendering_wait", "8000");
-      u.searchParams.set("auto_scroll", "true");
+      // auto_scroll only for the fullpage capture, which stitches the WHOLE
+      // page and needs it to trigger below-the-fold lazy images (the HR-V
+      // grey-box case above). On the viewport degrade path -- which exists
+      // specifically to show "the top of the listing (price + vehicle
+      // visible)" per the comment below -- auto_scroll actively defeats that:
+      // it leaves the page scrolled to wherever it stopped, and the viewport
+      // shot then captures THAT position, not the top. Confirmed live
+      // 2026-08-21 (Okotoks Toyota, the exact dealer already named above as
+      // the known too_large/degrade case): the sealed capture showed the
+      // Specifications/Key features section, not the price/VIN/vehicle photo
+      // at the top -- the report's most important evidence, missing.
+      if (fullpage) u.searchParams.set("auto_scroll", "true");
       u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before the sealed shot
       u.searchParams.set("country", "ca");
       if (asp) u.searchParams.set("asp", "true");
@@ -504,6 +516,11 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // also misses them (long page, oversized screenshot, whatever), this was
     // the one remaining source with nothing reading it. See convertus-vms.js.
     const cv = rendered.html ? extractConvertusVmsVehicle(rendered.html) : null;
+    // D2C Media's window.__vdpJSON -- same reasoning as Convertus above, a
+    // second platform whose real price/identity fields never reach JSON-LD
+    // or vision when the page templates a "Call for pricing" gate over them.
+    // See d2c-vdp.js.
+    const dv = rendered.html ? extractD2cVdpVehicle(rendered.html) : null;
 
     // Ground-truth price-gate check against the RAW rendered DOM text -- runs
     // regardless of whether the screenshot capture was complete or the vision
@@ -563,7 +580,7 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // null, but the page's own structured data was sitting right there).
     // A confirmed price-gate CTA is the same kind of signal worth keeping
     // even when vision, JSON-LD and vmsData all came back empty.
-    if (!parsed && !jsonLd && !cv && !renderGateCtaDetected) return null;
+    if (!parsed && !jsonLd && !cv && !dv && !renderGateCtaDetected) return null;
     if (!parsed) parsed = {};
     parsed.extractionMethod = parsed.extractionMethod
       || (Object.keys(parsed).length === 0 && (jsonLd || cv) ? "scrapfly_render_structured_data" : "scrapfly_render_vision");
@@ -574,6 +591,7 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // fields have no schema.org equivalent, so this only ever fills gaps
     // JSON-LD genuinely couldn't -- never overwrites what fillFromJsonLd set.
     if (cv) fillFromConvertusVms(parsed, cv);
+    if (dv) fillFromD2cVdp(parsed, dv);
     // #14 listing-photo proof lock: keep the rendered screenshot ON the report
     // and seal its SHA-256 into the signed canonical (report-sign.ts reads
     // listingShotSha256). Proves what the page looked like at that moment --
@@ -602,9 +620,28 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
 // only fill blanks, but always prefer a real rescued price/MSRP over null.
 export function mergeRescued(analysis: any, rescued: any): void {
   if (!analysis || !rescued) return;
+  const hadNoQuotedPrice = !(Number(analysis.quotedPrice) > 0);
   const preferKeys = ["quotedPrice", "msrp"];
   for (const k of preferKeys) {
     if ((analysis[k] == null || Number(analysis[k]) <= 0) && Number(rescued[k]) > 0) analysis[k] = rescued[k];
+  }
+  // quotedPriceSource rides along with quotedPrice above -- without it, a
+  // rescue-path Convertus price (fillFromConvertusVms now tags it
+  // "convertus_vms") gets the right number but silently drops the provenance
+  // tag priceVerified checks for, same bug as the main-path gap-fill it
+  // mirrors. Gated on hadNoQuotedPrice (captured before the loop above), not
+  // just "analysis.quotedPrice is now positive" -- otherwise an already-present
+  // LLM-guessed price that happens to match rescued's number would wrongly
+  // inherit rescued's "verified" source tag instead of staying unverified.
+  if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.quotedPriceSource) {
+    analysis.quotedPriceSource = rescued.quotedPriceSource;
+  }
+  // Same reasoning, same gate: the D2C "page says Call for pricing, blob
+  // says $X" tell (fillFromD2cVdp) only means something if THIS merge is
+  // what actually supplied the price.
+  if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.priceGatedButRecovered) {
+    analysis.priceGatedButRecovered = true;
+    analysis.priceGateMessage = rescued.priceGateMessage;
   }
   const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {

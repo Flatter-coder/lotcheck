@@ -181,9 +181,21 @@ const FILL_CASES = [
   ["vision returned nothing -> vmsData carries the whole rescue",
     {}, cvReal,
     { quotedPrice: 36605, msrp: 36605, vin: "2HGFE4F83TH013665", year: 2026, make: "Honda", model: "Civic Sedan", trim: "Sport eCVT", vehicle: "2026 Honda Civic Sedan Sport eCVT" }],
-  ["a real parsed price is never clobbered by a differing vmsData price",
+  // Confirmed live 2026-08-21 (albertahonda.com, 2026 Civic Sedan LX CVT): a
+  // correctly-extracted $31,595 asking price never reached the report,
+  // because (a) the MAIN scan path's own gap-fill loop in
+  // analyze-listing-url/index.ts never included "quotedPrice" in its key
+  // list at all, and (b) even here, filling quotedPrice never tagged a
+  // source -- so priceVerified's already-existing `src === "convertus_vms"`
+  // check could never fire for a price this function filled. (a) isn't
+  // reachable from this file (it's inline in the edge function, not
+  // exported); this pins (b), the shared half of the same bug class.
+  ["quotedPrice fill also tags quotedPriceSource as convertus_vms",
+    {}, cvReal,
+    { quotedPrice: 36605, quotedPriceSource: "convertus_vms" }],
+  ["a real parsed price is never clobbered by a differing vmsData price, nor does it inherit a source tag it didn't earn",
     { quotedPrice: 41000 }, cvReal,
-    { quotedPrice: 41000 }],
+    { quotedPrice: 41000, quotedPriceSource: undefined }],
   ["a zero/falsy parsed price IS replaced (bad vision read, not a real $0 listing)",
     { quotedPrice: 0 }, cvReal,
     { quotedPrice: 36605 }],

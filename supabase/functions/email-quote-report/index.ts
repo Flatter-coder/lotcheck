@@ -433,6 +433,39 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Worth asking outright: <b>&ldquo;How long has this exact car been on your lot?&rdquo;</b> A car that has sat 90+ days is carrying real cost for them, and the answer is easy for them to give and awkward to dodge. We could not read it here, so we are not guessing at it.</div>` });
   }
 
+  // 5b1 -- Used market value: the median-anchored band from our OWN comps
+  // (design 10 in dollars, never a score -- design-must-not-create-questions).
+  // Arcs don't survive email clients, so the same information rides on a linear
+  // low->median->high band with a "you are here" marker.
+  if (a.marketValue && a.marketValue.average != null) {
+    const mv = a.marketValue;
+    const median = Number(mv.average) || 0;
+    const low = Number(mv.low != null ? mv.low : mv.below) || 0;
+    const high = Number(mv.high != null ? mv.high : mv.above) || 0;
+    const ask = Number(a.quotedPrice) || 0;
+    const comps = mv.comps != null ? Number(mv.comps) : null;
+    const delta = (ask && median) ? ask - median : 0;
+    const inBand = ask >= low && ask <= high;
+    const pos = delta === 0 ? "at the local median" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local median`;
+    if (median && low && high) {
+      const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
+      const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
+      const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
+      const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
+      const band =
+        `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
+          `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
+          `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
+          `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
+        `</div>` +
+        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Median ${money(median)}</span><span>High ${money(high)}</span></div>`;
+      deck.push({ label: "Used market value", tone: inBand ? "muted" : "flag", glow: false, body:
+        `<div style="font-size:18px;font-weight:900;color:${inBand ? "#17756B" : "#A63C25"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market median ${money(median)}`}</div>` +
+        band +
+        `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
+    }
+  }
+
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
   if (a.msrpBasis === "exact" && a.allInPricing?.body && a.msrpPriceBasis !== "incl_freight" && Number(a.msrp) > 0 && Number(a.quotedPrice) > Number(a.msrp) + 100) {
     deck.push({ label: "Basis note - freight & PDI", tone: "muted", glow: false, body:
@@ -689,6 +722,14 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
+  // Used market value: the dealer's asking against our own comp median (dollars,
+  // not a score). Flag only when it sits above the range -- a watch-out.
+  if (a.marketValue && a.marketValue.average != null) {
+    const mv = a.marketValue, ask = Number(a.quotedPrice) || 0, med = Number(mv.average) || 0, d = (ask && med) ? ask - med : 0;
+    const lo = Number(mv.low != null ? mv.low : mv.below) || 0, hi = Number(mv.high != null ? mv.high : mv.above) || 0;
+    const inB = ask >= lo && ask <= hi;
+    P.push({ t: "Used market value", v: ask ? (money(ask) + " · " + (d === 0 ? "AT MEDIAN" : money(Math.abs(d)) + (d > 0 ? " ABOVE" : " BELOW") + " MEDIAN")) : (money(med) + " MEDIAN"), tone: (ask && !inB && d > 0) ? "flag" : "muted" });
+  }
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
   else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
@@ -734,19 +775,34 @@ function pointExplain(t: string, a: any): string | null {
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
   const exact = ms > 0 && a.msrpBasis === "exact";
   switch (t) {
-    case "Price vs MSRP":
+    case "Price vs MSRP": {
+      // The page itself gated the price ("Call for pricing" or similar) but
+      // its own machine-readable data carried the real ask -- a verifiable
+      // claim about what the page's own source contains, not an inference
+      // about intent (gated-price-recovery memory, point 3). Prefixed onto
+      // whichever branch below fires, so the "how" of the comparison stays
+      // exactly as accurate as it already was; only the "where this number
+      // came from" note is new. Confirmed live 2026-08-22, Okotoks Toyota
+      // RAV4 PHEV GR Sport AWD (VIN JTM7ERAV1TD018440): the rendered page
+      // shows "Call for pricing" while window.__vdpJSON's own price field
+      // held $85,995 the whole time -- also published to Google Vehicle Ads,
+      // so this is public information, not a private number LotCheck leaked.
+      const gatedNote = (qp && a.priceGatedButRecovered)
+        ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+        : "";
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
-      if (qp && ms && exact) return delta > 0
+      if (qp && ms && exact) return gatedNote + (delta > 0
         ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(delta)} more than sticker - anything over sticker is pure negotiation room.`
         : delta === 0
           ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
-          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`;
+          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`);
       // Was hardcoded to the "starting at" story, which is wrong prose for a used
       // car's original MSRP or a dealer-stated figure. The gate owns the reason.
-      if (ms) return qualifyMsrpClaim(a).refusal
-        ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`;
-      return "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+      if (ms) return gatedNote + (qualifyMsrpClaim(a).refusal
+        ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`);
+      return gatedNote + "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+    }
     case "Transport Canada recalls":
       if (a.recalls?.checked && a.recalls.count > 0) return `A recall is a safety defect the manufacturer must fix free of charge. Have the dealer complete the repair${a.recalls.count > 1 ? "s" : ""} before delivery - it costs you nothing.`;
       if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
@@ -979,6 +1035,20 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   if (a.msrpSourceUrl) {
     for (const ln of wrap(`Verify this MSRP on ${a.make || "the manufacturer"}'s own page: ${a.msrpSourceUrl}`, sans, 8.5, W)) {
       need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
+    }
+    // That linked page shows the manufacturer's ALL-IN "from" price (freight/
+    // PDI, A/C charge, tire levy, etc. already added in), not this ex-freight
+    // trim MSRP -- the two numbers are EXPECTED to differ. Without this line,
+    // a reader who clicks through sees a bigger number and reasonably reads it
+    // as this report being wrong. Confirmed live 2026-08-21 (Vic, RAV4 PHEV GR
+    // SPORT AWD): the linked Toyota page shows $60,578 against this card's
+    // $57,500 -- both correct, on different bases (msrpAllIn is the same
+    // hand-verified catalog row, not a re-derived guess).
+    if (Number(a.msrpAllIn) > (Number(ms) || 0)) {
+      const gap = Math.round(Number(a.msrpAllIn) - (Number(ms) || 0));
+      for (const ln of wrap(`That page shows the ALL-IN total, ${money(a.msrpAllIn)} -- about ${money(gap)} more, covering freight/PDI, the A/C charge and other levies on top of the ${money(ms)} base MSRP above. Same trim, different basis, not a mismatch.`, sans, 8.5, W)) {
+        need(12); T(ln, { size: 8.5, font: sans, color: SOFT }); y -= 11;
+      }
     }
     y -= 6;
   }
@@ -1348,7 +1418,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
         y -= 15;
         if (k === 0) {
           para("Full-page photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-          if (sealedShot.sourceUrl) { const src = String(sealedShot.sourceUrl); T("Listing address (sealed in the signed report): " + (src.length > 80 ? src.slice(0, 77) + "..." : src), { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          // wrap(), not a single T() -- a long dealer URL (Okotoks Toyota,
+          // 2026-08-21: "...2026-Toyota-RAV4_Plug_In_Hybri" cut off mid-word,
+          // no "...", nothing wrong with the 80-char slice below it) simply
+          // ran past the page's content width at 7.5pt mono and off the
+          // printable margin. T() draws whatever string it's given at full
+          // width with no wrap or clip -- it was never the slice that failed.
+          if (sealedShot.sourceUrl) {
+            const src = String(sealedShot.sourceUrl);
+            const label = "Listing address (sealed in the signed report): " + (src.length > 80 ? src.slice(0, 77) + "..." : src);
+            for (const ln of wrap(label, mono, 7.5, W)) { T(ln, { size: 7.5, font: mono, color: FAINT }); y -= 11; }
+          }
           T("SHA-256 " + sealedShot.sha.slice(0, 64), { size: 7.5, font: mono, color: FAINT }); y -= 11;
         }
         off += slice; k++;

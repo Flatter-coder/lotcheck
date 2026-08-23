@@ -26,13 +26,15 @@ function num(x: unknown): number | null {
 // client's canonicalReport(). This exact string is hashed AND signed.
 export function canonicalReport(a: any): any {
   return {
-    // v3: also projects fcx + source, which had drifted onto the client copy
-    // only. v2 added leverage's traceable note (lvn) and each add-on's reason, so
-    // /verify no longer shows a bare score or a fee flag with no basis. Safe,
-    // additive-only bump -- /verify re-hashes whatever bytes are EMBEDDED in
-    // its own link, never rebuilds canonicalReport() from a live object, so
-    // links signed under v1 keep verifying exactly as issued.
-    v: 3,
+    // v4: marketValue now also carries the true low/high range (lo/hi), the comp
+    // count (n) and the capture date (as), so /verify can show the used-value band
+    // gauge with the same dollars-and-dates the report card shows -- not just a
+    // bare median. v3 also projects fcx + source, which had drifted onto the
+    // client copy only. v2 added leverage's traceable note (lvn) and each add-on's
+    // reason. Every bump is additive-only -- /verify re-hashes whatever bytes are
+    // EMBEDDED in its own link, never rebuilds canonicalReport() from a live
+    // object, so links signed under v1..v3 keep verifying exactly as issued.
+    v: 4,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -42,7 +44,7 @@ export function canonicalReport(a: any): any {
     addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,
     reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
-    marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null } : null,
+    marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), lo: num(a.marketValue.low), hi: num(a.marketValue.high), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null, n: num(a.marketValue.comps), as: a.marketValue.asOf || null } : null,
     summary: a.summary || null,
     // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
     // signed canonical -- alter the image and the seal breaks.
