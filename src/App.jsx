@@ -9392,6 +9392,79 @@ function useComparableListings(a){
   },[key]);
   return st;
 }
+// Used-market value, shown as design 10 — a radial band gauge in dollars, never
+// a score. The dealer's asking price rides on a low→median→high arc so the buyer
+// sees exactly where it sits with nothing to explain (design-must-not-create-
+// questions). Reads only signed fields (avg/lo/hi/below/above/n/as) + the signed
+// asking price, so it renders identically wherever marketValue travels.
+function MarketBandGauge({mv, asking, C, cardStyle}){
+  const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const AMBER="#f2a84b";
+  // Accept both shapes: the live report object (average/low/high/comps/asOf) and
+  // the signed /verify payload (avg/lo/hi/n/as).
+  const median=Number(mv.avg!=null?mv.avg:mv.average)||0;
+  const low=Number(mv.lo!=null?mv.lo:(mv.low!=null?mv.low:mv.below))||0;
+  const high=Number(mv.hi!=null?mv.hi:(mv.high!=null?mv.high:mv.above))||0;
+  const comps=mv.n!=null?mv.n:mv.comps;
+  const asOf=mv.as!=null?mv.as:mv.asOf;
+  const ask=Number(asking)||0;
+  if(!median||!low||!high) return null;
+  // Domain always includes the dealer's price so its marker is on the arc.
+  const lo0=Math.min(low, ask>0?ask:low), hi0=Math.max(high, ask>0?ask:high);
+  const pad=Math.max(1,(hi0-lo0)*0.10), d0=lo0-pad, d1=hi0+pad;
+  const frac=v=>Math.max(0,Math.min(1,(v-d0)/((d1-d0)||1)));
+  const LEN=Math.PI*2*115*270/360; // full-arc length for the progress dash
+  // SVG user-unit rotation (attribute form) — no transform-box, so markers land
+  // on the arc in every engine, not just Chrome/FF/Safari 15.4+.
+  const rotAttr=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
+  const delta=(ask&&median)?ask-median:0;
+  // Caution ONLY when the dealer asks above the whole local range — a real
+  // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
+  const aboveRange=ask>0&&ask>high, belowRange=ask>0&&ask<low;
+  const pos=delta===0?"at the local median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} the local median`;
+  const rangeSuffix=aboveRange?" · above the range":belowRange?" · below the range":(ask?" · within the range":"");
+  const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
+  return (
+    <div style={{...cardStyle}}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Used market value · {mv.source||"LotCheck market"}</div>
+      <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(ask||median)}, ${pos}. Market range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
+          <defs>
+            <linearGradient id="mvArcGrad" gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
+              <stop offset="0" stopColor="#4fd0c9"/><stop offset="0.5" stopColor="#8b6cf0"/><stop offset="1" stopColor={AMBER}/>
+            </linearGradient>
+          </defs>
+          <path d={TRACK} fill="none" stroke="rgba(147,164,194,.18)" strokeWidth="9" strokeLinecap="round"/>
+          <path d={TRACK} fill="none" stroke="url(#mvArcGrad)" strokeWidth="9" strokeLinecap="round" style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
+          <g transform={rotAttr(frac(median))}>
+            <circle cx="88.68" cy="241.32" r="4.6" fill="#4fd0c9" stroke="#0d131e" strokeWidth="1.4"/>
+          </g>
+          <g transform={rotAttr(frac(ask||median))}>
+            <circle cx="88.68" cy="241.32" r="8.5" fill={AMBER} stroke="#fff2df" strokeWidth="1.6"/>
+          </g>
+          <text x="66" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(low)}</text>
+          <text x="274" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(high)}</text>
+        </svg>
+        <div style={{position:"absolute",left:"50%",top:"57%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
+          <div style={{fontSize:10,letterSpacing:".14em",color:C.inkFaint,textTransform:"uppercase"}}>Dealer asking</div>
+          <div style={{fontSize:33,fontWeight:1000,color:C.ink,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{money(ask||median)}</div>
+          <div style={{fontSize:11.5,color:aboveRange?AMBER:C.tealInk,marginTop:4,fontWeight:700,lineHeight:1.35}}>{ask?pos:"market median"}{rangeSuffix}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6}}>
+        {[["Low",low],["Median",median],["High",high]].map(([l,v],i)=>(
+          <div key={i} style={{flex:1,textAlign:"center",padding:"7px 4px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
+            <div style={{fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,textTransform:"uppercase"}}>{l}</div>
+            <div style={{fontSize:13.5,fontWeight:800,color:l==="Median"?C.tealInk:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>
+        {comps?`${Number(comps).toLocaleString()} comparable used listings`:"Comparable used listings"}{mv.mileage?` near ${Number(mv.mileage).toLocaleString()} km`:""}{asOf?` · captured ${asOf}`:""}. Asking prices read from dealers' own listings, not confirmed sales — this is the market, not the dealer's trade-in number.
+      </div>
+    </div>
+  );
+}
 // Compact payload for the emailed report (server renders HTML/PDF from it;
 // the server builds its own source link from its own make map — a client-
 // supplied URL never rides into a DKIM-signed email).
@@ -9514,12 +9587,14 @@ function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fp
 function canonicalReport(a){
   const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
   return {
+    // v4: marketValue also carries true low/high (lo/hi), comp count (n) and
+    // capture date (as) so /verify shows the used-value band, not a bare median.
     // v3: server now projects fcx + source too (they were client-only).
     // v2: added leverage's traceable note (lvn) and each add-on's reason.
     // Mirrors supabase/functions/_shared/report-sign.ts -- keep both in sync.
     // Additive-only: /verify re-hashes whatever bytes are embedded in its own
-    // link, never rebuilds this from a live object, so v1 links still verify.
-    v:3,
+    // link, never rebuilds this from a live object, so v1..v3 links still verify.
+    v:4,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9529,7 +9604,7 @@ function canonicalReport(a){
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null,reason:x.reason||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
-    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null}:null,
+    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),lo:num(a.marketValue.low),hi:num(a.marketValue.high),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null,n:num(a.marketValue.comps),as:a.marketValue.asOf||null}:null,
     summary:a.summary||null,
     shot:a.listingShotSha256||null,
     vin:a.vin||null,
@@ -9908,7 +9983,11 @@ function VerifyPage(){
                   {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
-                  {o.marketValue&&o.marketValue.avg!=null&&<Row t={`Market value · ${o.marketValue.source||"independent"}`} v={money(o.marketValue.avg)}/>}
+                  {o.marketValue&&o.marketValue.avg!=null&&(()=>{
+                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, d=(ask&&med)?ask-med:0;
+                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={ask?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
+                  })()}
+                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
                   {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/
@@ -11806,24 +11885,9 @@ function QuoteCheckPage(){
                   VIN is present + a market-value provider is live). Buyer-side
                   value anchor — NOT the dealer's trade-in number. Source label
                   comes from the data so it stays accurate as providers change. */}
-              {analysis.marketValue&&analysis.marketValue.average!=null&&(()=>{
-                const mv=analysis.marketValue;
-                const asking=Number(analysis.quotedPrice)||0;
-                const avg=Number(mv.average);
-                const delta=(asking&&avg)?asking-avg:0;
-                const good=delta<=0;
-                return (
-                  <div style={{...cardStyle,background:good?C.tealBg:C.coralBg,border:`1px solid ${(good?C.teal:C.coral)}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Market value · {mv.source||"independent"}</div>
-                    <div style={{fontSize:18,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.1}}>
-                      {(asking&&avg)?`Asking is ${delta<=0?`$${Math.abs(delta).toLocaleString()} under`:`$${delta.toLocaleString()} over`} market`:`Market average $${avg.toLocaleString()}`}
-                    </div>
-                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
-                      Typical market range <b>${Number(mv.below).toLocaleString()}–${Number(mv.above).toLocaleString()}</b>{mv.mileage?` at ~${Number(mv.mileage).toLocaleString()} km`:""}{(mv.comps||mv.count)?`, from ${Number(mv.comps||mv.count).toLocaleString()} recent listings`:""}. This is the independent market value — not the dealer's trade-in number.
-                    </div>
-                  </div>
-                );
-              })()}
+              {analysis.marketValue&&analysis.marketValue.average!=null&&(
+                <MarketBandGauge mv={analysis.marketValue} asking={Number(analysis.quotedPrice)||0} C={C} cardStyle={cardStyle}/>
+              )}
 
               {analysis.leverageScore?.computed&&(
                 <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>

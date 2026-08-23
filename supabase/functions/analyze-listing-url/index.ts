@@ -2495,9 +2495,17 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   await applyVerifiedWarranty(analysis);
   await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
-  // Auto market value (best-effort). Inert until MARKETVALUE_PROVIDER is set to
-  // a real provider; returns null and the report omits the module.
-  if (analysis.vin) { const mv = await fetchMarketValue(analysis.vin, analysis.odometerKm != null ? Number(analysis.odometerKm) : null); if (mv) analysis.marketValue = mv; }
+  // Auto market value (best-effort) from our OWN crawl (lotcheck provider, the
+  // default): needs the VIN plus ymm + condition to build the comparable set,
+  // and returns null on thin coverage so the report omits the module.
+  if (analysis.vin) {
+    const mv = await fetchMarketValue(
+      analysis.vin,
+      analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
+      { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition },
+    );
+    if (mv) analysis.marketValue = mv;
+  }
   analysis.vinCheck = validateVin(analysis.vin);
   // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
   // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model

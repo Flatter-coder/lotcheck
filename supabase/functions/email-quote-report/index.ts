@@ -433,6 +433,41 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Worth asking outright: <b>&ldquo;How long has this exact car been on your lot?&rdquo;</b> A car that has sat 90+ days is carrying real cost for them, and the answer is easy for them to give and awkward to dodge. We could not read it here, so we are not guessing at it.</div>` });
   }
 
+  // 5b1 -- Used market value: the median-anchored band from our OWN comps
+  // (design 10 in dollars, never a score -- design-must-not-create-questions).
+  // Arcs don't survive email clients, so the same information rides on a linear
+  // low->median->high band with a "you are here" marker.
+  if (a.marketValue && a.marketValue.average != null) {
+    const mv = a.marketValue;
+    const median = Number(mv.average) || 0;
+    const low = Number(mv.low != null ? mv.low : mv.below) || 0;
+    const high = Number(mv.high != null ? mv.high : mv.above) || 0;
+    const ask = Number(a.quotedPrice) || 0;
+    const comps = mv.comps != null ? Number(mv.comps) : null;
+    const delta = (ask && median) ? ask - median : 0;
+    // Caution ONLY when asking above the whole local range (a watch-out), never
+    // for a below-range good deal or a missing price -- matches the 10-point line.
+    const aboveRange = ask > 0 && ask > high;
+    const pos = delta === 0 ? "at the local median" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local median`;
+    if (median && low && high) {
+      const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
+      const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
+      const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
+      const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
+      const band =
+        `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
+          `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
+          `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
+          `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
+        `</div>` +
+        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Median ${money(median)}</span><span>High ${money(high)}</span></div>`;
+      deck.push({ label: "Used market value", tone: aboveRange ? "flag" : "muted", glow: false, body:
+        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market median ${money(median)}`}</div>` +
+        band +
+        `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
+    }
+  }
+
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
   if (a.msrpBasis === "exact" && a.allInPricing?.body && a.msrpPriceBasis !== "incl_freight" && Number(a.msrp) > 0 && Number(a.quotedPrice) > Number(a.msrp) + 100) {
     deck.push({ label: "Basis note - freight & PDI", tone: "muted", glow: false, body:
@@ -689,6 +724,10 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
+  // NOTE: used market value is NOT one of the fixed 10 audit points -- it is a
+  // context module (like days-on-lot) and renders as its own deck card + a PDF
+  // narrative section. Pushing it here would overflow P.slice(0,10) and silently
+  // drop the last real point (Dealer reputation). Kept out on purpose.
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
   else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
@@ -1168,6 +1207,31 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     para("Ask them outright: \"How long has this exact car been on your lot?\" A car that has sat 90+ days is carrying real cost for them, and it is an easy question to answer and an awkward one to dodge. We could not read it here, so we are not guessing at it.",
       { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
+  }
+
+  // ---- USED MARKET VALUE — our own comp band, in dollars (never a score) ----
+  // A context module like days-on-lot: it renders here as its own narrative
+  // section, NOT as one of the fixed 10 audit points.
+  if (a.marketValue && a.marketValue.average != null) {
+    const mv = a.marketValue;
+    const med = Number(mv.average) || 0;
+    const lo = Number(mv.low != null ? mv.low : mv.below) || 0;
+    const hi = Number(mv.high != null ? mv.high : mv.above) || 0;
+    const ask = Number(a.quotedPrice) || 0;
+    const comps = mv.comps != null ? Number(mv.comps) : null;
+    const d = (ask && med) ? ask - med : 0;
+    const aboveRange = ask > 0 && ask > hi;
+    const m = (n: number) => "$" + Math.round(n).toLocaleString("en-CA");
+    if (med && lo && hi) {
+      need(72);
+      kicker("USED MARKET VALUE");
+      T(ask ? `${m(ask)} - ${d === 0 ? "at the local median" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local median"}` : `Market median ${m(med)}`,
+        { size: 14, font: serifB, color: aboveRange ? CORAL : INK }); y -= 19;
+      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, median ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
+      advance(2);
+      para("Asking prices read from dealers' own listings, not confirmed sales - this is the market, not the dealer's trade-in number.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+      rule();
+    }
   }
 
   // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
