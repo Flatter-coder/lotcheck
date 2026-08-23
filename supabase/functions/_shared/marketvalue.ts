@@ -204,6 +204,12 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
         p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
         p_condition: String(ctx.condition), p_exclude_vin: vin || null,
         p_province: ctx.province || "AB",
+        // +/-2 model years, not +/-1. A 2020-2024 window for a 2022 car is still
+        // honest comparables (usually the same generation), and it roughly
+        // doubles how many used cars clear the comp floor -- measured live against
+        // the crawl: CX-5 4->7, Corolla 2->5, Rogue 8->31. The mileage band,
+        // outlier trim and median still guard quality within the wider pool.
+        p_year_span: 2,
       }),
     });
     if (!res.ok) { console.warn("lotcheck market_comps: HTTP", res.status); return null; }
