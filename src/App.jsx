@@ -9414,10 +9414,15 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   const pad=Math.max(1,(hi0-lo0)*0.10), d0=lo0-pad, d1=hi0+pad;
   const frac=v=>Math.max(0,Math.min(1,(v-d0)/((d1-d0)||1)));
   const LEN=Math.PI*2*115*270/360; // full-arc length for the progress dash
-  const rot=f=>`rotate(${(f*270).toFixed(2)}deg)`;
-  const org={transformOrigin:"170px 160px",transformBox:"view-box"};
-  const delta=(ask&&median)?ask-median:0, inBand=ask>=low&&ask<=high;
+  // SVG user-unit rotation (attribute form) — no transform-box, so markers land
+  // on the arc in every engine, not just Chrome/FF/Safari 15.4+.
+  const rotAttr=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
+  const delta=(ask&&median)?ask-median:0;
+  // Caution ONLY when the dealer asks above the whole local range — a real
+  // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
+  const aboveRange=ask>0&&ask>high, belowRange=ask>0&&ask<low;
   const pos=delta===0?"at the local median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} the local median`;
+  const rangeSuffix=aboveRange?" · above the range":belowRange?" · below the range":(ask?" · within the range":"");
   const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
   return (
     <div style={{...cardStyle}}>
@@ -9431,10 +9436,10 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
           </defs>
           <path d={TRACK} fill="none" stroke="rgba(147,164,194,.18)" strokeWidth="9" strokeLinecap="round"/>
           <path d={TRACK} fill="none" stroke="url(#mvArcGrad)" strokeWidth="9" strokeLinecap="round" style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
-          <g style={{transform:rot(frac(median)),...org}}>
+          <g transform={rotAttr(frac(median))}>
             <circle cx="88.68" cy="241.32" r="4.6" fill="#4fd0c9" stroke="#0d131e" strokeWidth="1.4"/>
           </g>
-          <g style={{transform:rot(frac(ask||median)),...org}}>
+          <g transform={rotAttr(frac(ask||median))}>
             <circle cx="88.68" cy="241.32" r="8.5" fill={AMBER} stroke="#fff2df" strokeWidth="1.6"/>
           </g>
           <text x="66" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(low)}</text>
@@ -9443,7 +9448,7 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
         <div style={{position:"absolute",left:"50%",top:"57%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
           <div style={{fontSize:10,letterSpacing:".14em",color:C.inkFaint,textTransform:"uppercase"}}>Dealer asking</div>
           <div style={{fontSize:33,fontWeight:1000,color:C.ink,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{money(ask||median)}</div>
-          <div style={{fontSize:11.5,color:inBand?C.tealInk:AMBER,marginTop:4,fontWeight:700,lineHeight:1.35}}>{ask?pos:"market median"}{ask&&!inBand?" · outside the range":""}</div>
+          <div style={{fontSize:11.5,color:aboveRange?AMBER:C.tealInk,marginTop:4,fontWeight:700,lineHeight:1.35}}>{ask?pos:"market median"}{rangeSuffix}</div>
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6}}>
@@ -9982,7 +9987,7 @@ function VerifyPage(){
                     const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, d=(ask&&med)?ask-med:0;
                     return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={ask?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
                   })()}
-                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""}</div>}
+                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
                   {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/

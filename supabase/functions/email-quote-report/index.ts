@@ -445,7 +445,9 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     const ask = Number(a.quotedPrice) || 0;
     const comps = mv.comps != null ? Number(mv.comps) : null;
     const delta = (ask && median) ? ask - median : 0;
-    const inBand = ask >= low && ask <= high;
+    // Caution ONLY when asking above the whole local range (a watch-out), never
+    // for a below-range good deal or a missing price -- matches the 10-point line.
+    const aboveRange = ask > 0 && ask > high;
     const pos = delta === 0 ? "at the local median" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local median`;
     if (median && low && high) {
       const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
@@ -459,8 +461,8 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
           `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
         `</div>` +
         `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Median ${money(median)}</span><span>High ${money(high)}</span></div>`;
-      deck.push({ label: "Used market value", tone: inBand ? "muted" : "flag", glow: false, body:
-        `<div style="font-size:18px;font-weight:900;color:${inBand ? "#17756B" : "#A63C25"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market median ${money(median)}`}</div>` +
+      deck.push({ label: "Used market value", tone: aboveRange ? "flag" : "muted", glow: false, body:
+        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market median ${money(median)}`}</div>` +
         band +
         `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
     }
@@ -722,14 +724,10 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
-  // Used market value: the dealer's asking against our own comp median (dollars,
-  // not a score). Flag only when it sits above the range -- a watch-out.
-  if (a.marketValue && a.marketValue.average != null) {
-    const mv = a.marketValue, ask = Number(a.quotedPrice) || 0, med = Number(mv.average) || 0, d = (ask && med) ? ask - med : 0;
-    const lo = Number(mv.low != null ? mv.low : mv.below) || 0, hi = Number(mv.high != null ? mv.high : mv.above) || 0;
-    const inB = ask >= lo && ask <= hi;
-    P.push({ t: "Used market value", v: ask ? (money(ask) + " · " + (d === 0 ? "AT MEDIAN" : money(Math.abs(d)) + (d > 0 ? " ABOVE" : " BELOW") + " MEDIAN")) : (money(med) + " MEDIAN"), tone: (ask && !inB && d > 0) ? "flag" : "muted" });
-  }
+  // NOTE: used market value is NOT one of the fixed 10 audit points -- it is a
+  // context module (like days-on-lot) and renders as its own deck card + a PDF
+  // narrative section. Pushing it here would overflow P.slice(0,10) and silently
+  // drop the last real point (Dealer reputation). Kept out on purpose.
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
   else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
@@ -1209,6 +1207,31 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     para("Ask them outright: \"How long has this exact car been on your lot?\" A car that has sat 90+ days is carrying real cost for them, and it is an easy question to answer and an awkward one to dodge. We could not read it here, so we are not guessing at it.",
       { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
+  }
+
+  // ---- USED MARKET VALUE — our own comp band, in dollars (never a score) ----
+  // A context module like days-on-lot: it renders here as its own narrative
+  // section, NOT as one of the fixed 10 audit points.
+  if (a.marketValue && a.marketValue.average != null) {
+    const mv = a.marketValue;
+    const med = Number(mv.average) || 0;
+    const lo = Number(mv.low != null ? mv.low : mv.below) || 0;
+    const hi = Number(mv.high != null ? mv.high : mv.above) || 0;
+    const ask = Number(a.quotedPrice) || 0;
+    const comps = mv.comps != null ? Number(mv.comps) : null;
+    const d = (ask && med) ? ask - med : 0;
+    const aboveRange = ask > 0 && ask > hi;
+    const m = (n: number) => "$" + Math.round(n).toLocaleString("en-CA");
+    if (med && lo && hi) {
+      need(72);
+      kicker("USED MARKET VALUE");
+      T(ask ? `${m(ask)} - ${d === 0 ? "at the local median" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local median"}` : `Market median ${m(med)}`,
+        { size: 14, font: serifB, color: aboveRange ? CORAL : INK }); y -= 19;
+      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, median ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
+      advance(2);
+      para("Asking prices read from dealers' own listings, not confirmed sales - this is the market, not the dealer's trade-in number.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+      rule();
+    }
   }
 
   // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
