@@ -9399,7 +9399,8 @@ function useComparableListings(a){
 // asking price, so it renders identically wherever marketValue travels.
 function MarketBandGauge({mv, asking, C, cardStyle}){
   const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
-  const AMBER="#f2a84b";
+  const AMBER="#f2a84b", TEAL=C.tealInk||"#4fd0c9", VIOLET="#8b6cf0";
+  const hexA=(h,a)=>{ const m=/^#?([0-9a-f]{6})$/i.exec(String(h||"")); if(!m) return h; const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
   // Accept both shapes: the live report object (average/low/high/comps/asOf) and
   // the signed /verify payload (avg/lo/hi/n/as).
   const median=Number(mv.avg!=null?mv.avg:mv.average)||0;
@@ -9416,46 +9417,60 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   const LEN=Math.PI*2*115*270/360; // full-arc length for the progress dash
   // SVG user-unit rotation (attribute form) — no transform-box, so markers land
   // on the arc in every engine, not just Chrome/FF/Safari 15.4+.
-  const rotAttr=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
+  const rot=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
   const delta=(ask&&median)?ask-median:0;
   // Caution ONLY when the dealer asks above the whole local range — a real
   // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
   const aboveRange=ask>0&&ask>high, belowRange=ask>0&&ask<low;
-  const pos=delta===0?"at the local median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} the local median`;
-  const rangeSuffix=aboveRange?" · above the range":belowRange?" · below the range":(ask?" · within the range":"");
+  const pos=delta===0?"at median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} median`;
+  const rangeWord=aboveRange?"above the range":belowRange?"below the range":"inside band";
   const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
+  const mono="'IBM Plex Mono',ui-monospace,monospace";
+  const uid="mv"+Math.round(median)+"x"+Math.round(low);   // unique defs ids per instance
   return (
     <div style={{...cardStyle}}>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:2}}>Used market value · {mv.source||"LotCheck market"}</div>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>Used market value · {mv.source||"LotCheck market"}</div>
       <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
-        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(ask||median)}, ${pos}. Market range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(ask||median)}, ${ask?pos+" and "+rangeWord:"market median"}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
           <defs>
-            <linearGradient id="mvArcGrad" gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
-              <stop offset="0" stopColor="#4fd0c9"/><stop offset="0.5" stopColor="#8b6cf0"/><stop offset="1" stopColor={AMBER}/>
+            <linearGradient id={uid+"g"} gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
+              <stop offset="0" stopColor={TEAL}/><stop offset="0.5" stopColor={VIOLET}/><stop offset="1" stopColor={AMBER}/>
             </linearGradient>
+            <filter id={uid+"soft"} x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id={uid+"node"} x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="6"/></filter>
+            <radialGradient id={uid+"stage"} cx="50%" cy="46%" r="55%"><stop offset="0" stopColor="rgba(139,108,240,.20)"/><stop offset="1" stopColor="rgba(139,108,240,0)"/></radialGradient>
           </defs>
-          <path d={TRACK} fill="none" stroke="rgba(147,164,194,.18)" strokeWidth="9" strokeLinecap="round"/>
-          <path d={TRACK} fill="none" stroke="url(#mvArcGrad)" strokeWidth="9" strokeLinecap="round" style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
-          <g transform={rotAttr(frac(median))}>
-            <circle cx="88.68" cy="241.32" r="4.6" fill="#4fd0c9" stroke="#0d131e" strokeWidth="1.4"/>
+          <ellipse cx="170" cy="150" rx="150" ry="120" fill={`url(#${uid}stage)`}/>
+          <path d="M80.90 249.10 A126 126 0 1 1 259.10 249.10" fill="none" stroke={C.inkFaint} strokeOpacity="0.4" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="1.5 16.5"/>
+          <path d="M99.29 230.71 A100 100 0 1 1 240.71 230.71" fill="none" stroke={C.line} strokeWidth="1"/>
+          <path d={TRACK} fill="none" stroke={C.line} strokeWidth="9" strokeLinecap="round"/>
+          <circle cx="88.68" cy="241.32" r="3.4" fill={C.inkFaint} opacity="0.5"/>
+          <circle cx="251.32" cy="241.32" r="3.4" fill={C.inkFaint} opacity="0.5"/>
+          <path d={TRACK} fill="none" stroke={`url(#${uid}g)`} strokeWidth="9" strokeLinecap="round" filter={`url(#${uid}soft)`} style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
+          <g transform={rot(frac(median))}>
+            <line x1="88.68" y1="241.32" x2="79.9" y2="250.1" stroke={TEAL} strokeWidth="2.4" strokeLinecap="round"/>
+            <rect x="85" y="237.6" width="7.4" height="7.4" rx="1.4" fill={TEAL} transform="rotate(45 88.68 241.32)" style={{filter:`drop-shadow(0 0 5px ${hexA(TEAL,.7)})`}}/>
           </g>
-          <g transform={rotAttr(frac(ask||median))}>
-            <circle cx="88.68" cy="241.32" r="8.5" fill={AMBER} stroke="#fff2df" strokeWidth="1.6"/>
+          <g transform={rot(frac(ask||median))}>
+            <line x1="170" y1="160" x2="88.68" y2="241.32" stroke={AMBER} strokeOpacity="0.42" strokeWidth="2" strokeLinecap="round"/>
+            <circle cx="88.68" cy="241.32" r="13" fill={AMBER} opacity="0.28" filter={`url(#${uid}node)`}/>
+            <circle cx="88.68" cy="241.32" r="7" fill={AMBER} stroke="#fff2df" strokeWidth="1.4" style={{filter:`drop-shadow(0 0 6px ${hexA(AMBER,.9)})`}}/>
+            <circle cx="88.68" cy="241.32" r="2.4" fill="#20130a"/>
           </g>
-          <text x="66" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(low)}</text>
-          <text x="274" y="259" textAnchor="middle" style={{font:"600 11px 'IBM Plex Mono',monospace"}} fill="#8b98b0">{money(high)}</text>
+          <text x="66" y="259" textAnchor="middle" style={{font:`600 11px ${mono}`}} fill={C.inkFaint}>{money(low)}</text>
+          <text x="274" y="259" textAnchor="middle" style={{font:`600 11px ${mono}`}} fill={C.inkFaint}>{money(high)}</text>
         </svg>
-        <div style={{position:"absolute",left:"50%",top:"57%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
-          <div style={{fontSize:10,letterSpacing:".14em",color:C.inkFaint,textTransform:"uppercase"}}>Dealer asking</div>
-          <div style={{fontSize:33,fontWeight:1000,color:C.ink,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{money(ask||median)}</div>
-          <div style={{fontSize:11.5,color:aboveRange?AMBER:C.tealInk,marginTop:4,fontWeight:700,lineHeight:1.35}}>{ask?pos:"market median"}{rangeSuffix}</div>
+        <div style={{position:"absolute",left:"50%",top:"56%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
+          <div style={{fontSize:9.5,letterSpacing:".2em",color:AMBER,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"}}><span style={{width:6,height:6,borderRadius:"50%",background:AMBER,boxShadow:`0 0 9px ${AMBER}`,display:"inline-block"}}/>Dealer asking</div>
+          <div style={{fontSize:37,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4}}><small style={{fontSize:20,fontWeight:700,opacity:.7,marginRight:1}}>$</small>{Math.round(ask||median).toLocaleString("en-CA")}</div>
+          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{ask?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"market median"}</div>
         </div>
       </div>
-      <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6}}>
-        {[["Low",low],["Median",median],["High",high]].map(([l,v],i)=>(
-          <div key={i} style={{flex:1,textAlign:"center",padding:"7px 4px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
-            <div style={{fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,textTransform:"uppercase"}}>{l}</div>
-            <div style={{fontSize:13.5,fontWeight:800,color:l==="Median"?C.tealInk:C.ink,fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:8}}>
+        {[["Low",low,false],["Median",median,true],["High",high,false]].map(([l,v,mid],i)=>(
+          <div key={i} style={{flex:1,textAlign:"center",padding:"9px 8px 8px",borderRadius:12,background:mid?`linear-gradient(180deg, ${hexA(TEAL,.12)}, ${hexA(TEAL,.03)})`:`linear-gradient(180deg, ${hexA(TEAL,.06)}, ${hexA(TEAL,.02)})`,border:`1px solid ${mid?hexA(TEAL,.32):C.line}`}}>
+            <div style={{fontSize:8.5,letterSpacing:".16em",color:C.inkFaint,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:5,justifyContent:"center"}}><span style={{width:5,height:5,borderRadius:"50%",background:TEAL,opacity:.55,display:"inline-block"}}/>{l}</div>
+            <div style={{fontSize:15,fontWeight:700,color:mid?TEAL:C.ink,marginTop:4,letterSpacing:"-.01em",fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
           </div>
         ))}
       </div>
@@ -12953,10 +12968,32 @@ function CrawlCoverage(){
   const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
   const dark=theme==="dark";
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
+  const [selIdx,setSelIdx]=useState(0); const [askIn,setAskIn]=useState(""); const [gauge,setGauge]=useState(null); const [gLoad,setGLoad]=useState(false);
   useEffect(()=>{ let alive=true; (async()=>{
     try{ const {data:d,error}=await supabase.rpc("fn_crawl_coverage",{}); if(error)throw error; if(alive){ setData(d); setLoading(false); } }
     catch(e){ if(alive){ setErr("Couldn't reach the dataset just now — reload to try again."); setLoading(false); } }
   })(); return()=>{ alive=false; }; },[]);
+  // Build the LIVE design-10 band for the selected model: fetch its used comps
+  // (±2yr) and reduce them the same way the report does — median, 25/75 band,
+  // true low/high, a 0.4x-2.0x outlier trim, 5-comp floor.
+  useEffect(()=>{
+    const mm=(data&&data.models)||[]; if(!mm.length) return;
+    const m=mm[selIdx]||mm[0]; let alive=true; setGLoad(true);
+    (async()=>{
+      try{
+        const {data:rows,error}=await supabase.rpc("fn_market_comps",{p_year:2022,p_make:m.make,p_model:m.model,p_condition:"used",p_province:"AB",p_year_span:2});
+        if(error)throw error;
+        const prices=(rows||[]).map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
+        if(prices.length<5){ if(alive){ setGauge({insufficient:true}); setGLoad(false); } return; }
+        const med0=prices[Math.floor(prices.length/2)];
+        const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
+        const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
+        const asOf=(rows||[]).map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
+        if(alive){ setGauge({average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:"LotCheck market · "+kept.length+" comparable listings",mileage:null,make:m.make,model:m.model}); setGLoad(false); }
+      }catch(e){ if(alive){ setGauge(null); setGLoad(false); } }
+    })();
+    return()=>{ alive=false; };
+  },[data,selIdx]);
 
   const T=dark?{
     bg:"radial-gradient(120% 80% at 50% -8%, rgba(138,107,255,.14), transparent 55%), #0b1017",
@@ -12977,6 +13014,11 @@ function CrawlCoverage(){
   const maxModel=models.length?Number(models[0].n):1; const maxCity=cities.length?Number(cities[0].n):1;
   const mono="ui-monospace,SFMono-Regular,Menlo,monospace";
   const goBack=()=>{ try{ if(window.history.length>1){ window.history.back(); return; } }catch{} window.location.href="/quote-check"; };
+  // Adapt the page theme (T) to the colour keys MarketBandGauge reads (C), so the
+  // shipped design-10 gauge renders here with no changes.
+  const gc={inkFaint:T.faint,ink:T.text,inkSoft:T.muted,tealInk:T.teal,paper2:T.panel2,line:T.hair};
+  const gCard={background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"};
+  const fieldStyle={background:T.panel,color:T.text,border:`1px solid ${T.hairS}`,borderRadius:10,padding:"9px 11px",fontSize:14,fontWeight:600,outline:"none",fontFamily:"inherit"};
 
   const Tile=({n,l,c})=>(
     <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:12,padding:"15px 16px"}}>
@@ -13016,6 +13058,24 @@ function CrawlCoverage(){
             <Tile n={num(data.cities.length)} l={"Cities"}/>
             <Tile n={num(data.modelsGauge)} c={T.teal} l={<>Models with enough<br/>comps to score</>}/>
             <Tile n={String(data.freshest||"—").replace(/^\d{4}-/, "")} c={T.amber} l={<>Dealer data<br/>as of (snapshot)</>}/>
+          </div>
+
+          {/* LIVE design-10 gauge — the value band, in action */}
+          <div style={{marginTop:34}}>
+            <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".14em",textTransform:"uppercase",color:T.amber}}>The value band · live</div>
+            <h2 style={{fontSize:"clamp(19px,2.6vw,25px)",fontWeight:800,letterSpacing:"-.01em",margin:"8px 0 0"}}>See any model's value band on the gauge</h2>
+            <p style={{fontSize:14,color:T.muted,margin:"6px 0 0"}}>This is the design-10 gauge the report uses — built live from the comps above. Pick a model; type an asking price to see exactly where it lands.</p>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",margin:"14px 0"}}>
+              <select value={selIdx} onChange={e=>setSelIdx(Number(e.target.value))} style={{...fieldStyle,minWidth:220,cursor:"pointer"}}>
+                {models.slice(0,24).map((m,i)=><option key={i} value={i}>{m.make} {m.model} · {num(m.n)} comps</option>)}
+              </select>
+              <input type="number" inputMode="numeric" placeholder="Asking price (optional)" value={askIn} onChange={e=>setAskIn(e.target.value)} style={{...fieldStyle,width:200}}/>
+            </div>
+            <div style={{maxWidth:420}}>
+              {gLoad&&<div style={{fontFamily:mono,color:T.faint,fontSize:13,padding:"20px 0"}}>Building the band…</div>}
+              {!gLoad&&gauge&&gauge.insufficient&&<div style={{...gCard,color:T.muted,fontSize:14}}>Not enough comparable listings for this model yet — the gauge shows nothing rather than guess.</div>}
+              {!gLoad&&gauge&&!gauge.insufficient&&<MarketBandGauge mv={gauge} asking={Number(askIn)||0} C={gc} cardStyle={gCard}/>}
+            </div>
           </div>
 
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginTop:34}}>
