@@ -13029,17 +13029,16 @@ function CrawlCoverage(){
 
   return (
     <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"}}>
-      <div style={{position:"sticky",top:0,zIndex:10,backdropFilter:"blur(10px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
-        <div style={{maxWidth:1040,margin:"0 auto",padding:"11px 20px",display:"flex",alignItems:"center",gap:12}}>
-          <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 12px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:mono}}>‹ Back</button>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:8,textDecoration:"none",color:T.text}}>
-            <span style={{width:22,height:22,borderRadius:5,position:"relative",background:`linear-gradient(115deg,${T.violet},${T.amber})`,display:"inline-block",flex:"none"}}>
-              <span style={{position:"absolute",top:5,bottom:5,left:6,width:3,background:T.panel,borderRadius:2}}/><span style={{position:"absolute",top:5,bottom:5,right:6,width:3,background:T.panel,borderRadius:2}}/>
-            </span>
-            <b style={{fontSize:14,letterSpacing:".02em"}}>LOTCHECK</b>
-          </a>
-          <span style={{marginLeft:"auto",fontFamily:mono,fontSize:11.5,color:T.faint}}>Used-car data coverage · Alberta</span>
-          <button onClick={toggleTheme} aria-label="Toggle theme" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:999,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:mono}}>◐</button>
+      <style dangerouslySetInnerHTML={{__html:`.crawl-navlinks{scrollbar-width:none;-ms-overflow-style:none}.crawl-navlinks::-webkit-scrollbar{display:none}.crawl-navlinks a:hover{color:${T.amber}}`}}/>
+      <div style={{position:"sticky",top:0,zIndex:20,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
+        <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
+          <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:mono,flexShrink:0}}>‹</button>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.text,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={42}/>LotCheck</a>
+          <div className="crawl-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
+            {MAL_NAV.map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          </div>
+          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
+          <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap",flexShrink:0}}>Analyze my quote</a>
         </div>
       </div>
 
