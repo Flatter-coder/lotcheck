@@ -12940,6 +12940,127 @@ function MsrpAlertsPage(){
 // The CASL double-opt-in landing page. The confirmation email links here with
 // ?token=<uuid>; we call fn_alert_confirm (anon; the token IS the auth) which
 // flips the row 'waitlist' -> 'confirmed'. Only confirmed rows are ever alerted.
+// ── /crawl — LIVE used-car coverage from our OWN Alberta crawl ─────────────
+// Reads fn_crawl_coverage (used-only aggregate) on load. Shows the dataset the
+// used-value gauge is built on: how many used cars, how many dealers, which
+// cities, which models have enough comps to score. USED only on purpose — new
+// cars answer to a published MSRP (few questions), a different kind of data
+// kept separate. No dealer NAMES: our sources are the moat (dealers-are-
+// adversaries). No "LIVE" dot: the read is live but the crawl data is a dated
+// snapshot, so we state the date instead of claiming live (live-data-green-dot).
+function CrawlCoverage(){
+  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return"dark"; if(s==="light"||s==="outdoor")return"light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return"dark"; } });
+  const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
+  const dark=theme==="dark";
+  const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
+  useEffect(()=>{ let alive=true; (async()=>{
+    try{ const {data:d,error}=await supabase.rpc("fn_crawl_coverage",{}); if(error)throw error; if(alive){ setData(d); setLoading(false); } }
+    catch(e){ if(alive){ setErr("Couldn't reach the dataset just now — reload to try again."); setLoading(false); } }
+  })(); return()=>{ alive=false; }; },[]);
+
+  const T=dark?{
+    bg:"radial-gradient(120% 80% at 50% -8%, rgba(138,107,255,.14), transparent 55%), #0b1017",
+    panel:"#151d2b", panel2:"#1b2536", hair:"#263349", hairS:"#35455f",
+    text:"#e2e9f3", muted:"#91a0b8", faint:"#63718a",
+    amber:"#f2a84b", teal:"#4fd0c9", violet:"#b7a2ff", risk:"#ec6a4e",
+    navBg:"rgba(11,16,23,.72)",
+  }:{
+    bg:"radial-gradient(120% 80% at 50% -8%, rgba(109,75,214,.10), transparent 55%), #eef1f4",
+    panel:"#ffffff", panel2:"#f3f6f9", hair:"#d2dae4", hairS:"#b7c2d0",
+    text:"#141b28", muted:"#55627a", faint:"#8592a6",
+    amber:"#b96608", teal:"#0c7f78", violet:"#6d4bd6", risk:"#b83c22",
+    navBg:"rgba(255,255,255,.8)",
+  };
+  const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const num=n=>Number(n||0).toLocaleString("en-CA");
+  const models=(data&&data.models)||[]; const cities=(data&&data.cities)||[];
+  const maxModel=models.length?Number(models[0].n):1; const maxCity=cities.length?Number(cities[0].n):1;
+  const mono="ui-monospace,SFMono-Regular,Menlo,monospace";
+  const goBack=()=>{ try{ if(window.history.length>1){ window.history.back(); return; } }catch{} window.location.href="/quote-check"; };
+
+  const Tile=({n,l,c})=>(
+    <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:12,padding:"15px 16px"}}>
+      <div style={{fontWeight:900,fontSize:30,lineHeight:1,letterSpacing:"-.02em",color:c||T.text,fontVariantNumeric:"tabular-nums"}}>{n}</div>
+      <div style={{fontFamily:mono,fontSize:10.5,letterSpacing:".06em",textTransform:"uppercase",color:T.faint,marginTop:7,lineHeight:1.4}}>{l}</div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"}}>
+      <div style={{position:"sticky",top:0,zIndex:10,backdropFilter:"blur(10px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
+        <div style={{maxWidth:1040,margin:"0 auto",padding:"11px 20px",display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 12px",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:mono}}>‹ Back</button>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:8,textDecoration:"none",color:T.text}}>
+            <span style={{width:22,height:22,borderRadius:5,position:"relative",background:`linear-gradient(115deg,${T.violet},${T.amber})`,display:"inline-block",flex:"none"}}>
+              <span style={{position:"absolute",top:5,bottom:5,left:6,width:3,background:T.panel,borderRadius:2}}/><span style={{position:"absolute",top:5,bottom:5,right:6,width:3,background:T.panel,borderRadius:2}}/>
+            </span>
+            <b style={{fontSize:14,letterSpacing:".02em"}}>LOTCHECK</b>
+          </a>
+          <span style={{marginLeft:"auto",fontFamily:mono,fontSize:11.5,color:T.faint}}>Used-car data coverage · Alberta</span>
+          <button onClick={toggleTheme} aria-label="Toggle theme" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:999,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:mono}}>◐</button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:1040,margin:"0 auto",padding:"30px 20px 80px"}}>
+        <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:T.amber}}>Our own dataset · no vendor</div>
+        <h1 style={{fontSize:"clamp(28px,5vw,44px)",lineHeight:1.03,fontWeight:900,letterSpacing:"-.02em",margin:"8px 0 0"}}>The <span style={{color:T.amber}}>used cars</span> we track across Alberta</h1>
+        <p style={{fontSize:"clamp(16px,2.1vw,19px)",color:T.muted,maxWidth:"58ch",margin:"12px 0 0",lineHeight:1.5}}>Read from dealers' own public listings — the dataset the used-value gauge, days-on-lot and price history are built on. New cars sit under a published MSRP, so this is used only.</p>
+
+        {loading&&<div style={{marginTop:28,fontFamily:mono,color:T.faint,fontSize:14}}>Reading the dataset…</div>}
+        {err&&!loading&&<div style={{marginTop:28,background:T.panel,border:`1px solid ${T.hair}`,borderLeft:`3px solid ${T.risk}`,borderRadius:12,padding:"14px 16px",color:T.muted,fontSize:14}}>{err}</div>}
+
+        {data&&!loading&&(<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginTop:24}}>
+            <Tile n={num(data.totalUsed)} l={"Used cars tracked"}/>
+            <Tile n={num(data.dealers)} l={"Alberta dealers"}/>
+            <Tile n={num(data.cities.length)} l={"Cities"}/>
+            <Tile n={num(data.modelsGauge)} c={T.teal} l={<>Models with enough<br/>comps to score</>}/>
+            <Tile n={String(data.freshest||"—").replace(/^\d{4}-/, "")} c={T.amber} l={<>Dealer data<br/>as of (snapshot)</>}/>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginTop:34}}>
+            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"}}>
+              <div style={{fontWeight:800,fontSize:14,letterSpacing:".02em"}}>Read on demand · daily refresh paused</div>
+              <p style={{fontSize:13.5,color:T.muted,margin:"8px 0 0",lineHeight:1.5}}>Every scan a buyer runs reads that car's listing and stores it — that's live today, and it's built most of this. The nightly bulk crawl that would refresh every dealer is paused pending legal sign-off, which is why the data reads as of <b style={{color:T.text}}>{data.freshest}</b>.</p>
+            </div>
+            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"}}>
+              <div style={{fontWeight:800,fontSize:14,letterSpacing:".02em"}}>Where the used cars are</div>
+              <div style={{marginTop:10}}>
+                {cities.slice(0,8).map((c,i)=>(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"110px 1fr auto",gap:10,alignItems:"center",padding:"4px 0",fontSize:13.5}}>
+                    <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.city}</span>
+                    <span style={{height:8,borderRadius:5,background:T.panel2,overflow:"hidden"}}><span style={{display:"block",height:"100%",width:`${Math.max(4,Math.round(Number(c.n)/maxCity*100))}%`,background:T.amber,borderRadius:5}}/></span>
+                    <span style={{fontFamily:mono,fontSize:12,color:T.muted}}>{num(c.n)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{marginTop:34}}>
+            <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".14em",textTransform:"uppercase",color:T.amber}}>Coverage by model</div>
+            <h2 style={{fontSize:"clamp(19px,2.6vw,25px)",fontWeight:800,letterSpacing:"-.01em",margin:"8px 0 0"}}>Most-tracked used models</h2>
+            <p style={{fontSize:14,color:T.muted,margin:"6px 0 0"}}>Used listings per model with the live asking range. Enough to build a value band at 5+.</p>
+            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"12px 18px",marginTop:14}}>
+              {models.slice(0,16).map((m,i)=>(
+                <div key={i} style={{display:"grid",gridTemplateColumns:"150px 1fr 148px",gap:12,alignItems:"center",padding:"9px 0",borderTop:i?`1px solid ${T.hair}`:"none"}}>
+                  <span style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.make} {m.model}</span>
+                  <span style={{height:9,borderRadius:6,background:T.panel2,overflow:"hidden"}}><span style={{display:"block",height:"100%",width:`${Math.max(4,Math.round(Number(m.n)/maxModel*100))}%`,background:`linear-gradient(90deg,${T.teal},${T.violet})`,borderRadius:6}}/></span>
+                  <span style={{fontFamily:mono,fontSize:11,color:T.faint,textAlign:"right",whiteSpace:"nowrap"}}><b style={{color:T.muted,fontSize:12.5}}>{num(m.n)}</b> · {money(m.lo)}–{money(m.hi)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{marginTop:24,background:T.panel,border:`1px solid ${T.hair}`,borderLeft:`3px solid ${T.teal}`,borderRadius:12,padding:"14px 16px",fontSize:13.5,color:T.muted,lineHeight:1.55}}>
+            <b style={{color:T.text}}>Why no dealer names?</b> The specific dealers we read are our edge, not something we hand to the people we audit. You see how many and where — {num(data.dealers)} dealers across {num(data.cities.length)} Alberta cities — never the list. Every figure traces to a dealer's own public listing; these are asking prices, not confirmed sales.
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 function AlertConfirmPage(){
   const [state,setState]=useState("working");   // working | ok | bad
   const [veh,setVeh]=useState("");
@@ -12993,6 +13114,7 @@ export default function App(){
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
         : path.startsWith("/alert-confirm") ? <AlertConfirmPage/>
         : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
+        : path.startsWith("/crawl") ? <CrawlCoverage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
