@@ -9409,19 +9409,24 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   const comps=mv.n!=null?mv.n:mv.comps;
   const asOf=mv.as!=null?mv.as:mv.asOf;
   const ask=Number(asking)||0;
+  // A real asking price is a positive, finite number. Anything else — blank, 0,
+  // negative, NaN — is "no price entered": never plotted, never classified. One
+  // gate for the whole component, so a bad input (e.g. -1) can't render as a
+  // dealer price on one line and fall through to a false "inside band" on the next.
+  const hasAsk=Number.isFinite(ask)&&ask>0;
   if(!median||!low||!high) return null;
   // Domain always includes the dealer's price so its marker is on the arc.
-  const lo0=Math.min(low, ask>0?ask:low), hi0=Math.max(high, ask>0?ask:high);
+  const lo0=Math.min(low, hasAsk?ask:low), hi0=Math.max(high, hasAsk?ask:high);
   const pad=Math.max(1,(hi0-lo0)*0.10), d0=lo0-pad, d1=hi0+pad;
   const frac=v=>Math.max(0,Math.min(1,(v-d0)/((d1-d0)||1)));
   const LEN=Math.PI*2*115*270/360; // full-arc length for the progress dash
   // SVG user-unit rotation (attribute form) — no transform-box, so markers land
   // on the arc in every engine, not just Chrome/FF/Safari 15.4+.
   const rot=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
-  const delta=(ask&&median)?ask-median:0;
+  const delta=hasAsk?ask-median:0;
   // Caution ONLY when the dealer asks above the whole local range — a real
   // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
-  const aboveRange=ask>0&&ask>high, belowRange=ask>0&&ask<low;
+  const aboveRange=hasAsk&&ask>high, belowRange=hasAsk&&ask<low;
   const pos=delta===0?"at median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} median`;
   const rangeWord=aboveRange?"above the range":belowRange?"below the range":"inside band";
   const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
@@ -9431,7 +9436,7 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
     <div style={{...cardStyle}}>
       <div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>Used market value · {mv.source||"LotCheck market"}</div>
       <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
-        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(ask||median)}, ${ask?pos+" and "+rangeWord:"market median"}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(hasAsk?ask:median)}, ${hasAsk?pos+" and "+rangeWord:"market median"}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
           <defs>
             <linearGradient id={uid+"g"} gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
               <stop offset="0" stopColor={TEAL}/><stop offset="0.5" stopColor={VIOLET}/><stop offset="1" stopColor={AMBER}/>
@@ -9446,12 +9451,12 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
           <path d={TRACK} fill="none" stroke={C.line} strokeWidth="9" strokeLinecap="round"/>
           <circle cx="88.68" cy="241.32" r="3.4" fill={C.inkFaint} opacity="0.5"/>
           <circle cx="251.32" cy="241.32" r="3.4" fill={C.inkFaint} opacity="0.5"/>
-          <path d={TRACK} fill="none" stroke={`url(#${uid}g)`} strokeWidth="9" strokeLinecap="round" filter={`url(#${uid}soft)`} style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(ask||median))}}/>
+          <path d={TRACK} fill="none" stroke={`url(#${uid}g)`} strokeWidth="9" strokeLinecap="round" filter={`url(#${uid}soft)`} style={{strokeDasharray:LEN,strokeDashoffset:LEN*(1-frac(hasAsk?ask:median))}}/>
           <g transform={rot(frac(median))}>
             <line x1="88.68" y1="241.32" x2="79.9" y2="250.1" stroke={TEAL} strokeWidth="2.4" strokeLinecap="round"/>
             <rect x="85" y="237.6" width="7.4" height="7.4" rx="1.4" fill={TEAL} transform="rotate(45 88.68 241.32)" style={{filter:`drop-shadow(0 0 5px ${hexA(TEAL,.7)})`}}/>
           </g>
-          <g transform={rot(frac(ask||median))}>
+          <g transform={rot(frac(hasAsk?ask:median))}>
             <line x1="170" y1="160" x2="88.68" y2="241.32" stroke={AMBER} strokeOpacity="0.42" strokeWidth="2" strokeLinecap="round"/>
             <circle cx="88.68" cy="241.32" r="13" fill={AMBER} opacity="0.28" filter={`url(#${uid}node)`}/>
             <circle cx="88.68" cy="241.32" r="7" fill={AMBER} stroke="#fff2df" strokeWidth="1.4" style={{filter:`drop-shadow(0 0 6px ${hexA(AMBER,.9)})`}}/>
@@ -9462,8 +9467,8 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
         </svg>
         <div style={{position:"absolute",left:"50%",top:"56%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
           <div style={{fontSize:9.5,letterSpacing:".2em",color:AMBER,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"}}><span style={{width:6,height:6,borderRadius:"50%",background:AMBER,boxShadow:`0 0 9px ${AMBER}`,display:"inline-block"}}/>Dealer asking</div>
-          <div style={{fontSize:37,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4}}><small style={{fontSize:20,fontWeight:700,opacity:.7,marginRight:1}}>$</small>{Math.round(ask||median).toLocaleString("en-CA")}</div>
-          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{ask?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"market median"}</div>
+          <div style={{fontSize:37,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4}}><small style={{fontSize:20,fontWeight:700,opacity:.7,marginRight:1}}>$</small>{Math.round(hasAsk?ask:median).toLocaleString("en-CA")}</div>
+          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{hasAsk?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"market median"}</div>
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:8}}>
@@ -9999,8 +10004,8 @@ function VerifyPage(){
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
                   {o.marketValue&&o.marketValue.avg!=null&&(()=>{
-                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, d=(ask&&med)?ask-med:0;
-                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={ask?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
+                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, hasAsk=Number.isFinite(ask)&&ask>0, d=hasAsk?ask-med:0;
+                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
                   })()}
                   {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
