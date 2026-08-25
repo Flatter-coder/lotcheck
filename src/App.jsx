@@ -13067,10 +13067,23 @@ function CrawlCoverage(){
             <div style={{padding:"18px 22px"}}>
               <div style={{fontFamily:mono,fontSize:11,letterSpacing:".12em",color:T.teal,textTransform:"uppercase",marginBottom:10}}>Used-car market · Alberta · <b style={{color:T.amber,fontWeight:600}}>our own dataset · no vendor</b></div>
               <h1 style={{fontFamily:"'Archivo',system-ui,sans-serif",fontWeight:800,fontSize:"clamp(22px,3vw,32px)",lineHeight:1.04,margin:"0 0 10px",letterSpacing:"-.01em"}}>The used cars we track across Alberta</h1>
-              <p style={{margin:0,color:T.muted,fontSize:13.5,lineHeight:1.5,maxWidth:"56ch"}}>Read from dealers' own public listings — the dataset the used-value gauge, days-on-lot and price history are built on. New cars sit under a published MSRP, so this is <b style={{color:T.text,fontWeight:600}}>used only</b>.</p>
+              <p style={{margin:"0 0 11px",color:T.muted,fontSize:13,lineHeight:1.4}}>Read from dealers' own public Alberta listings — <b style={{color:T.text,fontWeight:600}}>used cars only</b>.</p>
+              <div style={{fontFamily:mono,fontSize:9.5,letterSpacing:".14em",textTransform:"uppercase",color:T.teal,marginBottom:2}}>What your report adds</div>
+              {[
+                [T.teal,"Value band","Low·median·high of asking prices for the same used model, in dollars."],
+                [T.violet,"Days on lot","How long it's been listed — the dealer's own date, or our first-seen floor."],
+                [T.amber,"Recalls · warranty","Live recall check from Transport Canada, plus estimated warranty left."],
+              ].map(([c,label,line],i)=>(
+                <div key={i} style={{display:"flex",gap:9,alignItems:"baseline",padding:"4px 0",borderTop:i?`1px solid ${hexA(T.teal,.10)}`:"none"}}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:c,boxShadow:`0 0 8px ${hexA(c,.55)}`,flex:"none",transform:"translateY(-1px)"}}/>
+                  <span style={{fontFamily:mono,fontSize:10.5,color:T.text,fontWeight:700,letterSpacing:".02em",flex:"none",width:124}}>{label}</span>
+                  <span style={{fontSize:11.5,color:T.muted,lineHeight:1.35}}>{line}</span>
+                </div>
+              ))}
+              <p style={{margin:"9px 0 0",fontFamily:mono,fontSize:9.5,lineHeight:1.5,color:T.faint}}>Bands use dealers' advertised prices — not sales — where 5+ comparable listings exist. Every report is signed; re-check any figure at lotcheck.ca/verify.</p>
             </div>
             <div style={{borderLeft:`1px solid ${hexA(T.teal,.12)}`,display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:hexA(T.teal,.1)}}>
-              {[[num(data.totalUsed),"used cars tracked",T.text],[num(data.dealers),"Alberta dealers",T.text],[num(data.cities.length),"cities",T.text],[num(data.modelsGauge),"models with enough comps to score",T.teal]].map(([v,l,c],i)=>(
+              {[[num(data.totalUsed),"used cars tracked",T.text],[num(data.dealers),"Alberta dealers",T.text],[num(data.cities.length),"cities",T.text],[num(data.modelsGauge),"models with enough listings to show a band",T.teal]].map(([v,l,c],i)=>(
                 <div key={i} style={{background:dark?"linear-gradient(180deg,rgba(16,28,44,.9),rgba(11,20,32,.95))":T.panel2,padding:"12px 14px",display:"flex",flexDirection:"column",justifyContent:"center"}}>
                   <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:22,lineHeight:1,color:c,fontVariantNumeric:"tabular-nums"}}>{v}</div>
                   <div style={{fontSize:10.5,color:T.faint,marginTop:5,lineHeight:1.3}}>{l}</div>
@@ -13104,7 +13117,7 @@ function CrawlCoverage(){
               </div>
             </Panel>
 
-            <Panel head="Value-band gauge" tag="DESIGN-10 · LIVE" bodyStyle={{padding:"12px 14px 14px"}}>
+            <Panel head="Value-band gauge" tag="LIVE" bodyStyle={{padding:"12px 14px 14px"}}>
               <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:10,marginBottom:6}}>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Model</label>
@@ -13123,7 +13136,7 @@ function CrawlCoverage(){
             </Panel>
 
             <Panel head="Most-tracked used models" tag="CT · RANGE" bodyStyle={{padding:"8px 11px 10px"}}>
-              {models.slice(0,15).map((m,i)=>(
+              {models.slice(0,12).map((m,i)=>(
                 <div key={i} style={{padding:"5px 2px",borderTop:i?`1px solid ${hexA(T.text,.06)}`:"none"}}>
                   <div style={{display:"grid",gridTemplateColumns:"108px 1fr 28px",gap:8,alignItems:"center"}}>
                     <span style={{fontSize:12,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.make} {m.model}</span>
