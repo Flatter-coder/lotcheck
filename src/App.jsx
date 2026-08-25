@@ -9380,7 +9380,7 @@ function useComparableListings(a){
         const { data, error } = await supabase.rpc("fn_comparable_listings", {
           p_year:Number(year), p_make:make, p_model:model, p_condition:condition,
           p_exclude_vin:vin||null, p_trim:trim||null, p_odometer_km:odo,
-          p_province:"AB", p_limit:3,
+          p_province:"AB", p_limit:10,
         });
         if(error) throw error;
         const rows=Array.isArray(data)?data:[];
@@ -9575,7 +9575,30 @@ function ComparableListingsCard({analysis:a, C, cardStyle}){
   // the identical price are both "cheapest" if they're the minimum), so a
   // repeated price never looks arbitrarily different.
   const GREEN="#10b981", GREEN_BG="rgba(16,185,129,.14)", GREEN_INK="#10b981";
-  const prices=[...new Set(cl.rows.map(r=>Number(r.price)))].sort((x,y)=>x-y);
+  const shown=cl.rows.slice(0,3);
+  const prices=[...new Set(shown.map(r=>Number(r.price)))].sort((x,y)=>x-y);
+  // Cheaper-lot gap — a genuinely LIKE-FOR-LIKE cheaper listing: same trim (first-
+  // word normalized) AND, where we know this car's odometer, within a mileage
+  // window of it. Never the global-cheapest comp — that's usually a high-mileage
+  // or base-trim one that's cheap for a reason, and calling it "$X below you"
+  // would be a false leverage claim. Gated on a KNOWN subject price + trim; reads
+  // dealers' own advertised prices, city shown, never the dealer name.
+  const normTrim=t=>String(t||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim().split(/\s+/)[0]||"";
+  const subj=Number(a?.quotedPrice)||0;
+  const subjTrim=normTrim(a?.trim);
+  const subjOdo=a?.odometerKm!=null?Number(a.odometerKm):null;
+  const likeForLike=cl.rows.filter(r=>{
+    if(!(Number(r.price)>0)||normTrim(r.trim)!==subjTrim) return false;
+    if(subjOdo!=null&&subjOdo>0&&Number(r.odometerKm)>0&&Math.abs(Number(r.odometerKm)-subjOdo)>subjOdo*0.4+20000) return false;
+    return true;
+  });
+  const below=subj>0?likeForLike.filter(r=>Number(r.price)<subj):[];
+  const cheapest=below.length?below.reduce((m,r)=>Number(r.price)<Number(m.price)?r:m):null;
+  const hasOdo=subjOdo!=null&&subjOdo>0;
+  // Don't claim "same-trim" when the subject's trim is a generic/unknown token
+  // ("Other/Don't Know" → "other") — there's no real trim to match on.
+  const validTrim=subjTrim&&!["other","unknown","unknwn","na","don","n","base"].includes(subjTrim);
+  const showLever=subj>0&&validTrim&&!!cheapest;
   const rankColor=(price)=>{
     if(prices.length<2) return {bg:undefined,bd:C.line,ink:C.ink};
     const rank=prices.indexOf(Number(price));
@@ -9594,8 +9617,11 @@ function ComparableListingsCard({analysis:a, C, cardStyle}){
           ? `Other ${cl.year} ${cl.make} ${cl.model} listings we've read from Alberta dealers, closest in mileage to this one.`
           : `Other ${cl.year} ${cl.make} ${cl.model} listings we've read from Alberta dealers.`}
       </div>
+      {showLever&&<div style={{marginTop:10,padding:"9px 11px",borderRadius:8,background:GREEN_BG,border:`1px solid ${GREEN}55`,fontSize:12.5,lineHeight:1.5,color:C.inkSoft}}>
+        <b style={{color:GREEN_INK}}>Cheaper across town</b> — a same-trim{hasOdo?", similar-mileage":""} one is <b style={{color:C.ink}}>{money(subj-Number(cheapest.price))} less</b>: {money(cheapest.price)}{cheapest.city?` in ${cheapest.city}`:""}.{below.length>1?` ${below.length} like-for-like listings priced below this one.`:""}
+      </div>}
       <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:6}}>
-        {cl.rows.map((r,i)=>{ const rc=rankColor(r.price); return (
+        {shown.map((r,i)=>{ const rc=rankColor(r.price); return (
           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"8px 10px",borderRadius:8,...(rc.bg?{background:rc.bg}:{background:C.paper2}),border:`1px solid ${rc.bd}55`}}>
             <div style={{minWidth:0}}>
               <div style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||cl.model}{r.city?` · ${r.city}`:""}</div>
