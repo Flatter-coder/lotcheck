@@ -12986,6 +12986,7 @@ function CrawlCoverage(){
   const dark=theme==="dark";
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
   const [selIdx,setSelIdx]=useState(0); const [askIn,setAskIn]=useState(""); const [gauge,setGauge]=useState(null); const [gLoad,setGLoad]=useState(false);
+  const [ladder,setLadder]=useState({rows:[]}); const [msrpGap,setMsrpGap]=useState(null);
   useEffect(()=>{ let alive=true; (async()=>{
     try{ const {data:d,error}=await supabase.rpc("fn_crawl_coverage",{}); if(error)throw error; if(alive){ setData(d); setLoading(false); } }
     catch(e){ if(alive){ setErr("Couldn't reach the dataset just now — reload to try again."); setLoading(false); } }
@@ -13000,17 +13001,59 @@ function CrawlCoverage(){
       try{
         const {data:rows,error}=await supabase.rpc("fn_market_comps",{p_year:2022,p_make:m.make,p_model:m.model,p_condition:"used",p_province:"AB",p_year_span:2});
         if(error)throw error;
-        const prices=(rows||[]).map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
-        if(prices.length<5){ if(alive){ setGauge({insufficient:true}); setGLoad(false); } return; }
-        const med0=prices[Math.floor(prices.length/2)];
-        const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
-        // Re-check the 5-listing floor AFTER the outlier trim — trimming can drop a
-        // marginal model below it, and a band on <5 breaks the "enough listings" promise.
-        if(kept.length<5){ if(alive){ setGauge({insufficient:true}); setGLoad(false); } return; }
-        const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
-        const asOf=(rows||[]).map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
-        if(alive){ setGauge({average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:"LotCheck market · "+kept.length+" comparable listings",mileage:null,make:m.make,model:m.model}); setGLoad(false); }
-      }catch(e){ if(alive){ setGauge(null); setGLoad(false); } }
+        const all=Array.isArray(rows)?rows:[];
+        const prices=all.map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
+        const asOf=all.map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
+        // Model-year ladder — a real depreciation ladder needs LIKE-FOR-LIKE years, so
+        // control it to the model's single most-listed trim (first-word normalized).
+        // Grouping all trims per year lets a loaded 2023 outprice a base 2024 and read
+        // as "negative depreciation" — a question the page must never create. Each rung
+        // still clears the 5-listing floor; newest year first.
+        const normTrim=t=>String(t||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim().split(/\s+/)[0]||"";
+        const trimTot={};
+        for(const r of all){ const tn=normTrim(r.trim); if(tn)trimTot[tn]=(trimTot[tn]||0)+1; }
+        const topTrim=Object.keys(trimTot).sort((a,b)=>trimTot[b]-trimTot[a])[0]||"";
+        const byYear={};
+        for(const r of all){ if(normTrim(r.trim)!==topTrim)continue; const y=Number(r.year), p=Number(r.price); if(y>0&&p>0)(byYear[y]=byYear[y]||[]).push(p); }
+        const ldRows=Object.keys(byYear).map(y=>{const ps=byYear[y].sort((a,b)=>a-b); return {year:Number(y),n:ps.length,med:ps[Math.floor(ps.length/2)]};}).filter(r=>r.n>=5).sort((a,b)=>b.year-a.year);
+        const ld={trim:topTrim,rows:ldRows};
+        // Value band — same reduction as the report (median, 25/75, low/high, 0.4x-2.0x
+        // outlier trim, 5-comp floor both before and after the trim).
+        let band=null, usedMed=null;
+        if(prices.length>=5){
+          const med0=prices[Math.floor(prices.length/2)];
+          const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
+          if(kept.length>=5){
+            const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
+            usedMed=at(0.5);
+            band={average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:"LotCheck market · "+kept.length+" comparable listings",mileage:null,make:m.make,model:m.model};
+          }
+        }
+        if(alive){ setLadder(ld); setGauge(band||{insufficient:true}); setGLoad(false); }
+        // Used-vs-new MSRP — separate + non-fatal. Compare all-in to all-in where the
+        // manufacturer publishes all_in_price; otherwise use MSRP only as a conservative
+        // FLOOR ("a new one lists from at least $x, before freight & fees") — never invent
+        // a freight-sized markup, which under our own rules is a public accusation.
+        try{
+          const {data:cat}=await supabase.rpc("fn_catalog_msrp",{p_make:m.make,p_model:m.model});
+          const cr=Array.isArray(cat)?cat:[];
+          let g=null;
+          if(cr.length&&usedMed>0){
+            const maxY=Math.max(...cr.map(r=>Number(r.year)||0));
+            const latest=cr.filter(r=>Number(r.year)===maxY&&Number(r.msrp)>0);
+            if(latest.length){
+              // "From" = the BASE trim (cheapest by MSRP). Use its all-in if the maker
+              // published one for THAT trim, else its MSRP as a conservative floor. Never
+              // min(all_in): only some trims carry all_in (the catalog populates it
+              // unevenly), so that would skip the cheaper base and overstate the new price.
+              const base=latest.slice().sort((a,b)=>Number(a.msrp)-Number(b.msrp))[0];
+              if(Number(base.allIn)>0){ const from=Number(base.allIn); g={basis:"allin",year:maxY,from,used:usedMed,gap:from-usedMed,pct:from>0?usedMed/from:null}; }
+              else { const from=Number(base.msrp); g={basis:"msrp",year:maxY,from,used:usedMed,floorGap:from-usedMed}; }
+            }
+          } else if(!cr.length){ g={none:"nocatalog"}; }
+          if(alive) setMsrpGap(g);
+        }catch(e2){ if(alive) setMsrpGap(null); }
+      }catch(e){ if(alive){ setGauge(null); setLadder({rows:[]}); setMsrpGap(null); setGLoad(false); } }
     })();
     return()=>{ alive=false; };
   },[data,selIdx]);
@@ -13039,6 +13082,8 @@ function CrawlCoverage(){
   const gc={inkFaint:T.faint,ink:T.text,inkSoft:T.muted,tealInk:T.teal,paper2:T.panel2,line:T.hair};
   const hexA=(h,a)=>{ const m=/^#?([0-9a-f]{6})$/i.exec(String(h||"")); if(!m) return h; const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
   const fieldStyle={background:dark?"rgba(9,16,26,.85)":T.panel2,color:T.text,border:`1px solid ${hexA(T.teal,.24)}`,borderRadius:8,padding:"9px 11px",fontSize:13,fontWeight:600,outline:"none",fontFamily:"inherit",width:"100%"};
+  const selM=models[selIdx]||models[0]||{};
+  const gapChip={display:"inline-flex",alignItems:"center",fontFamily:mono,fontSize:12,fontWeight:600,color:T.amber,background:hexA(T.amber,.13),border:`1px solid ${hexA(T.amber,.35)}`,borderRadius:8,padding:"6px 11px",lineHeight:1.35};
   // Command-HUD (variant 02): corner-bracketed panels on a faint grid field.
   const HUD=hexA(T.teal,.5);
   const panelStyle={position:"relative",background:dark?"linear-gradient(180deg,rgba(23,38,56,.6),rgba(12,22,34,.72))":T.panel,border:`1px solid ${hexA(T.teal,.16)}`,borderRadius:12,boxShadow:dark?"0 24px 60px -34px rgba(0,0,0,.8)":"0 14px 34px -20px rgba(30,44,80,.22)"};
@@ -13063,7 +13108,7 @@ function CrawlCoverage(){
 
   return (
     <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"}}>
-      <style dangerouslySetInnerHTML={{__html:`.crawl-navlinks{scrollbar-width:none;-ms-overflow-style:none}.crawl-navlinks::-webkit-scrollbar{display:none}.crawl-navlinks a:hover{color:${T.amber}}@media(max-width:1000px){.crawlhud-grid{grid-template-columns:1fr!important}.crawlhud-head{grid-template-columns:1fr!important}.crawlhud-notes{grid-template-columns:1fr!important}}`}}/>
+      <style dangerouslySetInnerHTML={{__html:`.crawl-navlinks{scrollbar-width:none;-ms-overflow-style:none}.crawl-navlinks::-webkit-scrollbar{display:none}.crawl-navlinks a:hover{color:${T.amber}}@media(max-width:1000px){.crawlhud-grid{grid-template-columns:1fr!important}.crawlhud-head{grid-template-columns:1fr!important}.crawlhud-notes{grid-template-columns:1fr!important}.crawlhud-instr{grid-template-columns:1fr!important}}`}}/>
       <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${hexA(T.teal,.05)} 1px,transparent 1px),linear-gradient(90deg,${hexA(T.teal,.05)} 1px,transparent 1px)`,backgroundSize:"44px 44px",WebkitMaskImage:"radial-gradient(120% 90% at 50% 0%,#000 42%,transparent 92%)",maskImage:"radial-gradient(120% 90% at 50% 0%,#000 42%,transparent 92%)"}}/>
       <div style={{position:"sticky",top:0,zIndex:20,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
@@ -13167,6 +13212,54 @@ function CrawlCoverage(){
                 </div>
               ))}
             </Panel>
+          </div>
+
+          <div className="crawlhud-instr" style={{display:"grid",gridTemplateColumns:(ladder.rows||[]).length>=2?"1fr 1fr":"1fr",gap:14,marginTop:14}}>
+            <Panel head="How far from new" tag={`${selM.make||""} ${selM.model||""}`.trim().toUpperCase()} bodyStyle={{padding:"14px 16px 15px"}}>
+              {gLoad&&<div style={{fontFamily:mono,color:T.faint,fontSize:12.5,padding:"22px 0",textAlign:"center"}}>Reading the catalog…</div>}
+              {!gLoad&&(!msrpGap||msrpGap.none)&&<div style={{color:T.muted,fontSize:12.5,lineHeight:1.5,padding:"10px 0",maxWidth:"58ch"}}>We don't hold the manufacturer's new-car price for this model yet — this lights up as the catalog fills.</div>}
+              {!gLoad&&msrpGap&&!msrpGap.none&&(()=>{ const g=msrpGap; return (
+                <div style={{display:"flex",flexWrap:"wrap",gap:"14px 30px",alignItems:"center"}}>
+                  <div style={{flex:"1 1 220px",minWidth:200}}>
+                    <div style={{fontFamily:"'Archivo',system-ui,sans-serif",fontWeight:800,fontSize:19,color:T.text,letterSpacing:"-.01em",marginBottom:6}}>{selM.make} {selM.model}</div>
+                    <p style={{margin:0,fontSize:12.5,color:T.muted,lineHeight:1.5}}>What the typical used one asks against a brand-new {g.year} — the "is it worth buying used?" gap.</p>
+                  </div>
+                  <div style={{flex:"2 1 340px",minWidth:300}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                      <span style={{fontSize:12,color:T.muted}}>New {g.year} · {g.basis==="allin"?"all-in":"MSRP"}</span>
+                      <span style={{fontFamily:mono,fontWeight:600,color:T.amber,fontVariantNumeric:"tabular-nums"}}>from {money(g.from)}</span>
+                    </div>
+                    <div style={{height:12,borderRadius:4,background:hexA(T.amber,.1),border:`1px solid ${hexA(T.amber,.35)}`,marginBottom:12}}/>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
+                      <span style={{fontSize:12,color:T.muted}}>Used median · ±2yr</span>
+                      <span style={{fontFamily:mono,fontWeight:600,color:T.teal,fontVariantNumeric:"tabular-nums"}}>{money(g.used)}</span>
+                    </div>
+                    <div style={{height:12,borderRadius:4,background:hexA(T.teal,.08),overflow:"hidden"}}><div style={{height:"100%",width:`${Math.max(4,Math.min(100,g.from>0?g.used/g.from*100:100))}%`,background:`linear-gradient(90deg,${hexA(T.teal,.7)},${T.teal})`,borderRadius:4}}/></div>
+                    <div style={{marginTop:13}}>
+                      {g.basis==="allin"&&g.gap>0&&<span style={gapChip}>− {money(g.gap)} · {Math.round((1-g.pct)*100)}% below a brand-new one</span>}
+                      {g.basis==="allin"&&g.gap<=0&&<div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>The typical used one asks at or above the base new price — used listings here skew to higher trims.</div>}
+                      {g.basis==="msrp"&&g.floorGap>0&&<span style={gapChip}>at least − {money(g.floorGap)} vs new · freight &amp; fees push new higher</span>}
+                      {g.basis==="msrp"&&g.floorGap<=0&&<div style={{fontSize:12,color:T.muted,lineHeight:1.5}}>The new MSRP shown is before freight &amp; fees, so we don't state the exact gap without the manufacturer's all-in price.</div>}
+                    </div>
+                    <div style={{fontFamily:mono,fontSize:9.5,color:T.faint,marginTop:11,lineHeight:1.5}}>{g.basis==="allin"?"Manufacturer's all-in price vs dealers' own all-in used asks — like for like.":"Manufacturer MSRP (before freight & fees), used only as a floor; used asks are all-in."}</div>
+                  </div>
+                </div>
+              ); })()}
+            </Panel>
+
+            {(ladder.rows||[]).length>=2&&<Panel head="Model-year ladder" tag={(ladder.trim?ladder.trim.toUpperCase()+" · ":"")+"MEDIAN ASK"} bodyStyle={{padding:"12px 15px 14px"}}>
+              {ladder.rows.map((r,i)=>(
+                <div key={r.year}>
+                  <div style={{display:"grid",gridTemplateColumns:"52px 1fr auto",alignItems:"center",gap:10,padding:"7px 0"}}>
+                    <span style={{fontFamily:mono,fontWeight:600,color:T.muted}}>{r.year}</span>
+                    <span style={{fontFamily:"'Archivo',system-ui,sans-serif",fontWeight:800,fontSize:16,color:T.text,fontVariantNumeric:"tabular-nums"}}>{money(r.med)}</span>
+                    <span style={{fontFamily:mono,fontSize:11.5,color:T.teal,fontWeight:600}}>{r.n} live</span>
+                  </div>
+                  {i<ladder.rows.length-1&&(()=>{ const step=r.med-ladder.rows[i+1].med; return <div style={{fontFamily:mono,fontSize:10.5,color:T.faint,textAlign:"right",borderBottom:`1px dashed ${hexA(T.text,.1)}`,paddingBottom:6,marginBottom:1}}>{step>=0?"−":"+"} {money(Math.abs(step))} a year older</div>; })()}
+                </div>
+              ))}
+              <div style={{fontFamily:mono,fontSize:9.5,color:T.faint,marginTop:10,lineHeight:1.5}}>Median advertised price by model-year, matched to the most-listed configuration{ladder.trim?" ("+ladder.trim.toUpperCase()+")":""} so years compare like-for-like. A rung shows only at 5+ live units.</div>
+            </Panel>}
           </div>
 
           <div className="crawlhud-notes" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginTop:14}}>
