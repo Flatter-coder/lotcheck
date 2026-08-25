@@ -16,6 +16,12 @@ the next instance.
 
 ---
 
+## 2026-08-25
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `ec93c86` | **A negative / invalid asking price rendered as a real dealer price and read "inside band."** Caught live by Vic typing `-1` into the `/crawl` value-band gauge's asking-price field: the header showed **"$-1"**, the subtext **"$40,391 below median · inside band,"** and the needle pinned to the low end — a confident, reassuring classification of a nonsense number. Root cause: `MarketBandGauge` used **two different notions of "has an asking price."** The big number, needle, delta and subtext gated on `ask` (truthy — so `-1` counts and renders), while the below/above-band classification gated on `ask>0` (so `-1` fails BOTH `aboveRange` and `belowRange` and falls through to the `"inside band"` default). The same split meant any genuine **below-lowest-listing** asking price (e.g. $25,000 on a RAV4 Hybrid banded $31,900–$48,998) would ALSO mis-read as "inside band" — a false all-clear aimed at exactly the buyer holding a below-market number | absence read as knowledge | one consistent gate — `hasAsk = Number.isFinite(ask) && ask>0` — now drives **every** branch of the shared component (domain, needle, big number, delta, aria-label, and the below/inside/above classification). Any non-positive/non-finite input (blank, 0, negative, NaN) behaves exactly like an empty field: shows the market median, makes no asking claim. A real below-low price now correctly reads **"below the range"** (teal, never alarmed), inside reads "inside band," above-high reads "above the range." The identical latent `ask?`-vs-`>0` split in the `/verify` compact market-value Row (fed by the SIGNED report's asking, so `-1` can't occur there in practice, but the class is the same) was hardened with the same `hasAsk` gate — fix-the-class, not the instance. Verified live on the dev server across all six input classes (blank / -1 / 0 / below-low / inside / above-high): each classifies correctly, and `-1` now reads plain "market median." `check:undef` / `check:syntax` / `check:parity` + `build` clean. Because `MarketBandGauge` is the one shared component, the same fix lands on both the `/crawl` gauge and the in-report gauge at once |
+
 ## 2026-08-22
 
 | fix | what broke | class | guard now in place |
