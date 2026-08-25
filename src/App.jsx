@@ -9409,12 +9409,14 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   const comps=mv.n!=null?mv.n:mv.comps;
   const asOf=mv.as!=null?mv.as:mv.asOf;
   const ask=Number(asking)||0;
-  // A real asking price is a positive, finite number. Anything else — blank, 0,
-  // negative, NaN — is "no price entered": never plotted, never classified. One
-  // gate for the whole component, so a bad input (e.g. -1) can't render as a
-  // dealer price on one line and fall through to a false "inside band" on the next.
-  const hasAsk=Number.isFinite(ask)&&ask>0;
-  if(!median||!low||!high) return null;
+  // A real asking price is a finite number of at least one dollar. Anything else —
+  // blank, 0, sub-dollar, negative, NaN — is "no price entered": never plotted,
+  // never classified. One gate for the whole component, so a bad input (e.g. -1)
+  // can't render as a dealer price on one line and fall to "inside band" on the next.
+  const hasAsk=Number.isFinite(ask)&&ask>=1;
+  // Reject impossible bands (inverted, negative, or zero bounds) rather than draw
+  // a reversed or self-contradictory arc — a garbage gauge is worse than none.
+  if(!(low>0&&median>0&&high>0&&low<=median&&median<=high)) return null;
   // Domain always includes the dealer's price so its marker is on the arc.
   const lo0=Math.min(low, hasAsk?ask:low), hi0=Math.max(high, hasAsk?ask:high);
   const pad=Math.max(1,(hi0-lo0)*0.10), d0=lo0-pad, d1=hi0+pad;
@@ -9423,7 +9425,9 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   // SVG user-unit rotation (attribute form) — no transform-box, so markers land
   // on the arc in every engine, not just Chrome/FF/Safari 15.4+.
   const rot=f=>`rotate(${(f*270).toFixed(2)} 170 160)`;
-  const delta=hasAsk?ask-median:0;
+  // Round the delta before the "at median" test so a sub-dollar difference (a
+  // fractional median vs a whole-dollar ask) reads "at median", not "$0 above".
+  const delta=hasAsk?Math.round(ask-median):0;
   // Caution ONLY when the dealer asks above the whole local range — a real
   // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
   const aboveRange=hasAsk&&ask>high, belowRange=hasAsk&&ask<low;
@@ -9432,11 +9436,17 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
   const mono="'IBM Plex Mono',ui-monospace,monospace";
   const uid="mv"+Math.round(median)+"x"+Math.round(low);   // unique defs ids per instance
+  // No ask entered → the big figure IS the market median, so label it that (teal),
+  // never "Dealer asking" (amber) over a price the user never typed.
+  const askLabel=hasAsk?"Dealer asking":"Market median", pillColor=hasAsk?AMBER:TEAL;
+  // Shrink the big figure for absurdly long values so it never spills the gauge.
+  const shownStr=Math.round(hasAsk?ask:median).toLocaleString("en-CA");
+  const bigFont=shownStr.length>12?22:shownStr.length>9?28:shownStr.length>7?33:37;
   return (
     <div style={{...cardStyle}}>
       <div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>Used market value · {mv.source||"LotCheck market"}</div>
       <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
-        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={`Dealer asking ${money(hasAsk?ask:median)}, ${hasAsk?pos+" and "+rangeWord:"market median"}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={hasAsk?`Dealer asking ${money(ask)}, ${pos} and ${rangeWord}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`:`Market median ${money(median)}. Range ${money(low)} to ${money(high)}. Enter an asking price to compare.`}>
           <defs>
             <linearGradient id={uid+"g"} gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
               <stop offset="0" stopColor={TEAL}/><stop offset="0.5" stopColor={VIOLET}/><stop offset="1" stopColor={AMBER}/>
@@ -9466,9 +9476,9 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
           <text x="274" y="259" textAnchor="middle" style={{font:`600 11px ${mono}`}} fill={C.inkFaint}>{money(high)}</text>
         </svg>
         <div style={{position:"absolute",left:"50%",top:"56%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
-          <div style={{fontSize:9.5,letterSpacing:".2em",color:AMBER,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"}}><span style={{width:6,height:6,borderRadius:"50%",background:AMBER,boxShadow:`0 0 9px ${AMBER}`,display:"inline-block"}}/>Dealer asking</div>
-          <div style={{fontSize:37,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4}}><small style={{fontSize:20,fontWeight:700,opacity:.7,marginRight:1}}>$</small>{Math.round(hasAsk?ask:median).toLocaleString("en-CA")}</div>
-          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{hasAsk?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"market median"}</div>
+          <div style={{fontSize:9.5,letterSpacing:".2em",color:pillColor,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"}}><span style={{width:6,height:6,borderRadius:"50%",background:pillColor,boxShadow:`0 0 9px ${pillColor}`,display:"inline-block"}}/>{askLabel}</div>
+          <div style={{fontSize:bigFont,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4,whiteSpace:"nowrap"}}><small style={{fontSize:Math.round(bigFont*0.54),fontWeight:700,opacity:.7,marginRight:1}}>$</small>{shownStr}</div>
+          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{hasAsk?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"type a price to compare"}</div>
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:8}}>
@@ -10004,8 +10014,10 @@ function VerifyPage(){
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
                   {o.marketValue&&o.marketValue.avg!=null&&(()=>{
-                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, hasAsk=Number.isFinite(ask)&&ask>0, d=hasAsk?ask-med:0;
-                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}`:money(med)}/>;
+                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, hasAsk=Number.isFinite(ask)&&ask>=1, d=hasAsk?Math.round(ask-med):0;
+                    const lo=Number(m.lo!=null?m.lo:m.below)||0, hi=Number(m.hi!=null?m.hi:m.above)||0;
+                    const band=hasAsk?(hi>0&&ask>hi?" · above the range":lo>0&&ask<lo?" · below the range":" · inside band"):"";
+                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}${band}`:money(med)}/>;
                   })()}
                   {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
@@ -12992,6 +13004,9 @@ function CrawlCoverage(){
         if(prices.length<5){ if(alive){ setGauge({insufficient:true}); setGLoad(false); } return; }
         const med0=prices[Math.floor(prices.length/2)];
         const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
+        // Re-check the 5-listing floor AFTER the outlier trim — trimming can drop a
+        // marginal model below it, and a band on <5 breaks the "enough listings" promise.
+        if(kept.length<5){ if(alive){ setGauge({insufficient:true}); setGLoad(false); } return; }
         const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
         const asOf=(rows||[]).map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
         if(alive){ setGauge({average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:"LotCheck market · "+kept.length+" comparable listings",mileage:null,make:m.make,model:m.model}); setGLoad(false); }
