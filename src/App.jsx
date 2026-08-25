@@ -13017,19 +13017,34 @@ function CrawlCoverage(){
   // Adapt the page theme (T) to the colour keys MarketBandGauge reads (C), so the
   // shipped design-10 gauge renders here with no changes.
   const gc={inkFaint:T.faint,ink:T.text,inkSoft:T.muted,tealInk:T.teal,paper2:T.panel2,line:T.hair};
-  const gCard={background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"};
-  const fieldStyle={background:T.panel,color:T.text,border:`1px solid ${T.hairS}`,borderRadius:10,padding:"9px 11px",fontSize:14,fontWeight:600,outline:"none",fontFamily:"inherit"};
-
-  const Tile=({n,l,c})=>(
-    <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:12,padding:"15px 16px"}}>
-      <div style={{fontWeight:900,fontSize:30,lineHeight:1,letterSpacing:"-.02em",color:c||T.text,fontVariantNumeric:"tabular-nums"}}>{n}</div>
-      <div style={{fontFamily:mono,fontSize:10.5,letterSpacing:".06em",textTransform:"uppercase",color:T.faint,marginTop:7,lineHeight:1.4}}>{l}</div>
+  const hexA=(h,a)=>{ const m=/^#?([0-9a-f]{6})$/i.exec(String(h||"")); if(!m) return h; const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
+  const fieldStyle={background:dark?"rgba(9,16,26,.85)":T.panel2,color:T.text,border:`1px solid ${hexA(T.teal,.24)}`,borderRadius:8,padding:"9px 11px",fontSize:13,fontWeight:600,outline:"none",fontFamily:"inherit",width:"100%"};
+  // Command-HUD (variant 02): corner-bracketed panels on a faint grid field.
+  const HUD=hexA(T.teal,.5);
+  const panelStyle={position:"relative",background:dark?"linear-gradient(180deg,rgba(23,38,56,.6),rgba(12,22,34,.72))":T.panel,border:`1px solid ${hexA(T.teal,.16)}`,borderRadius:12,boxShadow:dark?"0 24px 60px -34px rgba(0,0,0,.8)":"0 14px 34px -20px rgba(30,44,80,.22)"};
+  const Corners=()=>(<>
+    <span style={{position:"absolute",top:6,left:6,width:12,height:12,borderTop:`2px solid ${HUD}`,borderLeft:`2px solid ${HUD}`,opacity:.5,pointerEvents:"none"}}/>
+    <span style={{position:"absolute",top:6,right:6,width:12,height:12,borderTop:`2px solid ${HUD}`,borderRight:`2px solid ${HUD}`,opacity:.5,pointerEvents:"none"}}/>
+    <span style={{position:"absolute",bottom:6,left:6,width:12,height:12,borderBottom:`2px solid ${HUD}`,borderLeft:`2px solid ${HUD}`,opacity:.5,pointerEvents:"none"}}/>
+    <span style={{position:"absolute",bottom:6,right:6,width:12,height:12,borderBottom:`2px solid ${HUD}`,borderRight:`2px solid ${HUD}`,opacity:.5,pointerEvents:"none"}}/>
+  </>);
+  const Panel=({head,tag,children,style,bodyStyle})=>(
+    <div style={{...panelStyle,display:"flex",flexDirection:"column",...style}}>
+      <Corners/>
+      {head!=null&&<div style={{display:"flex",alignItems:"center",gap:9,padding:"9px 13px",borderBottom:`1px solid ${hexA(T.teal,.12)}`}}>
+        <span style={{width:7,height:7,borderRadius:"50%",background:T.teal,boxShadow:`0 0 10px ${T.teal}`,flex:"none"}}/>
+        <span style={{fontFamily:mono,fontSize:11,letterSpacing:".14em",textTransform:"uppercase",color:T.muted,fontWeight:600}}>{head}</span>
+        {tag&&<span style={{marginLeft:"auto",fontFamily:mono,fontSize:10,color:T.faint,letterSpacing:".08em"}}>{tag}</span>}
+      </div>}
+      <div style={{padding:"12px 13px 13px",flex:1,display:"flex",flexDirection:"column",...bodyStyle}}>{children}</div>
     </div>
   );
+  const cityTop=cities.slice(0,8); const citySum=cityTop.reduce((s,c)=>s+Number(c.n),0);
 
   return (
     <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:"system-ui,-apple-system,Segoe UI,Roboto,sans-serif"}}>
-      <style dangerouslySetInnerHTML={{__html:`.crawl-navlinks{scrollbar-width:none;-ms-overflow-style:none}.crawl-navlinks::-webkit-scrollbar{display:none}.crawl-navlinks a:hover{color:${T.amber}}`}}/>
+      <style dangerouslySetInnerHTML={{__html:`.crawl-navlinks{scrollbar-width:none;-ms-overflow-style:none}.crawl-navlinks::-webkit-scrollbar{display:none}.crawl-navlinks a:hover{color:${T.amber}}@media(max-width:1000px){.crawlhud-grid{grid-template-columns:1fr!important}.crawlhud-head{grid-template-columns:1fr!important}.crawlhud-notes{grid-template-columns:1fr!important}}`}}/>
+      <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,backgroundImage:`linear-gradient(${hexA(T.teal,.05)} 1px,transparent 1px),linear-gradient(90deg,${hexA(T.teal,.05)} 1px,transparent 1px)`,backgroundSize:"44px 44px",WebkitMaskImage:"radial-gradient(120% 90% at 50% 0%,#000 42%,transparent 92%)",maskImage:"radial-gradient(120% 90% at 50% 0%,#000 42%,transparent 92%)"}}/>
       <div style={{position:"sticky",top:0,zIndex:20,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",background:T.navBg,borderBottom:`1px solid ${T.hair}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
           <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:mono,flexShrink:0}}>‹</button>
@@ -13042,77 +13057,96 @@ function CrawlCoverage(){
         </div>
       </div>
 
-      <div style={{maxWidth:1040,margin:"0 auto",padding:"30px 20px 80px"}}>
-        <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:T.amber}}>Our own dataset · no vendor</div>
-        <h1 style={{fontSize:"clamp(28px,5vw,44px)",lineHeight:1.03,fontWeight:900,letterSpacing:"-.02em",margin:"8px 0 0"}}>The <span style={{color:T.amber}}>used cars</span> we track across Alberta</h1>
-        <p style={{fontSize:"clamp(16px,2.1vw,19px)",color:T.muted,maxWidth:"58ch",margin:"12px 0 0",lineHeight:1.5}}>Read from dealers' own public listings — the dataset the used-value gauge, days-on-lot and price history are built on. New cars sit under a published MSRP, so this is used only.</p>
-
-        {loading&&<div style={{marginTop:28,fontFamily:mono,color:T.faint,fontSize:14}}>Reading the dataset…</div>}
-        {err&&!loading&&<div style={{marginTop:28,background:T.panel,border:`1px solid ${T.hair}`,borderLeft:`3px solid ${T.risk}`,borderRadius:12,padding:"14px 16px",color:T.muted,fontSize:14}}>{err}</div>}
+      <div style={{position:"relative",zIndex:1,maxWidth:1240,margin:"0 auto",padding:"16px 20px 44px"}}>
+        {loading&&<div style={{marginTop:44,fontFamily:mono,color:T.faint,fontSize:14,textAlign:"center"}}>Reading the dataset…</div>}
+        {err&&!loading&&<div style={{marginTop:28,...panelStyle,borderLeft:`3px solid ${T.risk}`,padding:"14px 16px",color:T.muted,fontSize:14}}><Corners/>{err}</div>}
 
         {data&&!loading&&(<>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginTop:24}}>
-            <Tile n={num(data.totalUsed)} l={"Used cars tracked"}/>
-            <Tile n={num(data.dealers)} l={"Alberta dealers"}/>
-            <Tile n={num(data.cities.length)} l={"Cities"}/>
-            <Tile n={num(data.modelsGauge)} c={T.teal} l={<>Models with enough<br/>comps to score</>}/>
-            <Tile n={String(data.freshest||"—").replace(/^\d{4}-/, "")} c={T.amber} l={<>Dealer data<br/>as of (snapshot)</>}/>
-          </div>
-
-          {/* LIVE design-10 gauge — the value band, in action */}
-          <div style={{marginTop:34}}>
-            <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".14em",textTransform:"uppercase",color:T.amber}}>The value band · live</div>
-            <h2 style={{fontSize:"clamp(19px,2.6vw,25px)",fontWeight:800,letterSpacing:"-.01em",margin:"8px 0 0"}}>See any model's value band on the gauge</h2>
-            <p style={{fontSize:14,color:T.muted,margin:"6px 0 0"}}>This is the design-10 gauge the report uses — built live from the comps above. Pick a model; type an asking price to see exactly where it lands.</p>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap",margin:"14px 0"}}>
-              <select value={selIdx} onChange={e=>setSelIdx(Number(e.target.value))} style={{...fieldStyle,minWidth:220,cursor:"pointer"}}>
-                {models.slice(0,24).map((m,i)=><option key={i} value={i}>{m.make} {m.model} · {num(m.n)} comps</option>)}
-              </select>
-              <input type="number" inputMode="numeric" placeholder="Asking price (optional)" value={askIn} onChange={e=>setAskIn(e.target.value)} style={{...fieldStyle,width:200}}/>
+          <div className="crawlhud-head" style={{...panelStyle,display:"grid",gridTemplateColumns:"1.5fr 1fr",overflow:"hidden",marginBottom:14}}>
+            <Corners/>
+            <div style={{padding:"18px 22px"}}>
+              <div style={{fontFamily:mono,fontSize:11,letterSpacing:".12em",color:T.teal,textTransform:"uppercase",marginBottom:10}}>Used-car market · Alberta · <b style={{color:T.amber,fontWeight:600}}>our own dataset · no vendor</b></div>
+              <h1 style={{fontFamily:"'Archivo',system-ui,sans-serif",fontWeight:800,fontSize:"clamp(22px,3vw,32px)",lineHeight:1.04,margin:"0 0 10px",letterSpacing:"-.01em"}}>The used cars we track across Alberta</h1>
+              <p style={{margin:0,color:T.muted,fontSize:13.5,lineHeight:1.5,maxWidth:"56ch"}}>Read from dealers' own public listings — the dataset the used-value gauge, days-on-lot and price history are built on. New cars sit under a published MSRP, so this is <b style={{color:T.text,fontWeight:600}}>used only</b>.</p>
             </div>
-            <div style={{maxWidth:420}}>
-              {gLoad&&<div style={{fontFamily:mono,color:T.faint,fontSize:13,padding:"20px 0"}}>Building the band…</div>}
-              {!gLoad&&gauge&&gauge.insufficient&&<div style={{...gCard,color:T.muted,fontSize:14}}>Not enough comparable listings for this model yet — the gauge shows nothing rather than guess.</div>}
-              {!gLoad&&gauge&&!gauge.insufficient&&<MarketBandGauge mv={gauge} asking={Number(askIn)||0} C={gc} cardStyle={gCard}/>}
-            </div>
-          </div>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginTop:34}}>
-            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"}}>
-              <div style={{fontWeight:800,fontSize:14,letterSpacing:".02em"}}>Read on demand · daily refresh paused</div>
-              <p style={{fontSize:13.5,color:T.muted,margin:"8px 0 0",lineHeight:1.5}}>Every scan a buyer runs reads that car's listing and stores it — that's live today, and it's built most of this. The nightly bulk crawl that would refresh every dealer is paused pending legal sign-off, which is why the data reads as of <b style={{color:T.text}}>{data.freshest}</b>.</p>
-            </div>
-            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"18px 20px"}}>
-              <div style={{fontWeight:800,fontSize:14,letterSpacing:".02em"}}>Where the used cars are</div>
-              <div style={{marginTop:10}}>
-                {cities.slice(0,8).map((c,i)=>(
-                  <div key={i} style={{display:"grid",gridTemplateColumns:"110px 1fr auto",gap:10,alignItems:"center",padding:"4px 0",fontSize:13.5}}>
-                    <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.city}</span>
-                    <span style={{height:8,borderRadius:5,background:T.panel2,overflow:"hidden"}}><span style={{display:"block",height:"100%",width:`${Math.max(4,Math.round(Number(c.n)/maxCity*100))}%`,background:T.amber,borderRadius:5}}/></span>
-                    <span style={{fontFamily:mono,fontSize:12,color:T.muted}}>{num(c.n)}</span>
-                  </div>
-                ))}
+            <div style={{borderLeft:`1px solid ${hexA(T.teal,.12)}`,display:"grid",gridTemplateColumns:"1fr 1fr",gap:1,background:hexA(T.teal,.1)}}>
+              {[[num(data.totalUsed),"used cars tracked",T.text],[num(data.dealers),"Alberta dealers",T.text],[num(data.cities.length),"cities",T.text],[num(data.modelsGauge),"models with enough comps to score",T.teal]].map(([v,l,c],i)=>(
+                <div key={i} style={{background:dark?"linear-gradient(180deg,rgba(16,28,44,.9),rgba(11,20,32,.95))":T.panel2,padding:"12px 14px",display:"flex",flexDirection:"column",justifyContent:"center"}}>
+                  <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:22,lineHeight:1,color:c,fontVariantNumeric:"tabular-nums"}}>{v}</div>
+                  <div style={{fontSize:10.5,color:T.faint,marginTop:5,lineHeight:1.3}}>{l}</div>
+                </div>
+              ))}
+              <div style={{gridColumn:"1 / -1",background:dark?"linear-gradient(180deg,rgba(16,28,44,.9),rgba(11,20,32,.95))":T.panel2,padding:"11px 14px"}}>
+                <div style={{fontFamily:"'Archivo',sans-serif",fontWeight:800,fontSize:15,color:T.amber}}>{data.freshest||"—"} <small style={{fontSize:12,color:T.teal,fontWeight:700}}>· snapshot</small></div>
+                <div style={{fontSize:10.5,color:T.faint,marginTop:4}}>dealer data as of</div>
               </div>
             </div>
           </div>
 
-          <div style={{marginTop:34}}>
-            <div style={{fontFamily:mono,fontSize:11,fontWeight:600,letterSpacing:".14em",textTransform:"uppercase",color:T.amber}}>Coverage by model</div>
-            <h2 style={{fontSize:"clamp(19px,2.6vw,25px)",fontWeight:800,letterSpacing:"-.01em",margin:"8px 0 0"}}>Most-tracked used models</h2>
-            <p style={{fontSize:14,color:T.muted,margin:"6px 0 0"}}>Used listings per model with the live asking range. Enough to build a value band at 5+.</p>
-            <div style={{background:T.panel,border:`1px solid ${T.hair}`,borderRadius:14,padding:"12px 18px",marginTop:14}}>
-              {models.slice(0,16).map((m,i)=>(
-                <div key={i} style={{display:"grid",gridTemplateColumns:"150px 1fr 148px",gap:12,alignItems:"center",padding:"9px 0",borderTop:i?`1px solid ${T.hair}`:"none"}}>
-                  <span style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.make} {m.model}</span>
-                  <span style={{height:9,borderRadius:6,background:T.panel2,overflow:"hidden"}}><span style={{display:"block",height:"100%",width:`${Math.max(4,Math.round(Number(m.n)/maxModel*100))}%`,background:`linear-gradient(90deg,${T.teal},${T.violet})`,borderRadius:6}}/></span>
-                  <span style={{fontFamily:mono,fontSize:11,color:T.faint,textAlign:"right",whiteSpace:"nowrap"}}><b style={{color:T.muted,fontSize:12.5}}>{num(m.n)}</b> · {money(m.lo)}–{money(m.hi)}</span>
+          <div className="crawlhud-grid" style={{display:"grid",gridTemplateColumns:"248px 1fr 322px",gap:14,alignItems:"stretch"}}>
+            <Panel head="Cities" tag="USED / CITY">
+              {cityTop.map((c,i)=>(
+                <div key={i} style={{marginBottom:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}>
+                    <span style={{fontSize:12.5,color:T.text}}>{c.city}</span>
+                    <span style={{fontFamily:mono,fontSize:12,color:T.teal,fontWeight:600}}>{num(c.n)}</span>
+                  </div>
+                  <div style={{height:10,borderRadius:3,background:hexA(T.teal,.06),overflow:"hidden",border:`1px solid ${hexA(T.teal,.06)}`}}>
+                    <div style={{height:"100%",width:`${Math.max(3,Number(c.n)/maxCity*100)}%`,background:`linear-gradient(180deg,${T.teal},${hexA(T.teal,.7)})`,boxShadow:`inset 0 -2px 0 rgba(0,0,0,.25),0 0 10px ${hexA(T.teal,.3)}`,borderRadius:3}}/>
+                  </div>
                 </div>
               ))}
-            </div>
+              <div style={{marginTop:"auto",paddingTop:12,borderTop:`1px solid ${hexA(T.teal,.12)}`}}>
+                <div style={{fontFamily:mono,fontSize:9,letterSpacing:".14em",textTransform:"uppercase",color:T.teal,marginBottom:7}}>Coverage</div>
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:mono,fontSize:11,color:T.muted,marginBottom:6}}><span>Top {cityTop.length} of {data.cities.length} cities</span><b style={{color:T.text}}>{num(citySum)}</b></div>
+                <div style={{height:7,borderRadius:4,background:hexA(T.teal,.06),overflow:"hidden"}}><div style={{height:"100%",width:`${Math.min(100,citySum/Number(data.totalUsed||1)*100)}%`,background:`linear-gradient(90deg,${T.violet},${T.teal})`}}/></div>
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:mono,fontSize:11,color:T.muted,marginTop:7}}><span>of {num(data.totalUsed)} tracked</span><b style={{color:T.text}}>{num(data.dealers)} dealers</b></div>
+              </div>
+            </Panel>
+
+            <Panel head="Value-band gauge" tag="DESIGN-10 · LIVE" bodyStyle={{padding:"12px 14px 14px"}}>
+              <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:10,marginBottom:6}}>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Model</label>
+                  <select value={selIdx} onChange={e=>setSelIdx(Number(e.target.value))} style={{...fieldStyle,fontFamily:mono,cursor:"pointer"}}>
+                    {models.slice(0,24).map((m,i)=><option key={i} value={i}>{m.make} {m.model} · {num(m.n)} comps</option>)}
+                  </select>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Asking price</label>
+                  <input type="number" inputMode="numeric" placeholder="optional" value={askIn} onChange={e=>setAskIn(e.target.value)} style={{...fieldStyle,fontFamily:mono}}/>
+                </div>
+              </div>
+              {gLoad&&<div style={{fontFamily:mono,color:T.faint,fontSize:13,padding:"48px 0",textAlign:"center"}}>Building the band…</div>}
+              {!gLoad&&gauge&&gauge.insufficient&&<div style={{color:T.muted,fontSize:14,padding:"36px 8px",textAlign:"center"}}>Not enough comparable listings for this model yet — the gauge shows nothing rather than guess.</div>}
+              {!gLoad&&gauge&&!gauge.insufficient&&<div style={{maxWidth:440,margin:"0 auto",width:"100%"}}><MarketBandGauge mv={gauge} asking={Number(askIn)||0} C={gc} cardStyle={{background:"transparent",border:"none",padding:0}}/></div>}
+            </Panel>
+
+            <Panel head="Most-tracked used models" tag="CT · RANGE" bodyStyle={{padding:"8px 11px 10px"}}>
+              {models.slice(0,15).map((m,i)=>(
+                <div key={i} style={{padding:"5px 2px",borderTop:i?`1px solid ${hexA(T.text,.06)}`:"none"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"108px 1fr 28px",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:12,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.make} {m.model}</span>
+                    <span style={{height:6,borderRadius:3,background:hexA(T.text,.06),overflow:"hidden"}}><span style={{display:"block",height:"100%",width:`${Number(m.n)/maxModel*100}%`,background:`linear-gradient(90deg,${hexA(T.violet,.7)},${T.violet})`,boxShadow:`0 0 8px ${hexA(T.violet,.5)}`,borderRadius:3}}/></span>
+                    <span style={{fontFamily:mono,fontSize:12,color:T.teal,textAlign:"right",fontWeight:600}}>{m.n}</span>
+                  </div>
+                  {m.lo!=null&&<div style={{fontFamily:mono,fontSize:9.5,color:T.faint,margin:"1px 0 0 118px"}}>{money(m.lo)}–{money(m.hi)}</div>}
+                </div>
+              ))}
+            </Panel>
           </div>
 
-          <div style={{marginTop:24,background:T.panel,border:`1px solid ${T.hair}`,borderLeft:`3px solid ${T.teal}`,borderRadius:12,padding:"14px 16px",fontSize:13.5,color:T.muted,lineHeight:1.55}}>
-            <b style={{color:T.text}}>Why no dealer names?</b> The specific dealers we read are our edge, not something we hand to the people we audit. You see how many and where — {num(data.dealers)} dealers across {num(data.cities.length)} Alberta cities — never the list. Every figure traces to a dealer's own public listing; these are asking prices, not confirmed sales.
+          <div className="crawlhud-notes" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginTop:14}}>
+            <div style={{...panelStyle,padding:"13px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
+              <Corners/>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{flex:"none",marginTop:1}}><path d="M12 3l9 16H3l9-16z" stroke={T.amber} strokeWidth="1.8" strokeLinejoin="round"/><path d="M12 10v4M12 16.5v.01" stroke={T.amber} strokeWidth="1.8" strokeLinecap="round"/></svg>
+              <div><div style={{fontFamily:mono,fontSize:12,letterSpacing:".06em",textTransform:"uppercase",color:T.amber,marginBottom:4}}>Read on demand · daily refresh paused</div><p style={{margin:0,fontSize:12.5,lineHeight:1.5,color:T.muted}}>The nightly bulk crawl that would refresh every dealer is <b style={{color:T.text}}>paused pending legal sign-off</b>, which is why the data reads as of <b style={{color:T.text}}>{data.freshest}</b>.</p></div>
+            </div>
+            <div style={{...panelStyle,padding:"13px 16px",display:"flex",gap:12,alignItems:"flex-start"}}>
+              <Corners/>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style={{flex:"none",marginTop:1}}><circle cx="12" cy="12" r="9" stroke={T.teal} strokeWidth="1.8"/><path d="M12 11v5M12 8v.01" stroke={T.teal} strokeWidth="1.8" strokeLinecap="round"/></svg>
+              <div><div style={{fontFamily:mono,fontSize:12,letterSpacing:".06em",textTransform:"uppercase",color:T.text,marginBottom:4}}>Why no dealer names?</div><p style={{margin:0,fontSize:12.5,lineHeight:1.5,color:T.muted}}>The specific dealers we read are our edge — you see <b style={{color:T.text}}>how many and where</b> ({num(data.dealers)} dealers, {num(data.cities.length)} cities), never the list. Asking prices, not confirmed sales.</p></div>
+            </div>
           </div>
         </>)}
       </div>
