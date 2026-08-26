@@ -75,7 +75,7 @@ import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
-import { resolveCity } from "../_shared/jurisdiction.ts";
+import { resolveCity, resolveJurisdiction } from "../_shared/jurisdiction.ts";
 import { stripSettledContradictions } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16x";  // + CPO premium: a certified subject's asking vs the non-certified used median (computeCpoPremium) shown in the certified counter-script move
+const CACHE_VER = "2026-08-16y";  // + province coverage guard: market value + CPO premium suppressed when the LISTING's province isn't one we crawl (Alberta today) — no more Alberta comps on an out-of-province car
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2507,7 +2507,8 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       analysis.vin,
       analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
       { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
-        saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null },
+        saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
+        province: resolveJurisdiction(analysis).code },
     );
     if (mv) analysis.marketValue = mv;
   }

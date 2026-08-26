@@ -61,6 +61,7 @@ import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
+import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
@@ -802,7 +803,8 @@ Deno.serve(async (req: Request) => {
         analysis.vin,
         analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
         { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
-          saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null },
+          saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
+          province: resolveJurisdiction(analysis).code },
       );
       if (mv) analysis.marketValue = mv;
     }

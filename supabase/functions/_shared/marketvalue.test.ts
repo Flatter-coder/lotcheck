@@ -10,7 +10,7 @@
 //
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/marketvalue.test.ts
-import { computeBand, computeCpoPremium, median, percentile, type CompRow } from "./marketvalue.ts";
+import { computeBand, computeCpoPremium, servesComps, median, percentile, type CompRow } from "./marketvalue.ts";
 
 let pass = 0, fail = 0;
 const fails: string[] = [];
@@ -139,6 +139,14 @@ check(computeCpoPremium([{ price: 40000, certified: true }, { price: 35000, cert
 check(computeCpoPremium(cpoRows, 35000, { minComps: 5 }) === null, "cpo: certified NOT above the non-certified median -> null");
 // No asking -> null.
 check(computeCpoPremium(cpoRows, 0, { minComps: 5 }) === null, "cpo: no asking price -> null");
+
+// --- province coverage guard (only Alberta is crawled today) ---------------
+check(servesComps("AB") === true, "serves: Alberta is covered");
+check(servesComps("ab") === true, "serves: case-insensitive");
+check(servesComps("ON") === false, "serves: Ontario is NOT covered -> no value band");
+check(servesComps("BC") === false, "serves: BC is NOT covered -> no value band");
+check(servesComps(null) === false, "serves: unknown province is NOT served (missing beats wrong)");
+check(servesComps("") === false, "serves: empty province is NOT served");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error("FAILURES:\n  " + fails.join("\n  ")); process.exit(1); }
