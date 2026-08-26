@@ -60,6 +60,7 @@ import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
+import { deriveSaleCondition } from "../_shared/condition.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
@@ -818,6 +819,7 @@ Deno.serve(async (req: Request) => {
     { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }
     // S12 — doc-fee vs jurisdiction benchmark (fail-safe: only flags with a backed benchmark).
     { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }
+    analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
     // S25 — all-in label + safeguard: fires on any all-in-province listing, even a
     // clean one, so the report labels the price all-in and the script states the anchor.
     { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; }

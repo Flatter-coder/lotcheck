@@ -13,6 +13,7 @@
     "test:fee-schedule": "node --experimental-strip-types supabase/functions/_shared/fee-schedule.test.ts",
     "test:docfee": "node --experimental-strip-types supabase/functions/_shared/docfee.test.ts",
     "test:cpo": "node --experimental-strip-types supabase/functions/_shared/cpo.test.ts",
+    "test:condition": "node --experimental-strip-types supabase/functions/_shared/condition.test.ts",
     "check:copy": "node scripts/check-copy-compliance.mjs",
     "check:parity": "node scripts/check-report-parity.mjs",
     "check:undef": "node scripts/check-undefined-identifiers.mjs",
