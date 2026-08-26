@@ -146,6 +146,11 @@ jobs:
       # RAV4 financed adds = $3,078, so a silent edit to any component fails here.
       - name: Fee catalog (sourced fee constants; no fabricated brand fees)
         run: npm run test:fee-schedule
+      # The dealer-fee-ceiling flag: fires ONLY for a new vehicle of a captured
+      # make in-province; never a used car, an uncaptured make, or a fee under
+      # the ceiling. A wrong fee claim against a named dealer is what this guards.
+      - name: Doc-fee ceiling flag (backed, new-only, no false claims)
+        run: npm run test:docfee
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")

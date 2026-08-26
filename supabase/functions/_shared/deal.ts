@@ -185,9 +185,16 @@ export function buildCounterScript(analysis: any): CounterScript {
   }
   const df = analysis?.docFeeCheck;
   if (df) {
-    if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.` });
-    else if (df.kind === "over_cap") moves.push({ topic: "Doc fee", say: `Your ${money(df.docFee)} doc fee is above ${df.jurisdiction}'s ~${money(df.benchmark)} cap — please bring it down.` });
-    else if (df.kind === "over_norm") moves.push({ topic: "Doc fee", say: `A ${money(df.docFee)} doc fee is on the high side — can you reduce it?` });
+    // Backed, neutral leverage: the manufacturer's OWN published maximum dealer
+    // fee. Only present when the fee exceeds it on a new vehicle of that make
+    // (docfee.ts guards the scope), so this is a fact-with-authority, never an
+    // accusation (no-accusation-language, make-it-dispute-proof).
+    const ceiling = (df.mfrCeiling && df.mfrCeilingOverBy)
+      ? ` It's also ${money(df.mfrCeilingOverBy)} above ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — ask them to bring it to the manufacturer's cap.`
+      : "";
+    if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.${ceiling}` });
+    else if (df.kind === "over_cap") moves.push({ topic: "Doc fee", say: `Your ${money(df.docFee)} doc fee is above ${df.jurisdiction}'s ~${money(df.benchmark)} cap — please bring it down.${ceiling}` });
+    else if (df.kind === "over_norm") moves.push({ topic: "Doc fee", say: `A ${money(df.docFee)} doc fee is on the high side — can you reduce it?${ceiling}` });
   }
   // S24 — all-in advertised price. Non-tax fees stacked on the price mean the
   // advertised number wasn't all-in. Name the authority so it's dispute-proof
