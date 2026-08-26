@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16w";  // + used-market: saleCondition granularity (new/demo/certified/used) + CPO certified-badge verification move (cpo.ts) in the counter-script
+const CACHE_VER = "2026-08-16x";  // + CPO premium: a certified subject's asking vs the non-certified used median (computeCpoPremium) shown in the certified counter-script move
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2496,6 +2496,9 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   await applyVerifiedWarranty(analysis);
   await applyRemainingWarranty(analysis);
   await applyVerifiedFuelType(analysis);
+  // Sale-condition granularity (new/demo/certified/used), derived here so both the
+  // market-value CPO premium below and the certified counter-script move can use it.
+  analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
   // Auto market value (best-effort) from our OWN crawl (lotcheck provider, the
   // default): needs the VIN plus ymm + condition to build the comparable set,
   // and returns null on thin coverage so the report omits the module.
@@ -2503,7 +2506,8 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
     const mv = await fetchMarketValue(
       analysis.vin,
       analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
-      { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition },
+      { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+        saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null },
     );
     if (mv) analysis.marketValue = mv;
   }
@@ -2656,9 +2660,6 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
-  // Sale-condition granularity (new/demo/certified/used) from the LLM field or a
-  // platform extractor's saleConditionHint. Feeds the CPO certified check below.
-  analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
   // S25. The city is ONE signal and it silently failed on Charlesglen, leaving
   // allInPricing null -- and null meant "not all-in", printing Toyota's own
   // $3,078 of freight as dealer markup. Ask every other province signal on the

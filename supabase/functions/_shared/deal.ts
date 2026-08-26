@@ -206,7 +206,13 @@ export function buildCounterScript(analysis: any): CounterScript {
     if (cpo) {
       const incl = [cpo.inspectionPoints ? `${cpo.inspectionPoints}-point inspection` : null, cpo.powertrain ? `a ${cpo.powertrain} warranty` : null].filter(Boolean).join(" and ");
       const concern = cpo.eligibilityConcern ? ` One thing to check: ${cpo.eligibilityConcern}, so confirm it genuinely qualifies.` : "";
-      moves.push({ topic: "Certified", say: `Listed as certified. ${cpo.make} runs an OEM program (${cpo.program})${incl ? ` — ${incl}` : ""}. Confirm this vehicle is enrolled in ${cpo.program} (not a dealer in-house "certified") and get the warranty terms in writing.${concern}` });
+      // The premium the certification is costing, from our own comps (never a
+      // published fee — CPO is a price premium). Only present when backed.
+      const prem = analysis?.marketValue?.cpoPremium;
+      const premiumSay = (prem && prem.premium > 0)
+        ? ` It's about ${money(prem.premium)} more than a comparable non-certified one (${prem.nNonCertified} listing${prem.nNonCertified === 1 ? "" : "s"}, ${prem.basis}) — weigh that against the coverage.`
+        : "";
+      moves.push({ topic: "Certified", say: `Listed as certified. ${cpo.make} runs an OEM program (${cpo.program})${incl ? ` — ${incl}` : ""}.${premiumSay} Confirm this vehicle is enrolled in ${cpo.program} (not a dealer in-house "certified") and get the warranty terms in writing.${concern}` });
     }
   }
   // S24 — all-in advertised price. Non-tax fees stacked on the price mean the
