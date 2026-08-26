@@ -16,6 +16,8 @@
 // change) — same officially-sourced discipline as the warranty catalog.
 // ============================================================================
 
+import { assessDealerFeeVsCeiling } from "./fee-schedule.ts";
+
 const num = (x: unknown): number | null => { const v = Number(x); return Number.isFinite(v) ? v : null; };
 
 type Benchmark =
@@ -57,7 +59,7 @@ function findDocFee(items: any[]): { name: string; price: number } | null {
     const n = (typeof it?.name === "string" ? it.name : "").toLowerCase();
     const p = num(it?.price);
     if (p == null || p <= 0) continue;
-    if (/\b(documentation|doc(\s|-)?fee|admin(istration)?|dealer fee)\b/.test(n) && (!best || p > best.price)) {
+    if (/\b(documentation|doc(\s|-)?fee|admin(istration)?|dealer fees?)\b/.test(n) && (!best || p > best.price)) {
       best = { name: it.name, price: p };
     }
   }
@@ -73,6 +75,13 @@ export interface DocFeeAssessment {
   body?: string;              // regulator name (allin)
   note?: string;              // cap/norm note
   source: string;
+  // Manufacturer's OWN published maximum dealer fee, attached only when the fee
+  // exceeds it. Valid, backed leverage on a NEW vehicle of a make whose ceiling
+  // we have captured (fee-schedule.ts). Absent = no sourced ceiling to cite.
+  mfrCeiling?: number;        // the published maximum (e.g. Lexus $995, Toyota $999)
+  mfrCeilingOverBy?: number;  // observed doc fee − ceiling
+  mfrCeilingMake?: string;    // whose ceiling this is
+  mfrCeilingSource?: string;  // provenance (manufacturer Build & Price)
 }
 
 // All-in advertised-pricing authority for a listing's jurisdiction (Canada).
@@ -100,14 +109,26 @@ export function assessDocFee(analysis: any): DocFeeAssessment | null {
   const b = BENCHMARKS[code];
   if (!b) return null; // no backed benchmark -> no claim (fail-safe)
 
+  // The manufacturer's OWN published maximum dealer fee — a backed, brand-sourced
+  // enrichment on top of the jurisdiction rule. Valid ONLY for a NEW vehicle of a
+  // make whose ceiling we captured, in that province: the ceiling governs new
+  // sales of that make. For a used car, an uncaptured make, or a fee at/under the
+  // ceiling, we attach nothing — missing beats wrong (dealers-are-adversaries).
+  const mfr = (analysis?.vehicleCondition === "new" && analysis?.make)
+    ? assessDealerFeeVsCeiling(analysis.make, code, doc.price)
+    : null;
+  const ceiling = (mfr && mfr.over)
+    ? { mfrCeiling: mfr.ceiling, mfrCeilingOverBy: mfr.overBy, mfrCeilingMake: String(analysis.make), mfrCeilingSource: mfr.source }
+    : {};
+
   if (b.type === "allin") {
-    return { docFee: doc.price, jurisdiction: code, kind: "allin", benchmark: null, overBy: null, body: b.body, source: b.source };
+    return { docFee: doc.price, jurisdiction: code, kind: "allin", benchmark: null, overBy: null, body: b.body, source: b.source, ...ceiling };
   }
   if (b.type === "cap") {
     const over = doc.price > b.value;
-    return { docFee: doc.price, jurisdiction: code, kind: over ? "over_cap" : "within_cap", benchmark: b.value, overBy: over ? Math.round(doc.price - b.value) : 0, note: b.note, source: b.source };
+    return { docFee: doc.price, jurisdiction: code, kind: over ? "over_cap" : "within_cap", benchmark: b.value, overBy: over ? Math.round(doc.price - b.value) : 0, note: b.note, source: b.source, ...ceiling };
   }
   // norm
   const over = doc.price >= b.value;
-  return over ? { docFee: doc.price, jurisdiction: code, kind: "over_norm", benchmark: b.value, overBy: Math.round(doc.price - b.value), note: b.note, source: b.source } : null;
+  return over ? { docFee: doc.price, jurisdiction: code, kind: "over_norm", benchmark: b.value, overBy: Math.round(doc.price - b.value), note: b.note, source: b.source, ...ceiling } : null;
 }

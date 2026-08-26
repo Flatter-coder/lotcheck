@@ -106,7 +106,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16q";  // + D2C Media window.__vdpJSON extractor built (was specified 2026-08-15, never wired in) -- recovers a real quoted price the page's own "Call for pricing" template hides
+const CACHE_VER = "2026-08-16r";  // + dealer-fee-ceiling flag: a doc/dealer fee over the manufacturer's own published max (fee-schedule.ts) now surfaces in the report; findDocFee also matches "Dealer Fees" (plural)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

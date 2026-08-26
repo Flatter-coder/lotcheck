@@ -12298,6 +12298,7 @@ function QuoteCheckPage(){
                       {d.kind==="over_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is about <b style={{color:C.coralInk}}>{m(d.overBy)} above</b> {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). It's negotiable — push back.</>}
                       {d.kind==="over_norm"&&<>{d.jurisdiction} doesn't cap doc fees, and your <b>{m(d.docFee)}</b> is at the high end ({d.note}). Negotiable — ask them to reduce it.</>}
                       {d.kind==="within_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is within {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). Nothing to flag here.</>}
+                      {d.mfrCeiling&&d.mfrCeilingOverBy>0&&<div style={{marginTop:6}}>It's also <b style={{color:C.coralInk}}>{m(d.mfrCeilingOverBy)} above</b> {d.mfrCeilingMake}'s own published maximum dealer fee of <b>{m(d.mfrCeiling)}</b> — ask them to match it.</div>}
                     </div>
                     <a href={d.source} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:7}}>Source ↗</a>
                   </div>
