@@ -176,6 +176,14 @@ html[data-theme="dark"] .nav{background:rgba(21,18,31,.82)}
 .nav-links a{transition:color .2s var(--ease-out)}
 .nav-links a:hover{color:var(--nav-hover)}
 .nav-links a:hover::after{transform:scaleX(1)}
+.nav-more{position:relative;display:flex;align-items:center}
+.nav-more>summary{list-style:none;cursor:pointer;font-weight:800;font-size:1.05rem;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px}
+.nav-more>summary::-webkit-details-marker{display:none}
+.nav-more>summary::after{content:"\25BE";font-size:.68em;opacity:.7}
+.nav-more[open]>summary,.nav-more>summary:hover{color:var(--nav-hover)}
+.nav-more-panel{position:absolute;top:calc(100% + 12px);right:0;min-width:200px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 22px 46px -20px rgba(30,25,60,.28);padding:6px;display:flex;flex-direction:column;z-index:600}
+.nav-more-panel a{padding:9px 12px;border-radius:8px;white-space:nowrap;font-size:.95rem;font-weight:700}
+.nav-more-panel a::after{display:none!important}
 .nav-links a.live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
 .nav-links a.live::after{transform:scaleX(1)}
 .live-dot{position:relative;width:9px;height:9px;border-radius:50%;background:var(--live);flex:none}
@@ -562,12 +570,14 @@ footer{padding:34px 0 44px}
       <a class="live" href="/live-price-index"><span class="live-dot" aria-hidden="true"></span>MSRP Price Index</a>
       <a href="/alberta">Alberta Dealers Map</a>
       <a href="/crawl">Used-car market</a>
-      <a href="#how">How it works</a>
-      <a href="#pipeline">10-point lane</a>
-      <a href="#report">Sample report</a>
-      <a href="#what">What LotCheck does</a>
       <a href="/live-price-index?view=alerts">MSRP Notifier</a>
       <a href="/verify">Verify</a>
+      <details class="nav-more"><summary>More</summary><div class="nav-more-panel">
+        <a href="#how">How it works</a>
+        <a href="#pipeline">10-point lane</a>
+        <a href="#report">Sample report</a>
+        <a href="#what">What LotCheck does</a>
+      </div></details>
     </div>
     <div class="nav-cta">
       <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" aria-pressed="false">

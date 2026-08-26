@@ -76,6 +76,14 @@
   .sn-links a{position:relative;font-size:.99rem;font-weight:600;color:var(--dim);text-decoration:none;padding:3px 0;transition:color .2s}
   .sn-links a::after{content:"";position:absolute;left:0;right:0;bottom:-3px;height:2px;background:var(--nav-hover);transform:scaleX(0);transform-origin:left;transition:transform .2s}
   .sn-links a:hover{color:var(--nav-hover)}
+  .nav-more{position:relative;display:flex;align-items:center}
+  .nav-more>summary{list-style:none;cursor:pointer;font-size:.99rem;font-weight:600;color:var(--dim);display:inline-flex;align-items:center;gap:5px}
+  .nav-more>summary::-webkit-details-marker{display:none}
+  .nav-more>summary::after{content:"\25BE";font-size:.72em;opacity:.7}
+  .nav-more[open]>summary,.nav-more>summary:hover{color:var(--nav-hover)}
+  .nav-more-panel{position:absolute;top:calc(100% + 12px);right:0;min-width:196px;background:var(--panel-solid);border:1px solid var(--line,rgba(150,170,255,.16));border-radius:12px;box-shadow:0 22px 46px -20px rgba(0,0,0,.55);padding:6px;display:flex;flex-direction:column;z-index:600}
+  .nav-more-panel a{padding:9px 12px;border-radius:8px;white-space:nowrap;font-size:.92rem}
+  .nav-more-panel a::after{display:none!important}
   .sn-links a:hover::after{transform:scaleX(1)}
   .sn-links a.sn-live{display:inline-flex;align-items:center;gap:8px;color:var(--ink)}
   .sn-links a.sn-live::after{transform:scaleX(1)}
@@ -404,12 +412,14 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <a class="sn-live" href="/live-price-index" aria-current="page"><span class="sn-dot" aria-hidden="true"></span>MSRP Price Index</a>
       <a href="/alberta">Alberta Dealers Map</a>
       <a href="/crawl">Used-car market</a>
-      <a href="/#how">How it works</a>
-      <a href="/#pipeline">10-point lane</a>
-      <a href="/#report">Sample report</a>
-      <a href="/#what">What LotCheck does</a>
       <a href="/msrp-alerts">MSRP Notifier</a>
       <a href="/verify">Verify</a>
+      <details class="nav-more"><summary>More</summary><div class="nav-more-panel">
+        <a href="/#how">How it works</a>
+        <a href="/#pipeline">10-point lane</a>
+        <a href="/#report">Sample report</a>
+        <a href="/#what">What LotCheck does</a>
+      </div></details>
     </div>
     <div class="sn-cta">
       <button class="theme-toggle" id="themeToggle" aria-label="Toggle light / dark theme" title="Toggle theme">
