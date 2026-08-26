@@ -71,6 +71,40 @@ export function canonicalReport(a: any): any {
   };
 }
 
+// Canonical projection for a VALUE report (the sell/what's-it-worth product), a
+// SEPARATE additive-only namespace from canonicalReport so /verify can tell them
+// apart (t:'value') and links signed under either keep verifying. Phase 1 signs
+// ONLY what we can back from our own comps: the retail-ASKING band + the market
+// CPO premium (certified vs non-certified). No trade/private tiering is signed —
+// that has no backed data source. recalls/warranty are Phase 2 (additive).
+export function canonicalValueReport(a: any): any {
+  const mv = a.marketValue;
+  const cpo = mv && mv.cpoPremium;
+  return {
+    t: "value",
+    v: 1,
+    vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
+    trim: a.trim || null,
+    year: num(a.year),
+    odo: num(a.odometerKm),
+    cond: a.saleCondition || a.condition || null,
+    prov: a.province ? String(a.province).toUpperCase() : null,
+    vin: a.vin || null,
+    // Retail ASKING band (avg=median, below/above=p25/p75, lo/hi=true range, n=comps).
+    band: mv && mv.average != null ? {
+      avg: num(mv.average), below: num(mv.below), above: num(mv.above),
+      lo: num(mv.low), hi: num(mv.high), n: num(mv.comps), as: mv.asOf || null,
+    } : null,
+    // Market CPO premium: certified median − non-certified median (both from our
+    // comps). Only present for a certified subject with enough comps on both sides.
+    cpo: cpo ? {
+      prem: num(cpo.premium), base: num(cpo.nonCertifiedMedian),
+      cmed: num(cpo.certifiedMedian), nn: num(cpo.nNonCertified), nc: num(cpo.nCertified),
+    } : null,
+    issuedAt: a.issuedAt || null,
+  };
+}
+
 function b64urlFromBytes(buf: ArrayBuffer): string {
   let s = "";
   const bytes = new Uint8Array(buf);
@@ -125,7 +159,10 @@ async function getPrivateKey(): Promise<CryptoKey | null> {
 // sign it when the key is configured. Idempotent — a cached, already-finalized
 // analysis is returned untouched. Never throws; on any failure the report is
 // still returned (unsigned).
-export async function finalizeServerSide(analysis: any): Promise<any> {
+export async function finalizeServerSide(
+  analysis: any,
+  canonicalFn: (a: any) => any = canonicalReport,
+): Promise<any> {
   try {
     if (!analysis) return analysis;
     if (analysis.reportId && analysis.verifyPayload) {
@@ -142,7 +179,7 @@ export async function finalizeServerSide(analysis: any): Promise<any> {
       return analysis;
     }
     if (!analysis.issuedAt) analysis.issuedAt = new Date().toISOString();
-    const canonical = JSON.stringify(canonicalReport(analysis));
+    const canonical = JSON.stringify(canonicalFn(analysis));
     analysis.reportId = makeReportId(await sha256Hex(canonical));
     // Compress the payload so the verify QR is scannable. Fall back to the raw
     // (uncompressed) payload if CompressionStream is unavailable — /verify auto-
