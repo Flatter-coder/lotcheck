@@ -118,8 +118,12 @@ const RULES = [
     condition: "true only while admin_config.flywheel_capture_enabled = false",
     why: "'Analyzed once, never stored' must stay literally true of the running system, not aspirationally true.",
     patterns: [/\b(never|nothing|not)\s+stored\b/i],
-    // App.jsx 6314 (report end-card), 6689 (verify badge), 6697 (verify body, twice).
-    expected: 4,
+    // App.jsx: report end-card ("Analyzed once, never stored"), the /verify badge
+    // ("Tamper-proof · nothing stored"), and the /verify camera-first callout
+    // ("No app, nothing stored"). Was 4 before the 2026-08-26 /verify redesign
+    // consolidated the verify body from two "nothing stored" phrases to one;
+    // flywheel_capture_enabled is still false, so the promise remains literally true.
+    expected: 3,
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a
