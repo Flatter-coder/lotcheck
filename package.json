@@ -55,6 +55,7 @@
     "test:region-gate": "node scripts/test-region-gate.mjs",
     "test:catalog-guard": "node scripts/test-catalog-guard.mjs",
     "test:bp-summary": "node scripts/test-bp-summary.mjs",
+    "test:tci-overrides": "node scripts/test-tci-overrides.mjs",
     "test:supersede": "node scripts/test-supersede-enrichment.mjs",
     "check:migrations": "node scripts/check-migration-columns.mjs",
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",

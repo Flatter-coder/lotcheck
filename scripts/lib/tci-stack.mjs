@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
 import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp } from "./tci-msrp.mjs";
+import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
@@ -285,7 +286,17 @@ export async function run(config) {
   const args = Object.fromEntries(process.argv.slice(2).map(a => {
     const m = a.match(/^--([^=]+)=(.*)$/); return m ? [m[1], m[2]] : [a.replace(/^--/, ""), true];
   }));
-  const { msrpRows, financeRows, leaseRows } = await scrapeBrand({ ...config, filterSeries: args.series, pinYear: args.year });
+  const { msrpRows: rawMsrp, financeRows, leaseRows } = await scrapeBrand({ ...config, filterSeries: args.series, pinYear: args.year });
+
+  // Hand-seed corrections for models the SERIES-level fuel tag mis-derives — the
+  // Lexus TX had its gas TX 350 trims stored as Hybrid and its base named by the
+  // internal grade "Premium" instead of the "Luxury" trim. Runs on every refresh,
+  // so replaceRows() can't wipe it. See tci-overrides.mjs (proper inferFuel fix
+  // is tracked separately). The guard warns if any OTHER multi-powertrain line
+  // comes back all one non-gas fuel, so the next mis-tag is loud, not silent.
+  const { rows: msrpRows, replaced } = applyTciOverrides(rawMsrp, config.makeName);
+  for (const r of replaced) console.log(`  override: ${r.key} — dropped ${r.dropped} scraped row(s), inserted ${r.inserted} verified`);
+  for (const s of flagAllOnePowertrain(msrpRows)) console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
 
   // WRITE THROUGH writeCatalogs, NOT THREE BARE AWAITS.
   // 5f4259d fixed exactly this defect -- an MSRP write that throws must not take

@@ -176,6 +176,11 @@ jobs:
         run: npm run test:catalog-writes
       - name: Build & Price gate (a premium colour must never seed as trim MSRP)
         run: npm run test:bp-summary
+      # Toyota/Lexus catalog overrides: the series-level fuel tag stored the gas
+      # TX 350 trims as Hybrid and named the base "Premium" not "Luxury", so a
+      # TX 350 Luxury listing resolved to $81,484. Locks the hand-seed + guard.
+      - name: TCI catalog overrides (Lexus TX fuel/trim fix)
+        run: npm run test:tci-overrides
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
