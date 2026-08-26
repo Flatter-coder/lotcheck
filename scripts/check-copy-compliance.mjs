@@ -132,11 +132,11 @@ const RULES = [
     why: "We advertise a 10-point verification, so ten must run and ten must deliver.",
     patterns: [/\b10[-\s]point\b/i],
     // 9 in public/index.html (incl. the meta description), 1 each in
-    // alberta.html and live-price-index.html, 4 in App.jsx (was 6 — two sat
-    // inside the Bento/HUD report views removed 2026-08-12; the ten points
-    // still render on every surviving surface: scroll, heatmap, sidebar,
-    // flipbook, PDF, email).
-    expected: 15,
+    // alberta.html and live-price-index.html, 5 in App.jsx (4 report surfaces —
+    // scroll, heatmap, sidebar, flipbook, PDF, email — plus the "10-point lane"
+    // link now living in the quote-check nav's "More" menu). The 10-point
+    // verification itself is unchanged: ten run, ten deliver.
+    expected: 16,
   },
 ];
 
