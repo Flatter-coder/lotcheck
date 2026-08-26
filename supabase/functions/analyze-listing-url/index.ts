@@ -72,6 +72,7 @@ import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
+import { deriveSaleCondition } from "../_shared/condition.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { resolveCity } from "../_shared/jurisdiction.ts";
@@ -106,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16v";  // + folded in 10 officially-sourced freight rows (for the explainAllIn estimate); no-data makes (Audi/Genesis/Lincoln/Chrysler/Dodge) confirmed no-ceiling
+const CACHE_VER = "2026-08-16w";  // + used-market: saleCondition granularity (new/demo/certified/used) + CPO certified-badge verification move (cpo.ts) in the counter-script
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2655,6 +2656,9 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
+  // Sale-condition granularity (new/demo/certified/used) from the LLM field or a
+  // platform extractor's saleConditionHint. Feeds the CPO certified check below.
+  analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
   // S25. The city is ONE signal and it silently failed on Charlesglen, leaving
   // allInPricing null -- and null meant "not all-in", printing Toyota's own
   // $3,078 of freight as dealer markup. Ask every other province signal on the
@@ -2754,6 +2758,7 @@ Extract the following as a single JSON object, with EXACTLY these fields and no 
   "odometerKm": number | null,     // the odometer reading / mileage in kilometres if shown (e.g. "41,220 km" -> 41220, "10 km" -> 10). Numbers only, no units or commas. null if not shown.
   "fuelType": "BEV" | "PHEV" | "Hybrid" | "Gas" | "Diesel" | null,  // Confirmed via real testing (2026-07-22, Gateway Toyota C-HR listing) that a dealer page's marketing/description prose can genuinely contradict its own structured spec sheet -- that listing's spec table said "Fuel Type: Gasoline" while ALSO listing an electric motor, 77-kWh battery, NACS charging port, and electric driving range. An earlier version of this note said to trust the structured "Fuel Type:" label in cases like this -- that turned out to be BACKWARDS. Checking Toyota Canada's own official spec pages and press release confirmed the 2026 C-HR genuinely IS a 77-kWh BEV; the "Fuel Type: Gasoline" label was the dealer's own error (almost certainly a stale inventory-system default never updated for a brand-new model-year nameplate change), not the detailed EV specs. The corrected rule: when a single categorical label (a bare "Fuel Type:", "Engine:", or similar field) conflicts with multiple DETAILED, mutually-consistent technical numbers describing an EV or PHEV (battery capacity in kWh, electric driving range in km, charging port type/speed, electric motor power) -- trust the detailed, internally-consistent numbers. A cluster of specific figures that all agree with each other is much harder to end up on a page by accident than one stale category label is. If you do encounter and resolve a genuine contradiction like this, say so plainly in the summary field so the buyer knows to double check with the dealer, the same way you would for any other page inconsistency. Note also that the frontend independently cross-checks year/make/model against a separately-verified EV rebate list, so a wrong read here isn't the only safeguard -- but getting this field right still matters for the report's own accuracy.
   "vehicleCondition": "new" | "used" | null,
+  "saleCondition": "new" | "demo" | "certified" | "used" | null,  // finer than vehicleCondition. "certified" only if the page shows a manufacturer/OEM certified pre-owned badge (e.g. "Toyota Certified", "H-Promise", "Certified Pre-Owned"); "demo" if it says demo/demonstrator/dealer-demo; else mirror vehicleCondition (new->"new", used->"used").
   "dealerName": string | null,    // the dealership's business name as it would appear on Google (e.g. "Macleod Trail Toyota", "Calgary Honda") -- usually near the top of the page or in an "Available at..." line. Do NOT include the city/location as part of this field; that's a separate concern.
   "dealerCity": string | null,    // the city (and province if visible, e.g. "Calgary, AB") the dealership operates in. Needed to disambiguate common dealer names -- there are many "Toyota" or "Honda" dealers across Canada, and the name alone isn't enough to look up the right one.
   "msrp": number | null,          // the manufacturer's suggested retail price, before any options, fees, or discounts. Often NOT shown as a standalone price tag -- many dealer sites, especially "payment-first" listings with no separate sticker price displayed anywhere, only state it inside a dense lease/finance legal disclosure paragraph, in a pattern like "Lease payments include: MSRP ($32,300.00), [paint/option] ($550.00), Freight and PDI ($1,830.00), ...". Read fine-print/legal disclosure text carefully for this pattern -- do not restrict your search to prominent, large-font prices.

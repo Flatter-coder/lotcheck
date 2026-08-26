@@ -57,6 +57,7 @@ const DISCOUNT_RE = /\b(discount|rebate|savings|incentive|loyalty|conquest)\b/;
 // Whether an MSRP may back a claim is decided in ONE place. This file used to
 // answer it twice, differently, and both answers were wrong.
 import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
+import { assessCertifiedClaim } from "./cpo.ts";
 
 export type LineClass = "fee" | "addon" | "discount";
 
@@ -195,6 +196,18 @@ export function buildCounterScript(analysis: any): CounterScript {
     if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.${ceiling}` });
     else if (df.kind === "over_cap") moves.push({ topic: "Doc fee", say: `Your ${money(df.docFee)} doc fee is above ${df.jurisdiction}'s ~${money(df.benchmark)} cap — please bring it down.${ceiling}` });
     else if (df.kind === "over_norm") moves.push({ topic: "Doc fee", say: `A ${money(df.docFee)} doc fee is on the high side — can you reduce it?${ceiling}` });
+  }
+  // Certified pre-owned: verify the badge is a REAL OEM program (not a dealer
+  // in-house "certified" with no factory warranty) and name what the premium
+  // buys. Backed + neutral — assessCertifiedClaim returns null for any make we
+  // haven't cataloged, so this never guesses (cpo.ts).
+  if (analysis?.saleCondition === "certified") {
+    const cpo = assessCertifiedClaim({ make: analysis.make, odometerKm: analysis.odometerKm, modelYear: analysis.year });
+    if (cpo) {
+      const incl = [cpo.inspectionPoints ? `${cpo.inspectionPoints}-point inspection` : null, cpo.powertrain ? `a ${cpo.powertrain} warranty` : null].filter(Boolean).join(" and ");
+      const concern = cpo.eligibilityConcern ? ` One thing to check: ${cpo.eligibilityConcern}, so confirm it genuinely qualifies.` : "";
+      moves.push({ topic: "Certified", say: `Listed as certified. ${cpo.make} runs an OEM program (${cpo.program})${incl ? ` — ${incl}` : ""}. Confirm this vehicle is enrolled in ${cpo.program} (not a dealer in-house "certified") and get the warranty terms in writing.${concern}` });
+    }
   }
   // S24 — all-in advertised price. Non-tax fees stacked on the price mean the
   // advertised number wasn't all-in. Name the authority so it's dispute-proof

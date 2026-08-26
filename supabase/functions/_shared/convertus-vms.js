@@ -71,6 +71,11 @@ export function extractConvertusVmsVehicle(html) {
 
   const saleClass = String(v.sale_class || "").toLowerCase();
   const condition = /new/.test(saleClass) ? "new" : (/used|pre-?owned|certified/.test(saleClass) ? "used" : null);
+  // Finer condition, kept alongside the binary `condition`.
+  const saleConditionHint = /new/.test(saleClass) ? "new"
+    : (/\bdemo\b|demonstrat/.test(saleClass) ? "demo"
+      : ((/certified|\bcpo\b/.test(saleClass) && !/non[-\s]?certified/.test(saleClass)) ? "certified"
+        : (/used|pre-?owned/.test(saleClass) ? "used" : null)));
 
   const yearNum = Number(v.year);
   const odoNum = Number(v.odometer);
@@ -144,6 +149,7 @@ export function extractConvertusVmsVehicle(html) {
     stockNumber: str(v.stock_number),
     odometerKm: Number.isFinite(odoNum) && odoNum >= 0 ? Math.round(odoNum) : null,
     condition,
+    saleConditionHint,
     msrp: num(v.msrp),
     quotedPrice: asking,
     financeApr,
@@ -183,6 +189,7 @@ export function fillFromConvertusVms(parsed, cv) {
   if (!parsed.model && cv.model) parsed.model = cv.model;
   if (!parsed.trim && cv.trim) parsed.trim = cv.trim;
   if (!parsed.vehicleCondition && cv.condition) parsed.vehicleCondition = cv.condition;
+  if (!parsed.saleConditionHint && cv.saleConditionHint) parsed.saleConditionHint = cv.saleConditionHint;
   if (!parsed.dealerName && cv.dealerName) parsed.dealerName = cv.dealerName;
   if (!parsed.dealerCity && cv.dealerCity) parsed.dealerCity = cv.dealerCity;
   if (parsed.odometerKm == null && cv.odometerKm != null) parsed.odometerKm = cv.odometerKm;

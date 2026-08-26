@@ -72,6 +72,9 @@ export function extractD2cVdpVehicle(html) {
   const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
 
   const condition = v.isNew ? "new" : (v.isDemo ? "used" : (v.isCertified ? "used" : null));
+  // Finer condition, kept alongside the binary `condition` (which stays used for
+  // demo/certified so nothing downstream keying off "new"/"used" changes).
+  const saleConditionHint = v.isNew ? "new" : (v.isDemo ? "demo" : (v.isCertified ? "certified" : (condition === "used" ? "used" : null)));
 
   const yearNum = Number(v.year);
   // "km" comes through as "" (not absent) on a fresh-delivery new unit --
@@ -108,6 +111,7 @@ export function extractD2cVdpVehicle(html) {
     stockNumber: str(v.sn),
     odometerKm: Number.isFinite(odoNum) && odoNum >= 0 ? Math.round(odoNum) : null,
     condition,
+    saleConditionHint,
     quotedPrice,
     priceGated,
     priceGateMessage: priceGated ? gateMessage : null,
@@ -139,6 +143,7 @@ export function fillFromD2cVdp(parsed, dv) {
   if (!parsed.model && dv.model) parsed.model = dv.model;
   if (!parsed.trim && dv.trim) parsed.trim = dv.trim;
   if (!parsed.vehicleCondition && dv.condition) parsed.vehicleCondition = dv.condition;
+  if (!parsed.saleConditionHint && dv.saleConditionHint) parsed.saleConditionHint = dv.saleConditionHint;
   if (!parsed.dealerName && dv.dealerName) parsed.dealerName = dv.dealerName;
   if (parsed.odometerKm == null && dv.odometerKm != null) parsed.odometerKm = dv.odometerKm;
   if (!parsed.drivetrain && dv.drivetrain) parsed.drivetrain = dv.drivetrain;
