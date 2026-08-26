@@ -153,6 +153,29 @@ const FREIGHT: Fee[] = [
     source: "Toyota Canada Build & Price — 2026 RAV4", capturedOn: "2026-08-15" },
   { component: "freight", label: "Delivery and Destination Charge", amount: 2205, applies: "always", scope: "model", make: "Lexus", model: "ES",
     source: "Lexus Canada Build & Price — 2026 ES 350h", capturedOn: "2026-08-25" },
+  // Freight is model-specific and feeds only the labelled explainAllIn estimate
+  // (never a dealer claim, never overwrites a captured all_in_price). Verified
+  // verbatim via exa this session where marked; else the batch-1 official capture.
+  { component: "freight", label: "Freight and PDI", amount: 2080, applies: "always", scope: "model", make: "Nissan", model: "Rogue",
+    source: "Nissan Canada (canada.nissannews.com) — \"CA$2,080 freight and PDI\" (verified)", capturedOn: "2026-08-26" },
+  { component: "freight", label: "Freight and PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-5",
+    source: "Mazda Canada (mazda.ca) — \"$2,195 freight and PDI\" (verified)", capturedOn: "2026-08-26" },
+  { component: "freight", label: "Freight and PDI", amount: 2495, applies: "always", scope: "model", make: "Infiniti", model: "QX60",
+    source: "Infiniti Canada (canada.infinitinews.com) — \"CA$2,495 freight and PDI\" (verified)", capturedOn: "2026-08-26" },
+  { component: "freight", label: "Freight and PDI", amount: 2770, applies: "always", scope: "model", make: "Volvo", model: "XC60",
+    source: "Volvo Car Canada (volvocars.com/offers) — \"$2,770 freight and PDI\" (verified)", capturedOn: "2026-08-26" },
+  { component: "freight", label: "Destination Freight Charge", amount: 2700, applies: "always", scope: "model", make: "Chevrolet", model: "Silverado 1500",
+    source: "Chevrolet Canada Build & Price — itemized AB build summed to the dollar", capturedOn: "2026-08-26" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "Tucson",
+    source: "Hyundai Canada Build & Price (official capture)", capturedOn: "2026-08-25" },
+  { component: "freight", label: "Freight & PDI", amount: 2185, applies: "always", scope: "model", make: "Kia", model: "Sportage",
+    source: "Kia Canada Build & Price (official capture)", capturedOn: "2026-08-25" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Ram", model: "1500",
+    source: "Ram Canada (official capture)", capturedOn: "2026-08-25" },
+  { component: "freight", label: "Freight & PDI", amount: 2295, applies: "always", scope: "model", make: "Subaru", model: "Outback",
+    source: "Subaru Canada (official capture)", capturedOn: "2026-08-25" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Volkswagen", model: "Tiguan",
+    source: "Volkswagen Canada (official capture)", capturedOn: "2026-08-25" },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────────────
