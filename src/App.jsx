@@ -9431,14 +9431,14 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   // Caution ONLY when the dealer asks above the whole local range — a real
   // watch-out. Below-range is a GOOD deal, never alarmed (matches the audit line).
   const aboveRange=hasAsk&&ask>high, belowRange=hasAsk&&ask<low;
-  const pos=delta===0?"at median":`${money(Math.abs(delta))} ${delta>0?"above":"below"} median`;
+  const pos=delta===0?"at the middle value":`${money(Math.abs(delta))} ${delta>0?"above":"below"} the middle value`;
   const rangeWord=aboveRange?"above the range":belowRange?"below the range":"inside band";
   const TRACK="M88.68 241.32 A115 115 0 1 1 251.32 241.32";
   const mono="'IBM Plex Mono',ui-monospace,monospace";
   const uid="mv"+Math.round(median)+"x"+Math.round(low);   // unique defs ids per instance
   // No ask entered → the big figure IS the market median, so label it that (teal),
   // never "Dealer asking" (amber) over a price the user never typed.
-  const askLabel=hasAsk?"Dealer asking":"Market median", pillColor=hasAsk?AMBER:TEAL;
+  const askLabel=hasAsk?"Dealer asking":"Market middle value", pillColor=hasAsk?AMBER:TEAL;
   // Shrink the big figure for absurdly long values so it never spills the gauge.
   const shownStr=Math.round(hasAsk?ask:median).toLocaleString("en-CA");
   const bigFont=shownStr.length>12?22:shownStr.length>9?28:shownStr.length>7?33:37;
@@ -9446,7 +9446,7 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
     <div style={{...cardStyle}}>
       <div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>Used market value · {mv.source||"LotCheck market"}</div>
       <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
-        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={hasAsk?`Dealer asking ${money(ask)}, ${pos} and ${rangeWord}. Range ${money(low)} to ${money(high)}, median ${money(median)}.`:`Market median ${money(median)}. Range ${money(low)} to ${money(high)}. Enter an asking price to compare.`}>
+        <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={hasAsk?`Dealer asking ${money(ask)}, ${pos} and ${rangeWord}. Range ${money(low)} to ${money(high)}, middle value ${money(median)}.`:`Market middle value ${money(median)}. Range ${money(low)} to ${money(high)}. Enter an asking price to compare.`}>
           <defs>
             <linearGradient id={uid+"g"} gradientUnits="userSpaceOnUse" x1="88" y1="0" x2="272" y2="0">
               <stop offset="0" stopColor={TEAL}/><stop offset="0.5" stopColor={VIOLET}/><stop offset="1" stopColor={AMBER}/>
@@ -9482,7 +9482,7 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:8}}>
-        {[["Low",low,false],["Median",median,true],["High",high,false]].map(([l,v,mid],i)=>(
+        {[["Low",low,false],["Middle value",median,true],["High",high,false]].map(([l,v,mid],i)=>(
           <div key={i} style={{flex:1,textAlign:"center",padding:"9px 8px 8px",borderRadius:12,background:mid?`linear-gradient(180deg, ${hexA(TEAL,.12)}, ${hexA(TEAL,.03)})`:`linear-gradient(180deg, ${hexA(TEAL,.06)}, ${hexA(TEAL,.02)})`,border:`1px solid ${mid?hexA(TEAL,.32):C.line}`}}>
             <div style={{fontSize:8.5,letterSpacing:".16em",color:C.inkFaint,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:5,justifyContent:"center"}}><span style={{width:5,height:5,borderRadius:"50%",background:TEAL,opacity:.55,display:"inline-block"}}/>{l}</div>
             <div style={{fontSize:15,fontWeight:700,color:mid?TEAL:C.ink,marginTop:4,letterSpacing:"-.01em",fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
@@ -10043,9 +10043,9 @@ function VerifyPage(){
                     const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, hasAsk=Number.isFinite(ask)&&ask>=1, d=hasAsk?Math.round(ask-med):0;
                     const lo=Number(m.lo!=null?m.lo:m.below)||0, hi=Number(m.hi!=null?m.hi:m.above)||0;
                     const band=hasAsk?(hi>0&&ask>hi?" · above the range":lo>0&&ask<lo?" · below the range":" · inside band"):"";
-                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at median":`${money(Math.abs(d))} ${d>0?"above":"below"} median`}${band}`:money(med)}/>;
+                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at the middle value":`${money(Math.abs(d))} ${d>0?"above":"below"} the middle value`}${band}`:money(med)}/>;
                   })()}
-                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · median {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
+                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · middle value {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
                   {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/
@@ -13174,7 +13174,7 @@ function CrawlCoverage(){
               <p style={{margin:"0 0 11px",color:T.muted,fontSize:13,lineHeight:1.4}}>Read from dealers' own public Alberta listings — <b style={{color:T.text,fontWeight:600}}>used cars only</b>.</p>
               <div style={{fontFamily:mono,fontSize:9.5,letterSpacing:".14em",textTransform:"uppercase",color:T.teal,marginBottom:2}}>What your report adds</div>
               {[
-                [T.teal,"Value band","Low·median·high of asking prices for the same used model, in dollars."],
+                [T.teal,"Value band","Low · middle value · high of asking prices for the same used model, in dollars."],
                 [T.violet,"Days on lot","How long it's been listed — the dealer's own date, or our first-seen floor."],
                 [T.amber,"Recalls · warranty","Live recall check from Transport Canada, plus estimated warranty left."],
               ].map(([c,label,line],i)=>(
@@ -13277,7 +13277,7 @@ function CrawlCoverage(){
                     </div>
                     <div style={{height:12,borderRadius:4,background:hexA(T.amber,.1),border:`1px solid ${hexA(T.amber,.35)}`,marginBottom:12}}/>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                      <span style={{fontSize:12,color:T.muted}}>Used {g.uy||""} median</span>
+                      <span style={{fontSize:12,color:T.muted}}>Used {g.uy||""} middle value</span>
                       <span style={{fontFamily:mono,fontWeight:600,color:T.teal,fontVariantNumeric:"tabular-nums"}}>{money(g.used)}</span>
                     </div>
                     <div style={{height:12,borderRadius:4,background:hexA(T.teal,.08),overflow:"hidden"}}><div style={{height:"100%",width:`${Math.max(4,Math.min(100,g.from>0?g.used/g.from*100:100))}%`,background:`linear-gradient(90deg,${hexA(T.teal,.7)},${T.teal})`,borderRadius:4}}/></div>
@@ -13293,7 +13293,7 @@ function CrawlCoverage(){
               ); })()}
             </Panel>
 
-            {(ladder.rows||[]).length>=2&&<Panel head="Model-year ladder" tag={(ladder.trim?ladder.trim.toUpperCase()+" · ":"")+"MEDIAN ASK"} bodyStyle={{padding:"12px 15px 14px"}}>
+            {(ladder.rows||[]).length>=2&&<Panel head="Model-year ladder" tag={(ladder.trim?ladder.trim.toUpperCase()+" · ":"")+"MIDDLE VALUE ASK"} bodyStyle={{padding:"12px 15px 14px"}}>
               {ladder.rows.map((r,i)=>(
                 <div key={r.year}>
                   <div style={{display:"grid",gridTemplateColumns:"52px 1fr auto",alignItems:"center",gap:10,padding:"7px 0"}}>
@@ -13304,7 +13304,7 @@ function CrawlCoverage(){
                   {i<ladder.rows.length-1&&(()=>{ const step=r.med-ladder.rows[i+1].med; return <div style={{fontFamily:mono,fontSize:10.5,color:T.faint,textAlign:"right",borderBottom:`1px dashed ${hexA(T.text,.1)}`,paddingBottom:6,marginBottom:1}}>{step>=0?"−":"+"} {money(Math.abs(step))} a year older</div>; })()}
                 </div>
               ))}
-              <div style={{fontFamily:mono,fontSize:9.5,color:T.faint,marginTop:10,lineHeight:1.5}}>Median advertised price by model-year, matched to the most-listed configuration{ladder.trim?" ("+ladder.trim.toUpperCase()+")":""} so years compare like-for-like. A rung shows only at 5+ live units.</div>
+              <div style={{fontFamily:mono,fontSize:9.5,color:T.faint,marginTop:10,lineHeight:1.5}}>Middle-value advertised price by model-year, matched to the most-listed configuration{ladder.trim?" ("+ladder.trim.toUpperCase()+")":""} so years compare like-for-like. A rung shows only at 5+ live units.</div>
             </Panel>}
           </div>
 
