@@ -16,6 +16,12 @@ the next instance.
 
 ---
 
+## 2026-08-26
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `e277ef8` | **A 2026 Lexus TX 350 Luxury report anchored MSRP to $81,484 and called it "Lexus's base price."** The real base is $69,855 ex-freight / $73,206.18 all-in, so the $73,862 asking was a fair ~$656 over — but the report read as if the dealer had marked the car down from a much higher "list." The dealer inflated nothing; our own catalog was wrong. Root cause: the TCI scraper (`tci-stack.mjs` `inferFuel`) tags fuel at the **series** level, so the multi-powertrain TX line (gas TX 350 + hybrid TX 500h) stored **every gas TX 350 trim as "Hybrid,"** and named the base by Lexus's internal grade **"Premium"** instead of the Canadian trim **"Luxury."** A "TX 350 Luxury" listing then matched no catalog row and resolved onto $81,484 (the F SPORT 3 row); the real TX 500h hybrids were missing entirely. A daily `replaceRows()` refresh reproduces the corruption, so a migration alone would be wiped within a day | absence read as knowledge (a wrong-trim fallback rendered as "the base price") | **guard + hand-seed** (the two-step's first half): `scripts/lib/tci-overrides.mjs` — a hand-maintained override applied to the scrape output **before write**, so every refresh reproduces the correct TX (6 gas TX 350 + 4 hybrid TX 500h, cross-province-verified MSRPs + B&P all-in). `flagAllOnePowertrain()` warns whenever any other multi-powertrain line comes back all one non-gas fuel, so the next series-tag mis-label is loud, not silent. Migration `20260826_lexus_tx_fuel_trim_fix.sql` corrected the live rows immediately (verified via `fn_catalog_msrp`: TX 350 Luxury now returns Gas $69,855 / $73,206.18 all-in). `test:tci-overrides` 11/11, wired into `gates.yml`. **Tracked follow-up:** the proper root fix — per-**model** fuel in `inferFuel` + grade→trim reconciliation across all Toyota/Lexus data, tested against the live feed |
+
 ## 2026-08-25
 
 | fix | what broke | class | guard now in place |
