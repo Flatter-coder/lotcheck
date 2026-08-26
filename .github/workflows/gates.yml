@@ -151,6 +151,11 @@ jobs:
       # the ceiling. A wrong fee claim against a named dealer is what this guards.
       - name: Doc-fee ceiling flag (backed, new-only, no false claims)
         run: npm run test:docfee
+      # CPO program catalog: verifies a "certified" badge against the OEM program;
+      # an uncataloged make must return null (never a false "in-house" cry) and an
+      # eligibility concern fires only for an official threshold clearly exceeded.
+      - name: CPO catalog (certified-claim verification, no false accusations)
+        run: npm run test:cpo
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
