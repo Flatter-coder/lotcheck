@@ -30,7 +30,11 @@ const OUTPUT_SHAPING = [
   // a recall claim SAYS -- the confirmed semantics, the tri-state, the wording --
   // could ship with no bump, and every cached report would replay the old answer
   // for six hours (CACHE_TTL_MS) while looking like a failed deploy.
-  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
+  // fee-schedule joined on 2026-08-26: docfee.ts reads the dealer-fee ceilings
+  // from it to shape docFeeCheck, so a change to a ceiling value changes what a
+  // report SAYS -- the same blind spot recalls/scrapfly had (logic feeding the
+  // analysis object living in a shared module the gate didn't watch).
+  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
   // scrapfly joined this list on 2026-08-20, for the same reason recalls did
   // the day before: attachSealedScreenshot() stamps sourceUrl/capturedAt onto
   // `analysis` before it's signed, and a change to what it stamps (or when)

@@ -106,7 +106,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16r";  // + dealer-fee-ceiling flag: a doc/dealer fee over the manufacturer's own published max (fee-schedule.ts) now surfaces in the report; findDocFee also matches "Dealer Fees" (plural)
+const CACHE_VER = "2026-08-16s";  // + dealer-fee-ceiling flag expanded from 2 makes to 7: Hyundai $799, Mazda $795, VW $750, Chevrolet $699, Nissan $621 added (verified verbatim at official sources); ceilings now national
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

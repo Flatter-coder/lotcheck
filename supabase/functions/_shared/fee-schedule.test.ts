@@ -40,8 +40,16 @@ check("PPSA service fee $4 when financed", feeAmount("AB", "ppsa_service", { fin
 // ── Per-brand: freight (model) + dealer-fee ceiling (make) ───────────────────
 check("Toyota RAV4 freight is $1,930", freightFor("Toyota", "RAV4")?.amount, 1930);
 check("Lexus ES freight is $2,205",    freightFor("Lexus", "ES")?.amount, 2205);
-check("Toyota dealer-fee ceiling is $999 (AB)", dealerFeeCeiling("Toyota", "AB")?.amount, 999);
-check("Lexus dealer-fee ceiling is $995 (AB)",  dealerFeeCeiling("Lexus", "AB")?.amount, 995);
+check("Toyota dealer-fee ceiling is $999", dealerFeeCeiling("Toyota", "AB")?.amount, 999);
+check("Lexus dealer-fee ceiling is $995",  dealerFeeCeiling("Lexus", "AB")?.amount, 995);
+// Newly captured, verified verbatim at each official source (2026-08-25).
+check("Hyundai dealer-fee ceiling is $799",    dealerFeeCeiling("Hyundai")?.amount, 799);
+check("Mazda dealer-fee ceiling is $795",      dealerFeeCeiling("Mazda")?.amount, 795);
+check("Volkswagen dealer-fee ceiling is $750", dealerFeeCeiling("Volkswagen")?.amount, 750);
+check("Chevrolet dealer-fee ceiling is $699",  dealerFeeCeiling("Chevrolet")?.amount, 699);
+check("Nissan dealer-fee ceiling is $621",     dealerFeeCeiling("Nissan")?.amount, 621);
+ok("ceilings are national — Hyundai resolves in ON as well as AB", dealerFeeCeiling("Hyundai", "ON")?.amount === 799);
+check("Ford publishes no ceiling -> null (confirmed, not a gap)", dealerFeeCeiling("Ford"), null);
 ok("make/model lookups are case-insensitive", freightFor("toyota", "rav4")?.amount === 1930);
 
 // ── THE load-bearing identity: Toyota RAV4 financed = $3,078 of adds ─────────
@@ -60,6 +68,8 @@ check("Lexus $1,295 admin fee is $300 over the $995 published max",
   assessDealerFeeVsCeiling("Lexus", "AB", 1295),
   { ceiling: 995, observed: 1295, over: true, overBy: 300, source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25" });
 ok("a fee at the ceiling is not flagged over", assessDealerFeeVsCeiling("Toyota", "AB", 999)?.over === false);
+ok("Hyundai $1,000 admin fee is $201 over the $799 max", assessDealerFeeVsCeiling("Hyundai", "AB", 1000)?.overBy === 201);
+ok("Chevrolet $500 is under the $699 max -> not flagged (GM's $350 default is fine)", assessDealerFeeVsCeiling("Chevrolet", "AB", 500)?.over === false);
 check("no ceiling for the make -> no claim (fail-safe)", assessDealerFeeVsCeiling("Honda", "AB", 1500), null);
 
 // ── No fabrication: an uncaptured brand/model returns null, never a guess ────
