@@ -33,17 +33,40 @@ All verified verbatim at the official source. Ceilings are national ("up to $X")
 | Volkswagen | **$750** | "representative dealer admin fee … up to $750" | vw.ca/offers | DONE |
 | Chevrolet | **$699** | "up to $699 dealer fee" (B&P applies $350 default) | chevrolet.ca B&P disclaimer | DONE |
 | Nissan | **$621** | "dealer fees (up to $621)" (may vary by region) | canada.nissannews.com | DONE |
+| MINI | **$595** | "retailer administration fees (up to $595)" | mini.ca (verified in-session) | DONE |
+| BMW | **$595** | "retailer administration fees (up to $595)" | bmw.ca (same BMW Group policy, verified via MINI) | DONE |
+| Buick | **$699** | "up to $699 dealer fee" | GM national B&P disclaimer (buick.ca) | DONE |
+| Cadillac | **$699** | "up to $699 dealer fee" | GM national B&P disclaimer (cadillaccanada.ca) | DONE |
 
 ### Confirmed to publish NO ceiling (flag correctly does not fire)
 
-Ford, GMC, Honda, Jeep, Kia, Ram, Subaru — official disclaimers exclude dealer
-fees / set no maximum. Recorded so we don't re-check them.
+Ford, Honda, Jeep, Kia, Ram, Subaru, **Acura** (acura.ca B&P disclaimer: dealer
+fee is included but dealer-set/uncapped), **Mercedes-Benz** (mercedes-benz.ca
+special-offers MSRP disclaimer EXCLUDES dealer fees, no cap — the "$695" exists
+only in a model press release, not a durable published policy).
 
-### Pending verification (lead only — NOT in fee-schedule.ts)
+### Held — agent-found verbatim, NOT yet in fee-schedule.ts (need a clean verify)
 
-| Make | Lead | Why pending |
+Batch-2 agents shared one browser daemon and hit contention, so these official
+"up to $X" captures could not be personally re-verified (JS configurators / 403).
+Verbatim wording was reported; hold until confirmed at the source.
+
+| Make | Lead | Why held |
 |---|---|---|
-| Mercedes-Benz | $695 "dealer administration charges (up to $695)" | source (media.mercedes-benz.ca) returned 403; needs a durable official source before it powers a claim |
+| Volvo | $699 "retailer administration fee (up to $699)" | volvocars.com/offers JS-gated; no family corroboration |
+| Mitsubishi | $799 "Dealer/administrative fees of up to $799" | configurator-only; no corroboration |
+| Infiniti | $921 "dealer fees (up to $921)" | infinitinews 403s headless; NOT Nissan's $621 (premium division is higher) |
+| GMC | likely $699 (GM national disclaimer) | batch-1 agent used a secondary site; no GM-disclaimer verbatim captured yet |
+
+### Excluded (not a pure dealer fee)
+
+Porsche — configurator shows "PDI and administration (up to $2,750)", which bundles
+freight/PDI with admin. That is not a dealer-fee ceiling; not added.
+
+### No data yet (unresolved — neither ceiling nor no-ceiling confirmed)
+
+Audi, Genesis, Lincoln, Chrysler, Dodge (Chrysler/Dodge likely no-ceiling like the
+other Stellantis brands, but the agents returned no usable disclaimer).
 
 ## Freight — officially sourced (for explainAllIn; not yet all in fee-schedule.ts)
 
