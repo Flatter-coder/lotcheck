@@ -141,6 +141,11 @@ jobs:
         run: npm run test:trim
       - name: MSRP authority (inflation callout thresholds)
         run: npm run test:msrp-authority
+      # The fee catalog behind an all-in price. Locks the sourced fee constants
+      # to their Build & Price captures -- the load-bearing invariant is Toyota
+      # RAV4 financed adds = $3,078, so a silent edit to any component fails here.
+      - name: Fee catalog (sourced fee constants; no fabricated brand fees)
+        run: npm run test:fee-schedule
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
