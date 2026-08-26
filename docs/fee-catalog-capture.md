@@ -44,10 +44,15 @@ All verified verbatim at the official source. Ceilings are national ("up to $X")
 
 ### Confirmed to publish NO ceiling (flag correctly does not fire)
 
-Ford, Honda, Jeep, Kia, Ram, Subaru, **Acura** (acura.ca B&P disclaimer: dealer
-fee is included but dealer-set/uncapped), **Mercedes-Benz** (mercedes-benz.ca
-special-offers MSRP disclaimer EXCLUDES dealer fees, no cap — the "$695" exists
-only in a model press release, not a durable published policy).
+Ford, Honda, Jeep, Kia, Ram, Subaru, **Acura** (dealer fee included but
+dealer-set/uncapped), **Mercedes-Benz** (mercedes-benz.ca disclaimer EXCLUDES
+dealer fees; the "$695" is press-release-only), **Audi** (audi.ca: excludes "any
+dealer admin fees", dealer-set — does NOT share VW's $750), **Lincoln** (Ford
+family, no cap), **Chrysler** + **Dodge** ("administration fees of the selected
+dealer", dealer-set, no "up to $X" — confirms the Stellantis pattern).
+
+**Genesis** — special case: **all-inclusive, no-haggle, one-price. No dealer
+fees at all** (like Tesla). The flag has nothing to fire on.
 
 ### Held list — CLEARED (2026-08-26)
 
@@ -61,18 +66,24 @@ so it was added on GM's corporate-general disclaimer (verified on 3 sibling bran
 Porsche — configurator shows "PDI and administration (up to $2,750)", which bundles
 freight/PDI with admin. That is not a dealer-fee ceiling; not added.
 
-### No data yet (unresolved — neither ceiling nor no-ceiling confirmed)
+### No data — RESOLVED (2026-08-26)
 
-Audi, Genesis, Lincoln, Chrysler, Dodge (Chrysler/Dodge likely no-ceiling like the
-other Stellantis brands, but the agents returned no usable disclaimer).
+All five (Audi, Genesis, Lincoln, Chrysler, Dodge) confirmed **no published
+ceiling** at their official sources (see the no-ceiling list above). Nothing left
+unresolved on the new-car ceiling side.
 
-## Freight — officially sourced (for explainAllIn; not yet all in fee-schedule.ts)
+## Freight — in fee-schedule.ts (for the explainAllIn estimate)
 
-Toyota RAV4 $1,930 · Lexus ES $2,205 (both live). Official, pending add: Chevrolet
-Silverado 1500 $2,700 · Nissan Rogue $2,080 · Hyundai Tucson $2,200 · Kia Sportage
-$2,185 · Ram 1500 $2,195 · Subaru Outback $2,295 · Mazda CX-5 $2,195 · VW Tiguan
-$2,200. Secondary-only (needs official capture): Ford F-150 $2,695 · GMC Sierra
-$2,700 · Jeep Grand Cherokee $2,295 · Honda CR-V $2,000. Mercedes GLC $3,995 (unverified).
+Live (12 models): Toyota RAV4 $1,930 · Lexus ES $2,205 · Nissan Rogue $2,080 ·
+Mazda CX-5 $2,195 · Infiniti QX60 $2,495 · Volvo XC60 $2,770 · Chevrolet Silverado
+1500 $2,700 · Hyundai Tucson $2,200 · Kia Sportage $2,185 · Ram 1500 $2,195 ·
+Subaru Outback $2,295 · VW Tiguan $2,200. (First six verified verbatim via exa this
+session; the rest from batch-1 official captures. Freight is estimate-only — it
+feeds explainAllIn, never a dealer claim, and never overwrites a captured all_in.)
+
+Secondary-only, NOT added (need an official capture): Ford F-150 $2,695 · GMC
+Sierra $2,700 · Jeep Grand Cherokee $2,295 · Honda CR-V $2,000 · Acura MDX $2,595 ·
+Mercedes GLC $3,995.
 
 ## Alberta / federal fees (brand-independent — captured once, cover all 31)
 

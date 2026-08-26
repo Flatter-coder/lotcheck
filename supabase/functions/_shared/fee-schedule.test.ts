@@ -40,6 +40,11 @@ check("PPSA service fee $4 when financed", feeAmount("AB", "ppsa_service", { fin
 // ── Per-brand: freight (model) + dealer-fee ceiling (make) ───────────────────
 check("Toyota RAV4 freight is $1,930", freightFor("Toyota", "RAV4")?.amount, 1930);
 check("Lexus ES freight is $2,205",    freightFor("Lexus", "ES")?.amount, 2205);
+// Folded-in freight (2026-08-26): verified via exa / batch-1 official captures.
+check("Nissan Rogue freight is $2,080",         freightFor("Nissan", "Rogue")?.amount, 2080);
+check("Chevrolet Silverado 1500 freight is $2,700", freightFor("Chevrolet", "Silverado 1500")?.amount, 2700);
+check("Volvo XC60 freight is $2,770",           freightFor("Volvo", "XC60")?.amount, 2770);
+check("Infiniti QX60 freight is $2,495",        freightFor("Infiniti", "QX60")?.amount, 2495);
 check("Toyota dealer-fee ceiling is $999", dealerFeeCeiling("Toyota", "AB")?.amount, 999);
 check("Lexus dealer-fee ceiling is $995",  dealerFeeCeiling("Lexus", "AB")?.amount, 995);
 // Newly captured, verified verbatim at each official source (2026-08-25).
