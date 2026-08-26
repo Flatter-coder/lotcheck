@@ -13011,83 +13011,91 @@ function CrawlCoverage(){
   const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
   const dark=theme==="dark";
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true); const [err,setErr]=useState("");
-  const [selIdx,setSelIdx]=useState(0); const [askIn,setAskIn]=useState(""); const [gauge,setGauge]=useState(null); const [gLoad,setGLoad]=useState(false);
-  const [ladder,setLadder]=useState({rows:[]}); const [msrpGap,setMsrpGap]=useState(null);
+  const [selIdx,setSelIdx]=useState(0); const [askIn,setAskIn]=useState(""); const [gLoad,setGLoad]=useState(false);
+  const [compsRaw,setCompsRaw]=useState(null); const [catRaw,setCatRaw]=useState([]); const [selTrim,setSelTrim]=useState("");
   useEffect(()=>{ let alive=true; (async()=>{
     try{ const {data:d,error}=await supabase.rpc("fn_crawl_coverage",{}); if(error)throw error; if(alive){ setData(d); setLoading(false); } }
     catch(e){ if(alive){ setErr("Couldn't reach the dataset just now — reload to try again."); setLoading(false); } }
   })(); return()=>{ alive=false; }; },[]);
-  // Build the LIVE design-10 band for the selected model: fetch its used comps
-  // (±2yr) and reduce them the same way the report does — median, 25/75 band,
-  // true low/high, a 0.4x-2.0x outlier trim, 5-comp floor.
+  // Fetch the model's used comps (±2yr) + its new-car catalog ONCE per model. The
+  // trim picker then re-narrows the band client-side, no refetch.
   useEffect(()=>{
     const mm=(data&&data.models)||[]; if(!mm.length) return;
-    const m=mm[selIdx]||mm[0]; let alive=true; setGLoad(true);
+    const m=mm[selIdx]||mm[0]; let alive=true; setGLoad(true); setSelTrim(""); setCompsRaw(null); setCatRaw([]);
     (async()=>{
       try{
         const {data:rows,error}=await supabase.rpc("fn_market_comps",{p_year:2022,p_make:m.make,p_model:m.model,p_condition:"used",p_province:"AB",p_year_span:2});
         if(error)throw error;
-        const all=Array.isArray(rows)?rows:[];
-        const prices=all.map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
-        const asOf=all.map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
-        // Model-year span of the comps, so every figure states which years it's OF
-        // — a bare "median" or "$29,373 low" across 5 model-years reads as broken.
-        const cYears=all.map(r=>Number(r.year)).filter(y=>y>1990&&y<2100);
-        const yMin=cYears.length?Math.min(...cYears):null, yMax=cYears.length?Math.max(...cYears):null;
-        const yLabel=yMin&&yMax?(yMin===yMax?String(yMin):`${yMin}–${yMax}`):null;
-        // Model-year ladder — a real depreciation ladder needs LIKE-FOR-LIKE years, so
-        // control it to the model's single most-listed trim (first-word normalized).
-        // Grouping all trims per year lets a loaded 2023 outprice a base 2024 and read
-        // as "negative depreciation" — a question the page must never create. Each rung
-        // still clears the 5-listing floor; newest year first.
-        const normTrim=t=>String(t||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim().split(/\s+/)[0]||"";
-        const trimTot={};
-        for(const r of all){ const tn=normTrim(r.trim); if(tn)trimTot[tn]=(trimTot[tn]||0)+1; }
-        const topTrim=Object.keys(trimTot).sort((a,b)=>trimTot[b]-trimTot[a])[0]||"";
-        const byYear={};
-        for(const r of all){ if(normTrim(r.trim)!==topTrim)continue; const y=Number(r.year), p=Number(r.price); if(y>0&&p>0)(byYear[y]=byYear[y]||[]).push(p); }
-        const ldRows=Object.keys(byYear).map(y=>{const ps=byYear[y].sort((a,b)=>a-b); return {year:Number(y),n:ps.length,med:ps[Math.floor(ps.length/2)]};}).filter(r=>r.n>=5).sort((a,b)=>b.year-a.year);
-        const ld={trim:topTrim,rows:ldRows};
-        // Value band — same reduction as the report (median, 25/75, low/high, 0.4x-2.0x
-        // outlier trim, 5-comp floor both before and after the trim).
-        let band=null, usedMed=null;
-        if(prices.length>=5){
-          const med0=prices[Math.floor(prices.length/2)];
-          const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
-          if(kept.length>=5){
-            const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
-            usedMed=at(0.5);
-            band={average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:(yLabel?yLabel+" · every trim & mileage":"LotCheck market · "+kept.length+" listings"),mileage:null,make:m.make,model:m.model};
-          }
-        }
-        if(alive){ setLadder(ld); setGauge(band||{insufficient:true}); setGLoad(false); }
-        // Used-vs-new MSRP — separate + non-fatal. Compare all-in to all-in where the
-        // manufacturer publishes all_in_price; otherwise use MSRP only as a conservative
-        // FLOOR ("a new one lists from at least $x, before freight & fees") — never invent
-        // a freight-sized markup, which under our own rules is a public accusation.
-        try{
-          const {data:cat}=await supabase.rpc("fn_catalog_msrp",{p_make:m.make,p_model:m.model});
-          const cr=Array.isArray(cat)?cat:[];
-          let g=null;
-          if(cr.length&&usedMed>0){
-            const maxY=Math.max(...cr.map(r=>Number(r.year)||0));
-            const latest=cr.filter(r=>Number(r.year)===maxY&&Number(r.msrp)>0);
-            if(latest.length){
-              // "From" = the BASE trim (cheapest by MSRP). Use its all-in if the maker
-              // published one for THAT trim, else its MSRP as a conservative floor. Never
-              // min(all_in): only some trims carry all_in (the catalog populates it
-              // unevenly), so that would skip the cheaper base and overstate the new price.
-              const base=latest.slice().sort((a,b)=>Number(a.msrp)-Number(b.msrp))[0];
-              if(Number(base.allIn)>0){ const from=Number(base.allIn); g={basis:"allin",year:maxY,trim:base.trim,uy:yLabel,from,used:usedMed,gap:from-usedMed,pct:from>0?usedMed/from:null}; }
-              else { const from=Number(base.msrp); g={basis:"msrp",year:maxY,trim:base.trim,uy:yLabel,from,used:usedMed,floorGap:from-usedMed}; }
-            }
-          } else if(!cr.length){ g={none:"nocatalog"}; }
-          if(alive) setMsrpGap(g);
-        }catch(e2){ if(alive) setMsrpGap(null); }
-      }catch(e){ if(alive){ setGauge(null); setLadder({rows:[]}); setMsrpGap(null); setGLoad(false); } }
+        let cat=[];
+        try{ const {data:c}=await supabase.rpc("fn_catalog_msrp",{p_make:m.make,p_model:m.model}); cat=Array.isArray(c)?c:[]; }catch(e2){}
+        if(alive){ setCompsRaw(Array.isArray(rows)?rows:[]); setCatRaw(cat); setGLoad(false); }
+      }catch(e){ if(alive){ setCompsRaw([]); setCatRaw([]); setGLoad(false); } }
     })();
     return()=>{ alive=false; };
   },[data,selIdx]);
+  const normTrim=t=>String(t||"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim().split(/\s+/)[0]||"";
+  const GENERIC_TRIM=["other","unknown","na","don","n","base",""];
+  // Derive band + model-year ladder + used-vs-new gap + trim options from the
+  // fetched comps and the selected trim — all client-side, so picking a trim
+  // re-narrows instantly. A picked trim makes the band LIKE-FOR-LIKE (one config,
+  // not every trim/mileage) — the fix for "why is one $29k and another $96k?".
+  const derived=useMemo(()=>{
+    const m=((data&&data.models)||[])[selIdx]||{};
+    const all=Array.isArray(compsRaw)?compsRaw:[];
+    // Trims with enough comps to stand alone (>=5 after the outlier floor), most-listed first.
+    const trimTot={};
+    for(const r of all){ const tn=normTrim(r.trim); const p=Number(r.price); if(tn&&p>0)trimTot[tn]=(trimTot[tn]||0)+1; }
+    const namedTrims=Object.keys(trimTot).filter(t=>!GENERIC_TRIM.includes(t)).sort((a,b)=>trimTot[b]-trimTot[a]);
+    const trimOptions=namedTrims.filter(t=>trimTot[t]>=5);
+    const activeTrim=trimOptions.includes(selTrim)?selTrim:"";
+    const active=activeTrim?all.filter(r=>normTrim(r.trim)===activeTrim):all;
+    const prices=active.map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
+    const asOf=all.map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
+    const cYears=active.map(r=>Number(r.year)).filter(y=>y>1990&&y<2100);
+    const yMin=cYears.length?Math.min(...cYears):null, yMax=cYears.length?Math.max(...cYears):null;
+    const yLabel=yMin&&yMax?(yMin===yMax?String(yMin):`${yMin}–${yMax}`):null;
+    const scope=yLabel?`${yLabel} · ${activeTrim?activeTrim.toUpperCase():"every trim & mileage"}`:"LotCheck market";
+    // Value band from the active set (5-comp floor before + after the 0.4x-2.0x trim).
+    let band=null, usedMed=null;
+    if(prices.length>=5){
+      const med0=prices[Math.floor(prices.length/2)];
+      const kept=prices.filter(p=>p>=med0*0.4&&p<=med0*2.0).sort((a,b)=>a-b);
+      if(kept.length>=5){
+        const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
+        usedMed=at(0.5);
+        band={average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:scope,mileage:null,make:m.make,model:m.model};
+      }
+    }
+    // Model-year ladder — controlled to the active trim if picked, else the most-
+    // listed trim; either way like-for-like across years. 5-listing floor per rung.
+    const ladderTrim=activeTrim||namedTrims[0]||"";
+    const byYear={};
+    for(const r of all){ if(normTrim(r.trim)!==ladderTrim)continue; const y=Number(r.year), p=Number(r.price); if(y>0&&p>0)(byYear[y]=byYear[y]||[]).push(p); }
+    const ldRows=Object.keys(byYear).map(y=>{const ps=byYear[y].sort((a,b)=>a-b); return {year:Number(y),n:ps.length,med:ps[Math.floor(ps.length/2)]};}).filter(r=>r.n>=5).sort((a,b)=>b.year-a.year);
+    const ladder={trim:ladderTrim,rows:ldRows};
+    // Used-vs-new — compare the ACTIVE used median to the matching new trim. Trim
+    // picked → match it in the catalog for a true like-for-like (all-in vs all-in
+    // where published, else MSRP as a floor); no catalog match for that trim → say
+    // so, don't compare a picked used trim to a base new price. No trim → base trim.
+    let g=null;
+    const cr=Array.isArray(catRaw)?catRaw:[];
+    if(cr.length&&usedMed>0){
+      const maxY=Math.max(...cr.map(r=>Number(r.year)||0));
+      const latest=cr.filter(r=>Number(r.year)===maxY&&Number(r.msrp)>0);
+      if(latest.length){
+        const matched=activeTrim?(latest.filter(r=>normTrim(r.trim)===activeTrim).sort((a,b)=>Number(a.msrp)-Number(b.msrp))[0]||null):null;
+        if(activeTrim&&!matched){ g={none:"notrim"}; }
+        else{
+          const pick=matched||latest.slice().sort((a,b)=>Number(a.msrp)-Number(b.msrp))[0];
+          const head={year:maxY,trim:pick.trim,matched:!!matched,uy:yLabel,used:usedMed};
+          if(Number(pick.allIn)>0){ const from=Number(pick.allIn); g={...head,basis:"allin",from,gap:from-usedMed,pct:from>0?usedMed/from:null}; }
+          else{ const from=Number(pick.msrp); g={...head,basis:"msrp",from,floorGap:from-usedMed}; }
+        }
+      }
+    } else if(!cr.length){ g={none:"nocatalog"}; }
+    return {trimOptions,activeTrim,gauge:band||{insufficient:true},ladder,msrpGap:g};
+  },[compsRaw,catRaw,selTrim,selIdx,data]);
+  const {trimOptions,activeTrim,gauge,ladder,msrpGap}=derived;
 
   const T=dark?{
     bg:"radial-gradient(120% 80% at 50% -8%, rgba(138,107,255,.14), transparent 55%), #0b1017",
@@ -13214,13 +13222,20 @@ function CrawlCoverage(){
             </Panel>
 
             <Panel head="Value-band gauge" tag="LIVE" bodyStyle={{padding:"12px 14px 14px"}}>
-              <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr",gap:10,marginBottom:6}}>
+              <div style={{display:"grid",gridTemplateColumns:trimOptions.length?"1.5fr 1fr 1fr":"1.4fr 1fr",gap:10,marginBottom:6}}>
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Model</label>
                   <select value={selIdx} onChange={e=>setSelIdx(Number(e.target.value))} style={{...fieldStyle,fontFamily:mono,cursor:"pointer"}}>
                     {models.slice(0,24).map((m,i)=><option key={i} value={i}>{m.make} {m.model} · {num(m.n)} comps</option>)}
                   </select>
                 </div>
+                {trimOptions.length>0&&<div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Trim</label>
+                  <select value={selTrim} onChange={e=>setSelTrim(e.target.value)} style={{...fieldStyle,fontFamily:mono,cursor:"pointer"}}>
+                    <option value="">All trims</option>
+                    {trimOptions.map((t,i)=><option key={i} value={t}>{t.toUpperCase()}</option>)}
+                  </select>
+                </div>}
                 <div style={{display:"flex",flexDirection:"column",gap:4}}>
                   <label style={{fontFamily:mono,fontSize:9.5,letterSpacing:".1em",textTransform:"uppercase",color:T.faint}}>Asking price</label>
                   <input type="number" inputMode="numeric" placeholder="optional" value={askIn} onChange={e=>setAskIn(e.target.value)} style={{...fieldStyle,fontFamily:mono}}/>
@@ -13248,7 +13263,7 @@ function CrawlCoverage(){
           <div className="crawlhud-instr" style={{display:"grid",gridTemplateColumns:(ladder.rows||[]).length>=2?"1fr 1fr":"1fr",gap:14,marginTop:14}}>
             <Panel head="How far from new" tag={`${selM.make||""} ${selM.model||""}`.trim().toUpperCase()} bodyStyle={{padding:"14px 16px 15px"}}>
               {gLoad&&<div style={{fontFamily:mono,color:T.faint,fontSize:12.5,padding:"22px 0",textAlign:"center"}}>Reading the catalog…</div>}
-              {!gLoad&&(!msrpGap||msrpGap.none)&&<div style={{color:T.muted,fontSize:12.5,lineHeight:1.5,padding:"10px 0",maxWidth:"58ch"}}>We don't hold the manufacturer's new-car price for this model yet — this lights up as the catalog fills.</div>}
+              {!gLoad&&(!msrpGap||msrpGap.none)&&<div style={{color:T.muted,fontSize:12.5,lineHeight:1.5,padding:"10px 0",maxWidth:"58ch"}}>{msrpGap&&msrpGap.none==="notrim"?`We don't hold the manufacturer's new-car price for the ${activeTrim.toUpperCase()} trim — pick All trims to compare against a new base one.`:"We don't hold the manufacturer's new-car price for this model yet — this lights up as the catalog fills."}</div>}
               {!gLoad&&msrpGap&&!msrpGap.none&&(()=>{ const g=msrpGap; return (
                 <div style={{display:"flex",flexWrap:"wrap",gap:"14px 30px",alignItems:"center"}}>
                   <div style={{flex:"1 1 220px",minWidth:200}}>
@@ -13257,7 +13272,7 @@ function CrawlCoverage(){
                   </div>
                   <div style={{flex:"2 1 340px",minWidth:300}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                      <span style={{fontSize:12,color:T.muted}}>New {g.year}{g.trim?" "+g.trim+" (base)":""} · {g.basis==="allin"?"all-in":"MSRP"}</span>
+                      <span style={{fontSize:12,color:T.muted}}>New {g.year}{g.trim?" "+g.trim+(g.matched?"":" (base)"):""} · {g.basis==="allin"?"all-in":"MSRP"}</span>
                       <span style={{fontFamily:mono,fontWeight:600,color:T.amber,fontVariantNumeric:"tabular-nums"}}>from {money(g.from)}</span>
                     </div>
                     <div style={{height:12,borderRadius:4,background:hexA(T.amber,.1),border:`1px solid ${hexA(T.amber,.35)}`,marginBottom:12}}/>
