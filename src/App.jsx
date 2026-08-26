@@ -9978,15 +9978,33 @@ function VerifyPage(){
             {P==="loading"&&<div style={{color:T.soft,fontSize:14}}>Verifying…</div>}
             {(P==="empty"||P==="bad")&&(<>
               <div style={{fontSize:11,letterSpacing:2,textTransform:"uppercase",color:T.eyebrow,fontWeight:700}}>Verify</div>
-              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:T.heading}}>Is this LotCheck report real?</div>
-              <div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>{P==="bad"?"That link's data is incomplete or was altered, so its fingerprint doesn't compute. Paste the original link from your LotCheck report.":"Paste the verify link, or scan the QR on any LotCheck PDF — we recompute its fingerprint and check the signature, nothing stored. The report ID on its own can't be checked (there's nothing stored to look it up)."}</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <input value={input} onChange={e=>{setInput(e.target.value);if(hint)setHint("");}} onKeyDown={e=>{if(e.key==="Enter")verifyFromInput();}} placeholder="lotcheck.ca/verify?d=…" style={{flex:"1 1 200px",background:T.inputBg,border:`1px solid ${hint?"rgba(240,153,123,.6)":T.inputBd}`,borderRadius:10,padding:"11px 12px",fontSize:12.5,color:T.text,outline:"none",boxSizing:"border-box"}}/>
-                <button onClick={verifyFromInput} style={{background:"#2FA79A",color:"#fff",border:"none",borderRadius:10,padding:"11px 18px",fontSize:13,fontWeight:800,cursor:"pointer"}}>Verify</button>
+              <div style={{fontSize:22,fontWeight:700,margin:"6px 0",color:T.heading}}>{P==="bad"?"That link didn't check out":"Is this LotCheck report real?"}</div>
+              {P==="bad"&&<div style={{fontSize:13,color:T.soft,lineHeight:1.6,marginBottom:14}}>The link's data is incomplete or was changed, so it can't be checked. Open the Verify link again from your original report to check it fresh.</div>}
+              {/* Two real cases, one page. Report ON a screen (phone email/PDF, or a
+                  computer): TAP/click the Verify link on it — it opens here loaded and
+                  shows the verdict. You can't scan a QR on the same screen you'd scan
+                  with, so tapping the link is the phone path. Printed report: scan the
+                  QR with a phone. Either way the signed link lands here and is checked. */}
+              <div style={{display:"flex",gap:13,alignItems:"flex-start",background:vdark?"rgba(52,211,153,.06)":"rgba(15,110,86,.05)",border:`1px solid ${vdark?"rgba(52,211,153,.24)":"rgba(15,110,86,.2)"}`,borderRadius:13,padding:"14px 15px",marginBottom:11}}>
+                <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true" style={{flex:"none",marginTop:1}}>
+                  <path d="M9.5 13.8 a3.4 3.4 0 0 0 5 .3 l2.7-2.7 a3.4 3.4 0 0 0-4.8-4.8 l-1.2 1.2 M14.5 10.2 a3.4 3.4 0 0 0-5-.3 l-2.7 2.7 a3.4 3.4 0 0 0 4.8 4.8 l1.2-1.2" fill="none" stroke="#34d399" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+                <div>
+                  <div style={{fontSize:15,fontWeight:800,color:T.heading,marginBottom:3}}>On your phone or computer: tap the Verify link on your report</div>
+                  <div style={{fontSize:12.5,color:T.soft,lineHeight:1.55}}>It's in your LotCheck email and on the PDF. Tapping it opens this page with the report loaded and shows the answer instantly — genuine and unchanged, or not. No app, nothing stored.</div>
+                </div>
               </div>
-              {hint
-                ? <div style={{marginTop:11,fontSize:12,lineHeight:1.55,color:"#c0532f",background:"rgba(240,153,123,.14)",border:"1px solid rgba(240,153,123,.4)",borderRadius:9,padding:"9px 11px"}}>{hint}</div>
-                : <div style={{marginTop:12,fontSize:11.5,color:T.faint}}>Paste the link, or scan the QR on the printed report — the report ID alone can’t be checked.</div>}
+              <div style={{display:"flex",gap:13,alignItems:"flex-start",background:vdark?"rgba(255,255,255,.03)":"rgba(255,255,255,.5)",border:`1px solid ${T.cardBd}`,borderRadius:13,padding:"14px 15px",marginBottom:12}}>
+                <svg viewBox="0 0 40 40" width="36" height="36" aria-hidden="true" style={{flex:"none",marginTop:1}}>
+                  <path d="M4 13 V7 a3 3 0 0 1 3-3 h6 M27 4 h6 a3 3 0 0 1 3 3 v6 M36 27 v6 a3 3 0 0 1-3 3 h-6 M13 36 H7 a3 3 0 0 1-3-3 v-6" fill="none" stroke={T.faint} strokeWidth="2.6" strokeLinecap="round"/>
+                  <rect x="15" y="15" width="4.6" height="4.6" rx="1" fill={T.faint}/><rect x="20.4" y="15" width="4.6" height="4.6" rx="1" fill={T.faint} opacity=".55"/><rect x="15" y="20.4" width="4.6" height="4.6" rx="1" fill={T.faint} opacity=".55"/><rect x="20.4" y="20.4" width="4.6" height="4.6" rx="1" fill={T.faint}/>
+                </svg>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:T.heading,marginBottom:3}}>Holding a printed report? Scan its QR</div>
+                  <div style={{fontSize:12.5,color:T.soft,lineHeight:1.55}}>Point another phone's camera at the QR on the paper — same instant answer.</div>
+                </div>
+              </div>
+              <div style={{fontSize:11.5,color:T.faint,lineHeight:1.55}}>Just the report number (like LC-DD3D-16F) can't be looked up on its own — nothing is stored to look it up.</div>
             </>)}
             {(P==="signed"||P==="ok"||P==="altered"||P==="unclaimed")&&(()=>{
               const o=state.obj||{};
@@ -10000,7 +10018,7 @@ function VerifyPage(){
                 msrpBasis:o.basis?.b,msrpTrim:o.basis?.t,msrpYear:o.basis?.y,
                 year:o.year,priceVerified:o.price?.verified});
               const delta=vclaim.delta??0;
-              const title=P==="signed"?"Signed & authentic":P==="ok"?"Authentic report":P==="altered"?(state.signed?"Signature check failed":"This report was altered"):"Confirm the report ID";
+              const title=P==="signed"?"Genuine — nothing changed":P==="ok"?"Nothing was changed":P==="altered"?"This doesn't check out":"Check the report number";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
                 <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:6}}>
@@ -10008,16 +10026,16 @@ function VerifyPage(){
                   <div style={{fontSize:18,fontWeight:800,color:T.heading}}>{title}</div>
                 </div>
                 <div style={{fontSize:12.5,color:T.soft,lineHeight:1.6,marginBottom:12}}>
-                  {P==="signed"&&<>Valid LotCheck signature over <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Could only have been issued by LotCheck, and not one figure has changed.</>}
-                  {P==="ok"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>, matching the claimed ID. Every figure below is unaltered.</>}
-                  {P==="altered"&&state.signed&&<>The signature is <b style={{color:"#d6533f"}}>not valid</b> for these contents — altered after signing, or not from LotCheck. Don't trust the figures.</>}
-                  {P==="altered"&&!state.signed&&<>Claims to be <b style={{fontFamily:mono}}>{state.claimed}</b> but produces <b style={{fontFamily:mono,color:"#d6533f"}}>{state.id}</b>. A figure was changed after issue.</>}
-                  {P==="unclaimed"&&<>Contents produce <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Confirm it matches the ID printed on your report.</>}
+                  {P==="signed"&&<>This is a real LotCheck report — only LotCheck could have made it — and not one number has changed since. Report <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>.</>}
+                  {P==="ok"&&<>Every number in this report is exactly as it was made — nothing was changed. This one isn't digitally signed, so we can confirm it's unaltered but not that LotCheck made it (a signed report is stronger). Report <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>.</>}
+                  {P==="altered"&&state.signed&&<>The numbers here <b style={{color:"#d6533f"}}>don't match</b> LotCheck's signature — this was changed after it was made, or it isn't a real LotCheck report. Don't trust the figures.</>}
+                  {P==="altered"&&!state.signed&&<>This says it's <b style={{fontFamily:mono}}>{state.claimed}</b>, but its actual contents come out as <b style={{fontFamily:mono,color:"#d6533f"}}>{state.id}</b> — a number was changed after it was made. Don't trust the figures.</>}
+                  {P==="unclaimed"&&<>This report's number is <b style={{fontFamily:mono,color:T.text}}>{state.id}</b>. Check that it matches the number printed on your report.</>}
                 </div>
                 {P==="signed"&&state.sig&&(
                   <div style={{display:"flex",alignItems:"center",gap:12,margin:"2px 0 14px",padding:"10px 12px",background:vdark?"rgba(127,119,221,.08)":"rgba(111,87,230,.08)",border:`1px solid ${vdark?"rgba(127,119,221,.25)":"rgba(111,87,230,.28)"}`,borderRadius:10}}>
                     <div style={{flex:"none"}}><Seal seed={sealSeed(state.sig)} size={66} gid="vseal"/></div>
-                    <div style={{fontSize:11.5,color:T.soft,lineHeight:1.5}}>This report's <b style={{color:T.eyebrow}}>unique seal</b> — drawn from its signature. No other report has it, and it can't be reproduced without LotCheck's key.</div>
+                    <div style={{fontSize:11.5,color:T.soft,lineHeight:1.5}}>This report's <b style={{color:T.eyebrow}}>one-of-a-kind seal</b>. No other report has it, and it can't be copied or faked without LotCheck's private key.</div>
                   </div>
                 )}
                 <div style={{background:vdark?"rgba(255,255,255,.04)":"rgba(255,255,255,.6)",border:`1px solid ${T.cardBd}`,borderRadius:12,padding:"14px 16px"}}>
@@ -10128,7 +10146,7 @@ function VerifyPage(){
             })()}
           </div>
         </div>
-        <p style={{color:T.faint,fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report — this page recomputes its fingerprint and checks the signature live from the link. Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
+        <p style={{color:T.faint,fontSize:12,lineHeight:1.6,marginTop:16,maxWidth:640}}>LotCheck doesn't store your report. This page checks it live from the QR or link and tells you if it's genuine and unchanged. Every figure traces to a public source you can re-check yourself: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google.</p>
         <a href="/real" style={{display:"inline-block",marginTop:10,fontSize:12.5,fontWeight:700,color:T.eyebrow,textDecoration:"none"}}>Worried about fakes? How to spot a real LotCheck report →</a>
       </div>
       </div>
@@ -12702,7 +12720,7 @@ function TrustPage(){
         </div>
 
         <div className="tsteps" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,margin:"18px 0"}}>
-          {[["1","Find the QR code at the bottom of the PDF, or the verify link in your email."],["2","Scan it. It opens lotcheck.ca/verify and re-checks the report live."],["3","Green “Signed & authentic” = real. Red or no result = fake or altered."]].map(([n,t])=>(
+          {[["1","On your report, tap the verify link (email or PDF) — or scan the QR on a printout."],["2","It opens lotcheck.ca/verify with the report loaded and re-checks it live."],["3","Green “Genuine — nothing changed” = real. Red or no result = fake or altered."]].map(([n,t])=>(
             <div key={n} style={card}>
               <div style={{width:24,height:24,borderRadius:"50%",background:"#2FA79A",color:"#fff",fontWeight:900,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8}}>{n}</div>
               <p style={{fontSize:12.5,color:"#c3bfe0",lineHeight:1.5,margin:0}}>{t}</p>
