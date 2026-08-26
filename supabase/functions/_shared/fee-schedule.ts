@@ -115,6 +115,19 @@ const DEALER_FEE_CEILING: Fee[] = [
   { component: "dealer_fee_ceiling", label: "dealer fees (up to $621)", amount: 621, applies: "always", scope: "brand", make: "Nissan",
     source: "Nissan Canada (canada.nissannews.com, 2026 Rogue pricing) — \"dealer fees (up to $621)\"", capturedOn: "2026-08-25",
     note: "\"May vary by region and dealer.\"" },
+  // Batch 2 (2026-08-26). MINI read verbatim in-session; BMW is the same BMW Group
+  // policy (identical wording, verified via MINI); Buick/Cadillac carry GM's one
+  // national B&P disclaimer, the same "up to $699 dealer fee" string as Chevrolet.
+  { component: "dealer_fee_ceiling", label: "retailer administration fees (up to $595)", amount: 595, applies: "always", scope: "brand", make: "MINI",
+    source: "MINI Canada (mini.ca/en/special-offers) — \"retailer administration fees (up to $595)\"", capturedOn: "2026-08-26" },
+  { component: "dealer_fee_ceiling", label: "retailer administration fees (up to $595)", amount: 595, applies: "always", scope: "brand", make: "BMW",
+    source: "BMW Canada (bmw.ca) — \"retailer administration fees (up to $595)\"; same BMW Group policy verified verbatim on MINI", capturedOn: "2026-08-26" },
+  { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Buick",
+    source: "GM Canada Build & Price disclaimer (buick.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26",
+    note: "Flag only ABOVE $699 (GM applies a lower default in-build)." },
+  { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Cadillac",
+    source: "GM Canada Build & Price disclaimer (cadillaccanada.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26",
+    note: "Flag only ABOVE $699 (GM applies a lower default in-build)." },
 ];
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────

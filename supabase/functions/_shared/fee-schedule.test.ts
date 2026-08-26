@@ -48,6 +48,11 @@ check("Mazda dealer-fee ceiling is $795",      dealerFeeCeiling("Mazda")?.amount
 check("Volkswagen dealer-fee ceiling is $750", dealerFeeCeiling("Volkswagen")?.amount, 750);
 check("Chevrolet dealer-fee ceiling is $699",  dealerFeeCeiling("Chevrolet")?.amount, 699);
 check("Nissan dealer-fee ceiling is $621",     dealerFeeCeiling("Nissan")?.amount, 621);
+// Batch 2 (2026-08-26): verified in-session / same-family corroborated.
+check("MINI dealer-fee ceiling is $595",       dealerFeeCeiling("MINI")?.amount, 595);
+check("BMW dealer-fee ceiling is $595",        dealerFeeCeiling("BMW")?.amount, 595);
+check("Buick dealer-fee ceiling is $699",      dealerFeeCeiling("Buick")?.amount, 699);
+check("Cadillac dealer-fee ceiling is $699",   dealerFeeCeiling("Cadillac")?.amount, 699);
 ok("ceilings are national — Hyundai resolves in ON as well as AB", dealerFeeCeiling("Hyundai", "ON")?.amount === 799);
 check("Ford publishes no ceiling -> null (confirmed, not a gap)", dealerFeeCeiling("Ford"), null);
 ok("make/model lookups are case-insensitive", freightFor("toyota", "rav4")?.amount === 1930);
