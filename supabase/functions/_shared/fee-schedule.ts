@@ -88,15 +88,33 @@ const PROVINCE: Record<string, Fee[]> = {
 
 // ── Brand — the manufacturer's OWN published maximum dealer fee ──────────────
 // Not every OEM publishes one; absence here means "no sourced ceiling", never
-// "no fee". Captured from each brand's Build & Price. Region-qualified because
-// the ceiling can vary by province.
+// "no fee" (Ford, GMC, Honda, Jeep, Kia, Ram, Subaru confirmed to publish none).
+// The cap is a NATIONAL manufacturer policy ("dealer fees of up to $X"), so rows
+// carry no region and apply wherever docfee.ts fires (the all-in provinces). Each
+// figure is the published MAXIMUM ("up to $X") read verbatim from an official
+// source on the date shown; the flag fires only ABOVE it, so a dealer charging
+// within "up to $X" is never flagged.
 const DEALER_FEE_CEILING: Fee[] = [
-  { component: "dealer_fee_ceiling", label: "Dealer Fees (maximum)", amount: 999, applies: "always", scope: "brand", make: "Toyota", region: "AB",
+  { component: "dealer_fee_ceiling", label: "Dealer Fees (maximum)", amount: 999, applies: "always", scope: "brand", make: "Toyota",
     source: "Toyota Canada Build & Price — 2026 RAV4 (Alberta)", capturedOn: "2026-08-15",
-    note: "Manufacturer's own published maximum dealer fee. In an all-in province it must already be inside the advertised price." },
-  { component: "dealer_fee_ceiling", label: "Dealer Fees", amount: 995, applies: "always", scope: "brand", make: "Lexus", region: "AB",
+    note: "Published maximum dealer fee. In an all-in province it must already be inside the advertised price." },
+  { component: "dealer_fee_ceiling", label: "Dealer Fees", amount: 995, applies: "always", scope: "brand", make: "Lexus",
     source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25",
-    note: "Manufacturer's own published maximum dealer fee." },
+    note: "Published maximum dealer fee." },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $799)", amount: 799, applies: "always", scope: "brand", make: "Hyundai",
+    source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25",
+    note: "\"Fees may vary by dealer.\" Some models publish $599; $799 is the highest published figure, used as the max." },
+  { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $795)", amount: 795, applies: "always", scope: "brand", make: "Mazda",
+    source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25" },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $750)", amount: 750, applies: "always", scope: "brand", make: "Volkswagen",
+    source: "Volkswagen Canada (vw.ca/offers) — \"representative dealer admin fee (actual fee is set by dealers and varies, up to $750)\"", capturedOn: "2026-08-25",
+    note: "Framed as a \"representative\" fee, but explicitly capped at \"up to $750\"." },
+  { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Chevrolet",
+    source: "Chevrolet Canada Build & Price disclaimer (chevrolet.ca) — \"up to $699 dealer fee\"", capturedOn: "2026-08-25",
+    note: "GM's B&P applies a $350 default in-build, but the published maximum is $699; we flag only ABOVE $699 to stay conservative." },
+  { component: "dealer_fee_ceiling", label: "dealer fees (up to $621)", amount: 621, applies: "always", scope: "brand", make: "Nissan",
+    source: "Nissan Canada (canada.nissannews.com, 2026 Rogue pricing) — \"dealer fees (up to $621)\"", capturedOn: "2026-08-25",
+    note: "\"May vary by region and dealer.\"" },
 ];
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────

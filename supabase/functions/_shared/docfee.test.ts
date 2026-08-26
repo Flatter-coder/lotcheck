@@ -35,6 +35,18 @@ check("new Toyota AB $1,200 -> ceiling $999, over by $201",
   assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Documentation Fee", price: 1200 }] })),
   { kind: "allin", mfrCeiling: 999, mfrCeilingOverBy: 201, mfrCeilingMake: "Toyota" });
 
+check("new Hyundai AB $1,000 admin fee -> ceiling $799, over by $201",
+  assessDocFee(listing({ make: "Hyundai", addOns: [{ name: "Admin Fee", price: 1000 }] })),
+  { kind: "allin", mfrCeiling: 799, mfrCeilingOverBy: 201, mfrCeilingMake: "Hyundai" });
+
+check("new Chevrolet AB $900 dealer fee -> ceiling $699, over by $201",
+  assessDocFee(listing({ make: "Chevrolet", addOns: [{ name: "Dealer Fee", price: 900 }] })),
+  { kind: "allin", mfrCeiling: 699, mfrCeilingOverBy: 201, mfrCeilingMake: "Chevrolet" });
+
+check("new Ford AB -> no ceiling (Ford publishes none), base finding intact",
+  assessDocFee(listing({ make: "Ford" })),
+  { kind: "allin", docFee: 1295, mfrCeiling: undefined });
+
 // ── The flag must NOT fire — and the base doc-fee finding still stands ───────
 check("USED Lexus -> no ceiling (the max governs NEW sales), base finding intact",
   assessDocFee(listing({ vehicleCondition: "used" })),
