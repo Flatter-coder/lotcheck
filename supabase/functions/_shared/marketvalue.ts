@@ -33,6 +33,19 @@ export interface MarketValue {
   comps?: number | null;      // # of comps behind the number (coverage signal)
   asOf?: string | null;       // capture date of the freshest comp (dated proof)
   confidence?: "high" | "low" | null;
+  cpoPremium?: CpoPremium | null;  // set only for a CERTIFIED subject with enough non-certified comps
+}
+
+// The CPO "fee" is a market PREMIUM, not a line item: what a certified car costs
+// over a comparable NON-certified one. Attached to marketValue for a certified
+// subject; null (omitted) otherwise.
+export interface CpoPremium {
+  premium: number;              // subject asking − non-certified median (> 0)
+  nonCertifiedMedian: number;
+  certifiedMedian: number | null;
+  nNonCertified: number;
+  nCertified: number;
+  basis: string;                // the mileage/trim control used for the baseline
 }
 
 export interface MarketCtx {
@@ -44,6 +57,8 @@ export interface MarketCtx {
   province?: string | null;      // crawl coverage is per-province; 'AB' today
   postalOrZip?: string | null;
   country?: "CA" | "US" | null;
+  saleCondition?: string | null; // finer: 'certified' triggers the CPO premium
+  asking?: number | null;        // the subject's asking price, for the premium delta
 }
 
 const env = (k: string): string | undefined => (globalThis as any).Deno?.env?.get(k);
@@ -134,7 +149,7 @@ function num(x: unknown): number | null { const v = Number(x); return Number.isF
 // trim (pctracker.ca's 0.4x-2.0x method), and the min-comps gate. One tested
 // implementation, so a thin or noisy set can never quietly produce a number.
 // ---------------------------------------------------------------------------
-export interface CompRow { price: number; odometerKm?: number | null; trim?: string | null; year?: number | null; asOf?: string | null; }
+export interface CompRow { price: number; odometerKm?: number | null; trim?: string | null; year?: number | null; asOf?: string | null; certified?: boolean | null; }
 export interface Band {
   n: number; median: number; p25: number; p75: number; low: number; high: number;
   kmBasis: boolean;       // true = band computed within a mileage window of the subject
@@ -206,6 +221,38 @@ export function computeBand(rows: CompRow[], opts: BandOpts = {}): Band {
   };
 }
 
+// The CPO premium: what a CERTIFIED subject costs over a comparable NON-certified
+// one. Baseline = the non-certified used comps, mileage/trim-controlled through
+// computeBand (like-for-like), min-comps gated (thin -> null, never a guessed
+// premium). Only a POSITIVE premium is returned — if the certified car is not
+// priced above the non-certified median there is nothing to surface. The
+// certified-set median is added as context when enough certified comps exist.
+export function computeCpoPremium(rows: CompRow[], subjectAsking: number, opts: BandOpts = {}): CpoPremium | null {
+  const ask = Number(subjectAsking);
+  if (!(ask > 0) || !Array.isArray(rows)) return null;
+  const nonCertified = rows.filter((r) => r && r.certified !== true);
+  const certified = rows.filter((r) => r && r.certified === true);
+  const minComps = opts.minComps ?? 5;
+  const base = computeBand(nonCertified, opts);
+  if (base.insufficient || base.n < minComps || !(base.median > 0)) return null;
+  const premium = Math.round(ask - base.median);
+  if (!(premium > 0)) return null;
+  // Certified-set median as context — a plain median (not a min-comps-gated band):
+  // the certified pool is small by nature, so 3+ is enough to sketch it.
+  const certPrices = certified.map((r) => Number(r.price)).filter((p) => p > 0);
+  const certifiedMedian = certPrices.length >= 3 ? median(certPrices) : null;
+  const basis = base.trimBasis && base.kmBasis ? "same trim, similar mileage"
+    : base.trimBasis ? "same trim" : base.kmBasis ? "similar mileage" : "all trims";
+  return {
+    premium,
+    nonCertifiedMedian: base.median,
+    certifiedMedian,
+    nNonCertified: base.n,
+    nCertified: certified.length,
+    basis,
+  };
+}
+
 async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx): Promise<MarketValue | null> {
   const url = env("SUPABASE_URL");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
@@ -237,7 +284,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       console.warn(`lotcheck: thin coverage (${band.n} < ${COMP_FLOOR}) — suppressing value`);
       return null;
     }
-    return {
+    const mv: MarketValue = {
       average: band.median,
       below: band.p25,
       above: band.p75,
@@ -249,6 +296,14 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       asOf: band.asOf,
       confidence: band.n >= COMP_FLOOR ? "high" : "low",
     };
+    // CPO premium: only for a certified subject, against the NON-certified comps
+    // in the same pool. computeCpoPremium is min-comps gated and returns a
+    // positive premium only, so this stays null unless it's genuinely backed.
+    if (String(ctx.saleCondition) === "certified" && Number(ctx.asking) > 0) {
+      const prem = computeCpoPremium(Array.isArray(rows) ? (rows as CompRow[]) : [], Number(ctx.asking), { odometerKm: mileage, trim: ctx.trim ?? null, minComps: COMP_FLOOR });
+      if (prem) mv.cpoPremium = prem;
+    }
+    return mv;
   } catch (e) {
     console.warn("lotcheck market value error (suppressing):", (e as Error)?.message);
     return null;

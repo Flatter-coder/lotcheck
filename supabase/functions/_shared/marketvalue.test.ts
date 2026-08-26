@@ -10,7 +10,7 @@
 //
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/marketvalue.test.ts
-import { computeBand, median, percentile, type CompRow } from "./marketvalue.ts";
+import { computeBand, computeCpoPremium, median, percentile, type CompRow } from "./marketvalue.ts";
 
 let pass = 0, fail = 0;
 const fails: string[] = [];
@@ -119,6 +119,26 @@ check(both.trimBasis === true && both.kmBasis === true, "trim+km: narrows on tri
 // --- empty / garbage -------------------------------------------------------
 check(computeBand([], { minComps: 5 }).insufficient === true, "empty: no rows is insufficient");
 check(computeBand([{ price: 0 }, { price: -5 }, { price: NaN as unknown as number }], { minComps: 1 }).insufficient === true, "garbage: non-positive/NaN prices are dropped");
+
+// --- CPO premium -----------------------------------------------------------
+// Non-certified used comps cluster ~36k (median 36k); a few certified sit ~40k.
+const cpoRows: CompRow[] = [
+  { price: 34000, certified: false }, { price: 35000, certified: false }, { price: 36000, certified: false },
+  { price: 36000, certified: false }, { price: 37000, certified: false }, { price: 38000, certified: false },
+  { price: 39000, certified: true }, { price: 40000, certified: true }, { price: 41000, certified: true },
+];
+const prem = computeCpoPremium(cpoRows, 40000, { minComps: 5 });
+check(prem != null && prem.premium === 4000, "cpo: $40k certified vs $36k non-certified median -> $4,000 premium", `prem=${JSON.stringify(prem)}`);
+check(prem?.nonCertifiedMedian === 36000, "cpo: baseline is the NON-certified median (36k), not the mixed pool");
+check(prem?.nNonCertified === 6, "cpo: only the 6 non-certified comps form the baseline");
+check(prem?.certifiedMedian === 40000, "cpo: certified-set median attached as context");
+// Not enough non-certified comps -> null (never a guessed premium).
+check(computeCpoPremium([{ price: 40000, certified: true }, { price: 35000, certified: false }, { price: 36000, certified: false }], 40000, { minComps: 5 }) === null,
+  "cpo: thin non-certified comps -> null");
+// Subject not priced above the non-certified median -> nothing to flag.
+check(computeCpoPremium(cpoRows, 35000, { minComps: 5 }) === null, "cpo: certified NOT above the non-certified median -> null");
+// No asking -> null.
+check(computeCpoPremium(cpoRows, 0, { minComps: 5 }) === null, "cpo: no asking price -> null");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) { console.error("FAILURES:\n  " + fails.join("\n  ")); process.exit(1); }

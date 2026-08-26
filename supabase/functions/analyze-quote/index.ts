@@ -796,11 +796,13 @@ Deno.serve(async (req: Request) => {
     // the default). Needs the VIN (to exclude the subject) plus ymm + condition
     // to build the comparable set; returns null on thin coverage and the report
     // omits the module.
+    analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
     if (analysis.vin) {
       const mv = await fetchMarketValue(
         analysis.vin,
         analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
-        { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition },
+        { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+          saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null },
       );
       if (mv) analysis.marketValue = mv;
     }
@@ -819,7 +821,6 @@ Deno.serve(async (req: Request) => {
     { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }
     // S12 — doc-fee vs jurisdiction benchmark (fail-safe: only flags with a backed benchmark).
     { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }
-    analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
     // S25 — all-in label + safeguard: fires on any all-in-province listing, even a
     // clean one, so the report labels the price all-in and the script states the anchor.
     { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; }
