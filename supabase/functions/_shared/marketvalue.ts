@@ -74,6 +74,19 @@ const PROVIDER = (): string => (env("MARKETVALUE_PROVIDER") || "lotcheck").toLow
 // than show a low-confidence number as authoritative. Tunable per provider.
 const COMP_FLOOR = Number(env("MARKETVALUE_COMP_FLOOR") || "5");
 
+// Provinces our crawl actually covers. The value band + CPO premium are built
+// from these comps, so a car OUTSIDE them has no honest baseline — we return null
+// rather than compare it against Alberta prices unlabeled (missing beats wrong).
+// Env-configurable so expansion is a config change, not a code change.
+const COMPS_PROVINCES = (): Set<string> =>
+  new Set((env("MARKETVALUE_COMPS_PROVINCES") || "AB").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean));
+
+/** True only when we have crawl comps for this province (Alberta today). An
+ *  unknown/empty province is NOT served — we don't guess a car's market. */
+export function servesComps(province: string | null | undefined): boolean {
+  return COMPS_PROVINCES().has(String(province || "").toUpperCase());
+}
+
 // ---------------------------------------------------------------------------
 // MarketCheck adapter — CONFIRMED endpoints (docs.marketcheck.com, 2026-08-04).
 // Base https://api.marketcheck.com/v2/ ; auth = api_key query param.
@@ -258,6 +271,11 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
   if (!url || !key) return null;
   if (!ctx.year || !ctx.make || !ctx.model || !ctx.condition) return null; // need ymm + condition to build comps
+  // The LISTING's province must be one we actually crawl. A non-Alberta car (or
+  // one whose province we couldn't establish) gets no value band and no CPO
+  // premium — we won't show it Alberta comps unlabeled. See servesComps above.
+  const prov = String(ctx.province || "").toUpperCase();
+  if (!servesComps(prov)) return null;
   try {
     const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
       method: "POST",
@@ -265,7 +283,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       body: JSON.stringify({
         p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
         p_condition: String(ctx.condition), p_exclude_vin: vin || null,
-        p_province: ctx.province || "AB",
+        p_province: prov,
         // +/-2 model years, not +/-1. A 2020-2024 window for a 2022 car is still
         // honest comparables (usually the same generation), and it roughly
         // doubles how many used cars clear the comp floor -- measured live against
