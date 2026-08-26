@@ -9939,6 +9939,7 @@ function VerifyPage(){
   @media(prefers-reduced-motion:reduce){.vfloatK,.vsweepK,.vsealK,.vringK,.vgridK,.vedge,.lc-gate-car,.lc-gate-window{animation:none!important}}
   @media(max-width:760px){.vgc{grid-template-columns:1fr!important}}
   @media(max-width:900px){.vnav-links{display:none!important}.vnav-cta{margin-left:auto!important}}
+  .vnav-links{scrollbar-width:none;-ms-overflow-style:none}.vnav-links::-webkit-scrollbar{display:none}
   .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
@@ -9947,13 +9948,13 @@ function VerifyPage(){
     <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
       <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
-        <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:16}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
-          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+        <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:14}}>
+          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={45}/>LotCheck</a>
+          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",minWidth:0,overflowX:"auto"}}>
             {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
           <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
-          <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
+          <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap",flexShrink:0}}>Analyze my quote</a>
         </div>
       </nav>
       <div style={{padding:"28px 18px",display:"flex",justifyContent:"center"}}>
@@ -11315,6 +11316,7 @@ function QuoteCheckPage(){
               {[
                 ["/live-price-index","MSRP Price Index"],
                 ["/alberta","Alberta Dealers Map"],
+                ["/crawl","Used-car market"],
                 ["/#how","How it works"],
                 ["/#pipeline","10-point lane"],
                 ["/#report","Sample report"],
