@@ -10,6 +10,7 @@
     "test:recalls": "node --experimental-strip-types supabase/functions/_shared/recalls.test.ts",
     "test:invariants": "node --experimental-strip-types supabase/functions/_shared/invariants.test.ts",
     "test:market-value": "node --experimental-strip-types supabase/functions/_shared/marketvalue.test.ts",
+    "test:fee-schedule": "node --experimental-strip-types supabase/functions/_shared/fee-schedule.test.ts",
     "check:copy": "node scripts/check-copy-compliance.mjs",
     "check:parity": "node scripts/check-report-parity.mjs",
     "check:undef": "node scripts/check-undefined-identifiers.mjs",
