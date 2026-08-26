@@ -437,7 +437,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
   <!-- HERO: median MSRP on the 3D pedestal -->
   <section class="card hero">
-    <div class="k">Median MSRP<span class="lv lv-cat"><i></i>Live</span></div>
+    <div class="k">Middle value MSRP<span class="lv lv-cat"><i></i>Live</span></div>
     <div class="idx-stage">
       <div class="idx-podium" id="idxPodium">
         <div class="idx mono" id="fig">—</div>
@@ -648,7 +648,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
         hex("var(--cyan)",'<path d="M22 34h16M22 28h16" stroke="var(--cyan)" stroke-width="2"/>'), null],
       ["Trims verified", catalog.trims, "current models",
         hex("var(--gate)",'<circle cx="30" cy="31" r="7" fill="none" stroke="var(--gate)" stroke-width="2"/>'), null],
-      ["Median new MSRP", catalog.median, "across all trims",
+      ["Middle value new MSRP", catalog.median, "across all trims",
         hex("var(--up)",'<path d="M30 22v18M25 27h10M25 35h10" stroke="var(--up)" stroke-width="2"/>'), money]
     ].map(function(t,i){
       return '<div class="card tile">'+t[3]+'<div><div class="k">'+t[0]+'</div>'+
@@ -900,11 +900,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       stk=inflN
         ? " Of <b>"+num(stated)+"</b> listings that print their own sticker, <b class='co'>"+num(inflN)+
           "</b> print one above the manufacturer's figure for that exact trim"+
-          (isFinite(inflMed)&&inflMed>0?" — at least <b class='co'>+"+inflMed.toFixed(1)+"%</b> at the median":"")+"."
+          (isFinite(inflMed)&&inflMed>0?" — at least <b class='co'>+"+inflMed.toFixed(1)+"%</b> at the middle value":"")+"."
         : " Of <b>"+num(stated)+"</b> listings that print their own sticker, none print one above the manufacturer's figure for that exact trim.";
     }
     say.innerHTML="<b>"+pc(under)+"%</b> of matched Alberta listings ask <b>less than the manufacturer-verified sticker</b>"+
-      (isFinite(med)&&med<0?" — at least <b class='cy'>"+Math.abs(med).toFixed(1)+"% off</b> at the median":"")+". "+
+      (isFinite(med)&&med<0?" — at least <b class='cy'>"+Math.abs(med).toFixed(1)+"% off</b> at the middle value":"")+". "+
       (over?("<b class='co'>"+num(over)+"</b> ask more than sticker plus a full freight-and-fees allowance.")
            :"<b class='co'>None</b> ask more than sticker plus a full freight-and-fees allowance.")+
       " <b>"+num(ind)+"</b> land inside that allowance, where only the row's exact freight figure could decide — so no call is made."+stk;
@@ -965,7 +965,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var p25=Number(dev.p25);
     foot.textContent="Ticks are distance from the manufacturer-verified sticker, mirrored either side — "+
       "floors, so a bar can understate its distance, never overstate it."+
-      (isFinite(med)?"  Median discount at least "+Math.abs(med).toFixed(2)+"%":"")+
+      (isFinite(med)?"  Middle-value discount at least "+Math.abs(med).toFixed(2)+"%":"")+
       (isFinite(p25)?" · 25th percentile "+p25.toFixed(1)+"%":"");
   }
 
@@ -1199,7 +1199,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       document.getElementById("ptNote").innerHTML=
         "Couldn&rsquo;t reach the MSRP catalog — reload to try again.";
       document.getElementById("tiles").innerHTML=[
-        ["Makes tracked","verified makes"],["Trims verified","current models"],["Median new MSRP","across all trims"]
+        ["Makes tracked","verified makes"],["Trims verified","current models"],["Middle value new MSRP","across all trims"]
       ].map(function(t){
         return '<div class="card tile in"><div><div class="k">'+t[0]+'</div>'+
           '<div class="v mono">—</div><div class="k sub">'+t[1]+'</div></div></div>';
