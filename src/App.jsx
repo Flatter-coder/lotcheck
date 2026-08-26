@@ -13030,6 +13030,11 @@ function CrawlCoverage(){
         const all=Array.isArray(rows)?rows:[];
         const prices=all.map(r=>Number(r.price)).filter(v=>v>0).sort((a,b)=>a-b);
         const asOf=all.map(r=>r.asOf).filter(Boolean).sort().slice(-1)[0]||null;
+        // Model-year span of the comps, so every figure states which years it's OF
+        // — a bare "median" or "$29,373 low" across 5 model-years reads as broken.
+        const cYears=all.map(r=>Number(r.year)).filter(y=>y>1990&&y<2100);
+        const yMin=cYears.length?Math.min(...cYears):null, yMax=cYears.length?Math.max(...cYears):null;
+        const yLabel=yMin&&yMax?(yMin===yMax?String(yMin):`${yMin}–${yMax}`):null;
         // Model-year ladder — a real depreciation ladder needs LIKE-FOR-LIKE years, so
         // control it to the model's single most-listed trim (first-word normalized).
         // Grouping all trims per year lets a loaded 2023 outprice a base 2024 and read
@@ -13052,7 +13057,7 @@ function CrawlCoverage(){
           if(kept.length>=5){
             const at=q=>kept[Math.min(kept.length-1,Math.max(0,Math.round(q*(kept.length-1))))];
             usedMed=at(0.5);
-            band={average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:"LotCheck market · "+kept.length+" comparable listings",mileage:null,make:m.make,model:m.model};
+            band={average:at(0.5),below:at(0.25),above:at(0.75),low:kept[0],high:kept[kept.length-1],comps:kept.length,asOf,source:(yLabel?yLabel+" · every trim & mileage":"LotCheck market · "+kept.length+" listings"),mileage:null,make:m.make,model:m.model};
           }
         }
         if(alive){ setLadder(ld); setGauge(band||{insufficient:true}); setGLoad(false); }
@@ -13073,8 +13078,8 @@ function CrawlCoverage(){
               // min(all_in): only some trims carry all_in (the catalog populates it
               // unevenly), so that would skip the cheaper base and overstate the new price.
               const base=latest.slice().sort((a,b)=>Number(a.msrp)-Number(b.msrp))[0];
-              if(Number(base.allIn)>0){ const from=Number(base.allIn); g={basis:"allin",year:maxY,from,used:usedMed,gap:from-usedMed,pct:from>0?usedMed/from:null}; }
-              else { const from=Number(base.msrp); g={basis:"msrp",year:maxY,from,used:usedMed,floorGap:from-usedMed}; }
+              if(Number(base.allIn)>0){ const from=Number(base.allIn); g={basis:"allin",year:maxY,trim:base.trim,uy:yLabel,from,used:usedMed,gap:from-usedMed,pct:from>0?usedMed/from:null}; }
+              else { const from=Number(base.msrp); g={basis:"msrp",year:maxY,trim:base.trim,uy:yLabel,from,used:usedMed,floorGap:from-usedMed}; }
             }
           } else if(!cr.length){ g={none:"nocatalog"}; }
           if(alive) setMsrpGap(g);
@@ -13248,16 +13253,16 @@ function CrawlCoverage(){
                 <div style={{display:"flex",flexWrap:"wrap",gap:"14px 30px",alignItems:"center"}}>
                   <div style={{flex:"1 1 220px",minWidth:200}}>
                     <div style={{fontFamily:"'Archivo',system-ui,sans-serif",fontWeight:800,fontSize:19,color:T.text,letterSpacing:"-.01em",marginBottom:6}}>{selM.make} {selM.model}</div>
-                    <p style={{margin:0,fontSize:12.5,color:T.muted,lineHeight:1.5}}>What the typical used one asks against a brand-new {g.year} — the "is it worth buying used?" gap.</p>
+                    <p style={{margin:0,fontSize:12.5,color:T.muted,lineHeight:1.5}}>What the typical used one asks vs the manufacturer's price for a brand-new {g.year} {selM.model} — the "is it worth buying used?" gap. Same national price everywhere, no dealer or city.</p>
                   </div>
                   <div style={{flex:"2 1 340px",minWidth:300}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                      <span style={{fontSize:12,color:T.muted}}>New {g.year} · {g.basis==="allin"?"all-in":"MSRP"}</span>
+                      <span style={{fontSize:12,color:T.muted}}>New {g.year}{g.trim?" "+g.trim+" (base)":""} · {g.basis==="allin"?"all-in":"MSRP"}</span>
                       <span style={{fontFamily:mono,fontWeight:600,color:T.amber,fontVariantNumeric:"tabular-nums"}}>from {money(g.from)}</span>
                     </div>
                     <div style={{height:12,borderRadius:4,background:hexA(T.amber,.1),border:`1px solid ${hexA(T.amber,.35)}`,marginBottom:12}}/>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:5}}>
-                      <span style={{fontSize:12,color:T.muted}}>Used median · ±2yr</span>
+                      <span style={{fontSize:12,color:T.muted}}>Used {g.uy||""} median</span>
                       <span style={{fontFamily:mono,fontWeight:600,color:T.teal,fontVariantNumeric:"tabular-nums"}}>{money(g.used)}</span>
                     </div>
                     <div style={{height:12,borderRadius:4,background:hexA(T.teal,.08),overflow:"hidden"}}><div style={{height:"100%",width:`${Math.max(4,Math.min(100,g.from>0?g.used/g.from*100:100))}%`,background:`linear-gradient(90deg,${hexA(T.teal,.7)},${T.teal})`,borderRadius:4}}/></div>
