@@ -128,6 +128,23 @@ const DEALER_FEE_CEILING: Fee[] = [
   { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Cadillac",
     source: "GM Canada Build & Price disclaimer (cadillaccanada.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26",
     note: "Flag only ABOVE $699 (GM applies a lower default in-build)." },
+  // Held-list cleared 2026-08-26: verified verbatim at the official source.
+  { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Volvo",
+    source: "Volvo Car Canada (volvocars.com/en-ca/offers) — \"retailer administration fee (up to $699)\"", capturedOn: "2026-08-26",
+    note: "May vary by region and retailer." },
+  { component: "dealer_fee_ceiling", label: "dealer fees (up to $921)", amount: 921, applies: "always", scope: "brand", make: "Infiniti",
+    source: "Infiniti Canada (canada.infinitinews.com, 2025 QX60 pricing) — \"dealer fees (up to $921)\"", capturedOn: "2026-08-26",
+    note: "Premium division — NOT Nissan's $621. May vary by region and dealer." },
+  { component: "dealer_fee_ceiling", label: "Dealer/administrative fees of up to $799", amount: 799, applies: "always", scope: "brand", make: "Mitsubishi",
+    source: "Mitsubishi Canada Build & Price disclaimer (mitsubishi-motors.ca) — \"Dealer/administrative fees of up to $799\"", capturedOn: "2026-08-26" },
+  // GMC: GM's Build & Price is Akamai-blocked to every tool, so no GMC-specific
+  // capture was possible. GM's dealer-fee disclaimer is corporate-GENERAL ("up to
+  // $699 dealer fee"), verified verbatim on three sibling brands (Chevrolet, Buick,
+  // Cadillac) that run the identical GM B&P engine. Added on that deduction; flag
+  // only ABOVE $699. If GMC ever needs its own verbatim, it stays un-crawlable.
+  { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "GMC",
+    source: "GM Canada national B&P disclaimer — \"up to $699 dealer fee\" (verified on Chevrolet/Buick/Cadillac; GMC B&P Akamai-blocked from direct capture)", capturedOn: "2026-08-26",
+    note: "Inferred from GM's corporate-wide disclaimer, not a GMC-specific page. Flag only ABOVE $699." },
 ];
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────

@@ -37,6 +37,10 @@ All verified verbatim at the official source. Ceilings are national ("up to $X")
 | BMW | **$595** | "retailer administration fees (up to $595)" | bmw.ca (same BMW Group policy, verified via MINI) | DONE |
 | Buick | **$699** | "up to $699 dealer fee" | GM national B&P disclaimer (buick.ca) | DONE |
 | Cadillac | **$699** | "up to $699 dealer fee" | GM national B&P disclaimer (cadillaccanada.ca) | DONE |
+| Volvo | **$699** | "retailer administration fee (up to $699)" | volvocars.com/en-ca/offers (verified) | DONE |
+| Infiniti | **$921** | "dealer fees (up to $921)" (premium, ≠ Nissan) | canada.infinitinews.com (verified) | DONE |
+| Mitsubishi | **$799** | "Dealer/administrative fees of up to $799" | mitsubishi-motors.ca B&P (verified) | DONE |
+| GMC | **$699** | "up to $699 dealer fee" (GM corporate disclaimer) | GM national; GMC B&P Akamai-blocked, inferred from Chevy/Buick/Cadillac | DONE |
 
 ### Confirmed to publish NO ceiling (flag correctly does not fire)
 
@@ -45,18 +49,12 @@ fee is included but dealer-set/uncapped), **Mercedes-Benz** (mercedes-benz.ca
 special-offers MSRP disclaimer EXCLUDES dealer fees, no cap — the "$695" exists
 only in a model press release, not a durable published policy).
 
-### Held — agent-found verbatim, NOT yet in fee-schedule.ts (need a clean verify)
+### Held list — CLEARED (2026-08-26)
 
-Batch-2 agents shared one browser daemon and hit contention, so these official
-"up to $X" captures could not be personally re-verified (JS configurators / 403).
-Verbatim wording was reported; hold until confirmed at the source.
-
-| Make | Lead | Why held |
-|---|---|---|
-| Volvo | $699 "retailer administration fee (up to $699)" | volvocars.com/offers JS-gated; no family corroboration |
-| Mitsubishi | $799 "Dealer/administrative fees of up to $799" | configurator-only; no corroboration |
-| Infiniti | $921 "dealer fees (up to $921)" | infinitinews 403s headless; NOT Nissan's $621 (premium division is higher) |
-| GMC | likely $699 (GM national disclaimer) | batch-1 agent used a secondary site; no GM-disclaimer verbatim captured yet |
+All four moved to Captured above. Volvo/Infiniti/Mitsubishi verified verbatim via
+a direct `web_fetch_exa` fetch (the gstack browser's headed mode was crashing and
+the sites bot-wall headless Chromium). GMC's B&P is Akamai-blocked to every tool,
+so it was added on GM's corporate-general disclaimer (verified on 3 sibling brands).
 
 ### Excluded (not a pure dealer fee)
 

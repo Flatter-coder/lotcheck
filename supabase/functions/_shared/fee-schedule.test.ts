@@ -53,6 +53,12 @@ check("MINI dealer-fee ceiling is $595",       dealerFeeCeiling("MINI")?.amount,
 check("BMW dealer-fee ceiling is $595",        dealerFeeCeiling("BMW")?.amount, 595);
 check("Buick dealer-fee ceiling is $699",      dealerFeeCeiling("Buick")?.amount, 699);
 check("Cadillac dealer-fee ceiling is $699",   dealerFeeCeiling("Cadillac")?.amount, 699);
+// Held list cleared (2026-08-26): Volvo/Infiniti/Mitsubishi verified verbatim via
+// exa fetch; GMC by GM corporate-disclaimer deduction (Akamai-blocked directly).
+check("Volvo dealer-fee ceiling is $699",      dealerFeeCeiling("Volvo")?.amount, 699);
+check("Infiniti dealer-fee ceiling is $921 (premium, not Nissan's $621)", dealerFeeCeiling("Infiniti")?.amount, 921);
+check("Mitsubishi dealer-fee ceiling is $799", dealerFeeCeiling("Mitsubishi")?.amount, 799);
+check("GMC dealer-fee ceiling is $699",        dealerFeeCeiling("GMC")?.amount, 699);
 ok("ceilings are national — Hyundai resolves in ON as well as AB", dealerFeeCeiling("Hyundai", "ON")?.amount === 799);
 check("Ford publishes no ceiling -> null (confirmed, not a gap)", dealerFeeCeiling("Ford"), null);
 ok("make/model lookups are case-insensitive", freightFor("toyota", "rav4")?.amount === 1930);
