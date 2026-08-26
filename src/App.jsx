@@ -9950,8 +9950,9 @@ function VerifyPage(){
       <nav style={{position:"sticky",top:0,zIndex:300,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:14}}>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={45}/>LotCheck</a>
-          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",minWidth:0,overflowX:"auto"}}>
-            {NAV.map(([label,href])=>{const active=label==="Verify";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          <div className="vnav-links" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {navPrimary(NAV).map(([label,href])=>{const active=label==="Verify report";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+            <NavMore items={navMoreItems(NAV)} c={T.link} h={T.cyan} bg={vdark?"#141326":"#ffffff"} bd={T.navBorder}/>
           </div>
           <button onClick={toggleVTheme} aria-label={vdark?"Switch to bright mode":"Switch to dark mode"} title={vdark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{vdark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" className="vnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap",flexShrink:0}}>Analyze my quote</a>
@@ -11323,7 +11324,7 @@ function QuoteCheckPage(){
                 ["/#what","What LotCheck does"],
                 ["/msrp-alerts","MSRP Notifier"],
                 ["/verify","Verify report"],
-              ].map(([href,label])=>(
+              ].filter(([href])=>!NAV_MORE_HREFS.has(href)).map(([href,label])=>(
                 <a key={href} href={href}
                   style={{color:C.inkSoft,textDecoration:"none",fontWeight:800,fontSize:13.5,padding:"7px 10px",borderRadius:9,whiteSpace:"nowrap"}}
                   onMouseEnter={e=>{e.currentTarget.style.background=C.paper2;e.currentTarget.style.color=C.ink;}}
@@ -11332,6 +11333,7 @@ function QuoteCheckPage(){
                 </a>
               ))}
             </div>
+            <NavMore items={[["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"]]} c={C.inkSoft} h={C.ink} bg={C.card} bd={C.line}/>
             <div className="qc-topbar-controls" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
             {lastAttemptType&&(
               <button onClick={handleRefresh} disabled={status==="analyzing"} aria-label="Re-run this report"
@@ -12679,7 +12681,8 @@ function TrustPage(){
         <div style={{maxWidth:1120,margin:"0 auto",padding:"11px clamp(16px,3vw,28px)",display:"flex",alignItems:"center",gap:22}}>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:"#fff",fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
           <div className="tnav-links" style={{display:"flex",gap:19,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
-            {NAV.map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
+            {navPrimary(NAV).map(([label,href])=><a key={label} href={href} style={{fontSize:".9rem",fontWeight:600,color:"#b6b1d6",textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>)}
+            <NavMore items={navMoreItems(NAV)} c="#b6b1d6" h="#ffffff" bg="#161327" bd="rgba(255,255,255,.12)"/>
           </div>
           <a href="/quote-check" className="tnav-cta" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
@@ -12806,6 +12809,24 @@ const MAL_CITIES=(()=>{const c=[
   "Taber","Strathmore","Innisfail","Westlock","Barrhead","St. Paul","Vermilion","Claresholm","Pincher Creek",
   "Cardston","Provost",
 ];return c.map(city=>({label:`${city}, AB`,city,province:"AB"}));})();
+// The homepage-explainer tabs fold into a "More" dropdown so the top nav fits one
+// desktop row instead of overflowing/scrolling (tabs-always-on-top, but tidy).
+const NAV_MORE_HREFS=new Set(["/#how","/#pipeline","/#report","/#what"]);
+const navPrimary=arr=>arr.filter(([label,href])=>!NAV_MORE_HREFS.has(href));
+const navMoreItems=arr=>arr.filter(([label,href])=>NAV_MORE_HREFS.has(href));
+function NavMore({items,c,h,bg,bd}){
+  const [open,setOpen]=useState(false); const ref=useRef(null);
+  useEffect(()=>{ if(!open) return; const d=e=>{ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); }; const k=e=>{ if(e.key==="Escape") setOpen(false); }; document.addEventListener("mousedown",d); document.addEventListener("keydown",k); return()=>{ document.removeEventListener("mousedown",d); document.removeEventListener("keydown",k); }; },[open]);
+  if(!items||!items.length) return null;
+  return (
+    <div ref={ref} style={{position:"relative",flexShrink:0}}>
+      <button type="button" onClick={()=>setOpen(o=>!o)} aria-haspopup="menu" aria-expanded={open} style={{display:"inline-flex",alignItems:"center",gap:5,background:"transparent",border:"none",cursor:"pointer",color:c,fontWeight:600,fontSize:".9rem",fontFamily:"inherit",padding:"6px 2px",whiteSpace:"nowrap"}}>More <span aria-hidden="true" style={{fontSize:9,opacity:.7,display:"inline-block",transform:open?"rotate(180deg)":"none",transition:"transform .15s"}}>▾</span></button>
+      {open&&<div role="menu" style={{position:"absolute",top:"calc(100% + 8px)",right:0,minWidth:190,background:bg,border:`1px solid ${bd}`,borderRadius:12,boxShadow:"0 20px 44px -20px rgba(0,0,0,.55)",padding:6,zIndex:600,display:"flex",flexDirection:"column"}}>
+        {items.map(([label,href])=><a key={href} role="menuitem" href={href} onClick={()=>setOpen(false)} style={{color:c,textDecoration:"none",fontWeight:600,fontSize:".9rem",padding:"8px 12px",borderRadius:8,whiteSpace:"nowrap"}} onMouseEnter={e=>{e.currentTarget.style.color=h;}} onMouseLeave={e=>{e.currentTarget.style.color=c;}}>{label}</a>)}
+      </div>}
+    </div>
+  );
+}
 const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
 
 function MsrpAlertsPage(){
@@ -12932,9 +12953,10 @@ function MsrpAlertsPage(){
       <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
-          <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
-            {MAL_NAV.map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {navPrimary(MAL_NAV).map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
+          <NavMore items={navMoreItems(MAL_NAV)} c={T.link} h={T.cyan} bg={dark?"#141a2e":"#ffffff"} bd={T.navBorder}/>
           <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
         </div>
@@ -13155,9 +13177,10 @@ function CrawlCoverage(){
         <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
           <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:mono,flexShrink:0}}>‹</button>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.text,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={42}/>LotCheck</a>
-          <div className="crawl-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap",overflowX:"auto"}}>
-            {MAL_NAV.map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+          <div className="crawl-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
+            {navPrimary(MAL_NAV).map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
+          <NavMore items={navMoreItems(MAL_NAV)} c={T.muted} h={T.amber} bg={T.panel} bd={T.hair}/>
           <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap",flexShrink:0}}>Analyze my quote</a>
         </div>
