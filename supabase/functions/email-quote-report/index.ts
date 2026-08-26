@@ -448,7 +448,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     // Caution ONLY when asking above the whole local range (a watch-out), never
     // for a below-range good deal or a missing price -- matches the 10-point line.
     const aboveRange = ask > 0 && ask > high;
-    const pos = delta === 0 ? "at the local median" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local median`;
+    const pos = delta === 0 ? "at the local middle value" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local middle value`;
     if (median && low && high) {
       const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
       const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
@@ -460,9 +460,9 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
           `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
           `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
         `</div>` +
-        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Median ${money(median)}</span><span>High ${money(high)}</span></div>`;
+        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Middle value ${money(median)}</span><span>High ${money(high)}</span></div>`;
       deck.push({ label: "Used market value", tone: aboveRange ? "flag" : "muted", glow: false, body:
-        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market median ${money(median)}`}</div>` +
+        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market middle value ${money(median)}`}</div>` +
         band +
         `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
     }
@@ -1225,9 +1225,9 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     if (med && lo && hi) {
       need(72);
       kicker("USED MARKET VALUE");
-      T(ask ? `${m(ask)} - ${d === 0 ? "at the local median" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local median"}` : `Market median ${m(med)}`,
+      T(ask ? `${m(ask)} - ${d === 0 ? "at the local middle value" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local middle value"}` : `Market middle value ${m(med)}`,
         { size: 14, font: serifB, color: aboveRange ? CORAL : INK }); y -= 19;
-      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, median ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
+      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, middle value ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
       advance(2);
       para("Asking prices read from dealers' own listings, not confirmed sales - this is the market, not the dealer's trade-in number.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
       rule();

@@ -138,6 +138,7 @@ export interface CompRow { price: number; odometerKm?: number | null; trim?: str
 export interface Band {
   n: number; median: number; p25: number; p75: number; low: number; high: number;
   kmBasis: boolean;       // true = band computed within a mileage window of the subject
+  trimBasis: boolean;     // true = band narrowed to the subject's trim (like-for-like)
   trimMatches: number;    // how many of the kept comps share the subject's trim
   asOf: string | null;    // most recent last_seen_on across the kept comps
   insufficient?: boolean; // true = below the comp floor, DO NOT show a number
@@ -151,33 +152,47 @@ export function computeBand(rows: CompRow[], opts: BandOpts = {}): Band {
   const kmBandPct = opts.kmBandPct ?? 0.30;   // used cars: comps within +/-30% mileage
   const lowerMult = opts.lowerMult ?? 0.4;    // drop listings below 0.4x the raw median
   const upperMult = opts.upperMult ?? 2.0;    // and above 2.0x — junk/bundle/typo guard
-  const empty: Band = { n: 0, median: 0, p25: 0, p75: 0, low: 0, high: 0, kmBasis: false, trimMatches: 0, asOf: null, insufficient: true };
+  const empty: Band = { n: 0, median: 0, p25: 0, p75: 0, low: 0, high: 0, kmBasis: false, trimBasis: false, trimMatches: 0, asOf: null, insufficient: true };
 
   const priced = (rows || []).filter((r) => r && Number.isFinite(Number(r.price)) && Number(r.price) > 0);
   if (!priced.length) return empty;
 
-  // Used cars: prefer a mileage-matched window, but only if it's dense enough to
-  // stand on its own. Otherwise fall back to the full model set (kmBasis=false),
-  // never show a 2-comp mileage band as if it were the market.
+  // Narrow to the subject's TRIM first — the biggest driver of the confusing
+  // all-trims spread (a base and a loaded one are different cars, so a $29k base
+  // and a $96k loaded one bracketing "the same truck" reads as broken). First-word
+  // normalized so "XLT" and "XLT SuperCrew" group; generic tokens ("Other/Don't
+  // Know") never match. Only when >= the floor of same-trim comps — otherwise fall
+  // back to all trims rather than show a thin same-trim band.
+  const normTrim = (t: unknown): string => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim().split(/\s+/)[0] || "";
+  const GENERIC = new Set(["other", "unknown", "na", "don", "n", "base", ""]);
   let selected = priced;
+  let trimBasis = false;
+  const st = normTrim(opts.trim);
+  if (st && !GENERIC.has(st)) {
+    const tset = priced.filter((r) => normTrim(r.trim) === st);
+    if (tset.length >= minComps) { selected = tset; trimBasis = true; }
+  }
+
+  // Then a mileage-matched window WITHIN that set, if dense enough — never a
+  // 2-comp mileage band as if it were the market.
   let kmBasis = false;
   if (opts.condition === "used" && opts.odometerKm != null && Number.isFinite(Number(opts.odometerKm))) {
     const km = Number(opts.odometerKm);
     const lo = km * (1 - kmBandPct), hi = km * (1 + kmBandPct);
-    const band = priced.filter((r) => r.odometerKm != null && Number(r.odometerKm) >= lo && Number(r.odometerKm) <= hi);
+    const band = selected.filter((r) => r.odometerKm != null && Number(r.odometerKm) >= lo && Number(r.odometerKm) <= hi);
     if (band.length >= minComps) { selected = band; kmBasis = true; }
   }
 
   const asOf = selected.reduce<string | null>((mx, r) => (r.asOf && (!mx || r.asOf > mx) ? r.asOf : mx), null);
-  const trimMatches = opts.trim ? selected.filter((r) => r.trim && String(r.trim).toLowerCase() === String(opts.trim).toLowerCase()).length : 0;
+  const trimMatches = st ? selected.filter((r) => normTrim(r.trim) === st).length : 0;
 
   const prices0 = selected.map((r) => Number(r.price));
-  if (prices0.length < minComps) return { ...empty, n: prices0.length, kmBasis, trimMatches, asOf };
+  if (prices0.length < minComps) return { ...empty, n: prices0.length, kmBasis, trimBasis, trimMatches, asOf };
 
   // Median-relative outlier trim, then recompute the band on what survives.
   const m0 = median(prices0);
   const kept = prices0.filter((p) => p >= m0 * lowerMult && p <= m0 * upperMult);
-  if (kept.length < minComps) return { ...empty, n: kept.length, kmBasis, trimMatches, asOf };
+  if (kept.length < minComps) return { ...empty, n: kept.length, kmBasis, trimBasis, trimMatches, asOf };
 
   return {
     n: kept.length,
@@ -186,7 +201,7 @@ export function computeBand(rows: CompRow[], opts: BandOpts = {}): Band {
     p75: percentile(kept, 75),
     low: Math.min(...kept),
     high: Math.max(...kept),
-    kmBasis, trimMatches, asOf,
+    kmBasis, trimBasis, trimMatches, asOf,
     insufficient: false,
   };
 }
@@ -229,7 +244,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       low: band.low,
       high: band.high,
       mileage: mileage ?? null,
-      source: `LotCheck market · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`,
+      source: `LotCheck market · ${band.trimBasis && band.kmBasis ? "same trim, similar mileage" : band.trimBasis ? "same trim" : band.kmBasis ? "similar mileage" : "all trims"} · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`,
       comps: band.n,
       asOf: band.asOf,
       confidence: band.n >= COMP_FLOOR ? "high" : "low",

@@ -80,6 +80,42 @@ const trimSet: CompRow[] = [
 const withTrim = computeBand(trimSet, { minComps: 5, trim: "gt" });
 check(withTrim.trimMatches === 4, "trim: counts case-insensitive same-trim comps", `trimMatches=${withTrim.trimMatches}`);
 
+// --- trim narrowing (like-for-like band) -----------------------------------
+// Subject is an XLT: five XLT comps ~33k plus three loaded Lariats ~60k. With
+// >=5 same-trim comps, the band narrows to XLT so a base/loaded mix never sets
+// a $33k-$60k spread on "the same truck".
+const trimNarrow: CompRow[] = [
+  { price: 32000, trim: "XLT" }, { price: 33000, trim: "XLT" }, { price: 34000, trim: "XLT SuperCrew" },
+  { price: 33500, trim: "XLT" }, { price: 32500, trim: "XLT" },
+  { price: 58000, trim: "Lariat" }, { price: 61000, trim: "Lariat" }, { price: 60000, trim: "Lariat" },
+];
+const narrowed = computeBand(trimNarrow, { minComps: 5, trim: "XLT" });
+check(narrowed.trimBasis === true, "trim-narrow: >=5 same-trim comps -> band is trim-specific");
+check(narrowed.n === 5 && narrowed.high <= 34000, "trim-narrow: loaded Lariats excluded from an XLT band", `n=${narrowed.n} high=${narrowed.high}`);
+
+// Subject is a Lariat but only 3 Lariats -> fall back to all trims, never a thin
+// same-trim band.
+const trimThin: CompRow[] = [
+  { price: 32000, trim: "XLT" }, { price: 33000, trim: "XLT" }, { price: 34000, trim: "XLT" }, { price: 33500, trim: "XLT" }, { price: 32500, trim: "XLT" },
+  { price: 58000, trim: "Lariat" }, { price: 61000, trim: "Lariat" }, { price: 60000, trim: "Lariat" },
+];
+const thinFell = computeBand(trimThin, { minComps: 5, trim: "Lariat" });
+check(thinFell.trimBasis === false, "trim-narrow: <5 same-trim falls back to all trims");
+check(thinFell.insufficient !== true && thinFell.n === 8, "trim-narrow: fallback bands the full set", `n=${thinFell.n}`);
+
+// A generic subject trim ("Other/Don't Know") never narrows.
+check(computeBand(trimNarrow, { minComps: 5, trim: "Other/Don't Know" }).trimBasis === false, "trim-narrow: generic subject trim does not narrow");
+
+// Trim + mileage compose: XLTs, tight mileage subset dense enough -> both bases.
+const trimKm: CompRow[] = [
+  { price: 33000, trim: "XLT", odometerKm: 42000 }, { price: 33500, trim: "XLT", odometerKm: 45000 },
+  { price: 32500, trim: "XLT", odometerKm: 40000 }, { price: 34000, trim: "XLT", odometerKm: 47000 },
+  { price: 33200, trim: "XLT", odometerKm: 44000 }, { price: 28000, trim: "XLT", odometerKm: 130000 },
+  { price: 27500, trim: "XLT", odometerKm: 145000 },
+];
+const both = computeBand(trimKm, { minComps: 5, trim: "XLT", condition: "used", odometerKm: 43000, kmBandPct: 0.30 });
+check(both.trimBasis === true && both.kmBasis === true, "trim+km: narrows on trim AND mileage when both are dense", `trim=${both.trimBasis} km=${both.kmBasis} n=${both.n}`);
+
 // --- empty / garbage -------------------------------------------------------
 check(computeBand([], { minComps: 5 }).insufficient === true, "empty: no rows is insufficient");
 check(computeBand([{ price: 0 }, { price: -5 }, { price: NaN as unknown as number }], { minComps: 1 }).insufficient === true, "garbage: non-positive/NaN prices are dropped");
