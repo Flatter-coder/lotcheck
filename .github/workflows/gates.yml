@@ -92,6 +92,14 @@ jobs:
       # provokes the rate limiting in the first place.
       - name: Page read (one shared source per scan, render as second source)
         run: npm run test:page-read
+      # We advertise a 10-point verification, so the ten advertised and the ten
+      # delivered must be ONE list. They were not: the landing page promised a
+      # "leverage score" (the verdict computed FROM the points, never one of
+      # them) and never mentioned "Financing APR", which the report delivers.
+      # check:copy pins how often the phrase appears; a regex cannot see an
+      # array's length, so this reads the arrays.
+      - name: Ten points (advertised == delivered, extras never counted as points)
+        run: npm run check:points
       # The report-email endpoint is unauthenticated: its ONLY proof that a real
       # scan happened is the ECDSA signature gate. A regression there reopens an
       # open mail relay on our own DKIM-signed domain, so it blocks like a

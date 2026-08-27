@@ -611,6 +611,7 @@ import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXE
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
+import { POINT_TITLES } from "../_shared/report-points.js";
 
 // A capture the server has PROVEN is the sealed original: its SHA-256 was
 // recomputed here over the actual bytes AND that hash sits inside the report's
@@ -1148,9 +1149,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // A hardcoded 10 over a longer list is the same self-contradiction the app
   // shipped: "The 10-point verification" printed above 14 tiles.
   const POINTS = tenPoints(a);
-  kicker(`${POINTS.length}-POINT AUDIT`);
+  // TEN, THEN THE EXTRAS -- under their own heading.
+  //
+  // This printed `${POINTS.length}-POINT AUDIT`, which is derived and honest
+  // about the count but calls an "MSRP per trim" card a verification point and
+  // disagrees with the ten we advertise. The ten are a defined core; everything
+  // a particular listing additionally supported is real, is printed in full
+  // (Vic: "yes add them to pdf file all 14"), and is named for what it is.
+  // Same split as the on-screen heatmap, from the same canonical list.
+  const CORE = POINTS.slice(0, POINT_TITLES.length);
+  const EXTRA = POINTS.slice(POINT_TITLES.length);
+  kicker(`${CORE.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  for (const p of POINTS) {
+  const renderPoint = (p: { t: string; v: string; tone: string }) => {
     // THE LABEL IS ALWAYS LEGIBLE. It used to render in SOFT whenever the tone
     // was muted, so a muted row arrived as faded title + faint value + soft
     // body -- the whole row receding at once. Vic caught it on a PDF where
@@ -1165,6 +1176,11 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // indented under its point in small italic so the audit stays scannable.
     const ex = pointExplain(p.t, a);
     if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, x: M + 10, maxW: W - 10 }); advance(4); }
+  };
+  for (const p of CORE) renderPoint(p);
+  if (EXTRA.length) {
+    kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
+    for (const p of EXTRA) renderPoint(p);
   }
   rule();
 

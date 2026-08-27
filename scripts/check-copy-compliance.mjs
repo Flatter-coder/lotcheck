@@ -145,25 +145,34 @@ const RULES = [
     condition: "true only while tenPoints renders all 10 with backed results and no dead placeholders",
     why: "We advertise a 10-point verification, so ten must run and ten must deliver.",
     patterns: [/\b10[-\s]point\b/i],
-    // 9 in public/index.html (incl. the meta description), 1 each in
-    // alberta.html and live-price-index.html, 5 in App.jsx (4 report surfaces —
-    // scroll, heatmap, sidebar, flipbook, PDF, email — plus the "10-point lane"
-    // link now living in the quote-check nav's "More" menu). The 10-point
-    // verification itself is unchanged: ten run, ten deliver.
-    // 2026-08-27 — THE CLAIM IS NOW A FLOOR, NOT AN EXACT COUNT. Vic:
-    // "always good to over deliver ... minimum 10 points we will keep
-    // increasing". Five occurrences were removed because they were
-    // ARITHMETICALLY FALSE, not because the claim was softened:
-    //   - 3 in public/index.html reframed to "10+ point" (a floor)
-    //   - App.jsx's heatmap heading now DERIVES the count (it read
-    //     "The 10-point verification" above a 14-tile grid)
-    //   - the PDF kicker now prints the real count (it was hardcoded 10
-    //     while the list grew past ten)
-    // RE-CONFIRMED before changing this number: tenPoints() pushes exactly
-    // ten DISTINCT points before any conditional extra, every one via an
-    // if/else so precisely one branch always fires. The floor therefore
-    // cannot be undershot, which is the only thing that makes a "minimum 10"
-    // claim safe. See [[ten-point-claim-policy]].
+    // ── THE ACTUAL INVENTORY, enumerated 2026-08-27 ──────────────────────────
+    // The note that stood here was WRONG about what it counted, which is worse
+    // than no note: it said the App.jsx hits were "4 report surfaces — scroll,
+    // heatmap, sidebar, flipbook, PDF, email". Not one of them is. All four are
+    // navigation links to /#pipeline. Whoever re-confirmed this rule on the next
+    // count change would have believed four report surfaces had been checked
+    // when none was ever in the count.
+    //
+    //   public/index.html          6  nav link ×2, "10-point pipeline",
+    //                                 the section aria-label, the <h2>, the lede
+    //   public/alberta.html        1  nav link
+    //   public/live-price-index.html 1  nav link
+    //   src/App.jsx                4  nav links only (comments are not counted)
+    //                              ─
+    //                             12
+    //
+    // So this rule polices the ADVERTISEMENT, and only the advertisement.
+    //
+    // ── WHAT THIS RULE CANNOT DO ────────────────────────────────────────────
+    // A regex occurrence count cannot observe an array's length. This rule
+    // therefore stayed green across every commit that grew the on-screen grid
+    // from 10 tiles to 16 — it was counting the CLAIM, never the thing claimed.
+    // The structural assertion lives in `npm run check:points`, which reads the
+    // arrays: App.jsx's ten pushes, tenPoints()'s ten, and the ten named in
+    // public/index.html must be the same ten in the same order, with any extras
+    // rendered under their own heading and never numbered as points.
+    // Keep BOTH: this one catches a NEW use of the claim, that one catches the
+    // claim drifting from the product. See [[ten-point-claim-policy]].
     expected: 12,
   },
 ];
