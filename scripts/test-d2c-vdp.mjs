@@ -55,6 +55,19 @@ const TRULY_EMPTY = {
 // 4. No vehicle-identifying data at all (a non-VDP page loading the same script).
 const NO_VEHICLE = { settings: {} };
 
+// 5. A GATED USED unit. The Google Vehicle Ads corroboration the report copy
+// cites is a NEW-vehicle requirement (Google mandates a real, all-in price on
+// those). On used/CPO the premise does not hold, so the extractor must NOT
+// authorise that sentence -- otherwise the report asserts a corroboration
+// nothing checked (claims-must-stay-backed).
+const GATED_USED = {
+  niv: "2T3H1RFV8LC123456", sn: "U778", make: { basic: "Toyota" }, model: { basic: "RAV4" },
+  version: { basic: "XLE AWD" }, year: "2022", km: "61000", isNew: 0, isDemo: 0, isCertified: true,
+  addresses: { dealer: "Example Toyota", phone: "" },
+  prices: { price: "", fullPrice: "", originalPriceWithoutCustomFees: "$38,995", priceWithoutCustomFees: "$38,995",
+    messages: { message: "Call for pricing", fullPrice: "", currentPrice: "", rebatePrice: "" } },
+};
+
 const CASES = [
   ["real Okotoks Toyota shape -- gated display, real price recovered",
     page(REAL),
@@ -68,6 +81,12 @@ const CASES = [
   ["genuinely empty price fields -- quotedPrice null, priceGated false (nothing to tag)",
     page(TRULY_EMPTY),
     { quotedPrice: null, priceGated: false }],
+  ["gated NEW unit may cite the Google vehicle-ads corroboration",
+    page(REAL),
+    { priceGated: true, googleAdsCorroborated: true }],
+  ["gated USED/CPO unit recovers the price but must NOT cite Google vehicle ads",
+    page(GATED_USED),
+    { quotedPrice: 38995, priceGated: true, googleAdsCorroborated: false, condition: "used" }],
   ["no vehicle data -> null", page(NO_VEHICLE), null],
   ["no __vdpJSON at all -> null", "<html><body>nothing here</body></html>", null],
   ["malformed JSON after the marker doesn't throw", "<script>window.__vdpJSON = {oops not json</script>", null],
@@ -106,6 +125,12 @@ const FILL_CASES = [
   ["existing fields are left alone, only blanks fill in",
     { vin: "1FTEW1EP0KKD00000", vehicle: "Real Vehicle String" }, dvReal,
     { vin: "1FTEW1EP0KKD00000", vehicle: "Real Vehicle String" }],
+  ["a gated NEW unit sets the google-backed flag on the analysis",
+    {}, dvReal,
+    { priceGatedButRecovered: true, priceGateGoogleAdsBacked: true }],
+  ["a gated USED unit fills the price but leaves the google-backed flag FALSE",
+    {}, extractD2cVdpVehicle(page(GATED_USED)),
+    { quotedPrice: 38995, priceGatedButRecovered: true, priceGateGoogleAdsBacked: false }],
   ["null dv is a no-op", { quotedPrice: 41000 }, null, { quotedPrice: 41000 }],
 ];
 for (const [label, parsed, dv, want] of FILL_CASES) {

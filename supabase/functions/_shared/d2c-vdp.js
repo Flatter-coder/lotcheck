@@ -96,6 +96,16 @@ export function extractD2cVdpVehicle(html) {
   // memory) has nothing for this extractor to add.
   const gateMessage = str(p.messages && p.messages.message);
   const priceGated = !!(quotedPrice && gateMessage && GATING_PHRASES.test(gateMessage));
+  // Whether the Google Vehicle Ads corroboration may be CITED for this unit.
+  // Google requires a real price (and, in Canada, an all-in price type) on
+  // NEW-vehicle listings -- that requirement is what makes "it's public
+  // anyway" a backed statement rather than an assumption. It does NOT extend
+  // to used/CPO inventory, which a dealer can advertise without a price feed
+  // at all. The report copy asserted it unconditionally, so on a gated USED
+  // D2C unit it stated a corroboration nothing had checked
+  // (claims-must-stay-backed). Surfaces render the narrower sentence when
+  // this is false.
+  const googleAdsCorroborated = priceGated && !!v.isNew;
 
   const dealerName = str(v.addresses && v.addresses.dealer);
   const dealerPhone = str(v.addresses && v.addresses.phone);
@@ -115,6 +125,7 @@ export function extractD2cVdpVehicle(html) {
     quotedPrice,
     priceGated,
     priceGateMessage: priceGated ? gateMessage : null,
+    googleAdsCorroborated,
     drivetrain: str(v.drivetrain),
     dealerName,
     dealerCity: null, // not carried in this blob; the page's own address block/city is read elsewhere
@@ -135,6 +146,7 @@ export function fillFromD2cVdp(parsed, dv) {
     if (dv.priceGated) {
       parsed.priceGatedButRecovered = true;
       parsed.priceGateMessage = dv.priceGateMessage;
+      parsed.priceGateGoogleAdsBacked = !!dv.googleAdsCorroborated;
     }
   }
   if (!parsed.vin && dv.vin) parsed.vin = dv.vin;

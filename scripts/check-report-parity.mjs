@@ -124,6 +124,29 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-08-22 after a post-ship audit found this shipped to exactly
+    // TWO surfaces (ReportViews + the emailed PDF) and was missing from the
+    // DEFAULT scroll view, the flipbook, /verify and the share link -- the
+    // report-features-all-views rule broken on the single most valuable fact a
+    // price-gated listing produces. Pinned per-surface so a future edit that
+    // drops one says WHICH one.
+    field: "gated-price recovery note (D2C 'Call for pricing')",
+    app: {
+      "shared note helper":        "function gatedPriceNote(a){",
+      "heatmap / sidebar":         "const gatedRecoveredNote = gatedPriceNote(a);",
+      "scroll view card":          "const gatedNoteScroll=gatedPriceNote(analysis);",
+      "flipbook deal page":        "{gatedPriceNote(a)&&<div className=\"rfb-note\"",
+      "share link encode":         "pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
+      "share link decode":         "priceGatedButRecovered:c.pg?true:undefined",
+      "signed verify payload":     "gate:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
+      "verify page row":           'o.gate && o.price?.asking',
+    },
+    email: {
+      "emailed HTML deck":  "const gatedPriceNoteHtml =",
+      "emailed PDF":        "const gatedNote = (qp && a.priceGatedButRecovered)",
+    },
+  },
+  {
     field: "trimRange (MSRP per trim, standing req 2026-08-19)",
     app: {
       "shared hook + cache":        "function useTrimRange",

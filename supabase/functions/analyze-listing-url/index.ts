@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27b";  // convertus-vms.js refactored to export extractConvertusVmsRoot (extractConvertusVmsVehicle byte-identical, 16/16) — analyze output unchanged, but the cache-ver gate watches this file, so bump to satisfy it and refresh the cache once
+const CACHE_VER = "2026-08-27c";  // post-ship audit: structured-data gap-fill now runs BEFORE priceVerified + leverage (a recovered D2C price was arriving too late to count), carries its own quotedPriceSource, and the gated-price disclosure reaches every surface
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -723,14 +723,22 @@ function computeLeverageScore(analysis: any): void {
   // "starting_at" floor (base trim / adjacent MY) says nothing about THIS
   // unit's sticker — an option-loaded car above the base floor isn't "over
   // MSRP", so it must not add leverage or a basis line.
+  // NAME THE BASIS THE FIGURE IS ON. 63fa164 correctly switched this function
+  // to compare against claim.reference (the all-in figure when the asking
+  // price is an AMVIC all-in advertised price), but kept calling it "MSRP" --
+  // while every on-screen card still prints its own delta against the
+  // ex-freight MSRP. One report, two different "over MSRP" dollar figures,
+  // neither labelled with which basis it used. The number here is right; the
+  // word for it was not.
+  const refLabel = claim.comparedAgainst === "all_in" ? "all-in MSRP" : "MSRP";
   if (msrp && quoted && analysis.msrpBasis === "exact") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
-      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} MSRP`);
+      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} ${refLabel}`);
     } else if (deltaPct < -0.02) {
       score -= 1.0;
-      basis.push(`already priced below MSRP`);
+      basis.push(`already priced below ${refLabel}`);
     }
   } else if (msrp && quoted && analysis.msrpBasis === "starting_at") {
     // trim-match.js's priceImplausible() already downgraded this from "exact"
@@ -3101,23 +3109,38 @@ Deno.serve(async (req: Request) => {
         vehicle: [blob.year, blob.make, blob.model, blob.trim].filter(Boolean).join(" ") || null,
         odometerKm: blob.odometerKm, vehicleCondition: blob.condition,
         dealerName: blob.dealerName, dealerCity: blob.dealerCity ?? null,
+        // WHICH platform's blob this price came from. Without it the gap-fill
+        // below could copy the NUMBER but not its provenance, leaving
+        // quotedPriceSource unset -> priceVerified false -> every surface
+        // printing "PRICE UNVERIFIED" beside a price we read from the dealer's
+        // own machine-readable data. That is exactly the bug the Convertus
+        // fix closed earlier the same day; the D2C wiring reintroduced it by
+        // never calling fillFromD2cVdp on this path at all.
+        quotedPriceSource: Number(blob.quotedPrice) > 0 ? (cv ? "convertus_vms" : "d2c_vdp") : null,
         // Only D2C's extractor sets these (a real "the page says X but the
         // page's own data says Y" tell, not a guess -- see d2c-vdp.js).
         priceGatedButRecovered: blob.priceGated || null, priceGateMessage: blob.priceGateMessage || null,
+        priceGateGoogleAdsBacked: blob.googleAdsCorroborated || null,
       } : null;
-      if (!blobFacts) return jl;
+      if (!blobFacts) return jl ? { ...jl, quotedPriceSource: Number(jl.quotedPrice) > 0 ? "structured_data" : null } : jl;
       if (!jl) return blobFacts;
+      const jlPriceWins = Number(jl.quotedPrice) > 0;
       return {
         ...jl,
-        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : blobFacts.quotedPrice,
+        quotedPrice: jlPriceWins ? jl.quotedPrice : blobFacts.quotedPrice,
+        // The source must follow whichever price actually won above.
+        quotedPriceSource: jlPriceWins ? "structured_data" : blobFacts.quotedPriceSource,
         msrp: Number(jl.msrp) > 0 ? jl.msrp : blobFacts.msrp,
         vin: jl.vin || blobFacts.vin,
         odometerKm: jl.odometerKm ?? blobFacts.odometerKm,
         vehicleCondition: jl.vehicleCondition || blobFacts.vehicleCondition,
         dealerName: jl.dealerName || blobFacts.dealerName,
         dealerCity: jl.dealerCity || blobFacts.dealerCity,
-        priceGatedButRecovered: blobFacts.priceGatedButRecovered,
-        priceGateMessage: blobFacts.priceGateMessage,
+        // Only meaningful when the BLOB's price is the one that won -- a
+        // JSON-LD price was never gated, so the tell would be a false claim.
+        priceGatedButRecovered: jlPriceWins ? null : blobFacts.priceGatedButRecovered,
+        priceGateMessage: jlPriceWins ? null : blobFacts.priceGateMessage,
+        priceGateGoogleAdsBacked: jlPriceWins ? null : blobFacts.priceGateGoogleAdsBacked,
       };
     }).catch(() => null);
 
@@ -3845,6 +3868,69 @@ Deno.serve(async (req: Request) => {
       } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
     }
 
+    // Gap-fill from the structured-data read: the scrape sometimes lands the
+    // vehicle but misses the price or VIN that schema.org (or a platform's own
+    // embedded vehicle-data JSON, e.g. Convertus vmsData / D2C __vdpJSON)
+    // states outright. Never overwrites a value the scrape already found.
+    //
+    // MUST RUN BEFORE priceVerified AND before the leverage recompute below.
+    // It used to sit ~40 lines further down, AFTER both -- so a price that
+    // only this gap-fill could recover (the entire point of the D2C work)
+    // arrived too late to be counted: priceVerified had already been computed
+    // off an empty quotedPriceSource and stuck at false, and the leverage
+    // score had already been computed with no price at all, printing "No
+    // pricing red flags" on a report that then displayed a large over-MSRP
+    // gap. Same ordering-vs-derived-value class as the computeLeverageScore /
+    // allInPricing bug fixed in 63fa164 -- moving the producer above its
+    // consumers is the structural fix, not re-deriving after the fact.
+    let structuredGapFilledPrice = false;
+    try {
+      const early = await earlyStructuredFacts;
+      if (early) {
+        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (early as any)[k];
+          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
+          if (missing && alt != null && alt !== "") {
+            (analysis as any)[k] = alt;
+            if (k === "quotedPrice") structuredGapFilledPrice = true;
+            console.log(`Gap-filled ${k} from structured data.`);
+          }
+        }
+        // The price's PROVENANCE rides with the price itself. Only stamped
+        // when this gap-fill is what actually supplied it -- a price the
+        // scrape/Claude already had keeps whatever source it already carried
+        // (usually none, i.e. correctly unverified).
+        if (structuredGapFilledPrice && early.quotedPriceSource) {
+          analysis.quotedPriceSource = early.quotedPriceSource;
+          console.log(`Gap-filled quotedPriceSource=${early.quotedPriceSource} from structured data.`);
+        }
+        if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
+        // Carry the D2C "page says Call for pricing, blob says $X" tell
+        // through -- only when THIS gap-fill is what actually supplied the
+        // price (never claim a gate was recovered for a price that was on the
+        // page/Claude's own read the whole time).
+        if (early.priceGatedButRecovered && structuredGapFilledPrice) {
+          analysis.priceGatedButRecovered = true;
+          analysis.priceGateMessage = early.priceGateMessage;
+          analysis.priceGateGoogleAdsBacked = !!early.priceGateGoogleAdsBacked;
+        }
+        gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+      }
+    } catch { /* the safety net must never sink the scan */ }
+
+    // A price that arrived only just now (above) was not available when
+    // enrichAnalysis ran computeLeverageScore, so every price-dependent
+    // finding it produced was computed against no price at all. Recompute
+    // them here rather than shipping a leverage panel that contradicts the
+    // figures printed beside it.
+    if (structuredGapFilledPrice) {
+      computeFinancingCheck(analysis);
+      computeLeverageScore(analysis);
+      analysis.counterScript = buildCounterScript(analysis);
+      console.log("Recomputed leverage/financing/counter-script after a structured-data price gap-fill.");
+    }
+
     // WHAT "PRICE VERIFIED" ACTUALLY MEANS. Until 2026-08-15 it meant nothing:
     // `priceVerified` was READ in eight places across the app, the email and the
     // PDF — where it escalated to "STATUS - VERIFIED QUOTE" — and ASSIGNED by
@@ -3881,34 +3967,9 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Gap-fill from the structured-data read: the scrape sometimes lands the
-    // vehicle but misses the price or VIN that schema.org (or a platform's own
-    // embedded vehicle-data JSON, e.g. Convertus vmsData) states outright.
-    // Never overwrites a value the scrape already found.
-    try {
-      const early = await earlyStructuredFacts;
-      if (early) {
-        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
-          const cur = (analysis as any)[k];
-          const alt = (early as any)[k];
-          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
-          if (missing && alt != null && alt !== "") {
-            (analysis as any)[k] = alt;
-            console.log(`Gap-filled ${k} from structured data.`);
-          }
-        }
-        if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
-        // Carry the D2C "page says Call for pricing, blob says $X" tell
-        // through -- fill-only, only when THIS gap-fill is what actually
-        // supplied the price (never claim a gate was recovered for a price
-        // that was on the page/Claude's own read the whole time).
-        if (early.priceGatedButRecovered && Number(analysis.quotedPrice) === Number(early.quotedPrice)) {
-          analysis.priceGatedButRecovered = true;
-          analysis.priceGateMessage = early.priceGateMessage;
-        }
-        gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
-      }
-    } catch { /* the safety net must never sink the scan */ }
+    // (The structured-data gap-fill that used to live here now runs ABOVE, so
+    // priceVerified and the leverage score can actually see the price it
+    // recovers -- see the comment on it for why the order matters.)
     // Re-assert AFTER the last gap-fill: a price that arrived here (structured
     // data recovered what the prose pass never saw) can newly contradict the
     // summary written earlier -- verify the text against the final figures

@@ -34,7 +34,12 @@ export function canonicalReport(a: any): any {
     // reason. Every bump is additive-only -- /verify re-hashes whatever bytes are
     // EMBEDDED in its own link, never rebuilds canonicalReport() from a live
     // object, so links signed under v1..v3 keep verifying exactly as issued.
-    v: 4,
+    // v5: `gate` records that the dealer's rendered page refused to display a
+    // price while the page's own machine-readable data carried one (D2C
+    // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
+    // signed canonical because it is a material claim about the listing, and
+    // /verify must be able to show it as sealed rather than as a re-assertion.
+    v: 5,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -55,6 +60,7 @@ export function canonicalReport(a: any): any {
     odo: num(a.odometerKm),
     dol: a.daysOnLot && Number(a.daysOnLot.days) > 0 ? { d: Math.round(Number(a.daysOnLot.days)), s: a.daysOnLot.since || null } : null,
     pd: a.priceDisclosure || null,
+    gate: a.priceGatedButRecovered ? { m: a.priceGateMessage || null, g: !!a.priceGateGoogleAdsBacked } : null,
     basis: a.msrpBasis ? { b: a.msrpBasis, t: a.msrpTrim || null, y: a.msrpYear || null } : null,
     allIn: a.allInPricing?.body || null,
     disc: a.disclaimerCheck ? { e: !!a.disclaimerCheck.escapeHatch, x: !!a.disclaimerCheck.contradiction } : null,
