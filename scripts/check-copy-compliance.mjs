@@ -119,11 +119,13 @@ const RULES = [
     why: "'Analyzed once, never stored' must stay literally true of the running system, not aspirationally true.",
     patterns: [/\b(never|nothing|not)\s+stored\b/i],
     // App.jsx: report end-card ("Analyzed once, never stored"), the /verify badge
-    // ("Tamper-proof · nothing stored"), and the /verify camera-first callout
-    // ("No app, nothing stored"). Was 4 before the 2026-08-26 /verify redesign
-    // consolidated the verify body from two "nothing stored" phrases to one;
+    // ("Tamper-proof · nothing stored"), the /verify camera-first callout
+    // ("No app, nothing stored"), and the /value entry page footnote ("Real
+    // listings · nothing stored · signed & verifiable" — the value-report function
+    // computes + returns, no DB writes, so the promise holds there too). Was 3
+    // before the 2026-08-26 /value page (Phase 4) added the fourth occurrence;
     // flywheel_capture_enabled is still false, so the promise remains literally true.
-    expected: 3,
+    expected: 4,
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a

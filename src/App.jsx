@@ -4948,7 +4948,14 @@ function VerifFounderLedger({C, readOnly}){
           RECORD A PAYMENT
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:6}}>
-          <select value={pay.email} onChange={e=>setPay({...pay,email:e.target.value})}
+          <select value={pay.email}
+            onChange={e=>{
+              const email=e.target.value;
+              // A founder can't front a payment for themselves — clear a
+              // stale "Fronted by" selection rather than let the change
+              // produce that combination silently.
+              setPay(p=>({...p,email,covered:p.covered===email?"":p.covered}));
+            }}
             style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}>
             <option value="">Who paid…</option>
@@ -4970,7 +4977,10 @@ function VerifFounderLedger({C, readOnly}){
             style={{fontSize:13.5,padding:"7px 8px",borderRadius:8,border:`1px solid ${C.line}`,
                     background:C.paper2,color:C.ink}}>
             <option value="">Paid it themselves</option>
-            {(bal||[]).map(f=><option key={f.email} value={f.email}>Fronted by {f.name}</option>)}
+            {/* A founder can't front for themselves — exclude whoever is
+                already selected as "who paid" rather than let the picker
+                offer a combination the ledger will reject. */}
+            {(bal||[]).filter(f=>f.email!==pay.email).map(f=><option key={f.email} value={f.email}>Fronted by {f.name}</option>)}
           </select>
           <button disabled={busy||!pay.email||!pay.amount}
             onClick={()=>act("fn_admin_record_payment",{
@@ -13408,6 +13418,162 @@ function AlertConfirmPage(){
   );
 }
 
+// ── /value — LotCheck Live Market Value entry (Phase 4) ────────────────────
+// A buyer/seller types their car; we call the signed value-report edge function
+// and show the retail-asking band + CPO premium + recalls + warranty, offer the
+// signed PDF, and — for a car outside Alberta or with too-thin coverage — show an
+// HONEST "no coverage yet" teaser rather than a fabricated number. Free (no
+// charge) in this phase; billing is Phase 3.
+function ValueReportPage(){
+  const [f,setF]=useState({year:"",make:"",model:"",trim:"",km:"",condition:"used",province:"AB",vin:""});
+  const [status,setStatus]=useState("idle"); // idle|loading|done|teaser|error
+  const [result,setResult]=useState(null);
+  const [err,setErr]=useState("");
+  const set=(k)=>(e)=>setF(s=>({...s,[k]:e.target.value}));
+  const money=(n)=>n==null?"—":"$"+Math.round(Number(n)).toLocaleString("en-CA");
+  const PROVINCES=["AB","BC","SK","MB","ON","QC","NB","NS","PE","NL","YT","NT","NU"];
+
+  const submit=async(e)=>{
+    e.preventDefault();
+    if(!f.year||!f.make.trim()||!f.model.trim()) { setErr("Year, make and model are required."); setStatus("error"); return; }
+    setStatus("loading"); setErr(""); setResult(null);
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/value-report",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":SB_ANON_KEY,"Authorization":`Bearer ${SB_ANON_KEY}`},
+        body:JSON.stringify({year:Number(f.year),make:f.make.trim(),model:f.model.trim(),trim:f.trim.trim()||null,km:f.km?Number(f.km):null,province:f.province,condition:f.condition,vin:f.vin.trim().toUpperCase()||null}),
+      });
+      const data=await res.json().catch(()=>({}));
+      if(res.ok){ setResult(data); setStatus("done"); }
+      else if(res.status===403){ setErr("outside_service_area"); setStatus("teaser"); }
+      else if(res.status===422){ setErr("insufficient_coverage"); setStatus("teaser"); }
+      else { setErr(data&&data.message?data.message:"Something went wrong. Please try again."); setStatus("error"); }
+    }catch(_){ setErr("Couldn't reach LotCheck. Check your connection and try again."); setStatus("error"); }
+  };
+
+  const downloadPdf=()=>{
+    if(!result||!result.pdfBase64) return;
+    try{
+      const bytes=Uint8Array.from(atob(result.pdfBase64),c=>c.charCodeAt(0));
+      const blob=new Blob([bytes],{type:"application/pdf"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url;
+      a.download=`LotCheck-${f.year}-${f.make}-${f.model}-Value.pdf`.replace(/\s+/g,"-");
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+    }catch(_){}
+  };
+
+  const a=result&&result.analysis, mv=a&&a.marketValue, cpo=mv&&mv.cpoPremium, rc=a&&a.recalls, rw=a&&a.remainingWarranty;
+  const reset=()=>{ setStatus("idle"); setResult(null); setErr(""); };
+
+  return(
+    <div className="vr-page">
+      <style>{`
+        .vr-page{min-height:100vh;background:radial-gradient(120% 100% at 50% 0%,#171735 0%,#0b0b16 60%);color:#EDEBFA;font-family:'Inter',system-ui,-apple-system,sans-serif;padding:26px 18px 80px}
+        .vr-wrap{max-width:620px;margin:0 auto}
+        .vr-top{display:flex;align-items:center;gap:11px;margin-bottom:26px}
+        .vr-top b{font-size:19px;font-weight:900}
+        .vr-top span{display:block;font-size:12px;color:#A7A3D0;font-weight:600;margin-top:-2px}
+        .vr-back{margin-left:auto;font-size:12.5px;color:#A7A3D0;text-decoration:none}
+        .vr-h1{font-size:clamp(26px,5vw,34px);font-weight:900;letter-spacing:-.02em;line-height:1.1;margin:0 0 8px}
+        .vr-sub{color:#B8B4E0;font-size:15px;margin:0 0 24px;max-width:52ch}
+        .vr-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:22px}
+        .vr-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+        .vr-field{display:flex;flex-direction:column;gap:5px}
+        .vr-field.full{grid-column:1 / -1}
+        .vr-field label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#9C98C8}
+        .vr-field label i{color:#6b6890;font-style:normal;font-weight:600;text-transform:none;letter-spacing:0}
+        .vr-field input,.vr-field select{background:#0d0d1c;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:11px 12px;color:#fff;font-size:14.5px;font-family:inherit;outline:none}
+        .vr-field input:focus,.vr-field select:focus{border-color:#5eead4}
+        .vr-btn{width:100%;margin-top:18px;background:#2FA79A;color:#04231f;font-weight:800;font-size:15.5px;border:0;border-radius:12px;padding:14px;cursor:pointer}
+        .vr-btn:disabled{opacity:.6;cursor:default}
+        .vr-note{font-size:12px;color:#8b88b0;margin-top:12px;text-align:center}
+        .vr-err{background:rgba(240,133,122,.12);border:1px solid rgba(240,133,122,.4);color:#f6b5ad;border-radius:10px;padding:11px 14px;font-size:13.5px;margin-top:14px}
+        .vr-hero{background:linear-gradient(180deg,rgba(94,234,212,.10),rgba(255,255,255,.03));border:1px solid rgba(94,234,212,.35);border-radius:16px;padding:20px;margin-bottom:14px}
+        .vr-cap{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#5eead4;margin-bottom:4px}
+        .vr-big{font-size:42px;font-weight:900;letter-spacing:-.02em;line-height:1}
+        .vr-line{font-size:14px;color:#CFCCEA;margin-top:8px}
+        .vr-faint{font-size:12.5px;color:#8b88b0;margin-top:6px}
+        .vr-row{display:flex;gap:10px;padding:12px 0;border-top:1px solid rgba(255,255,255,.08)}
+        .vr-row .k{flex:none;width:96px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9C98C8;padding-top:2px}
+        .vr-row .v{flex:1;font-size:13.5px;color:#DEDBF3;line-height:1.5}
+        .vr-dl{width:100%;margin-top:16px;background:#6D28D9;color:#fff;font-weight:800;font-size:15px;border:0;border-radius:12px;padding:14px;cursor:pointer}
+        .vr-alt{display:block;text-align:center;margin-top:12px;font-size:13px;color:#A7A3D0;text-decoration:none}
+        .vr-teaser b{color:#fff}
+      `}</style>
+      <div className="vr-wrap">
+        <div className="vr-top">
+          <SiteLogo size={38}/>
+          <div><b>LotCheck</b><span>Live Market Value</span></div>
+          <a className="vr-back" href="/">← lotcheck.ca</a>
+        </div>
+
+        {(status==="idle"||status==="loading"||status==="error")&&(
+          <form onSubmit={submit}>
+            <h1 className="vr-h1">What's your car actually worth?</h1>
+            <p className="vr-sub">A market read from real Alberta listings — the number from someone who isn't trying to buy your car. Free.</p>
+            <div className="vr-card">
+              <div className="vr-grid">
+                <div className="vr-field"><label>Year</label><input type="number" inputMode="numeric" placeholder="2022" value={f.year} onChange={set("year")}/></div>
+                <div className="vr-field"><label>Make</label><input placeholder="Honda" value={f.make} onChange={set("make")}/></div>
+                <div className="vr-field"><label>Model</label><input placeholder="Odyssey" value={f.model} onChange={set("model")}/></div>
+                <div className="vr-field"><label>Trim <i>· optional</i></label><input placeholder="EX-L" value={f.trim} onChange={set("trim")}/></div>
+                <div className="vr-field"><label>Kilometres <i>· optional</i></label><input type="number" inputMode="numeric" placeholder="148000" value={f.km} onChange={set("km")}/></div>
+                <div className="vr-field"><label>Condition</label><select value={f.condition} onChange={set("condition")}><option value="used">Used</option><option value="certified">Certified (CPO)</option><option value="demo">Demo</option></select></div>
+                <div className="vr-field"><label>Province</label><select value={f.province} onChange={set("province")}>{PROVINCES.map(p=><option key={p} value={p}>{p}</option>)}</select></div>
+                <div className="vr-field"><label>VIN <i>· optional</i></label><input placeholder="5FNRL6H61NB502518" value={f.vin} onChange={set("vin")}/></div>
+              </div>
+              <button className="vr-btn" type="submit" disabled={status==="loading"}>{status==="loading"?"Reading the market…":"Get my value report"}</button>
+              {status==="error"&&<div className="vr-err">{err}</div>}
+              <div className="vr-note">Real listings · nothing stored · signed &amp; verifiable</div>
+            </div>
+          </form>
+        )}
+
+        {status==="teaser"&&(
+          <div className="vr-card vr-teaser">
+            <h1 className="vr-h1">Not enough to say — honestly.</h1>
+            {err==="outside_service_area"
+              ? <p className="vr-sub">LotCheck's live market coverage is <b>Alberta</b> right now. We won't show you Alberta prices dressed up as {f.province} — that wouldn't be honest. Alberta coverage is expanding; the rest of Canada is next.</p>
+              : <p className="vr-sub">We don't yet have enough comparable Alberta listings for a <b>{f.year} {f.make} {f.model}</b> to give you a number we'd stand behind. Missing beats wrong — so instead of guessing, we'll tell you the moment coverage lands.</p>}
+            <a className="vr-alt" href="#" onClick={(e)=>{e.preventDefault();reset();}}>← Try another vehicle</a>
+          </div>
+        )}
+
+        {status==="done"&&a&&(
+          <div>
+            <h1 className="vr-h1">{a.year} {a.make} {a.model}{a.trim?" "+a.trim:""}</h1>
+            <p className="vr-sub">{[a.odometerKm?Number(a.odometerKm).toLocaleString("en-CA")+" km":null,(a.saleCondition||"used"),a.province].filter(Boolean).join("  ·  ")}</p>
+            {mv&&mv.average!=null&&(
+              <div className="vr-hero">
+                <div className="vr-cap">What it's worth — retail asking</div>
+                <div className="vr-big">{money(mv.average)}</div>
+                <div className="vr-line">Full range {money(mv.low!=null?mv.low:mv.below)} to {money(mv.high!=null?mv.high:mv.above)} · most between {money(mv.below)} and {money(mv.above)}</div>
+                <div className="vr-faint">{(mv.comps||0)} comparable Alberta listing{mv.comps===1?"":"s"}{mv.asOf?", read "+new Date(mv.asOf).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"}):""} · asking prices, not sold</div>
+              </div>
+            )}
+            <div className="vr-card">
+              {cpo&&Number(cpo.premium)>0&&(
+                <div className="vr-row"><div className="k">CPO premium</div><div className="v">Certified listings ask about <b style={{color:"#fff"}}>{money(cpo.premium)}</b> more than non-certified ones.</div></div>
+              )}
+              {rc&&(
+                <div className="vr-row"><div className="k">Recalls</div><div className="v">{!rc.checked?"Couldn't reach the registry — check by VIN at Transport Canada.":Number(rc.count)>0?<span><b style={{color:"#f6b5ad"}}>{rc.count} open recall{rc.count===1?"":"s"}</b> on record — free fixes; confirm on your VIN at honda.ca/recalls.</span>:rc.confirmed?"No open recalls on record (confirmed).":"Couldn't confirm for this exact model — not an all-clear."}</div></div>
+              )}
+              {rw&&(rw.basic||rw.powertrain)&&(
+                <div className="vr-row"><div className="k">Warranty</div><div className="v">{["basic","powertrain"].map(t=>rw[t]?(rw[t].active?(t==="basic"?"Basic":"Powertrain")+" active":(t==="basic"?"Basic":"Powertrain")+" expired"):null).filter(Boolean).join(" · ")} <span style={{color:"#8b88b0"}}>(estimated)</span></div></div>
+              )}
+              <button className="vr-dl" onClick={downloadPdf}>Download the signed PDF report</button>
+              {result.verifyUrl&&<a className="vr-alt" href={result.verifyUrl} target="_blank" rel="noreferrer">Verify this report ({a.reportId}) →</a>}
+              <a className="vr-alt" href="#" onClick={(e)=>{e.preventDefault();reset();}}>← Value another vehicle</a>
+            </div>
+            <p className="vr-note" style={{marginTop:16}}>A market read to inform your decision — not a formal appraisal. The price is always yours to set.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // App is the actual default export/root — it must not call any hooks itself
 // (Rules of Hooks), so routing between the buyer-facing site, admin panel,
 // and quote-check page happens here by choosing which fully separate
@@ -13424,6 +13590,7 @@ export default function App(){
         : path.startsWith("/alert-confirm") ? <AlertConfirmPage/>
         : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
         : path.startsWith("/crawl") ? <CrawlCoverage/>
+        : path.startsWith("/value") ? <ValueReportPage/>
         : <LotCheckApp/>}
       <Analytics/>
     </>
