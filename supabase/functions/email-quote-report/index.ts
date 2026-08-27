@@ -288,7 +288,7 @@ function deckCard(idx: number, total: number, label: string, tone: string, bodyH
   return `<div style="background:${bg};border:1px solid ${bd};border-radius:14px;padding:14px 16px;margin-bottom:11px;${glowCss}">
     <table style="width:100%;margin-bottom:6px;"><tr>
       <td style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;">${label}</td>
-      <td style="text-align:right;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:#b9b3a4;font-weight:700;white-space:nowrap;">${n(idx)} / ${n(total)}</td>
+      <td style="text-align:right;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:#b9b3a4;font-weight:700;white-space:nowrap;">CARD ${n(idx)} OF ${n(total)}</td>
     </tr></table>
     ${bodyHtml}</div>`;
 }
@@ -922,9 +922,24 @@ function pointExplain(t: string, a: any): string | null {
         : "We recomputed the payment from the price, rate and term - and they don't line up. Ask them to show the calculation line by line.";
       return "Not enough financing detail (payment, term, total) was shown to re-check the math. Ask for all three in writing.";
     case "Odometer":
-      if (a.odometerCheck?.checked) return a.vehicleCondition === "new"
-        ? "A truly new car should read near zero km - thousands on the clock means it's been driven (demo/loaner) and should be priced below new."
-        : "Compare the reading against the car's age - roughly 15,000-20,000 km per year is typical.";
+      // Branches on the BAND the reading was actually put in, not on
+      // vehicleCondition alone. The old string told every new car -- including
+      // one reading 12 km -- that "thousands on the clock" meant demo use,
+      // directly under our own note saying 12 km is delivery distance.
+      if (a.odometerCheck?.checked) {
+        const km = Number(a.odometerCheck.km);
+        const kmTxt = Number.isFinite(km) ? km.toLocaleString() + " km" : "this reading";
+        switch (a.odometerCheck.band) {
+          case "new_delivery":
+            return `New vehicles do not arrive on zero. Coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. ${kmTxt} is delivery distance, not use. Read the dash yourself when you see the car and confirm it still matches.`;
+          case "new_beyond_delivery":
+            return `A new vehicle normally shows only delivery distance. This one reads ${kmTxt}, which is further than a car gets being delivered - most often that means it was a demonstrator or a service loaner. That is a normal part of the business, not a fault. What matters to you is that the factory warranty clock starts when a vehicle goes into service, not when you buy it: ask for the in-service date in writing, and ask how the price reflects it.`;
+          case "used_nearly_new":
+            return `On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return rather than anything unusual. Ask for the in-service date - the factory warranty started then, not on the day you buy.`;
+          default:
+            return "Compare the reading against the car's age - roughly 15,000-20,000 km per year is typical.";
+        }
+      }
       return "No odometer reading was shown. Read it off the dash yourself before signing - never off the paperwork alone.";
     case "VIN check":
       return a.vinCheck?.present
@@ -1541,8 +1556,31 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
   const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
   const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
-  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
-  need(40);
+  // THE COLOPHON RESERVES ITS SPACE BEFORE IT WRITES, not after.
+  //
+  // This block used to run para(...) and THEN need(40) for the logo + ID line.
+  // para() reserves per LINE, so it can legally leave y as low as M+30 (86);
+  // need(40) then fires for any y under 126 and opens a brand-new page whose
+  // only ink is the logo and the ID. That is exactly what Vic saw on the 2025
+  // Mazda CX-90 report (LC-436A-B5C): page 4 of 5 blank but for the logo and
+  // "LOTCHECK - LC-436A-B5C - lotcheck.ca/verify".
+  //
+  // No section rendered empty -- every optional section is if-guarded and an
+  // untaken branch draws nothing. It is a PHASE bug, and it only shows on a
+  // SHORT report, because only then does the paragraph's last line land in the
+  // orphan band. That is why it survived: the reports we look at most are the
+  // long ones.
+  //
+  // Reserving the whole trailer up front means the paragraph and the mark it
+  // belongs to either share a page or move to the next one together. A block
+  // must not be able to open a page it cannot fill.
+  const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
+  const COLOPHON_H = 40 + 30;                      // logo + ID line, per the draws below
+  {
+    const lines = Math.max(1, Math.ceil(String(colophonText).length / 110));
+    need(COLOPHON_H + lines * 11);
+  }
+  para(colophonText, { size: 8, color: FAINT, font: sans, lead: 3 });
   { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
   y -= 30;
   center("LOTCHECK  -  " + RID + "  -  lotcheck.ca/verify", y - 8, { size: 7.5, font: sansB, color: FAINT });

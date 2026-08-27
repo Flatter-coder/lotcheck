@@ -7,6 +7,7 @@ import heic2any from "heic2any";
 // surfaces ended up with six different answers to "may this MSRP support a
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
+import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
 // like a different product on Android than on macOS.
@@ -8441,7 +8442,20 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
   // 10 Dealer reputation
   { const d = a.dealerSentiment; const rated = Number(d?.rating) > 0; const ran = d?.checked === true || rated; const tone = rated ? (Number(d.rating) >= 4 ? "pass" : "muted") : "muted"; /* three states: a lookup that never ran must NOT read as "no reviews exist" -- Charlesglen has 5,930 */ const v = rated ? Number(d.rating).toFixed(1) + "★ / " + Number(d.reviewCount || 0).toLocaleString() : (ran ? "NONE FOUND" : "NOT CHECKED");
-    const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : <Simple big="Not found" c={MUT2} note="No public Google reviews were located for this dealer." />;
+    const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : (() => {
+      // THREE STATES, NOT TWO. This was `d?.rating ? reviews : "Not found"`, so
+      // the moment the lookup did not COMPLETE the card asserted "No public
+      // Google reviews were located for this dealer" -- about Sundance Mazda, an
+      // established Edmonton dealer with plenty of them. The check timed out; we
+      // never looked. The point beside it already said "NOT CHECKED", so one
+      // card contradicted the other and the card was the one making the false
+      // claim. A lookup miss must never render as a finding.
+      // [[make-recalls-fail-safe]] [[no-accusation-language]]
+      const rep = dealerReputationPoint(a.dealerSentiment);
+      return rep.state === "absent"
+        ? <Simple big="None found" c={MUT2} note="We searched and found no public reviews for this dealer — not a red flag by itself, but there's no track record to lean on." />
+        : <Simple big="Not checked" c={MUT2} note="We didn't complete this lookup, so nothing here is a statement about this dealer. Search their name on Google to see their rating and review count yourself." />;
+    })();
     P.push({ title: "Dealer reputation", tone, v, body }); }
 
   // ── "What this means" — every card carries a plain-language translation of
@@ -8512,7 +8526,20 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         : "We recomputed the advertised payment from the price, rate and term — and they DON'T line up. Something extra is baked into the payment. Ask them to show the calculation line by line.")
       : "The listing doesn't show enough financing detail (payment, term and total) for us to re-check the math. Ask for all three in writing — then the payment can be verified.",
     "Odometer": a.odometerCheck?.checked
-      ? `This is how far the car has actually been driven: ${Number(a.odometerCheck.km).toLocaleString()} km. ${a.vehicleCondition === "new" ? "A truly new car should be near zero — anything in the thousands means it's been driven (demo/loaner) and should be priced below new." : "Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."}`
+      // Branches on the BAND the server put this reading in, not on
+      // vehicleCondition alone. The old sentence told every new car that
+      // "anything in the thousands" meant demo use -- printed on a 2025 Mazda
+      // CX-90 reading 12 km, directly under our own note calling that delivery
+      // distance. A fixed sentence beside a variable number will always
+      // eventually contradict it. [[present-without-creating-questions]]
+      ? `This is how far the car has actually been driven: ${Number(a.odometerCheck.km).toLocaleString()} km. ${
+          a.odometerCheck.band === "new_delivery"
+            ? "New vehicles don't arrive on zero — coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. That's delivery distance, not use. Read the dash yourself when you see the car and confirm it still matches."
+          : a.odometerCheck.band === "new_beyond_delivery"
+            ? "That's further than a car gets being delivered — most often it means the vehicle was a demonstrator or a service loaner. That's a normal part of the business, not a fault. What matters to you is that the factory warranty clock starts when a vehicle goes into service, not when you buy it: ask for the in-service date in writing, and ask how the price reflects it."
+          : a.odometerCheck.band === "used_nearly_new"
+            ? "On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return rather than anything unusual. Ask for the in-service date — the factory warranty started then, not on the day you buy."
+            : "Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."}`
       : "No odometer reading was shown. Always read it off the dash yourself before signing — never off the paperwork alone.",
     "VIN check": a.vinCheck?.present
       ? "The VIN is the car's unique fingerprint. This one has a valid format — before you sign, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
