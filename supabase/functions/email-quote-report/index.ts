@@ -1007,10 +1007,21 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  drawSeal(M + W - 116, y - 9, 15); // small stamp left of the header text
-  right("QUOTE CHECK REPORT", { size: 8.5, font: sansB, color: SOFT });
+  // SEAL POSITION IS MEASURED, NOT GUESSED. This was drawSeal(M + W - 116, ...)
+  // with S=15, whose outer ring reaches cx + S*1.46 = cx + 21.9 -> its right
+  // edge landed at M+W-94, while `right()` starts "QUOTE CHECK REPORT" at
+  // M+W-(text width ~118) = M+W-118. The seal was therefore drawn UNDER both
+  // header lines, and a 420-segment guilloché behind 8.5pt type reads as
+  // shimmering, illegible text -- reported from a real emailed report as
+  // "letters are shining", on the artifact a buyer forwards to a dealer.
+  // Measure the widest header line and seat the seal clear to its left.
+  const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
+  const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
+  const SEAL_S = 15, SEAL_GAP = 12;
+  drawSeal(M + W - hdrW - SEAL_GAP - SEAL_S * 1.46, y - 9, SEAL_S);
+  right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
   y -= 20;
-  right("No. " + RID, { size: 8.5, font: mono, color: FAINT });
+  right(HDR_NO, { size: 8.5, font: mono, color: FAINT });
   y -= 2;
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.4, color: INK });
   y -= 22;
