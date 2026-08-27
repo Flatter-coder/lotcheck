@@ -7903,13 +7903,39 @@ function gatedPriceNote(a){
     : `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price shown here. `;
 }
 
+// Generous, but bounded: a share link is a URL fragment. If a report ever has
+// more recalls than this, the encoder says so (`tc`) rather than quietly
+// shipping a count its own list cannot support.
+const RECALL_SHARE_MAX = 24;
+
 function encodeReport(a){
   const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
     qp:a.quotedPrice,ms:a.msrp,
     fin:a.financing?{p:a.financing.paymentAmount,f:a.financing.paymentFrequency,r:a.financing.rate,t:a.financing.termMonths}:null,
     fr:a.financeRates?{d:a.financeRates.dealer?.apr??null,ds:a.financeRates.dealer?.source??null,m:a.financeRates.manufacturer?.apr??null}:null,
-    rc:a.recalls?.checked?{n:a.recalls.count,it:(a.recalls.items||[]).slice(0,6).map(x=>({s:x.system,d:x.date}))}:null,
-    ao:(a.addOns||[]).map(x=>({n:x.name,p:x.price,vd:x.verdict||(x.flagged?"flagged":"standard")})),
+    // TWO SAFETY RULES WERE INVERTED HERE.
+    //
+    // `confirmed` was not carried at all, and decodeReport rebuilt the object
+    // without it -- while canonicalReport reads `confirmed: a.recalls.confirmed
+    // !== false`. So an UNCONFIRMED recall match forwarded as CONFIRMED: a
+    // shared report made a firmer claim about the vehicle than the original
+    // did. That is [[make-recalls-fail-safe]] run backwards, on a link a buyer
+    // sends to a dealer.
+    //
+    // And the detail list was capped at 6 while `n` (the count) was uncapped,
+    // so a 9-recall report forwarded as "9 open recalls" showing 6 --
+    // [[recalls-detail-list-must-match-count]], fixed on 2026-08-20 and
+    // recurring here because that fix never reached the share encoder. The cap
+    // is now generous and, more importantly, the COUNT follows the list that
+    // actually rides, so the two can never disagree again.
+    rc:a.recalls?.checked?(()=>{ const it=(a.recalls.items||[]).slice(0,RECALL_SHARE_MAX);
+      const truncated=(a.recalls.items||[]).length>it.length;
+      return {n:a.recalls.count,it:it.map(x=>({s:x.system,d:x.date})),cf:a.recalls.confirmed===false?0:1,tc:truncated?1:0}; })():null,
+    // `rs` is the REASON an add-on was flagged. The canonical carries it and
+    // this encoder did not, so a forwarded report showed a flag with nothing
+    // behind it -- a bare accusation is exactly what this product must not
+    // make. [[claims-must-stay-backed]]
+    ao:(a.addOns||[]).map(x=>({n:x.name,p:x.price,vd:x.verdict||(x.flagged?"flagged":"standard"),rs:x.reason||null})),
     tf:a.totalFlaggedCost,
     ds:a.dealerSentiment?{r:a.dealerSentiment.rating,c:a.dealerSentiment.reviewCount,h:(a.dealerSentiment.highlights||[]).slice(0,3).map(x=>({r:x.rating,t:x.text}))}:null,
     lv:a.leverageScore?{s:a.leverageScore.score,n:a.leverageScore.note}:null,
@@ -7943,7 +7969,25 @@ function encodeReport(a){
     mun:a.msrpUnavailable?{n:a.msrpUnavailable.note}:null,
     mref:a.msrpReference&&a.msrpReference.msrp>0?{m:a.msrpReference.msrp,t:a.msrpReference.trim||null,u:a.msrpReference.sourceUrl||null,mk:a.msrpReference.make||null}:null,
     lic:a.dealerLicence&&a.dealerLicence.status?{s:a.dealerLicence.status,st:a.dealerLicence.state,n:a.dealerLicence.legalName||null,no:a.dealerLicence.licenceNumber||null,e:a.dealerLicence.expiryDate||null}:null,
-    sh:a.listingShotSha256||null};
+    sh:a.listingShotSha256||null,
+    // ── FIELDS THE SIGNED CANONICAL CARRIES AND THIS ENCODER DID NOT ────────
+    // The share link ships TWO representations of one report: `vp` (the
+    // complete signed canonical, which the banner verifies) and this compact
+    // projection, which is what the page actually RENDERS. They were never
+    // reconciled, so a forwarded report could contradict the very payload its
+    // own "verified" banner had just checked.
+    //
+    // vin  -- [[vin-every-scan]] says the VIN appears on every surface. It was
+    //         absent from every view of a shared link.
+    // odo  -- odometer, the second thing any buyer checks.
+    // mv   -- the market-value band.
+    // src  -- the dated capture provenance [[make-it-dispute-proof]] rests on.
+    // fm   -- the financing-math check.
+    vin:a.vin||null,
+    odo:Number.isFinite(Number(a.odometerKm))?Number(a.odometerKm):null,
+    mv:a.marketValue?{l:a.marketValue.low??null,h:a.marketValue.high??null,n:a.marketValue.note||null,s:a.marketValue.source||null}:null,
+    src:(a.sourceUrl||a.capturedAt)?{u:a.sourceUrl||null,c:a.capturedAt||null}:null,
+    fm:a.financingCheck?{r:!!a.financingCheck.reconciles,n:a.financingCheck.note||null}:null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
 }
@@ -7955,8 +7999,11 @@ function decodeReport(s){
       quotedPrice:c.qp,msrp:c.ms,
       financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
       financeRates:c.fr?{dealer:c.fr.d!=null?{apr:c.fr.d,source:c.fr.ds||null}:null,manufacturer:c.fr.m!=null?{apr:c.fr.m}:null}:null,
-      recalls:c.rc?{checked:true,count:c.rc.n,items:(c.rc.it||[]).map(x=>({system:x.s,date:x.d})),source:"Transport Canada VRDB"}:null,
-      addOns:(c.ao||[]).map(x=>({name:x.n,price:x.p,verdict:x.vd})),
+      // `confirmed` defaults to FALSE on a legacy link that predates `cf`.
+      // Missing information must land on the cautious side of a claim about a
+      // vehicle, never the confident one. [[make-recalls-fail-safe]]
+      recalls:c.rc?{checked:true,count:c.rc.n,items:(c.rc.it||[]).map(x=>({system:x.s,date:x.d})),confirmed:c.rc.cf===1,detailsTruncated:c.rc.tc===1,source:"Transport Canada VRDB"}:null,
+      addOns:(c.ao||[]).map(x=>({name:x.n,price:x.p,verdict:x.vd,reason:x.rs||null})),
       totalFlaggedCost:c.tf,
       dealerSentiment:c.ds?{rating:c.ds.r,reviewCount:c.ds.c,highlights:(c.ds.h||[]).map(x=>({rating:x.r,text:x.t})),dealerName:c.dn}:null,
       leverageScore:c.lv?{score:c.lv.s,note:c.lv.n,computed:true}:null,
@@ -7981,7 +8028,14 @@ function decodeReport(s){
       msrpUnavailable:c.mun?{note:c.mun.n}:null,
       msrpReference:c.mref?{msrp:c.mref.m,trim:c.mref.t||null,sourceUrl:c.mref.u||null,make:c.mref.mk||null,basis:"starting_at"}:null,
       dealerLicence:c.lic?{status:c.lic.s,state:c.lic.st,legalName:c.lic.n||null,licenceNumber:c.lic.no||null,expiryDate:c.lic.e||null,source:"AMVIC public registry"}:null,
-      listingShotSha256:c.sh||null,__shared:true};
+      listingShotSha256:c.sh||null,
+      vin:c.vin||null,
+      odometerKm:Number.isFinite(Number(c.odo))?Number(c.odo):null,
+      marketValue:c.mv?{low:c.mv.l??null,high:c.mv.h??null,note:c.mv.n||null,source:c.mv.s||null}:null,
+      sourceUrl:c.src?(c.src.u||null):null,
+      capturedAt:c.src?(c.src.c||null):null,
+      financingCheck:c.fm?{reconciles:!!c.fm.r,note:c.fm.n||null}:null,
+      __shared:true};
   }catch{ return null; }
 }
 

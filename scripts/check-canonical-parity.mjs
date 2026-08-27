@@ -95,26 +95,72 @@ const same = server.keys.length === client.keys.length &&
 if (same) {
   console.log(`canonical-parity: both copies project the same ${server.keys.length} keys in the same order.`);
   console.log(`   ${server.keys.join(", ")}`);
+  if (!shareLinkCarriesEverything()) process.exit(1);
   process.exit(0);
 }
 
-console.error("canonical-parity: the two canonicalReport() copies have DRIFTED.\n");
-console.error(`  ${server.label} (${server.file})`);
-console.error(`    ${server.keys.join(", ")}\n`);
-console.error(`  ${client.label} (${client.file})`);
-console.error(`    ${client.keys.join(", ")}\n`);
+// ── THE SHARE LINK IS A THIRD COPY, AND NOTHING WAS POLICING IT ──────────────
+//
+// A `#r=` link ships TWO representations of one report: `vp`, the complete
+// signed canonical the banner verifies, and a hand-maintained compact
+// projection that the page actually RENDERS from. The gate above keeps the two
+// canonicalReport copies honest with each other and never looked at the third.
+//
+// It had drifted badly. Eight fields the canonical carries were absent from the
+// encoder — vin, odometer, market value, capture provenance, financing math,
+// add-on reasons — so a forwarded report contradicted the very payload its own
+// "verified" banner had just checked. Two of those absences INVERTED a safety
+// rule: `recalls.confirmed` was not carried and the decoder rebuilt the object
+// without it, so an UNCONFIRMED recall match forwarded as CONFIRMED; and the
+// detail list was capped at six while the count was not, reviving a defect
+// fixed on 2026-08-20 on a surface that fix never reached.
+//
+// This compares the analysis fields canonicalReport READS against the fields
+// encodeReport reads. It is deliberately a READ comparison, not a key
+// comparison: the two use different key names by design (the share encoder is
+// compact on purpose), but they must draw on the same source facts.
+function shareLinkCarriesEverything() {
+  const appSrc = readFileSync("src/App.jsx", "utf8");
+  const bodyOf = (name) => {
+    const at = appSrc.indexOf(`function ${name}`);
+    if (at < 0) throw new Error(`src/App.jsx: no ${name}() found`);
+    const end = appSrc.indexOf("\nfunction ", at + 1);
+    return appSrc.slice(at, end < 0 ? appSrc.length : end);
+  };
+  const reads = (body) => new Set([...body.matchAll(/\ba\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
 
-const onlyServer = server.keys.filter((k) => !client.keys.includes(k));
-const onlyClient = client.keys.filter((k) => !server.keys.includes(k));
-if (onlyServer.length) console.error(`  only in ${server.label}: ${onlyServer.join(", ")}`);
-if (onlyClient.length) console.error(`  only in ${client.label}: ${onlyClient.join(", ")}`);
-if (!onlyServer.length && !onlyClient.length) {
-  console.error(`  same keys, DIFFERENT ORDER -- JSON.stringify emits insertion order, so the bytes differ.`);
+  let canonical, encoder;
+  try { canonical = reads(bodyOf("canonicalReport")); encoder = reads(bodyOf("encodeReport")); }
+  catch (e) { console.error(`canonical-parity: ${e.message}`); return false; }
+
+  // Fields the canonical reads that the share link legitimately need not carry.
+  // Each needs a REASON, not just an entry.
+  const EXEMPT = new Map([
+    ["listingShot",   "the capture image is far too large for a URL fragment; its SHA-256 (`sh`) rides instead"],
+    ["verifyPayload", "carried verbatim as `vp` -- it IS the signed canonical, not a projection of it"],
+    ["sig",           "carried verbatim as `sg`"],
+    ["keyId",         "carried verbatim as `kid`"],
+  ]);
+
+  // WHAT THIS DOES NOT CATCH, stated plainly so nobody reads its green line as
+  // more than it is: this compares TOP-LEVEL `a.X` reads. A field dropped from
+  // INSIDE an object the encoder already touches -- `recalls.confirmed` and
+  // `addOns[].reason`, both real omissions found on 2026-08-27 -- still reads
+  // as covered, because `a.recalls` and `a.addOns` are present. Those two are
+  // pinned by their own cases in test:share-round-trip. A gate that overstates
+  // its coverage is exactly how the last one stayed green for weeks.
+  const missing = [...canonical].filter((f) => !encoder.has(f) && !EXEMPT.has(f)).sort();
+  if (!missing.length) {
+    console.log(`canonical-parity: the share encoder reads every one of the ${canonical.size} analysis fields the canonical does.`);
+    return true;
+  }
+  console.error(`\ncanonical-parity: the SHARE LINK drops ${missing.length} field(s) the signed canonical carries.\n`);
+  for (const f of missing) console.error(`  x  a.${f}`);
+  console.error(`\nA forwarded report renders from the compact projection, NOT from \`vp\` -- so a`);
+  console.error(`field missing here is a field the shared copy does not show, while its own banner`);
+  console.error(`says the payload verified. Add it to encodeReport AND decodeReport, or add it to`);
+  console.error(`EXEMPT in this file with the reason it cannot ride.`);
+  return false;
 }
 
-console.error(`\nThe server copy is what gets SIGNED; the client copy is the unsigned fallback.`);
-console.error(`A key on one side only is either missing from the signed record -- computed and`);
-console.error(`shown, but absent from what a buyer can prove -- or invented by the fallback, so`);
-console.error(`the same analysis yields two different report ids.`);
-console.error(`\nFix by projecting the same keys in the same order on both, and bump v.`);
 process.exit(1);
