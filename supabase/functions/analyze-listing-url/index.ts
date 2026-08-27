@@ -72,6 +72,7 @@ import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
+import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
@@ -108,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27k";  // + a forwarded report carries VIN/odometer/market value/capture provenance, and an UNCONFIRMED recall match can no longer forward as confirmed
+const CACHE_VER = "2026-08-27m";  // + a bundled price line ("Fees & Accessories") is no longer attributed to the dealer: 70% of that row was manufacturer freight and government levies
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2780,6 +2781,20 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   await resolveFinanceRates(analysis);
   await resolveLeaseRates(analysis);
   // Deal Decoder — run AFTER msrp + finance rates are resolved.
+  // A BUNDLED price line is not the dealer's money. Normalised HERE -- once,
+  // before computeReconciliation, before the counter-script, and before
+  // anything reads totalFlaggedCost -- so every consumer inherits the same
+  // correction instead of each needing its own fix. Ordering matters: this repo
+  // has shipped an ordering-vs-derived-value defect twice (63fa164, fe57ad4),
+  // where the value arrived after the thing that consumed it.
+  {
+    const b = normaliseBundledAddOns(analysis);
+    if (b.changed) {
+      console.log(`Bundled fee line(s) not attributed to the dealer: ` +
+        `${b.lines.map((l) => `${l.name} ${l.price ?? "?"}`).join("; ")}` +
+        `${b.flaggedRemoved ? ` (removed $${b.flaggedRemoved} from totalFlaggedCost)` : ""}.`);
+    }
+  }
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12

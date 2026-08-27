@@ -59,6 +59,7 @@ import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
 import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
@@ -821,6 +822,20 @@ Deno.serve(async (req: Request) => {
     await resolveLeaseRates(analysis);
     // S3 — deal reconciliation: split fees vs negotiable dealer add-ons so the
     // report shows the real out-the-door + how much markup is removable.
+    // A BUNDLED price line is not the dealer's money. Normalised HERE -- once,
+    // before computeReconciliation, before the counter-script, and before
+    // anything reads totalFlaggedCost -- so every consumer inherits the same
+    // correction instead of each needing its own fix. Ordering matters: this repo
+    // has shipped an ordering-vs-derived-value defect twice (63fa164, fe57ad4),
+    // where the value arrived after the thing that consumed it.
+    {
+      const b = normaliseBundledAddOns(analysis);
+      if (b.changed) {
+        console.log(`Bundled fee line(s) not attributed to the dealer: ` +
+          `${b.lines.map((l) => `${l.name} ${l.price ?? "?"}`).join("; ")}` +
+          `${b.flaggedRemoved ? ` (removed $${b.flaggedRemoved} from totalFlaggedCost)` : ""}.`);
+      }
+    }
     { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }
     // S11 — financing-contingent-discount trap (runs after reconciliation + finance rates).
     { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }
