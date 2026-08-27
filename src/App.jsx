@@ -7859,6 +7859,27 @@ class ReportBoundary extends Component {
 // carried a starting-at reference price. Found by check:undef, reproduced live.
 function money(n){ const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); }
 
+// ONE definition of the gated-price disclosure, read by EVERY surface.
+// e80122c shipped this sentence as a local const inside ReportViews and a
+// separate copy inside the emailed PDF -- so the DEFAULT Scroll view, the Book
+// (flipbook) view and the 3D view all printed the recovered number with no
+// hint that the dealer's own page refuses to show it. That is the
+// report-features-all-views rule broken on the single most valuable fact a
+// gated listing produces. A module-level helper is the structural fix: a new
+// surface cannot forget to opt in, because it renders whatever this returns.
+//
+// `googleAdsBacked` narrows the claim: Google mandates a real (all-in, in
+// Canada) price on NEW-vehicle ads, which is what makes "public either way"
+// backed. On used/CPO that premise does not hold, so the sentence stops at
+// what we actually verified -- the page's own data. (claims-must-stay-backed)
+function gatedPriceNote(a){
+  if(!a || !(Number(a.quotedPrice) > 0) || !a.priceGatedButRecovered) return "";
+  const msg = a.priceGateMessage || "Call for pricing";
+  return a.priceGateGoogleAdsBacked
+    ? `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+    : `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price shown here. `;
+}
+
 function encodeReport(a){
   const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
     qp:a.quotedPrice,ms:a.msrp,
@@ -7877,6 +7898,18 @@ function encodeReport(a){
     // would get MORE confident by being forwarded, which is backwards.
     dol:a.daysOnLot?{d:a.daysOnLot.days,s:a.daysOnLot.since||null,sl:a.daysOnLot.sourceLabel||null,al:a.daysOnLot.atLeast===true?1:0}:null,
     pd:a.priceDisclosure||null,mb:a.msrpBasis||null,mt:a.msrpTrim||null,my:a.msrpYear||null,
+    // pv/pg*/mc were all dropped by this encoder, so a FORWARDED report lost
+    // findings the original showed. pv: priceVerified (surfaces that honour it
+    // silently fell back to "any price counts as verified"). pg*: the
+    // "page says Call for pricing, its own data says $X" disclosure -- the
+    // single most valuable fact on a gated listing, absent from every view of
+    // a shared link. mc: msrpCeiling, without which a shared report renders
+    // "no over/under-MSRP claim is made" beside a leverage note asserting a
+    // specific ceiling-exceeded dollar figure -- one page, two answers.
+    pv:a.priceVerified===true?1:(a.priceVerified===false?0:null),
+    pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:a.priceGateGoogleAdsBacked?1:0}:null,
+    mc:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
+    mai:a.msrpAllIn??null,
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
@@ -7909,6 +7942,12 @@ function decodeReport(s){
       reportId:c.rid||null,issuedAt:c.ia||null,verifyPayload:c.vp||null,sig:c.sg||null,keyId:c.kid||null,
       daysOnLot:c.dol?{days:c.dol.d,since:c.dol.s||null,sourceLabel:c.dol.sl||null,atLeast:c.dol.al===1,source:c.dol.al===1?"lotcheck_first_seen":"dealer_platform_feed"}:null,
       priceDisclosure:c.pd||null,msrpBasis:c.mb||null,msrpTrim:c.mt||null,msrpYear:c.my||null,
+      priceVerified:c.pv===1?true:(c.pv===0?false:undefined),
+      priceGatedButRecovered:c.pg?true:undefined,
+      priceGateMessage:c.pg?(c.pg.m||null):undefined,
+      priceGateGoogleAdsBacked:c.pg?c.pg.g===1:undefined,
+      msrpCeiling:c.mc?{allIn:c.mc.a??null,floorAllIn:c.mc.f??null,trim:c.mc.t||null,trimsConsidered:c.mc.n??0}:null,
+      msrpAllIn:c.mai??null,
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
@@ -8084,9 +8123,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // Toyota RAV4 PHEV GR Sport AWD: rendered page shows "Call for pricing",
   // window.__vdpJSON's price field holds $85,995 -- also published to
   // Google Vehicle Ads, so this is public information either way.
-  const gatedRecoveredNote = (qp && a.priceGatedButRecovered)
-    ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
-    : "";
+  const gatedRecoveredNote = gatedPriceNote(a);
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
   const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
@@ -8752,7 +8789,15 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       return (<div className="rfb-pg">{num}
       <div className="rfb-k">The deal</div>
       <h2 className="rfb-h2">{exactFb?(delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"):(ms>0?`Base MSRP from ${money(ms)}`:(qp>0?`Asking ${money(qp)}`:"The deal"))}</h2>
-      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">the dealer's all-in price</div></div>}
+      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">{a.allInPricing?"the dealer's all-in price":"the dealer's asking price"}</div></div>}
+      {/* The Book view is a full report surface, not a summary -- it printed the
+          recovered number with no hint the dealer's own page refuses to show it
+          (report-features-all-views). Shared helper, so this cannot drift from
+          the Scroll view or the PDF again. The "all-in" sub-label above was
+          also asserted unconditionally while every other surface conditions it
+          on a.allInPricing -- on a non-all-in province that was an unbacked
+          claim about what the price includes. */}
+      {gatedPriceNote(a)&&<div className="rfb-note" style={{fontSize:11,lineHeight:1.5,marginTop:8,opacity:.85}}>{gatedPriceNote(a)}</div>}
       {ms>0&&<div className="rfb-stat"><div className="rfb-lab">{exactFb?"Verified MSRP":"MSRP · starting at"}</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{exactFb&&delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}{!exactFb&&<div className="rfb-sub">base model — this unit's options are extra</div>}</div>}
       <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
     </div>); }
@@ -9321,7 +9366,12 @@ function canonicalReport(a){
     // Mirrors supabase/functions/_shared/report-sign.ts -- keep both in sync.
     // Additive-only: /verify re-hashes whatever bytes are embedded in its own
     // link, never rebuilds this from a live object, so v1..v3 links still verify.
-    v:4,
+    // v5: `gate` records that the dealer's rendered page refused to display a
+    // price while the page's own machine-readable data carried one (D2C
+    // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
+    // signed canonical because it is a material claim about the listing, and
+    // /verify must be able to show it as sealed rather than as a re-assertion.
+    v:5,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9338,6 +9388,7 @@ function canonicalReport(a){
     odo:num(a.odometerKm),
     dol:a.daysOnLot&&Number(a.daysOnLot.days)>0?{d:Math.round(Number(a.daysOnLot.days)),s:a.daysOnLot.since||null}:null,
     pd:a.priceDisclosure||null,
+    gate:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:!!a.priceGateGoogleAdsBacked}:null,
     basis:a.msrpBasis?{b:a.msrpBasis,t:a.msrpTrim||null,y:a.msrpYear||null}:null,
     allIn:a.allInPricing?.body||null,
     disc:a.disclaimerCheck?{e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
@@ -9720,6 +9771,12 @@ function VerifyPage(){
                   {o.t==="value" && o.cpo && o.cpo.prem!=null && <Row t="Certified (CPO) premium" v={money(o.cpo.prem)+" more than non-certified"}/>}
                   {o.t==="value" && o.rw && (o.rw.basic||o.rw.pt) && <Row t="Factory warranty (est.)" v={[o.rw.basic&&`Basic ${o.rw.basic.a?"active":"expired"}`,o.rw.pt&&`Powertrain ${o.rw.pt.a?"active":"expired"}`].filter(Boolean).join(" · ")}/>}
                   {o.t!=="value" && <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>}
+                  {/* Sealed in the signed payload (canonical v5), so this is
+                      tamper-evident here rather than a re-assertion: the
+                      dealer's own page declined to show a price while its own
+                      data carried one. Without it /verify displayed the
+                      recovered number as an ordinary advertised price. */}
+                  {o.t!=="value" && o.gate && o.price?.asking ? <Row t="Price was gated" v={`page showed "${o.gate.m||"Call for pricing"}"${o.gate.g?" · also public via Google vehicle ads":""}`}/> : null}
                   {/* The label came from o.price.verified, which is the ASKING
                       PRICE's flag, not the MSRP's — so a dealer's own unverified
                       sticker was printed as "MSRP (verified)" in green on the
@@ -11612,6 +11669,16 @@ function QuoteCheckPage(){
                 const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
                 const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
                 const gated=!analysis.quotedPrice&&analysis.priceDisclosure==="contact_for_price";
+                // This view was the ONLY one printing a bare "over/under MSRP"
+                // without saying whether the listing price was actually
+                // verified -- the emailed cover, the PDF deck and /verify all
+                // qualify it. Same signed report, two different confidence
+                // levels depending on which view you opened. Mirrors the PDF's
+                // wording rather than hiding the delta, so no finding is lost.
+                const priceVerifiedScroll=analysis.priceVerified!==undefined?!!analysis.priceVerified:(Number(analysis.quotedPrice)>0);
+                // The dealer's page refuses to show this number; the page's own
+                // data carries it. Shared helper so every surface agrees.
+                const gatedNoteScroll=gatedPriceNote(analysis);
                 return (
                   <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:gated?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
                     <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price{analysis.allInPricing?" · all-in":""}</div>
@@ -11621,9 +11688,13 @@ function QuoteCheckPage(){
                         The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp&&isManufacturerFigure(analysis.msrpBasis)?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
                       </div>
                     )}
+                    {gatedNoteScroll&&(
+                      <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>{gatedNoteScroll}</div>
+                    )}
                     {hasMsrpCompare&&(
                       <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
                         {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
+                        {!priceVerifiedScroll&&<span style={{fontWeight:600,color:C.inkFaint}}> (vs catalog MSRP — listing price not yet verified)</span>}
                       </div>
                     )}
                     {!hasMsrpCompare&&analysis.msrp&&analysis.quotedPrice&&(

@@ -15,7 +15,14 @@
 // Run: node scripts/check-cache-ver.mjs [baseRef]
 import { execSync } from "node:child_process";
 
-const BASE = process.argv[2] || process.env.GITHUB_BASE_REF || "origin/main";
+// GITHUB_BASE_REF is a BARE branch name on a PR ("main"), which often does not
+// exist as a local ref in a CI checkout -- merge-base then throws and the gate
+// skips silently. Qualify it to origin/<ref> unless the caller passed an
+// explicit base.
+const RAW_BASE = process.argv[2] || process.env.GITHUB_BASE_REF || "origin/main";
+const BASE = (process.argv[2] || !process.env.GITHUB_BASE_REF || RAW_BASE.startsWith("origin/"))
+  ? RAW_BASE
+  : `origin/${RAW_BASE}`;
 const CACHE_FILE = "supabase/functions/analyze-listing-url/index.ts";
 
 // Files whose changes alter what a report SAYS. Deliberately not the whole
@@ -54,7 +61,26 @@ try {
   process.exit(0);
 }
 
-const changed = sh(`git diff --name-only ${base}..HEAD`).split("\n").filter(Boolean);
+let changed = sh(`git diff --name-only ${base}..HEAD`).split("\n").filter(Boolean);
+// ON A PUSH TO main THIS GATE WAS A GUARANTEED NO-OP. After a merge, HEAD IS
+// origin/main, so merge-base returns HEAD, the diff is empty, and the gate
+// exits 0 having inspected nothing -- on the very event where a missed
+// CACHE_VER bump starts serving stale reports to real buyers. It only ever did
+// real work on PR branches. When the base resolves to HEAD itself, fall back to
+// the commit that was just pushed (HEAD~1) so the push is actually checked.
+// Conservative: only when HEAD~1 exists, so a first or shallow commit still
+// skips rather than failing the build.
+if (!changed.length) {
+  let headSha = null, parent = null;
+  try { headSha = sh("git rev-parse HEAD"); } catch { /* ignore */ }
+  if (headSha && base === headSha) {
+    try { parent = sh("git rev-parse HEAD~1"); } catch { /* no parent to compare */ }
+  }
+  if (parent) {
+    changed = sh(`git diff --name-only ${parent}..HEAD`).split("\n").filter(Boolean);
+    if (changed.length) console.log("cache-ver: base resolved to HEAD (push event) — checking the pushed commit against HEAD~1 instead.");
+  }
+}
 if (!changed.length) { console.log("cache-ver: no changes."); process.exit(0); }
 
 const shaping = changed.filter((f) => OUTPUT_SHAPING.some((re) => re.test(f)));

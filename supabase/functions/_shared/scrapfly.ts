@@ -642,6 +642,7 @@ export function mergeRescued(analysis: any, rescued: any): void {
   if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.priceGatedButRecovered) {
     analysis.priceGatedButRecovered = true;
     analysis.priceGateMessage = rescued.priceGateMessage;
+    analysis.priceGateGoogleAdsBacked = !!rescued.priceGateGoogleAdsBacked;
   }
   const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
   for (const k of fillKeys) {

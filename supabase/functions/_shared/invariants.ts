@@ -196,8 +196,19 @@ export const INVARIANTS: Invariant[] = [
     id: "SUMMARY_MATCHES_PRICE",
     severity: "repair",
     why: "the narrative may never deny a price the report itself displays",
+    // The three original alternatives cover a summary that says the price is
+    // ABSENT. They miss the shape a price-GATED page produces, which is what
+    // the D2C recovery work newly makes reachable: the rendered page says
+    // "Call for pricing" / "contact the dealer for pricing", the vision pass
+    // faithfully writes that into the summary, and THEN the structured-data
+    // gap-fill recovers a real number -- leaving prose that tells the buyer to
+    // phone for a price the report prints two inches above. Same defect class
+    // as the HR-V case in the comment above, just reached by a different
+    // route, so it belongs in the same guard rather than a parallel one.
     applies: (a) => hasPrice(a) && typeof a.summary === "string"
-      && /\bno (?:pricing|price|advertised(?: selling| asking)? price)\b(?![-–])|\bprice (?:is |was )?not (?:shown|disclosed|advertised|published|present)\b|\b(?:doesn'?t|does not|do not) disclose\b[^.]{0,60}\bpric/i.test(a.summary),
+      && (/\bno (?:pricing|price|advertised(?: selling| asking)? price)\b(?![-–])|\bprice (?:is |was )?not (?:shown|disclosed|advertised|published|present)\b|\b(?:doesn'?t|does not|do not) disclose\b[^.]{0,60}\bpric/i.test(a.summary)
+        || /\b(?:call|contact|ask|inquire|enquire)\b[^.]{0,40}\bfor\b[^.]{0,20}\bpric/i.test(a.summary)
+        || /\bprice\b[^.]{0,30}\b(?:on request|upon request|available on request|hidden|withheld|gated)\b/i.test(a.summary)),
     holds: () => false,
     repair: (a) => {
       const price = Math.round(num(a.quotedPrice)).toLocaleString("en-CA");

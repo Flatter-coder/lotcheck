@@ -307,6 +307,19 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
+  // The emailed HTML body is its own render surface. e80122c put the
+  // gated-price disclosure in the attached PDF but not here, so the email a
+  // buyer actually opens showed the recovered price with no indication the
+  // dealer's page refuses to display it -- while the PDF stapled to that same
+  // email said so plainly. One signed report, two stories.
+  const gatedPriceNoteHtml = (an: any): string => {
+    if (!an || !(Number(an.quotedPrice) > 0) || !an.priceGatedButRecovered) return "";
+    const msg = String(an.priceGateMessage || "Call for pricing");
+    const txt = an.priceGateGoogleAdsBacked
+      ? `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way.`
+      : `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price shown here.`;
+    return `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(txt)}</div>`;
+  };
   const deck: Array<{ label: string; tone: string; glow: boolean; body: string }> = [];
 
   // 1 -- Price vs MSRP (compact; the cover headlines the delta, this is the detail)
@@ -316,6 +329,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     glow: false,
     body: `<div style="font-size:18px;font-weight:900;color:${!pv || over ? "#A63C25" : "#17756B"};">${hasCmp ? (diff === 0 ? "At MSRP" : over ? money(diff) + " over" : money(diff) + " under") : (a.quotedPrice ? money(a.quotedPrice) : "Price not shown")}</div>
       <div style="font-size:12px;color:#706D96;margin-top:2px;">${a.quotedPrice ? money(a.quotedPrice) : "—"}${hasCmp ? " vs " + money(a.msrp) + " MSRP" : (claim.msrp ? ` · ${escapeHtml(claim.label)} ${money(claim.msrp)}` : "")} · ${pv ? "price verified" : "price not verified"}</div>
+      ${gatedPriceNoteHtml(a)}
       ${!hasCmp && claim.refusal ? `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(claim.refusal)}</div>` : ""}
       ${a.msrpSourceUrl ? `<div style="font-size:11.5px;margin-top:7px;"><a href="${escapeHtml(a.msrpSourceUrl)}" style="color:#17756B;">See ${escapeHtml(a.make || "the manufacturer")}'s own page for this MSRP →</a></div>` : ""}`,
   });
@@ -785,8 +799,15 @@ function pointExplain(t: string, a: any): string | null {
       // shows "Call for pricing" while window.__vdpJSON's own price field
       // held $85,995 the whole time -- also published to Google Vehicle Ads,
       // so this is public information, not a private number LotCheck leaked.
+      // The Google Vehicle Ads corroboration is only assertable on NEW units --
+      // Google mandates a real (all-in, in Canada) price on those, which is
+      // what makes "public either way" a backed statement. On used/CPO the
+      // premise does not hold, so the sentence narrows to what we actually
+      // verified: the page's own data. (claims-must-stay-backed)
       const gatedNote = (qp && a.priceGatedButRecovered)
-        ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+        ? (a.priceGateGoogleAdsBacked
+            ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+            : `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price shown here. `)
         : "";
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";

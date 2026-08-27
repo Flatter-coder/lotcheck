@@ -52,6 +52,14 @@ const SURFACES = [
   "supabase/functions/_shared/point-state.ts",
   "supabase/functions/_shared/settled-claims.ts",
   "supabase/functions/_shared/reference-financing.ts",
+  // The emailed HTML body and the PDF deck are the artifacts the buyer
+  // FORWARDS TO THE DEALER -- the most adversarially-read copy LotCheck
+  // produces -- and this gate never scanned them. Every rule below (no
+  // accusation language, no "scraping", jurisdiction correctness) applies at
+  // least as hard here as on screen. Added 2026-08-22 after an audit found
+  // tonight's new gated-price sentence landed in this file completely
+  // ungated.
+  "supabase/functions/email-quote-report/index.ts",
 ];
 
 const RULES = [
@@ -125,7 +133,7 @@ const RULES = [
     // computes + returns, no DB writes, so the promise holds there too). Was 3
     // before the 2026-08-26 /value page (Phase 4) added the fourth occurrence;
     // flywheel_capture_enabled is still false, so the promise remains literally true.
-    expected: 4,
+    expected: 5, // +1 2026-08-22: the emailed PDF's own 'never stored' line, newly in scope when email-quote-report joined SURFACES. Re-confirmed: admin_config.flywheel_capture_enabled is seeded 'false' and NO migration ever sets it true.
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a
@@ -142,7 +150,7 @@ const RULES = [
     // scroll, heatmap, sidebar, flipbook, PDF, email — plus the "10-point lane"
     // link now living in the quote-check nav's "More" menu). The 10-point
     // verification itself is unchanged: ten run, ten deliver.
-    expected: 16,
+    expected: 17, // +1 2026-08-22: the emailed PDF's '10-POINT AUDIT' kicker, newly in scope. Re-confirmed: tenPoints() in that file renders all ten with backed values.
   },
 ];
 
