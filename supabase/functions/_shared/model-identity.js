@@ -22,10 +22,25 @@
 // Markers that denote a distinct powertrain variant sold alongside a base
 // model. Deliberately narrow: only nameplate-level suffixes that manufacturers
 // price as separate vehicles.
+// THE JAPANESE-LUXURY NUMERIC-H CONVENTION WAS MISSING, and it is not a rare
+// edge: Lexus/Acura/Infiniti name their hybrids "NX 350h", "RX 500h",
+// "MDX Sport Hybrid", and their plug-ins "NX 450h+". None of the three
+// patterns below matched any of those, so "NX 350h" read as MARKER-FREE and
+// powertrainCompatible() matched it against the GAS "NX" series.
+//
+// Confirmed live 2026-08-27 on a real customer report: a 2026 Lexus NX 350h
+// Premium Hybrid AWD was anchored to the gas NX's $55,080 base MSRP while the
+// dealer's own page stated $58,675 for that exact unit -- a false anchor of
+// precisely the kind [[powertrain-identity-rule]] forbids ("an EV/PHEV/hybrid
+// never inherits its gas sibling's MSRP").
+//
+// The "+" in 450h+ is the plug-in marker in this convention, so it is matched
+// by the phev pattern; powertrainMarkers() below already promotes plug-in over
+// hybrid when both fire.
 const MARKERS = [
   ["bev", /\bev\b|\be-?tron\b|\blightning\b|\bmach-?e\b|\bev6\b|\bev9\b|\bioniq\s*[56]\b|\bbz4x\b|\bsolterra\b/i],
-  ["phev", /\bphev\b|\bplug-?in\b|\bprime\b|\b4xe\b|\brecharge\b/i],
-  ["hybrid", /\bhybrid\b|\bhev\b|\bhybride\b/i],
+  ["phev", /\bphev\b|\bplug-?in\b|\bprime\b|\b4xe\b|\brecharge\b|\d{3}h\+|\be:?phev\b/i],
+  ["hybrid", /\bhybrid\b|\bhev\b|\bhybride\b|\b\d{3}h\b|\be:?hev\b|\be-?power\b|\bsport\s+hybrid\b/i],
 ];
 
 /**

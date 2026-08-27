@@ -135,5 +135,26 @@ for (const [l, c] of [["bZ4X XLE", "bZ4X"], ["Mustang Mach-E Premium", "Mustang 
 }
 check("a gas Equinox still cannot reach the EV row", !resolve("Equinox LT", "Equinox EV"));
 
+// ── Japanese-luxury numeric-h convention (added 2026-08-27) ────────────────
+// Lexus/Acura/Infiniti/Honda/Nissan do not put the word "hybrid" in the
+// nameplate: it is 350h / 500h / 450h+ / e:HEV / e-POWER / Sport Hybrid.
+// None of those matched MARKERS, so "NX 350h" read as marker-FREE and matched
+// the GAS "NX" series. Confirmed live on a real customer report: a 2026 Lexus
+// NX 350h was anchored to the gas NX's $55,080 base MSRP while the dealer's
+// own page stated $58,675 for that exact unit. [[powertrain-identity-rule]]
+console.log("\nJapanese-luxury hybrid nameplates carry a powertrain marker");
+for (const [s, want] of [["NX 350h Premium Hybrid AWD", "hybrid"], ["RX 500h F Sport", "hybrid"],
+                         ["ES 300h", "hybrid"], ["MDX Sport Hybrid", "hybrid"],
+                         ["Accord e:HEV", "hybrid"], ["Rogue e-POWER", "hybrid"],
+                         ["NX 450h+", "phev"]] as Array<[string, string]>) {
+  check(`'${s}' -> ${want}`, powertrainMarkers(s).has(want));
+}
+check("a plain gas '350' is NOT read as a hybrid", !powertrainMarkers("NX 350 AWD").has("hybrid"));
+check("450h+ is a PLUG-IN, not merely a hybrid", powertrainMarkers("NX 450h+").has("phev"));
+// The three claims that actually protect a buyer's money:
+check("a gas NX can never inherit the hybrid NX's row", !resolve("NX 350 AWD", "NX Hybrid"));
+check("a hybrid NX still reaches the NX Hybrid row", resolve("NX 350h Premium Hybrid AWD", "NX Hybrid"));
+check("a hybrid NX can never inherit the GAS NX row", !resolve("NX 350h Premium Hybrid AWD", "NX"));
+
 console.log(`\n${pass} passed, ${fail} failed.`);
 if (fail) process.exit(1);
