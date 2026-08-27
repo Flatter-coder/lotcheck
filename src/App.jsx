@@ -8684,7 +8684,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {trs.slice(0, TRIM_ROWS_SHOWN).map((t, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 9px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.trim}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{trimRange.multiNameplate && t.nameplate ? <span style={{ color: MUT, fontWeight: 600 }}>{t.nameplate} · </span> : null}{t.trim}</span>
               <span style={{ fontSize: 12, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(t.msrp)}{t.price_basis === "excl_freight" ? <span style={{ color: MUT }}> +frt</span> : null}</span>
             </div>
           ))}
@@ -9407,7 +9407,12 @@ function trimRangePayload(tr){
     // being computed over the TRUNCATED list -- so on a 17-trim ladder it
     // divided by 12 and stated a proportion that was simply not true of the
     // manufacturer's lineup. Render a capped view; count over everything.
-    t:tr.trims.slice(0,TRIM_PAYLOAD_MAX).map(t=>({ n:String(t.trim).slice(0,60), m:Number(t.msrp), b:t.price_basis==="excl_freight"?1:0 })) };
+    mn:!!tr.multiNameplate,
+    t:tr.trims.slice(0,TRIM_PAYLOAD_MAX).map(t=>({ n:String(t.trim).slice(0,60), m:Number(t.msrp), b:t.price_basis==="excl_freight"?1:0,
+      // Which of the separately-priced vehicles this row belongs to. Sent only
+      // when the pool spans more than one, so the emailed report can say what
+      // the on-screen card says instead of printing six same-named rows.
+      p:tr.multiNameplate&&t.nameplate?String(t.nameplate).slice(0,40):undefined })) };
 }
 function TrimMsrpRange({analysis:a, C, cardStyle}){
   const tr=useTrimRange(a);

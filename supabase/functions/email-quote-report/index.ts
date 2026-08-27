@@ -409,7 +409,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     // buyer comparing the email against the app is not reading two counts.
     const HTML_ROWS_SHOWN = 12;
     const rows = tr.t.slice(0, HTML_ROWS_SHOWN).map((x: any) =>
-      `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
+      `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${x.p ? escapeHtml(String(x.p)) + " · " : ""}${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
     deck.push({ label: "MSRP per trim", tone: "muted", body:
       `<div style="font-size:13px;font-weight:900;color:#33305A;">${tr.y} ${escapeHtml(tr.mk)} ${escapeHtml(tr.md)} — the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}</div>` +
       `<div style="margin-top:6px;">${rows}</div>` +
@@ -1206,7 +1206,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const TRIM_ROWS_SHOWN = 12;
     for (const x of tr.t.slice(0, TRIM_ROWS_SHOWN)) {
       need(13);
-      T(pdfSafe(x.n), { size: 9, font: sans, color: SOFT });
+      T(pdfSafe(x.p ? `${x.p} · ${x.n}` : x.n), { size: 9, font: sans, color: SOFT });
       right(`$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, { size: 9, font: sansB });
       y -= 13;
     }
