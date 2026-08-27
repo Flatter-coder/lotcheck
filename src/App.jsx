@@ -5367,14 +5367,37 @@ function VerificationTab({apiUsage, apiUsageLoading, apiUsageReadAt, readOnly}){
          note:`${vnum(attempts)} attempted · ${vnum(ledger.provider_err)} rejected`,
          state:(ledger.provider_err||0)>0?"bad":"ok", pct:okPct,
          proof:"One row per attempt in report_delivery, written before the send and carrying the SHA-256 of the exact PDF bytes handed to Resend. A customer forwards their PDF, you hash it, and it matches a row or it does not."},
-        {id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
-         note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints`,
-         state:(ledger.bounced||0)>0?"bad":"ok", pct:delivPct,
-         proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."},
+        // NO PROVIDER EVENT HAS *EVER* ARRIVED is a different fact from "some
+        // deliveries failed", and this row used to paint both green. Its state
+        // was computed from the bounce count ALONE, so 0-confirmed-of-1-accepted
+        // rendered the same teal square as 100-of-100 — the exact false
+        // all-clear this panel's own footer says it exists to prevent.
+        // (Confirmed live 2026-08-27: the resend-webhook function was deployed
+        // with gateway JWT verification ON, so Resend's Svix POSTs were answered
+        // 401 and no delivery event could ever be recorded. Fixed by
+        // supabase/config.toml, but the row must not have been GREEN about it.)
+        // Three honest states now: hollow when nothing has ever reported, bad
+        // on a real bounce or a total absence of confirmations, ok otherwise.
+        ...(((ledger.delivered||0) === 0 && (ledger.bounced||0) === 0 && (ledger.complained||0) === 0 && (ledger.accepted||0) > 0)
+          ? [unmeasured("deliv","Delivery confirmed by provider","report_delivery_event",
+              `${vnum(ledger.accepted)} send(s) accepted by Resend, and NOT ONE provider event has come back — not a delivery, not a bounce, not a complaint. That pattern is the webhook not arriving at all, not mail failing: a real delivery problem produces bounces, not silence. Check that resend-webhook is deployed with verify_jwt=false (supabase/config.toml), that the endpoint is registered in the Resend dashboard, and that RESEND_WEBHOOK_SECRET is set. Until an event arrives this stays hollow rather than green, because a confirmation count nothing can write is not a passing check.`)]
+          : [{id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
+              note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints · ${Math.round(delivPct)}% of accepted`,
+              state:((ledger.bounced||0)>0 || ((ledger.accepted||0)>0 && (ledger.delivered||0)===0))?"bad":"ok", pct:delivPct,
+              proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."}]),
+        // Same distinction on the stall row: "accepted but unresolved" is only
+        // an early-warning signal once delivery reporting is known to WORK. If
+        // no provider event has ever arrived, every send ages into this row
+        // after an hour regardless of whether it was delivered perfectly — so
+        // it is measuring the missing webhook, not the mail. Say which.
         {id:"stall", name:"Accepted, unresolved over 1h", value:vnum(ledger.stalled_1h),
-         note:`${vnum(ledger.no_msg_id)} with no provider id`,
+         note:((ledger.delivered||0)===0 && (ledger.bounced||0)===0 && (ledger.complained||0)===0 && (ledger.stalled_1h||0)>0)
+           ? "no provider events at all — see the row above"
+           : `${vnum(ledger.no_msg_id)} with no provider id`,
          state:(ledger.stalled_1h||0)>0?"bad":"ok", pct:(ledger.stalled_1h||0)>0?60:100,
-         proof:"Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
+         proof:((ledger.delivered||0)===0 && (ledger.bounced||0)===0 && (ledger.complained||0)===0 && (ledger.stalled_1h||0)>0)
+           ? "Sends Resend accepted but never resolved to delivered or bounced. Right now NO provider event of any kind has been recorded, so this count is measuring the delivery webhook not arriving — it is NOT evidence that the mail failed. With the webhook flowing, a non-zero count here becomes the real early warning it is meant to be."
+           : "Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
       );
     } else {
       rows.push(

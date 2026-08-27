@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27d";  // + analyze-quote now uses the shared pickTrimMsrp scorer (was granting accusation-grade "exact" off a powertrain-blind ilike) and marks used vehicles original_when_new
+const CACHE_VER = "2026-08-27e";  // + all SIX delivery paths now instrumented via instrumentDelivery() (5 of 6 charged the buyer while writing zero telemetry, incl. every cache hit)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -431,6 +431,71 @@ async function logProviderCall(f: {
     if (error) console.warn("provider_call log failed:", error.message);
   } catch (e) {
     console.warn("provider_call log threw (run continues):", e);
+  }
+}
+
+// THE SINGLE DELIVERY BOUNDARY. Every branch that hands a buyer a report and
+// captures their credit must pass through here.
+//
+// It did not used to. This function has SIX return points that deliver an
+// `analysis` and call captureCredit -- the 6-hour cache fast-path, the SM360
+// feed fallback, the JSON-LD fallback, the Convertus vmsData fallback, the
+// Scrapfly render-only rescue, and the main success path -- and only the LAST
+// one wrote telemetry. The other five charged the buyer and wrote no
+// api_usage_log row and no verification_check rows at all, so:
+//   - a cached delivery was invisible to the admin ledger entirely, making
+//     "URL scans" a count of cache MISSES rather than of reports delivered;
+//   - the four page-load fallbacks each put their own text in error_message
+//     ("page-load failed, served SM360 feed fallback"), overwriting the
+//     `degraded: missing …` token the ledger matches on, so a hollow delivery
+//     could never register as hollow;
+//   - five of six delivered reports contributed zero of their 13 checkpoints,
+//     which is a code-level reason the per-check failure rate this panel is
+//     built to measure ([[failure-rate-under-one-percent]]) reads low.
+//
+// Adding five more call sites would have left the same trap for the next
+// fallback branch, so the fix is this one helper: a new delivery path is
+// instrumented by construction, or it does not compile past review.
+//
+// `note` is the branch's own trace text. The degraded token is PREPENDED so it
+// stays the leading token the ledger matches, and the branch's provenance is
+// preserved after it rather than replaced.
+async function instrumentDelivery(
+  analysis: any,
+  note: string | null,
+  usage?: { input_tokens?: number; output_tokens?: number } | null,
+): Promise<void> {
+  try {
+    const gaps: string[] = [];
+    if (!(Number(analysis?.quotedPrice) > 0)) gaps.push("price");
+    if (!(Number(analysis?.msrp) > 0)) gaps.push("msrp");
+    if (!analysis?.vin) gaps.push("vin");
+    if (!analysis?.recalls) gaps.push("recalls");
+    if (!(Number(analysis?.financing?.rate) > 0)) gaps.push("apr");
+    const parts = [
+      gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
+      note,
+    ].filter(Boolean);
+    await logUsage({
+      success: true,
+      inputTokens: usage?.input_tokens ?? null,
+      outputTokens: usage?.output_tokens ?? null,
+      errorMessage: parts.length ? parts.join(" | ") : null,
+    });
+    // One row per checkpoint, so the ledger can report a real per-check
+    // failure rate instead of a single boolean that calls 12-of-13 a success.
+    // Host only, never the full URL. Fail-open.
+    let host: string | null = null;
+    try { host = new URL(String(analysis?.sourceUrl || "")).hostname.replace(/^www\./, ""); } catch { /* not parseable */ }
+    await recordCheckpoints(supabase, {
+      reportId: analysis?.reportId ?? null,
+      feature: "listing_url",
+      analysis,
+      listingHost: host,
+    });
+  } catch (e) {
+    // Telemetry must never take down a delivery the buyer already paid for.
+    console.warn("instrumentDelivery failed (ignored):", (e as Error)?.message);
   }
 }
 
@@ -2995,6 +3060,14 @@ Deno.serve(async (req: Request) => {
           );
         }
         await finalizeServerSide(cached.analysis); // finalizes entries cached before this change
+        // A cached delivery is a DELIVERED, CHARGED report and must be counted
+        // as one. This branch sits above every logUsage call site in the file
+        // and wrote nothing at all, so "URL scans" in the admin ledger was
+        // really a count of cache MISSES, and a cached report contributed zero
+        // of its 13 checkpoints. Two consequences worth naming: the panel
+        // undercounted real deliveries, and the per-check failure rate was
+        // computed over a biased sample (fresh scans only).
+        await instrumentDelivery(cached.analysis, "cache hit");
         // A cached delivery is still a delivered accurate result -> capture.
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -3168,7 +3241,7 @@ Deno.serve(async (req: Request) => {
           console.warn("Cache write failed (SM360 fallback):", err);
         }
         // Logged as a success: we returned a usable report, just via the feed.
-        await logUsage({ success: true, errorMessage: `page-load failed, served SM360 feed fallback` });
+        await instrumentDelivery(fallback, "page-load failed, served SM360 feed fallback");
         console.log(`Served SM360 feed fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         // A usable report was delivered (via the feed) -> capture.
         const credits = await captureCredit(holdId);
@@ -3222,7 +3295,7 @@ Deno.serve(async (req: Request) => {
         } catch (err) {
           console.warn("Cache write failed (JSON-LD fallback):", err);
         }
-        await logUsage({ success: true, errorMessage: `page-load failed, served structured-data (JSON-LD) fallback` });
+        await instrumentDelivery(jsonLdFallback, "page-load failed, served structured-data (JSON-LD) fallback");
         console.log(`Served structured-data (JSON-LD) fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -3269,7 +3342,7 @@ Deno.serve(async (req: Request) => {
         } catch (err) {
           console.warn("Cache write failed (Convertus fallback):", err);
         }
-        await logUsage({ success: true, errorMessage: `page-load failed, served Convertus vmsData fallback` });
+        await instrumentDelivery(convertusFallback, "page-load failed, served Convertus vmsData fallback");
         console.log(`Served Convertus vmsData fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         const cvCredits = await captureCredit(holdId);
         holdId = null;
@@ -3315,7 +3388,7 @@ Deno.serve(async (req: Request) => {
             } catch (err) {
               console.warn("Cache write failed (render fallback):", err);
             }
-            await logUsage({ success: true, errorMessage: `page-load failed, served Scrapfly render fallback` });
+            await instrumentDelivery(renderOnly, "page-load failed, served Scrapfly render fallback");
             console.log(`Served Scrapfly render fallback for ${url} after full page-load failure (${nimbleResult.errBody}).`);
             const credits = await captureCredit(holdId);
             holdId = null;
@@ -4018,35 +4091,7 @@ Deno.serve(async (req: Request) => {
       console.warn("Cache write failed:", err);
     }
 
-    // "success" means HTTP 200, not "the buyer got a complete report". Record
-    // which core points are missing so a hollow delivery is visible as hollow
-    // in the admin ledger instead of counting exactly like a full one
-    // (Vic, 2026-08-15). Mirrors the same note format analyze-quote writes.
-    {
-      const gaps: string[] = [];
-      if (!(Number(analysis.quotedPrice) > 0)) gaps.push("price");
-      if (!(Number(analysis.msrp) > 0)) gaps.push("msrp");
-      if (!analysis.vin) gaps.push("vin");
-      if (!analysis.recalls) gaps.push("recalls");
-      if (!(Number(analysis.financing?.rate) > 0)) gaps.push("apr");
-      await logUsage({
-        success: true,
-        inputTokens: usage?.input_tokens,
-        outputTokens: usage?.output_tokens,
-        errorMessage: gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
-      });
-      // One row per checkpoint, so the ledger can report a real per-check
-      // failure rate instead of a single boolean that calls 12-of-13 a
-      // success. Host only, never the full URL. Fail-open.
-      let host: string | null = null;
-      try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { /* not a parseable URL */ }
-      await recordCheckpoints(supabase, {
-        reportId: analysis.reportId ?? null,
-        feature: "listing_url",
-        analysis,
-        listingHost: host,
-      });
-    }
+    await instrumentDelivery(analysis, null, usage);
 
     // Delivered an accurate result -> capture the hold (signed-in only) and
     // include the new balance. Null holdId out first so a later throw can't

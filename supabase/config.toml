@@ -1,0 +1,38 @@
+# Supabase CLI project config.
+#
+# WHY THIS FILE EXISTS (2026-08-27). Two edge functions receive posts from
+# THIRD PARTIES that cannot carry a Supabase JWT, and both say so in their own
+# header comments ("Deploy: ... --no-verify-jwt"). But CI deploys every
+# function in one bulk command:
+#
+#   .github/workflows/deploy-edge-functions.yml
+#     supabase functions deploy --project-ref debigtyjhjamipooajhk
+#
+# with no per-function flags. So the gateway kept JWT verification ON for both,
+# and a one-off manual `--no-verify-jwt` deploy was silently reverted by the
+# next push that touched supabase/functions/**. A flag you have to remember to
+# pass is a flag that gets lost; this file makes the setting part of the repo.
+#
+# THE COST OF THE MISSING SETTING, measured: the admin ledger's
+# "Delivery confirmed by provider" has been stuck at 0 and
+# "Accepted, unresolved over 1h" has been red, because Resend's Svix POSTs were
+# answered 401 by the gateway before resend-webhook ever ran. Nothing was
+# wrong with the email OR the webhook code -- the events simply never arrived,
+# so no send could ever be confirmed delivered.
+#
+# THIS DOES NOT MAKE THEM UNAUTHENTICATED. Both authenticate the CALLER
+# themselves, which is the correct layer for a third-party sender:
+#   resend-webhook        verifies the Svix signature (RESEND_WEBHOOK_SECRET);
+#                         an unsigned/badly-signed event is recorded with
+#                         sig_verified=false and never trusted as evidence.
+#   vendor-invoice-ingest requires a shared secret in X-Invoice-Secret
+#                         (INVOICE_INGEST_SECRET).
+# Every other function stays JWT-verified by CLI default -- they are called by
+# the browser with the anon key, which IS a JWT, so they need no entry here.
+project_id = "debigtyjhjamipooajhk"
+
+[functions.resend-webhook]
+verify_jwt = false
+
+[functions.vendor-invoice-ingest]
+verify_jwt = false
