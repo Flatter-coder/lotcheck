@@ -1601,160 +1601,11 @@ function TestDriveModal({listing,onClose}){
 
 const MAKES=["Toyota","Hyundai","Kia","Chevrolet","Ford","Volkswagen","Mitsubishi"];
 
-function estimateAppraisal(make,model,year,km,condition){
-  const baseByAge={2026:42000,2025:38000,2024:34000,2023:30000,2022:26000,2021:22000,2020:18000,2019:15000};
-  let base=baseByAge[year]||Math.max(8000,42000-(2026-year)*4000);
-  const kmFactor=Math.max(0.55,1-(km/250000)*0.45);
-  const condFactor={Excellent:1.08,Good:1.0,Fair:0.88,Poor:0.7}[condition]||1.0;
-  const estimate=Math.round(base*kmFactor*condFactor/100)*100;
-  return{low:Math.round(estimate*0.9/100)*100,mid:estimate,high:Math.round(estimate*1.1/100)*100};
-}
-
-function AppraisalModal({onClose}){
-  const [step,setStep]=useState("form");
-  const [make,setMake]=useState("Toyota");
-  const [model,setModel]=useState("");
-  const [year,setYear]=useState(2022);
-  const [km,setKm]=useState("");
-  const [condition,setCondition]=useState("Good");
-  const [name,setName]=useState("");
-  const [phone,setPhone]=useState("");
-  const [email,setEmail]=useState("");
-  const [wantsPickup,setWantsPickup]=useState(false);
-  const [pickupAddress,setPickupAddress]=useState("");
-  const [vin,setVin]=useState("");
-  const [err,setErr]=useState("");
-
-  const estimate=step!=="form"?estimateAppraisal(make,model,Number(year),Number(km)||50000,condition):null;
-
-  function handleGetEstimate(){
-    if(!model.trim()){setErr("Please enter your car's model.");return;}
-    if(!km||Number(km)<=0){setErr("Please enter your odometer reading.");return;}
-    setErr("");setStep("result");
-  }
-
-  async function handleSubmitToDealer(){
-    if(!name.trim()){setErr("Please enter your name.");return;}
-    if(!phone.trim()&&!email.trim()){setErr("Please enter phone or email.");return;}
-    if(wantsPickup&&!pickupAddress.trim()){setErr("Please enter your pickup address.");return;}
-    setErr("");setStep("sending");
-    try{
-      const {error}=await supabase.from("leads").insert({
-        lead_type:"appraisal",
-        name, phone, email,
-        details:{
-          make, model, year:Number(year), km:Number(km)||null, condition,
-          vin:vin||null,
-          estimate_low:estimate?.low||null,
-          estimate_mid:estimate?.mid||null,
-          estimate_high:estimate?.high||null,
-          wants_pickup:wantsPickup,
-          pickup_address:wantsPickup?pickupAddress:null,
-        },
-      });
-      if(error) throw error;
-      setStep("done");
-    }catch(err){
-      console.error("Lead submit failed:",err.message);
-      setErr("Something went wrong sending your request. Please try again.");
-      setStep("dealer");
-    }
-  }
-
-  const inp={width:"100%",background:"#1e293b",border:"1px solid #334155",borderRadius:10,padding:"12px 14px",color:"#f1f5f9",fontSize:15,boxSizing:"border-box",outline:"none",fontFamily:"inherit",marginBottom:10};
-
-  return(
-    <div className="lc-modal-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div className="lc-modal" style={{maxWidth:460}}>
-        {step==="form"&&<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{fontSize:17,fontWeight:700,color:"#f1f5f9"}}><Icon3D name="money" size={14}/> What's your car worth?</div>
-            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-          </div>
-          <div style={{fontSize:13,color:"#64748b",marginBottom:18}}>Free instant estimate · No obligation · Takes 30 seconds</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:0}}>
-            <div>
-              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Make</label>
-              <select value={make} onChange={e=>setMake(e.target.value)} style={{...inp,appearance:"auto"}}>
-                {MAKES.map(m=><option key={m}>{m}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Year</label>
-              <select value={year} onChange={e=>setYear(e.target.value)} style={{...inp,appearance:"auto"}}>
-                {[2026,2025,2024,2023,2022,2021,2020,2019,2018,2017,2016,2015].map(y=><option key={y}>{y}</option>)}
-              </select>
-            </div>
-          </div>
-          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Model</label>
-          <input type="text" placeholder="e.g. RAV4, Tacoma, Camry" value={model} onChange={e=>setModel(e.target.value)} style={inp}/>
-          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Odometer (km)</label>
-          <input type="number" placeholder="e.g. 65000" value={km} onChange={e=>setKm(e.target.value)} style={inp}/>
-          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>
-            VIN <span style={{color:"#334155",fontWeight:400,fontSize:11}}>(optional)</span>
-          </label>
-          <input type="text" placeholder="e.g. 2T3BFREV1JW123456" value={vin} onChange={e=>setVin(e.target.value.toUpperCase())} style={{...inp,fontFamily:"monospace",letterSpacing:"0.5px"}} maxLength={17}/>
-          <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>Condition</label>
-          <div style={{display:"flex",gap:6,marginBottom:14}}>
-            {["Excellent","Good","Fair","Poor"].map(c=>(
-              <button key={c} onClick={()=>setCondition(c)}
-                style={{flex:1,padding:"10px 0",background:condition===c?"#16a34a":"transparent",border:`1px solid ${condition===c?"#16a34a":"#334155"}`,borderRadius:8,color:condition===c?"#fff":"#94a3b8",cursor:"pointer",fontSize:12,fontWeight:600}}>
-                {c}
-              </button>
-            ))}
-          </div>
-          {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:12}}>{err}</div>}
-          <button onClick={handleGetEstimate} className="lc-modal-btn">Get my free estimate →</button>
-        </>}
-
-        {step==="result"&&<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:16,fontWeight:700,color:"#f1f5f9"}}>Your estimated value</div>
-            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-          </div>
-          <div style={{background:"#0d2010",border:"1px solid #16a34a30",borderRadius:14,padding:"18px",marginBottom:16,textAlign:"center"}}>
-            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>ESTIMATED TRADE-IN VALUE</div>
-            <div style={{fontSize:32,fontWeight:800,color:"#22c55e",marginBottom:4}}>${estimate.mid.toLocaleString()}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>Range: ${estimate.low.toLocaleString()} – ${estimate.high.toLocaleString()}</div>
-          </div>
-          <button onClick={()=>setStep("dealer")} className="lc-modal-btn">Get a real offer from a dealer →</button>
-          <button onClick={()=>setStep("form")} style={{width:"100%",background:"transparent",border:"none",color:"#475569",fontSize:12,cursor:"pointer",marginTop:10,textAlign:"center"}}>← Edit my car details</button>
-        </>}
-
-        {(step==="dealer"||step==="sending")&&<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <div style={{fontSize:16,fontWeight:700,color:"#f1f5f9"}}>Get your real offer</div>
-            <button onClick={onClose} style={{background:"transparent",border:"none",color:"#475569",fontSize:20,cursor:"pointer",lineHeight:1}}>✕</button>
-          </div>
-          <div style={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:10,padding:"12px 14px",marginBottom:14,display:"flex",justifyContent:"space-between"}}>
-            <span style={{fontSize:13,color:"#94a3b8"}}>Estimated value</span>
-            <span style={{fontSize:15,fontWeight:700,color:"#22c55e"}}>${estimate.mid.toLocaleString()}</span>
-          </div>
-          {[["Full name *","text","Jane Smith",name,setName],["Phone","tel","403-555-0100",phone,setPhone],["Email","email","jane@email.com",email,setEmail]].map(([l,t,ph,v,s])=>(
-            <div key={l}>
-              <label style={{fontSize:12,color:"#94a3b8",display:"block",marginBottom:4}}>{l}</label>
-              <input type={t} placeholder={ph} value={v} onChange={e=>s(e.target.value)} style={inp}/>
-            </div>
-          ))}
-          {err&&<div style={{background:"#7f1d1d20",border:"1px solid #7f1d1d50",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#ef4444",marginBottom:12}}>{err}</div>}
-          <button onClick={handleSubmitToDealer} disabled={step==="sending"} className="lc-modal-btn" style={{background:step==="sending"?"#1e3a5f":"#16a34a"}}>
-            {step==="sending"?"Sending…":"Submit to dealer →"}
-          </button>
-        </>}
-
-        {step==="done"&&(
-          <div style={{textAlign:"center",padding:"16px 0"}}>
-            <div style={{marginBottom:10}}><Icon3D name="check" size={52}/></div>
-            <div style={{fontSize:18,fontWeight:700,color:"#f1f5f9",marginBottom:8}}>Request received!</div>
-            <div style={{fontSize:14,color:"#64748b",marginBottom:16,lineHeight:1.6}}>We'll follow up with you directly about your {year} {make} {model}.</div>
-            <button onClick={onClose} className="lc-modal-btn">Done</button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
+// estimateAppraisal() + AppraisalModal removed 2026-08-27 (Phase 4): a fabricated
+// trade-in appraisal (static baseByAge table), never wired in. It must never
+// coexist with the SIGNED value report (/value + the value-report edge fn), which
+// is built only from real comps. Killed so it can never be mistaken for, or fed
+// into, the real product (make-it-dispute-proof, dealers-are-adversaries).
 // ── Depreciation planning calculator (free) ─────────────────────────────────
 // Different question from Value Estimate: not "what is this used listing
 // worth right now" but "if I buy something for $X new, what will it
@@ -10051,7 +9902,14 @@ function VerifyPage(){
                 <div style={{background:vdark?"rgba(255,255,255,.04)":"rgba(255,255,255,.6)",border:`1px solid ${T.cardBd}`,borderRadius:12,padding:"14px 16px"}}>
                   <div style={{fontSize:15,fontWeight:700,color:T.heading}}>{o.vehicle||"Vehicle"}</div>
                   <div style={{fontSize:12.5,color:T.soft,fontStyle:"italic",marginBottom:4}}>{[o.dealer?.name,o.dealer?.city].filter(Boolean).join(", ")}{issued?` · ${issued.toLocaleString("en-CA",{dateStyle:"medium",timeStyle:"short"})}`:""}</div>
-                  <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>
+                  {/* VALUE report (t:'value') renders the band + CPO + warranty;
+                      the quote-only rows below are gated off since a value report
+                      has no asking/MSRP/leverage/dealer. Signature already verified. */}
+                  {o.t==="value" && o.band && o.band.avg!=null && <Row t="Retail-asking value" v={money(o.band.avg)} c="#34d399"/>}
+                  {o.t==="value" && o.band && <div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.band.lo)}–{money(o.band.hi)}{o.band.n?` · ${o.band.n} comps`:""}{o.band.as?` · ${o.band.as}`:""} · asking prices, not sold</div>}
+                  {o.t==="value" && o.cpo && o.cpo.prem!=null && <Row t="Certified (CPO) premium" v={money(o.cpo.prem)+" more than non-certified"}/>}
+                  {o.t==="value" && o.rw && (o.rw.basic||o.rw.pt) && <Row t="Factory warranty (est.)" v={[o.rw.basic&&`Basic ${o.rw.basic.a?"active":"expired"}`,o.rw.pt&&`Powertrain ${o.rw.pt.a?"active":"expired"}`].filter(Boolean).join(" · ")}/>}
+                  {o.t!=="value" && <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>}
                   {/* The label came from o.price.verified, which is the ASKING
                       PRICE's flag, not the MSRP's — so a dealer's own unverified
                       sticker was printed as "MSRP (verified)" in green on the
