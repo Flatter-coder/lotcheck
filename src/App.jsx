@@ -7970,6 +7970,15 @@ function encodeReport(a){
     mref:a.msrpReference&&a.msrpReference.msrp>0?{m:a.msrpReference.msrp,t:a.msrpReference.trim||null,u:a.msrpReference.sourceUrl||null,mk:a.msrpReference.make||null}:null,
     lic:a.dealerLicence&&a.dealerLicence.status?{s:a.dealerLicence.status,st:a.dealerLicence.state,n:a.dealerLicence.legalName||null,no:a.dealerLicence.licenceNumber||null,e:a.dealerLicence.expiryDate||null}:null,
     sh:a.listingShotSha256||null,
+    // The dealer's own itemisation, so a forwarded report shows the same
+    // breakdown the original did. `i` records whether the fees are inside
+    // the advertised price -- without it the shared copy could imply they
+    // were added on top, which is the claim we must never make.
+    dli:a.dealerLineItems&&Array.isArray(a.dealerLineItems.fees)&&a.dealerLineItems.fees.length?{
+      f:a.dealerLineItems.fees.slice(0,8).map(x=>({n:String(x.name).slice(0,60),a:Number(x.amount)})),
+      d:(a.dealerLineItems.incentives||[]).slice(0,8).map(x=>({n:String(x.name).slice(0,60),a:Number(x.amount)})),
+      i:a.dealerLineItems.insideAdvertisedPrice===true?1:(a.dealerLineItems.insideAdvertisedPrice===false?0:null),
+      s:String(a.dealerLineItems.source||"").slice(0,80)}:null,
     // ── FIELDS THE SIGNED CANONICAL CARRIES AND THIS ENCODER DID NOT ────────
     // The share link ships TWO representations of one report: `vp` (the
     // complete signed canonical, which the banner verifies) and this compact
@@ -8029,6 +8038,8 @@ function decodeReport(s){
       msrpReference:c.mref?{msrp:c.mref.m,trim:c.mref.t||null,sourceUrl:c.mref.u||null,make:c.mref.mk||null,basis:"starting_at"}:null,
       dealerLicence:c.lic?{status:c.lic.s,state:c.lic.st,legalName:c.lic.n||null,licenceNumber:c.lic.no||null,expiryDate:c.lic.e||null,source:"AMVIC public registry"}:null,
       listingShotSha256:c.sh||null,
+      dealerLineItems:c.dli?{fees:(c.dli.f||[]).map(x=>({name:x.n,amount:x.a})),incentives:(c.dli.d||[]).map(x=>({name:x.n,amount:x.a})),
+        insideAdvertisedPrice:c.dli.i===1?true:(c.dli.i===0?false:null),source:c.dli.s||"the dealer's own price breakdown on the listing"}:null,
       vin:c.vin||null,
       odometerKm:Number.isFinite(Number(c.odo))?Number(c.odo):null,
       marketValue:c.mv?{low:c.mv.l??null,high:c.mv.h??null,note:c.mv.n||null,source:c.mv.s||null}:null,
@@ -8198,6 +8209,52 @@ function EvidenceCard({ a, palette }) {
       )}
       <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot && a.verifyPayload && a.sig ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
         <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
+      </div>
+    </div>
+  );
+}
+
+// THE DEALER'S OWN PRICE BREAKDOWN, when the listing publishes one.
+//
+// On the 2025 Mazda CX-90 at sundancemazda.com the page itemised its price
+// openly -- "Admin. Fee $795", "Dealer bonus: -$8,000" -- and the report said
+// "Add-ons & fee audit: NONE LISTED". Vic: "at least they transparent $795
+// fees but we miss them incredible".
+//
+// THE FEE IS INSIDE THE ADVERTISED PRICE. The page's arithmetic proves it
+// (58,805 - 795 = 58,010 = the blob's own priceWithoutCustomFees), so the copy
+// says "already included in" and never "added on top". A dealer who itemises
+// what they charge is being transparent, and the report must read that way --
+// the ONE useful thing to tell the buyer is which line is the dealer's own and
+// therefore the one they can ask about. [[no-accusation-language]]
+function DealerLineItems({ items, money, ink, faint, line, teal }) {
+  if (!items || !Array.isArray(items.fees) || !items.fees.length) return null;
+  const total = items.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0);
+  const inside = items.insideAdvertisedPrice;
+  return (
+    <div>
+      <div style={{ fontSize: 13.5, color: ink, lineHeight: 1.55, marginBottom: 10 }}>
+        The dealer itemised their price on the listing. {inside === true
+          ? <>These charges are <b>already included</b> in the advertised price — they are not added on top.</>
+          : inside === false
+            ? <>These charges sit <b>on top of</b> the advertised price.</>
+            : <>The listing does not make clear whether these are inside the advertised price or on top of it — ask.</>}
+      </div>
+      {items.fees.map((f, i) => (
+        <div key={"f" + i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 0", borderTop: i > 0 ? `1px solid ${line}` : "none" }}>
+          <div style={{ fontSize: 14, color: ink }}>{f.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: ink, whiteSpace: "nowrap" }}>{money(f.amount)}</div>
+        </div>
+      ))}
+      {(items.incentives || []).map((d, i) => (
+        <div key={"d" + i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 0", borderTop: `1px solid ${line}` }}>
+          <div style={{ fontSize: 14, color: faint }}>{d.name}</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: teal, whiteSpace: "nowrap" }}>−{money(d.amount)}</div>
+        </div>
+      ))}
+      <div style={{ fontSize: 12.5, color: faint, lineHeight: 1.55, marginTop: 12, borderTop: `1px solid ${line}`, paddingTop: 10 }}>
+        {total > 0 && <>The {money(total)} {items.fees.length === 1 ? "fee is" : "fees are"} the dealer&apos;s own — not the manufacturer&apos;s and not a government charge — so {items.fees.length === 1 ? "it is" : "they are"} the line to ask about. </>}
+        Read from {items.source}.
       </div>
     </div>
   );
@@ -8418,8 +8475,13 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     else body = <Simple big="✓ No open recalls found" c={TEAL} note="Transport Canada's registry shows none for this year/make/model." />;
     P.push({ title: "Transport Canada recalls", tone, v, body }); }
   // 3 Add-ons & fees
-  { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : "NONE LISTED";
-    const body = (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
+  { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const dli = a.dealerLineItems; const dliTotal = dli && Array.isArray(dli.fees) ? dli.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0) : 0;
+    // A dealer who itemises is TRANSPARENT, not "none listed". The old value
+    // keyed only on addOns, which never carried the listing's own breakdown.
+    const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : dliTotal > 0 ? "ITEMIZED" : "NONE LISTED";
+    const body = (!(a.addOns || []).length && dliTotal > 0)
+      ? <DealerLineItems items={dli} money={money} ink="#e2e8f0" faint={MUT2} line={BORD} teal={TEAL} />
+      : (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
     P.push({ title: "Add-ons & fee audit", tone, v, body }); }
   // 4 Financing APR
   { const dr = (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }

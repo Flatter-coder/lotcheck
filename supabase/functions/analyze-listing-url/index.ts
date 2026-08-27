@@ -109,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27q";  // + the capture records WHICH shot it is, so a top-of-page degrade is no longer labelled "Full-page capture of the listing"
+const CACHE_VER = "2026-08-27r";  // + the dealer's own itemisation is read (a published $795 Admin. Fee reported as "NONE LISTED")
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3287,6 +3287,13 @@ Deno.serve(async (req: Request) => {
       if (!jl && !blob) return null;
       const blobFacts = blob ? {
         quotedPrice: blob.quotedPrice, msrp: blob.msrp ?? null, vin: blob.vin,
+        // The dealer's OWN itemisation of the price they advertise. Kept apart
+        // from addOns because these sit INSIDE the advertised figure, not on
+        // top of it -- see _shared/d2c-vdp.js.
+        dealerFees: (blob as any).dealerFees ?? null,
+        dealerIncentives: (blob as any).dealerIncentives ?? null,
+        feesInsideAdvertised: (blob as any).feesInsideAdvertised ?? null,
+        dealerStatedMsrp: (blob as any).dealerStatedMsrp ?? null,
         vehicle: [blob.year, blob.make, blob.model, blob.trim].filter(Boolean).join(" ") || null,
         odometerKm: blob.odometerKm, vehicleCondition: blob.condition,
         dealerName: blob.dealerName, dealerCity: blob.dealerCity ?? null,
@@ -3306,8 +3313,22 @@ Deno.serve(async (req: Request) => {
       if (!blobFacts) return jl ? { ...jl, quotedPriceSource: Number(jl.quotedPrice) > 0 ? "structured_data" : null } : jl;
       if (!jl) return blobFacts;
       const jlPriceWins = Number(jl.quotedPrice) > 0;
+      // THE ENUMERATED MERGE DROPS ANYTHING NEW. This branch used to start at
+      // `...jl` and then name every field it wanted from blobFacts, so a field
+      // added to the blob reader reached the analysis only on pages with NO
+      // JSON-LD -- silently doing nothing on the pages that have both. That is
+      // how the dealer's $795 Admin. Fee would have been read correctly and
+      // still never shown: sundancemazda.com publishes JSON-LD, so this branch
+      // is the one that runs. blobFacts is spread FIRST so it supplies anything
+      // the named list below does not, and every existing precedence decision
+      // still wins because it is applied after.
       return {
+        ...blobFacts,
         ...jl,
+        dealerFees: blobFacts.dealerFees ?? (jl as any).dealerFees ?? null,
+        dealerIncentives: blobFacts.dealerIncentives ?? (jl as any).dealerIncentives ?? null,
+        feesInsideAdvertised: blobFacts.feesInsideAdvertised ?? null,
+        dealerStatedMsrp: blobFacts.dealerStatedMsrp ?? null,
         quotedPrice: jlPriceWins ? jl.quotedPrice : blobFacts.quotedPrice,
         // The source must follow whichever price actually won above.
         quotedPriceSource: jlPriceWins ? "structured_data" : blobFacts.quotedPriceSource,
@@ -4085,6 +4106,30 @@ Deno.serve(async (req: Request) => {
         if (structuredGapFilledPrice && early.quotedPriceSource) {
           analysis.quotedPriceSource = early.quotedPriceSource;
           console.log(`Gap-filled quotedPriceSource=${early.quotedPriceSource} from structured data.`);
+        }
+        // THE DEALER'S OWN ITEMISATION. Attached here, with the rest of the
+        // structured gap-fill, so it lands before anything derived from it.
+        //
+        // Deliberately NOT merged into analysis.addOns. computeReconciliation
+        // treats every addOn as money added ON TOP of the selling price
+        // (realPreTax = selling + addedOnTop), and on this page the fee is
+        // already INSIDE the advertised figure -- the page's own arithmetic
+        // proves it: 58,805 - 795 = 58,010 = priceWithoutCustomFees. Pushing
+        // it into addOns would inflate the buyer's real pre-tax by $795 and
+        // describe a dealer who itemised openly as though they had padded the
+        // quote. That is the class 38274c2 fixed and it must not come back.
+        if (Array.isArray(early.dealerFees) && early.dealerFees.length && !analysis.dealerLineItems) {
+          analysis.dealerLineItems = {
+            fees: early.dealerFees,
+            incentives: Array.isArray(early.dealerIncentives) ? early.dealerIncentives : [],
+            // null when the page did not reconcile -- we then say nothing
+            // about WHERE the fees sit. [[missing-beats-wrong]]
+            insideAdvertisedPrice: early.feesInsideAdvertised === true ? true
+              : early.feesInsideAdvertised === false ? false : null,
+            source: "the dealer's own price breakdown on the listing",
+          };
+          const t = early.dealerFees.reduce((sum: number, f: any) => sum + (Number(f?.amount) || 0), 0);
+          console.log(`Dealer line items read: ${early.dealerFees.length} fee(s) totalling ${t}, inside the advertised price = ${early.feesInsideAdvertised}.`);
         }
         if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
         // Carry the D2C "page says Call for pricing, blob says $X" tell

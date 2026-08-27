@@ -90,6 +90,79 @@ export function extractD2cVdpVehicle(html) {
   const priceCandidates = [money(p.priceWithoutCustomFees), money(p.originalPriceWithoutCustomFees)].filter((n) => n != null);
   const quotedPrice = priceCandidates.length ? Math.min(...priceCandidates) : null;
 
+  // ── THE DEALER'S OWN ITEMISATION ────────────────────────────────────────
+  //
+  // D2C publishes the line items behind its advertised price, and we were
+  // reading none of them. On the 2025 Mazda CX-90 at sundancemazda.com the
+  // page showed, in the dealer's own words:
+  //
+  //     2025 Mazda CX-90 MHEV MSRP starting at   $66,010
+  //     Admin. Fee                                  $795
+  //     Dealer bonus:                            - $8,000
+  //     Your Price:                              $58,805
+  //
+  // and the blob carries every one of those numbers: customFeesList
+  // [{amount: 795, descEn: "Admin. Fee"}] and allIncentivesList
+  // [{amount: 8000, descEn: "Dealer bonus:"}], base64 in descEn. The report
+  // said "Add-ons & fee audit: NONE LISTED" and Vic caught it: "at least they
+  // transparent $795 fees but we miss them incredible".
+  //
+  // THE FEE IS INSIDE THE ADVERTISED PRICE, NOT ON TOP OF IT. The page's own
+  // arithmetic proves it three ways, to the dollar:
+  //     58,805 - 795            = 58,010 = priceWithoutCustomFees
+  //     66,010 + 795            = 66,805 = fullPriceInteger
+  //     66,010 + 795 - 8,000    = 58,805 = the advertised price
+  // That distinction is the whole safety of this read. Treating an included
+  // fee as an add-on would inflate the buyer's "real pre-tax" by $795 and
+  // describe a dealer who itemised openly as though they had padded the
+  // quote -- the class fixed in 38274c2. So the items are returned SEPARATELY
+  // from addOns, with `insideAdvertisedPrice` PROVEN rather than assumed.
+  const b64Text = (x) => {
+    if (typeof x !== "string" || !x.trim()) return null;
+    let t = x.trim();
+    // descEn is base64 in every sample seen; a platform that stops encoding it
+    // must still work, so decoding is attempted and never required.
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(t) && t.length % 4 === 0) {
+      try { t = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(atob(t), (c) => c.charCodeAt(0))); }
+      catch { /* not base64 after all -- keep the raw string */ }
+    }
+    t = t.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().replace(/[\s:;,.\u2013\u2014-]+$/, "");
+    return t && t.length <= 80 ? t : null;
+  };
+  // `amount` arrives as a NUMBER here (795), not the formatted string money()
+  // expects, so money() rejected every row and both lists came back empty.
+  const amountOf = (x) => {
+    const n = typeof x === "number" ? x : (typeof x === "string" ? Number(x.replace(/[^0-9.]/g, "")) : NaN);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  const lineItems = (arr) => (Array.isArray(arr) ? arr : []).map((it) => {
+    const amount = amountOf(it && it.amount), name = b64Text(it && it.descEn);
+    // A row we cannot both name AND price is dropped, never guessed at.
+    return amount != null && amount > 0 && name ? { name, amount } : null;
+  }).filter(Boolean);
+
+  const dealerFees = lineItems(p.customFeesList);
+  const dealerFeesTotal = dealerFees.reduce((t, f) => t + f.amount, 0);
+  const dealerIncentives = lineItems(p.allIncentivesList);
+
+  // PROVEN, not assumed: the advertised price must exceed the ex-fee figure by
+  // the fee total, within a dollar of rounding. If the page does not reconcile
+  // we say nothing about where the fees sit. [[missing-beats-wrong]]
+  const advertised = money(p.priceInteger) ?? money(p.price);
+  const exFees = money(p.priceWithoutCustomFees);
+  const feesInsideAdvertised = (dealerFeesTotal > 0 && advertised != null && exFees != null)
+    ? Math.abs((advertised - exFees) - dealerFeesTotal) <= 1
+    : null;
+
+  // The dealer's own stated MSRP leg, promoted ONLY when the page's arithmetic
+  // identifies it as one: MSRP + fees = fullPrice. Without that test this field
+  // is just a was-price, which is why the header note used to say D2C carries
+  // no MSRP at all -- true of the one unit that note was written against.
+  const fullPrice = money(p.fullPriceInteger) ?? money(p.fullPrice);
+  const origExFees = money(p.originalPriceWithoutCustomFees);
+  const dealerStatedMsrp = (origExFees != null && fullPrice != null && dealerFeesTotal > 0
+    && Math.abs((origExFees + dealerFeesTotal) - fullPrice) <= 1) ? origExFees : null;
+
   // The tell: the template swapped the real price fields for a lead-capture
   // message. Only meaningful alongside a recovered quotedPrice -- a gate with
   // no recoverable number at all (the Red Deer Toyota case in the same
@@ -130,6 +203,12 @@ export function extractD2cVdpVehicle(html) {
     dealerName,
     dealerCity: null, // not carried in this blob; the page's own address block/city is read elsewhere
     dealerPhone,
+    // Kept OUT of addOns on purpose -- see the block above. These are the
+    // dealer's own itemisation of a price they already advertise.
+    dealerFees,
+    dealerIncentives,
+    feesInsideAdvertised,
+    dealerStatedMsrp,
   };
 }
 

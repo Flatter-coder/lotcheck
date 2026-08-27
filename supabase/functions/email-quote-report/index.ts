@@ -765,6 +765,16 @@ function reportNo(a: any): string {
 // with its own result -- a point with no data reads "NOT ON QUOTE"/"N/A", never
 // omitted, so the "10-POINT" label is always backed (claims must stay backed)
 // and a dealer can see every point and its outcome (dispute-proof).
+// Total of the fees the DEALER itemised on their own listing. These sit
+// separately from addOns because, where the page's arithmetic proves it, they
+// are already INSIDE the advertised price rather than added on top -- see
+// _shared/d2c-vdp.js and the analyze-listing-url attach site.
+function dealerFeeTotal(a: any): number {
+  const fees = a?.dealerLineItems?.fees;
+  if (!Array.isArray(fees)) return 0;
+  return fees.reduce((t: number, f: any) => t + (Number(f?.amount) || 0), 0);
+}
+
 function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
@@ -794,6 +804,11 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
   else P.push({ t: "Transport Canada recalls", v: "COULDN'T VERIFY", tone: "muted" });
   if ((a.addOns || []).length) { const fl = a.addOns.filter((x: any) => x.verdict === "flagged").length; P.push({ t: "Add-ons & fee audit", v: fl ? fl + " FLAGGED" : "TRANSPARENT", tone: fl ? "flag" : "pass" }); }
+  // A dealer who publishes their own breakdown is TRANSPARENT, not "none
+  // listed". This keyed only on addOns, which never carried the listing's own
+  // itemisation, so the 2025 Mazda CX-90's openly-stated $795 Admin. Fee
+  // reported as nothing at all.
+  else if (dealerFeeTotal(a) > 0) P.push({ t: "Add-ons & fee audit", v: "ITEMIZED", tone: "muted" });
   else P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
   const fr = a.financeRates;
   // See the fuller comment at the deck-card version above: an untrusted
@@ -1244,6 +1259,40 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     for (const p of EXTRA) renderPoint(p);
   }
   rule();
+
+  // ---- THE DEALER'S OWN PRICE BREAKDOWN ----
+  // Printed because the dealer published it. Where the page's arithmetic
+  // proves the fees are already inside the advertised price, the copy says so
+  // and never implies they were added on top. The buyer's useful takeaway is
+  // which line is the dealer's own -- that is the one they can ask about.
+  if (dealerFeeTotal(a) > 0) {
+    const dli = a.dealerLineItems;
+    kicker("THE DEALER'S OWN PRICE BREAKDOWN");
+    const inside = dli.insideAdvertisedPrice;
+    para(inside === true
+        ? "The dealer itemised their price on the listing. These charges are already included in the advertised price - they are not added on top."
+      : inside === false
+        ? "The dealer itemised their price on the listing. These charges sit on top of the advertised price."
+        : "The dealer itemised their price on the listing. It does not say whether these are inside the advertised price or on top of it - ask.",
+      { size: 9, font: sans, color: SOFT, lead: 3 });
+    advance(4);
+    for (const f of dli.fees) {
+      need(15);
+      T(pdfSafe(String(f.name)), { size: 9.5, font: sans, color: INK });
+      right("$" + Number(f.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: INK });
+      y -= 14;
+    }
+    for (const d of (dli.incentives || [])) {
+      need(15);
+      T(pdfSafe(String(d.name)), { size: 9.5, font: sans, color: SOFT });
+      right("-$" + Number(d.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: TEAL });
+      y -= 14;
+    }
+    advance(3);
+    para(`The $${dealerFeeTotal(a).toLocaleString("en-CA")} ${dli.fees.length === 1 ? "fee is" : "fees are"} the dealer's own - not the manufacturer's and not a government charge - so ${dli.fees.length === 1 ? "it is" : "they are"} the line to ask about.`,
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
 
   // ---- MSRP PER TRIM — the factory range (client-derived, shape-validated;
   // standing requirement 2026-08-19: the buyer sees the manufacturer's range
