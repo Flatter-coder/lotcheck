@@ -176,7 +176,13 @@ const SURFACES = [
   {
     field: "sealedShot (listing capture)",
     app: {
-      "scroll view copy":        "capture rides along as its own photo file",
+      // ONE component, mounted by each surface -- so the anchor is the MOUNT,
+      // not the copy. Anchoring on the copy is how this gate certified the
+      // scroll view green off ReportViews' own text for weeks: the string
+      // existed somewhere in the file, and `src.includes()` cannot tell where.
+      "shared evidence component": "function EvidenceCard(",
+      "scroll view mount":         "<EvidenceCard a={analysis}",
+      "heatmap/sidebar mount":     "<EvidenceCard a={a}",
       "signed verify payload":   "shot:a.listingShotSha256||null",
       "verify page sealed row":  'o.shot&&P==="signed"&&<Row t="Listing photo"',
       "verify page drop zone":   "Check the sealed photo",
@@ -189,9 +195,70 @@ const SURFACES = [
     },
   },
 ];
+// ── THE ANCHOR MUST LIVE IN THE SURFACE IT NAMES ────────────────────────────
+//
+// This gate used to ask `src.includes(anchor)` — anywhere in a 13,000-line
+// file. So an anchor labelled "scroll view copy" was satisfied by a string that
+// lives inside ReportViews, and the gate certified the SCROLL view green using
+// the SIDEBAR's own text. Caught 2026-08-27: `capture rides along as its own
+// photo file` occurs exactly once in src/App.jsx, inside ReportViews — while
+// the scroll view, the DEFAULT surface, renders no sealed capture at all. The
+// gate exited 0 the whole time.
+//
+// That is the same shape as everything this gate exists to stop: a green signal
+// with no check behind it. A parity gate satisfiable by another surface's code
+// is worse than none, because it gets CITED as proof.
+//
+// Now each label maps to the function that renders it and the anchor must be
+// found inside that function's byte range. Labels naming shared machinery (a
+// hook, the signed payload, an email helper) carry no region and match
+// file-wide, as before.
+const REGION_OF = [
+  [/scroll view/i,       "QuoteCheckPage"],
+  [/heatmap|sidebar/i,   "ReportViews"],
+  [/flipbook|\bbook\b/i, "ReportFlipbook"],
+  [/verify page/i,       "VerifyPage"],
+];
+
+/**
+ * Byte range of a top-level `function NAME(`, ending where the next top-level
+ * declaration begins. Deliberately coarse: it only has to be tight enough to
+ * tell one render surface from another.
+ */
+function regionRange(source, name) {
+  const start = source.search(new RegExp(`^function ${name}\\s*\\(`, "m"));
+  if (start < 0) return null;
+  const rest = source.slice(start + 1).search(/^(?:function|const|class) [A-Za-z]/m);
+  return { start, end: rest < 0 ? source.length : start + 1 + rest };
+}
+const regionCache = new Map();
+const regionFor = (name) => {
+  if (!regionCache.has(name)) regionCache.set(name, regionRange(src, name));
+  return regionCache.get(name);
+};
+
 for (const { field, app, email } of SURFACES) {
   for (const [surface, anchor] of Object.entries(app)) {
-    if (!src.includes(anchor)) failures.push(`${FILE}: '${field}' is missing from the ${surface}. Every report feature ships to ALL views in the same change.`);
+    if (!src.includes(anchor)) {
+      failures.push(`${FILE}: '${field}' is missing from the ${surface}. Every report feature ships to ALL views in the same change.`);
+      continue;
+    }
+    const regionName = (REGION_OF.find(([re]) => re.test(surface)) || [])[1];
+    if (!regionName) continue;                        // shared machinery: anywhere is fine
+    const r = regionFor(regionName);
+    if (!r) {
+      failures.push(`${FILE}: the gate names surface '${surface}', but function ${regionName}() no longer exists — re-anchor it.`);
+      continue;
+    }
+    // An anchor may legitimately appear more than once; at least ONE occurrence
+    // must be inside the surface being claimed.
+    let found = false;
+    for (let i = src.indexOf(anchor); i >= 0; i = src.indexOf(anchor, i + 1)) {
+      if (i >= r.start && i < r.end) { found = true; break; }
+    }
+    if (!found) {
+      failures.push(`${FILE}: '${field}' claims the ${surface}, but its anchor appears ONLY outside ${regionName}() — another surface's code is being counted as this one's.`);
+    }
   }
   for (const [surface, anchor] of Object.entries(email)) {
     if (!emailSrc.includes(anchor)) failures.push(`${EMAIL_FILE}: '${field}' is missing from the ${surface}.`);
