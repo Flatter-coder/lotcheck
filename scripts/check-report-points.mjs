@@ -40,13 +40,24 @@ console.log("\nthe report on screen");
     JSON.stringify(titles) === JSON.stringify(POINT_TITLES),
     `app: ${JSON.stringify(titles)}\n         canon: ${JSON.stringify(POINT_TITLES)}`);
   // The grid captioned with the point count must render the POINT array.
-  check("the N-point caption is rendered over pointItems, never the mixed pool",
+  check("the N-point caption is derived from pointItems, never the mixed pool",
     /\{pointItems\.length\}-point verification/.test(src), "caption must read {pointItems.length}");
   check("optional cards are explicitly flagged as non-points",
     /\.map\(\(c\) => \(\{ \.\.\.c, point: false \}\)\)/.test(src));
+  // The Heatmap view was retired 2026-08-27 and the Sidebar carries the two
+  // bands now, so the ordinal is keyed off the rail's selection rather than a
+  // tile index. What must not change is WHERE the ordinal comes from: the
+  // item's own `point` flag, never its position in the concatenated array.
   check("the detail counter numbers by KIND, not by array position",
-    /c\.point\s*\n?\s*\?\s*`point \$\{idx \+ 1\} \/ \$\{pointItems\.length\}`/.test(src),
+    /c\.point \? `point \$\{sel\} \/ \$\{pointItems\.length\}`/.test(src),
     "the ordinal must read the item's own `point` flag");
+  check("the verdict card carries no ordinal at all",
+    /sel === 0 \? null/.test(src),
+    "the verdict is not one of the ten and must not be numbered");
+  check("the Sidebar rail labels both bands",
+    /\$\{pointItems\.length\}-point verification/.test(src)
+    && /Also checked on this listing \(\$\{extraItems\.length\}\)/.test(src),
+    "the 10-point framing moved here when the Heatmap was retired");
 }
 
 // ── the emailed PDF (email-quote-report) ───────────────────────────────────
