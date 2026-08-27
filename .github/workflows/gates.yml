@@ -220,6 +220,12 @@ jobs:
         run: npm run test:goauto
       - name: Convertus vmsData vehicle extraction (structured-data fallback)
         run: npm run test:convertus-vms
+      # The standing crawl's convertus branch: reads the dealer's own sitemap +
+      # per-VDP vmsData (robots-allowed) instead of the Disallowed /wp-content
+      # ajax endpoint. Locks the sitemap VDP filter + the vehicle->row mapping
+      # (incl. the real date_on_lot the VDP carries).
+      - name: Convertus standing-crawl adapter (sitemap + VDP -> row)
+        run: npm run test:convertus-crawl
       # D2C Media's window.__vdpJSON: specified 2026-08-15, never wired in --
       # confirmed live TWICE on the same listing (Okotoks Toyota RAV4 PHEV,
       # 2026-08-15 and 2026-08-22) before this gate existed. See d2c-vdp.js.

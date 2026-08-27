@@ -36,6 +36,8 @@
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
 import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
+import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
+import { pathToFileURL } from "node:url";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
@@ -120,26 +122,17 @@ function normalizeSm360(v, section) {
 // ($40,889 vs $40,889). Presenting that as "the dealer's invoice" would be a
 // fabricated claim of exactly the kind the report exists to catch. If we ever
 // want a cost anchor it has to be sourced, not inferred from a field name.
-const CVT_PAGE = 50;
-const cvtEndpoint = (cp, pg, sc) =>
-  `https://vms.prod.convertus.rocks/api/filtering/?cp=${cp}&ln=en&pg=${pg}&pc=${CVT_PAGE}&dc=false&qs=&im=&svs=&sc=${sc}` +
-  `&v1=&st=&ai=&oem=&dp=&in_transit=true&in_stock=true&on_order=true&sn=&view=grid` +
-  `&pnpi=msrp&pnpm=none&pnpf=inte&pupi=msrp&pupm=none&pupf=inte&nnpi=none&nnpm=none&nnpf=none&nupi=none&nupm=none&nupf=none&po=`;
+// Convertus inventory is read the ROBOTS-COMPLIANT way (2026-08-27): the
+// dealer's own sitemap enumerates every vehicle detail page (VDP), and each VDP
+// embeds the full vehicle record in a `var vmsData = {...}` blob — the same
+// object the old ajax endpoint returned per unit, plus a real date_on_lot. That
+// endpoint lived under /wp-content/plugins/, which convertus/WordPress dealers
+// routinely Disallow in robots.txt (confirmed: Denham Ford, North Hill Mazda),
+// so the crawl was skipping them entirely. The sitemap + VDP pages are allowed.
+// See discoverConvertusVdps below and lib/robots.mjs.
+const VDP_CAP = 600; // per section, a runaway-enumeration backstop like PAGE_CAP
 
-async function fetchConvertusPage(host, cp, pg, sc) {
-  const url = `${host}/wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php` +
-    `?endpoint=${encodeURIComponent(cvtEndpoint(cp, pg, sc))}&action=vms_data`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": UA, "X-Requested-With": "XMLHttpRequest", Referer: `${host}/vehicles/${sc}/` },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  let d = await res.json();
-  if (d?.data) d = d.data;
-  return d;
-}
-
-// Convertus reports days_on_lot but no entry DATE, so we derive one by
+// The ajax path reported days_on_lot but no entry DATE, so we derived one by
 // subtracting. That is arithmetic on the dealer's own number, not our estimate —
 // but it inherits their precision, so it can only ever be a day-resolution floor.
 function entryFromDays(days) {
@@ -148,13 +141,52 @@ function entryFromDays(days) {
   return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
 }
 
-function normalizeConvertus(v, sc) {
+// The VDP carries a REAL date_on_lot timestamp ("2025-10-08 06:47:47") — better
+// than deriving one from a count. Validate and take the date part; reject the
+// obvious system-default / future values so a bad field never becomes a claim.
+function entryFromDate(s) {
+  if (typeof s !== "string") return null;
+  const d = s.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const t = Date.parse(d);
+  if (!Number.isFinite(t) || t < 946684800000 || t > Date.now() + 86_400_000) return null;
+  return d;
+}
+// Whole CALENDAR days between a validated YYYY-MM-DD entry date and today. Both
+// ends are anchored at UTC midnight so the current time-of-day can't push the
+// count up by one — the entry date has no time component, so neither should the
+// comparison. (A residual <1-day UTC-vs-local edge is inherent to date-only data.)
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  const t = Date.parse(dateStr); // YYYY-MM-DD -> UTC midnight
+  if (!Number.isFinite(t)) return null;
+  const now = new Date();
+  const todayMid = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const days = Math.floor((todayMid - t) / 86_400_000);
+  return days >= 0 && days <= 3650 ? days : null;
+}
+
+// One convertus vehicle object -> one row. Works on both shapes of that object:
+// the VDP's vmsData.vehicle (what the crawl reads now — carries date_on_lot) and
+// the old ajax results[] item (days_on_lot). Prefers the real date_on_lot when
+// present, falls back to deriving from a day count. Exported for the test.
+export function normalizeConvertus(v, sc) {
   const check = validateVin(v?.vin);
   if (!check.present || !check.valid) return null;
   const strip = (s) => (typeof s === "string" ? s.replace(/<[^>]*>/g, "").trim() : null) || null;
-  const asking = pos(v?.asking_price);
-  const final = pos(v?.final_price) ?? pos(v?.internet_price) ?? asking;
+  const sticker = pos(v?.asking_price);
+  // The advertised ask is the LOWEST consumer-facing figure, mirroring the
+  // byte-verified buyer path (convertus-vms.js): asking_price often just repeats
+  // the MSRP sticker, while internet_price / sale_price carry the real
+  // discounted price. final_price is deliberately excluded there, so it is here.
+  const consumer = [pos(v?.internet_price), pos(v?.sale_price), pos(v?.asking_price)].filter((n) => n != null);
+  const advertised = consumer.length ? Math.min(...consumer) : null;
   const msrp = pos(v?.msrp);
+  const dateOnLot = entryFromDate(v?.date_on_lot);
+  // Convertus encodes booleans as true/1/"1". Decode them ALL the same way —
+  // in_transit/on_order used raw truthiness before, so a string "0" (falsy value,
+  // truthy string) would have flipped a for-sale car to IN_TRANSIT.
+  const flag = (x) => x === true || x === 1 || x === "1";
   return {
     vin: check.vin,
     stock_no: v?.stock_number ?? null,
@@ -165,36 +197,105 @@ function normalizeConvertus(v, sc) {
     condition: sc === "new" ? "new" : "used",
     odometer_km: num(v?.odometer),
     msrp,
-    list_price: asking ?? final,
-    sale_price: final ?? asking,
-    date_entry: entryFromDays(v?.days_on_lot),
-    days_in_inventory: pos(v?.days_on_lot),
-    certified: v?.certified === true || v?.certified === 1 || v?.certified === "1",
-    demo: v?.demo === true || v?.demo === 1 || v?.demo === "1",
+    list_price: sticker ?? advertised,
+    sale_price: advertised ?? sticker,
+    date_entry: dateOnLot ?? entryFromDays(v?.days_on_lot),
+    days_in_inventory: (dateOnLot ? daysSince(dateOnLot) : null) ?? pos(v?.days_on_lot),
+    certified: flag(v?.certified),
+    demo: flag(v?.demo),
     damaged: null,                       // Convertus states no equivalent — null, never false
-    status: v?.in_transit ? "IN_TRANSIT" : (v?.on_order ? "ON_ORDER" : "FOR_SALE"),
+    status: flag(v?.in_transit) ? "IN_TRANSIT" : (flag(v?.on_order) ? "ON_ORDER" : "FOR_SALE"),
   };
 }
 
-async function crawlConvertus(host, cp, sc) {
-  const rows = [];
-  let total = CVT_PAGE, pg = 1, partial = false;
-  while ((pg - 1) * CVT_PAGE < total && pg <= PAGE_CAP) {
-    let d;
-    try {
-      d = await fetchConvertusPage(host, cp, pg, sc);
-    } catch (e) {
-      if (pg === 1) throw e;
-      console.warn(`    page ${pg} failed (${e.message}) — keeping ${rows.length} rows, stopping`);
-      partial = true;
-      break;
+// "/path?query" for a robots check.
+function urlPathAndQuery(u) { try { const x = new URL(u); return x.pathname + (x.search || ""); } catch { return u; } }
+// Sitemap <loc> values are externally controlled. A loc on a DIFFERENT host
+// would be robots-checked against the wrong dealer's robots.txt, so we only ever
+// fetch URLs on the dealer's own host (a cross-host loc is dropped, and counted
+// as a gap). Exported for the test.
+export function sameHost(u, host) { try { return new URL(u).host === new URL(host).host; } catch { return false; } }
+// Every <loc> value in a sitemap's XML.
+function sitemapLocs(xml) {
+  return (String(xml || "").match(/<loc>\s*([^<\s]+)\s*<\/loc>/g) || []).map((m) => m.replace(/<\/?loc>/g, "").trim());
+}
+// The real VDP URLs in a sitemap. Convertus VDPs are
+// /vehicles/YYYY/make/model/city/prov/adId/ — the year segment is what tells
+// them apart from the /vehicles/<section>/ listing page, which is also in the
+// sitemap and must be excluded. Exported for the test.
+export function vdpUrlsFromSitemap(xml) {
+  return sitemapLocs(xml).filter((u) => /\/vehicles\/(?:19|20)\d\d\//.test(u));
+}
+
+// Enumerate a convertus dealer's VDPs for one section from its OWN sitemaps
+// (which robots.txt exists to expose), checking every URL against robots — and
+// its host — before fetching it. Never touches the Disallowed /wp-content ajax
+// endpoint. Throws only if no sitemap index is reachable at all (a real
+// failure). Returns { vdps, complete }: `complete` is false if ANY sub-sitemap
+// or VDP was dropped (robots, cross-host, or a fetch failure) — the caller folds
+// that into `partial` so a truncated enumeration NEVER reads as "the rest sold".
+// `opts.fetcher`/`opts.delayMs` exist only so the test can drive it offline.
+export async function discoverConvertusVdps(host, sc, robots, opts = {}) {
+  const fetcher = opts.fetcher || fetchHtml;
+  const delayMs = opts.delayMs ?? effectiveDelayMs;
+  const want = sc === "new" ? /new-vehicle-\d+-sitemap\.xml/i : /used-vehicle-\d+-sitemap\.xml/i;
+  let subMaps = [], readAnyIndex = false;
+  for (const cand of ["/sitemap.xml", "/sitemap_index.xml"]) {
+    const idxUrl = `${host}${cand}`;
+    if (!isPathAllowed(robots, urlPathAndQuery(idxUrl))) continue;
+    let idx;
+    try { idx = await fetcher(idxUrl); readAnyIndex = true; } catch { continue; }
+    const found = [...new Set(sitemapLocs(idx).filter((u) => want.test(u)))];
+    if (found.length) { subMaps = found; break; }
+  }
+  if (!subMaps.length) {
+    if (!readAnyIndex) throw new Error("no reachable sitemap index");
+    return { vdps: [], complete: true }; // index read; dealer lists no vehicle sitemaps
+  }
+  const vdps = [], seen = new Set();
+  let complete = true; // any dropped submap/VDP flips this -> caller suppresses delisting
+  for (const smUrl of subMaps) {
+    if (!sameHost(smUrl, host) || !isPathAllowed(robots, urlPathAndQuery(smUrl))) { complete = false; continue; }
+    await sleep(delayMs);
+    let sm;
+    try { sm = await fetcher(smUrl); } catch (e) { console.warn(`    ${sc}: sitemap ${smUrl} failed (${e.message})`); complete = false; continue; }
+    const urls = vdpUrlsFromSitemap(sm);
+    // A vehicle sub-sitemap that fetched 200 but parsed to ZERO VDP URLs is
+    // suspect (a gzip body read as text, a WAF interstitial, a truncated
+    // response) — never a real vehicle sitemap with no vehicles. Treat it as
+    // incomplete so its cars are not read as sold.
+    if (!urls.length) { console.warn(`    ${sc}: sitemap ${smUrl} yielded 0 vehicle URLs — marking incomplete`); complete = false; continue; }
+    for (const u of urls) {
+      if (seen.has(u)) continue;
+      if (!sameHost(u, host) || !isPathAllowed(robots, urlPathAndQuery(u))) { complete = false; continue; }
+      seen.add(u); vdps.push(u);
     }
-    total = num(d?.summary?.total_vehicles) ?? total;
-    const results = d?.results || [];
-    if (!results.length) break;
-    for (const v of results) { const row = normalizeConvertus(v, sc); if (row) rows.push(row); }
-    pg++;
-    if ((pg - 1) * CVT_PAGE < total) await sleep(effectiveDelayMs);
+  }
+  return { vdps, complete };
+}
+
+export async function crawlConvertus(host, sc, robots, opts = {}) {
+  const fetcher = opts.fetcher || fetchHtml;
+  const delayMs = opts.delayMs ?? effectiveDelayMs;
+  const { vdps, complete } = await discoverConvertusVdps(host, sc, robots, { fetcher, delayMs }); // throws -> section failure
+  if (!vdps.length) { console.warn(`    ${sc}: sitemap listed no vehicle pages — partial, no delisting`); return { rows: [], partial: true }; }
+  // A gap in enumeration means we did NOT see the whole lot -> partial.
+  let partial = !complete || vdps.length > VDP_CAP;
+  if (vdps.length > VDP_CAP) console.warn(`    ${sc}: ${vdps.length} VDPs exceeds cap ${VDP_CAP} — crawled ${VDP_CAP}, rest skipped`);
+  const rows = [];
+  const cap = Math.min(vdps.length, VDP_CAP);
+  for (let i = 0; i < cap; i++) {
+    await sleep(delayMs); // a delay before every VDP fetch, per dealer
+    let html;
+    try { html = await fetcher(vdps[i]); }
+    catch (e) { console.warn(`    ${sc}: VDP ${i + 1}/${cap} failed (${e.message})`); partial = true; continue; }
+    const root = extractConvertusVmsRoot(html);
+    const row = root?.vehicle ? normalizeConvertus(root.vehicle, sc) : null;
+    if (row) rows.push(row);
+    // A VDP that fetched 200 but yielded no readable unit is NOT "sold" — it's a
+    // page we couldn't read. Mark partial so its VIN is never delisted for being
+    // absent from `seen` (missing beats wrong).
+    else partial = true;
   }
   return { rows, partial };
 }
@@ -302,12 +403,12 @@ async function fetchRobots(host) {
   }
 }
 
-// The URL path(s) the crawler will actually request for a section, checked
-// against robots.txt before we fetch. Convertus reads a WordPress ajax endpoint
-// behind /vehicles/<sc>/, so both are checked (a dealer that Disallows
-// /wp-content/ has said no). If any path is Disallowed we skip the section.
+// The URL path(s) the crawler will request for a section, checked against
+// robots.txt before we fetch. If any is Disallowed the section is skipped.
 function robotsPathsFor(platform, section) {
-  if (platform === "convertus") return ["/wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php", `/vehicles/${section}/`];
+  // convertus now reads the sitemap index + the /vehicles/ VDP space; each VDP
+  // URL is re-checked individually inside discoverConvertusVdps.
+  if (platform === "convertus") return ["/sitemap.xml", "/vehicles/"];
   if (platform === "sm360") return [`/en/${section}/api/listing`];
   return [`/${section}/`]; // jsonld_itemlist + edealer
 }
@@ -357,7 +458,8 @@ async function main() {
     const isJsonLd = d.platform === "jsonld_itemlist";
     const isEdealer = d.platform === "edealer";
     const sections = d.sections?.length ? d.sections : (isCvt || isJsonLd || isEdealer ? ["new", "used"] : ["new-inventory", "used-inventory"]);
-    if (isCvt && !d.platform_id) { console.warn(`    skipped: convertus dealer with no platform_id (cp)`); totals.failed++; totals.dealers++; continue; }
+    // (convertus no longer needs platform_id — it enumerates VDPs from the
+    // dealer's sitemap, not the platform-keyed ajax endpoint.)
 
     // robots.txt — a standing crawl honours it (legal brief Q17). One fetch per
     // dealer. If we can't confirm permission (non-404 error), skip the dealer.
@@ -379,7 +481,7 @@ async function main() {
 
       let result;
       try {
-        result = isCvt ? await crawlConvertus(d.host, d.platform_id, section)
+        result = isCvt ? await crawlConvertus(d.host, section, rb.robots)
           : isJsonLd ? await crawlJsonLdSection(d.host, section)
           : isEdealer ? await crawlEdealerSection(d.host, section)
           : await crawlSection(d.host, section);
@@ -418,7 +520,17 @@ async function main() {
     if (!DRY) {
       // Only delist after a CLEAN, COMPLETE crawl. A partial or failed run must
       // never be read as "the rest of the lot sold."
-      if (!failed && !partial && seen.length) {
+      //
+      // Convertus delisting is DEFERRED. Its new/used inventory lives in
+      // independent sitemaps that can silently lag live inventory per-section,
+      // while delisting is decided at DEALER granularity (combined `seen` + a
+      // dealer-level >50% guard) — so a stale one-section sitemap, masked by a
+      // healthy other section, could wrongly delist live cars. Until delisting
+      // is made section/condition-scoped, convertus adds + updates listings but
+      // never delists — exactly its behaviour before this crawler read it at all.
+      if (isCvt) {
+        console.log(`    delisting deferred (convertus: section-scoped delisting not yet built)`);
+      } else if (!failed && !partial && seen.length) {
         const { data, error } = await supabase.rpc("fn_mark_delisted", { p_dealer_id: d.id, p_seen_vins: seen, p_saw_count: seen.length });
         if (error) console.warn(`    delist failed: ${error.message}`);
         else { totals.delisted += data || 0; if (data) console.log(`    ${data} no longer listed`); }
@@ -436,4 +548,9 @@ async function main() {
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);
 }
 
-await main();
+// Run only when invoked directly, not when a test imports the exported helpers
+// (normalizeConvertus, vdpUrlsFromSitemap, crawlConvertus, ...). argv[1] is
+// absent under `node -e`/REPL, so guard it before pathToFileURL.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
