@@ -201,7 +201,15 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
       para("Couldn't reach the recall registry - not an all-clear. Check open recalls by VIN at Transport Canada before you sell.", { size: 10, font: serif, color: SOFT, lead: 4 });
     } else if (Number(rc.count) > 0) {
       T(rc.count + " open recall" + (rc.count === 1 ? "" : "s") + " on record for this model.", { size: 11, font: sansB, color: CORAL }); y -= 16;
-      for (const it of (rc.items || []).slice(0, 6)) { need(14); T("- " + pdfSafe(it.system || "Safety recall") + (it.date ? "  (" + pdfSafe(it.date) + ")" : ""), { size: 9.5, font: sans, color: SOFT }); y -= 13; }
+      const items = rc.items || [];
+      const CAP = 12; // list must match the count (recalls-detail-list-must-match-count); note any overflow
+      for (const it of items.slice(0, CAP)) {
+        need(14);
+        let ds = "";
+        if (it.date) { const dt = new Date(it.date); ds = isNaN(dt.getTime()) ? String(it.date).split(" ")[0] : dt.toLocaleDateString("en-CA", { month: "short", year: "numeric" }); }
+        T("- " + pdfSafe(it.system || "Safety recall") + (ds ? "  (" + ds + ")" : ""), { size: 9.5, font: sans, color: SOFT }); y -= 13;
+      }
+      if (items.length > CAP) { need(14); T("  + " + (items.length - CAP) + " more - see the per-VIN check", { size: 9.5, font: sans, color: FAINT }); y -= 13; }
       para("These are free fixes at any dealer. Confirm which are still open on this exact VIN at the manufacturer's recall page or Transport Canada - clearing them makes a sale easier.", { size: 9, font: serif, color: SOFT, lead: 4 });
     } else if (rc.confirmed) {
       T("No open recalls on record (confirmed with Transport Canada).", { size: 11, font: sans, color: GREEN }); y -= 16;
