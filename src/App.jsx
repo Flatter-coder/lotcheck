@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext, createContext, useMemo, Component } from "react";
+import { useState, useEffect, useRef, useContext, createContext, useMemo, Component, Fragment } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, BarChart, Bar, Cell } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 import { Analytics } from "@vercel/analytics/react";
@@ -7,7 +7,6 @@ import heic2any from "heic2any";
 // surfaces ended up with six different answers to "may this MSRP support a
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
-import DealOrrery from "./DealOrrery.jsx";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
 // like a different product on Android than on macOS.
@@ -8216,6 +8215,19 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // stays in sync with what the listener sees instead of narrating one page
   // while a different one sits on screen.
   const [speakingIdx, setSpeakingIdx] = useState(-1);
+  const [scriptCopied, setScriptCopied] = useState(false);
+  // Numbered, one per line, so it pastes into Notes or a text message and still
+  // reads in order. Same shape the Scroll view copies.
+  function copyCounterScript() {
+    const moves = a?.counterScript?.moves;
+    if (!Array.isArray(moves) || !moves.length) return;
+    const text = moves.map((m, i) => `${i + 1}. ${m.say}`).join("\n");
+    try {
+      navigator.clipboard.writeText(text)
+        .then(() => { setScriptCopied(true); setTimeout(() => setScriptCopied(false), 2200); })
+        .catch(() => {});
+    } catch (e) {}
+  }
   const pickBritishVoice = () => {
     try {
       const voices = window.speechSynthesis.getVoices() || [];
@@ -8533,7 +8545,20 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   )};
 
   const cs = a.counterScript;
-  const sayItem = (cs && Array.isArray(cs.moves) && cs.moves.length) ? { key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: <div>{cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}</div> } : null;
+  // COPY THE SCRIPT — the whole point of the counter-script is that the buyer
+  // has it on their phone at the desk, and the Scroll view has had a copy
+  // button since it shipped while this card, showing the identical lines, had
+  // none (Vic, 2026-08-27). Reading nine moves off a screen and retyping them
+  // is not a thing anyone does. Lives on the ITEM, so it travels with the card
+  // to any surface that renders it. [[report-features-all-views]]
+  const sayItem = (cs && Array.isArray(cs.moves) && cs.moves.length) ? { key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: (
+    <div>
+      {cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}
+      <button onClick={copyCounterScript} style={{ marginTop: 12, width: "100%", background: scriptCopied ? TEAL : "transparent", border: `1px solid ${scriptCopied ? TEAL : CY}`, borderRadius: 10, padding: "10px 12px", color: scriptCopied ? "#04222b" : CY, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+        {scriptCopied ? "Copied — it's on your clipboard ✓" : "Copy the script"}
+      </button>
+    </div>
+  ) } : null;
 
   // Days on lot — motivated-seller leverage from the dealer's OWN inventory
   // data (SM360 daysInInventory/dateEntry; later our observation network).
@@ -8857,7 +8882,6 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
-  const [selP, setSelP] = useState(0);
   const [btab, setBtab] = useState("deal"); // bento view's active tab
   const N = items.length;
   const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
@@ -8867,14 +8891,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const cardBox = (c) => ({ borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
   const navBtn = (side) => ({ position: "absolute", [side]: -6, top: 90, zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
   const Head = ({ c, n }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}><span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span>{n && <span style={{ fontSize: 11, fontFamily: mono, color: MUT }}>{n}</span>}</div>);
-  const vb = (v, label) => <button key={v} onClick={() => onView && onView(v)} style={{ background: view === v ? CY : "transparent", color: view === v ? "#04222b" : MUT2, border: "none", borderRadius: 8, padding: "6px 11px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>{label}</button>;
 
   return (
     <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX, maxWidth: 1120, margin: "0 auto" }}>
       <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
         <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        <div style={{ display: "flex", gap: 3, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}`, borderRadius: 10, padding: 3 }}>{vb("heatmap", "Heatmap")}{vb("sidebar", "Sidebar")}</div>
         {typeof window !== "undefined" && !!window.speechSynthesis && (
           <button onClick={voiceState === "speaking" ? stopSpeaking : speakReport}
             style={{ display: "inline-flex", alignItems: "center", gap: 6, background: voiceState === "speaking" ? ROSE : "transparent", border: `1px solid ${voiceState === "speaking" ? ROSE : BORD}`, borderRadius: 10, padding: "8px 12px", color: voiceState === "speaking" ? "#fff" : TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
@@ -8895,43 +8917,38 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       {view === "sidebar" && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
           <div style={{ flex: "0 0 190px", minWidth: 150, display: "flex", flexDirection: "column", gap: 5 }}>
-            {items.map((c, i) => { const speaking = speakingIdx === i; return (<button key={c.key} onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: speaking ? "rgba(251,191,36,.14)" : (sel === i ? "rgba(15,23,42,.85)" : "transparent"), border: `1px solid ${speaking ? AMBER : (sel === i ? (c.glow ? CY : BORD) : "transparent")}`, borderRadius: 10, padding: "9px 11px", color: speaking ? "#fff" : (sel === i ? "#fff" : MUT2), fontSize: 12.5, fontWeight: 700, cursor: "pointer", boxShadow: speaking ? `0 0 10px rgba(251,191,36,.35)` : "none" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: speaking ? AMBER : toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>); })}
+            {/* THE TWO BANDS, carried over when the Heatmap view was retired
+                (Vic, 2026-08-27). The 10-point framing is the product's central
+                claim and it lived only in that grid; the Sidebar is now the one
+                non-scroll view, so it carries it here. A band label is emitted
+                before the first POINT and before the first EXTRA, so the rail
+                says which kind each row is instead of running them together --
+                which is exactly what let a trim-price card read as
+                "point 12 / 14". `items` is [verdict, ...pointItems, ...extraItems]. */}
+            {items.map((c, i) => { const speaking = speakingIdx === i;
+              const band = i === 1 ? `The ${pointItems.length}-point verification`
+                : (i === pointItems.length + 1 && extraItems.length
+                    ? `Also checked on this listing (${extraItems.length})`
+                    : null);
+              return (<Fragment key={c.key}>
+                {band && <div style={{ fontSize: 10, color: MUT, fontFamily: mono, letterSpacing: ".06em", textTransform: "uppercase", margin: i === 1 ? "2px 0 4px" : "12px 0 4px" }}>{band}</div>}
+                <button onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: speaking ? "rgba(251,191,36,.14)" : (sel === i ? "rgba(15,23,42,.85)" : "transparent"), border: `1px solid ${speaking ? AMBER : (sel === i ? (c.glow ? CY : BORD) : "transparent")}`, borderRadius: 10, padding: "9px 11px", color: speaking ? "#fff" : (sel === i ? "#fff" : MUT2), fontSize: 12.5, fontWeight: 700, cursor: "pointer", boxShadow: speaking ? `0 0 10px rgba(251,191,36,.35)` : "none" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: speaking ? AMBER : toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>
+              </Fragment>); })}
           </div>
-          <div style={{ flex: "1 1 260px", minWidth: 0 }}><div style={{ ...cardBox(items[sel]), ...(speakingIdx === sel ? { border: `2px solid ${AMBER}`, boxShadow: `0 0 24px rgba(251,191,36,.3)` } : {}) }}><Head c={items[sel]} /><div>{items[sel].body}</div></div></div>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}>{(() => {
+            const c = items[sel] || items[0];
+            // The ordinal reads off the ITEM's own kind, never its position in
+            // the concatenated array, so a context card cannot be announced as
+            // a verification point whatever order the pool is built in. The
+            // verdict leads the rail and is not numbered at all.
+            const n = sel === 0 ? null
+              : c.point ? `point ${sel} / ${pointItems.length}`
+              : `also checked ${sel - pointItems.length} / ${extraItems.length}`;
+            return (<div style={{ ...cardBox(c), ...(speakingIdx === sel ? { border: `2px solid ${AMBER}`, boxShadow: `0 0 24px rgba(251,191,36,.3)` } : {}) }}><Head c={c} n={n} /><div>{c.body}</div></div>);
+          })()}</div>
         </div>
       )}
 
-      {view === "heatmap" && (<>
-        {/* Two BANDS, not one grid with a number over it. The heading used to
-            read "The 10-point verification" above a grid rendering 11-16 tiles,
-            then briefly "{heatItems.length}-point verification" -- which is
-            derived and honest, but calls a trim-price card a verification
-            point and disagrees with the ten we advertise. Ten is the floor and
-            it is exactly ten; everything else is named for what it is. */}
-        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The {pointItems.length}-point verification — hot squares are flagged</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
-          {pointItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
-        </div>
-        {extraItems.length > 0 && (<>
-          {/* Everything this listing supported BEYOND the ten. Named as what it
-              is, numbered in its own sequence, and never counted as a point. */}
-          <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "16px 0 10px" }}>Also checked on this listing ({extraItems.length}) — beyond the {pointItems.length} we advertise</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
-            {extraItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(pointItems.length + i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === pointItems.length + i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>+{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
-          </div>
-        </>)}
-        {(() => {
-          const idx = Math.min(selP, heatItems.length - 1);
-          const c = heatItems[idx];
-          // The ordinal reads off the ITEM's own kind, not its position in a
-          // concatenated array -- so a context card can never be announced as
-          // "point 12 / 14" again, whatever order the pool is built in.
-          const n = c.point
-            ? `point ${idx + 1} / ${pointItems.length}`
-            : `also checked ${idx - pointItems.length + 1} / ${extraItems.length}`;
-          return (<div style={{ marginTop: 14 }}><div style={cardBox(c)}><Head c={c} n={n} /><div>{c.body}</div></div></div>);
-        })()}
-      </>)}
 
 
       {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
@@ -8939,263 +8956,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   );
 }
 
-function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
-  const [cur,setCur]=useState(0);
-  const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
-  const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
-  const trimRange=useTrimRange(a);   // MSRP-per-trim page (standing req 2026-08-19)
-  const comparables=useComparableListings(a);   // comparable listings page (Vic, 2026-08-20)
-  const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
-  const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
-  const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
-  const vehName=a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||"Vehicle";
-  const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"}, fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
-
-  // Build the page list — only pages backed by real data.
-  const P=[];
-  P.push({t:"cover"});
-  if(qp||ms) P.push({t:"deal"});
-  if(a.financing?.paymentAmount||a.financeRates?.dealer||a.financeRates?.manufacturer||a.financeContingent?.contingent) P.push({t:"fin"});
-  if(a.recalls?.checked) P.push({t:"recalls"});
-  if(feeItems.length) P.push({t:"fees"});
-  if(a.dealerSentiment?.rating) P.push({t:"rep"});
-  if(trimRange.status==="ready"&&trimRange.trims?.length) P.push({t:"trims"});
-  if(comparables.status==="ready"&&comparables.rows?.length) P.push({t:"comparables"});
-  if((Number(a.daysOnLot?.days)||0)>0||a.tradeInWidget?.detected) P.push({t:"lev"});
-  if(a.leverageScore||a.summary) P.push({t:"bottom"});
-  // THE BOOK HAD NOTHING TO VERIFY AGAINST. Every other surface carries the
-  // report ID, the verify link, the seal and the sealed capture; the Book -- the
-  // one surface that reads as a PRINTED document, and therefore the one most
-  // likely to be handed to a dealer -- carried none of them. A printed page
-  // asserting figures with no way to check them is the opposite of what this
-  // product is. [[make-it-dispute-proof]] [[report-features-all-views]]
-  P.push({t:"evidence"});
-  if(P.length%2) P.push({t:"blank"});
-  const leaves=[]; for(let i=0;i<P.length;i+=2) leaves.push([P[i],P[i+1]]);
-  const N=leaves.length;
-  useEffect(()=>{
-    const h=(e)=>{ if(e.key==="ArrowRight"&&cur<N)setCur(cur+1); if(e.key==="ArrowLeft"&&cur>0)setCur(cur-1); };
-    window.addEventListener("keydown",h); return ()=>window.removeEventListener("keydown",h);
-  },[cur,N]);
-
-  const Page=({p,side})=>{
-    if(!p||p.t==="blank") return <div className="rfb-pg" style={{background:"#123f3a"}}/>;
-    const num=<div className={`rfb-pn ${side}`}>{p.t==="cover"?"":String(P.indexOf(p)+1).padStart(2,"0")}</div>;
-    if(p.t==="cover") return (
-      <div className="rfb-pg rfb-cover">
-        <div><div className="rfb-brand"><RealLogo width={38}/>LotCheck</div>
-          <div className="rfb-ct">Quote Check Report</div>
-          <div className="rfb-veh">{a.year} {a.make}<br/>{a.model}</div>
-          <div className="rfb-dl">{[a.trim,a.dealerName,a.dealerCity].filter(Boolean).join(" · ")}</div></div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
-          <div className="rfb-seal">◈ Verified{a.vehicleCondition?` · ${a.vehicleCondition}`:""}</div>
-        </div>
-      </div>);
-    if(p.t==="deal"){ const exactFb = isExactMsrp(a);
-      return (<div className="rfb-pg">{num}
-      <div className="rfb-k">The deal</div>
-      <h2 className="rfb-h2">{exactFb?(delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"):(ms>0?`Base MSRP from ${money(ms)}`:(qp>0?`Asking ${money(qp)}`:"The deal"))}</h2>
-      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">{a.allInPricing?"the dealer's all-in price":"the dealer's asking price"}</div></div>}
-      {/* The Book view is a full report surface, not a summary -- it printed the
-          recovered number with no hint the dealer's own page refuses to show it
-          (report-features-all-views). Shared helper, so this cannot drift from
-          the Scroll view or the PDF again. The "all-in" sub-label above was
-          also asserted unconditionally while every other surface conditions it
-          on a.allInPricing -- on a non-all-in province that was an unbacked
-          claim about what the price includes. */}
-      {gatedPriceNote(a)&&<div className="rfb-note" style={{fontSize:11,lineHeight:1.5,marginTop:8,opacity:.85}}>{gatedPriceNote(a)}</div>}
-      {ms>0&&<div className="rfb-stat"><div className="rfb-lab">{exactFb?"Verified MSRP":"MSRP · starting at"}</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{exactFb&&delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}{!exactFb&&<div className="rfb-sub">base model — this unit's options are extra</div>}</div>}
-      <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
-    </div>); }
-    if(p.t==="fin"){ const fin=a.financing, r=fin?.rate, dRate=(a.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source))?a.financeRates.dealer.apr:null, mRate=a.financeRates?.manufacturer?.apr;
-      return (<div className="rfb-pg">{num}<div className="rfb-k">Financing</div>
-      <h2 className="rfb-h2">{dRate&&mRate&&dRate>mRate?`Rate is ${(dRate-mRate).toFixed(2)}% over ${a.make}'s`:"Payment breakdown"}</h2>
-      {fin?.paymentAmount&&fin?.paymentFrequency&&<div className="rfb-stat"><div className="rfb-lab">On your quote</div><div className="rfb-big">{money(fin.paymentAmount)}<span style={{fontSize:16,color:"#9a94b4"}}>{fSuf[fin.paymentFrequency]}</span></div><div className="rfb-sub">{r?`${r}% APR · `:""}{fin.termMonths?`${fin.termMonths} months`:""}</div></div>}
-      <div className="rfb-rows">
-        {dRate!=null&&<div className="rfb-r"><span className="rfb-n">This dealer</span><span className="rfb-v bad">{dRate}%</span></div>}
-        {mRate!=null&&<div className="rfb-r"><span className="rfb-n">{a.make} advertised</span><span className="rfb-v">{mRate}%</span></div>}
-      </div>
-      {dRate&&mRate&&dRate>mRate&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Worth pushing back</div><div className="rfb-wt">{(dRate-mRate).toFixed(2)}% above {a.make}'s advertised rate — ask them to match the manufacturer rate.</div></div>}
-      {a.financeContingent?.contingent&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#e0503c"}}>This price depends on financing with the dealer</div><div className="rfb-wt">The listing's own wording ties the advertised price to taking their financing — the discount is often funded by their commission on the loan, so a cash buyer can lose it. Ask in writing: <b>what is the price if I pay cash or use my own bank, and by exactly how much does it change?</b></div></div>}
-    </div>); }
-    if(p.t==="recalls"){ const r=a.recalls;
-      return (<div className="rfb-pg">{num}<div className="rfb-k">Safety</div>
-      <h2 className="rfb-h2">{r.count>0?`${r.count} open recall${r.count>1?"s":""}`:"No open recalls"}</h2>
-      {r.count>0?<>
-        <div className="rfb-why"><div className="rfb-wh">Why you're seeing this</div><div className="rfb-wt">Open safety-recall campaigns <b>Transport Canada</b> publishes for this year/make/model — read live from the federal Vehicle Recall Database. Government data, not our opinion. Confirm by <b>VIN</b> with the dealer.</div></div>
-        <div className="rfb-rows">{(r.items||[]).slice(0,5).map((it,i)=><div className="rfb-r" key={i}><span className="rfb-n">{it.system||"Recall"}{it.date?` · ${new Date(it.date).getFullYear()||""}`:""}</span></div>)}</div>
-        {/* Fixed-page layout genuinely can't fit an unbounded list -- unlike
-            the scroll view's expandable section, which now shows every item.
-            The cap itself is fine; hiding that it's a cap is not (same
-            promised-vs-delivered gap that hit the scroll view, 2026-08-20). */}
-        {(r.items||[]).length>5&&<div className="rfb-lede" style={{marginTop:6,fontSize:11.5}}>+ {(r.items||[]).length-5} more — see the full report.</div>}
-        <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>All recall repairs are free of charge.</div>
-      </>:<div className="rfb-lede">Transport Canada's registry shows no open recalls for this year/make/model.</div>}
-    </div>); }
-    if(p.t==="trims"){ const trs=trimRange.trims||[]; const aboveN=qp>0?trs.filter(t=>qp>Number(t.msrp)).length:0; const allExcl=trs.every(t=>t.price_basis==="excl_freight");
-      return (<div className="rfb-pg">{num}<div className="rfb-k">The factory range</div>
-      <h2 className="rfb-h2">MSRP per trim — {trimRange.year} {a.make} {a.model}</h2>
-      {/* Same correction as the scroll card: this list can span powertrains,
-          so "every trim" is not a true description of the rows. */}
-      <div className="rfb-lede" style={{fontSize:12}}>{trimRange?.mixed
-        ? <>Manufacturer prices for these trims{allExcl?" (before freight & fees)":""} — this model name covers more than one powertrain, so compare against the rows matching your car.</>
-        : <>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</>}</div>
-      <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:10}}>
-        {trs.slice(0,TRIM_ROWS_SHOWN).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
-          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{trimRange?.multiNameplate&&t.nameplate?<span style={{opacity:.6,fontWeight:600}}>{t.nameplate} · </span>:null}{t.trim}</span>
-          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?" +frt":""}</span>
-        </div>))}
-      </div>
-      {trs.length > TRIM_ROWS_SHOWN && (<div className="rfb-lede" style={{fontSize:11,marginTop:6}}>Showing {TRIM_ROWS_SHOWN} of {trs.length} published trims.</div>)}
-      {qp>0&&<div className="rfb-sub" style={{marginTop:8}}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.</div>}
-      {trimRange.src&&<a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:800,marginTop:8,display:"inline-block"}}>Source: the manufacturer's own site ↗</a>}
-      </div>);
-    }
-    if(p.t==="comparables"){ const rows=comparables.rows||[]; const isUsed=comparables.condition==="used";
-      // Same traffic-light palette as this page's own Days on lot card
-      // (#e0503c red / #c78a1e amber / #159e8f green): cheapest of these
-      // comparables to priciest, not time-based here.
-      const cPrices=[...new Set(rows.map(r=>Number(r.price)))].sort((x,y)=>x-y);
-      const cColor=(price)=>{ if(cPrices.length<2) return "#333"; const rank=cPrices.indexOf(Number(price)); return rank===0?"#159e8f":rank===cPrices.length-1?"#e0503c":"#c78a1e"; };
-      return (<div className="rfb-pg">{num}<div className="rfb-k">{isUsed?"Other used listings":"Other listings"}</div>
-      <h2 className="rfb-h2">{isUsed?"Comparable used listings":"Other listings of this model"}</h2>
-      <div className="rfb-lede" style={{fontSize:12}}>{isUsed?`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers, closest in mileage to this one.`:`Other ${comparables.year} ${comparables.make} ${comparables.model} listings read from Alberta dealers.`}</div>
-      <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:10}}>
-        {rows.map((r,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
-          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.trim||comparables.model}{r.city?` · ${r.city}`:""}{isUsed&&r.odometerKm!=null?` · ${Number(r.odometerKm).toLocaleString()} km`:""}</span>
-          <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap",fontWeight:800,color:cColor(r.price)}}>{money(r.price)}</span>
-        </div>))}
-      </div>
-      <div className="rfb-sub" style={{marginTop:8}}>Green = cheapest of these, red = priciest. Read from each dealer's own public listing page — not a third-party valuation.</div>
-      </div>);
-    }
-    if(p.t==="lev"){ const d=Math.round(Number(a.daysOnLot?.days)||0); const tiw=a.tradeInWidget;
-      return (<div className="rfb-pg">{num}<div className="rfb-k">Leverage</div>
-      <h2 className="rfb-h2">{d>0?`${d.toLocaleString()} days on the lot`:"Trade-in tool on this listing"}</h2>
-      {d>0&&<div className="rfb-stat"><div className="rfb-lab">Days on lot{a.daysOnLot.since?` · first seen ${a.daysOnLot.since}`:""}</div><div className="rfb-big" style={{color:d>=90?"#e0503c":d>=31?"#c78a1e":"#159e8f"}}>{d.toLocaleString()} days</div><div className="rfb-sub">{a.daysOnLot.sourceLabel||"dealer inventory data"} — the dealer's own clock, not our guess</div></div>}
-      {d>0&&<div className="rfb-lede" style={{fontSize:12}}>{d>=90?"Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage.":d>=31?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"Recently listed — limited sitting-time leverage on this unit."}{dolCareAsk(d)}</div>}
-      {tiw?.detected&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Trade-in tool on this listing{tiw.vendor?` · ${tiw.vendor}`:""}</div><div className="rfb-wt">Its instant number is the <b>wholesale</b> side of the market (what dealers pay each other) and it's non-binding. Settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment.</div></div>}
-    </div>); }
-    if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Line items on top of the price</div>
-      <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
-      <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div key={i}><div className="rfb-r"><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>{x.verdict==="flagged"&&x.reason&&<div style={{fontSize:10.5,color:"#8a8399",padding:"0 0 6px",borderBottom:"1px solid #e7e0d2"}}>{x.reason}</div>}</div>)}</div>
-      <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Added on top of the price</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
-    </div>);
-    if(p.t==="rep"){ const d=a.dealerSentiment;
-      return (<div className="rfb-pg">{num}<div className="rfb-k">Reputation</div>
-      <h2 className="rfb-h2">{d.dealerName||"This dealer"}</h2>
-      <div className="rfb-stat"><div className="rfb-lab">Google reviews</div><div className="rfb-big">{Number(d.rating).toFixed(1)}<span style={{fontSize:16,color:"#9a94b4"}}> · {Number(d.reviewCount||0).toLocaleString()}</span></div></div>
-      <div className="rfb-rows">{(d.highlights||[]).slice(0,3).map((h,i)=><div className="rfb-r" key={i}><span className="rfb-n">★{h.rating} · {h.text}</span></div>)}</div>
-      <div className="rfb-lede" style={{marginTop:10,fontSize:12}}>Public Google reviews — snippets shown, linked to source.</div>
-    </div>); }
-    if(p.t==="bottom"){ const lv=a.leverageScore;
-      return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f0eafc)"}}>{num}<div className="rfb-k">Bottom line</div>
-      <h2 className="rfb-h2">{lv?`Leverage ${lv.score} / 10`:"The bottom line"}</h2>
-      {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">{lv.note||"Computed only from the verified findings — not an opinion."}</div></div>}
-      {a.summary&&<div className="rfb-lede" style={{marginTop:6}}>{a.summary}</div>}
-    </div>); }
-    if(p.t==="evidence"){
-      return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f4f1ea)"}}>{num}<div className="rfb-k">Evidence</div>
-      <h2 className="rfb-h2">How to check this</h2>
-      <EvidenceCard a={a} palette={{
-        CY:"#17756B", MUT:"#706D96", MUT2:"#5B5885", BORD:"rgba(51,48,90,.14)",
-        TEAL:"#17756B", ROSE:"#A63C25", AMBER:"#8A6414", ink:"#33305A",
-        mono:"ui-monospace,Menlo,Consolas,monospace",
-        btnBorder:"rgba(51,48,90,.18)", btnBg:"#E3F4F1", shotBg:"#fff",
-      }}/>
-    </div>); }
-    return <div className="rfb-pg"/>;
-  };
-
-  return (
-    <div className="rfb-wrap" style={{color:ink||"#241f3a"}}>
-      <style>{RFB_CSS}</style>
-      <div className="rfb-bar">
-        <button className="rfb-exit" onClick={onExit}>‹ Scroll view</button>
-        <div className="rfb-count">{cur===0?"Cover":(cur===N?"End":`Spread ${cur} / ${N-1}`)}</div>
-        <button className="rfb-share" onClick={onShare}>{copied?"Link copied":"Copy share link"}</button>
-      </div>
-      <div className="rfb-book">
-        <div className="rfb-base l"><div className="rfb-inside"><div className="rfb-vmark">LotCheck · Verified</div></div></div>
-        <div className="rfb-base r"><div className="rfb-end"><div style={{marginBottom:14}}><RealLogo width={52}/></div><h3>That's your report.</h3><p>Every figure traces to a real source — no invented scores.</p><div className="rfb-fine">Read from the dealer's page by an automated system, including AI reading when it can't be parsed directly — verify against the original listing.</div><div className="rfb-fine" style={{marginTop:6}}>Analyzed once, never stored</div></div></div>
-        {leaves.map((lf,i)=>(
-          <div className={`rfb-leaf ${i<cur?"flipped":""}`} key={i} style={{zIndex:i<cur?i:N-i}}>
-            <div className="rfb-face front"><Page p={lf[0]} side="r"/></div>
-            <div className="rfb-face back"><Page p={lf[1]} side="l"/></div>
-          </div>
-        ))}
-      </div>
-      <div className="rfb-ctr">
-        <button className="rfb-nav" onClick={()=>cur>0&&setCur(cur-1)} disabled={cur===0} aria-label="Previous">‹</button>
-        <button className="rfb-nav" onClick={()=>cur<N&&setCur(cur+1)} disabled={cur===N} aria-label="Next">›</button>
-      </div>
-      {shared&&<div className="rfb-shared">Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
-    </div>
-  );
-}
-
-const RFB_CSS=`
-  .rfb-wrap{display:flex;flex-direction:column;align-items:center;padding:8px 0 24px}
-  .rfb-bar{display:flex;align-items:center;gap:12px;width:100%;max-width:860px;margin-bottom:14px;flex-wrap:wrap}
-  .rfb-exit,.rfb-share{background:transparent;border:1px solid rgba(120,110,160,.55);border-radius:10px;padding:8px 14px;font:inherit;font-weight:800;font-size:13px;color:inherit;cursor:pointer}
-  .rfb-share{margin-left:auto;background:#6d4bd8;border-color:#6d4bd8;color:#fff}
-  .rfb-count{font-family:'JetBrains Mono',monospace;font-size:12px;opacity:.7}
-  .rfb-book{position:relative;width:min(860px,96vw);height:min(560px,68vh);perspective:2400px;box-shadow:0 40px 60px -30px rgba(0,0,0,.45)}
-  .rfb-base{position:absolute;top:0;bottom:0;width:50%;overflow:hidden}
-  .rfb-base.l{left:0;border-radius:10px 4px 4px 10px}.rfb-base.r{right:0;border-radius:4px 10px 10px 4px}
-  .rfb-inside{position:absolute;inset:0;background:linear-gradient(135deg,#123f3a,#171235);display:grid;place-items:center}
-  .rfb-vmark{font-family:'Space Grotesk',sans-serif;font-weight:700;letter-spacing:.3em;color:rgba(127,224,211,.4);text-transform:uppercase;font-size:12px;transform:rotate(-90deg);white-space:nowrap}
-  .rfb-end{position:absolute;inset:0;background:linear-gradient(150deg,#171235,#123f3a);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:34px}
-  .rfb-mk2{width:40px;height:40px;border-radius:11px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);margin-bottom:14px}
-  .rfb-end h3{font-family:'Space Grotesk';font-weight:700;font-size:21px;margin:0 0 8px}
-  .rfb-end p{color:#c9c2ee;font-size:13px;margin:0;max-width:24ch;line-height:1.5}
-  .rfb-fine{color:#6f68a0;font-size:11px;margin-top:14px}
-  .rfb-leaf{position:absolute;top:0;right:0;width:50%;height:100%;transform-origin:left center;transform-style:preserve-3d;transition:transform .95s cubic-bezier(.2,.72,.2,1)}
-  .rfb-leaf.flipped{transform:rotateY(-180deg)}
-  .rfb-face{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;overflow:hidden;background:#fbf7ef}
-  .rfb-face.front{border-radius:4px 10px 10px 4px;box-shadow:inset 22px 0 40px -30px rgba(0,0,0,.35)}
-  .rfb-face.back{transform:rotateY(180deg);border-radius:10px 4px 4px 10px;box-shadow:inset -22px 0 40px -30px rgba(0,0,0,.35)}
-  .rfb-pg{position:absolute;inset:0;padding:32px 30px;display:flex;flex-direction:column;color:#241f3a;font-family:'Nunito',sans-serif}
-  .rfb-k{font-size:10.5px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;color:#6d4bd8}
-  .rfb-h2{font-family:'Space Grotesk';font-weight:700;font-size:23px;margin:6px 0 14px;line-height:1.12}
-  .rfb-pn{position:absolute;bottom:16px;font-size:10px;font-weight:800;color:#9a94b4;letter-spacing:.1em}
-  .rfb-pn.l{left:30px}.rfb-pn.r{right:30px}
-  .rfb-stat{margin-bottom:13px}.rfb-lab{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9a94b4}
-  .rfb-big{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:29px;line-height:1.1}
-  .rfb-sub{font-size:12px;color:#5d5878;margin-top:2px}
-  .rfb-tag{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 8px}
-  .rfb-tag.bad{background:#fbe7e2;color:#d6533f}
-  .rfb-rows{border-top:1px solid #e7e0d2;margin-top:4px}
-  .rfb-r{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #e7e0d2;font-size:12.5px}
-  .rfb-n{color:#241f3a;font-weight:700}.rfb-v{font-family:'JetBrains Mono';font-weight:800;white-space:nowrap}.rfb-v.bad{color:#d6533f}
-  .rfb-why{margin-top:12px;background:#fbe7e2;border:1px solid #eec3b8;border-radius:12px;padding:10px 12px}
-  .rfb-why.warn{background:#fbf0d8;border-color:#e9d29a}
-  .rfb-wh{font-size:12px;font-weight:1000;color:#d6533f;margin-bottom:4px}
-  .rfb-wt{font-size:11.5px;color:#241f3a;line-height:1.5;font-weight:600}
-  .rfb-lede{font-size:13px;color:#5d5878;line-height:1.55}
-  .rfb-cover{background:linear-gradient(150deg,#171235,#241a52 55%,#123f3a);color:#fff;justify-content:space-between;padding:38px 32px}
-  .rfb-brand{display:flex;align-items:center;gap:11px;font-weight:1000;font-size:22px}
-  .rfb-mk{width:36px;height:36px;border-radius:10px;background:conic-gradient(from 210deg,#8b5cf6,#39d3c0,#8b5cf6);box-shadow:0 6px 20px rgba(0,0,0,.4)}
-  .rfb-ct{font-family:'Space Grotesk';font-weight:700;font-size:14px;letter-spacing:.24em;text-transform:uppercase;color:#7fe0d3;margin-top:24px}
-  .rfb-veh{font-family:'Space Grotesk';font-weight:700;font-size:28px;line-height:1.12;margin:8px 0 6px}
-  .rfb-dl{color:#c9c2ee;font-size:12.5px}
-  .rfb-seal{display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(127,224,211,.5);border-radius:999px;padding:7px 14px;font-size:11px;font-weight:800;color:#7fe0d3;text-transform:capitalize}
-  .rfb-ctr{display:flex;gap:14px;margin-top:18px}
-  .rfb-nav{width:44px;height:44px;border-radius:50%;border:1px solid rgba(120,110,160,.55);background:rgba(120,110,160,.18);color:inherit;font-size:20px;cursor:pointer}
-  .rfb-nav:disabled{opacity:.3;cursor:default}
-  .rfb-shared{font-size:11px;opacity:.6;margin-top:12px}
-  @media(max-width:640px){.rfb-pg{padding:22px 18px}.rfb-h2{font-size:19px}.rfb-big{font-size:25px}}
-`;
-
-// ── Dispute-proof report identity (Option A: self-authenticating, NOTHING
-// stored). The report ID is a fingerprint of the report's own contents +
-// issued-at timestamp: change any figure and the ID changes, so it's
-// tamper-evident. /verify?d=<payload> recomputes the fingerprint from the
-// link and shows the same ID + figures — the buyer compares that ID to the one
-// printed on their report. LotCheck stores nothing; the buyer's copy is the
-// record. (Keeps the "analyzed once, never stored" promise — see the
-// always-check-legally-clear analysis: Alberta PIPA/PIPEDA + Consumer
-// Protection Act.)
+// SHA-256 as lowercase hex. Used by the sealed-capture proof and the verify
+// page; it sat below the Book view and was carried out with it when that view
+// was retired -- check:undef caught it, the build did not.
 async function sha256Hex(str){
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
@@ -11842,14 +11605,13 @@ function QuoteCheckPage(){
                 </div>
               </div>
             ) : null;
-            if(reportView==="heatmap"||reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
-            if(reportView==="flip") return <div>{sharedBanner}<ReportFlipbook analysis={analysis} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink}/></div>;
+            if(reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
             // 3-way view toggle (scroll / report / orrery), active state highlighted.
             const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
                 <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("scroll","Scroll")}{vBtn("heatmap","Heatmap")}{vBtn("sidebar","Sidebar")}{vBtn("flip","Book")}{vBtn("orrery","3D")}
+                  {vBtn("scroll","Scroll")}{vBtn("sidebar","Sidebar")}
                 </div>
                 {/* The delivery confirmation belongs on EVERY view, not just the
                     two that happen to route through ReportViews. It lived only
@@ -11867,14 +11629,6 @@ function QuoteCheckPage(){
               </div>
             );
             // 3D Orrery view — the deal as a navigable hologram (real WebGL).
-            if(reportView==="orrery") return (
-              <div>
-                {viewToggle}
-                {sharedBanner}
-                <DealOrrery analysis={analysis} height={540}/>
-                <div style={{fontSize:12,color:C.inkFaint,textAlign:"center",marginTop:8,lineHeight:1.5}}>Drag to orbit · scroll to zoom. Your quote is the core; fees orbit it (bigger = pricier), <b style={{color:C.coralInk}}>flagged fees glow red</b>, and the teal ring is MSRP.</div>
-              </div>
-            );
             return (
             <div>
               {viewToggle}

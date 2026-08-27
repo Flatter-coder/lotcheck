@@ -133,7 +133,16 @@ const RULES = [
     // computes + returns, no DB writes, so the promise holds there too). Was 3
     // before the 2026-08-26 /value page (Phase 4) added the fourth occurrence;
     // flywheel_capture_enabled is still false, so the promise remains literally true.
-    expected: 5, // +1 2026-08-22: the emailed PDF's own 'never stored' line, newly in scope when email-quote-report joined SURFACES. Re-confirmed: admin_config.flywheel_capture_enabled is seeded 'false' and NO migration ever sets it true.
+    // 2026-08-27: 5 -> 4. The Book view was retired (Vic: "remove Book tab,
+    // Heatmap, 3D") and it carried one of the five. The CLAIM is unchanged and
+    // is not weakened -- one surface that made it no longer exists.
+    // RE-CONFIRMED before moving the number, as this rule requires:
+    // 20260806_flywheel_capture.sql:22 seeds admin_config
+    // flywheel_capture_enabled = 'false', and no migration anywhere sets it
+    // true (grep across supabase/migrations). The live row is not anon-readable,
+    // which is itself correct -- a buyer-facing key must not be able to read the
+    // switch that governs whether their quote is captured.
+    expected: 4, // was 5 before the Book view was retired. +1 2026-08-22: the emailed PDF's own 'never stored' line, newly in scope when email-quote-report joined SURFACES. Re-confirmed: admin_config.flywheel_capture_enabled is seeded 'false' and NO migration ever sets it true.
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a

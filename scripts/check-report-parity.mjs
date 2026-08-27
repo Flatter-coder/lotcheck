@@ -103,13 +103,12 @@ const SURFACES = [
     // strictly better than a count, which stayed green when the scroll card was
     // deleted during this gate's own trial run.
     app: {
-      // Bento/Deck/Scorecard/HUD views removed 2026-08-12 (too many display
-      // modes) — the surviving report surfaces are heatmap + sidebar (both
-      // render from the shared item pool below), scroll, and the flipbook.
-      "heatmap / sidebar card pool":     "financeContingentItem = {",
+      // Display modes have been cut twice: Bento/Deck/Scorecard/HUD on
+      // 2026-08-12, then Heatmap/Book/3D on 2026-08-27. The surviving report
+      // surfaces are SCROLL and SIDEBAR on screen, plus the emailed HTML and
+      // PDF. Sidebar renders from the shared item pool below.
+      "sidebar card pool":     "financeContingentItem = {",
       "flag pool (sidebar)":             "financeContingentItem ? [financeContingentItem]",
-      "flipbook financing page":         'a.financeContingent?.contingent&&<div className="rfb-why warn"',
-      "flipbook page is reachable":      "a.financeContingent?.contingent) P.push",
       "scroll summary tile strip":       'tiles.push({label:"Price conditions"',
       "bento watch-outs count":          "analysis.financeContingent?.contingent) watchOuts",
       "scroll view card":                "analysis.financeContingent&&analysis.financeContingent.contingent&&(",
@@ -133,9 +132,8 @@ const SURFACES = [
     field: "gated-price recovery note (D2C 'Call for pricing')",
     app: {
       "shared note helper":        "function gatedPriceNote(a){",
-      "heatmap / sidebar":         "const gatedRecoveredNote = gatedPriceNote(a);",
+      "sidebar":         "const gatedRecoveredNote = gatedPriceNote(a);",
       "scroll view card":          "const gatedNoteScroll=gatedPriceNote(analysis);",
-      "flipbook deal page":        "{gatedPriceNote(a)&&<div className=\"rfb-note\"",
       "share link encode":         "pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
       "share link decode":         "priceGatedButRecovered:c.pg?true:undefined",
       "signed verify payload":     "gate:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
@@ -151,15 +149,13 @@ const SURFACES = [
     app: {
       "shared hook + cache":        "function useTrimRange",
       "scroll view card":           "<TrimMsrpRange analysis={analysis}",
-      "heatmap/sidebar pool item":  'key: "trimrange"',
+      "sidebar pool item":  'key: "trimrange"',
       // Added 2026-08-27 after I shipped the nameplate label to 3 of 5 surfaces
       // in the very change that was fixing this class. A trim ladder spanning
       // several separately-priced vehicles must say so on EVERY surface, or the
       // buyer sees six rows named "Luxury" at six prices and no explanation.
-      "heatmap/sidebar nameplate label": "trimRange.multiNameplate && t.nameplate",
+      "sidebar nameplate label": "trimRange.multiNameplate && t.nameplate",
       "scroll trim card nameplate label": "tr.multiNameplate&&t.nameplate",
-      "flipbook nameplate label":        "trimRange?.multiNameplate&&t.nameplate",
-      "flipbook page":              'if(p.t==="trims")',
       "email payload attach":       "trimRangePayload(mainTrimRange)",
     },
     email: {
@@ -177,7 +173,7 @@ const SURFACES = [
     app: {
       "component":              "function FinancingBreakdown(",
       "scroll view mount":      "<FinancingBreakdown analysis={analysis}",
-      "heatmap/sidebar mount":  "<FinancingBreakdown analysis={a}",
+      "sidebar mount":  "<FinancingBreakdown analysis={a}",
       "in the shared item pool": 'key: "finex"',
     },
     email: {
@@ -205,11 +201,9 @@ const SURFACES = [
       // existed somewhere in the file, and `src.includes()` cannot tell where.
       "shared evidence component": "function EvidenceCard(",
       "scroll view mount":         "<EvidenceCard a={analysis}",
-      "heatmap/sidebar mount":     "<EvidenceCard a={a}",
+      "sidebar mount":     "<EvidenceCard a={a}",
       // The Book is the surface a buyer is most likely to PRINT and hand over,
       // and it carried no report id, no verify link, no seal and no capture.
-      "flipbook evidence page":    'p.t==="evidence"',
-      "flipbook page is reachable": 'P.push({t:"evidence"})',
       "signed verify payload":   "shot:a.listingShotSha256||null",
       "verify page sealed row":  'o.shot&&P==="signed"&&<Row t="Listing photo"',
       "verify page drop zone":   "Check the sealed photo",
@@ -246,10 +240,13 @@ const REGION_OF = [
   // QuoteCheckPage. The mount itself is pinned separately ("scroll view card").
   [/trim card/i,         "TrimMsrpRange"],
   [/scroll view/i,       "QuoteCheckPage"],
-  [/heatmap|sidebar/i,   "ReportViews"],
-  [/flipbook|\bbook\b/i, "ReportFlipbook"],
+  [/sidebar/i,           "ReportViews"],
   [/verify page/i,       "VerifyPage"],
 ];
+// The Heatmap, Book and 3D views were retired 2026-08-27 (Vic: "remove Book
+// tab, Heatmap, 3D"). Their anchors are gone rather than left pointing at
+// deleted code -- a gate that pins a surface nobody can open is the same lie
+// this gate was made range-aware to stop.
 
 /**
  * Byte range of a top-level `function NAME(`, ending where the next top-level
