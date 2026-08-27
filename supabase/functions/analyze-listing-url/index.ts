@@ -108,7 +108,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27h";  // + base packages named by their PUBLISHED name, and an unrecognised grade can no longer win by escaping the conflict penalty (a 2026 NX 350h Premium resolved to "Executive" $70,878 against a $62,005 ask)
+const CACHE_VER = "2026-08-27i";  // + trim rows name which nameplate they belong to, one cap on every surface, and the "sits above N of M" count is taken over the FULL ladder
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

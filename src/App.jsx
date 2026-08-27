@@ -8682,13 +8682,14 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <div>
         <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>{trimRange.year} {a.make} {a.model} — the manufacturer's price per trim{allExcl ? " (before freight & fees)" : ""}. The factory range the quote should be read against.</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {trs.map((t, i) => (
+          {trs.slice(0, TRIM_ROWS_SHOWN).map((t, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 9px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.trim}</span>
               <span style={{ fontSize: 12, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(t.msrp)}{t.price_basis === "excl_freight" ? <span style={{ color: MUT }}> +frt</span> : null}</span>
             </div>
           ))}
         </div>
+          {trs.length > TRIM_ROWS_SHOWN && (<div style={{ fontSize: 11, color: MUT, marginTop: 6 }}>Showing {TRIM_ROWS_SHOWN} of {trs.length} published trims — the full ladder is on the manufacturer's own page.</div>)}
         {qp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.{allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>}
         {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Source: confirm on the manufacturer's site ↗</a>}
       </div>
@@ -8957,11 +8958,12 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
         ? <>Manufacturer prices for these trims{allExcl?" (before freight & fees)":""} — this model name covers more than one powertrain, so compare against the rows matching your car.</>
         : <>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</>}</div>
       <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:10}}>
-        {trs.slice(0,10).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
-          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
+        {trs.slice(0,TRIM_ROWS_SHOWN).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
+          <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{trimRange?.multiNameplate&&t.nameplate?<span style={{opacity:.6,fontWeight:600}}>{t.nameplate} · </span>:null}{t.trim}</span>
           <span style={{fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?" +frt":""}</span>
         </div>))}
       </div>
+      {trs.length > TRIM_ROWS_SHOWN && (<div className="rfb-lede" style={{fontSize:11,marginTop:6}}>Showing {TRIM_ROWS_SHOWN} of {trs.length} published trims.</div>)}
       {qp>0&&<div className="rfb-sub" style={{marginTop:8}}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.</div>}
       {trimRange.src&&<a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{fontSize:12,fontWeight:800,marginTop:8,display:"inline-block"}}>Source: the manufacturer's own site ↗</a>}
       </div>);
@@ -9170,7 +9172,7 @@ function useTrimRange(a){
         // powertrain so rows can be filtered to THIS car and labelled when
         // they are not. [[powertrain-identity-rule]]
         const { data, error } = await supabase.from("msrp_catalog")
-          .select("trim,msrp,year,price_basis,fuel_type")
+          .select("trim,msrp,year,price_basis,fuel_type,model")
           .eq("make",make).ilike("model","%"+model+"%")
           .gt("msrp",0).order("msrp",{ascending:true}).limit(48);
         if(error) throw error;
@@ -9213,8 +9215,18 @@ function useTrimRange(a){
           const k=String(r.trim).trim().toLowerCase().replace(/\s+/g," ")+"|"+Number(r.msrp);
           if(seen.has(k)) return false;
           seen.add(k); return true;
-        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null}));
-        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed};
+        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null,nameplate:r.model||null}));
+        // WHICH NAMEPLATE EACH ROW IS. The query is a substring match by
+        // design (dealers write "NX 350h" while the catalog stores "NX
+        // Hybrid"), so the pool can legitimately span several separately-priced
+        // vehicles. Until now nothing carried that distinction into the row, so
+        // a 2026 Lexus NX printed SIX rows named "Luxury" at six different
+        // prices with nothing on screen saying what differed between them --
+        // Vic: "have look trims its crazy". `model` was not even SELECTED, so
+        // the card structurally could not have said. [[present-without-creating-questions]]
+        const nameplates=[...new Set(trims.map(r=>r.nameplate).filter(Boolean))];
+        const multiNameplate=nameplates.length>1;
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed,nameplates,multiNameplate};
         trimRangeCache[key]=v; if(alive)setSt(v);
       }catch(e){ if(alive)setSt({status:"error",make,model}); }
     })();
@@ -9370,10 +9382,32 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
 // Compact payload for the emailed report (server renders HTML/PDF from it;
 // the server builds its own source link from its own make map — a client-
 // supplied URL never rides into a DKIM-signed email).
+// ONE CAP, EVERY SURFACE, AND IT SAYS SO.
+//
+// The same signed report gave four different answers to "how many trims does
+// the manufacturer publish": the scroll card rendered all 17, the flipbook
+// sliced to 10, this payload sliced to 12, and none of the three said it was
+// truncating. A buyer comparing the on-screen report with the emailed PDF is
+// reading contradictory counts of the same catalog.
+//
+// Capping is deliberate (a report that stays above the fold), so the fix is not
+// to uncap -- it is to cap ONCE and always print "showing N of M".
+// [[present-without-creating-questions]]
+const TRIM_ROWS_SHOWN = 12;
+// How many rows may ride to the server. Bounded so a corrupt catalog cannot
+// inflate an email payload; well above any real lineup.
+const TRIM_PAYLOAD_MAX = 40;
+
 function trimRangePayload(tr){
   if(!tr||tr.status!=="ready"||!tr.trims?.length) return null;
   return { y:tr.year, mk:tr.make, md:tr.model,
-    t:tr.trims.slice(0,12).map(t=>({ n:String(t.trim).slice(0,60), m:Number(t.msrp), b:t.price_basis==="excl_freight"?1:0 })) };
+    n:tr.trims.length,                                  // the TRUE total, so the server can say "12 of 17"
+    // The FULL ladder rides in the payload even though the PDF prints a capped
+    // view of it. The PDF's "sits above N of M published trim prices" claim was
+    // being computed over the TRUNCATED list -- so on a 17-trim ladder it
+    // divided by 12 and stated a proportion that was simply not true of the
+    // manufacturer's lineup. Render a capped view; count over everything.
+    t:tr.trims.slice(0,TRIM_PAYLOAD_MAX).map(t=>({ n:String(t.trim).slice(0,60), m:Number(t.msrp), b:t.price_basis==="excl_freight"?1:0 })) };
 }
 function TrimMsrpRange({analysis:a, C, cardStyle}){
   const tr=useTrimRange(a);
@@ -9410,16 +9444,17 @@ function TrimMsrpRange({analysis:a, C, cardStyle}){
           interleaved. Say what the rows actually are.
           (claims-must-stay-backed / present-without-creating-questions) */}
       <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>{tr.mixed
-        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This model name covers more than one powertrain, so each row is tagged with which one — compare against the rows matching your car.</>
+        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. {tr.multiNameplate?<>This name covers {tr.nameplates.length} separately-priced vehicles ({tr.nameplates.join(", ")}), so each row is labelled with the one it belongs to — compare against the rows matching your car.</>:<>This model name covers more than one powertrain, so each row is tagged; compare against the rows matching your car.</>}</>
         : <>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</>}</div>
       <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
-        {trims.map((t,i)=>(
+        {trims.slice(0,TRIM_ROWS_SHOWN).map((t,i)=>(
           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"6px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
-            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}{t.powertrain?<span style={{marginLeft:6,fontSize:10.5,fontWeight:800,letterSpacing:.3,color:C.inkFaint,textTransform:"uppercase"}}>{t.powertrain==="phev"?"Plug-in":t.powertrain==="bev"?"Electric":t.powertrain}</span>:null}</span>
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tr.multiNameplate&&t.nameplate?<span style={{color:C.inkFaint,fontWeight:600}}>{t.nameplate} · </span>:null}{t.trim}{t.powertrain?<span style={{marginLeft:6,fontSize:10.5,fontWeight:800,letterSpacing:.3,color:C.inkFaint,textTransform:"uppercase"}}>{t.powertrain==="phev"?"Plug-in":t.powertrain==="bev"?"Electric":t.powertrain}</span>:null}</span>
             <span style={{fontSize:12.5,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?<span style={{color:C.inkFaint,fontWeight:600}}> + freight</span>:null}</span>
           </div>
         ))}
       </div>
+      {trims.length > TRIM_ROWS_SHOWN && (<div style={{fontSize:11.5,color:C.inkFaint,marginTop:6}}>Showing {TRIM_ROWS_SHOWN} of {trims.length} published trims — the full ladder is on the manufacturer's own page.</div>)}
       {qp>0&&trims.length>0&&(
         <div style={{fontSize:12.5,color:C.inkSoft,marginTop:10,lineHeight:1.55}}>
           The asking price <b style={{color:C.ink}}>{money(qp)}</b> sits above <b style={{color:C.ink}}>{above} of {trims.length}</b> published trim prices{above===trims.length&&trims.length>1?" — above every trim price the manufacturer publishes for this model":""}.{allExcl?" Catalog prices exclude freight & fees, so compare like-for-like.":""}
