@@ -57,6 +57,7 @@ const DISCOUNT_RE = /\b(discount|rebate|savings|incentive|loyalty|conquest)\b/;
 // Whether an MSRP may back a claim is decided in ONE place. This file used to
 // answer it twice, differently, and both answers were wrong.
 import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
+import { isBundledFeeCaption, bundledItemisationAsk } from "./fee-caption.ts";
 import { assessCertifiedClaim } from "./cpo.ts";
 
 export type LineClass = "fee" | "addon" | "discount";
@@ -65,6 +66,14 @@ export function classifyLine(name: unknown, price: unknown, verdict?: unknown): 
   const p = num(price);
   const n = norm(name);
   if ((p != null && p < 0) || (DISCOUNT_RE.test(n) && (p == null || p <= 0))) return "discount";
+  // A BUNDLED caption ("Fees & Accessories") names a MIXTURE, and on the real
+  // 2026 Lexus NX that mixture was 70% manufacturer freight and government
+  // levies. It is checked before everything else -- including the "flagged"
+  // verdict and the unknown-line default below, both of which would otherwise
+  // route it to "addon" and put "take off the $3,330 in dealer add-ons" in a
+  // buyer's mouth. We do not know the split, so we do not claim one.
+  // [[no-accusation-language]]  See _shared/fee-caption.ts.
+  if (isBundledFeeCaption(name)) return "fee";
   if (ADDON_RE.test(n)) return "addon";
   if (FEE_RE.test(n)) return "fee";
   if (verdict === "flagged") return "addon";
@@ -95,6 +104,13 @@ export function buildCounterScript(analysis: any): CounterScript {
   const moves: { topic: string; say: string }[] = [];
 
   const rec = analysis?.reconciliation;
+  // A line we could not attribute gets the ask that actually resolves it. This
+  // is a REQUEST for information, not an allegation, so it is safe to say to a
+  // dealer whose bundle turns out to be entirely legitimate -- and it is the
+  // only move that gets the buyer the split.
+  for (const b of (analysis?.bundledFeeLines || [])) {
+    moves.push({ topic: "Itemization", say: bundledItemisationAsk(b?.name, b?.price) });
+  }
   if (rec && rec.addonsTotal > 0) {
     const names = (rec.addons || []).map((a: any) => a.name).filter(Boolean).slice(0, 3);
     moves.push({ topic: "Add-ons", say: `Please take off the ${money(rec.addonsTotal)} in dealer add-ons${names.length ? ` (${names.join(", ")})` : ""} — I don't want them.` });

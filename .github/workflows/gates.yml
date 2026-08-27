@@ -100,6 +100,14 @@ jobs:
       # array's length, so this reads the arrays.
       - name: Ten points (advertised == delivered, extras never counted as points)
         run: npm run check:points
+      # A dealer platform bundles freight, government levies and its own fee into
+      # ONE row captioned "Fees & Accessories". We were attributing the whole row
+      # to the dealer and handing the buyer "take off the $3,330 in dealer
+      # add-ons" to read aloud -- when 70% of it was the manufacturer's freight
+      # and the province's levies. That is a false statement about a named
+      # business, so this gate blocks like a correctness defect.
+      - name: Bundled fee line (a mixture is never the dealer's money)
+        run: npm run test:bundled-fee
       # A forwarded report must not say something different from the original.
       # The share link renders from a compact projection, not from the signed
       # payload its own banner verifies, and that projection had drifted: VIN,

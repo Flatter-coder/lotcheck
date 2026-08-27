@@ -9076,10 +9076,10 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       {d>0&&<div className="rfb-lede" style={{fontSize:12}}>{d>=90?"Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage.":d>=31?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"Recently listed — limited sitting-time leverage on this unit."}{dolCareAsk(d)}</div>}
       {tiw?.detected&&<div className="rfb-why warn"><div className="rfb-wh" style={{color:"#c78a1e"}}>Trade-in tool on this listing{tiw.vendor?` · ${tiw.vendor}`:""}</div><div className="rfb-wt">Its instant number is the <b>wholesale</b> side of the market (what dealers pay each other) and it's non-binding. Settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment.</div></div>}
     </div>); }
-    if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Add-ons &amp; fees</div>
+    if(p.t==="fees") return (<div className="rfb-pg">{num}<div className="rfb-k">Line items on top of the price</div>
       <h2 className="rfb-h2">{flaggedTotal>0?`${money(flaggedTotal)} worth questioning`:"Fees itemized"}</h2>
       <div className="rfb-rows">{feeItems.slice(0,6).map((x,i)=><div key={i}><div className="rfb-r"><span className="rfb-n" style={x.verdict==="flagged"?{color:"#d6533f"}:null}>{x.verdict==="flagged"?"⚑ ":""}{x.name}</span><span className={`rfb-v ${x.verdict==="flagged"?"bad":""}`}>{money(x.price)}</span></div>{x.verdict==="flagged"&&x.reason&&<div style={{fontSize:10.5,color:"#8a8399",padding:"0 0 6px",borderBottom:"1px solid #e7e0d2"}}>{x.reason}</div>}</div>)}</div>
-      <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Add-ons total</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
+      <div className="rfb-r" style={{border:0,paddingTop:12}}><span className="rfb-n" style={{fontSize:14}}>Added on top of the price</span><span className="rfb-v" style={{fontSize:16}}>{money(feesTotal)}</span></div>
     </div>);
     if(p.t==="rep"){ const d=a.dealerSentiment;
       return (<div className="rfb-pg">{num}<div className="rfb-k">Reputation</div>
@@ -12527,7 +12527,11 @@ function QuoteCheckPage(){
                         if(!feeItems.length) return null;
                         return (
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
-                            <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Add-ons total</div>
+                            <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Added on top of the price</div>
+                            {/* A line whose caption names a MIXTURE ("Fees & Accessories")
+                                cannot be attributed to one party. On the real 2026 Lexus NX,
+                                70% of that row was manufacturer freight and government levies.
+                                Say what it is instead of implying whose it is. */}
                             <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
                           </div>
                         );
