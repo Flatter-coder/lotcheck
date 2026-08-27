@@ -136,7 +136,7 @@ const EMAIL_MAKE_SITE: Record<string, string> = {
 function trimRangeOk(tr: any): boolean {
   return !!tr && typeof tr === "object" && Number(tr.y) > 0 &&
     typeof tr.mk === "string" && typeof tr.md === "string" &&
-    Array.isArray(tr.t) && tr.t.length > 0 && tr.t.length <= 14 &&
+    Array.isArray(tr.t) && tr.t.length > 0 && tr.t.length <= 40 &&   // the FULL ladder rides here; the PDF renders a capped view of it
     tr.t.every((x: any) => x && typeof x.n === "string" && Number(x.m) > 0);
 }
 
@@ -405,11 +405,15 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
     const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
     const site = EMAIL_MAKE_SITE[tr.mk] || null;
-    const rows = tr.t.map((x: any) =>
+    // Same capped view as the PDF and the on-screen card -- one number, so a
+    // buyer comparing the email against the app is not reading two counts.
+    const HTML_ROWS_SHOWN = 12;
+    const rows = tr.t.slice(0, HTML_ROWS_SHOWN).map((x: any) =>
       `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
     deck.push({ label: "MSRP per trim", tone: "muted", body:
       `<div style="font-size:13px;font-weight:900;color:#33305A;">${tr.y} ${escapeHtml(tr.mk)} ${escapeHtml(tr.md)} — the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}</div>` +
       `<div style="margin-top:6px;">${rows}</div>` +
+      (tr.t.length > HTML_ROWS_SHOWN ? `<div style="font-size:11px;color:#706D96;margin-top:4px;">Showing ${HTML_ROWS_SHOWN} of ${tr.t.length} published trims.</div>` : "") +
       (qpT > 0 ? `<div style="font-size:12px;color:#5B5885;margin-top:6px;">The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>` : "") +
       (site ? `<div style="font-size:12px;margin-top:6px;"><a href="${site}" style="color:#17756B;font-weight:700;">Confirm the range on ${escapeHtml(tr.mk)}'s own site</a></div>` : "") });
   }
@@ -1195,11 +1199,21 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     need(64 + tr.t.length * 13);
     kicker("MSRP PER TRIM");
     T(`${tr.y} ${pdfSafe(tr.mk)} ${pdfSafe(tr.md)} - the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}`, { size: 10.5, font: sansB }); y -= 18;
-    for (const x of tr.t) {
+    // Capped VIEW, honest COUNT. The on-screen card, the flipbook and this PDF
+    // used to truncate at three different numbers (all, 10, 12) and none said
+    // so, giving one signed report several answers to "how many trims does the
+    // manufacturer publish".
+    const TRIM_ROWS_SHOWN = 12;
+    for (const x of tr.t.slice(0, TRIM_ROWS_SHOWN)) {
       need(13);
       T(pdfSafe(x.n), { size: 9, font: sans, color: SOFT });
       right(`$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, { size: 9, font: sansB });
       y -= 13;
+    }
+    if (tr.t.length > TRIM_ROWS_SHOWN) {
+      advance(2);
+      T(`Showing ${TRIM_ROWS_SHOWN} of ${tr.t.length} published trims.`, { size: 7.5, font: mono, color: FAINT });
+      y -= 11;
     }
     if (qpT > 0) { advance(3); para(`The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees - compare like-for-like." : ""}`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
     const site = EMAIL_MAKE_SITE[tr.mk];
