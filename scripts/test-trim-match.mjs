@@ -50,6 +50,21 @@ const MACHE = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
   { trim: "GT",      msrp: 69990, fuel_type: "BEV" },
 ];
+// The 2026 Lexus NX 350h ladder EXACTLY as the catalog stored it on 2026-08-27:
+// the base "Premium" package filed under the internal grade "LUXURY", sitting
+// beside the genuinely different "Luxury" package.
+const NX350H_AS_STORED = [
+  { trim: "LUXURY",       msrp: 58025, fuel_type: "Hybrid" },
+  { trim: "Luxury",       msrp: 62165, fuel_type: "Hybrid" },
+  { trim: "F SPORT 2",    msrp: 65545, fuel_type: "Hybrid" },
+  { trim: "F SPORT 3",    msrp: 68420, fuel_type: "Hybrid" },
+  { trim: "Executive",    msrp: 70878, fuel_type: "Hybrid" },
+  { trim: "Ultra Luxury", msrp: 72300, fuel_type: "Hybrid" },
+];
+// The same ladder as the scraper writes it now — every package by its published
+// Canadian name.
+const NX350H_PUBLISHED = NX350H_AS_STORED.map((r) => (r.trim === "LUXURY" ? { ...r, trim: "Premium" } : r));
+
 // The same lineup from a catalog that DOES pin drivetrain — exact stays exact.
 const MACHE_AWD = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV", drivetrain: "RWD" },
@@ -215,6 +230,42 @@ const CASES = [
   // BOTH 20% and $6,000.
   ["IONIQ 9, small plausible gap stays exact", IONIQ9_GAPPED,
     { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 66500 }, 64999, "exact"],
+
+  // ── 2026 Lexus NX 350h Premium (report LC-46A4-66F, 2026-08-27) ──────────
+  // A real paid report anchored this car to $70,878 -- the "Executive" row --
+  // against an asking price of $62,005, when its true MSRP is $58,025. Two
+  // independent causes, both locked here.
+  //
+  // 1. The catalog stored the BASE package under the manufacturer's internal
+  //    series grade ("LUXURY") instead of its published name ("Premium"), so
+  //    the listing could never match its own row.
+  // 2. "premium" is a KEY_TOKEN, so every correctly-named row took the -5
+  //    grade-conflict penalty -- and "Executive", a real Lexus grade that was
+  //    simply missing from KEY_TOKENS, escaped the penalty and won at 0.
+  ["NX 350h Premium: the Executive row must never win", NX350H_AS_STORED,
+    { trim: "350h Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 62005 },
+    62165, "starting_at"],
+  ["NX 350h Premium: with the published package name, the right row and figure", NX350H_PUBLISHED,
+    { trim: "350h Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 62005 },
+    58025, "starting_at"],
+  // The CLASS, not the instance: any row whose grade name our vocabulary does
+  // not recognise must not beat a row that shares the stated grade.
+  ["an unrecognised grade name does not beat the stated grade", [
+    { trim: "Premium",        msrp: 58025, fuel_type: "Hybrid" },
+    { trim: "Sonderausgabe",  msrp: 70878, fuel_type: "Hybrid" },
+  ], { trim: "Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "starting_at"],
+  // ("starting_at", not "exact", is correct here: neither row pins a
+  // drivetrain, so the ladder cannot confirm this car's configuration. The
+  // claim under test is the FIGURE -- the $70,878 row must not win.)
+  // A row that makes no competing grade claim at all is untouched.
+  ["a bare drivetrain-only row is not penalised as a rival grade", [
+    { trim: "AWD",     msrp: 58025, fuel_type: "Hybrid" },
+  ], { trim: "Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "exact"],
+  // One trim name, two prices, nothing to tell the rows apart -> never "exact".
+  ["a trim name that appears twice at different prices is never exact", [
+    { trim: "LUXURY", msrp: 58025, fuel_type: "Hybrid" },
+    { trim: "Luxury", msrp: 62165, fuel_type: "Hybrid" },
+  ], { trim: "Luxury Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "starting_at"],
   // After backfilling the missing rows, the SAME asking price against the
   // full lineup correctly matches the real top trim (Ultimate Calligraphy,
   // $81,499) on its distinctive tokens + closest price -- a $2,400 gap, well

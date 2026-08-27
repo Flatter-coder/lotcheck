@@ -228,13 +228,35 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           const msrp = derived.get(`${modelCode}/${pk.packageCode}`);
           if (!Number.isFinite(msrp)) continue;   // already counted in refusals
           const info = model.packages.get(pk.packageCode);
-          // Base package -> the grade alone. Non-base -> its published name; a
-          // missing name is refused rather than invented, because a wrong trim
-          // name is a wrong MSRP for whoever matches a listing against it.
-          let trim = String(model.grade).trim();
-          if (info && !info.isBase) {
-            if (!info.name) { skipped.refused++; refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no published name`); continue; }
-            trim = String(info.name).trim();
+          // EVERY package is named by its PUBLISHED name. The base package used
+          // to be named by `model.grade` instead -- the manufacturer's internal
+          // series grade, which is not what the car is called on the lot.
+          //
+          // Caught live 2026-08-27 on the 2026 Lexus NX 350h (NXH/2026-bkcezc):
+          // grade = "LUXURY", while the BASE package P is `isBase: true, name:
+          // "Premium"`. So the NX 350h **Premium** (55,870 + 2,155 = $58,025)
+          // was stored under the trim name "LUXURY", and the genuinely
+          // different Luxury package L (+6,295, $62,165) sat beside it. A
+          // listing that says "Premium" could therefore never match its own
+          // row -- and worse, "premium" is a KEY_TOKEN, so every correctly
+          // named row took the -5 grade-conflict penalty and the one row with
+          // no recognised grade word won by default. Measured: the real
+          // listing resolved to trim "Executive" at $70,878 against a car
+          // asking $62,005 -- $12,853 above its true $58,025 MSRP.
+          //
+          // `grade` remains the fallback for a package with no published name,
+          // which is the only case it was ever right for. A non-base package
+          // with no name is still refused rather than invented.
+          let trim = "";
+          const published = info && info.name ? String(info.name).trim() : "";
+          if (published && !looksLikeInternalCode(published)) {
+            trim = published;
+          } else if (info && !info.isBase) {
+            skipped.refused++;
+            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no usable published name`);
+            continue;
+          } else {
+            trim = String(model.grade).trim();
           }
           trim = trim.trim();
           if (looksLikeInternalCode(trim)) {
