@@ -64,6 +64,9 @@ import { deriveSaleCondition } from "../_shared/condition.ts";
 import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+// The SAME trim scorer the listing path uses -- powertrain filter, drivetrain
+// confirmation and the implausible-gap ceiling. See lookupVerifiedMsrp.
+import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
@@ -1016,34 +1019,52 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
 
   try {
     if (trim) {
-      const { data: exact } = await supabase
+      // ONE MATCHER, SHARED WITH THE LISTING PATH. This used to be a raw
+      // `ilike("trim", trim)` -> matchType "exact", which is what authorises an
+      // over/under-MSRP accusation downstream. It filtered on year/make/model
+      // and NOTHING else -- no fuel_type, no drivetrain, `limit(1)` with no
+      // ordering. So an uploaded "RAV4 XSE" quote could bind to whichever of
+      // the hybrid ($50,900) or plug-in ($56,400) row the database happened to
+      // return first and then state an accusation off a $5,500 powertrain
+      // mix-up ([[powertrain-identity-rule]], and trap #3 in the 2026 RAV4
+      // pricing notes). pickTrimMsrp is the scorer the URL path has always
+      // used: it filters by powertrain, scores drivetrain, refuses "exact"
+      // unless the winning row actually pins the configuration the quote
+      // claims (rowConfirmsConfig), and downgrades an implausible gap to
+      // "starting_at" (priceImplausible) -- the three guards this path never
+      // had. Same defect class as the IONIQ 9 fix that landed on the listing
+      // path only; this closes the matching half.
+      const { data: rows } = await supabase
         .from("msrp_catalog")
-        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
+        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis, fuel_type, drivetrain, attrs")
         .eq("year", year)
         .ilike("make", make)
         .ilike("model", model)
-        .ilike("trim", trim)
-        .not("msrp", "is", null)
-        .limit(1)
-        .maybeSingle();
+        .not("msrp", "is", null);
 
-      if (exact?.msrp) {
-        return { value: exact.msrp, matchType: "exact", trim: exact.trim, fetchedAt: exact.fetched_at, sourceUrl: exact.source_url ?? null, allInPrice: exact.all_in_price ?? null, priceBasis: exact.price_basis ?? null };
-      }
-
-      const { data: fuzzy } = await supabase
-        .from("msrp_catalog")
-        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
-        .eq("year", year)
-        .ilike("make", make)
-        .ilike("model", model)
-        .ilike("trim", `%${trim}%`)
-        .not("msrp", "is", null)
-        .limit(1)
-        .maybeSingle();
-
-      if (fuzzy?.msrp) {
-        return { value: fuzzy.msrp, matchType: "fuzzy_trim", trim: fuzzy.trim, fetchedAt: fuzzy.fetched_at, sourceUrl: fuzzy.source_url ?? null, allInPrice: fuzzy.all_in_price ?? null, priceBasis: fuzzy.price_basis ?? null };
+      const candidates = (rows ?? []).filter((r: any) => r.msrp != null && !isNaN(Number(r.msrp)));
+      if (candidates.length) {
+        const picked = pickTrimMsrp(candidates, {
+          trim,
+          fuelType: extracted?.fuelType ?? null,
+          drivetrain: extracted?.drivetrain ?? null,
+          vinDrive: extracted?.vinDrive ?? null,
+          quotedPrice: Number(extracted?.quotedPrice) > 0 ? Number(extracted.quotedPrice) : null,
+        });
+        if (picked && Number(picked.msrp) > 0) {
+          const row = candidates.find((r: any) => String(r.trim) === String(picked.trim) && Number(r.msrp) === Number(picked.msrp)) ?? {};
+          return {
+            value: picked.msrp,
+            // pickTrimMsrp returns "exact" only when the row genuinely pins
+            // this configuration; everything else is an honest reference.
+            matchType: picked.basis === "exact" ? "exact" : "fuzzy_trim",
+            trim: picked.trim ?? row.trim ?? null,
+            fetchedAt: row.fetched_at ?? null,
+            sourceUrl: row.source_url ?? null,
+            allInPrice: row.all_in_price ?? null,
+            priceBasis: row.price_basis ?? null,
+          };
+        }
       }
     }
 
@@ -1465,7 +1486,20 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
   });
   const msrp = decided.msrp || null;
   const msrpSource = decided.source;
-  const msrpBasis = decided.basis;
+  // A USED car's catalog match is the price when it was NEW. Useful context
+  // ("this cost $X new"), but NOT a sticker to measure today's asking price
+  // against -- a 2014 truck is not "$35,000 under MSRP". The listing path has
+  // marked this since 2026-08 and every surface keys off it to switch the
+  // over/under claim off; this path never set it, so an uploaded quote for a
+  // used vehicle ran the full new-car comparison, and the leverage line added
+  // in 63fa164 printed an MSRP-gap finding against a car whose MSRP stopped
+  // being the relevant number years ago. Same guard, same thresholds.
+  const isUsedQuote = String(vehicleCondition || "").toLowerCase() === "used"
+    || (Number(extracted?.odometerKm) > 5000 && String(vehicleCondition || "").toLowerCase() !== "new");
+  const msrpBasis = (isUsedQuote && msrp && decided.basis !== "dealer_stated") ? "original_when_new" : decided.basis;
+  const originalMsrp = (isUsedQuote && msrp && decided.basis !== "dealer_stated")
+    ? { msrp, trim: msrpLookup.trim ?? null, year: year ?? null, sourceUrl: msrpLookup.sourceUrl ?? null }
+    : null;
 
   // The accusation now comes only from the resolver, which requires an EXACT
   // trim match AND its own materiality floor (>3% and >$800) -- not the bare
@@ -1506,6 +1540,9 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     // why MSRP_HAS_PROVENANCE could fail on every quote report and still ship.
     msrpSource,
     msrpBasis,
+    // Surfaces read this to render "what it cost when new" instead of an
+    // over/under-MSRP comparison. Null on new vehicles.
+    originalMsrp,
     ...(decided.trim ? { msrpTrim: decided.trim } : {}),
     ...(decided.dealerStatedMsrp ? { dealerStatedMsrp: decided.dealerStatedMsrp } : {}),
     ...(decided.inflation ? { msrpInflation: decided.inflation } : {}),

@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27c";  // post-ship audit: structured-data gap-fill now runs BEFORE priceVerified + leverage (a recovered D2C price was arriving too late to count), carries its own quotedPriceSource, and the gated-price disclosure reaches every surface
+const CACHE_VER = "2026-08-27d";  // + analyze-quote now uses the shared pickTrimMsrp scorer (was granting accusation-grade "exact" off a powertrain-blind ilike) and marks used vehicles original_when_new
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

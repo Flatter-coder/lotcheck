@@ -19,6 +19,7 @@
 // Run: node scripts/test-quote-msrp-authority.mjs
 
 import { resolveMsrpAuthority } from "../supabase/functions/_shared/msrp-authority.js";
+import { pickTrimMsrp } from "../supabase/functions/_shared/trim-match.js";
 
 // Mirrors analyze-quote's buildAnalysis mapping exactly.
 function decide({ statedOnDocument, catalogValue, catalogMatchType, catalogTrim = null, make = "Hyundai" }) {
@@ -93,6 +94,50 @@ const check = (label, cond, detail = "") => {
   const wouldNarrate = (d) => d.basis === "exact";
   check("leverage score stays silent on a floor", wouldNarrate(floor) === false);
   check("leverage score still speaks on an exact match", wouldNarrate(exact) === true);
+}
+
+// 8. POWERTRAIN SAFETY ON THE UPLOAD PATH (added 2026-08-22).
+// lookupVerifiedMsrp used to grant matchType "exact" -- which is what
+// authorises an over/under-MSRP accusation -- from a bare
+// `ilike("trim", trim)` filtered on year/make/model and NOTHING else: no
+// fuel_type, no drivetrain, limit(1), no ordering. A "RAV4 XSE" quote could
+// therefore bind to the hybrid row ($50,900) or the plug-in row ($56,400)
+// depending on row order, and state an accusation off a $5,500 mix-up. It now
+// runs the SAME pickTrimMsrp scorer the listing path has always used.
+{
+  const rows = [
+    { trim: "XSE", msrp: 50900, fuel_type: "hybrid", drivetrain: "AWD" },
+    { trim: "XSE", msrp: 56400, fuel_type: "PHEV",   drivetrain: "AWD" },
+  ];
+  const phev = pickTrimMsrp(rows, { trim: "XSE", fuelType: "PHEV", drivetrain: "AWD" });
+  const hev  = pickTrimMsrp(rows, { trim: "XSE", fuelType: "hybrid", drivetrain: "AWD" });
+  check("upload path: a PHEV quote binds to the PHEV row, not its hybrid sibling",
+    !!phev && phev.msrp === 56400, JSON.stringify(phev));
+  check("upload path: a hybrid quote binds to the hybrid row",
+    !!hev && hev.msrp === 50900, JSON.stringify(hev));
+}
+
+// 9. USED VEHICLES ON THE UPLOAD PATH (added 2026-08-22).
+// A used car's catalog match is what it cost NEW -- real context, but not a
+// sticker to measure today's asking price against. The listing path has marked
+// this "original_when_new" for months; this path never did, so the leverage
+// line added in 63fa164 printed an MSRP-gap finding on used vehicles. Mirrors
+// the exact condition now in buildAnalysis.
+{
+  const basisFor = (cond, odo, decidedBasis) => {
+    const isUsed = String(cond || "").toLowerCase() === "used"
+      || (Number(odo) > 5000 && String(cond || "").toLowerCase() !== "new");
+    return (isUsed && decidedBasis !== "dealer_stated") ? "original_when_new" : decidedBasis;
+  };
+  check("used quote downgrades an exact catalog match to original_when_new",
+    basisFor("used", 61000, "exact") === "original_when_new");
+  check("high-odometer quote with no stated condition is treated as used",
+    basisFor(null, 61000, "exact") === "original_when_new");
+  check("a NEW quote is untouched", basisFor("new", 8, "exact") === "exact");
+  check("a dealer-stated figure is never relabelled as original_when_new",
+    basisFor("used", 61000, "dealer_stated") === "dealer_stated");
+  check("used quote therefore cannot narrate an MSRP gap",
+    basisFor("used", 61000, "exact") !== "exact");
 }
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
