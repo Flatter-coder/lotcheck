@@ -8696,7 +8696,29 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  const heatItems = [...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(comparableItem ? [comparableItem] : []), ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []), ...(tradeInItem ? [tradeInItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : [])];
+  // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
+  //
+  // We advertise a 10-point verification and we over-deliver on it (Vic,
+  // 2026-08-27: "its always good thing to over deliver ... minimum 10 points we
+  // will keep increasing ... yes we advertising 10 points"). Ten is the FLOOR.
+  //
+  // But an "MSRP per trim" card is not a verification point, and the heatmap
+  // used to number it as one: a buyer reading the detail pane saw "point 12 /
+  // 14" over a card that checks nothing. That forecloses the only honest
+  // reading of the product -- that ten is a defined core and the rest are
+  // additions -- because the surface asserts they are all the same kind of
+  // thing. So the pool carries `point`, the two bands are rendered and
+  // numbered separately, and neither can drift from the other because both
+  // read the same flag. [[claims-must-stay-backed]]
+  const extraItems = [
+    ...(trimRangeItem ? [trimRangeItem] : []),
+    ...(comparableItem ? [comparableItem] : []),
+    ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
+    ...(tradeInItem ? [tradeInItem] : []),
+    ...(financeContingentItem ? [financeContingentItem] : []),
+    ...(licItem ? [licItem] : []),
+  ].map((c) => ({ ...c, point: false }));
+  const heatItems = [...pointItems, ...extraItems];
   // Every view that surfaces "things to watch" draws from this one pool, so a
   // new flag cannot reach one view and miss another (report-features-all-views).
   const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
@@ -8750,16 +8772,35 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       )}
 
       {view === "heatmap" && (<>
-        {/* The count is DERIVED, never hardcoded. This read "The 10-point
-            verification" above a grid that renders heatItems (14 on a full
-            report, and never fewer than 11) -- the report contradicting its
-            own heading. Ten is the advertised FLOOR; say what this report
-            actually delivered. [[ten-point-claim-policy]] */}
-        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>{heatItems.length}-point verification — hot squares are flagged</div>
+        {/* Two BANDS, not one grid with a number over it. The heading used to
+            read "The 10-point verification" above a grid rendering 11-16 tiles,
+            then briefly "{heatItems.length}-point verification" -- which is
+            derived and honest, but calls a trim-price card a verification
+            point and disagrees with the ten we advertise. Ten is the floor and
+            it is exactly ten; everything else is named for what it is. */}
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The {pointItems.length}-point verification — hot squares are flagged</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
-          {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
+          {pointItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
         </div>
-        <div style={{ marginTop: 14 }}><div style={cardBox(heatItems[Math.min(selP, heatItems.length - 1)])}><Head c={heatItems[Math.min(selP, heatItems.length - 1)]} n={`point ${Math.min(selP, heatItems.length - 1) + 1} / ${heatItems.length}`} /><div>{heatItems[Math.min(selP, heatItems.length - 1)].body}</div></div></div>
+        {extraItems.length > 0 && (<>
+          {/* Everything this listing supported BEYOND the ten. Named as what it
+              is, numbered in its own sequence, and never counted as a point. */}
+          <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "16px 0 10px" }}>Also checked on this listing ({extraItems.length}) — beyond the {pointItems.length} we advertise</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
+            {extraItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(pointItems.length + i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === pointItems.length + i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>+{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
+          </div>
+        </>)}
+        {(() => {
+          const idx = Math.min(selP, heatItems.length - 1);
+          const c = heatItems[idx];
+          // The ordinal reads off the ITEM's own kind, not its position in a
+          // concatenated array -- so a context card can never be announced as
+          // "point 12 / 14" again, whatever order the pool is built in.
+          const n = c.point
+            ? `point ${idx + 1} / ${pointItems.length}`
+            : `also checked ${idx - pointItems.length + 1} / ${extraItems.length}`;
+          return (<div style={{ marginTop: 14 }}><div style={cardBox(c)}><Head c={c} n={n} /><div>{c.body}</div></div></div>);
+        })()}
       </>)}
 
 
