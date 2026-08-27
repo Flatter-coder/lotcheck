@@ -39,7 +39,11 @@ function extractBalancedJson(text, startIdx) {
   return null;
 }
 
-export function extractConvertusVmsVehicle(html) {
+// The raw `vmsData` object (settings, vehicle, company_data, ...). This is the
+// one extraction primitive; both the per-vehicle analyze read below and the
+// standing crawl's per-VDP read (scripts/crawl-alberta-inventory.mjs) build on
+// it, so a Convertus page is parsed exactly one way everywhere.
+export function extractConvertusVmsRoot(html) {
   if (typeof html !== "string" || html.length === 0) return null;
   // The page also references vmsData.vehicle.* dozens of times in unrelated
   // template strings BEFORE the actual declaration -- confirmed live,
@@ -50,16 +54,17 @@ export function extractConvertusVmsVehicle(html) {
   const declMatch = /(?:var|let|const)\s+vmsData\s*=\s*\{|window\.vmsData\s*=\s*\{|\bvmsData\s*=\s*\{/.exec(html);
   if (!declMatch) return null;
   const braceStart = declMatch.index + declMatch[0].length - 1; // position of the '{'
-
-  let root;
   try {
     const jsonStr = extractBalancedJson(html, braceStart);
     if (!jsonStr) return null;
-    root = JSON.parse(jsonStr);
+    return JSON.parse(jsonStr);
   } catch {
     return null;
   }
+}
 
+export function extractConvertusVmsVehicle(html) {
+  const root = extractConvertusVmsRoot(html);
   const v = root && typeof root === "object" ? root.vehicle : null;
   if (!v || typeof v !== "object") return null;
 
