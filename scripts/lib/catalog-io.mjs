@@ -74,6 +74,17 @@ export const catKey = (r) => `${r.year}|${r.model}|${r.trim ?? ""}`;
 // the INSERT 400'd after the DELETE had already run, and eleven makes left
 // msrp_catalog on 2026-08-13. A carried key must never decide whether its
 // neighbours insert.
+// `attrs` is a BAG OF KEYS, not a single value, so "a fresh scrape always wins"
+// is the wrong rule for it. 38 rows carry hand-verified attrs captured from
+// Build & Price summaries by a person -- seats, package_line, base_msrp,
+// block_heater_included -- and once the scraper began supplying its own attrs
+// (the published fee stack), whole-column replacement would have silently
+// deleted every one of those keys on the next refresh. Both sets are true; a
+// fresh key wins over a stale one of the SAME name, and everything else is
+// kept. This is the same "carry what the scrape does not know" intent the
+// column-level rule expresses, applied at the right granularity.
+const isPlainObject = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+
 export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
   const prev = new Map();
   for (const r of prevRows || []) prev.set(catKey(r), r);
@@ -87,6 +98,12 @@ export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
         const v = old && old[c] != null ? old[c] : null;
         if (v != null) carried++;
         merged[c] = v;
+      } else if (isPlainObject(merged[c]) && old && isPlainObject(old[c])) {
+        // Both sides have keys: union them, fresh wins per key.
+        const before = Object.keys(merged[c]).length;
+        const union = { ...old[c], ...merged[c] };
+        if (Object.keys(union).length > before) carried++;
+        merged[c] = union;
       }
     }
     return merged;

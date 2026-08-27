@@ -108,6 +108,16 @@ jobs:
       # business, so this gate blocks like a correctness defect.
       - name: Bundled fee line (a mixture is never the dealer's money)
         run: npm run test:bundled-fee
+      # The manufacturer publishes what sits on top of MSRP -- freight, the A/C
+      # excise, the regulator fee, the tire levy, factory accessories and its own
+      # dealer fee. We fetch that payload three times per brand for MSRP and used
+      # to discard every fee line. Without it a dealer's bundled "Fees &
+      # Accessories" row is unattributable; with it, it decomposes to the cent.
+      # A stack that does not reconcile against the manufacturer's own SUBTOTAL
+      # is REFUSED, because an unproven decomposition is what becomes a false
+      # accusation.
+      - name: Manufacturer fee stack (reconciles to the cent, or is refused)
+        run: npm run test:fee-stack
       # A forwarded report must not say something different from the original.
       # The share link renders from a compact projection, not from the signed
       # payload its own banner verifies, and that projection had drifted: VIN,
