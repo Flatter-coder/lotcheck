@@ -84,6 +84,7 @@
     "check:points": "node scripts/check-report-points.mjs",
     "test:bundled-fee": "node --experimental-strip-types scripts/test-bundled-fee-line.mjs",
     "test:odometer-copy": "node scripts/test-odometer-copy.mjs",
+    "test:dealer-line-items": "node --experimental-strip-types scripts/test-dealer-line-items.mjs",
     "test:fee-stack": "node scripts/test-fee-stack.mjs",
     "test:share-round-trip": "node scripts/test-share-round-trip.mjs"
   },

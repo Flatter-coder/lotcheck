@@ -115,6 +115,13 @@ jobs:
       # written where the reading is judged, read by every surface.
       - name: Odometer copy (the explanation fits the reading)
         run: npm run test:odometer-copy
+      # A dealer who itemises their own price is being transparent, and we
+      # reported "Add-ons & fee audit: NONE LISTED" over an openly-published
+      # $795 Admin. Fee. The fee is INSIDE the advertised price -- the page's
+      # arithmetic proves it -- so it is read into its own field, never into
+      # addOns, which computeReconciliation adds ON TOP.
+      - name: Dealer line items (read the fee; never call it money added on top)
+        run: npm run test:dealer-line-items
       # The manufacturer publishes what sits on top of MSRP -- freight, the A/C
       # excise, the regulator fee, the tire levy, factory accessories and its own
       # dealer fee. We fetch that payload three times per brand for MSRP and used
