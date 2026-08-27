@@ -8804,12 +8804,34 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // thing. So the pool carries `point`, the two bands are rendered and
   // numbered separately, and neither can drift from the other because both
   // read the same flag. [[claims-must-stay-backed]]
+  // THE WORKED FINANCING EXAMPLE, ON MORE THAN ONE VIEW.
+  //
+  // FinancingBreakdown -- the editable-APR hero, the term x down-payment
+  // payment grid shaded by total interest, the interest-saved bullets and the
+  // price-verification gate that relabels everything "from MSRP" in estimate
+  // mode -- had exactly ONE call site in the entire app, inside the scroll
+  // body. Every other surface got two flat point cards ("Financing APR",
+  // "Financing math") and no worked example at all. Vic, 2026-08-27: "on
+  // scroll its showing example of financing APR, but on heatmap and side bar
+  // doesn't".
+  //
+  // It reads only LC_THEMES tokens, every one of which exists in both
+  // palettes, so the dark surfaces mount the SAME component with the dark
+  // theme rather than a second copy being written for them.
+  // [[report-features-all-views]]
+  const finExampleItem = (a.financing || a.financeRates || Number(a.quotedPrice) > 0) ? {
+    key: "finex", title: "Financing · worked example", tone: "muted", glow: false,
+    body: (<FinancingBreakdown analysis={a} C={LC_THEMES.dark}
+      cardStyle={{ background: "rgba(15,23,42,.5)", border: `1px solid ${BORD}`, borderRadius: 12, padding: 16 }} />),
+  } : null;
+
   const extraItems = [
     ...(trimRangeItem ? [trimRangeItem] : []),
     ...(comparableItem ? [comparableItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
+    ...(finExampleItem ? [finExampleItem] : []),
     ...(licItem ? [licItem] : []),
     // MEMBERSHIP MUST NOT DIFFER BY VIEW. The Heatmap built its own pool and
     // simply never spread evidenceItem or sayItem, so the Sidebar carried the
@@ -8941,6 +8963,13 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
   if(comparables.status==="ready"&&comparables.rows?.length) P.push({t:"comparables"});
   if((Number(a.daysOnLot?.days)||0)>0||a.tradeInWidget?.detected) P.push({t:"lev"});
   if(a.leverageScore||a.summary) P.push({t:"bottom"});
+  // THE BOOK HAD NOTHING TO VERIFY AGAINST. Every other surface carries the
+  // report ID, the verify link, the seal and the sealed capture; the Book -- the
+  // one surface that reads as a PRINTED document, and therefore the one most
+  // likely to be handed to a dealer -- carried none of them. A printed page
+  // asserting figures with no way to check them is the opposite of what this
+  // product is. [[make-it-dispute-proof]] [[report-features-all-views]]
+  P.push({t:"evidence"});
   if(P.length%2) P.push({t:"blank"});
   const leaves=[]; for(let i=0;i<P.length;i+=2) leaves.push([P[i],P[i+1]]);
   const N=leaves.length;
@@ -9064,6 +9093,16 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       <h2 className="rfb-h2">{lv?`Leverage ${lv.score} / 10`:"The bottom line"}</h2>
       {lv&&<div className="rfb-stat"><div className="rfb-big" style={{fontSize:44,color:"#6d4bd8"}}>{lv.score}<span style={{fontSize:18,color:"#9a94b4"}}>/10</span></div><div className="rfb-sub">{lv.note||"Computed only from the verified findings — not an opinion."}</div></div>}
       {a.summary&&<div className="rfb-lede" style={{marginTop:6}}>{a.summary}</div>}
+    </div>); }
+    if(p.t==="evidence"){
+      return (<div className="rfb-pg" style={{background:"linear-gradient(160deg,#fbf7ef,#f4f1ea)"}}>{num}<div className="rfb-k">Evidence</div>
+      <h2 className="rfb-h2">How to check this</h2>
+      <EvidenceCard a={a} palette={{
+        CY:"#17756B", MUT:"#706D96", MUT2:"#5B5885", BORD:"rgba(51,48,90,.14)",
+        TEAL:"#17756B", ROSE:"#A63C25", AMBER:"#8A6414", ink:"#33305A",
+        mono:"ui-monospace,Menlo,Consolas,monospace",
+        btnBorder:"rgba(51,48,90,.18)", btnBg:"#E3F4F1", shotBg:"#fff",
+      }}/>
     </div>); }
     return <div className="rfb-pg"/>;
   };
