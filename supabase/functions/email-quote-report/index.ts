@@ -385,17 +385,59 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     }
   }
 
-  // 5 -- Quick checks roll-up (VIN, odometer, financing math, warranty, EVAP, protection plan)
-  const checks: string[] = [];
-  if (a.vinCheck?.present) checks.push(`${a.vinCheck.valid ? "✓" : "⚠"} VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + escapeHtml(a.vinCheck.vin) : ""}`);
-  if (a.odometerCheck?.checked) checks.push(`${a.odometerCheck.flag ? "⚠" : "✓"} Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`);
-  if (a.financingCheck?.checked) checks.push(`${a.financingCheck.consistent ? "✓" : "⚠"} Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`);
-  if (a.standardWarranty?.coverage) checks.push(`✓ Included warranty: ${escapeHtml(a.standardWarranty.coverage)}`);
-  if (a.evapRebate?.eligible) checks.push(`✓ EV rebate ${money(a.evapRebate.total)} eligible`);
-  else if (a.evapRebate?.ineligibleReason) checks.push(`• EV rebate: ${escapeHtml(a.evapRebate.ineligibleReason)}`);
-  if (a.warranty?.offered) checks.push(`• Protection plan offered: ${escapeHtml(a.warranty.offered)}${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}`);
-  const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
-  if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
+  // 5 -- THE TEN, ALWAYS TEN.
+  //
+  // This was a "Quick checks" roll-up whose EVERY row was conditional --
+  // `if (a.vinCheck?.present) checks.push(...)` with no else -- so an
+  // unresolved point emitted nothing at all. The PDF stapled to this very
+  // email is documented to "ALWAYS return exactly 10 rows ... a point with no
+  // data reads NOT ON QUOTE, never omitted", and it does. So one signed report
+  // showed a different number of checks depending on which half of the same
+  // email you opened. If a check did not resolve, the buyer paid for it and was
+  // never told it had been asked.
+  //
+  // Built from tenPoints() -- the same builder the PDF uses -- so the two
+  // cannot diverge again. The cards above still give price, recalls, fees and
+  // reputation their own richer treatment; this is the checklist, and it is
+  // complete by construction. [[report-never-empty]] [[claims-must-stay-backed]]
+  {
+    const pts = tenPoints(a);
+    const core = pts.slice(0, POINT_TITLES.length);
+    const extras = pts.slice(POINT_TITLES.length);
+    const anyFlag = core.some((p) => p.tone === "flag");
+    const row = (p: { t: string; v: string; tone: string }) => {
+      const c = p.tone === "flag" ? "#A63C25" : p.tone === "pass" ? "#17756B" : "#706D96";
+      const mark = p.tone === "flag" ? "\u26a0" : p.tone === "pass" ? "\u2713" : "\u00b7";
+      return `<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">`
+        + `<span>${mark} ${escapeHtml(p.t)}</span>`
+        + `<span style="color:${c};font-weight:700;white-space:nowrap;">${escapeHtml(p.v)}</span></div>`;
+    };
+    deck.push({
+      label: `The ${core.length}-point verification`,
+      tone: anyFlag ? "flag" : "pass",
+      glow: !!anyFlag,
+      body: core.map(row).join(""),
+    });
+    if (extras.length) {
+      deck.push({
+        label: `Also checked on this listing (${extras.length})`,
+        tone: extras.some((p) => p.tone === "flag") ? "flag" : "muted",
+        glow: false,
+        body: extras.map(row).join(""),
+      });
+    }
+    // Not a verification point -- it is something the DEALER offered -- so it
+    // is stated separately rather than counted.
+    if (a.warranty?.offered) {
+      deck.push({
+        label: "Protection plan offered",
+        tone: "muted",
+        glow: false,
+        body: `<div style="font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(a.warranty.offered)}`
+          + `${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}</div>`,
+      });
+    }
+  }
 
   // 5a2 -- MSRP per trim: the factory range (client-derived from the verified
   // catalog, evapRebate pattern; source link is server-built, never client's).

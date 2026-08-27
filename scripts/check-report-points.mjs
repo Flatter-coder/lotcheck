@@ -76,6 +76,19 @@ console.log("\nthe emailed report");
     "slice(0,10) silently drops any point beyond the tenth instead of failing loudly");
   check("the PDF's audit kicker counts the CORE, not the mixed pool",
     /kicker\(`\$\{CORE\.length\}-POINT AUDIT`\)/.test(src));
+  // The emailed HTML body is a THIRD render path, and it used to build its own
+  // conditional roll-up instead of using tenPoints(): every row was an
+  // `if (...) push` with no else, so an unresolved point emitted nothing --
+  // while the PDF stapled to the same email printed it as "NOT ON QUOTE".
+  check("the emailed HTML body builds its checklist from tenPoints()",
+    /const pts = tenPoints\(a\);/.test(src),
+    "an unresolved point must render on every surface, not vanish from two of them");
+  check("the emailed HTML splits core from extras the same way",
+    /label: `The \$\{core\.length\}-point verification`/.test(src)
+    && /label: `Also checked on this listing \(\$\{extras\.length\}\)`/.test(src));
+  check("no conditional quick-checks roll-up remains",
+    !/deck\.push\(\{ label: "Quick checks"/.test(src),
+    "that roll-up is what silently dropped unresolved points");
   check("the PDF prints the additional checks under their own heading",
     /kicker\(`ALSO CHECKED ON THIS LISTING \(\$\{EXTRA\.length\}\)`\)/.test(src),
     "every extra must still be printed — just not as a point");
