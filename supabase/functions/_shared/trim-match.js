@@ -74,6 +74,9 @@ const KEY_TOKENS = new Set([
   // car is the strongest name evidence there is -- same reasoning the rest of
   // this list was built on.
   "ex","lx","dx","exl",
+  // Lexus grade ladder. "Executive" was missing, and its absence is what let a
+  // 2026 NX 350h Premium resolve to the Executive row at $70,878 (2026-08-27).
+  "executive",
 ]);
 
 function keyTokens(s) {
@@ -148,9 +151,35 @@ function priceImplausible(rowMsrp, askingPrice) {
   return gap > Number(rowMsrp) * 0.20 && gap > 6000;
 }
 
+// Does another row in this ladder carry the SAME trim name at a materially
+// different price? If so we cannot say which one a listing naming that trim
+// means, and publishing either as the exact MSRP is a coin flip on the
+// difference. Caught on the 2026 Lexus NX, where a case-sensitive write-side
+// dedupe left "LUXURY" $58,025 beside "Luxury" $62,165 -- $4,140 apart, one
+// trim name. The row is still the best answer available, so it is still
+// returned; it is just labelled "starting_at" instead of "exact".
+//
+// $500 is the same threshold the clear-winner rule uses: below it, either row
+// is an accurate answer to the buyer's question. [[msrp-exact-must-pin-config]]
+function trimNameIsAmbiguous(pool, row) {
+  const norm = (t) => String(t == null ? "" : t).trim().toLowerCase().replace(/\s+/g, " ");
+  const key = norm(row.trim);
+  if (!key) return false;
+  // Rows the CATALOG itself distinguishes are not ambiguous. Ford's Mach-E
+  // ladder legitimately carries "Premium" twice -- RWD $49,990 and AWD $56,990
+  // -- and the drivetrain column plus the listing's own drivetrain resolves
+  // that cleanly. Only a name collision with nothing to tell the rows apart is
+  // a coin flip.
+  const drive = norm(row.drivetrain);
+  return pool.some((r) => r !== row
+    && norm(r.trim) === key
+    && norm(r.drivetrain) === drive
+    && Math.abs(Number(r.msrp) - Number(row.msrp)) >= 500);
+}
 // rows: [{ trim, msrp, fuel_type?, drivetrain?, attrs? }]
 // sig:  { trim?, drivetrain?, fuelType?, quotedPrice?, features?[], vinDrive?, vinBody? }
 // returns { msrp, trim, basis: "exact"|"starting_at", score } or null.
+
 export function pickTrimMsrp(rows, sig) {
   const s = sig || {};
   const valid = (rows || []).filter((r) => r && Number(r.msrp) > 0);
@@ -192,6 +221,20 @@ export function pickTrimMsrp(rows, sig) {
     // evidence, so it has to be able to cost more than drivetrain can win.
     const rKeys = keyTokens(r.trim);
     if (wantKeys.length && rKeys.length && !rKeys.some((t) => wantKeys.includes(t))) sc -= 5;
+    // A row whose grade name we do not RECOGNISE used to escape that penalty
+    // entirely and win by being the only unpunished candidate. Caught live
+    // 2026-08-27 on a 2026 Lexus NX 350h Premium: "premium" is a KEY_TOKEN, so
+    // every correctly-named row ("Luxury", "F SPORT 2/3", "Ultra Luxury") took
+    // the -5, while "Executive" -- a real Lexus grade that simply was not in
+    // KEY_TOKENS -- scored 0 and won at $70,878 against a car asking $62,005.
+    //
+    // Naming an unrecognised grade is still naming a DIFFERENT grade than the
+    // one the listing states, so it has to cost something. It costs less than a
+    // recognised conflict (-3 vs -5) because the evidence is weaker: our
+    // vocabulary being incomplete is our gap, not the row's fault. Rows with no
+    // grade words at all (a bare "AWD", or an empty trim) are untouched -- they
+    // make no competing claim.
+    else if (wantKeys.length && !rKeys.length && contentTokens(r.trim).length) sc -= 3;
     // Distinctive features from attrs (e.g. { digitalKey2: true }).
     const attrs = r.attrs || {};
     for (const k of Object.keys(attrs)) {
@@ -231,7 +274,9 @@ export function pickTrimMsrp(rows, sig) {
     // still only the right TRIM, not the right CAR. Same for a winner whose own
     // MSRP isn't remotely close to what's actually being asked -- more likely a
     // missing higher-package row than a real markup (see priceImplausible).
-    const basis = (rowConfirmsConfig(top.r, s) && !priceImplausible(top.r.msrp, s.quotedPrice)) ? "exact" : "starting_at";
+    const basis = (rowConfirmsConfig(top.r, s)
+      && !priceImplausible(top.r.msrp, s.quotedPrice)
+      && !trimNameIsAmbiguous(pool, top.r)) ? "exact" : "starting_at";
     return { msrp: Number(top.r.msrp), trim: top.r.trim || null, basis, score: top.sc };
   }
 
