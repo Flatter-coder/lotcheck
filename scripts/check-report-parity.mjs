@@ -152,6 +152,13 @@ const SURFACES = [
       "shared hook + cache":        "function useTrimRange",
       "scroll view card":           "<TrimMsrpRange analysis={analysis}",
       "heatmap/sidebar pool item":  'key: "trimrange"',
+      // Added 2026-08-27 after I shipped the nameplate label to 3 of 5 surfaces
+      // in the very change that was fixing this class. A trim ladder spanning
+      // several separately-priced vehicles must say so on EVERY surface, or the
+      // buyer sees six rows named "Luxury" at six prices and no explanation.
+      "heatmap/sidebar nameplate label": "trimRange.multiNameplate && t.nameplate",
+      "scroll trim card nameplate label": "tr.multiNameplate&&t.nameplate",
+      "flipbook nameplate label":        "trimRange?.multiNameplate&&t.nameplate",
       "flipbook page":              'if(p.t==="trims")',
       "email payload attach":       "trimRangePayload(mainTrimRange)",
     },
@@ -160,6 +167,8 @@ const SURFACES = [
       "server source map":    "EMAIL_MAKE_SITE",
       "emailed HTML card":    'deck.push({ label: "MSRP per trim"',
       "emailed PDF section":  'kicker("MSRP PER TRIM")',
+      "emailed PDF nameplate label":  "x.p ? `${x.p}",
+      "emailed HTML nameplate label": 'x.p ? escapeHtml(String(x.p))',
     },
   },
   {
@@ -214,6 +223,10 @@ const SURFACES = [
 // hook, the signed payload, an email helper) carry no region and match
 // file-wide, as before.
 const REGION_OF = [
+  // Most specific first: the scroll view's trim card is its own top-level
+  // component that QuoteCheckPage mounts, so an anchor inside it is NOT inside
+  // QuoteCheckPage. The mount itself is pinned separately ("scroll view card").
+  [/trim card/i,         "TrimMsrpRange"],
   [/scroll view/i,       "QuoteCheckPage"],
   [/heatmap|sidebar/i,   "ReportViews"],
   [/flipbook|\bbook\b/i, "ReportFlipbook"],

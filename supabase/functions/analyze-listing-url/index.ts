@@ -108,7 +108,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27i";  // + trim rows name which nameplate they belong to, one cap on every surface, and the "sits above N of M" count is taken over the FULL ladder
+const CACHE_VER = "2026-08-27j";  // + the trim nameplate label reaches ALL five surfaces (I shipped it to three in the change that was fixing this exact class)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
