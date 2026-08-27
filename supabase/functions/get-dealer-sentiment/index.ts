@@ -53,6 +53,37 @@ const CORS_HEADERS = {
 // Google lookups/year, not one per buyer.
 const CACHE_TTL_DAYS = 30;
 
+// THE RATING MUST NOT WAIT ON THE REVIEW HIGHLIGHTS.
+//
+// This function makes three network hops in series -- Places text search,
+// Places details, then a Claude call that turns the reviews into highlights --
+// behind a Deno cold start. The caller (analyze-listing-url's
+// resolveDealerReputation) aborts the whole thing at 12s, and on a COLD cache
+// the three hops routinely exceed that. When they do, the caller catches the
+// abort and leaves the point UNCHECKED, so a real report on Sundance Mazda --
+// an established Edmonton dealer with plenty of Google reviews -- printed
+// "Dealer reputation: NOT CHECKED".
+//
+// The rating and the review count are both in hand after hop TWO. Only the
+// highlights need Claude. An optional enrichment that can take down the
+// required result is one of the four recurring defect shapes this repo tracks
+// ("optional step, fatal failure"), and this is an instance of it.
+//
+// So the Claude hop is bounded twice: it is SKIPPED entirely if the two Places
+// calls have already spent the budget, and ABORTED if it runs long. Either way
+// the function still answers with the rating and the count, which is what the
+// point needs. The highlights are not lost permanently -- a bounded failure
+// sets parseFailed, which (by the rule already here) refuses to bake an empty
+// answer into the 30-day cache, so the next lookup tries again on a warm
+// runtime.
+// 6s + 4s = a 10s worst case against the caller's 12s abort, so ~2s is left for
+// the response, the JSON, and the cache write that follows. An earlier draft
+// used 7s + 5s, which is exactly 12s -- it fits only if everything after hop 3
+// is free, which it is not. The gate now requires real headroom rather than
+// merely "not over".
+const HIGHLIGHTS_SKIP_AFTER_MS = 6_000;  // elapsed before hop 3 -> don't start it
+const HIGHLIGHTS_TIMEOUT_MS = 4_000;     // hop 3's own ceiling once started
+
 const SENTIMENT_SYSTEM_PROMPT = `You are reading a sample of public Google reviews for a Canadian car dealership, for a car-buying verification platform (LotCheck) that shows this directly to buyers researching where to shop.
 
 You are typically given around 5 reviews total -- that's a hard ceiling from the Google Places API itself, not something you can ask for more of. Produce 6 to 8 short, specific highlights drawn from that sample. It's fine and expected to draw MORE THAN ONE highlight from the same review if it genuinely contains multiple distinct, quotable observations (e.g. one review might mention both a specific staff member's name AND a specific financing detail -- those can be two separate highlights). Do not force exactly one highlight per review; that's often impossible with only ~5 to work with. Each highlight needs:
@@ -124,6 +155,7 @@ async function handleSentiment(req: Request): Promise<Response> {
   }
 
   try {
+    const startedAt = Date.now();
     const { dealerName, dealerCity } = await req.json();
     if (!dealerName || typeof dealerName !== "string") {
       // Not an error -- plenty of quotes/listings won't have a clean
@@ -256,18 +288,35 @@ async function handleSentiment(req: Request): Promise<Response> {
     let highlights: Array<{ rating: number; text: string }> = [];
     let parseFailed = false;
 
-    if (reviews.length > 0) {
+    // Skip hop 3 outright when the two Places calls have already spent the
+    // budget: starting a call we know we cannot finish only guarantees the
+    // caller aborts and the buyer sees NOT CHECKED instead of the rating we
+    // are already holding.
+    const elapsed = Date.now() - startedAt;
+    const highlightsBudget = Math.min(HIGHLIGHTS_TIMEOUT_MS, HIGHLIGHTS_SKIP_AFTER_MS - elapsed);
+    if (reviews.length > 0 && highlightsBudget < 1_000) {
+      parseFailed = true;   // not an answer -- do not cache it for 30 days
+      console.warn(
+        `Skipping review highlights for "${dealerName}": ${elapsed}ms already spent, ` +
+        `not enough budget to finish before the caller's timeout. Returning rating + review count.`,
+      );
+    } else if (reviews.length > 0) {
       const reviewBlock = reviews
         .map((r, i) => `Review ${i + 1} (${r.rating ?? "?"}★): ${r.text?.text ?? ""}`)
         .join("\n\n");
 
-      const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          "Content-Type": "application/json",
-        },
+      // Bounded. Without a signal this fetch is unbounded, and it is the hop
+      // that pushed the whole function past the caller's 12s abort.
+      let claudeRes: Response | null = null;
+      try {
+        claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+          signal: AbortSignal.timeout(highlightsBudget),
+          method: "POST",
+          headers: {
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+          },
         body: JSON.stringify({
           model: CLAUDE_MODEL,
           max_tokens: 500,
@@ -281,7 +330,14 @@ async function handleSentiment(req: Request): Promise<Response> {
         }),
       });
 
-      if (claudeRes.ok) {
+      } catch (e) {
+        // A slow or failed enrichment must never cost the buyer the rating.
+        claudeRes = null;
+        parseFailed = true;
+        console.warn(`Review highlights aborted for "${dealerName}" after ${highlightsBudget}ms: ${(e as Error)?.message}. Returning rating + review count.`);
+      }
+
+      if (claudeRes && claudeRes.ok) {
         const claudeData = await claudeRes.json();
         const rawText = claudeData.content?.[0]?.text ?? "[]";
 
@@ -337,10 +393,13 @@ async function handleSentiment(req: Request): Promise<Response> {
           console.error("Couldn't parse sentiment highlights JSON from any candidate:", rawText);
           parseFailed = true;
         }
-      } else {
+      } else if (claudeRes) {
         console.error("Claude sentiment call failed:", claudeRes.status, await claudeRes.text());
         parseFailed = true;
       }
+      // claudeRes === null means the call was aborted or threw; the catch above
+      // has already logged it and set parseFailed. Nothing more to say, and
+      // nothing to dereference.
     }
 
     const result = {
