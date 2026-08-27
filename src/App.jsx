@@ -839,35 +839,6 @@ function bucketPageViews(views,granularity){
 // precise accounting ever depends on it.
 const USD_TO_CAD = 1.406;
 
-// Same bucketing pattern as bucketPageViews, but sums cost_usd per bucket
-// instead of counting rows -- used for the admin Costs section's chart.
-function bucketApiUsage(usage,granularity){
-  const now=Date.now();
-  const configs={
-    hour:{bucketMs:3600000,count:24,label:d=>d.toLocaleTimeString("en-CA",{hour:"numeric"})},
-    day:{bucketMs:24*3600000,count:30,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
-    week:{bucketMs:7*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short",day:"numeric"})},
-    month:{bucketMs:30*24*3600000,count:12,label:d=>d.toLocaleDateString("en-CA",{month:"short"})},
-  };
-  const cfg=configs[granularity]||configs.day;
-  const startTime=now-cfg.bucketMs*cfg.count;
-  const buckets=[];
-  for(let i=0;i<cfg.count;i++){
-    const bucketStart=startTime+i*cfg.bucketMs;
-    const bucketEnd=bucketStart+cfg.bucketMs;
-    const inBucket=usage.filter(u=>{
-      const t=new Date(u.created_at).getTime();
-      return t>=bucketStart&&t<bucketEnd;
-    });
-    buckets.push({
-      label:cfg.label(new Date(bucketStart)),
-      cost:inBucket.reduce((s,u)=>s+(Number(u.cost_usd)||0),0),
-      requests:inBucket.length,
-    });
-  }
-  return buckets;
-}
-
 function getOrCreateVisitorId() {
   try {
     let id = window.localStorage.getItem(VISITOR_ID_KEY);
@@ -2771,165 +2742,6 @@ function DealersTab({dealers,dealersLoading,onAdd,onEdit,onToggle,onDelete,deale
             );
           })}
         </div>
-      )}
-    </div>
-  );
-}
-
-// ── Revenue tab ────────────────────────────────────────────────────────────
-function RevenueTab({dealers, apiUsage, apiUsageLoading}){
-  const featured = dealers.filter(d=>d.featured);
-  const featuredRev = featured.length*300;
-  const {C}=useAdminTheme();
-
-  // Manually-entered subscriber count -- there's no real subscription
-  // billing system yet (no accounts, no Stripe), so this is a stand-in you
-  // type in yourself, not something pulled from real billing data. Labeled
-  // as such below rather than presented as if it were live.
-  const [subscribers,setSubscribers]=useState(()=>{
-    try{ return Number(localStorage.getItem("lc_admin_subscriber_count"))||0; }catch{ return 0; }
-  });
-  function updateSubscribers(v){
-    const n=Math.max(0,Number(v)||0);
-    setSubscribers(n);
-    try{ localStorage.setItem("lc_admin_subscriber_count",String(n)); }catch{}
-  }
-
-  const [costGranularity,setCostGranularity]=useState("day");
-
-  const now=Date.now();
-  const rollupCost=(windowMs)=>{
-    const cutoff=now-windowMs;
-    const inWindow=apiUsage.filter(u=>new Date(u.created_at).getTime()>=cutoff);
-    const cost=inWindow.reduce((s,u)=>s+(Number(u.cost_usd)||0),0);
-    const succeeded=inWindow.filter(u=>u.success).length;
-    return {
-      requests: inWindow.length,
-      cost,
-      successRate: inWindow.length ? Math.round((succeeded/inWindow.length)*100) : null,
-    };
-  };
-  const costToday=rollupCost(24*3600000);
-  const costWeek=rollupCost(7*24*3600000);
-  const costMonth=rollupCost(30*24*3600000);
-
-  const assumedRevenue = subscribers*9.99;
-  const margin = assumedRevenue - costMonth.cost;
-
-  const bucketedCost = bucketApiUsage(apiUsage,costGranularity);
-
-  // Shows both currencies stacked -- USD first (what you're actually billed
-  // in) with the CAD estimate underneath in smaller, muted text.
-  function CostFigure({usd, size=22, color}){
-    return (
-      <>
-        <div style={{fontSize:size,fontWeight:800,color:color||C.ink}}>${usd.toFixed(4)} <span style={{fontSize:size*0.5,fontWeight:700,color:C.inkFaint}}>USD</span></div>
-        <div style={{fontSize:13.5,color:C.inkFaint,marginTop:2}}>≈ ${(usd*USD_TO_CAD).toFixed(4)} CAD</div>
-      </>
-    );
-  }
-
-  return (
-    <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:10,marginBottom:24}}>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:26,fontWeight:800,color:C.tealInk}}>${featuredRev.toLocaleString()}</div>
-          <div style={{fontSize:13.5,color:C.inkFaint}}>Featured listings/mo — real</div>
-        </div>
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-          <div style={{fontSize:26,fontWeight:800,color:C.inkFaint}}>$0</div>
-          <div style={{fontSize:13.5,color:C.inkFaint}}>Lead referral fees</div>
-        </div>
-      </div>
-      <AdminEmpty>
-        Lead referral revenue shows $0 on purpose — leads aren't linked to a
-        specific dealer yet (the buyer-facing Connect form doesn't set
-        <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4,margin:"0 4px"}}>dealer_id</code>
-        when someone submits it). The database column exists now, but wiring
-        the actual attribution is a separate follow-up task.
-      </AdminEmpty>
-      {featured.length>0 && (
-        <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,overflow:"hidden",marginTop:20,marginBottom:28}}>
-          {featured.map(d=>(
-            <div key={d.id} style={{padding:"12px 16px",borderBottom:`1px solid ${C.line}`,display:"flex",justifyContent:"space-between",fontSize:14.5}}>
-              <span style={{color:C.ink}}>{d.name}</span>
-              <span style={{color:C.tealInk,fontWeight:800}}>$300/mo</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1,marginBottom:2}}>
-        QUOTE CHECK COST · {apiUsageLoading?"loading…":`${apiUsage.length} logged call${apiUsage.length===1?"":"s"}`}
-      </div>
-      <div style={{fontSize:13,color:C.inkFaint,marginBottom:10}}>USD is what you're actually billed — CAD is an estimate at a fixed 1 USD = {USD_TO_CAD} CAD rate (July 15, 2026), not a live conversion.</div>
-      {!apiUsageLoading&&apiUsage.length===0?(
-        <AdminEmpty icon={<Icon3D name="chartBar" size={40}/>}>
-          No usage logged yet — this fills in the moment someone runs a real quote through Quote Check, once the analyze-quote function's logging is live.
-        </AdminEmpty>
-      ):(
-        <>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10,marginBottom:16}}>
-            {[["Today",costToday],["Last 7 days",costWeek],["Last 30 days",costMonth]].map(([label,stats])=>(
-              <div key={label} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"}}>
-                <div style={{fontSize:13.5,color:C.inkFaint,marginBottom:6}}>{label}</div>
-                <CostFigure usd={stats.cost}/>
-                <div style={{fontSize:13,color:C.inkFaint,marginTop:6}}>{stats.requests} request{stats.requests===1?"":"s"}{stats.successRate!=null?` · ${stats.successRate}% succeeded`:""}</div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:20}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-              <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft}}>Cost over time</div>
-              <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:8,padding:3}}>
-                {[["day","Day"],["week","Week"],["month","Month"]].map(([key,label])=>(
-                  <button key={key} onClick={()=>setCostGranularity(key)}
-                    style={{background:costGranularity===key?C.tealBg:"transparent",color:costGranularity===key?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:13.5,fontWeight:700,cursor:"pointer"}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div style={{height:180}}>
-              <ResponsiveContainer>
-                <BarChart data={bucketedCost} margin={{top:4,right:4,bottom:0,left:0}}>
-                  <XAxis dataKey="label" tick={{fontSize:12,fill:C.inkFaint}} tickLine={false} axisLine={false} interval="preserveStartEnd"/>
-                  <YAxis tick={{fontSize:13,fill:C.inkFaint}} tickLine={false} axisLine={false} width={50} tickFormatter={v=>`$${v.toFixed(2)}`}/>
-                  <Tooltip formatter={(v)=>[`$${Number(v).toFixed(4)} USD · $${(Number(v)*USD_TO_CAD).toFixed(4)} CAD`,"Cost"]} contentStyle={{background:C.ink,border:"none",borderRadius:8,fontSize:13.5,fontWeight:700,color:"#fff"}} labelStyle={{color:"#D9DBEF",fontSize:13}}/>
-                  <Bar dataKey="cost" radius={[3,3,0,0]} fill={C.teal}/>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px",marginBottom:12}}>
-            <div style={{fontSize:14.5,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Cost vs. subscription — estimate</div>
-            <div style={{fontSize:13,color:C.inkFaint,marginBottom:12,lineHeight:1.5}}>
-              There's no real subscriber billing yet — type in a subscriber count to see an estimated margin. This is a manual stand-in, not live billing data.
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-              <label style={{fontSize:13.5,color:C.inkSoft,whiteSpace:"nowrap"}}>Subscribers at $9.99/mo:</label>
-              <input type="number" min="0" value={subscribers} onChange={e=>updateSubscribers(e.target.value)}
-                style={{width:90,background:C.paper,border:`2px solid ${C.line}`,borderRadius:8,padding:"6px 10px",color:C.ink,fontSize:14.5,outline:"none"}}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
-              <div>
-                <div style={{fontSize:18,fontWeight:800,color:C.ink}}>${assumedRevenue.toFixed(2)} <span style={{fontSize:13,fontWeight:700,color:C.inkFaint}}>USD</span></div>
-                <div style={{fontSize:13,color:C.inkFaint}}>≈ ${(assumedRevenue*USD_TO_CAD).toFixed(2)} CAD</div>
-                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Assumed monthly revenue</div>
-              </div>
-              <div>
-                <CostFigure usd={costMonth.cost} size={18}/>
-                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Actual cost, last 30 days</div>
-              </div>
-              <div>
-                <CostFigure usd={Math.abs(margin)} size={18} color={margin>=0?C.tealInk:C.coralInk}/>
-                <div style={{fontSize:13,color:C.inkFaint,marginTop:4}}>Estimated margin{margin<0?" (loss)":""}</div>
-              </div>
-            </div>
-          </div>
-        </>
       )}
     </div>
   );
@@ -6488,7 +6300,6 @@ function AdminPanel(){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:4,background:C.card,border:`1px solid ${C.line}`,borderRadius:10,padding:4}}>
           <AdminTabButton active={tab==="overview"} onClick={()=>setTab("overview")}>Overview</AdminTabButton>
-          <AdminTabButton active={tab==="revenue"} onClick={()=>setTab("revenue")}>Revenue</AdminTabButton>
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
@@ -6649,7 +6460,6 @@ function AdminPanel(){
           )}
         </>)}
 
-        {tab==="revenue" && <RevenueTab dealers={dealers} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading}/>}
         {tab==="profit" && <ProfitTrackerTab/>}
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
