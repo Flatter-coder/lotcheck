@@ -269,7 +269,13 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   // A grade can appear under two modelCodes (same year/model/trim) — collapse to
   // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
   return {
-    msrpRows: dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp"),
+    // lower(trim): the key was CASE-SENSITIVE, so Lexus's AEM fragment
+    // returning "LUXURY" for one package and "Luxury" for another created TWO
+    // catalog rows for one trim at two different prices. Confirmed live
+    // 2026-08-27: a 2026 Lexus NX card printed six rows of "Luxury" at six
+    // prices. The database UNIQUE constraint is case-sensitive too, so it
+    // could not stop it either -- this is the write-side half of the fix.
+    msrpRows: dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${String(r.trim ?? "").trim().toLowerCase()}`, "msrp"),
     financeRows: dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr"),
     leaseRows,
   };
@@ -296,7 +302,30 @@ export async function run(config) {
   // comes back all one non-gas fuel, so the next mis-tag is loud, not silent.
   const { rows: msrpRows, replaced } = applyTciOverrides(rawMsrp, config.makeName);
   for (const r of replaced) console.log(`  override: ${r.key} — dropped ${r.dropped} scraped row(s), inserted ${r.inserted} verified`);
-  for (const s of flagAllOnePowertrain(msrpRows)) console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
+  // A PROVEN MIS-TAG IS NOW REFUSED, NOT JUST LOGGED. This was a console.warn,
+  // so a whole gasoline line tagged "Hybrid" shipped to msrp_catalog anyway --
+  // and every downstream consumer then offered a hybrid buyer the GAS ladder
+  // (or vice versa), which is the exact false anchor [[powertrain-identity-rule]]
+  // forbids. Confirmed live 2026-08-27: all six gasoline Lexus 'NX' rows carried
+  // fuel_type 'Hybrid'.
+  //
+  // "Proven" is deliberately strict: the same make/year must ALSO list a sibling
+  // nameplate extending this one with a powertrain marker ("NX" alongside "NX
+  // Hybrid"), which makes the bare nameplate the gas line by construction. A
+  // genuinely single-powertrain line (Sienna is hybrid-only) is never refused --
+  // it still warns, so a real new mis-tag stays loud. Missing beats wrong: a
+  // dropped model shows as "no catalog figure", which every surface already
+  // handles honestly; a mis-tagged one produces a confident wrong number.
+  const powertrainFlags = flagAllOnePowertrain(msrpRows);
+  const refusedKeys = new Set(powertrainFlags.filter((s) => s.proven).map((s) => s.key));
+  for (const s of powertrainFlags) {
+    if (s.proven) console.error(`  REFUSED: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel} while a powertrain-marked sibling nameplate exists; this is a series-level fuel mis-tag. Rows dropped. Add a tci-override or fix inferFuel.`);
+    else console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
+  }
+  const keptMsrpRows = refusedKeys.size
+    ? msrpRows.filter((r) => !refusedKeys.has(`${r.make}|${r.model}|${r.year}`))
+    : msrpRows;
+  if (refusedKeys.size) console.error(`  ${msrpRows.length - keptMsrpRows.length} MSRP row(s) withheld across ${refusedKeys.size} mis-tagged model(s).`);
 
   // WRITE THROUGH writeCatalogs, NOT THREE BARE AWAITS.
   // 5f4259d fixed exactly this defect -- an MSRP write that throws must not take
@@ -327,7 +356,7 @@ export async function run(config) {
   // SUBTOTAL = MSRP + PACKAGE + DRF + FPD + AC + levies, so the MSRP line sits
   // below freight. That matches the hand-seeded Build & Price rows, which this
   // derivation reproduces exactly for all four 2026 RAV4 PHEV trims.
-  await writeCatalogs(config.makeName, { msrpRows, financeRows, leaseRows }, {
+  await writeCatalogs(config.makeName, { msrpRows: keptMsrpRows, financeRows, leaseRows }, {
     priceBasis: "excl_freight",
   });
 }

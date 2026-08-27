@@ -85,12 +85,34 @@ export function flagAllOnePowertrain(rows, { minTrims = 4 } = {}) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
+  // A SIBLING NAMEPLATE IS THE PROOF. "all rows one non-gas fuel" alone is a
+  // false positive on genuinely single-powertrain lines (Sienna is hybrid-only
+  // and its nameplate carries no marker), and dropping those would cost real
+  // coverage. But when the SAME make/year also lists a sibling model whose
+  // name extends this one with a powertrain marker -- Lexus shipping "NX",
+  // "NX Hybrid" AND "NX Plug-in Hybrid" -- then the bare nameplate is the GAS
+  // line by construction, and tagging all of its trims "Hybrid" is provably a
+  // series-level mis-tag. Confirmed live 2026-08-27: every gasoline Lexus 'NX'
+  // row was stored fuel_type 'Hybrid', which is what let a gas ladder be
+  // offered to a hybrid buyer. Same defect a migration hand-fixed for the
+  // Lexus TX on 2026-08-26 and left unfixed for the NX.
+  const nameplates = new Set((rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`));
+  const hasPowertrainSibling = (make, year, model) => {
+    const base = String(model || "").toLowerCase();
+    return ["hybrid", "plug-in hybrid", "plug in hybrid", "phev", "ev", "prime", "recharge"]
+      .some((sfx) => nameplates.has(`${make}|${year}|${base} ${sfx}`));
+  };
   const flagged = [];
   for (const [k, rs] of groups) {
     if (rs.length < minTrims) continue;
     const fuels = new Set(rs.map((r) => r.fuel_type));
     if (fuels.size === 1 && !fuels.has("Gas") && !fuels.has(null)) {
-      flagged.push({ key: k, trims: rs.length, fuel: [...fuels][0] });
+      const r0 = rs[0];
+      flagged.push({
+        key: k, trims: rs.length, fuel: [...fuels][0],
+        // Only a proven mis-tag may be refused; the rest stay a warning.
+        proven: hasPowertrainSibling(r0.make, r0.year, r0.model),
+      });
     }
   }
   return flagged;
