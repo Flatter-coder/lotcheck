@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27e";  // + all SIX delivery paths now instrumented via instrumentDelivery() (5 of 6 charged the buyer while writing zero telemetry, incl. every cache hit)
+const CACHE_VER = "2026-08-27f";  // + Japanese-luxury hybrid nameplates (350h/450h+/e:HEV/e-POWER) now carry a powertrain marker, so a cached "NX 350h" no longer replays the GAS NX's $55,080 anchor
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
