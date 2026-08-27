@@ -79,7 +79,8 @@
     "test:price-index": "node scripts/test-price-index-panel.mjs",
     "test:recall-sweep": "node scripts/test-recall-sweep.mjs",
     "test:recall-source": "node scripts/test-recall-single-source.mjs",
-    "test:fetch-retry": "node scripts/test-fetch-retry.mjs"
+    "test:fetch-retry": "node scripts/test-fetch-retry.mjs",
+    "test:page-read": "node scripts/test-page-read.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

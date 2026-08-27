@@ -56,6 +56,7 @@ import { finalizeServerSide } from "../_shared/report-sign.ts";
 // already drifted apart. See _shared/recalls.ts for what the drift cost.
 import { lookupRecalls } from "../_shared/recalls.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
+import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
@@ -107,7 +108,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27f";  // + Japanese-luxury hybrid nameplates (350h/450h+/e:HEV/e-POWER) now carry a powertrain marker, so a cached "NX 350h" no longer replays the GAS NX's $55,080 anchor
+const CACHE_VER = "2026-08-27g";  // + one shared page read per scan, with the rescue render feeding the SAME structured readers (a blocked direct GET used to empty price/MSRP/VIN/trim/APR/days-on-lot together)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1902,12 +1903,18 @@ async function checkDealerLicence(analysis: any): Promise<void> {
   } catch (e) { console.warn("checkDealerLicence threw (ignored):", (e as Error)?.message); }
 }
 
-async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null): Promise<void> {
+// `sharedHtml` is the scan's ONE page read. Passing it is not an optimisation:
+// a scan used to fire up to five separate un-shared GETs at the same dealer URL
+// (three from the retry loop, one here, one from captureConvertusDaysOnLot) on
+// top of Nimble and Scrapfly, and on a Cloudflare-protected origin that volume
+// is what PROVOKES the rate limiting that then empties the whole report.
+// Falls back to its own fetch only when no shared read was supplied.
+async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null, sharedHtml?: Promise<string | null>): Promise<void> {
   try {
     if (!analysis || analysis.tradeInWidget) return;
     let hit = matchTradeInWidget(textHint || "");
     if (!hit) {
-      const html = await fetchDirectHtml(url, 8_000);
+      const html = sharedHtml ? await sharedHtml.catch(() => null) : await fetchDirectHtml(url, 8_000);
       if (html) hit = matchTradeInWidget(html);
     }
     if (hit) { analysis.tradeInWidget = hit; console.log(`Trade-in widget detected (${hit.vendor || "generic"}).`); }
@@ -1976,12 +1983,17 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
   }
 }
 
-async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<void> {
+// Reads date_on_lot out of the Convertus vmsData blob. It used to re-download
+// the ENTIRE page (a 1.1 MB fetch on the Lexus listing that exposed this) to
+// regex one field out of the very blob the main reader had already parsed --
+// a wholly redundant origin request on the hosts most likely to rate-limit us.
+// Now it uses the scan's shared read.
+async function captureConvertusDaysOnLot(url: string, analysis: any, sharedHtml?: Promise<string | null>): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;
     let u: URL; try { u = new URL(url); } catch { return; }
     if (!/\/vehicles\/\d{4}\//i.test(u.pathname)) return;
-    const html = await fetchDirectHtml(url, 12_000);
+    const html = sharedHtml ? await sharedHtml.catch(() => null) : await fetchDirectHtml(url, 12_000);
     if (!html) return;
     const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
     const since = m ? m[1] : null;
@@ -2284,7 +2296,15 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // MSRP/recalls/warranty/leverage. Page fees/financing are NOT read (that needs
 // the rendered page), so the sourceNote says so and points to the screenshot
 // path. Never throws; returns null when there's no usable priced vehicle node.
-async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string | null> {
+// Why a direct read failed, so the retry loop can tell "this origin is pushing
+// back" apart from "there is nothing here". They need opposite responses: a
+// 404/parse miss will never succeed on a retry, while a 429 or a Cloudflare
+// challenge is a TIMING signal -- and hammering it converts a transient block
+// into a sustained one.
+type DirectOutcome = { status: "ok" | "rate_limited" | "challenged" | "http_error" | "empty" | "network"; code?: number };
+
+async function fetchDirectHtml(url: string, timeoutMs: number, outcome?: DirectOutcome): Promise<string | null> {
+  const note = (status: DirectOutcome["status"], code?: number) => { if (outcome) { outcome.status = status; outcome.code = code; } };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -2310,14 +2330,16 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
       redirect: "follow",
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) { note(res.status === 429 || res.status === 503 ? "rate_limited" : "http_error", res.status); return null; }
     const html = await res.text();
-    if (!html || html.length < 500) return null;
+    if (!html || html.length < 500) { note("empty", res.status); return null; }
     // A Cloudflare/queue interstitial returns 200 with a small challenge shell
     // (no real content) -- treat it as a failed load so we never parse it.
-    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) return null;
+    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) { note("challenged", res.status); return null; }
+    note("ok", res.status);
     return html;
   } catch {
+    note("network");
     return null;
   } finally {
     clearTimeout(timer);
@@ -2334,15 +2356,42 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
 // directHtml -- and the whole scan then leaned on the late, time-starved
 // Scrapfly rescue. These retries run in PARALLEL with Nimble's own 30-100s
 // extraction, so the added attempts cost zero wall-clock in practice.
+//
+// THE SPACING WAS THE BUG. The old loop retried at 1.5s and 3s, described
+// in-comment as "a fresh connection, not a hammer". Against a per-IP rate
+// limiter three requests inside 4.5 seconds IS a hammer: measured live
+// 2026-08-27 against lexussouthpointe.com, 57 of 67 requests came back as a
+// 5,927-byte "Just a moment..." challenge shell and every request after that
+// returned HTTP 429. Real backoff with jitter gives the limiter's window time
+// to roll over, and costs no wall-clock in practice because these attempts run
+// in parallel with Nimble's own 30-100s extraction. A retry that cannot help
+// (404, unparseable) is not retried at all.
 async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3): Promise<string | null> {
+  // 2s, 8s -- plus up to 1s of jitter, so concurrent scans of the same host do
+  // not line their retries up on the same tick.
+  const BACKOFF_MS = [2_000, 8_000];
+  const outcome: DirectOutcome = { status: "network" };
   for (let i = 1; i <= attempts; i++) {
-    const html = await fetchDirectHtml(url, timeoutMs);
+    const html = await fetchDirectHtml(url, timeoutMs, outcome);
     if (html) { if (i > 1) console.log(`Direct fetch succeeded on attempt ${i}/${attempts}.`); return html; }
-    if (i < attempts) await sleep(1_500 * i); // 1.5s, 3s -- a fresh connection, not a hammer
+    // A hard HTTP error or an unparseably small body is a fact about the page,
+    // not about timing: retrying spends requests on an origin for no gain.
+    if (outcome.status === "http_error" && outcome.code !== 429 && outcome.code !== 503) {
+      console.warn(`Direct fetch: HTTP ${outcome.code} for ${url} -- not retrying.`);
+      lastDirectOutcome = outcome.status;
+      return null;
+    }
+    if (i < attempts) await sleep(BACKOFF_MS[i - 1] + Math.floor(Math.random() * 1_000));
   }
-  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url}.`);
+  lastDirectOutcome = outcome.status;
+  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url} (last outcome: ${outcome.status}${outcome.code ? " " + outcome.code : ""}).`);
   return null;
 }
+
+// The last direct-read outcome for this isolate, read only for logging and for
+// the "page not read" disclosure. Deliberately not used for any buyer-facing
+// claim about the DEALER -- an origin blocking our IP says nothing about them.
+let lastDirectOutcome: DirectOutcome["status"] = "ok";
 
 // Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
@@ -3131,24 +3180,6 @@ Deno.serve(async (req: Request) => {
     // copy of the very page it was written for. Anything needing real HTML
     // must come through here.
     const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, 15_000).catch(() => null);
-    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
-    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
-    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
-    // that Nimble's markdown AND this same direct-fetch text view both miss
-    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
-    // a real, correctly-scraped page still reported "price not shown" while
-    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
-    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
-    const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
-    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
-    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
-    // nothing extra. Specified 2026-08-15, never actually wired in until now
-    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
-    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
-    // pricing" over the real fields it renders, but priceWithoutCustomFees
-    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
-    // [[gated-price-recovery]] memory for the full mechanism.
-    const earlyD2cVdp: Promise<any | null> = directHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
     // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
     // fails (all retries exhausted) -- the strongest early signal the rescue
     // will be needed. Started here, ~20-50s into the request, it runs in
@@ -3164,6 +3195,53 @@ Deno.serve(async (req: Request) => {
     const earlyRender: Promise<RenderResult | null> = scrapflyEnabled()
       ? directHtml.then((html) => (html ? null : (console.log("Direct fetch failed -- pre-warming Scrapfly render for a possible rescue."), scrapflyRender(url, 70_000)))).catch(() => null)
       : Promise.resolve(null);
+    // THE PAGE SOURCE EVERY READER USES -- direct fetch first, the render second.
+    //
+    // Until now every structured reader hung off `directHtml` alone, so ONE
+    // blocked GET emptied price, MSRP, VIN, trim, APR and days-on-lot in a
+    // single stroke. Confirmed live 2026-08-27 on a real paid report
+    // (LC-46A4-66F, a 2026 Lexus NX 350h at lexussouthpointe.com): the page's
+    // own vmsData carried asking_price 62005, VIN 2T2GKCEZ8TC072832, msrp
+    // 58675, 8.99% APR and date_on_lot 2026-05-04 the entire time, and the
+    // buyer was shown "ASKING PRICE: Not shown" and "VIN: NOT ON QUOTE".
+    // Nothing was wrong with the extractors -- they were simply never handed
+    // any HTML, because Cloudflare served a challenge shell to the datacenter
+    // IP and fetchDirectHtml correctly returned null.
+    //
+    // The rescue render was ALREADY being paid for on exactly these scans
+    // (earlyRender above fires the moment the direct fetch conclusively
+    // fails), and scrapfly.ts had been running its own private copy of
+    // extractConvertusVmsVehicle on that HTML in a second, later pipeline.
+    // This promotes that same HTML into the ONE reader chain, so a blocked
+    // origin costs coverage of nothing we already hold. [[no-single-point-of-failure]]
+    // The resolution itself lives in _shared/page-source.js so the regression
+    // gate exercises the REAL function rather than a copy of its logic that
+    // can drift away from it.
+    const pageHtml: Promise<string | null> = directHtml.then(async (html) => {
+      const r = await earlyRender.catch(() => null);
+      const picked = resolvePageSource(html, r, (m) => console.log(m));
+      if (picked.source === "none") console.warn(`No page source: direct read ${lastDirectOutcome}, render produced no usable HTML.`);
+      return picked.html;
+    }).catch(() => null);
+
+    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, pageHtml).catch(() => null);
+    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
+    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
+    // that Nimble's markdown AND this same direct-fetch text view both miss
+    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
+    // a real, correctly-scraped page still reported "price not shown" while
+    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
+    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
+    const earlyConvertusVms: Promise<any | null> = pageHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
+    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
+    // nothing extra. Specified 2026-08-15, never actually wired in until now
+    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
+    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
+    // pricing" over the real fields it renders, but priceWithoutCustomFees
+    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
+    // [[gated-price-recovery]] memory for the full mechanism.
+    const earlyD2cVdp: Promise<any | null> = pageHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
     // Combined structured-data view for structuredFactsBlock + the post-Claude
     // gap-fill below: JSON-LD's fields stay authoritative where present (an
     // established, tested source); Convertus fills whatever JSON-LD didn't
@@ -3263,7 +3341,7 @@ Deno.serve(async (req: Request) => {
       // Prefer the copy we started at t=0; only re-fetch if it came back empty.
       const jsonLdFallback = (await earlyJsonLd) || (await buildJsonLdFallbackAnalysis(url));
       if (jsonLdFallback) {
-        await detectTradeInWidget(url, jsonLdFallback); // S36 (fetch is cached upstream at the CDN, cheap)
+        await detectTradeInWidget(url, jsonLdFallback, null, pageHtml); // S36 -- shares the scan's one page read
         // The structured data often lacks the price the RENDERED page displays.
         // With Scrapfly armed, run the vision rescue here too (this path used
         // to return early and skip it — the Okotoks $112,995 vanished that way).
@@ -3315,7 +3393,7 @@ Deno.serve(async (req: Request) => {
         ? await buildConvertusVmsFallbackAnalysis(url, directHtml)
         : null;
       if (convertusFallback) {
-        await detectTradeInWidget(url, convertusFallback);
+        await detectTradeInWidget(url, convertusFallback, null, pageHtml);
         let cvRenderConfirmedGated = false;
         if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
@@ -3637,7 +3715,7 @@ Deno.serve(async (req: Request) => {
 
     // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
     // the SM360 feed already provided it, or the URL isn't that shape).
-    await captureConvertusDaysOnLot(url, analysis);
+    await captureConvertusDaysOnLot(url, analysis, pageHtml);
 
     // Note the VIN BEFORE reading it back, so the very first scan of a car
     // starts its clock even though it can report nothing yet. This is what
@@ -3730,7 +3808,7 @@ Deno.serve(async (req: Request) => {
 
     // S36: flag embedded trade-in instant-offer widgets (checks the scraped
     // text first; falls back to one direct fetch), then refresh the script.
-    await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null);
+    await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null, pageHtml);
     if (analysis.tradeInWidget || analysis.financeContingent) analysis.counterScript = buildCounterScript(analysis);
 
     // Independent evidence: ask the Internet Archive to preserve the listing.
