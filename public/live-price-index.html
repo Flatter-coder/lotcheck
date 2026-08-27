@@ -134,6 +134,9 @@
     letter-spacing:1.6px;font-weight:700;color:var(--up);text-transform:uppercase;
     opacity:0;transition:opacity .4s;vertical-align:middle}
   .lv.on{opacity:1}
+  /* Stale/paused reading: an amber "Paused" badge, never a green "Live" one. */
+  .lv.paused{opacity:1;color:#e0a800}
+  .lv.paused i{background:#e0a800;box-shadow:0 0 7px #e0a800;animation:none}
   .lv i{width:7px;height:7px;border-radius:50%;background:var(--up);flex:none;
     box-shadow:0 0 7px var(--up);animation:pulse 2s ease-in-out infinite}
   @media (prefers-reduced-motion:reduce){.lv i{animation:none}}
@@ -633,6 +636,18 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   function setLive(cls,on){
     document.querySelectorAll(".lv."+cls).forEach(function(el){ el.classList.toggle("on",!!on); });
   }
+  // The market-reading badges have THREE states, not two: 'live' (green, current),
+  // 'paused' (amber, data exists but stale — must not pose as live), 'off' (hidden,
+  // read failed/loading). A stale reading showing "Live" was the bug.
+  function setMktLive(state){
+    document.querySelectorAll(".lv-mkt").forEach(function(el){
+      el.classList.toggle("on", state==="live");
+      el.classList.toggle("paused", state==="paused");
+      var i=el.querySelector("i");
+      while(i && i.nextSibling){ el.removeChild(i.nextSibling); }
+      el.appendChild(document.createTextNode(state==="paused"?"Paused":"Live"));
+    });
+  }
 
   function paintReal(){
     setLive("lv-cat",true);
@@ -873,11 +888,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     // "0 listings", which would fabricate a market count.
     if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
       var ln=mktMsg(dev);
-      say.textContent=""; strip.innerHTML=""; cap.textContent=""; foot.textContent="";
+      say.textContent=""; strip.innerHTML=""; strip.style.display="none"; cap.textContent=""; foot.textContent="";
       terr.className="mkt-wait"; terr.textContent=ln.filter(Boolean).join(" ");
       return;
     }
-    terr.className="mkt-terr";
+    strip.style.display=""; terr.className="mkt-terr";
 
     var n=Number(dev.n)||0, under=Number(dev.under_n)||0, over=Number(dev.over_n)||0;
     var at=Number(dev.at_n)||0, ind=Number(dev.indeterminate_n)||0;
@@ -1112,12 +1127,15 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
   function drawHist(dev){
     var wait=document.getElementById("histWait");
+    var lg=ch.parentNode&&ch.parentNode.querySelector(".lg");
     if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
       ch.style.display="none"; wait.style.display="flex";
+      if(lg) lg.style.display="none";   // no chart -> no orphaned legend
       wait.textContent=mktMsg(dev).join(" ");
       return;
     }
     ch.style.display="block"; wait.style.display="none";
+    if(lg) lg.style.display="";
     buildSeries(dev);
     redrawHist(true);
   }
@@ -1216,14 +1234,15 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       var v=validDev(d);
       if(!v) throw new Error("market payload failed shape validation");
       lastDev=v; drawMarket(v); drawHist(v); updateFootMkt(v);
-      // The tracking is live even below the publication gate — the read
-      // succeeded; the gate is about volume, not liveness.
-      setLive("lv-mkt",true);
+      // Live only when the reading is CURRENT. A stale reading (data exists but
+      // aged past "live") shows an amber "Paused" badge, not green "Live" — the
+      // badge must never contradict the "Market reading paused" message below it.
+      setMktLive(v.stale ? "paused" : "live");
     })
     .catch(function(e){
       // A failed or malformed read is an error state, never "0 of 25 listings".
       console.warn("deviation read failed:",e.message);
-      setLive("lv-mkt",false);
+      setMktLive("off");
       drawMarket(MKT_ERROR); drawHist(MKT_ERROR); updateFootMkt(MKT_ERROR);
     });
 })();
