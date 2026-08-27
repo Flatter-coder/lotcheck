@@ -100,6 +100,14 @@ jobs:
       # array's length, so this reads the arrays.
       - name: Ten points (advertised == delivered, extras never counted as points)
         run: npm run check:points
+      # A forwarded report must not say something different from the original.
+      # The share link renders from a compact projection, not from the signed
+      # payload its own banner verifies, and that projection had drifted: VIN,
+      # odometer, market value and capture provenance were dropped outright,
+      # and two omissions INVERTED a safety rule -- an unconfirmed recall match
+      # forwarded as confirmed, and a 9-recall report forwarded showing 6.
+      - name: Share round trip (a forwarded report never says something else)
+        run: npm run test:share-round-trip
       # The report-email endpoint is unauthenticated: its ONLY proof that a real
       # scan happened is the ECDSA signature gate. A regression there reopens an
       # open mail relay on our own DKIM-signed domain, so it blocks like a
