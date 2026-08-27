@@ -17,6 +17,14 @@
 // could corrupt the table. A crawl that returns suspiciously little never
 // mass-delists a lot (the guard lives in fn_mark_delisted).
 //
+// It HONOURS robots.txt (see lib/robots.mjs). Before touching a dealer it reads
+// their robots.txt: a Disallow on the paths we'd fetch skips that section
+// (leaving its inventory untouched, and marking the crawl partial so nothing is
+// delisted); a Crawl-delay raises the between-page delay; and if robots.txt
+// can't be read at all (any error but a clean 404) the dealer is skipped for the
+// day, because we couldn't confirm we're welcome. This is the first line of the
+// standing-crawl guardrails named in the legal brief (Q17).
+//
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --dry-run
 //   node --experimental-strip-types scripts/crawl-alberta-inventory.mjs --host https://www.tazaparkvw.com --dry-run
@@ -27,6 +35,7 @@
 // validation. One definition, one place to fix.
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
 import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
+import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
@@ -42,8 +51,12 @@ const UA = "LotCheckBot/1.0 (+https://lotcheck.ca/about; buyer-side vehicle pric
 // real Alberta dealer, and the cap stays only as a runaway-pagination backstop.
 // Hitting it still marks the crawl partial, which suppresses delisting.
 const PAGE_CAP = 150;
-const REQUEST_DELAY_MS = 800; // between page fetches, per dealer
+const REQUEST_DELAY_MS = 800; // between page fetches, per dealer (the floor)
 const FETCH_TIMEOUT_MS = 20_000;
+// The delay actually used between page fetches. Defaults to the floor above and
+// is raised per dealer to honour a robots.txt Crawl-delay. Module-level and set
+// in main() before any crawl call — safe because we crawl one dealer at a time.
+let effectiveDelayMs = REQUEST_DELAY_MS;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const num = (x) => { const v = Number(x); return Number.isFinite(v) ? v : null; };
@@ -181,7 +194,7 @@ async function crawlConvertus(host, cp, sc) {
     if (!results.length) break;
     for (const v of results) { const row = normalizeConvertus(v, sc); if (row) rows.push(row); }
     pg++;
-    if ((pg - 1) * CVT_PAGE < total) await sleep(REQUEST_DELAY_MS);
+    if ((pg - 1) * CVT_PAGE < total) await sleep(effectiveDelayMs);
   }
   return { rows, partial };
 }
@@ -216,7 +229,7 @@ async function crawlSection(host, section) {
     const vehicles = data?.vehicles || [];
     if (!vehicles.length) break;
     for (const v of vehicles) { const row = normalizeSm360(v, section); if (row) rows.push(row); }
-    if (page < Math.min(pages, PAGE_CAP)) await sleep(REQUEST_DELAY_MS);
+    if (page < Math.min(pages, PAGE_CAP)) await sleep(effectiveDelayMs);
   }
   if (pages > PAGE_CAP) {
     console.warn(`    ${section}: ${pages} pages exceeds cap ${PAGE_CAP} — crawled ${PAGE_CAP}, rest skipped`);
@@ -256,10 +269,10 @@ async function crawlJsonLdSection(host, section) {
       rows.push(...extractJsonLdVehicles(html, section === "used" ? "used" : "new"));
       url = findNextPage(html);
       pages++;
-      if (url) await sleep(REQUEST_DELAY_MS);
+      if (url) await sleep(effectiveDelayMs);
     }
     if (pages >= PAGE_CAP) { console.warn(`    ${section} ${catUrl}: exceeds page cap ${PAGE_CAP}`); partial = true; }
-    await sleep(REQUEST_DELAY_MS);
+    await sleep(effectiveDelayMs);
   }
   return { rows, partial };
 }
@@ -271,6 +284,32 @@ async function crawlJsonLdSection(host, section) {
 async function crawlEdealerSection(host, section) {
   const html = await fetchHtml(`${host}/${section}/`);
   return { rows: extractEdealerVehicles(html), partial: false };
+}
+
+// Fetch + parse a host's robots.txt for OUR agent. A 404 (no robots.txt) means
+// "crawling allowed" — the standard convention. Any OTHER failure (5xx, network,
+// timeout) means we could NOT confirm permission, so we skip the dealer today:
+// fail-safe, matching the crawler's existing skip-on-failure stance. One fetch
+// per dealer per run.
+async function fetchRobots(host) {
+  try {
+    const res = await fetch(`${host}/robots.txt`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (res.status === 404) return { ok: true, robots: { rules: [], crawlDelay: null }, note: "no robots.txt (404) — crawling allowed" };
+    if (!res.ok) return { ok: false, note: `robots.txt HTTP ${res.status} — can't confirm permission` };
+    return { ok: true, robots: parseRobots(await res.text(), "lotcheckbot"), note: "robots.txt read" };
+  } catch (e) {
+    return { ok: false, note: `robots.txt unreachable (${e.message})` };
+  }
+}
+
+// The URL path(s) the crawler will actually request for a section, checked
+// against robots.txt before we fetch. Convertus reads a WordPress ajax endpoint
+// behind /vehicles/<sc>/, so both are checked (a dealer that Disallows
+// /wp-content/ has said no). If any path is Disallowed we skip the section.
+function robotsPathsFor(platform, section) {
+  if (platform === "convertus") return ["/wp-content/plugins/convertus-vms/include/php/ajax-vehicles.php", `/vehicles/${section}/`];
+  if (platform === "sm360") return [`/en/${section}/api/listing`];
+  return [`/${section}/`]; // jsonld_itemlist + edealer
 }
 
 async function main() {
@@ -305,7 +344,7 @@ async function main() {
     if (HOST_ARG && !dealers.length) { console.error(`no active dealer matches --host ${HOST_ARG}`); process.exit(1); }
   }
 
-  let totals = { dealers: 0, rows: 0, new: 0, priced: 0, delisted: 0, failed: 0 };
+  let totals = { dealers: 0, rows: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0 };
 
   for (const d of dealers) {
     console.log(`${d.name || d.host}`);
@@ -320,7 +359,24 @@ async function main() {
     const sections = d.sections?.length ? d.sections : (isCvt || isJsonLd || isEdealer ? ["new", "used"] : ["new-inventory", "used-inventory"]);
     if (isCvt && !d.platform_id) { console.warn(`    skipped: convertus dealer with no platform_id (cp)`); totals.failed++; totals.dealers++; continue; }
 
+    // robots.txt — a standing crawl honours it (legal brief Q17). One fetch per
+    // dealer. If we can't confirm permission (non-404 error), skip the dealer.
+    const rb = await fetchRobots(d.host);
+    if (!rb.ok) { console.warn(`    skipped: ${rb.note}`); totals.robotsSkipped++; totals.dealers++; continue; }
+    effectiveDelayMs = rb.robots.crawlDelay ? Math.max(REQUEST_DELAY_MS, rb.robots.crawlDelay * 1000) : REQUEST_DELAY_MS;
+    if (rb.robots.crawlDelay) console.log(`    robots.txt crawl-delay ${rb.robots.crawlDelay}s — honouring (${effectiveDelayMs}ms between pages)`);
+
     for (const section of sections) {
+      // Per-section robots check. A Disallowed section is left completely
+      // untouched — and the crawl is marked partial so its inventory is never
+      // read as delisted.
+      const blockedPath = robotsPathsFor(d.platform, section).find((p) => !isPathAllowed(rb.robots, p));
+      if (blockedPath) {
+        console.log(`    ${section}: robots.txt disallows ${blockedPath} — skipping (inventory left untouched)`);
+        partial = true;
+        continue;
+      }
+
       let result;
       try {
         result = isCvt ? await crawlConvertus(d.host, d.platform_id, section)
@@ -376,7 +432,7 @@ async function main() {
     totals.dealers++;
   }
 
-  console.log(`\n${totals.failed ? "⚠" : "✅"} ${totals.dealers} dealers · ${totals.rows} units · ${totals.new} new · ${totals.priced} price events · ${totals.delisted} delisted · ${totals.failed} failed`);
+  console.log(`\n${totals.failed ? "⚠" : "✅"} ${totals.dealers} dealers · ${totals.rows} units · ${totals.new} new · ${totals.priced} price events · ${totals.delisted} delisted · ${totals.failed} failed${totals.robotsSkipped ? ` · ${totals.robotsSkipped} skipped (robots.txt)` : ""}`);
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);
 }
 

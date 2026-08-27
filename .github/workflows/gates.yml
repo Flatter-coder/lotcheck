@@ -186,6 +186,11 @@ jobs:
       # canonical stays byte-identical, so signatures/verify never silently drift.
       - name: Value-report signing canonical (value + quote-unchanged)
         run: npm run test:value-canonical
+      # Standing-crawl robots.txt guardrail: locks the parser + longest-match
+      # Allow/Disallow + crawl-delay so a future edit can't start ignoring a
+      # dealer that asked not to be crawled (legal brief Q17 guardrail).
+      - name: Crawler robots.txt guardrail
+        run: npm run test:robots
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
       - name: Migration columns exist (a 42703 must not reach the SQL editor)

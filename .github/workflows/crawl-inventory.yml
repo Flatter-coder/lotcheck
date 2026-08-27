@@ -7,6 +7,13 @@
 # legal-brief-ppr-amvic-access.md. Until that comes back, this runs only when a
 # human presses the button.
 #
+# The crawl HONOURS robots.txt (scripts/lib/robots.mjs): a Disallow on a path we
+# read skips that section, a Crawl-delay is obeyed, and an unreadable robots.txt
+# skips the dealer for the day. This is the first of the standing-crawl
+# guardrails counsel asked about (legal brief Q17) — but honouring robots.txt is
+# a guardrail, not the sign-off. The go/no-go on standing bulk crawling is still
+# counsel's, and this schedule stays commented out until they clear it.
+#
 # To enable after sign-off: uncomment the schedule block, and add the
 # legal_rule + legal_control rows recording what cleared it.
 #
