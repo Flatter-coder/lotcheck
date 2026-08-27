@@ -8750,7 +8750,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       )}
 
       {view === "heatmap" && (<>
-        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The 10-point verification — hot squares are flagged</div>
+        {/* The count is DERIVED, never hardcoded. This read "The 10-point
+            verification" above a grid that renders heatItems (14 on a full
+            report, and never fewer than 11) -- the report contradicting its
+            own heading. Ten is the advertised FLOOR; say what this report
+            actually delivered. [[ten-point-claim-policy]] */}
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>{heatItems.length}-point verification — hot squares are flagged</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
           {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
         </div>
