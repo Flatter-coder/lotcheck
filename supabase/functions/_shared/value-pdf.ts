@@ -167,7 +167,15 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
     const numW = serifB.widthOfTextAtSize(numStr, 34);
     page.drawRectangle({ x: M - 4, y: y - 34, width: numW + 12, height: 40, color: GREEN_BG });
     T(numStr, { size: 34, font: serifB, color: INK }); y -= 42;
-    T("Typical asking price for this year, trim and mileage", { size: 10.5, font: sans, color: SOFT }); y -= 18;
+    // Subtitle NAMES the real basis (present-without-creating-questions). With few
+    // comps the engine may not narrow to the subject's mileage/trim; say so rather
+    // than imply an adjustment that didn't happen. Basis comes from mv.source.
+    const _src = String(mv.source || "");
+    const subtitle = _src.includes("same trim, similar mileage") ? "Median asking price for the same trim at similar mileage"
+      : _src.includes("same trim") ? "Median asking for the same trim - not adjusted for mileage"
+      : _src.includes("similar mileage") ? "Median asking at similar mileage, across trims"
+      : "Median asking across trims - not yet adjusted for this mileage";
+    T(subtitle, { size: 10.5, font: sans, color: SOFT }); y -= 18;
     const lo = mv.low ?? mv.below, hi = mv.high ?? mv.above;
     if (lo != null && hi != null) { T("Full range " + money(lo) + " to " + money(hi) + "   -   most between " + money(mv.below) + " and " + money(mv.above), { size: 10.5, font: sans, color: INK }); y -= 17; }
     const n = Number(mv.comps) || 0;
