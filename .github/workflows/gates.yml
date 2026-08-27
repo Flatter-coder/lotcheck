@@ -122,6 +122,13 @@ jobs:
       # addOns, which computeReconciliation adds ON TOP.
       - name: Dealer line items (read the fee; never call it money added on top)
         run: npm run test:dealer-line-items
+      # The dealer's RATING must not wait on the review HIGHLIGHTS. Three serial
+      # hops behind a cold start blew the caller's 12s abort, and an established
+      # Edmonton dealer's report read "Dealer reputation: NOT CHECKED". The
+      # rating is in hand after hop two; only the highlights need Claude. This
+      # pins the budget arithmetic so the worst case keeps real headroom.
+      - name: Reputation budget (an optional hop cannot take down the rating)
+        run: npm run test:reputation-budget
       # The manufacturer publishes what sits on top of MSRP -- freight, the A/C
       # excise, the regulator fee, the tire levy, factory accessories and its own
       # dealer fee. We fetch that payload three times per brand for MSRP and used

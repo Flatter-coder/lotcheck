@@ -49,6 +49,13 @@ const OUTPUT_SHAPING = [
   // change this gate exists to catch, just living in a shared module instead
   // of analyze-listing-url/index.ts itself.
   /^supabase\/functions\/_shared\/scrapfly\./,
+  // get-dealer-sentiment joined on 2026-08-27. It is a separate function, so
+  // it sat outside every pattern above -- yet it decides what the Dealer
+  // reputation point SAYS: the rating, the review count, and whether the
+  // point reads NOT CHECKED at all. A change to that shipped with no bump
+  // and every cached report replayed the old answer, which is the same blind
+  // spot the recalls note above describes, one function further out.
+  /^supabase\/functions\/get-dealer-sentiment\//,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();

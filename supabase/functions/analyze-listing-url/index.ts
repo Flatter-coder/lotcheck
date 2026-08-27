@@ -109,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27r";  // + the dealer's own itemisation is read (a published $795 Admin. Fee reported as "NONE LISTED")
+const CACHE_VER = "2026-08-27s";  // + the dealer RATING no longer waits on the review highlights (three serial hops blew the caller's 12s abort and the point read NOT CHECKED)
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
