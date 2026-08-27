@@ -294,9 +294,17 @@ export function pickTrimMsrp(rows, sig) {
     // anchored to the GT-P row at $59,650 when the GT row at $55,700 is the
     // car the listing names. Only DISCRIMINATING tokens count, so the shared
     // model-name noise cannot punish a verbose catalog.
-    for (const t of contentTokens(r.trim)) {
-      if (common.has(t) || wantTokens.has(t)) continue;
-      sc -= KEY_TOKENS.has(t) ? 2 : 1;
+    // ONLY where the name actually matched something. A listing whose trim
+    // matches NO row ("Not A Real Trim") must not be resolved by penalising
+    // rows for how many words their names contain -- that just picks the
+    // shortest name and hands the province price-index read a confident match
+    // built on nothing. Caught by test:market-catalog, which pins exactly that.
+    const rDisc = contentTokens(r.trim).filter((t) => !common.has(t));
+    if (rDisc.some((t) => wantTokens.has(t))) {
+      for (const t of rDisc) {
+        if (wantTokens.has(t)) continue;
+        sc -= KEY_TOKENS.has(t) ? 2 : 1;
+      }
     }
     // Distinctive features from attrs (e.g. { digitalKey2: true }).
     const attrs = r.attrs || {};
