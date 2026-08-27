@@ -172,6 +172,20 @@ const SURFACES = [
     },
   },
   {
+    // The worked financing example had exactly ONE call site in the whole app.
+    field: "financing worked example (FinancingBreakdown)",
+    app: {
+      "component":              "function FinancingBreakdown(",
+      "scroll view mount":      "<FinancingBreakdown analysis={analysis}",
+      "heatmap/sidebar mount":  "<FinancingBreakdown analysis={a}",
+      "in the shared item pool": 'key: "finex"',
+    },
+    email: {
+      // The emailed report states the same two figures as its own points.
+      "emailed financing points": 'P.push({ t: "Financing math"',
+    },
+  },
+  {
     field: "daysOnLot parked-time care-asks",
     app: {
       "shared care-ask helper":      "function dolCareAsk",
@@ -192,6 +206,10 @@ const SURFACES = [
       "shared evidence component": "function EvidenceCard(",
       "scroll view mount":         "<EvidenceCard a={analysis}",
       "heatmap/sidebar mount":     "<EvidenceCard a={a}",
+      // The Book is the surface a buyer is most likely to PRINT and hand over,
+      // and it carried no report id, no verify link, no seal and no capture.
+      "flipbook evidence page":    'p.t==="evidence"',
+      "flipbook page is reachable": 'P.push({t:"evidence"})',
       "signed verify payload":   "shot:a.listingShotSha256||null",
       "verify page sealed row":  'o.shot&&P==="signed"&&<Row t="Listing photo"',
       "verify page drop zone":   "Check the sealed photo",
