@@ -150,7 +150,21 @@ const RULES = [
     // scroll, heatmap, sidebar, flipbook, PDF, email — plus the "10-point lane"
     // link now living in the quote-check nav's "More" menu). The 10-point
     // verification itself is unchanged: ten run, ten deliver.
-    expected: 17, // +1 2026-08-22: the emailed PDF's '10-POINT AUDIT' kicker, newly in scope. Re-confirmed: tenPoints() in that file renders all ten with backed values.
+    // 2026-08-27 — THE CLAIM IS NOW A FLOOR, NOT AN EXACT COUNT. Vic:
+    // "always good to over deliver ... minimum 10 points we will keep
+    // increasing". Five occurrences were removed because they were
+    // ARITHMETICALLY FALSE, not because the claim was softened:
+    //   - 3 in public/index.html reframed to "10+ point" (a floor)
+    //   - App.jsx's heatmap heading now DERIVES the count (it read
+    //     "The 10-point verification" above a 14-tile grid)
+    //   - the PDF kicker now prints the real count (it was hardcoded 10
+    //     while the list grew past ten)
+    // RE-CONFIRMED before changing this number: tenPoints() pushes exactly
+    // ten DISTINCT points before any conditional extra, every one via an
+    // if/else so precisely one branch always fires. The floor therefore
+    // cannot be undershot, which is the only thing that makes a "minimum 10"
+    // claim safe. See [[ten-point-claim-policy]].
+    expected: 12,
   },
 ];
 

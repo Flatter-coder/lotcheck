@@ -8750,7 +8750,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       )}
 
       {view === "heatmap" && (<>
-        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The 10-point verification — hot squares are flagged</div>
+        {/* The count is DERIVED, never hardcoded. This read "The 10-point
+            verification" above a grid that renders heatItems (14 on a full
+            report, and never fewer than 11) -- the report contradicting its
+            own heading. Ten is the advertised FLOOR; say what this report
+            actually delivered. [[ten-point-claim-policy]] */}
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>{heatItems.length}-point verification — hot squares are flagged</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
           {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
         </div>
@@ -8852,7 +8857,11 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
     if(p.t==="trims"){ const trs=trimRange.trims||[]; const aboveN=qp>0?trs.filter(t=>qp>Number(t.msrp)).length:0; const allExcl=trs.every(t=>t.price_basis==="excl_freight");
       return (<div className="rfb-pg">{num}<div className="rfb-k">The factory range</div>
       <h2 className="rfb-h2">MSRP per trim — {trimRange.year} {a.make} {a.model}</h2>
-      <div className="rfb-lede" style={{fontSize:12}}>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</div>
+      {/* Same correction as the scroll card: this list can span powertrains,
+          so "every trim" is not a true description of the rows. */}
+      <div className="rfb-lede" style={{fontSize:12}}>{trimRange?.mixed
+        ? <>Manufacturer prices for these trims{allExcl?" (before freight & fees)":""} — this model name covers more than one powertrain, so compare against the rows matching your car.</>
+        : <>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</>}</div>
       <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:10}}>
         {trs.slice(0,10).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
           <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
@@ -9055,8 +9064,19 @@ function useTrimRange(a){
     let alive=true;
     (async()=>{
       try{
+        // fuel_type is SELECTED because this query cannot avoid crossing
+        // powertrains: `ilike('%NX%')` matches "NX", "NX Hybrid" AND "NX
+        // Plug-in Hybrid" -- three different vehicles at three different
+        // price ladders. Confirmed live 2026-08-27 on a 2026 Lexus NX, where
+        // the card printed SEVENTEEN rows including four different "Luxury"
+        // prices, because it was stacking one trim name across three
+        // powertrains. Widening the match is deliberate (dealers write "NX
+        // 350h" while the catalog stores "NX Hybrid"), so the fix is not to
+        // narrow the query and risk an empty card -- it is to carry the
+        // powertrain so rows can be filtered to THIS car and labelled when
+        // they are not. [[powertrain-identity-rule]]
         const { data, error } = await supabase.from("msrp_catalog")
-          .select("trim,msrp,year,price_basis")
+          .select("trim,msrp,year,price_basis,fuel_type")
           .eq("make",make).ilike("model","%"+model+"%")
           .gt("msrp",0).order("msrp",{ascending:true}).limit(48);
         if(error) throw error;
@@ -9075,13 +9095,32 @@ function useTrimRange(a){
         // the same panel: "LIMITED" $52,000 vs "Limited" $52,350) are a real
         // data question this can't safely resolve, so those stay separate
         // rather than silently picking one.
+        // Keep only THIS car's powertrain when we know it. A hybrid NX must
+        // never be shown the gas NX ladder as "its" trims -- that is the same
+        // $5,500-class error the trim matcher guards against server-side.
+        const fuelKind=(x)=>{ const t=String(x==null?"":x).toLowerCase();
+          if(/phev|plug/.test(t)) return "phev";
+          if(/hybrid|hev/.test(t)) return "hybrid";
+          if(/bev|electric|ev/.test(t)) return "bev";
+          if(/diesel/.test(t)) return "diesel";
+          return t?"gas":null; };
+        const wantFuel=fuelKind(a?.fuelType);
+        const sameYear=rows.filter(r=>r.year===year);
+        const matched=wantFuel?sameYear.filter(r=>fuelKind(r.fuel_type)===wantFuel):[];
+        // Only narrow when it leaves a usable ladder; otherwise show all and
+        // LABEL each row's powertrain rather than silently mixing them.
+        const mixed=!(wantFuel&&matched.length>=2);
+        const pool=mixed?sameYear:matched;
         const seen=new Set();
-        const trims=rows.filter(r=>r.year===year).filter(r=>{
-          const k=String(r.trim).trim().toLowerCase()+"|"+Number(r.msrp);
+        const trims=pool.filter(r=>{
+          // Case-insensitive on trim AND price: "LUXURY"/"Luxury" at the same
+          // price are one trim written twice by a case-sensitive write-side
+          // dedupe, not two products.
+          const k=String(r.trim).trim().toLowerCase().replace(/\s+/g," ")+"|"+Number(r.msrp);
           if(seen.has(k)) return false;
           seen.add(k); return true;
-        });
-        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims};
+        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null}));
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed};
         trimRangeCache[key]=v; if(alive)setSt(v);
       }catch(e){ if(alive)setSt({status:"error",make,model}); }
     })();
@@ -9270,11 +9309,19 @@ function TrimMsrpRange({analysis:a, C, cardStyle}){
         <div style={{fontSize:14,fontWeight:800,color:C.ink}}>MSRP per trim — {tr.year} {a.make} {a.model}</div>
         <LiveDot readAt={tr.readAt}/>
       </div>
-      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</div>
+      {/* "every {model} trim" was a FALSE statement whenever the catalog match
+          crossed powertrains: on a 2026 Lexus NX it stacked gas + hybrid +
+          plug-in ladders and printed four different "Luxury" prices, so the
+          rows were never "every NX trim" -- they were several cars' trims
+          interleaved. Say what the rows actually are.
+          (claims-must-stay-backed / present-without-creating-questions) */}
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>{tr.mixed
+        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This model name covers more than one powertrain, so each row is tagged with which one — compare against the rows matching your car.</>
+        : <>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</>}</div>
       <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
         {trims.map((t,i)=>(
           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"6px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
-            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}{t.powertrain?<span style={{marginLeft:6,fontSize:10.5,fontWeight:800,letterSpacing:.3,color:C.inkFaint,textTransform:"uppercase"}}>{t.powertrain==="phev"?"Plug-in":t.powertrain==="bev"?"Electric":t.powertrain}</span>:null}</span>
             <span style={{fontSize:12.5,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?<span style={{color:C.inkFaint,fontWeight:600}}> + freight</span>:null}</span>
           </div>
         ))}
@@ -10052,9 +10099,29 @@ function QuoteCheckPage(){
           // it right here with our public key so the recipient sees a live
           // authenticity verdict on top of the FULL report.
           if(rep.verifyPayload&&rep.sig&&rep.keyId){
-            verifyReportSignature(rep.verifyPayload,rep.sig,rep.keyId)
-              .then((ok)=>setSharedAuth(ok?"valid":"invalid"))
-              .catch(()=>setSharedAuth(null));
+            // INFLATE BEFORE VERIFYING. report-sign.ts signs the RAW canonical
+            // string and then gzips it for the payload ("the SIGNATURE is still
+            // made over the raw canonical string, never the gzip bytes" —
+            // report-sign.ts:142). This called verifyReportSignature(), which
+            // verifies over b64urlToBytes(payload) — the STILL-GZIPPED bytes —
+            // so the signature could never match and EVERY genuine signed
+            // report opened from a share link rendered
+            // "Seal broken — this copy was altered", accusing the owner of
+            // tampering with their own report. Reported live 2026-08-27 by Vic
+            // clicking the app's own verify link on a fresh report.
+            //
+            // The correct pair already existed and is what /verify's runVerify
+            // uses: maybeGunzip() (passes legacy uncompressed payloads through
+            // unchanged, so old links keep working) + verifyReportSignature-
+            // Bytes(). Use the same path here so the two surfaces cannot
+            // disagree about the same signature again.
+            (async()=>{
+              try{
+                const canonBytes=await maybeGunzip(b64urlToBytes(rep.verifyPayload));
+                const ok=await verifyReportSignatureBytes(canonBytes,rep.sig,rep.keyId);
+                setSharedAuth(ok?"valid":"invalid");
+              }catch{ setSharedAuth(null); }
+            })();
           }
         }
       }
@@ -10111,7 +10178,24 @@ function QuoteCheckPage(){
       });
       const data=await res.json();
       if(!res.ok||data.error||!data.dealerSentiment) return;
-      setAnalysis(prev=>prev?{...prev,dealerSentiment:data.dealerSentiment}:prev);
+      // NEVER OVERWRITE A FIGURE THE SERVER ALREADY SIGNED. `dealerSentiment`
+      // is projected into the signed canonical as `reputation`
+      // (report-sign.ts), so writing a different rating/review-count here --
+      // after finalizeServerSide has signed -- makes the live object disagree
+      // with its own signature. email-quote-report recomputes the canonical
+      // from the submitted body and checks it against that signature, so a
+      // late arrival here could make a genuine report fail its own
+      // authenticity gate and refuse to send. Exactly the class recorded in
+      // [[report-email-signature-drift]]: "signing a new canonicalReport()
+      // field isn't enough -- audit every client SETTER of it too."
+      //
+      // Fill-only: if the server already resolved reputation, its value stands.
+      // This lookup exists for the case the server could not run it.
+      setAnalysis(prev=>{
+        if(!prev) return prev;
+        if(prev.dealerSentiment&&Number(prev.dealerSentiment.rating)>0) return prev;
+        return {...prev,dealerSentiment:data.dealerSentiment};
+      });
     }catch{
       // Silent by design -- see comment above.
     }
@@ -11508,18 +11592,25 @@ function QuoteCheckPage(){
             // Authenticity banner for OPENED shared links — sits above the full
             // report in every view, so "verify" = see the whole report + verdict.
             const sharedBanner = sharedReport ? (
-              <div style={{...cardStyle, background: sharedAuth==="invalid"?C.coralBg:C.tealBg, border:`1px solid ${(sharedAuth==="invalid"?C.coral:C.teal)}55`, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
-                {(analysis.sig||analysis.reportId)&&<Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={44} gid="shseal" ink={sharedAuth==="invalid"?C.coralInk:C.tealInk}/>}
+              // THREE STATES, NOT TWO. This painted TEAL for both "valid" and
+              // null, so a report whose signature could not be checked at all
+              // (crypto unavailable, verify threw, or the link carries no
+              // signature) rendered in exactly the same reassuring green as a
+              // cryptographically verified one -- the false all-clear this
+              // product exists to prevent, on its own authenticity banner.
+              // Unverified is now visually NEUTRAL and says so.
+              <div style={{...cardStyle, background: sharedAuth==="invalid"?C.coralBg:sharedAuth==="valid"?C.tealBg:C.card, border:`1px solid ${(sharedAuth==="invalid"?C.coral:sharedAuth==="valid"?C.teal:C.line)}55`, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+                {(analysis.sig||analysis.reportId)&&<Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={44} gid="shseal" ink={sharedAuth==="invalid"?C.coralInk:sharedAuth==="valid"?C.tealInk:C.inkFaint}/>}
                 <div style={{flex:"1 1 240px",minWidth:0}}>
-                  <div style={{fontSize:14.5,fontWeight:900,color:sharedAuth==="invalid"?C.coralInk:C.tealInk}}>
-                    {sharedAuth==="invalid"?"Seal broken — this copy was altered":sharedAuth==="valid"?"Authentic LotCheck report":"Shared LotCheck report"}
+                  <div style={{fontSize:14.5,fontWeight:900,color:sharedAuth==="invalid"?C.coralInk:sharedAuth==="valid"?C.tealInk:C.inkSoft}}>
+                    {sharedAuth==="invalid"?"Seal broken — this copy was altered":sharedAuth==="valid"?"Authentic LotCheck report":"Seal not checked on this copy"}
                   </div>
                   <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,marginTop:2}}>
                     {sharedAuth==="invalid"
                       ?"This copy does not match what LotCheck issued — at least one figure was changed after signing. Ask the sender for the original link."
                       :sharedAuth==="valid"
                         ?`Signed by LotCheck${analysis.issuedAt?` on ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""} — not one figure has been changed since. The full report is below.`
-                        :`Report ${analysis.reportId||""} — the ID is a fingerprint of its contents; the full report is below.`}
+                        :`Report ${analysis.reportId||""} — this copy carries no signature we could check here, so it is shown as unverified rather than confirmed. Open the verify link for a full check.`}
                   </div>
                 </div>
               </div>

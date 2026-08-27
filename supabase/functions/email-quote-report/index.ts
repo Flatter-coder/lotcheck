@@ -775,7 +775,40 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // which printed "No public reviews were found" about Charlesglen Toyota --
   // a dealer with 4.7 stars from 5,930 Google reviews.
   { const dr = dealerReputationPoint(a.dealerSentiment); P.push({ t: "Dealer reputation", v: dr.value, tone: dr.tone }); }
-  return P.slice(0, 10);
+
+  // ---- BEYOND THE ADVERTISED FLOOR ----------------------------------------
+  // Vic, 2026-08-27: "always good to over deliver ... minimum 10 points we
+  // will keep increasing ... add them to pdf file all 14". Ten is a FLOOR we
+  // advertise, not a cap we enforce. This used to `return P.slice(0, 10)`,
+  // so the emailed PDF -- the artifact a buyer actually forwards to a dealer
+  // -- was the THINNEST surface, printing 10 while the app rendered 14. That
+  // inverts the priority: the forwarded document should carry everything.
+  //
+  // The first ten above ALWAYS render (including explicit "not published"
+  // states), which is what makes the advertised floor safe. These additional
+  // points are conditional on having something real to say -- a point with no
+  // data is omitted rather than padded with a dead "-", so the count can rise
+  // above ten but never fall below it.
+  if (Number(a.msrpCeiling?.trimsConsidered) >= 2 && Number(a.msrpCeiling?.allIn) > 0) {
+    P.push({ t: "MSRP per trim", v: `${a.msrpCeiling.trimsConsidered} TRIMS`, tone: "muted" });
+  }
+  if (Array.isArray(a.comparableListings) && a.comparableListings.length > 0) {
+    P.push({ t: "Other listings of this model", v: `${a.comparableListings.length} NEARBY`, tone: "muted" });
+  }
+  if (Number(a.daysOnLot?.days) > 0) {
+    const d = Math.round(Number(a.daysOnLot.days));
+    P.push({ t: "Days on lot", v: `${d} DAY${d === 1 ? "" : "S"}${a.daysOnLot.atLeast ? "+" : ""}`, tone: d >= 90 ? "flag" : "muted" });
+  }
+  if (a.dealerLicence?.status) {
+    P.push({ t: "Dealer licence · AMVIC", v: String(a.dealerLicence.status).toUpperCase(), tone: a.dealerLicence.state === "ok" ? "pass" : "muted" });
+  }
+  if (a.tradeInWidget?.detected) {
+    P.push({ t: "Trade-in tool on this listing", v: String(a.tradeInWidget.vendor || "DETECTED").toUpperCase(), tone: "muted" });
+  }
+  if (a.financeContingent?.contingent) {
+    P.push({ t: "Price depends on financing", v: "FLAGGED", tone: "flag" });
+  }
+  return P;
 }
 
 // "What this means" — the plain-language translation printed under each audit
@@ -1007,10 +1040,21 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  drawSeal(M + W - 116, y - 9, 15); // small stamp left of the header text
-  right("QUOTE CHECK REPORT", { size: 8.5, font: sansB, color: SOFT });
+  // SEAL POSITION IS MEASURED, NOT GUESSED. This was drawSeal(M + W - 116, ...)
+  // with S=15, whose outer ring reaches cx + S*1.46 = cx + 21.9 -> its right
+  // edge landed at M+W-94, while `right()` starts "QUOTE CHECK REPORT" at
+  // M+W-(text width ~118) = M+W-118. The seal was therefore drawn UNDER both
+  // header lines, and a 420-segment guilloché behind 8.5pt type reads as
+  // shimmering, illegible text -- reported from a real emailed report as
+  // "letters are shining", on the artifact a buyer forwards to a dealer.
+  // Measure the widest header line and seat the seal clear to its left.
+  const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
+  const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
+  const SEAL_S = 15, SEAL_GAP = 12;
+  drawSeal(M + W - hdrW - SEAL_GAP - SEAL_S * 1.46, y - 9, SEAL_S);
+  right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
   y -= 20;
-  right("No. " + RID, { size: 8.5, font: mono, color: FAINT });
+  right(HDR_NO, { size: 8.5, font: mono, color: FAINT });
   y -= 2;
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.4, color: INK });
   y -= 22;
@@ -1098,10 +1142,15 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- 10-POINT AUDIT (always exactly 10, each with its plain-language gloss) ----
-  kicker("10-POINT AUDIT");
+  // ---- THE AUDIT: at least 10, more when the report has more to say ----
+  // The heading states the REAL count rather than a hardcoded "10", because
+  // ten is the advertised FLOOR, not the delivered number (see tenPoints()).
+  // A hardcoded 10 over a longer list is the same self-contradiction the app
+  // shipped: "The 10-point verification" printed above 14 tiles.
+  const POINTS = tenPoints(a);
+  kicker(`${POINTS.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  for (const p of tenPoints(a)) {
+  for (const p of POINTS) {
     // THE LABEL IS ALWAYS LEGIBLE. It used to render in SOFT whenever the tone
     // was muted, so a muted row arrived as faded title + faint value + soft
     // body -- the whole row receding at once. Vic caught it on a PDF where
