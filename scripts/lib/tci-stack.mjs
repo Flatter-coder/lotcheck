@@ -17,12 +17,17 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
-import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp } from "./tci-msrp.mjs";
+import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp, baseModelCode } from "./tci-msrp.mjs";
+import { parseFeeStack, feeStackTotal, allInBreakdown } from "./tci-fees.mjs";
 import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const PROVINCE = "ON"; // MSRP is national; ON is canonical for rate lookups
+// The fee stack is PROVINCE-scoped, so one has to be chosen to store. Alberta,
+// because that is the market these reports serve; every row stamps it in
+// attrs.province so a consumer can never read it as a national figure.
+const ALL_IN_PROVINCE = "AB";
 
 const FUEL_MAP = {
   "Gas": "Gas", "Hybrid": "Hybrid", "Hybrid Available": "Hybrid",
@@ -206,6 +211,39 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
       if (!Object.keys(pricesByProv).length) continue;
       hitYear = year;
 
+      // ── THE MANUFACTURER'S OWN FEE STACK ────────────────────────────────
+      //
+      // from_prices itemises what sits on top of MSRP -- freight, the A/C
+      // excise, the regulator fee, the tire levy, factory accessories, and the
+      // brand's own published dealer fee. We have been fetching this payload
+      // three times per brand for the MSRP derivation and throwing every one of
+      // those lines away.
+      //
+      // Without them a dealer's bundled "Fees & Accessories $3,330" row is
+      // unattributable, and LotCheck was attributing it to the DEALER -- see
+      // _shared/fee-caption.ts. With them it decomposes to the cent: on the
+      // 2026 Lexus NX 350h, $2,335 of that row is freight and government
+      // charges and $995 is Lexus's own published fee, at Lexus's own ceiling.
+      //
+      // Captured per PROVINCE because DRF and the regulator lines differ by
+      // province (Lexus AB 995 / ON 999 / QC 795), and the base model code
+      // itself differs by province on at least two Toyota series -- so it is
+      // resolved per province rather than from provinces[0].
+      const feeByProv = {};
+      for (const p of Object.keys(fromPricesByProv)) {
+        const baseCode = baseModelCode(fromPricesByProv[p], s.seriesCode, year);
+        if (!baseCode) continue;
+        const st = parseFeeStack(fromPricesByProv[p], s.seriesCode, year, baseCode);
+        if (st.ok) feeByProv[p] = st;
+        else if (st.refusal) {
+          // A stack that does not reconcile against the manufacturer's own
+          // SUBTOTAL is not stored. An unproven decomposition is exactly the
+          // input that becomes a false accusation.
+          skipped.refused++;
+          refusals.push(`${s.name} ${p} fee stack: ${st.refusal}`);
+        }
+      }
+
       // MSRP comes from the published from_prices line for the base trim, and
       // from a self-verifying difference for every other trim. See tci-msrp.mjs.
       const { msrp: derived, refused } = deriveSeriesMsrp({
@@ -264,7 +302,36 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
             refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: grade "${trim}" is an internal code, not a Canadian trim name`);
             continue;
           }
-          msrpRows.push({ year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+          // The all-in figure a dealer's advertised price is actually
+          // comparable to. AMVIC (and ON/BC/QC) require the advertised price to
+          // be all-in, so an ex-freight MSRP is the wrong thing to compare a
+          // sticker against -- that mismatch is what produced the $11,173
+          // phantom markup. [[amvic-all-in-pricing]]
+          //
+          // Alberta is the stack we store, because that is the market these
+          // reports serve; the province is stamped in attrs so a consumer can
+          // never mistake it for a national figure.
+          //
+          // HONEST ABOUT THE BASIS: from_prices publishes ONE model code per
+          // series -- the base configuration -- so the stack is per NAMEPLATE.
+          // Freight and the regulator lines do not vary by trim, but the tire
+          // levy can, so `all_in_basis` records that this is the series' base
+          // stack applied to this trim's MSRP rather than a per-trim figure.
+          const feeStack = feeByProv[ALL_IN_PROVINCE] || null;
+          const feeTotal = feeStack ? feeStackTotal(feeStack) : null;
+          const breakdown = feeStack ? allInBreakdown(feeStack) : null;
+          msrpRows.push({
+            year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel,
+            fetched_at: new Date().toISOString(),
+            ...(feeTotal != null ? { all_in_price: Math.round((msrp + feeTotal) * 100) / 100 } : {}),
+            ...(breakdown ? { attrs: {
+              province: ALL_IN_PROVINCE,
+              all_in_breakdown: breakdown,
+              all_in_basis: "series base configuration; freight and levies do not vary by trim",
+              captured_from: `${host}/bin/api/price_calculation/from_prices.${brand}.${ALL_IN_PROVINCE}.json (${s.seriesCode}/${year}/${feeStack.modelCode})`,
+              captured_on: today,
+            } } : {}),
+          });
         }
       }
 
