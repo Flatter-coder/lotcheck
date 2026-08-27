@@ -109,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27p";  // + the odometer explanation now fits the reading (a 12 km new car was told "thousands on the clock means it has been driven")
+const CACHE_VER = "2026-08-27q";  // + the capture records WHICH shot it is, so a top-of-page degrade is no longer labelled "Full-page capture of the listing"
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
