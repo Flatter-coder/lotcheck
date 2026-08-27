@@ -82,7 +82,7 @@ export function canonicalValueReport(a: any): any {
   const cpo = mv && mv.cpoPremium;
   return {
     t: "value",
-    v: 1,
+    v: 2,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     trim: a.trim || null,
     year: num(a.year),
@@ -100,6 +100,18 @@ export function canonicalValueReport(a: any): any {
     cpo: cpo ? {
       prem: num(cpo.premium), base: num(cpo.nonCertifiedMedian),
       cmed: num(cpo.certifiedMedian), nn: num(cpo.nNonCertified), nc: num(cpo.nCertified),
+    } : null,
+    // v2 (additive) — recalls (tri-state, mirrors the quote canonical) + remaining
+    // factory warranty. checked:false / confirmed:false stay distinct from a clean
+    // bill (make-recalls-fail-safe); a miss must never read as "none open".
+    recalls: a.recalls && a.recalls.checked ? {
+      count: a.recalls.count || 0,
+      confirmed: a.recalls.confirmed !== false,
+      items: (a.recalls.items || []).map((it: any) => ({ system: it.system || null, date: it.date || null })),
+    } : null,
+    rw: a.remainingWarranty ? {
+      basic: a.remainingWarranty.basic ? { t: a.remainingWarranty.basic.term, yl: num(a.remainingWarranty.basic.yearsLeft), kl: num(a.remainingWarranty.basic.kmLeft), a: !!a.remainingWarranty.basic.active } : null,
+      pt: a.remainingWarranty.powertrain ? { t: a.remainingWarranty.powertrain.term, yl: num(a.remainingWarranty.powertrain.yearsLeft), kl: num(a.remainingWarranty.powertrain.kmLeft), a: !!a.remainingWarranty.powertrain.active } : null,
     } : null,
     issuedAt: a.issuedAt || null,
   };

@@ -25,15 +25,24 @@ const valueA: any = {
     source: "LotCheck market · same trim · 7 comparable listings", comps: 7, asOf: "2026-08-18",
     cpoPremium: { premium: 3000, nonCertifiedMedian: 31000, certifiedMedian: 34000, nNonCertified: 6, nCertified: 3, basis: "same trim" },
   },
+  recalls: { checked: true, count: 2, confirmed: true, items: [{ system: "Airbag SRS", date: "2026-04" }, { system: "Backup camera", date: "2023-06" }] },
+  remainingWarranty: {
+    modelYear: 2022, odometerKm: 148000, asOfYear: 2026, estimated: true,
+    basic: { term: "3 yr / 60,000 km", termYears: 3, termKm: 60000, yearsLeft: -1, kmLeft: -88000, active: false },
+    powertrain: { term: "5 yr / 100,000 km", termYears: 5, termKm: 100000, yearsLeft: 1, kmLeft: -48000, active: false },
+    sourceUrl: "https://honda.ca/warranty",
+  },
 };
 
 // ---- shape ----
 const c = canonicalValueReport(valueA);
 ok("discriminator t === 'value'", c.t === "value");
-ok("own additive version v === 1", c.v === 1);
+ok("own additive version v === 2", c.v === 2);
 ok("province upper-cased", c.prov === "AB");
 ok("band projected (avg/lo/hi/n)", !!c.band && c.band.avg === 30000 && c.band.lo === 27000 && c.band.hi === 34000 && c.band.n === 7);
 ok("market CPO premium projected", !!c.cpo && c.cpo.prem === 3000 && c.cpo.base === 31000 && c.cpo.cmed === 34000);
+ok("recalls projected (tri-state count + items)", !!c.recalls && c.recalls.count === 2 && c.recalls.confirmed === true && c.recalls.items.length === 2 && c.recalls.items[0].system === "Airbag SRS");
+ok("remaining warranty projected (both terms, active flags)", !!c.rw && !!c.rw.basic && c.rw.basic.a === false && !!c.rw.pt && c.rw.pt.a === false);
 ok("vehicle string composed", c.vehicle === "2022 Honda Odyssey");
 ok("NO trade/private tiering is signed (only band + cpo)", !("trade" in c) && !("private" in c) && !("spread" in c));
 
@@ -44,7 +53,14 @@ ok("canonical is deterministic", JSON.stringify(canonicalValueReport(valueA)) ==
 const thin = canonicalValueReport({ year: 2022, make: "Honda", model: "Civic", province: "BC" });
 ok("no marketValue -> band null", thin.band === null);
 ok("no cpoPremium -> cpo null", thin.cpo === null);
+ok("no recalls -> recalls null", thin.recalls === null);
+ok("no warranty -> rw null", thin.rw === null);
 ok("still tagged as a value report", thin.t === "value");
+
+// make-recalls-fail-safe: an UNCHECKED recall result must not be signed as a
+// clean bill — it projects null (the live PDF still renders 'couldn't reach').
+const uncheckedC = canonicalValueReport({ year: 2022, make: "Honda", model: "Odyssey", province: "AB", recalls: { checked: false } });
+ok("unchecked recalls -> canonical recalls null (never a signed clean bill)", uncheckedC.recalls === null);
 
 // ---- finalize dispatches to the value canonical when passed ----
 const vCopy: any = JSON.parse(JSON.stringify(valueA));

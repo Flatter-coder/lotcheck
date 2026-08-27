@@ -95,7 +95,8 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
         SOFT = rgb(0.365, 0.341, 0.298), FAINT = rgb(0.55, 0.52, 0.47),
         TEAL = rgb(0.09, 0.459, 0.42), GREEN = rgb(0.082, 0.502, 0.239),
         HAIR = rgb(0.82, 0.80, 0.73), TRACK = rgb(0.87, 0.85, 0.78),
-        GREEN_BG = rgb(0.863, 0.988, 0.906), PURPLE = rgb(0.427, 0.231, 0.839);
+        GREEN_BG = rgb(0.863, 0.988, 0.906), PURPLE = rgb(0.427, 0.231, 0.839),
+        CORAL = rgb(0.651, 0.235, 0.149);
 
   const PW = 595.28, PH = 841.89, M = 56, W = PW - M * 2;
   let page = doc.addPage([PW, PH]);
@@ -189,6 +190,47 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
       para("Certified pre-owned listings of this vehicle ask about " + money(cp.premium) + " more than comparable non-certified ones (" + (cp.basis || "comparable listings") + "). That is what the market prices the manufacturer's certification - the extra inspection and extended warranty - at right now.", { size: 10, font: serif, color: SOFT, lead: 4 });
       y -= 4;
     }
+    rule(HAIR, 0.7, 4);
+  }
+
+  // ---- OPEN RECALLS (Transport Canada, fail-safe tri-state) ----
+  const rc = a.recalls;
+  if (rc) {
+    kicker("OPEN RECALLS - TRANSPORT CANADA", TEAL);
+    if (!rc.checked) {
+      para("Couldn't reach the recall registry - not an all-clear. Check open recalls by VIN at Transport Canada before you sell.", { size: 10, font: serif, color: SOFT, lead: 4 });
+    } else if (Number(rc.count) > 0) {
+      T(rc.count + " open recall" + (rc.count === 1 ? "" : "s") + " on record for this model.", { size: 11, font: sansB, color: CORAL }); y -= 16;
+      for (const it of (rc.items || []).slice(0, 6)) { need(14); T("- " + pdfSafe(it.system || "Safety recall") + (it.date ? "  (" + pdfSafe(it.date) + ")" : ""), { size: 9.5, font: sans, color: SOFT }); y -= 13; }
+      para("These are free fixes at any dealer. Confirm which are still open on this exact VIN at the manufacturer's recall page or Transport Canada - clearing them makes a sale easier.", { size: 9, font: serif, color: SOFT, lead: 4 });
+    } else if (rc.confirmed) {
+      T("No open recalls on record (confirmed with Transport Canada).", { size: 11, font: sans, color: GREEN }); y -= 16;
+    } else {
+      para("Couldn't confirm recalls for this exact model - NOT an all-clear. Check by VIN at Transport Canada before you sell.", { size: 10, font: serif, color: SOFT, lead: 4 });
+    }
+    rule(HAIR, 0.7, 4);
+  }
+
+  // ---- REMAINING FACTORY WARRANTY (estimated) ----
+  const rw = a.remainingWarranty;
+  if (rw && (rw.basic || rw.powertrain)) {
+    kicker("FACTORY WARRANTY REMAINING (ESTIMATED)", TEAL);
+    const wline = (label: string, term: any) => {
+      if (!term) return;
+      const st = term.active ? "active" : "expired";
+      let extra = "";
+      if (term.active) {
+        const yl = Math.max(0, Math.round(Number(term.yearsLeft)));
+        const parts: string[] = [];
+        if (yl > 0) parts.push("~" + yl + " yr");
+        if (term.kmLeft != null) parts.push(Math.max(0, Math.round(Number(term.kmLeft))).toLocaleString("en-CA") + " km");
+        if (parts.length) extra = " (" + parts.join(", ") + " left)";
+      }
+      need(15); T(label + ":  " + pdfSafe(term.term) + " - " + st + extra, { size: 10, font: sans, color: term.active ? INK : FAINT }); y -= 15;
+    };
+    wline("Basic", rw.basic);
+    wline("Powertrain", rw.powertrain);
+    para("Estimated from the model year" + (rw.odometerKm != null ? " and odometer" : " (odometer not provided)") + "; confirm exact coverage with the VIN at a dealer. Transferable coverage is a selling point.", { size: 9, font: serif, color: SOFT, lead: 4 });
     rule(HAIR, 0.7, 4);
   }
 
