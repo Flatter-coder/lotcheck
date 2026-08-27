@@ -413,6 +413,43 @@ function robotsPathsFor(platform, section) {
   return [`/${section}/`]; // jsonld_itemlist + edealer
 }
 
+// A crawl section targets one condition (sm360 uses new-inventory/used-inventory;
+// everything else uses new/used). The stored row `condition` is the authority
+// for bucketing seen VINs, but the section tells us which conditions we actually
+// attempted to crawl this run.
+export function sectionCondition(section) { return /new/i.test(String(section)) ? "new" : "used"; }
+
+// The per-condition fn_mark_delisted calls to make after a dealer's sections.
+//
+// TWO layers of safety:
+//  1. dealerClean (= no section failed/partial/robots-skipped): if ANY section
+//     was unhealthy, delist NOTHING. This is required because a row's stored
+//     `condition` is NOT always its section's condition — sm360's used-inventory
+//     feed can emit a newVehicle==true unit stored as condition 'new', and
+//     edealer reads condition from the vehicle, not the section. So a failed
+//     'used' section could otherwise leave a 'used'-sourced 'new' car out of
+//     seenByCond.new and the 'new' delist would wrongly mark it sold. Gating on
+//     the WHOLE dealer being clean means seenByCond is complete for every
+//     condition before we delist any of it.
+//  2. Per condition: only a condition we crawled with >=1 VIN is delisted, each
+//     call scoped to that condition so the SQL's >50% guard is evaluated within
+//     it — that is what catches a silent one-condition collapse (Finding B) that
+//     a dealer-granular guard would let a healthy other condition mask.
+// Exported for the test.
+export function planSectionDelisting(condState, seenByCond, dealerClean = true) {
+  if (!dealerClean) return [];
+  const plan = [];
+  for (const cond of Object.keys(condState)) {
+    const st = condState[cond];
+    // Dedup: two sections can map to the same condition (e.g. a used + certified
+    // split both resolve to 'used'), and a duplicate VIN must not inflate the
+    // saw-count and so defeat the SQL's >50% guard.
+    const vins = [...new Set(seenByCond[cond] || [])];
+    if (st?.crawled && st?.ok && vins.length) plan.push({ condition: cond, vins, count: vins.length });
+  }
+  return plan;
+}
+
 async function main() {
   let supabase = null;
   let dealers;
@@ -449,7 +486,10 @@ async function main() {
 
   for (const d of dealers) {
     console.log(`${d.name || d.host}`);
-    const seen = [];
+    // Seen VINs bucketed by the row's OWN condition; per-condition crawl state
+    // drives per-condition delisting (no cross-section masking).
+    const seenByCond = { new: [], used: [] };
+    const condState = { new: { crawled: false, ok: true }, used: { crawled: false, ok: true } };
     let failed = false, partial = false;
 
     // Each platform names its sections differently: SM360 uses the URL segment
@@ -469,13 +509,17 @@ async function main() {
     if (rb.robots.crawlDelay) console.log(`    robots.txt crawl-delay ${rb.robots.crawlDelay}s — honouring (${effectiveDelayMs}ms between pages)`);
 
     for (const section of sections) {
+      const cond = sectionCondition(section);
+      condState[cond].crawled = true;
+
       // Per-section robots check. A Disallowed section is left completely
-      // untouched — and the crawl is marked partial so its inventory is never
-      // read as delisted.
+      // untouched — and its condition is marked incomplete so its inventory is
+      // never read as delisted.
       const blockedPath = robotsPathsFor(d.platform, section).find((p) => !isPathAllowed(rb.robots, p));
       if (blockedPath) {
         console.log(`    ${section}: robots.txt disallows ${blockedPath} — skipping (inventory left untouched)`);
         partial = true;
+        condState[cond].ok = false;
         continue;
       }
 
@@ -488,9 +532,11 @@ async function main() {
       } catch (e) {
         console.warn(`    ${section}: FAILED (${e.message})`);
         failed = true;
+        condState[cond].ok = false;
         continue;
       }
       partial = partial || result.partial;
+      if (result.partial) condState[cond].ok = false;
       console.log(`    ${section}: ${result.rows.length} units with valid VINs`);
       totals.rows += result.rows.length;
 
@@ -502,7 +548,7 @@ async function main() {
           const price = r.sale_price != null ? `$${r.sale_price}` : "price not stated";
           console.log(`      ${r.vin}  ${r.year} ${r.make} ${r.model} ${(r.trim ?? "").slice(0, 28)} · ${days} · ${price}${cut > 0 ? ` (cut $${cut} off own list)` : ""}${offMsrp > 0 ? ` ($${offMsrp} off $${r.msrp} MSRP)` : ""}`);
         }
-        seen.push(...result.rows.map((r) => r.vin));
+        for (const r of result.rows) seenByCond[r.condition === "new" ? "new" : "used"].push(r.vin);
         continue;
       }
 
@@ -514,28 +560,22 @@ async function main() {
         totals.new += data?.new || 0;
         totals.priced += data?.price_changes || 0;
       }
-      seen.push(...result.rows.map((r) => r.vin));
+      for (const r of result.rows) seenByCond[r.condition === "new" ? "new" : "used"].push(r.vin);
     }
 
     if (!DRY) {
-      // Only delist after a CLEAN, COMPLETE crawl. A partial or failed run must
-      // never be read as "the rest of the lot sold."
-      //
-      // Convertus delisting is DEFERRED. Its new/used inventory lives in
-      // independent sitemaps that can silently lag live inventory per-section,
-      // while delisting is decided at DEALER granularity (combined `seen` + a
-      // dealer-level >50% guard) — so a stale one-section sitemap, masked by a
-      // healthy other section, could wrongly delist live cars. Until delisting
-      // is made section/condition-scoped, convertus adds + updates listings but
-      // never delists — exactly its behaviour before this crawler read it at all.
-      if (isCvt) {
-        console.log(`    delisting deferred (convertus: section-scoped delisting not yet built)`);
-      } else if (!failed && !partial && seen.length) {
-        const { data, error } = await supabase.rpc("fn_mark_delisted", { p_dealer_id: d.id, p_seen_vins: seen, p_saw_count: seen.length });
-        if (error) console.warn(`    delist failed: ${error.message}`);
-        else { totals.delisted += data || 0; if (data) console.log(`    ${data} no longer listed`); }
-      } else if (failed || partial) {
+      // Delist only after a clean WHOLE-dealer crawl (any failed/partial section
+      // -> nothing, because a row's stored condition isn't always its section's),
+      // then PER CONDITION so the SQL's >50% guard runs within each condition and
+      // a silent one-condition collapse can't be masked by a healthy other one.
+      const plan = planSectionDelisting(condState, seenByCond, !failed && !partial);
+      if (!plan.length && (failed || partial)) {
         console.log(`    delisting skipped (${failed ? "fetch failed" : "partial crawl"})`);
+      }
+      for (const { condition, vins, count } of plan) {
+        const { data, error } = await supabase.rpc("fn_mark_delisted", { p_dealer_id: d.id, p_seen_vins: vins, p_saw_count: count, p_condition: condition });
+        if (error) console.warn(`    delist (${condition}) failed: ${error.message}`);
+        else { totals.delisted += data || 0; if (data) console.log(`    ${data} no longer listed (${condition})`); }
       }
       await supabase.rpc("fn_record_crawl", { p_dealer_id: d.id, p_ok: !failed, p_error: failed ? "crawl failed" : null });
     }

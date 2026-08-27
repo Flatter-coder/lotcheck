@@ -10,7 +10,7 @@
 // The VDP shape/values below are trimmed straight from a live page
 // (denhamford.ca, a 2024 Ford Bronco Sport, captured 2026-08-27).
 
-import { normalizeConvertus, vdpUrlsFromSitemap, discoverConvertusVdps, crawlConvertus, sameHost } from "./crawl-alberta-inventory.mjs";
+import { normalizeConvertus, vdpUrlsFromSitemap, discoverConvertusVdps, crawlConvertus, sameHost, sectionCondition, planSectionDelisting } from "./crawl-alberta-inventory.mjs";
 import { parseRobots } from "./lib/robots.mjs";
 
 let pass = 0, fail = 0;
@@ -195,6 +195,38 @@ const opts = (map, boom) => ({ fetcher: mkFetcher(map, boom), delayMs: 0 });
   check("index with no vehicle sitemaps -> {vdps:[], complete:true}", d.vdps.length === 0 && d.complete === true);
   const r = await crawlConvertus(HOST, "used", ALLOW, opts(map));
   check("...and crawlConvertus reports partial (no cars seen, none delisted)", r.partial === true && r.rows.length === 0);
+}
+
+// ---- SECTION-SCOPED DELISTING (planSectionDelisting): a stale/partial one
+// section must never delist another (cross-section masking, Finding B). ----
+{
+  check("sectionCondition maps section -> condition", sectionCondition("new-inventory") === "new" && sectionCondition("used-inventory") === "used" && sectionCondition("new") === "new" && sectionCondition("used") === "used");
+
+  const both = planSectionDelisting(
+    { new: { crawled: true, ok: true }, used: { crawled: true, ok: true } },
+    { new: ["A"], used: ["B", "C"] }, true);
+  check("clean dealer -> delist both, each scoped to its condition", both.length === 2 && both.find((p) => p.condition === "new").count === 1 && both.find((p) => p.condition === "used").count === 2);
+
+  // THE section != condition safety: if ANY section is unhealthy the dealer is
+  // not clean, so we delist NOTHING — a used-sourced 'new'-tagged car can't be
+  // wrongly delisted just because the used section failed while new succeeded.
+  check("any unhealthy section (dealerClean=false) -> delist NOTHING",
+    planSectionDelisting({ new: { crawled: true, ok: true }, used: { crawled: true, ok: false } }, { new: ["A"], used: ["B"] }, false).length === 0);
+
+  // Finding B on a CLEAN dealer: both conditions are still delisted per-condition;
+  // the silent one-condition collapse is caught by the SQL >50% guard, not here.
+  check("clean dealer with both conditions -> both planned, scoped per condition",
+    planSectionDelisting({ new: { crawled: true, ok: true }, used: { crawled: true, ok: true } }, { new: ["A"], used: ["B", "C", "D"] }, true).length === 2);
+
+  check("a condition crawled but with 0 VINs seen is not delisted (0-result is suspect)",
+    planSectionDelisting({ new: { crawled: true, ok: true } }, { new: [], used: [] }, true).length === 0);
+  check("a condition never crawled is left untouched",
+    planSectionDelisting({ new: { crawled: false, ok: true }, used: { crawled: true, ok: true } }, { new: ["X"], used: ["B"] }, true).every((p) => p.condition !== "new"));
+
+  // Two sections mapping to the same condition (used + certified) must not
+  // double-count a VIN — an inflated saw-count would defeat the SQL >50% guard.
+  const dup = planSectionDelisting({ used: { crawled: true, ok: true } }, { used: ["V1", "V2", "V1", "V2"], new: [] }, true);
+  check("same-condition duplicate VINs are deduped in the saw-count", dup.length === 1 && dup[0].count === 2 && dup[0].vins.length === 2);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
