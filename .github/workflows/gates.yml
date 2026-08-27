@@ -84,6 +84,14 @@ jobs:
       # 2026-08-19): scraper fetches retry bounded on 5xx/429/network only.
       - name: Scraper fetch retry (5xx/429 bounded backoff)
         run: npm run test:fetch-retry
+      # A blocked direct GET must not empty the report. Every structured reader
+      # used to hang off ONE fetch, so a Cloudflare challenge took price, MSRP,
+      # VIN, trim, APR and days-on-lot out together while the page's own vmsData
+      # held all six (LC-46A4-66F, a real paid report, 2026-08-27). Also refuses
+      # any NEW un-shared fetch of the listing URL -- request volume is what
+      # provokes the rate limiting in the first place.
+      - name: Page read (one shared source per scan, render as second source)
+        run: npm run test:page-read
       # The report-email endpoint is unauthenticated: its ONLY proof that a real
       # scan happened is the ECDSA signature gate. A regression there reopens an
       # open mail relay on our own DKIM-signed domain, so it blocks like a
