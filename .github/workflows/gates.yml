@@ -108,6 +108,13 @@ jobs:
       # business, so this gate blocks like a correctness defect.
       - name: Bundled fee line (a mixture is never the dealer's money)
         run: npm run test:bundled-fee
+      # An explanation printed beside a number must fit that number. A 2025
+      # Mazda CX-90 reading 12 km was told "a truly new car should read near
+      # zero km - thousands on the clock means it's been driven (demo/loaner)"
+      # directly under our own note calling 12 km delivery distance. One band,
+      # written where the reading is judged, read by every surface.
+      - name: Odometer copy (the explanation fits the reading)
+        run: npm run test:odometer-copy
       # The manufacturer publishes what sits on top of MSRP -- freight, the A/C
       # excise, the regulator fee, the tire levy, factory accessories and its own
       # dealer fee. We fetch that payload three times per brand for MSRP and used

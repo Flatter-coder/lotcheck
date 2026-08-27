@@ -109,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27n";  // + the asking price can no longer decide which TRIM you own (a discounted CX-90 GT was anchored to the GT-P row, $3,950 high)
+const CACHE_VER = "2026-08-27p";  // + the odometer explanation now fits the reading (a 12 km new car was told "thousands on the clock means it has been driven")
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -735,20 +735,35 @@ function computeOdometerCheck(analysis: any): void {
   const isNew = analysis.vehicleCondition === "new";
   let flag = false;
   let note: string;
+  // The BAND, recorded so the explanation cannot contradict the reading.
+  // computeOdometerCheck already gets this right and writes a km-aware note --
+  // but the "what this means" explainers were SECOND, hand-written sentences
+  // that branched only on vehicleCondition and never looked at km. So a 2025
+  // Mazda CX-90 reading 12 km printed our own correct note ("12 km —
+  // consistent with a new vehicle") directly above our own contradiction
+  // ("A truly new car should read near zero km - thousands on the clock means
+  // it's been driven (demo/loaner)"). Vic, 2026-08-27: "that needs to change".
+  // One band, read by every surface, so a fixed sentence can never sit beside
+  // a variable number again.
+  let band: string;
   if (isNew) {
     if (km <= 500) {
+      band = "new_delivery";
       note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery distance).`;
     } else {
+      band = "new_beyond_delivery";
       flag = true;
       note = `Listed as new but shows ${km.toLocaleString()} km — more than typical delivery distance. Ask whether it was a demo or loaner, which can affect the warranty start date and the price.`;
     }
   } else if (age <= 1) {
     // Used, current or near-current model year -- effectively a demo, loaner,
     // or short lease return. Low mileage here is normal, NOT a rollback signal.
+    band = "used_nearly_new";
     note = `${km.toLocaleString()} km on a nearly-new used vehicle — low mileage is normal here (often a demo, loaner, or short lease return). Confirm the in-service date, since the manufacturer warranty usually starts then, not when you buy it.`;
   } else {
     const typical = age * 20000;
     const low = age * 10000;
+    band = "used";
     if (km < low * 0.6) {
       flag = true;
       note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
@@ -758,7 +773,7 @@ function computeOdometerCheck(analysis: any): void {
       note = `${km.toLocaleString()} km is in the normal range for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km).`;
     }
   }
-  analysis.odometerCheck = { checked: true, km, flag, note };
+  analysis.odometerCheck = { checked: true, km, flag, note, band };
 }
 
 // Negotiation leverage score (0-10): a transparent, DETERMINISTIC function of
