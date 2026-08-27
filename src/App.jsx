@@ -8158,7 +8158,18 @@ function EvidenceCard({ a, palette }) {
             <img src={listingShot} alt="Listing at report time" style={{ width: "100%", objectFit: "cover", objectPosition: "top" }} />
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 6 }}>
-            <div style={{ fontSize: 12.5, color: ink, lineHeight: 1.5 }}>Full-page capture of the listing, taken when this report was generated.</div>
+            {/* Say WHICH shot this is. The ladder degrades to a top-of-page viewport
+    shot when a fullpage capture is too large or fails, and calling that a
+    "full-page capture" is an unbacked claim about the evidence itself.
+    [[capture-always-whole-page]] */}
+          <div style={{ fontSize: 12.5, color: ink, lineHeight: 1.5 }}>{
+            a.listingShotKind === "viewport"
+              ? "The top of the listing, captured when this report was generated. The full page was too large to photograph in one piece, so this shows the vehicle and price rather than the whole listing — the fine print below it is captured separately as text."
+            : a.listingShotKind === "fullpage"
+              ? "Full-page capture of the listing, taken when this report was generated."
+              // No kind recorded (an older report, or one reconstructed from a
+              // share link): say what we can prove and nothing more.
+              : "Photo of the listing, captured when this report was generated."}</div>
             <button onClick={() => { try { const b64 = String(listingShot).split(",")[1] || ""; const mime = (String(listingShot).match(/^data:([^;]+)/) || [])[1] || "image/jpeg"; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const u = URL.createObjectURL(new Blob([bytes], { type: mime })); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60_000); } catch (e) {} }}
               style={{ alignSelf: "flex-start", background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: CY, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
               View full capture ↗

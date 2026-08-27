@@ -229,7 +229,14 @@ export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { sho
 // full ASP scrape, used to put a hash-sealed "what the page looked like"
 // photo on EVERY report (#14 on every scan, Vic-approved 2026-08-09).
 // Returns { b64, mime } or null. Fail-safe: any error -> null, never throws.
-export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string } | null> {
+// The capture now reports WHICH shot came back. It used to return only
+// { b64, mime }, so no consumer could tell a whole-page capture from a
+// top-of-page one -- and the report labelled both "Full-page capture of the
+// listing". Vic, 2026-08-27, on a Sundance Mazda CX-90: "scrapfly only took
+// screnshoot half the page". The degrade itself is deliberate and stays; what
+// was wrong is that it was SILENT, so a partial capture was presented as the
+// whole page. [[capture-always-whole-page]] [[claims-must-stay-backed]]
+export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string; kind: "fullpage" | "viewport" } | null> {
   if (!SCRAPFLY_API_KEY) return null;
   const started = Date.now();
   // `asp` is the difference between the call that works and the one that does
@@ -248,7 +255,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
   // unprotected shot is tried first and ASP is only paid for when that fails --
   // i.e. only when the alternative is no evidence photo at all. On the happy
   // path this change costs nothing.
-  const shoot = async (fullpage: boolean, ms: number, asp = false): Promise<{ b64: string; mime: string } | "too_large" | "shield" | null> => {
+  const shoot = async (fullpage: boolean, ms: number, asp = false): Promise<{ b64: string; mime: string; kind: "fullpage" | "viewport" } | "too_large" | "shield" | null> => {
     try {
       const u = new URL("https://api.scrapfly.io/screenshot");
       u.searchParams.set("key", SCRAPFLY_API_KEY);
@@ -299,7 +306,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
       const b64 = base64FromBytes(bytes);
       if (b64.length > 1_500_000) { console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} too large (${b64.length})`); return "too_large"; }
       const mime = /png/i.test(ct) ? "image/png" : "image/jpeg";
-      return { b64, mime };
+      return { b64, mime, kind: (fullpage ? "fullpage" : "viewport") as "fullpage" | "viewport" };
     } catch (e) {
       console.warn("captureListingScreenshot error:", (e as Error)?.message);
       return null;
@@ -383,7 +390,7 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
 // single listing-URL report was unemailable. Setting real values here BEFORE
 // signing, and only ever filling a gap the client left (`analysis.sourceUrl
 // || url`) client-side, closes the gap instead of racing it.
-export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<{ b64: string; mime: string } | null>): Promise<void> {
+export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<{ b64: string; mime: string; kind?: "fullpage" | "viewport" } | null>): Promise<void> {
   if (analysis) {
     analysis.sourceUrl = analysis.sourceUrl || url;
     if (!analysis.capturedAt) analysis.capturedAt = new Date().toISOString();
@@ -402,6 +409,13 @@ export async function attachSealedScreenshot(url: string, analysis: any, budgetM
     analysis.listingShot = `data:${shot.mime};base64,${shot.b64}`;
     analysis.listingShotSha256 = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
     analysis.listingShotAt = new Date().toISOString();
+    // WHOLE PAGE, or the top of it? The ladder degrades to a viewport shot
+    // when a fullpage capture is too large or fails, and that is worth far
+    // more than no photo -- but the report must SAY so. Labelling a
+    // top-of-page shot "Full-page capture of the listing" is an unbacked
+    // claim about our own evidence, on the one artifact a buyer puts in
+    // front of a dealer. [[capture-always-whole-page]]
+    analysis.listingShotKind = shot.kind || "fullpage";
     console.log(`Sealed screenshot attached (${bytes.length} bytes, sha ${analysis.listingShotSha256.slice(0, 12)}).`);
   } catch { /* best-effort -- never sink the scan */ }
 }

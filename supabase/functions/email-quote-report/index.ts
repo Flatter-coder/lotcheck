@@ -1620,7 +1620,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
         T("SEALED LISTING CAPTURE" + (totalPages > 1 ? "  -  PAGE " + (k + 1) + " OF " + totalPages : ""), { size: 8.5, font: sansB, color: TEAL });
         y -= 15;
         if (k === 0) {
-          para("Full-page photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+          para("Photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
           // wrap(), not a single T() -- a long dealer URL (Okotoks Toyota,
           // 2026-08-21: "...2026-Toyota-RAV4_Plug_In_Hybri" cut off mid-word,
           // no "...", nothing wrong with the 80-char slice below it) simply
