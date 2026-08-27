@@ -8039,6 +8039,105 @@ function DroneSentBeat({compact,body,accent}){
   );
 }
 
+// EVIDENCE — ONE COMPONENT, EVERY SURFACE.
+//
+// This body used to live inside ReportViews as a local object, so the sealed
+// listing capture, the source URL and the Archive link reached the Heatmap and
+// Sidebar and NOWHERE else. Vic, 2026-08-27: "scroll doesn't show screenshot
+// evidence as well". The Scroll view is the DEFAULT surface, so the majority of
+// buyers never saw the proof the report is built on.
+//
+// The parity gate was supposed to stop exactly this and could not: its anchor
+// labelled "scroll view copy" matched a string living inside ReportViews, so it
+// certified Scroll green using the Sidebar's own text. That gate is now
+// range-aware, and this is the code that makes it pass honestly.
+//
+// Everything here derives from `a`, so the component owns its own state (the
+// SHA-256 re-check, the copy-link flag) and can be mounted anywhere.
+// [[report-features-all-views]]
+function EvidenceCard({ a, palette }) {
+  const P = palette || {};
+  const CY = P.CY || "#22d3ee", MUT = P.MUT || "#64748b", MUT2 = P.MUT2 || "#94a3b8";
+  const BORD = P.BORD || "rgba(148,163,184,.22)", TEAL = P.TEAL || "#10b981";
+  const ROSE = P.ROSE || "#f43f5e", AMBER = P.AMBER || "#fbbf24";
+  const mono = P.mono || "ui-monospace,SFMono-Regular,Menlo,monospace";
+  const ink = P.ink || "#e2e8f0";
+  const rno = a.reportId || "LC-—";
+  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
+  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
+  const sourceUrl = a.sourceUrl || a.listingUrl || null;
+  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2999/" + sourceUrl : null;
+  const listingShot = a.listingShot || null;
+  const verifyHref = (typeof verifyLinkFor === "function") ? verifyLinkFor(a) : null;
+  // Button chrome comes from the palette so this card can sit on the dark
+  // report chrome AND on the Book/Scroll's cream paper without restyling.
+  const btnBorder = P.btnBorder || "rgba(34,211,238,.35)";
+  const btnBg = P.btnBg || "rgba(8,51,68,.25)";
+  const shotBg = P.shotBg || "#fff";
+  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: `1px solid ${btnBorder}`, borderRadius: 999, padding: "7px 13px", background: btnBg, whiteSpace: "nowrap", cursor: "pointer" };
+  const [vCopied, setVCopied] = useState(false);
+  const [shotSealOk, setShotSealOk] = useState(null); // true | false | null
+  useEffect(() => {
+    if (!(a.listingShot && a.listingShotSha256)) { setShotSealOk(null); return; }
+    (async () => {
+      try {
+        const b64 = String(a.listingShot).split(",")[1] || "";
+        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const dig = await crypto.subtle.digest("SHA-256", bytes);
+        const hex = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        setShotSealOk(hex === a.listingShotSha256);
+      } catch { setShotSealOk(null); }
+    })();
+  }, [a.listingShot, a.listingShotSha256]);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: ink }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
+      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
+      {listingShot && (
+        <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
+          {/* Collapsed proof: a small window onto the capture, not a page dump.
+              The full image opens on demand (blob URL — browsers block direct
+              data: navigation). The evidence is the HASH in the signature; the
+              picture is there for when it matters, not to dominate the card. */}
+          <div style={{ flex: "none", width: 120, height: 90, overflow: "hidden", borderRadius: 8, border: `1px solid ${shotSealOk === false ? ROSE : BORD}`, background: shotBg }}>
+            <img src={listingShot} alt="Listing at report time" style={{ width: "100%", objectFit: "cover", objectPosition: "top" }} />
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 6 }}>
+            <div style={{ fontSize: 12.5, color: ink, lineHeight: 1.5 }}>Full-page capture of the listing, taken when this report was generated.</div>
+            <button onClick={() => { try { const b64 = String(listingShot).split(",")[1] || ""; const mime = (String(listingShot).match(/^data:([^;]+)/) || [])[1] || "image/jpeg"; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const u = URL.createObjectURL(new Blob([bytes], { type: mime })); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60_000); } catch (e) {} }}
+              style={{ alignSelf: "flex-start", background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: CY, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+              View full capture ↗
+            </button>
+          </div>
+        </div>
+      )}
+      {a.listingShotSha256 && (
+        <div style={{ fontSize: 11, fontFamily: mono, lineHeight: 1.5, color: shotSealOk === false ? ROSE : shotSealOk ? TEAL : MUT2 }}>
+          {shotSealOk === false
+            ? "This photo does NOT match the fingerprint sealed in the signature -- it was altered."
+            : `Photo sealed in the signature · SHA-256 ${String(a.listingShotSha256).slice(0, 12)}...${shotSealOk ? " · verified, matches this image" : ""} -- what the page looked like at report time, tamper-evident.`}
+        </div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
+        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
+        {verifyHref && <button onClick={() => { try { navigator.clipboard.writeText(verifyHref).then(() => { setVCopied(true); setTimeout(() => setVCopied(false), 2000); }).catch(() => {}); } catch (e) {} }} style={linkBtn}>{vCopied ? "Verify link copied \u2713" : "Copy verify link"}</button>}
+      </div>
+      {a.disclaimerCheck && (
+        <div style={{ borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
+          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: AMBER, fontWeight: 800, marginBottom: 6 }}>The dealer's own fine print — captured</div>
+          <div style={{ fontSize: 12, color: MUT2, lineHeight: 1.55, fontStyle: "italic" }}>"{String(a.disclaimerCheck.text).slice(0, 420)}{String(a.disclaimerCheck.text).length > 420 ? "…" : ""}"</div>
+          <div style={{ fontSize: 12.5, color: ink, lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot && a.verifyPayload && a.sig ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
+        <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
+      </div>
+    </div>
+  );
+}
+
 function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend }){
   const [mounted, setMounted] = useState(false);
   useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
@@ -8160,29 +8259,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
   const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
   const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
-  const linkBtn = { fontSize: 12.5, fontFamily: mono, color: CY, textDecoration: "none", border: "1px solid rgba(34,211,238,.35)", borderRadius: 999, padding: "7px 13px", background: "rgba(8,51,68,.25)", whiteSpace: "nowrap", cursor: "pointer" };
 
-  const [vCopied, setVCopied] = useState(false);
   const sourceUrl = a.sourceUrl || a.listingUrl || null;
-  const capturedAt = a.capturedAt ? new Date(a.capturedAt) : issued;
-  const archiveViewUrl = sourceUrl ? "https://web.archive.org/web/2999/" + sourceUrl : null; // far-future ts -> latest capture (not the calendar)
   const listingShot = a.listingShot || null;
-  // #14 photo proof lock: recompute the displayed screenshot's SHA-256 in the
-  // browser and compare against the hash sealed in the signature.
-  const [shotSealOk, setShotSealOk] = useState(null); // true | false | null (no photo / not checkable)
-  useEffect(() => {
-    if (!(a.listingShot && a.listingShotSha256)) { setShotSealOk(null); return; }
-    (async () => {
-      try {
-        const b64 = String(a.listingShot).split(",")[1] || "";
-        const bin = atob(b64); const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const dig = await crypto.subtle.digest("SHA-256", bytes);
-        const hex = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-        setShotSealOk(hex === a.listingShotSha256);
-      } catch { setShotSealOk(null); }
-    })();
-  }, [a.listingShot, a.listingShotSha256]);
+  // The photo-proof SHA-256 re-check moved into <EvidenceCard>, which owns it
+  // now — leaving it here would recompute the digest of a full-page capture on
+  // every render of a view that no longer reads the result.
 
   useEffect(() => { if (!sourceUrl) return; try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) {} }, [sourceUrl]);
 
@@ -8393,50 +8475,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const pointItems = P.slice(0, 10).map((p, i) => ({ key: "p" + i, title: p.title, tone: p.tone, v: p.v, glow: p.tone === "flag", point: true, body: (<>{p.body}<ExplainBox txt={explainFor[p.title]} /></>) }));
 
   const evidenceItem = { key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0" }}>Report <b style={{ color: CY, fontFamily: mono }}>{rno}</b> is ECDSA-signed — change any figure and the ID stops matching.{capturedAt ? ` Checked ${capturedAt.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}</div>
-      {sourceUrl && <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, wordBreak: "break-all" }}>Source: {sourceUrl}</div>}
-      {listingShot && (
-        <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
-          {/* Collapsed proof: a small window onto the capture, not a page dump.
-              The full image opens on demand (blob URL — browsers block direct
-              data: navigation). The evidence is the HASH in the signature; the
-              picture is there for when it matters, not to dominate the card. */}
-          <div style={{ flex: "none", width: 120, height: 90, overflow: "hidden", borderRadius: 8, border: `1px solid ${shotSealOk === false ? ROSE : BORD}`, background: "#fff" }}>
-            <img src={listingShot} alt="Listing at report time" style={{ width: "100%", objectFit: "cover", objectPosition: "top" }} />
-          </div>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 6 }}>
-            <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}>Full-page capture of the listing, taken when this report was generated.</div>
-            <button onClick={() => { try { const b64 = String(listingShot).split(",")[1] || ""; const mime = (String(listingShot).match(/^data:([^;]+)/) || [])[1] || "image/jpeg"; const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const u = URL.createObjectURL(new Blob([bytes], { type: mime })); window.open(u, "_blank"); setTimeout(() => URL.revokeObjectURL(u), 60_000); } catch (e) {} }}
-              style={{ alignSelf: "flex-start", background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: CY, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-              View full capture ↗
-            </button>
-          </div>
-        </div>
-      )}
-      {a.listingShotSha256 && (
-        <div style={{ fontSize: 11, fontFamily: mono, lineHeight: 1.5, color: shotSealOk === false ? ROSE : shotSealOk ? TEAL : MUT2 }}>
-          {shotSealOk === false
-            ? "This photo does NOT match the fingerprint sealed in the signature -- it was altered."
-            : `Photo sealed in the signature · SHA-256 ${String(a.listingShotSha256).slice(0, 12)}...${shotSealOk ? " · verified, matches this image" : ""} -- what the page looked like at report time, tamper-evident.`}
-        </div>
-      )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-        {verifyHref && <a href={verifyHref} target="_blank" rel="noopener noreferrer" style={linkBtn}>Verify report ↗</a>}
-        {archiveViewUrl && <a href={archiveViewUrl} target="_blank" rel="noopener noreferrer" style={linkBtn}>Internet Archive snapshot ↗</a>}
-        {verifyHref && <button onClick={() => { try { navigator.clipboard.writeText(verifyHref).then(() => { setVCopied(true); setTimeout(() => setVCopied(false), 2000); }).catch(() => {}); } catch (e) {} }} style={linkBtn}>{vCopied ? "Verify link copied \u2713" : "Copy verify link"}</button>}
-      </div>
-      {a.disclaimerCheck && (
-        <div style={{ borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>
-          <div style={{ fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: AMBER, fontWeight: 800, marginBottom: 6 }}>The dealer's own fine print — captured</div>
-          <div style={{ fontSize: 12, color: MUT2, lineHeight: 1.55, fontStyle: "italic" }}>"{String(a.disclaimerCheck.text).slice(0, 420)}{String(a.disclaimerCheck.text).length > 420 ? "…" : ""}"</div>
-          <div style={{ fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.6, marginTop: 8 }}>{a.disclaimerCheck.note}</div>
-        </div>
-      )}
-      <div style={{ fontSize: 12, color: MUT, lineHeight: 1.6, borderTop: `1px solid ${BORD}`, paddingTop: 12 }}>LotCheck stores nothing. Your proof is this signed report plus an independent Internet Archive snapshot of the listing{sourceUrl ? " (preserved when this report was generated)" : ""} — so if the dealer edits the page later, the original still stands.{listingShot && a.verifyPayload && a.sig ? " Email the report to yourself and this capture rides along as its own photo file — drop that file on lotcheck.ca/verify anytime to prove it's untouched." : ""}
-        <span style={{ display: "block", marginTop: 6 }}>Heads-up: dealer pages are app-style, so the archived copy often won't LOOK like the live site — that's normal. The page's code and data (price, dates, fine print) are preserved inside it either way{a.listingShot ? "; the sealed photo above is your visual copy" : ""}.</span>
-      </div>
-    </div>
+    <EvidenceCard a={a} palette={{ CY, MUT, MUT2, BORD, TEAL, ROSE, AMBER, mono, ink: "#e2e8f0" }} />
   )};
 
   const cs = a.counterScript;
@@ -8717,13 +8756,27 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
     ...(licItem ? [licItem] : []),
+    // MEMBERSHIP MUST NOT DIFFER BY VIEW. The Heatmap built its own pool and
+    // simply never spread evidenceItem or sayItem, so the Sidebar carried the
+    // dispute-proof evidence and the negotiating lines and the Heatmap did not
+    // -- from the SAME component, off the SAME data. Vic, 2026-08-27: "there is
+    // 'No evidence on heatmap' vs sidebar, put on heatmap as well". A surface
+    // may differ in LAYOUT; it may not differ in what the report contains.
+    // [[report-features-all-views]]
+    evidenceItem,
+    ...(sayItem ? [sayItem] : []),
   ].map((c) => ({ ...c, point: false }));
   const heatItems = [...pointItems, ...extraItems];
   // Every view that surfaces "things to watch" draws from this one pool, so a
   // new flag cannot reach one view and miss another (report-features-all-views).
   const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
   const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  const items = [verdictItem, ...pointItems, ...(trimRangeItem ? [trimRangeItem] : []), ...(comparableItem ? [comparableItem] : []), ...(financeContingentItem ? [financeContingentItem] : []), ...(licItem ? [licItem] : []), ...(daysLotItem ? [daysLotItem] : []), ...(tradeInItem ? [tradeInItem] : []), evidenceItem, ...(sayItem ? [sayItem] : [])];
+  // DERIVED, not rebuilt. The Sidebar used to assemble its own membership list
+  // from the same ingredients in a different order -- which is precisely how it
+  // ended up carrying the Evidence card while the Heatmap did not. One pool,
+  // two layouts. The verdict gauge leads the Sidebar because it is a rail, and
+  // is not a tile.
+  const items = [verdictItem, ...heatItems];
 
   const [idx, setIdx] = useState(0);
   const [sel, setSel] = useState(0);
@@ -12541,6 +12594,23 @@ function QuoteCheckPage(){
                   )}
                 </div>
               )}
+
+              {/* EVIDENCE ON THE DEFAULT SURFACE. The sealed listing capture,
+                  the source URL and the Archive link reached the Heatmap and
+                  Sidebar and nowhere else, so most buyers -- who never leave
+                  Scroll -- never saw the proof the report is built on. Vic,
+                  2026-08-27: "scroll doesn't show screenshot evidence as well".
+                  Same component the other views mount, on paper tokens.
+                  [[report-features-all-views]] */}
+              <div style={cardStyle}>
+                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Evidence · dispute-proof</div>
+                <EvidenceCard a={analysis} palette={{
+                  CY: C.tealInk, MUT: C.inkFaint, MUT2: C.inkSoft, BORD: C.line,
+                  TEAL: C.tealInk, ROSE: C.coralInk, AMBER: C.butterInk,
+                  ink: C.ink, mono: "ui-monospace,Menlo,Consolas,monospace",
+                  btnBorder: C.line, btnBg: C.tealBg, shotBg: C.card,
+                }} />
+              </div>
 
               <div style={cardStyle}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Email me this report</div>
