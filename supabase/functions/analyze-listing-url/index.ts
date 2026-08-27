@@ -107,7 +107,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-16y";  // + province coverage guard: market value + CPO premium suppressed when the LISTING's province isn't one we crawl (Alberta today) — no more Alberta comps on an out-of-province car
+const CACHE_VER = "2026-08-27a";  // value-report pipeline touched _shared/marketvalue.ts (additive: lotcheckValueBand + computeMarketCpoPremium) and report-sign.ts — analyze-* output is unchanged (those exports aren't called here), but the cache-ver gate watches these files, so bump to satisfy it and refresh the cache once
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

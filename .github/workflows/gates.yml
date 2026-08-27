@@ -181,6 +181,11 @@ jobs:
       # TX 350 Luxury listing resolved to $81,484. Locks the hand-seed + guard.
       - name: TCI catalog overrides (Lexus TX fuel/trim fix)
         run: npm run test:tci-overrides
+      # Value-report signing canonical: locks canonicalValueReport (t:'value',
+      # asking-band + CPO + recalls + warranty, additive) AND proves the quote
+      # canonical stays byte-identical, so signatures/verify never silently drift.
+      - name: Value-report signing canonical (value + quote-unchanged)
+        run: npm run test:value-canonical
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
       - name: Migration columns exist (a 42703 must not reach the SQL editor)

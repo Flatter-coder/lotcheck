@@ -266,6 +266,29 @@ export function computeCpoPremium(rows: CompRow[], subjectAsking: number, opts: 
   };
 }
 
+// Market CPO premium for the VALUE report: certified median − non-certified
+// median, both from our comps. Unlike computeCpoPremium (which measures a
+// SUBJECT asking price against the baseline), this measures what the MARKET
+// prices certification at — so it works when we're VALUING a car, not auditing a
+// listing (no subject asking exists). Positive-only, gated on enough comps on
+// both sides (>=minComps non-certified, >=3 certified) — else null. Never fabricates.
+export function computeMarketCpoPremium(rows: CompRow[], opts: BandOpts = {}): CpoPremium | null {
+  if (!Array.isArray(rows)) return null;
+  const nonCertified = rows.filter((r) => r && r.certified !== true);
+  const certified = rows.filter((r) => r && r.certified === true);
+  const minComps = opts.minComps ?? 5;
+  const base = computeBand(nonCertified, opts);
+  if (base.insufficient || base.n < minComps || !(base.median > 0)) return null;
+  const certPrices = certified.map((r) => Number(r.price)).filter((p) => p > 0);
+  if (certPrices.length < 3) return null;
+  const certifiedMedian = median(certPrices);
+  const premium = Math.round(certifiedMedian - base.median);
+  if (!(premium > 0)) return null;
+  const basis = base.trimBasis && base.kmBasis ? "same trim, similar mileage"
+    : base.trimBasis ? "same trim" : base.kmBasis ? "similar mileage" : "all trims";
+  return { premium, nonCertifiedMedian: base.median, certifiedMedian, nNonCertified: base.n, nCertified: certified.length, basis };
+}
+
 async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx): Promise<MarketValue | null> {
   const url = env("SUPABASE_URL");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
@@ -331,6 +354,61 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
 // ---------------------------------------------------------------------------
 // Public entry point — dispatch by provider, always fail-safe to null.
 // ---------------------------------------------------------------------------
+// VALUE-report band: the same vendor-free comps as lotcheckValue, but keyed on
+// year/make/model with the VIN OPTIONAL (used only to exclude the subject's own
+// listing if it happens to be on the market). This is the value-report entry
+// point — the user is VALUING a car and may have no VIN, so we must not gate on
+// one the way fetchMarketValue does. It attaches the MARKET CPO premium
+// (computeMarketCpoPremium: certified vs non-certified medians), not a
+// subject-asking premium. Same coverage gates: non-served province or thin
+// comps -> null, so it can never fabricate a value.
+export async function lotcheckValueBand(
+  ctx: MarketCtx,
+  mileage?: number | null,
+  vin?: string | null,
+): Promise<MarketValue | null> {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
+  if (!url || !key) return null;
+  if (!ctx.year || !ctx.make || !ctx.model || !ctx.condition) return null; // need ymm + condition
+  const prov = String(ctx.province || "").toUpperCase();
+  if (!servesComps(prov)) return null; // Alberta-only crawl coverage today
+  try {
+    const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
+        p_condition: String(ctx.condition), p_exclude_vin: vin || null,
+        p_province: prov, p_year_span: 2,
+      }),
+    });
+    if (!res.ok) { console.warn("lotcheckValueBand market_comps: HTTP", res.status); return null; }
+    const rows = await res.json();
+    const band = computeBand(Array.isArray(rows) ? (rows as CompRow[]) : [], {
+      odometerKm: mileage ?? null, trim: ctx.trim ?? null, condition: String(ctx.condition),
+    });
+    if (band.insufficient || band.n < COMP_FLOOR) {
+      console.warn(`lotcheckValueBand: thin coverage (${band.n} < ${COMP_FLOOR}) — suppressing value`);
+      return null; // thin coverage -> null, never a fabricated value
+    }
+    const mv: MarketValue = {
+      average: band.median, below: band.p25, above: band.p75, low: band.low, high: band.high,
+      mileage: mileage ?? null,
+      source: `LotCheck market · ${band.trimBasis && band.kmBasis ? "same trim, similar mileage" : band.trimBasis ? "same trim" : band.kmBasis ? "similar mileage" : "all trims"} · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`,
+      comps: band.n, asOf: band.asOf, confidence: band.n >= COMP_FLOOR ? "high" : "low",
+    };
+    const cpo = computeMarketCpoPremium(Array.isArray(rows) ? (rows as CompRow[]) : [], {
+      odometerKm: mileage ?? null, trim: ctx.trim ?? null, minComps: COMP_FLOOR,
+    });
+    if (cpo) mv.cpoPremium = cpo;
+    return mv;
+  } catch (e) {
+    console.warn("lotcheckValueBand error (suppressing):", (e as Error)?.message);
+    return null;
+  }
+}
+
 export async function fetchMarketValue(
   vin: string | null | undefined,
   mileage?: number | null,
