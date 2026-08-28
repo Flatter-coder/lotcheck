@@ -6,7 +6,7 @@
 // ~$30k retail, NOT the $41,390 raw median (which is the price of much
 // lower-km comps). The mileage fit must step the number DOWN to her mileage.
 
-import { mileageAdjustedValue, valueTiers, pickNamedComps, median } from "../supabase/functions/_shared/marketvalue.ts";
+import { mileageAdjustedValue, valueTiers, pickNamedComps, cleanComps, median } from "../supabase/functions/_shared/marketvalue.ts";
 
 let pass = 0, fail = 0;
 const check = (label, cond, detail = "") => { console.log(`${cond ? "PASS" : "FAIL"}  ${label}${cond ? "" : detail}`); cond ? pass++ : fail++; };
@@ -32,6 +32,27 @@ const RAW_MEDIAN = median(COMPS.map((c) => c.price)); // ~$39,995
   check("estimate lands in a believable high-km range ($26k–$36k)", adj && adj.estimate >= 26000 && adj.estimate <= 36000, ` est ${adj && adj.estimate}`);
   check("flagged as extrapolated (148k is past the comps' 127k ceiling)", adj && adj.extrapolated === true);
   check("estimate never exceeds the raw median (clamp)", adj && adj.estimate <= RAW_MEDIAN);
+}
+
+// ---- cleanComps drops the junk row a single typo introduces, so the fit and
+//      the signed number can't be halved by it (the review's high-severity bug). ----
+{
+  const TYPO = { price: 90000, odometerKm: 30000, trim: "EX-L" }; // a mis-keyed "$9,000 down" / extra digit
+  const withTypo = [TYPO, ...COMPS];
+  const cleaned = cleanComps(withTypo, {});
+  check("cleanComps drops the >2x-median price typo", !cleaned.some((c) => c.price === 90000) && cleaned.length === COMPS.length, ` kept ${cleaned.length}`);
+  // the fit on the RAW pool is wrecked by the typo; on cleaned comps it is sane.
+  const rawFit = mileageAdjustedValue(withTypo, 148000, median(withTypo.map((c) => c.price)));
+  const cleanFit = mileageAdjustedValue(cleaned, 148000, median(cleaned.map((c) => c.price)));
+  check("cleaned fit stays in the believable range despite the typo", cleanFit && cleanFit.estimate >= 26000 && cleanFit.estimate <= 36000, ` clean ${cleanFit && cleanFit.estimate}`);
+  check("the raw-pool fit (unfixed) would be far lower — proving the fix matters", !rawFit || rawFit.estimate < cleanFit.estimate - 5000, ` raw ${rawFit && rawFit.estimate} vs clean ${cleanFit && cleanFit.estimate}`);
+}
+
+// ---- r2 floor: a no-mileage-signal fit is NOT signed as adjusted ----
+{
+  // prices essentially flat vs km (noise) -> negative-ish slope but r2 ~ 0 -> null.
+  const flat = [{price:30000,odometerKm:40000},{price:30100,odometerKm:60000},{price:29950,odometerKm:80000},{price:30050,odometerKm:100000},{price:29900,odometerKm:120000},{price:30020,odometerKm:140000}];
+  check("a flat/noise price-vs-km set -> null (not signed as mileage-adjusted)", mileageAdjustedValue(flat, 160000, 30000) === null);
 }
 
 // ---- guards: no fabrication when the signal isn't there ----

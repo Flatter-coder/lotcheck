@@ -470,6 +470,7 @@ export function mileageAdjustedValue(
   const a = my - b * mx;
   if (!(b < 0)) return null; // price must fall with km — else no usable mileage signal
   const r2 = syy > 0 ? Math.max(0, Math.min(1, (sxy * sxy) / (sxx * syy))) : 0;
+  if (r2 < 0.10) return null; // the fit explains almost no variance -> no real mileage signal; fall back to the median (labeled unadjusted) rather than sign a noise line as "mileage-adjusted"
   const ys = pts.map((p) => p.y), xs = pts.map((p) => p.x);
   const kmMin = Math.min(...xs), kmMax = Math.max(...xs);
   let est = a + b * km;
@@ -520,6 +521,27 @@ export function pickNamedComps(comps: ValueComp[], cap = 8): ValueComp[] {
   const step = (withKm.length - 1) / (cap - 1);
   for (let i = 0; i < cap; i++) out.push(withKm[Math.round(i * step)]);
   return [...new Map(out.map((c) => [c, c])).keys()];
+}
+
+// The comps the report should REASON on — the mileage fit, the chart, and the
+// table. Trim-narrowed like computeBand, then outlier-trimmed (0.4x-2.0x the
+// median) to drop the data-entry typo / "$X down" teaser / accessory-only
+// listing that computeBand exists to remove. UNLIKE computeBand it does NOT
+// apply the +/- mileage window — the regression needs the full km spread to read
+// the slope. Feeding the RAW pool to the fit let one junk row halve the signed
+// retail value and blow out the chart axis; this is the set that prevents that.
+export function cleanComps(rows: ValueComp[], opts: { trim?: string | null; lowerMult?: number; upperMult?: number; minComps?: number } = {}): ValueComp[] {
+  const lowerMult = opts.lowerMult ?? 0.4, upperMult = opts.upperMult ?? 2.0, minComps = opts.minComps ?? COMP_FLOOR;
+  const priced = (rows || []).filter((r) => r && Number(r.price) > 0);
+  if (!priced.length) return [];
+  const normTrim = (t: unknown): string => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim().split(/\s+/)[0] || "";
+  const GENERIC = new Set(["other", "unknown", "na", "don", "n", "base", ""]);
+  let sel = priced;
+  const st = normTrim(opts.trim);
+  if (st && !GENERIC.has(st)) { const tset = priced.filter((r) => normTrim(r.trim) === st); if (tset.length >= minComps) sel = tset; }
+  const m = median(sel.map((r) => Number(r.price)));
+  if (!(m > 0)) return sel;
+  return sel.filter((r) => { const p = Number(r.price); return p >= m * lowerMult && p <= m * upperMult; });
 }
 
 export interface ValueReport {
@@ -573,12 +595,18 @@ export async function lotcheckValueReport(
     const cpo = computeMarketCpoPremium(comps as CompRow[], { odometerKm: mileage ?? null, trim: ctx.trim ?? null, minComps: COMP_FLOOR });
     if (cpo) mv.cpoPremium = cpo;
 
-    const mileageAdj = mileageAdjustedValue(comps, mileage, band.median);
+    // The fit, chart, and table all reason on the CLEANED comps (trim-narrowed +
+    // outlier-trimmed), never the raw pool — one junk listing must not skew the
+    // signed number or blow out the chart. Fall back to the raw pool only if
+    // cleaning left too few to fit (the fit itself then returns null -> median).
+    const clean = cleanComps(comps, { trim: ctx.trim ?? null });
+    const reasoning = clean.length >= COMP_FLOOR ? clean : comps;
+    const mileageAdj = mileageAdjustedValue(reasoning, mileage, band.median);
     const retailEstimate = mileageAdj ? mileageAdj.estimate : band.median;
     const adjusted = !!mileageAdj;
     const tiers = valueTiers(retailEstimate, { topEnd: opts.topEnd });
-    const namedComps = pickNamedComps(comps);
-    return { band: mv, comps, namedComps, retailEstimate, adjusted, mileageAdj, tiers };
+    const namedComps = pickNamedComps(reasoning);
+    return { band: mv, comps: reasoning, namedComps, retailEstimate, adjusted, mileageAdj, tiers };
   } catch (e) {
     console.warn("lotcheckValueReport error (suppressing):", (e as Error)?.message);
     return null;

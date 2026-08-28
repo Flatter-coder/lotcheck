@@ -273,11 +273,15 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
     const pvPt = tiers.privateParty.point, tdPt = tiers.trade.point;
     if (yt) para("With no accidents and full service records, your " + modelLc + " sits at the TOP of each range: about " + money(tdPt) + " on a trade, or " + money(pvPt) + " selling it privately - roughly " + money(pvPt - tdPt) + " more in your pocket for selling it yourself.", { size: 10, font: serif, color: INK, lead: 4 });
     else para("On the figures we have, your " + modelLc + " sits mid-range: about " + money(tdPt) + " on a trade, or " + money(pvPt) + " selling it privately - roughly " + money(pvPt - tdPt) + " more for the work of selling it yourself.", { size: 10, font: serif, color: INK, lead: 4 });
-    // Honesty flag: if the subject's mileage is beyond every comp we have, the
-    // number is an extrapolation, not a read off nearby listings. Say so.
-    if (a.mileageAdj && a.mileageAdj.extrapolated && a.mileageAdj.kmMax > 0 && Number(a.odometerKm) > a.mileageAdj.kmMax) {
-      const capK = Math.round(Number(a.mileageAdj.kmMax) / 1000);
-      para("A note on confidence: your " + (a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") + " km" : "mileage") + " is beyond the comparable Alberta listings we have right now (they top out near " + capK + ",000 km), so this figure is stepped down along the trend rather than read straight off a same-mileage listing - treat it as indicative. It sharpens as more high-kilometre listings appear; a private-buyer inquiry is a good cross-check.", { size: 9, font: serifI, color: AMBER, lead: 4 });
+    // Honesty flag: if the subject's mileage is OUTSIDE the comps' range (above
+    // OR below), the number is read off the trend, not a same-mileage listing.
+    if (a.mileageAdj && a.mileageAdj.extrapolated) {
+      const km = Number(a.odometerKm), kmMax = Number(a.mileageAdj.kmMax), kmMin = Number(a.mileageAdj.kmMin);
+      const kmStr = a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") + " km" : "mileage";
+      const dir = km > kmMax
+        ? "beyond the comparable Alberta listings we have right now (they top out near " + Math.round(kmMax / 1000) + ",000 km)"
+        : "below the comparable Alberta listings we have right now (they start near " + Math.round(kmMin / 1000) + ",000 km)";
+      para("A note on confidence: your " + kmStr + " is " + dir + ", so this figure is read off the price-vs-mileage trend rather than a same-mileage listing - treat it as indicative. It sharpens as more listings near your mileage appear; a private-buyer inquiry is a good cross-check.", { size: 9, font: serifI, color: AMBER, lead: 4 });
     }
     y -= 4; rule(HAIR, 0.7, 4);
   }
