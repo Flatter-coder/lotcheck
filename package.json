@@ -59,6 +59,7 @@
     "test:tci-overrides": "node scripts/test-tci-overrides.mjs",
     "test:robots": "node scripts/test-robots.mjs",
     "test:value-canonical": "node --experimental-strip-types supabase/functions/_shared/value-report.test.ts",
+    "test:value-math": "node --experimental-strip-types scripts/test-value-math.mjs",
     "test:supersede": "node scripts/test-supersede-enrichment.mjs",
     "check:migrations": "node scripts/check-migration-columns.mjs",
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
