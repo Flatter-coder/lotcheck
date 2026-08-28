@@ -96,7 +96,9 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
         TEAL = rgb(0.09, 0.459, 0.42), GREEN = rgb(0.082, 0.502, 0.239),
         HAIR = rgb(0.82, 0.80, 0.73), TRACK = rgb(0.87, 0.85, 0.78),
         GREEN_BG = rgb(0.863, 0.988, 0.906), PURPLE = rgb(0.427, 0.231, 0.839),
-        CORAL = rgb(0.651, 0.235, 0.149);
+        CORAL = rgb(0.651, 0.235, 0.149), AMBER = rgb(0.706, 0.325, 0.035),
+        AMBER_BG = rgb(0.988, 0.925, 0.82), CARD = rgb(0.992, 0.984, 0.965),
+        SLATE = rgb(0.561, 0.541, 0.627), DOT = rgb(0.561, 0.541, 0.627);
 
   const PW = 595.28, PH = 841.89, M = 56, W = PW - M * 2;
   let page = doc.addPage([PW, PH]);
@@ -136,6 +138,96 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
     page.drawText("LC", { x: cxAbs - monoB.widthOfTextAtSize("LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
   };
 
+  const modelWord = String(a.model || "vehicle");
+  const modelLc = modelWord.toLowerCase();
+  const fmtMonYr = (d: any): string => { const dt = new Date(d); return isNaN(dt.getTime()) ? String(d).split(" ")[0] : dt.toLocaleDateString("en-CA", { month: "short", year: "numeric" }); };
+  // Clean-truncate verbose text (e.g. a Transport Canada recall summary) at a
+  // sentence or word boundary, never mid-word, with an ellipsis.
+  const clip = (s: any, n: number): string => {
+    const t = pdfSafe(String(s ?? "").replace(/\s+/g, " ").trim());
+    if (t.length <= n) return t;
+    const cut = t.slice(0, n);
+    const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("; "));
+    const sp = cut.lastIndexOf(" ");
+    const at = stop > n * 0.55 ? stop + 1 : (sp > 0 ? sp : n);
+    return t.slice(0, at).trim().replace(/[,;:]$/, "") + "...";
+  };
+
+  // A three-exit value card, drawn at an absolute top Y (does NOT move `y`).
+  const drawTierCard = (x0: number, w: number, topY: number, cfg: any) => {
+    const h = 158;
+    page.drawRectangle({ x: x0, y: topY - h, width: w, height: h, color: CARD, borderColor: cfg.hero ? GREEN : HAIR, borderWidth: cfg.hero ? 1.4 : 0.8 });
+    page.drawRectangle({ x: x0, y: topY - h, width: 3.2, height: h, color: cfg.accent });
+    let cy = topY - 15;
+    page.drawText(pdfSafe(cfg.label), { x: x0 + 11, y: cy - 7, size: 7, font: sansB, color: SOFT }); cy -= 26;
+    const rangeStr = money(cfg.low) + " - " + money(cfg.high);
+    if (cfg.hero) { const rw = serifB.widthOfTextAtSize(rangeStr, 13.5); page.drawRectangle({ x: x0 + 7, y: cy - 12, width: rw + 8, height: 20, color: GREEN_BG }); }
+    page.drawText(pdfSafe(rangeStr), { x: x0 + 11, y: cy - 10, size: 13.5, font: serifB, color: INK }); cy -= 26;
+    const yStr = pdfSafe(cfg.yours), pillW = sansB.widthOfTextAtSize(yStr, 8) + 12;
+    page.drawRectangle({ x: x0 + 11, y: cy - 11, width: pillW, height: 15, color: cfg.hero ? GREEN_BG : rgb(0.929, 0.914, 0.863) });
+    page.drawText(yStr, { x: x0 + 17, y: cy - 8, size: 8, font: sansB, color: cfg.hero ? GREEN : SOFT }); cy -= 26;
+    for (const ln of wrap(cfg.desc, sans, 8.3, w - 22)) { page.drawText(ln, { x: x0 + 11, y: cy - 8, size: 8.3, font: sans, color: SOFT }); cy -= 11; }
+  };
+
+  // Price-vs-mileage scatter, drawn with pdf primitives (no SVG). Advances `y`.
+  const drawChart = (comps: any[], subjectKm: number, subjectPrice: number) => {
+    const pts = (comps || []).map((c) => ({ km: Number(c.odometerKm), price: Number(c.price) })).filter((p) => p.km > 0 && p.price > 0);
+    if (pts.length < 3 || !(subjectKm > 0) || !(subjectPrice > 0)) return;
+    kicker("WHERE YOUR " + modelWord.toUpperCase() + " SITS IN THE MARKET", GREEN);
+    const H = 196; need(H + 24);
+    const boxTop = y, boxBot = y - H;
+    const plotL = M + 44, plotR = M + W - 8, plotT = boxTop - 14, plotB = boxBot + 24;
+    const allKm = [...pts.map((p) => p.km), subjectKm], allPr = [...pts.map((p) => p.price), subjectPrice];
+    const xMax = Math.max(...allKm) * 1.08, xMin = 0;
+    const yPad = ((Math.max(...allPr) - Math.min(...allPr)) * 0.15) || 2000;
+    const yMax = Math.max(...allPr) + yPad, yMin = Math.max(0, Math.min(...allPr) - yPad);
+    const sx = (km: number) => plotL + (km - xMin) / (xMax - xMin) * (plotR - plotL);
+    const sy = (pr: number) => plotB + (pr - yMin) / (yMax - yMin) * (plotT - plotB);
+    for (let i = 0; i <= 3; i++) { const pr = yMin + (yMax - yMin) * i / 3, yy = sy(pr); page.drawLine({ start: { x: plotL, y: yy }, end: { x: plotR, y: yy }, thickness: 0.4, color: TRACK }); page.drawText("$" + Math.round(pr / 1000) + "k", { x: M, y: yy - 3, size: 7.5, font: sans, color: FAINT }); }
+    for (const km of [50000, 100000, 150000, 200000]) { if (km <= xMax) { const xx = sx(km); page.drawText(km / 1000 + "k", { x: xx - 8, y: plotB - 12, size: 7.5, font: sans, color: FAINT }); } }
+    const sxSub = sx(subjectKm);
+    for (let yy = plotB; yy < plotT; yy += 6) page.drawRectangle({ x: sxSub - 0.3, y: yy, width: 0.7, height: 3.2, color: GREEN });
+    page.drawText("Your " + modelLc, { x: Math.min(sxSub - 16, plotR - 58), y: plotT + 1, size: 7.5, font: sansB, color: GREEN });
+    for (const p of pts) page.drawEllipse({ x: sx(p.km), y: sy(p.price), xScale: 2.6, yScale: 2.6, color: DOT });
+    page.drawEllipse({ x: sxSub, y: sy(subjectPrice), xScale: 3.6, yScale: 3.6, color: GREEN });
+    y = boxBot - 4;
+    page.drawEllipse({ x: M + 4, y: y - 3, xScale: 2.6, yScale: 2.6, color: DOT });
+    page.drawText("Alberta " + modelLc + " listing", { x: M + 12, y: y - 6, size: 8, font: sans, color: SOFT });
+    page.drawEllipse({ x: M + 150, y: y - 3, xScale: 3, yScale: 3, color: GREEN });
+    page.drawText("Your " + modelLc + ", estimated", { x: M + 158, y: y - 6, size: 8, font: sans, color: SOFT });
+    y -= 18;
+  };
+
+  // Named comps table + subject row. Advances `y`.
+  const drawComps = (named: any[]) => {
+    const rows = (named || []).filter((c) => Number(c.price) > 0);
+    if (!rows.length) return;
+    need(28 + rows.length * 15 + 26);
+    const cX = { yt: M, km: M + 190, ask: M + 258, src: M + 340 };
+    page.drawText("YEAR / TRIM", { x: cX.yt, y: y - 8, size: 8, font: sansB, color: SOFT });
+    page.drawText("KM", { x: cX.km, y: y - 8, size: 8, font: sansB, color: SOFT });
+    page.drawText("ASKING", { x: cX.ask, y: y - 8, size: 8, font: sansB, color: SOFT });
+    page.drawText("SOURCE", { x: cX.src, y: y - 8, size: 8, font: sansB, color: SOFT });
+    y -= 12; rule(HAIR, 0.5, 3);
+    for (const c of rows) {
+      need(15);
+      page.drawText(pdfSafe((c.year || a.year || "") + " " + String(c.trim || "")).slice(0, 26), { x: cX.yt, y: y - 9, size: 9, font: sans, color: INK });
+      page.drawText(c.odometerKm ? Number(c.odometerKm).toLocaleString("en-CA") : "-", { x: cX.km, y: y - 9, size: 9, font: sans, color: SOFT });
+      page.drawText(money(c.price), { x: cX.ask, y: y - 9, size: 9, font: sansB, color: INK });
+      page.drawText(pdfSafe([c.dealerName, c.city].filter(Boolean).join(", ") || "LotCheck crawl").slice(0, 32), { x: cX.src, y: y - 9, size: 8.5, font: sans, color: FAINT });
+      y -= 15;
+    }
+    need(20);
+    page.drawRectangle({ x: M - 4, y: y - 15, width: W + 8, height: 17, color: GREEN_BG });
+    page.drawText(pdfSafe("Your " + (a.year || "") + " " + (a.trim || a.model || "")).slice(0, 26), { x: cX.yt, y: y - 10, size: 9, font: sansB, color: INK });
+    page.drawText(a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") : "-", { x: cX.km, y: y - 10, size: 9, font: sansB, color: INK });
+    page.drawText("~" + money(a.retailEstimate), { x: cX.ask, y: y - 10, size: 9, font: sansB, color: GREEN });
+    page.drawText("retail estimate", { x: cX.src, y: y - 10, size: 8.5, font: sansB, color: GREEN });
+    y -= 20;
+    para("Prices are dealer ASKING figures (Alberta advertises all-in under AMVIC rules), read from live listings on the dates shown. Outliers - a different generation, a wildly off odometer - are set aside as non-comparable.", { size: 8.5, font: serif, color: FAINT, lead: 3 });
+    y -= 4;
+  };
+
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
@@ -146,71 +238,120 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
   y -= 20;
   rule(HAIR, 0.7, 4);
 
-  // ---- VEHICLE ----
+  // ---- HEADLINE ----
+  T("What your " + modelWord + " is actually worth", { size: 23, font: serifB }); y -= 30;
+  para("A market read for this exact " + modelLc + " - same year, same trim, your mileage and condition - built from real Alberta listings today, not a black-box estimate.", { size: 10.5, font: serif, color: SOFT, lead: 4 });
+  y -= 6;
+
+  // ---- VEHICLE CHIP STRIP ----
   const veh = a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ");
-  T(pdfSafe(veh + (a.trim ? " " + a.trim : "")), { size: 21, font: serifB }); y -= 27;
+  T(pdfSafe(veh + (a.trim ? " " + a.trim : "")), { size: 13.5, font: sansB }); y -= 17;
   const facts: string[] = [];
   if (a.odometerKm) facts.push(Number(a.odometerKm).toLocaleString("en-CA") + " km");
   facts.push(String(a.saleCondition || a.condition || "used"));
   if (a.province) facts.push(String(a.province).toUpperCase());
-  T(facts.join("     "), { size: 11, font: sans, color: SOFT }); y -= 16;
-  // VIN on every report (VIN-every-scan): absent -> stated, never blank.
-  if (a.vin) { T("VIN  " + String(a.vin), { size: 10, font: monoB, color: INK }); }
-  else { T("VIN  Not published - ask the dealer", { size: 10, font: sans, color: FAINT }); }
-  y -= 22; rule(HAIR, 0.7, 4);
+  facts.push(a.vin ? "VIN " + String(a.vin) : "VIN not published");
+  T(facts.join("      "), { size: 9.5, font: sans, color: SOFT }); y -= 15;
+  if (a.topEnd) {
+    const chip = "No accidents - full service history";
+    const cw = sansB.widthOfTextAtSize(chip, 8.5) + 16;
+    page.drawRectangle({ x: M, y: y - 12, width: cw, height: 16, color: GREEN_BG, borderColor: GREEN, borderWidth: 0.7 });
+    page.drawText(chip, { x: M + 8, y: y - 8.5, size: 8.5, font: sansB, color: GREEN }); y -= 16;
+  }
+  y -= 8; rule(HAIR, 0.7, 4);
 
-  // ---- THE VALUE BAND (retail asking) ----
-  const mv = a.marketValue;
-  if (mv && mv.average != null) {
-    kicker("WHAT IT'S WORTH - RETAIL ASKING", GREEN);
-    // green highlight behind the headline number
-    const numStr = money(mv.average);
-    const numW = serifB.widthOfTextAtSize(numStr, 34);
-    page.drawRectangle({ x: M - 4, y: y - 34, width: numW + 12, height: 40, color: GREEN_BG });
-    T(numStr, { size: 34, font: serifB, color: INK }); y -= 42;
-    // Subtitle NAMES the real basis (present-without-creating-questions). With few
-    // comps the engine may not narrow to the subject's mileage/trim; say so rather
-    // than imply an adjustment that didn't happen. Basis comes from mv.source.
-    const _src = String(mv.source || "");
-    const subtitle = _src.includes("same trim, similar mileage") ? "Median asking price for the same trim at similar mileage"
-      : _src.includes("same trim") ? "Median asking for the same trim - not adjusted for mileage"
-      : _src.includes("similar mileage") ? "Median asking at similar mileage, across trims"
-      : "Median asking across trims - not yet adjusted for this mileage";
-    T(subtitle, { size: 10.5, font: sans, color: SOFT }); y -= 18;
-    const lo = mv.low ?? mv.below, hi = mv.high ?? mv.above;
-    if (lo != null && hi != null) { T("Full range " + money(lo) + " to " + money(hi) + "   -   most between " + money(mv.below) + " and " + money(mv.above), { size: 10.5, font: sans, color: INK }); y -= 17; }
-    const n = Number(mv.comps) || 0;
-    const asOf = mv.asOf ? new Date(mv.asOf).toLocaleDateString("en-CA", { month: "short", day: "numeric", year: "numeric" }) : null;
-    T(n + " comparable Alberta listing" + (n === 1 ? "" : "s") + (asOf ? ", read " + asOf : ""), { size: 9.5, font: sans, color: FAINT }); y -= 20;
-
-    // ---- CPO PREMIUM (the one tiering we can back) ----
-    const cp = mv.cpoPremium;
-    if (cp && Number(cp.premium) > 0) {
-      T("CERTIFIED (CPO) PREMIUM", { size: 8.5, font: sansB, color: TEAL }); y -= 15;
-      para("Certified pre-owned listings of this vehicle ask about " + money(cp.premium) + " more than comparable non-certified ones (" + (cp.basis || "comparable listings") + "). That is what the market prices the manufacturer's certification - the extra inspection and extended warranty - at right now.", { size: 10, font: serif, color: SOFT, lead: 4 });
-      y -= 4;
+  // ---- THREE-EXIT VALUE STACK (what you'd GET) ----
+  const tiers = a.tiers;
+  if (tiers) {
+    kicker("WHAT YOU'D GET FOR IT", GREEN);
+    const gap = 12, cw = (W - gap * 2) / 3, cardH = 158; need(cardH + 6);
+    const topY = y, yt = !!tiers.topEnd;
+    drawTierCard(M, cw, topY, { label: "TRADE-IN / CASH OFFER", accent: SLATE, low: tiers.trade.low, high: tiers.trade.high, yours: yt ? "Yours: ~" + money(tiers.trade.high) + ", top end" : "Around ~" + money(tiers.trade.point), desc: "What a dealer or instant-offer service pays you. Fastest, lowest - they resell at wholesale.", hero: false });
+    drawTierCard(M + cw + gap, cw, topY, { label: "PRIVATE SALE", accent: GREEN, low: tiers.privateParty.low, high: tiers.privateParty.high, yours: yt ? "Yours: ~" + money(tiers.privateParty.high) + ", top end" : "Around ~" + money(tiers.privateParty.point), desc: "What you could realistically get selling it yourself. More work, more money.", hero: true });
+    drawTierCard(M + 2 * (cw + gap), cw, topY, { label: "DEALER RETAIL (LOT PRICE)", accent: PURPLE, low: tiers.retail.low, high: tiers.retail.high, yours: "Relist ~" + money(tiers.retail.high), desc: "What a lot would advertise your " + modelLc + " at - the top of the stack, not what you'd pocket.", hero: false });
+    y = topY - cardH - 12;
+    const pvPt = tiers.privateParty.point, tdPt = tiers.trade.point;
+    if (yt) para("With no accidents and full service records, your " + modelLc + " sits at the TOP of each range: about " + money(tdPt) + " on a trade, or " + money(pvPt) + " selling it privately - roughly " + money(pvPt - tdPt) + " more in your pocket for selling it yourself.", { size: 10, font: serif, color: INK, lead: 4 });
+    else para("On the figures we have, your " + modelLc + " sits mid-range: about " + money(tdPt) + " on a trade, or " + money(pvPt) + " selling it privately - roughly " + money(pvPt - tdPt) + " more for the work of selling it yourself.", { size: 10, font: serif, color: INK, lead: 4 });
+    // Honesty flag: if the subject's mileage is beyond every comp we have, the
+    // number is an extrapolation, not a read off nearby listings. Say so.
+    if (a.mileageAdj && a.mileageAdj.extrapolated && a.mileageAdj.kmMax > 0 && Number(a.odometerKm) > a.mileageAdj.kmMax) {
+      const capK = Math.round(Number(a.mileageAdj.kmMax) / 1000);
+      para("A note on confidence: your " + (a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") + " km" : "mileage") + " is beyond the comparable Alberta listings we have right now (they top out near " + capK + ",000 km), so this figure is stepped down along the trend rather than read straight off a same-mileage listing - treat it as indicative. It sharpens as more high-kilometre listings appear; a private-buyer inquiry is a good cross-check.", { size: 9, font: serifI, color: AMBER, lead: 4 });
     }
+    y -= 4; rule(HAIR, 0.7, 4);
+  }
+
+  // ---- PRICE-VS-MILEAGE CHART + NAMED COMPS TABLE ----
+  const mv = a.marketValue;
+  drawChart(a.comps || a.namedComps || [], Number(a.odometerKm), Number(a.retailEstimate));
+  drawComps(a.namedComps || a.comps || []);
+
+  // ---- CPO PREMIUM (the one tiering we can back) ----
+  const cp = mv && mv.cpoPremium;
+  if (cp && Number(cp.premium) > 0) {
+    kicker("CERTIFIED (CPO) PREMIUM", TEAL);
+    para("Certified pre-owned listings of this " + modelLc + " ask about " + money(cp.premium) + " more than comparable non-certified ones (" + (cp.basis || "comparable listings") + "). That is what the market prices the manufacturer's certification - the extra inspection and extended warranty - at right now.", { size: 10, font: serif, color: SOFT, lead: 4 });
+    y -= 4; rule(HAIR, 0.7, 4);
+  }
+
+  // ---- FACTORY WARRANTY - WHAT'S LEFT (basic / powertrain / corrosion) ----
+  const rw = a.remainingWarranty;
+  if (rw && (rw.basic || rw.powertrain || rw.corrosion)) {
+    need(24); kicker("FACTORY WARRANTY - WHAT'S LEFT", TEAL);
+    para("Straight from " + (a.make || "the manufacturer") + "'s own terms (estimated from the model year" + (a.odometerKm != null ? " and odometer" : "") + "). Every line is \"whichever comes first\" - at " + (a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") + " km" : "this mileage") + " the kilometres, not the calendar, usually run coverage out first.", { size: 9.5, font: serif, color: SOFT, lead: 4 });
+    y -= 2;
+    const wrow = (label: string, term: any, note: string) => {
+      if (!term) return;
+      need(34);
+      const active = !!term.active, badge = active ? "WORTH CHECKING" : "EXPIRED";
+      const bcol = active ? AMBER : SLATE, bbg = active ? AMBER_BG : rgb(0.9, 0.89, 0.86);
+      const bw = sansB.widthOfTextAtSize(badge, 7) + 12;
+      page.drawRectangle({ x: M, y: y - 12, width: bw, height: 14, color: bbg });
+      page.drawText(badge, { x: M + 6, y: y - 9, size: 7, font: sansB, color: bcol });
+      right(pdfSafe(term.term || ""), { size: 9, font: sans, color: SOFT });
+      y -= 17;
+      T(label, { size: 10.5, font: sansB, color: active ? INK : SOFT }); y -= 14;
+      para(note, { size: 9, font: serif, color: SOFT, lead: 3 }); y -= 3;
+    };
+    const kmOver = (rw.powertrain && rw.powertrain.kmLeft != null && Number(rw.powertrain.kmLeft) < 0) ? Math.abs(Math.round(Number(rw.powertrain.kmLeft))).toLocaleString("en-CA") : null;
+    wrow("Basic (bumper-to-bumper)", rw.basic, rw.basic && rw.basic.active ? "Still active - a rare, real selling point on a used car; transferable to the buyer." : "Long past on both time and distance.");
+    wrow("Powertrain - engine & transmission", rw.powertrain, rw.powertrain && rw.powertrain.active ? "Still active - engine and transmission still covered, and it transfers with the sale." : (kmOver ? "You're " + kmOver + " km past the kilometre cap, so this is used up regardless of the in-service date." : "Past its term - nothing left to transfer."));
+    wrow("Rust-through (perforation)", rw.corrosion, rw.corrosion && rw.corrosion.active ? "The one time-only line (no kilometre limit) - still active only if you're within its term of the first-registration date, which a " + (a.make || "brand") + " dealer can confirm from your VIN. Worth checking before you sell." : "Past its term from the first-registration date.");
     rule(HAIR, 0.7, 4);
   }
 
-  // ---- OPEN RECALLS (Transport Canada, fail-safe tri-state) ----
+  // ---- OPEN RECALL CAMPAIGNS (rich: campaign #, defect, remedy) ----
   const rc = a.recalls;
   if (rc) {
-    kicker("OPEN RECALLS - TRANSPORT CANADA", TEAL);
+    need(24); kicker("OPEN RECALL CAMPAIGNS", CORAL);
     if (!rc.checked) {
       para("Couldn't reach the recall registry - not an all-clear. Check open recalls by VIN at Transport Canada before you sell.", { size: 10, font: serif, color: SOFT, lead: 4 });
     } else if (Number(rc.count) > 0) {
-      T(rc.count + " open recall" + (rc.count === 1 ? "" : "s") + " on record for this model.", { size: 11, font: sansB, color: CORAL }); y -= 16;
+      const mk = a.make ? String(a.make) : "the manufacturer";
+      para("This " + modelLc + " appears in " + rc.count + " Transport Canada recall campaign" + (rc.count === 1 ? "" : "s") + " on record. The definitive list of what's still open versus already done on YOUR VIN is the " + mk + " recall check - all are free fixes at any dealer.", { size: 9.5, font: serif, color: SOFT, lead: 4 });
+      y -= 2;
       const items = rc.items || [];
-      const CAP = 12; // list must match the count (recalls-detail-list-must-match-count); note any overflow
+      const CAP = 12; // list must match the count (recalls-detail-list-must-match-count)
       for (const it of items.slice(0, CAP)) {
-        need(14);
-        let ds = "";
-        if (it.date) { const dt = new Date(it.date); ds = isNaN(dt.getTime()) ? String(it.date).split(" ")[0] : dt.toLocaleDateString("en-CA", { month: "short", year: "numeric" }); }
-        T("- " + pdfSafe(it.system || "Safety recall") + (ds ? "  (" + ds + ")" : ""), { size: 9.5, font: sans, color: SOFT }); y -= 13;
+        need(18);
+        const num = it.recallNumber ? pdfSafe(String(it.recallNumber)) + " - " : "";
+        const head = num + pdfSafe(it.system || "Safety recall") + (it.date ? "  (" + fmtMonYr(it.date) + ")" : "");
+        page.drawText("-", { x: M, y: y - 9, size: 9.5, font: sansB, color: CORAL });
+        for (const ln of wrap(head, sansB, 9.5, W - 14)) { page.drawText(ln, { x: M + 12, y: y - 9, size: 9.5, font: sansB, color: INK }); y -= 12.5; }
+        const sum = it.summary ? clip(String(it.summary).replace(/^\s*Issue:\s*/i, ""), 230) : "";
+        if (sum) for (const ln of wrap(sum, serif, 8.5, W - 16)) { need(11); page.drawText(ln, { x: M + 12, y: y - 8, size: 8.5, font: serif, color: SOFT }); y -= 10.5; }
+        y -= 4;
       }
-      if (items.length > CAP) { need(14); T("  + " + (items.length - CAP) + " more - see the per-VIN check", { size: 9.5, font: sans, color: FAINT }); y -= 13; }
-      para("These are free fixes at any dealer. Confirm which are still open on this exact VIN at the manufacturer's recall page or Transport Canada - clearing them makes a sale easier.", { size: 9, font: serif, color: SOFT, lead: 4 });
+      if (items.length > CAP) { need(14); T("  + " + (items.length - CAP) + " more - the per-VIN check lists every one that applies.", { size: 9, font: sans, color: FAINT }); y -= 13; }
+      // green suggestion box (positive advice is GREEN, not red)
+      const sug = "A suggestion before you list it: look your VIN up at " + (a.make ? String(a.make).toLowerCase() + ".ca/recalls" : "the manufacturer's recall page") + " to see which of these still apply versus which are already taken care of. The fixes are free, and clearing them removes a reason for a buyer to haggle.";
+      const sugLines = wrap(sug, serif, 9, W - 24);
+      const boxH = sugLines.length * 12 + 16; need(boxH + 6);
+      page.drawRectangle({ x: M - 6, y: y - boxH, width: W + 12, height: boxH, color: GREEN_BG, borderColor: GREEN, borderWidth: 0.8 });
+      let sy2 = y - 12;
+      for (const ln of sugLines) { page.drawText(ln, { x: M + 6, y: sy2, size: 9, font: serif, color: GREEN }); sy2 -= 12; }
+      y -= boxH + 6;
     } else if (rc.confirmed) {
       T("No open recalls on record (confirmed with Transport Canada).", { size: 11, font: sans, color: GREEN }); y -= 16;
     } else {
@@ -219,32 +360,40 @@ export async function buildValuePdf(a: any, verifyUrl?: string): Promise<Uint8Ar
     rule(HAIR, 0.7, 4);
   }
 
-  // ---- REMAINING FACTORY WARRANTY (estimated) ----
-  const rw = a.remainingWarranty;
-  if (rw && (rw.basic || rw.powertrain)) {
-    kicker("FACTORY WARRANTY REMAINING (ESTIMATED)", TEAL);
-    const wline = (label: string, term: any) => {
-      if (!term) return;
-      const st = term.active ? "active" : "expired";
-      let extra = "";
-      if (term.active) {
-        const yl = Math.max(0, Math.round(Number(term.yearsLeft)));
-        const parts: string[] = [];
-        if (yl > 0) parts.push("~" + yl + " yr");
-        if (term.kmLeft != null) parts.push(Math.max(0, Math.round(Number(term.kmLeft))).toLocaleString("en-CA") + " km");
-        if (parts.length) extra = " (" + parts.join(", ") + " left)";
-      }
-      need(15); T(label + ":  " + pdfSafe(term.term) + " - " + st + extra, { size: 10, font: sans, color: term.active ? INK : FAINT }); y -= 15;
+  // ---- WHAT HOLDS THIS NUMBER UP (condition levers) ----
+  {
+    need(24); kicker("WHAT HOLDS THIS NUMBER UP", GREEN);
+    para("The levers that move a used-car price most, and where yours land:", { size: 10, font: serif, color: SOFT, lead: 4 });
+    const lever = (title: string, body: string) => {
+      need(14);
+      page.drawText("-", { x: M, y: y - 9, size: 9, font: sansB, color: GREEN });
+      page.drawText(pdfSafe(title), { x: M + 12, y: y - 9, size: 9.5, font: sansB, color: INK }); y -= 13;
+      for (const ln of wrap(body, serif, 9.5, W - 14)) { need(12); page.drawText(ln, { x: M + 12, y: y - 8, size: 9.5, font: serif, color: SOFT }); y -= 12; }
+      y -= 3;
     };
-    wline("Basic", rw.basic);
-    wline("Powertrain", rw.powertrain);
-    para("Estimated from the model year" + (rw.odometerKm != null ? " and odometer" : " (odometer not provided)") + "; confirm exact coverage with the VIN at a dealer. Transferable coverage is a selling point.", { size: 9, font: serif, color: SOFT, lead: 4 });
+    lever("No accident history", a.accidents === "none" ? "confirmed clean, which supports the top of every range above." : a.accidents === "unknown" ? "not provided - a clean, confirmable history is what would support the top of each range." : "a reported accident pulls toward the lower end; disclose it and price accordingly.");
+    lever("Maintenance records", a.serviceHistory === "full" ? "documented service is real money to a private buyer and answers the \"high km\" worry before it's asked." : a.serviceHistory === "partial" ? "partial records help; a complete history would move you toward the top of the range." : "not provided - a full, documented history is worth real money to a private buyer.");
+    lever("Condition & tires", "interior wear, tire life, and a set of winter tires/rims in Alberta can each nudge the private-sale number up.");
+    lever("Recalls done", "clearing the open campaigns above (free) removes a reason for a buyer to hesitate or haggle.");
+    lever("Season", "family haulers and " + modelLc + "s tend to sell a touch stronger heading into fall/winter.");
     rule(HAIR, 0.7, 4);
   }
 
-  // ---- HONESTY / BASIS ----
-  para("These are dealers' ASKING prices for comparable used vehicles - not confirmed sale, trade-in, or wholesale prices, and not a formal appraisal. In Alberta advertised prices are all-in (every fee except GST). Every figure is read from live listings on the dates shown and refreshed from the current market - the same market a dealer prices against. This is a market read to inform your decision; the price is always yours to set.", { size: 9, font: serif, color: SOFT, lead: 4 });
-  y -= 8;
+  // ---- HOW THIS WAS BUILT ----
+  {
+    need(20); T("How this was built.", { size: 10, font: sansB, color: INK }); y -= 14;
+    const n = Number(mv && mv.comps) || (a.comps ? a.comps.length : 0);
+    para("Retail figures come from LotCheck's own daily read of Alberta dealers' advertised prices for the " + (a.year || "") + " " + modelWord + " (" + n + " comparable listing" + (n === 1 ? "" : "s") + "). " + (a.adjusted ? "Your " + (a.odometerKm ? Number(a.odometerKm).toLocaleString("en-CA") + " km" : "mileage") + " is read against the price-vs-mileage trend in those comps and stepped to your distance" : "There weren't enough same-mileage comps to fit a trend, so this is the median asking price, not yet adjusted for your mileage") + "; a clean, fully-documented history then places you at the top of that band. Private-sale and trade-in ranges apply typical Alberta spreads (private ~ 8-15% under dealer retail; trade ~ 15-25% under) to that retail band - a rule of thumb, not sold data. Warranty terms are quoted from " + (a.make || "the manufacturer") + "; recall data from Transport Canada's Motor Vehicle Safety Recalls Database. Nothing here is stored, and no personal details were used beyond the vehicle itself.", { size: 9, font: serif, color: SOFT, lead: 4 });
+    y -= 6;
+    // "live market read, not an appraisal" callout
+    const cta = "This is a live market read, not an appraisal. The figures come from Alberta listings that are live right now and refreshed every day - the same current market a dealer prices against, working here on your side.";
+    const ctaLines = wrap(cta, serif, 9.5, W - 24);
+    const cH = ctaLines.length * 12 + 16; need(cH + 6);
+    page.drawRectangle({ x: M - 6, y: y - cH, width: W + 12, height: cH, borderColor: HAIR, borderWidth: 0.8, color: CARD });
+    let cyy = y - 12;
+    for (const ln of ctaLines) { page.drawText(ln, { x: M + 6, y: cyy, size: 9.5, font: serif, color: SOFT }); cyy -= 12; }
+    y -= cH + 8;
+  }
 
   // ---- VERIFY QR + SEAL ----
   if (verifyUrl) {

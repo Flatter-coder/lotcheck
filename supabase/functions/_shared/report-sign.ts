@@ -34,7 +34,12 @@ export function canonicalReport(a: any): any {
     // reason. Every bump is additive-only -- /verify re-hashes whatever bytes are
     // EMBEDDED in its own link, never rebuilds canonicalReport() from a live
     // object, so links signed under v1..v3 keep verifying exactly as issued.
-    v: 4,
+    // v5: `gate` records that the dealer's rendered page refused to display a
+    // price while the page's own machine-readable data carried one (D2C
+    // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
+    // signed canonical because it is a material claim about the listing, and
+    // /verify must be able to show it as sealed rather than as a re-assertion.
+    v: 5,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -55,6 +60,7 @@ export function canonicalReport(a: any): any {
     odo: num(a.odometerKm),
     dol: a.daysOnLot && Number(a.daysOnLot.days) > 0 ? { d: Math.round(Number(a.daysOnLot.days)), s: a.daysOnLot.since || null } : null,
     pd: a.priceDisclosure || null,
+    gate: a.priceGatedButRecovered ? { m: a.priceGateMessage || null, g: !!a.priceGateGoogleAdsBacked } : null,
     basis: a.msrpBasis ? { b: a.msrpBasis, t: a.msrpTrim || null, y: a.msrpYear || null } : null,
     allIn: a.allInPricing?.body || null,
     disc: a.disclaimerCheck ? { e: !!a.disclaimerCheck.escapeHatch, x: !!a.disclaimerCheck.contradiction } : null,
@@ -95,6 +101,11 @@ export function canonicalValueReport(a: any): any {
       avg: num(mv.average), below: num(mv.below), above: num(mv.above),
       lo: num(mv.low), hi: num(mv.high), n: num(mv.comps), as: mv.asOf || null,
     } : null,
+    // The BACKED headline: the mileage-adjusted retail estimate (a least-squares
+    // read of our own comps AT the subject's km). adj=false -> not enough km
+    // signal, so it's the plain median. Private/trade exits are deliberately NOT
+    // signed — they apply a rule-of-thumb spread with no backed sold data.
+    retail: a.retailEstimate != null ? { est: num(a.retailEstimate), adj: !!a.adjusted } : null,
     // Market CPO premium: certified median − non-certified median (both from our
     // comps). Only present for a certified subject with enough comps on both sides.
     cpo: cpo ? {
@@ -112,6 +123,7 @@ export function canonicalValueReport(a: any): any {
     rw: a.remainingWarranty ? {
       basic: a.remainingWarranty.basic ? { t: a.remainingWarranty.basic.term, yl: num(a.remainingWarranty.basic.yearsLeft), kl: num(a.remainingWarranty.basic.kmLeft), a: !!a.remainingWarranty.basic.active } : null,
       pt: a.remainingWarranty.powertrain ? { t: a.remainingWarranty.powertrain.term, yl: num(a.remainingWarranty.powertrain.yearsLeft), kl: num(a.remainingWarranty.powertrain.kmLeft), a: !!a.remainingWarranty.powertrain.active } : null,
+      cor: a.remainingWarranty.corrosion ? { t: a.remainingWarranty.corrosion.term, yl: num(a.remainingWarranty.corrosion.yearsLeft), kl: num(a.remainingWarranty.corrosion.kmLeft), a: !!a.remainingWarranty.corrosion.active } : null,
     } : null,
     issuedAt: a.issuedAt || null,
   };

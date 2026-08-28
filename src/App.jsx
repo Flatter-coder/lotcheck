@@ -13284,7 +13284,7 @@ function AlertConfirmPage(){
 // HONEST "no coverage yet" teaser rather than a fabricated number. Free (no
 // charge) in this phase; billing is Phase 3.
 function ValueReportPage(){
-  const [f,setF]=useState({year:"",make:"",model:"",trim:"",km:"",condition:"used",province:"AB",vin:""});
+  const [f,setF]=useState({year:"",make:"",model:"",trim:"",km:"",condition:"used",province:"AB",vin:"",accidents:"unknown",serviceHistory:"unknown"});
   const [status,setStatus]=useState("idle"); // idle|loading|done|teaser|error
   const [result,setResult]=useState(null);
   const [err,setErr]=useState("");
@@ -13300,7 +13300,7 @@ function ValueReportPage(){
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/value-report",{
         method:"POST",
         headers:{"Content-Type":"application/json","apikey":SB_ANON_KEY,"Authorization":`Bearer ${SB_ANON_KEY}`},
-        body:JSON.stringify({year:Number(f.year),make:f.make.trim(),model:f.model.trim(),trim:f.trim.trim()||null,km:f.km?Number(f.km):null,province:f.province,condition:f.condition,vin:f.vin.trim().toUpperCase()||null}),
+        body:JSON.stringify({year:Number(f.year),make:f.make.trim(),model:f.model.trim(),trim:f.trim.trim()||null,km:f.km?Number(f.km):null,province:f.province,condition:f.condition,vin:f.vin.trim().toUpperCase()||null,accidents:f.accidents,serviceHistory:f.serviceHistory}),
       });
       const data=await res.json().catch(()=>({}));
       if(res.ok){ setResult(data); setStatus("done"); }
@@ -13322,7 +13322,8 @@ function ValueReportPage(){
     }catch(_){}
   };
 
-  const a=result&&result.analysis, mv=a&&a.marketValue, cpo=mv&&mv.cpoPremium, rc=a&&a.recalls, rw=a&&a.remainingWarranty;
+  const a=result&&result.analysis, mv=a&&a.marketValue, cpo=mv&&mv.cpoPremium, rc=a&&a.recalls, rw=a&&a.remainingWarranty, tiers=a&&a.tiers;
+  const recallHost=a&&a.make?String(a.make).toLowerCase()+".ca/recalls":"Transport Canada";
   const reset=()=>{ setStatus("idle"); setResult(null); setErr(""); };
 
   return(
@@ -13359,6 +13360,19 @@ function ValueReportPage(){
         .vr-dl{width:100%;margin-top:16px;background:#6D28D9;color:#fff;font-weight:800;font-size:15px;border:0;border-radius:12px;padding:14px;cursor:pointer}
         .vr-alt{display:block;text-align:center;margin-top:12px;font-size:13px;color:#A7A3D0;text-decoration:none}
         .vr-teaser b{color:#fff}
+        .vr-hint{font-size:11.5px;color:#8b88b0;margin-top:11px;line-height:1.45}
+        .vr-tiers{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+        @media(max-width:520px){.vr-tiers{grid-template-columns:1fr}}
+        .vr-tier{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:14px 14px 13px}
+        .vr-tier.hero{border-color:rgba(94,234,212,.5);background:linear-gradient(180deg,rgba(94,234,212,.12),rgba(255,255,255,.03))}
+        .vr-tier .tl{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9C98C8}
+        .vr-tier .tr{font-size:19px;font-weight:900;letter-spacing:-.01em;margin-top:6px;line-height:1.05}
+        .vr-tier.hero .tr{color:#5eead4}
+        .vr-tier .ty{font-size:11.5px;font-weight:700;color:#8b88b0;margin-top:5px}
+        .vr-tier.hero .ty{color:#7ff0dd}
+        .vr-place{font-size:14px;color:#DEDBF3;line-height:1.55;margin-bottom:14px}
+        .vr-place b{color:#5eead4}
+        .vr-faint2{display:block;font-size:11.5px;color:#8b88b0;margin-top:4px}
       `}</style>
       <div className="vr-wrap">
         <div className="vr-top">
@@ -13381,7 +13395,10 @@ function ValueReportPage(){
                 <div className="vr-field"><label>Condition</label><select value={f.condition} onChange={set("condition")}><option value="used">Used</option><option value="certified">Certified (CPO)</option><option value="demo">Demo</option></select></div>
                 <div className="vr-field"><label>Province</label><select value={f.province} onChange={set("province")}>{PROVINCES.map(p=><option key={p} value={p}>{p}</option>)}</select></div>
                 <div className="vr-field"><label>VIN <i>· optional</i></label><input placeholder="5FNRL6H61NB502518" value={f.vin} onChange={set("vin")}/></div>
+                <div className="vr-field"><label>Accident history <i>· optional</i></label><select value={f.accidents} onChange={set("accidents")}><option value="unknown">Not sure</option><option value="none">No accidents</option><option value="minor">Minor only</option><option value="major">Major</option></select></div>
+                <div className="vr-field"><label>Service records <i>· optional</i></label><select value={f.serviceHistory} onChange={set("serviceHistory")}><option value="unknown">Not sure</option><option value="full">Full history</option><option value="partial">Partial</option></select></div>
               </div>
+              <div className="vr-hint">Telling us these places your car in each range — like a clean, documented history holding it at the top.</div>
               <button className="vr-btn" type="submit" disabled={status==="loading"}>{status==="loading"?"Reading the market…":"Get my value report"}</button>
               {status==="error"&&<div className="vr-err">{err}</div>}
               <div className="vr-note">Real listings · nothing stored · signed &amp; verifiable</div>
@@ -13403,23 +13420,34 @@ function ValueReportPage(){
           <div>
             <h1 className="vr-h1">{a.year} {a.make} {a.model}{a.trim?" "+a.trim:""}</h1>
             <p className="vr-sub">{[a.odometerKm?Number(a.odometerKm).toLocaleString("en-CA")+" km":null,(a.saleCondition||"used"),a.province].filter(Boolean).join("  ·  ")}</p>
-            {mv&&mv.average!=null&&(
+            {tiers?(
+              <>
+                <div className="vr-tiers">
+                  <div className="vr-tier"><div className="tl">Trade-in / cash</div><div className="tr">{money(tiers.trade.low)}–{money(tiers.trade.high)}</div><div className="ty">{a.topEnd?"Yours ~"+money(tiers.trade.high):"~"+money(tiers.trade.point)}</div></div>
+                  <div className="vr-tier hero"><div className="tl">Private sale</div><div className="tr">{money(tiers.privateParty.low)}–{money(tiers.privateParty.high)}</div><div className="ty">{a.topEnd?"Yours ~"+money(tiers.privateParty.high):"~"+money(tiers.privateParty.point)}</div></div>
+                  <div className="vr-tier"><div className="tl">Dealer retail</div><div className="tr">{money(tiers.retail.low)}–{money(tiers.retail.high)}</div><div className="ty">Relist ~{money(tiers.retail.high)}</div></div>
+                </div>
+                <div className="vr-place">{a.topEnd?<>With no accidents and full records, you sit at the <b>top</b> of each range — about {money(tiers.trade.point)} on a trade, {money(tiers.privateParty.point)} selling it privately.</>:<>About {money(tiers.trade.point)} on a trade, or {money(tiers.privateParty.point)} selling it privately.</>}<span className="vr-faint2">{(mv&&mv.comps)||0} Alberta comp{(mv&&mv.comps)===1?"":"s"} · {a.adjusted?"stepped to your mileage":"asking price, not mileage-adjusted"}{a.mileageAdj&&a.mileageAdj.extrapolated?" · extrapolated beyond current comps — indicative":""} · not sold data</span></div>
+              </>
+            ):mv&&mv.average!=null&&(
               <div className="vr-hero">
                 <div className="vr-cap">What it's worth — retail asking</div>
                 <div className="vr-big">{money(mv.average)}</div>
-                <div className="vr-line">Full range {money(mv.low!=null?mv.low:mv.below)} to {money(mv.high!=null?mv.high:mv.above)} · most between {money(mv.below)} and {money(mv.above)}</div>
-                <div className="vr-faint">{(mv.comps||0)} comparable Alberta listing{mv.comps===1?"":"s"}{mv.asOf?", read "+new Date(mv.asOf).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"}):""} · asking prices, not sold</div>
+                <div className="vr-faint">{(mv.comps||0)} comparable Alberta listing{mv.comps===1?"":"s"} · asking prices, not sold</div>
               </div>
             )}
             <div className="vr-card">
               {cpo&&Number(cpo.premium)>0&&(
                 <div className="vr-row"><div className="k">CPO premium</div><div className="v">Certified listings ask about <b style={{color:"#fff"}}>{money(cpo.premium)}</b> more than non-certified ones.</div></div>
               )}
-              {rc&&(
-                <div className="vr-row"><div className="k">Recalls</div><div className="v">{!rc.checked?"Couldn't reach the registry — check by VIN at Transport Canada.":Number(rc.count)>0?<span><b style={{color:"#f6b5ad"}}>{rc.count} open recall{rc.count===1?"":"s"}</b> on record — free fixes; confirm on your VIN at honda.ca/recalls.</span>:rc.confirmed?"No open recalls on record (confirmed).":"Couldn't confirm for this exact model — not an all-clear."}</div></div>
+              {tiers&&(
+                <div className="vr-row"><div className="k">How you land</div><div className="v">{a.topEnd?<>A clean, no-accident history holds you at the <b style={{color:"#fff"}}>top</b> of each range and answers the "high&nbsp;km" worry before a buyer asks.</>:<>Tell us your accident &amp; service history for a personalized placement. The full PDF shows every lever.</>}</div></div>
               )}
-              {rw&&(rw.basic||rw.powertrain)&&(
-                <div className="vr-row"><div className="k">Warranty</div><div className="v">{["basic","powertrain"].map(t=>rw[t]?(rw[t].active?(t==="basic"?"Basic":"Powertrain")+" active":(t==="basic"?"Basic":"Powertrain")+" expired"):null).filter(Boolean).join(" · ")} <span style={{color:"#8b88b0"}}>(estimated)</span></div></div>
+              {rc&&(
+                <div className="vr-row"><div className="k">Recalls</div><div className="v">{!rc.checked?"Couldn't reach the registry — check by VIN at Transport Canada.":Number(rc.count)>0?<span><b style={{color:"#f6b5ad"}}>{rc.count} open recall{rc.count===1?"":"s"}</b> on record — free fixes; confirm on your VIN at {recallHost}. Clearing them removes a reason to haggle.</span>:rc.confirmed?"No open recalls on record (confirmed).":"Couldn't confirm for this exact model — not an all-clear."}</div></div>
+              )}
+              {rw&&(rw.basic||rw.powertrain||rw.corrosion)&&(
+                <div className="vr-row"><div className="k">Warranty</div><div className="v">{[["basic","Basic"],["powertrain","Powertrain"],["corrosion","Rust-through"]].map(([t,lbl])=>rw[t]?lbl+" "+(rw[t].active?(t==="corrosion"?"worth checking":"active"):"expired"):null).filter(Boolean).join(" · ")} <span style={{color:"#8b88b0"}}>(estimated)</span></div></div>
               )}
               <button className="vr-dl" onClick={downloadPdf}>Download the signed PDF report</button>
               {result.verifyUrl&&<a className="vr-alt" href={result.verifyUrl} target="_blank" rel="noreferrer">Verify this report ({a.reportId}) →</a>}

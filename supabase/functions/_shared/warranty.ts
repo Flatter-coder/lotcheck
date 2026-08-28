@@ -62,12 +62,16 @@ export interface RemainingWarranty {
   estimated: true;
   basic: RemainingTerm | null;
   powertrain: RemainingTerm | null;
+  corrosion: RemainingTerm | null;   // rust-through / perforation — often time-only, unlimited km
   sourceUrl: string | null;
 }
 
-// row = a manufacturer_warranties row (basic_coverage, powertrain_coverage, source_url…)
+// row = a manufacturer_warranties row (basic_coverage, powertrain_coverage,
+// corrosion_coverage, source_url…). corrosion is usually the ONE time-only line
+// (unlimited km), so on a high-km car it's the coverage most likely still worth
+// checking — which is exactly why the report surfaces it (matches Collette's).
 export function computeRemainingWarranty(
-  row: { basic_coverage?: string | null; powertrain_coverage?: string | null; source_url?: string | null },
+  row: { basic_coverage?: string | null; powertrain_coverage?: string | null; corrosion_coverage?: string | null; source_url?: string | null },
   modelYear: number | null | undefined,
   odometerKm: number | null | undefined,
   currentYear: number,
@@ -76,6 +80,7 @@ export function computeRemainingWarranty(
   const odo = (odometerKm != null && Number.isFinite(odometerKm)) ? Number(odometerKm) : null;
   const basic = remainingFor(row.basic_coverage, modelYear as number, odo, currentYear);
   const powertrain = remainingFor(row.powertrain_coverage, modelYear as number, odo, currentYear);
-  if (!basic && !powertrain) return null;
-  return { modelYear: modelYear as number, odometerKm: odo, asOfYear: currentYear, estimated: true, basic, powertrain, sourceUrl: row.source_url ?? null };
+  const corrosion = remainingFor(row.corrosion_coverage, modelYear as number, odo, currentYear);
+  if (!basic && !powertrain && !corrosion) return null;
+  return { modelYear: modelYear as number, odometerKm: odo, asOfYear: currentYear, estimated: true, basic, powertrain, corrosion, sourceUrl: row.source_url ?? null };
 }
