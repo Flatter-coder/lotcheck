@@ -36,6 +36,7 @@
     "test:structured-inventory": "node scripts/test-structured-inventory.mjs",
     "test:carry-forward": "node scripts/test-carry-forward.mjs",
     "test:capture": "node --experimental-strip-types supabase/functions/_shared/capture.test.ts",
+    "test:capture-whole-page": "node --experimental-strip-types scripts/test-capture-whole-page.mjs",
     "test:report-auth": "node --experimental-strip-types supabase/functions/_shared/report-auth.test.ts",
     "test:flywheel": "node --experimental-strip-types supabase/functions/_shared/fee-vocab.test.ts",
     "test:jsonld-vehicle": "node scripts/test-jsonld-vehicle.mjs",

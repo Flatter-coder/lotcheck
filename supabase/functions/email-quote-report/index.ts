@@ -620,7 +620,7 @@ function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string, s
       ${coverCard(a)}
       ${reportUrl ? `<div style="margin-bottom:14px;"><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#17756B;color:#fff;font-weight:800;font-size:14px;text-decoration:none;padding:12px 22px;border-radius:10px;">View your interactive report</a><div style="font-size:11px;color:#706D96;margin-top:6px;">Swipe through the deck in your browser, or open the attached PDF.</div></div>` : ""}
       ${verifyUrl ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">${a.reportId ? escapeHtml(a.reportId) : "Your report"} — tamper-evident</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">If a dealer questions this report, <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">verify it here</a> — the ID is a fingerprint of its contents, so any altered figure changes it. We store nothing.</div></div>` : ""}
-      ${hasShot ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">Attached: the listing, as it looked at report time</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">The full-page capture rides along as its own photo file. Its fingerprint is sealed in the signed report — if the page ever changes, ${verifyUrl ? `drop the photo on <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">the verify page</a>` : "drop the photo on lotcheck.ca/verify"} to prove yours is the untouched original. Keep this email — nothing is stored on our end.</div></div>` : ""}
+      ${hasShot ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">Attached: the listing, as it looked at report time</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">The capture rides along as its own photo file. Its fingerprint is sealed in the signed report — if the page ever changes, ${verifyUrl ? `drop the photo on <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">the verify page</a>` : "drop the photo on lotcheck.ca/verify"} to prove yours is the untouched original. Keep this email — nothing is stored on our end.</div></div>` : ""}
       <div style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;margin:6px 2px 8px;">The audit · ${total} card${total > 1 ? "s" : ""} · flagged cards glow</div>
       ${deckHtml}
       ${sayHtml}
@@ -1601,7 +1601,25 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // Page geometry hoisted ABOVE the footer text: a capture can embed fine yet
   // slice to zero pages (extreme wide-thin aspect), and the footer may only
   // promise pages that will actually render.
-  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 6;
+  // 13 PAGES, AND DERIVED AT THE NARROWEST CAPTURE, NOT THE WIDEST.
+  //
+  // Raising what we CAPTURE without raising what we PRINT is half a two-step:
+  // the bigger captures would simply be truncated on paper instead. But the
+  // page count cannot be derived at 1920, because capScaledH above scales by
+  // the CAPTURE's own width -- so a NARROWER source image prints TALLER, and
+  // the narrow ones are exactly what the refit ladder produces on the tall
+  // pages that need the pages most. Deriving at 1920 would repeat, one
+  // constant over, the mistake this whole change is about.
+  //
+  // So derive at CAPTURE_MIN_WIDTH = 1024, the narrowest the ladder can emit.
+  // The tallest capture on record here is a 17,729 px capitalchev.ca page:
+  // scaledH = 17,729 * (483.28 / 1024) = 8,367 pt, and 1 + ceil((8367 -
+  // 629.89) / 695.89) = 13 pages. At 1920 the same page needs 7. Thirteen is
+  // the ceiling, not the typical count -- an ordinary 5,900 px listing prints
+  // in 4 -- and the image is embedded ONCE and drawn per page, so extra pages
+  // cost drawing instructions, not megabytes. capture.test.ts hand-copies
+  // these constants and test:capture-whole-page fails if the copy drifts.
+  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 13;
   const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
   const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
   const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
@@ -1687,7 +1705,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       }
       // No silent caps: if the capture outruns the page budget, say so — the
       // attached image file always carries the complete page.
-      if (off < scaledH - 2) center("Capture truncated for print - the attached photo file contains the complete page.", 34, { size: 7.5, font: sans, color: FAINT });
+      // "contains the complete page" was a claim this endpoint cannot make.
+      // The attachment carries the whole CAPTURE; whether the capture is the
+      // whole PAGE is carried by listingShotKind, which is not signed
+      // (report-sign.ts seals only the hash) on an endpoint with no
+      // authentication -- reading it would put client-supplied text into a
+      // DKIM-signed LotCheck email.
+      //
+      // So state the one thing these pages themselves prove, as a number the
+      // render loop just computed: how much of the sealed photo got printed.
+      // True at any capture width, needs no canonical change, and does not
+      // require knowing what the photo is a photo OF.
+      // [[claims-must-stay-backed]]
+      if (off < scaledH - 2) center("These pages print the top " + Math.max(1, Math.round((off / scaledH) * 100)) + "% of the sealed photo - the attached photo file is the complete capture.", 34, { size: 7.5, font: sans, color: FAINT });
     } catch (e) { console.warn("Capture pages skipped:", (e as Error)?.message); }
   }
 

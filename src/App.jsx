@@ -4704,7 +4704,7 @@ const SERVICE_NOTES = [
     name: "Scrapfly",
     cost: "US$30.00 / month · billed the 10th",
     type: "fixed",
-    what: "Loads dealer pages that block ordinary requests, and takes the sealed full-page screenshot attached to every report.",
+    what: "Loads dealer pages that block ordinary requests, and takes the sealed capture of the listing attached to every report.",
     why: "Most dealer sites are JavaScript-rendered and bot-protected; a plain fetch gets an empty shell. The screenshot is also the buyer's evidence of what the page said at report time.",
     without: "Roughly half of dealer listings become unreadable, and reports lose the capture that makes them dispute-proof.",
   },
@@ -8175,9 +8175,34 @@ function EvidenceCard({ a, palette }) {
     [[capture-always-whole-page]] */}
           <div style={{ fontSize: 12.5, color: ink, lineHeight: 1.5 }}>{
             a.listingShotKind === "viewport"
-              ? "The top of the listing, captured when this report was generated. The full page was too large to photograph in one piece, so this shows the vehicle and price rather than the whole listing — the fine print below it is captured separately as text."
+              // HOW SHORT, in a number the buyer can check against the photo.
+              // The full-page attempt measures the page even when its file is
+              // too big to carry, so the shortfall is arithmetic rather than
+              // the vague "too large to photograph in one piece" this used to
+              // stop at. Omitted entirely when the numbers aren't there — we
+              // do not estimate coverage. [[present-without-creating-questions]]
+              ? "The top of the listing, captured when this report was generated." +
+                ((() => {
+                  if (!(a.listingShotHeightPx > 0) || !(a.listingShotPageHeightPx > 0)) return "";
+                  const pct = Math.round((a.listingShotHeightPx / a.listingShotPageHeightPx) * 100);
+                  // Only when it is genuinely partial. A shot that covers the
+                  // whole short page has nothing to disclose, and "covers the
+                  // top 100% of the page" is a sentence that creates a
+                  // question instead of answering one.
+                  return pct >= 1 && pct <= 97 ? ` This photo covers the top ${pct}% of the page.` : "";
+                })()) +
+                " The full page was too large to photograph in one piece, so this shows the vehicle and price rather than the whole listing — the fine print below it is captured separately as text."
             : a.listingShotKind === "fullpage"
-              ? "Full-page capture of the listing, taken when this report was generated."
+              // A capture that had to be re-shot narrower to fit in one image is
+              // the whole page of a slightly DIFFERENT rendering -- responsive
+              // layouts can move things between 1920 and 1024. The width was
+              // being recorded and read by nobody, which is how "full-page
+              // capture" ends up describing a photo the buyer never saw at that
+              // size. Guarded like the coverage clause: absent means silent.
+              ? "Full-page capture of the listing, taken when this report was generated." +
+                (a.listingShotWidthPx > 0 && a.listingShotWidthPx < 1920
+                  ? ` Photographed ${a.listingShotWidthPx}px wide so the whole page fit in one image.`
+                  : "")
               // No kind recorded (an older report, or one reconstructed from a
               // share link): say what we can prove and nothing more.
               : "Photo of the listing, captured when this report was generated."}</div>
@@ -10008,7 +10033,15 @@ function VerifyPage(){
                       onDrop={e=>{e.preventDefault();setZoneUi(u=>({...u,drag:false}));const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];checkPhotoFile(f,o.shot);}}
                       style={{marginTop:12,border:`1.5px dashed ${zoneBd}`,borderRadius:12,padding:"13px 15px",background:zoneUi.drag?(vdark?"rgba(58,224,255,.06)":"rgba(13,143,176,.06)"):vdark?"rgba(255,255,255,.03)":"rgba(255,255,255,.55)"}}>
                       <div style={{fontSize:12.5,fontWeight:800,color:T.heading,marginBottom:4}}>Check the sealed photo</div>
-                      <div style={{fontSize:12,color:T.soft,lineHeight:1.55}}>This signed report seals a full-page photo of the listing (fingerprint <span style={{fontFamily:mono}}>{String(o.shot).slice(0,10)}…</span>). Drop the “listing-capture” file from your LotCheck email here — your browser recomputes its fingerprint and compares. Nothing is uploaded.</div>
+                      {/* NOT "a full-page photo". This page is the proof surface, and the only
+                          thing it can prove about the image is the FINGERPRINT — which is
+                          what is sealed. Whether the capture was the whole page or the top
+                          of it is carried by listingShotKind, which is not signed and does
+                          not ride in a share link, so asserting it here would be an
+                          unbacked claim on the one page whose whole job is backing claims.
+                          PR #342 fixed this wording on the report card and the PDF and
+                          missed this sibling. [[claims-must-stay-backed]] */}
+                      <div style={{fontSize:12,color:T.soft,lineHeight:1.55}}>This signed report seals a photo of the listing (fingerprint <span style={{fontFamily:mono}}>{String(o.shot).slice(0,10)}…</span>). Drop the “listing-capture” file from your LotCheck email here — your browser recomputes its fingerprint and compares. Nothing is uploaded.</div>
                       <div style={{display:"flex",alignItems:"center",gap:10,marginTop:9,flexWrap:"wrap"}}>
                         <label style={{position:"relative",display:"inline-flex",alignItems:"center",minHeight:44,background:"transparent",border:`1px solid ${zoneUi.focus?T.cyan:T.cardBd}`,boxShadow:zoneUi.focus?`0 0 0 2px ${vdark?"rgba(58,224,255,.35)":"rgba(13,143,176,.3)"}`:"none",borderRadius:9,padding:"10px 16px",fontSize:12,fontWeight:700,color:T.cyan,cursor:"pointer"}}>
                           Choose photo
