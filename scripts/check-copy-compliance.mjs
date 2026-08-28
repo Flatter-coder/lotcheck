@@ -145,6 +145,38 @@ const RULES = [
     expected: 4, // was 5 before the Book view was retired. +1 2026-08-22: the emailed PDF's own 'never stored' line, newly in scope when email-quote-report joined SURFACES. Re-confirmed: admin_config.flywheel_capture_enabled is seeded 'false' and NO migration ever sets it true.
   },
   {
+    // TWICE NOW a top-of-page photo has shipped described as the whole page --
+    // PR #274 argued about WHICH half we got, PR #342 found we were labelling a
+    // half "Full-page capture of the listing", and #342's own sweep then missed
+    // two more sites (the /verify drop-zone and the email body). A third manual
+    // sweep is not a fix; pinning the count is, because it forces whoever adds
+    // one to re-confirm the claim is gated on evidence rather than assumed.
+    //
+    // THE CONDITION, precisely: this phrase may appear only where
+    // listingShotKind is known to be "fullpage". It is NOT signed
+    // (report-sign.ts seals only the capture's hash) and it does NOT ride in a
+    // share link (encodeReport omits it), so surfaces that cannot read it --
+    // /verify, the emailed HTML, the PDF caption -- must stay neutral and are
+    // deliberately at zero here.
+    id: "full-page-capture-claim-must-be-gated",
+    ruleKey: "ab-no-unfair-practice-in-our-own-claims",
+    kind: "guarded",
+    condition: "true only while every occurrence sits inside a listingShotKind === \"fullpage\" branch",
+    why: "The capture ladder can degrade to a photo of the top of the listing. Calling that the full page is an unbacked claim about our own evidence, printed on the one artifact a buyer hands to a dealer. [[capture-always-whole-page]] [[claims-must-stay-backed]]",
+    patterns: [/full[-\s]page (capture|photo|screenshot)/i],
+    // ── THE INVENTORY, enumerated 2026-08-27 (comments are stripped first) ──
+    //   src/App.jsx:8202   the report card's fullpage arm, guarded on
+    //                      a.listingShotKind === "fullpage". THE claim.
+    //   src/App.jsx:11524  "A full-page screenshot works better than a cropped
+    //                      one" -- upload guidance to the USER about their own
+    //                      photo, not a claim about our capture. In scope on
+    //                      purpose: if the wording ever migrates to describing
+    //                      what WE produce, the count moves and someone looks.
+    //   email-quote-report/index.ts  0  the emailed body and the PDF caption
+    //                      are both neutral, because neither can read the kind.
+    expected: 2,
+  },
+  {
     // The claim must map to ten checks that actually run and actually deliver a
     // backed result. Both halves are load-bearing: ten that exist, and ten that
     // are never blank.

@@ -109,7 +109,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27s";  // + the dealer RATING no longer waits on the review highlights (three serial hops blew the caller's 12s abort and the point read NOT CHECKED)
+const CACHE_VER = "2026-08-27t";  // + the sealed capture is the WHOLE page again: a too-large full-page shot is re-shot narrower and still whole (twice, the second from its own measurement) instead of being replaced by a photo of the top of the listing; a short capture now states its measured coverage
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3166,20 +3166,36 @@ Deno.serve(async (req: Request) => {
     // extraction. Fire-and-forget until the attach point; errors resolve null.
     // Instrumented so Scrapfly's screenshot job is directly comparable with
     // Nimble's extract job on the same listing — same host, same run, both
-    // logged. 60 credits/shot on the Discovery plan (~$0.009).
-    const SCRAPFLY_SHOT_CREDITS = 60, SCRAPFLY_SHOT_USD = 0.009;
+    // logged.
+    //
+    // 80, NOT 60, AND THE TWO NUMBERS ARE BOTH RIGHT. Scrapfly bills a
+    // screenshot at 60 credits base plus 1 credit per 100 KB of page weight
+    // over 4 MB. Vic's dashboard for 2026-08-16 (quoted twice in
+    // _shared/scrapfly.ts) shows what a real dealer VDP actually costs:
+    // "CA 200 cost 80 / US 200 cost 80". So 60 is the documented floor and 80
+    // is the measured price of the pages we photograph; the ledger should
+    // carry what we are charged, not the brochure figure.
+    //
+    // AND IT IS PER SHOT, NOT PER CAPTURE. The ladder can bill up to four
+    // (fullpage, two refits, the top-of-page fallback), and this row used to
+    // record exactly one — and recorded NOTHING at all on the failure path,
+    // where two paid shots were logged as free. The callback counts them.
+    const SCRAPFLY_SHOT_CREDITS = 80, SCRAPFLY_SHOT_USD = 0.012;
+    let scrapflyShots = 0;
     const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
       ? (() => {
           const t0 = Date.now();
-          return captureListingScreenshot(url, 90_000)
+          return captureListingScreenshot(url, 90_000, { onBilledShot: () => { scrapflyShots++; } })
             .then((r) => {
               logProviderCall({
                 provider: "scrapfly", operation: "screenshot", ok: !!r,
                 driver: "capture", listingHost: hostOf(url),
                 durationMs: Date.now() - t0,
                 errorCode: r ? null : (lastScrapflyError ?? "empty"),
-                credits: r ? SCRAPFLY_SHOT_CREDITS : null,
-                costUsd: r ? SCRAPFLY_SHOT_USD : null,
+                // On BOTH branches: a capture that ended with no photo still
+                // spent every shot it took getting there.
+                credits: scrapflyShots ? scrapflyShots * SCRAPFLY_SHOT_CREDITS : null,
+                costUsd: scrapflyShots ? Number((scrapflyShots * SCRAPFLY_SHOT_USD).toFixed(3)) : null,
               });
               return r;
             })

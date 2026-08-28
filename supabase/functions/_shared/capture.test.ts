@@ -78,7 +78,12 @@ check("non-IHDR first chunk fails closed (budget can't be bypassed by chunk reor
 }
 
 // ── capturePageCount — must mirror the render loop's 2 pt tolerance ─────────
-const U0 = 629.89, UR = 695.89, MAXP = 6;
+// Hand-copied from buildReportPdf's CAP_* constants. A mirror can drift, so
+// test:capture-whole-page reads BOTH this line and the real ones out of source
+// and fails if they disagree. MAXP moved 6 -> 8 on 2026-08-27, when the capture
+// byte cap was raised: a bigger capture that the PDF simply truncates on paper
+// is half a two-step.
+const U0 = 629.89, UR = 695.89, MAXP = 13;
 check("fits-on-one-page yields 1", capturePageCount(U0, U0, UR, MAXP) === 1);
 check("1 pt of overflow is absorbed (no phantom PAGE 2)", capturePageCount(U0 + 1, U0, UR, MAXP) === 1);
 check("2 pt of overflow is absorbed", capturePageCount(U0 + 2, U0, UR, MAXP) === 1);

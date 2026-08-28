@@ -301,6 +301,15 @@ jobs:
       # keeps a tall page both readable and inside the limit.
       - name: Vision tiling geometry (uploaded screenshots stay readable and in-budget)
         run: npm run test:vision-tiling
+      # "scrapfly only took screnshoot half the page" (Vic, 2026-08-27). The
+      # sealed capture is asked for as a FULL page and then thrown away when it
+      # ran past a cap nobody had measured against a real downstream limit --
+      # the report shipped a photo of the TOP of the listing instead. The rule
+      # is that the capture is always the whole page, so this pins the derived
+      # cap, the narrower-and-still-whole retry that replaces the crop, and the
+      # fact that no surface claims "full-page" from a field it cannot back.
+      - name: Whole-page capture (a too-large page is re-shot whole, never cropped)
+        run: npm run test:capture-whole-page
       # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
       # the LISTING path only; a dealer red-team found the identical accusation
       # still live on the UPLOAD path, which carried its own unguarded copy and

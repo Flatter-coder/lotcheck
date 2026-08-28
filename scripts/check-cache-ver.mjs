@@ -56,6 +56,13 @@ const OUTPUT_SHAPING = [
   // and every cached report replayed the old answer, which is the same blind
   // spot the recalls note above describes, one function further out.
   /^supabase\/functions\/get-dealer-sentiment\//,
+  // capture + vision-limits joined on 2026-08-27, when the whole-page fix moved
+  // the capture cap, the refit width and the coverage arithmetic into them.
+  // Those numbers decide whether a report shows the WHOLE listing or the top of
+  // it, and what the evidence card says about which -- output shaping in the
+  // plainest sense, in shared modules the gate did not watch. Same blind spot
+  // as recalls and scrapfly above, one file further out.
+  /^supabase\/functions\/_shared\/(capture|vision-limits)\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
