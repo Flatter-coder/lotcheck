@@ -5367,14 +5367,37 @@ function VerificationTab({apiUsage, apiUsageLoading, apiUsageReadAt, readOnly}){
          note:`${vnum(attempts)} attempted · ${vnum(ledger.provider_err)} rejected`,
          state:(ledger.provider_err||0)>0?"bad":"ok", pct:okPct,
          proof:"One row per attempt in report_delivery, written before the send and carrying the SHA-256 of the exact PDF bytes handed to Resend. A customer forwards their PDF, you hash it, and it matches a row or it does not."},
-        {id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
-         note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints`,
-         state:(ledger.bounced||0)>0?"bad":"ok", pct:delivPct,
-         proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."},
+        // NO PROVIDER EVENT HAS *EVER* ARRIVED is a different fact from "some
+        // deliveries failed", and this row used to paint both green. Its state
+        // was computed from the bounce count ALONE, so 0-confirmed-of-1-accepted
+        // rendered the same teal square as 100-of-100 — the exact false
+        // all-clear this panel's own footer says it exists to prevent.
+        // (Confirmed live 2026-08-27: the resend-webhook function was deployed
+        // with gateway JWT verification ON, so Resend's Svix POSTs were answered
+        // 401 and no delivery event could ever be recorded. Fixed by
+        // supabase/config.toml, but the row must not have been GREEN about it.)
+        // Three honest states now: hollow when nothing has ever reported, bad
+        // on a real bounce or a total absence of confirmations, ok otherwise.
+        ...(((ledger.delivered||0) === 0 && (ledger.bounced||0) === 0 && (ledger.complained||0) === 0 && (ledger.accepted||0) > 0)
+          ? [unmeasured("deliv","Delivery confirmed by provider","report_delivery_event",
+              `${vnum(ledger.accepted)} send(s) accepted by Resend, and NOT ONE provider event has come back — not a delivery, not a bounce, not a complaint. That pattern is the webhook not arriving at all, not mail failing: a real delivery problem produces bounces, not silence. Check that resend-webhook is deployed with verify_jwt=false (supabase/config.toml), that the endpoint is registered in the Resend dashboard, and that RESEND_WEBHOOK_SECRET is set. Until an event arrives this stays hollow rather than green, because a confirmation count nothing can write is not a passing check.`)]
+          : [{id:"deliv", name:"Delivery confirmed by provider", value:vnum(ledger.delivered),
+              note:`${vnum(ledger.bounced)} bounced · ${vnum(ledger.complained)} complaints · ${Math.round(delivPct)}% of accepted`,
+              state:((ledger.bounced||0)>0 || ((ledger.accepted||0)>0 && (ledger.delivered||0)===0))?"bad":"ok", pct:delivPct,
+              proof:"Resend's own webhook events. A confirmed delivery means the receiving mail server accepted the message — not that it reached the inbox, and not that anyone read it. Opens are deliberately not shown: image blocking hides them and Apple Mail Privacy Protection invents them, so an open proves nothing either way."}]),
+        // Same distinction on the stall row: "accepted but unresolved" is only
+        // an early-warning signal once delivery reporting is known to WORK. If
+        // no provider event has ever arrived, every send ages into this row
+        // after an hour regardless of whether it was delivered perfectly — so
+        // it is measuring the missing webhook, not the mail. Say which.
         {id:"stall", name:"Accepted, unresolved over 1h", value:vnum(ledger.stalled_1h),
-         note:`${vnum(ledger.no_msg_id)} with no provider id`,
+         note:((ledger.delivered||0)===0 && (ledger.bounced||0)===0 && (ledger.complained||0)===0 && (ledger.stalled_1h||0)>0)
+           ? "no provider events at all — see the row above"
+           : `${vnum(ledger.no_msg_id)} with no provider id`,
          state:(ledger.stalled_1h||0)>0?"bad":"ok", pct:(ledger.stalled_1h||0)>0?60:100,
-         proof:"Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
+         proof:((ledger.delivered||0)===0 && (ledger.bounced||0)===0 && (ledger.complained||0)===0 && (ledger.stalled_1h||0)>0)
+           ? "Sends Resend accepted but never resolved to delivered or bounced. Right now NO provider event of any kind has been recorded, so this count is measuring the delivery webhook not arriving — it is NOT evidence that the mail failed. With the webhook flowing, a non-zero count here becomes the real early warning it is meant to be."
+           : "Sends Resend accepted but never resolved to delivered or bounced. A non-zero count here is the early warning that delivery reporting has stopped flowing, not that the mail failed."},
       );
     } else {
       rows.push(
@@ -7859,6 +7882,27 @@ class ReportBoundary extends Component {
 // carried a starting-at reference price. Found by check:undef, reproduced live.
 function money(n){ const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); }
 
+// ONE definition of the gated-price disclosure, read by EVERY surface.
+// e80122c shipped this sentence as a local const inside ReportViews and a
+// separate copy inside the emailed PDF -- so the DEFAULT Scroll view, the Book
+// (flipbook) view and the 3D view all printed the recovered number with no
+// hint that the dealer's own page refuses to show it. That is the
+// report-features-all-views rule broken on the single most valuable fact a
+// gated listing produces. A module-level helper is the structural fix: a new
+// surface cannot forget to opt in, because it renders whatever this returns.
+//
+// `googleAdsBacked` narrows the claim: Google mandates a real (all-in, in
+// Canada) price on NEW-vehicle ads, which is what makes "public either way"
+// backed. On used/CPO that premise does not hold, so the sentence stops at
+// what we actually verified -- the page's own data. (claims-must-stay-backed)
+function gatedPriceNote(a){
+  if(!a || !(Number(a.quotedPrice) > 0) || !a.priceGatedButRecovered) return "";
+  const msg = a.priceGateMessage || "Call for pricing";
+  return a.priceGateGoogleAdsBacked
+    ? `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+    : `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price shown here. `;
+}
+
 function encodeReport(a){
   const c={v:a.vehicle,y:a.year,mk:a.make,md:a.model,tr:a.trim,dn:a.dealerName,dc:a.dealerCity,cond:a.vehicleCondition,
     qp:a.quotedPrice,ms:a.msrp,
@@ -7877,6 +7921,18 @@ function encodeReport(a){
     // would get MORE confident by being forwarded, which is backwards.
     dol:a.daysOnLot?{d:a.daysOnLot.days,s:a.daysOnLot.since||null,sl:a.daysOnLot.sourceLabel||null,al:a.daysOnLot.atLeast===true?1:0}:null,
     pd:a.priceDisclosure||null,mb:a.msrpBasis||null,mt:a.msrpTrim||null,my:a.msrpYear||null,
+    // pv/pg*/mc were all dropped by this encoder, so a FORWARDED report lost
+    // findings the original showed. pv: priceVerified (surfaces that honour it
+    // silently fell back to "any price counts as verified"). pg*: the
+    // "page says Call for pricing, its own data says $X" disclosure -- the
+    // single most valuable fact on a gated listing, absent from every view of
+    // a shared link. mc: msrpCeiling, without which a shared report renders
+    // "no over/under-MSRP claim is made" beside a leverage note asserting a
+    // specific ceiling-exceeded dollar figure -- one page, two answers.
+    pv:a.priceVerified===true?1:(a.priceVerified===false?0:null),
+    pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:a.priceGateGoogleAdsBacked?1:0}:null,
+    mc:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
+    mai:a.msrpAllIn??null,
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
@@ -7909,6 +7965,12 @@ function decodeReport(s){
       reportId:c.rid||null,issuedAt:c.ia||null,verifyPayload:c.vp||null,sig:c.sg||null,keyId:c.kid||null,
       daysOnLot:c.dol?{days:c.dol.d,since:c.dol.s||null,sourceLabel:c.dol.sl||null,atLeast:c.dol.al===1,source:c.dol.al===1?"lotcheck_first_seen":"dealer_platform_feed"}:null,
       priceDisclosure:c.pd||null,msrpBasis:c.mb||null,msrpTrim:c.mt||null,msrpYear:c.my||null,
+      priceVerified:c.pv===1?true:(c.pv===0?false:undefined),
+      priceGatedButRecovered:c.pg?true:undefined,
+      priceGateMessage:c.pg?(c.pg.m||null):undefined,
+      priceGateGoogleAdsBacked:c.pg?c.pg.g===1:undefined,
+      msrpCeiling:c.mc?{allIn:c.mc.a??null,floorAllIn:c.mc.f??null,trim:c.mc.t||null,trimsConsidered:c.mc.n??0}:null,
+      msrpAllIn:c.mai??null,
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
@@ -8084,9 +8146,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // Toyota RAV4 PHEV GR Sport AWD: rendered page shows "Call for pricing",
   // window.__vdpJSON's price field holds $85,995 -- also published to
   // Google Vehicle Ads, so this is public information either way.
-  const gatedRecoveredNote = (qp && a.priceGatedButRecovered)
-    ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
-    : "";
+  const gatedRecoveredNote = gatedPriceNote(a);
   const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
   const fr = score != null ? score / 10 : 0;
   const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
@@ -8690,7 +8750,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       )}
 
       {view === "heatmap" && (<>
-        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>The 10-point verification — hot squares are flagged</div>
+        {/* The count is DERIVED, never hardcoded. This read "The 10-point
+            verification" above a grid that renders heatItems (14 on a full
+            report, and never fewer than 11) -- the report contradicting its
+            own heading. Ten is the advertised FLOOR; say what this report
+            actually delivered. [[ten-point-claim-policy]] */}
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>{heatItems.length}-point verification — hot squares are flagged</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
           {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid ${selP === i ? "#fff" : (c.glow ? CY : BORD)}`, background: c.tone === "flag" ? "rgba(244,63,94,.16)" : c.tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.08)", boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 12px ${CY}55` : "none", cursor: "pointer", padding: 9, display: "flex", flexDirection: "column", justifyContent: "space-between", textAlign: "left" }}><span style={{ fontSize: 10, fontFamily: mono, color: toneColor(c) }}>{String(i + 1).padStart(2, "0")} · {c.v}</span><span style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.2, color: "#cbd5e1" }}>{c.title}</span></button>))}
         </div>
@@ -8752,7 +8817,15 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
       return (<div className="rfb-pg">{num}
       <div className="rfb-k">The deal</div>
       <h2 className="rfb-h2">{exactFb?(delta>0?`Priced ${money(delta)} over MSRP`:delta<0?`${money(-delta)} below MSRP`:"Priced at MSRP"):(ms>0?`Base MSRP from ${money(ms)}`:(qp>0?`Asking ${money(qp)}`:"The deal"))}</h2>
-      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">the dealer's all-in price</div></div>}
+      {qp>0&&<div className="rfb-stat"><div className="rfb-lab">Asking price · before tax</div><div className="rfb-big">{money(qp)}</div><div className="rfb-sub">{a.allInPricing?"the dealer's all-in price":"the dealer's asking price"}</div></div>}
+      {/* The Book view is a full report surface, not a summary -- it printed the
+          recovered number with no hint the dealer's own page refuses to show it
+          (report-features-all-views). Shared helper, so this cannot drift from
+          the Scroll view or the PDF again. The "all-in" sub-label above was
+          also asserted unconditionally while every other surface conditions it
+          on a.allInPricing -- on a non-all-in province that was an unbacked
+          claim about what the price includes. */}
+      {gatedPriceNote(a)&&<div className="rfb-note" style={{fontSize:11,lineHeight:1.5,marginTop:8,opacity:.85}}>{gatedPriceNote(a)}</div>}
       {ms>0&&<div className="rfb-stat"><div className="rfb-lab">{exactFb?"Verified MSRP":"MSRP · starting at"}</div><div className="rfb-big" style={{color:"#159e8f"}}>{money(ms)}</div>{exactFb&&delta>0&&<div className="rfb-sub"><span className="rfb-tag bad">▲ {money(delta)} over MSRP</span></div>}{!exactFb&&<div className="rfb-sub">base model — this unit's options are extra</div>}</div>}
       <div className="rfb-lede" style={{marginTop:"auto"}}>{a.summary?a.summary.slice(0,190)+(a.summary.length>190?"…":""):"See the pages ahead for financing, recalls, fees and reputation."}</div>
     </div>); }
@@ -8784,7 +8857,11 @@ function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
     if(p.t==="trims"){ const trs=trimRange.trims||[]; const aboveN=qp>0?trs.filter(t=>qp>Number(t.msrp)).length:0; const allExcl=trs.every(t=>t.price_basis==="excl_freight");
       return (<div className="rfb-pg">{num}<div className="rfb-k">The factory range</div>
       <h2 className="rfb-h2">MSRP per trim — {trimRange.year} {a.make} {a.model}</h2>
-      <div className="rfb-lede" style={{fontSize:12}}>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</div>
+      {/* Same correction as the scroll card: this list can span powertrains,
+          so "every trim" is not a true description of the rows. */}
+      <div className="rfb-lede" style={{fontSize:12}}>{trimRange?.mixed
+        ? <>Manufacturer prices for these trims{allExcl?" (before freight & fees)":""} — this model name covers more than one powertrain, so compare against the rows matching your car.</>
+        : <>The manufacturer's own price for every trim{allExcl?" (before freight & fees)":""} — the range the dealer is working against.</>}</div>
       <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:10}}>
         {trs.slice(0,10).map((t,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:12.5}}>
           <span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
@@ -8987,8 +9064,19 @@ function useTrimRange(a){
     let alive=true;
     (async()=>{
       try{
+        // fuel_type is SELECTED because this query cannot avoid crossing
+        // powertrains: `ilike('%NX%')` matches "NX", "NX Hybrid" AND "NX
+        // Plug-in Hybrid" -- three different vehicles at three different
+        // price ladders. Confirmed live 2026-08-27 on a 2026 Lexus NX, where
+        // the card printed SEVENTEEN rows including four different "Luxury"
+        // prices, because it was stacking one trim name across three
+        // powertrains. Widening the match is deliberate (dealers write "NX
+        // 350h" while the catalog stores "NX Hybrid"), so the fix is not to
+        // narrow the query and risk an empty card -- it is to carry the
+        // powertrain so rows can be filtered to THIS car and labelled when
+        // they are not. [[powertrain-identity-rule]]
         const { data, error } = await supabase.from("msrp_catalog")
-          .select("trim,msrp,year,price_basis")
+          .select("trim,msrp,year,price_basis,fuel_type")
           .eq("make",make).ilike("model","%"+model+"%")
           .gt("msrp",0).order("msrp",{ascending:true}).limit(48);
         if(error) throw error;
@@ -9007,13 +9095,32 @@ function useTrimRange(a){
         // the same panel: "LIMITED" $52,000 vs "Limited" $52,350) are a real
         // data question this can't safely resolve, so those stay separate
         // rather than silently picking one.
+        // Keep only THIS car's powertrain when we know it. A hybrid NX must
+        // never be shown the gas NX ladder as "its" trims -- that is the same
+        // $5,500-class error the trim matcher guards against server-side.
+        const fuelKind=(x)=>{ const t=String(x==null?"":x).toLowerCase();
+          if(/phev|plug/.test(t)) return "phev";
+          if(/hybrid|hev/.test(t)) return "hybrid";
+          if(/bev|electric|ev/.test(t)) return "bev";
+          if(/diesel/.test(t)) return "diesel";
+          return t?"gas":null; };
+        const wantFuel=fuelKind(a?.fuelType);
+        const sameYear=rows.filter(r=>r.year===year);
+        const matched=wantFuel?sameYear.filter(r=>fuelKind(r.fuel_type)===wantFuel):[];
+        // Only narrow when it leaves a usable ladder; otherwise show all and
+        // LABEL each row's powertrain rather than silently mixing them.
+        const mixed=!(wantFuel&&matched.length>=2);
+        const pool=mixed?sameYear:matched;
         const seen=new Set();
-        const trims=rows.filter(r=>r.year===year).filter(r=>{
-          const k=String(r.trim).trim().toLowerCase()+"|"+Number(r.msrp);
+        const trims=pool.filter(r=>{
+          // Case-insensitive on trim AND price: "LUXURY"/"Luxury" at the same
+          // price are one trim written twice by a case-sensitive write-side
+          // dedupe, not two products.
+          const k=String(r.trim).trim().toLowerCase().replace(/\s+/g," ")+"|"+Number(r.msrp);
           if(seen.has(k)) return false;
           seen.add(k); return true;
-        });
-        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims};
+        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null}));
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed};
         trimRangeCache[key]=v; if(alive)setSt(v);
       }catch(e){ if(alive)setSt({status:"error",make,model}); }
     })();
@@ -9202,11 +9309,19 @@ function TrimMsrpRange({analysis:a, C, cardStyle}){
         <div style={{fontSize:14,fontWeight:800,color:C.ink}}>MSRP per trim — {tr.year} {a.make} {a.model}</div>
         <LiveDot readAt={tr.readAt}/>
       </div>
-      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</div>
+      {/* "every {model} trim" was a FALSE statement whenever the catalog match
+          crossed powertrains: on a 2026 Lexus NX it stacked gas + hybrid +
+          plug-in ladders and printed four different "Luxury" prices, so the
+          rows were never "every NX trim" -- they were several cars' trims
+          interleaved. Say what the rows actually are.
+          (claims-must-stay-backed / present-without-creating-questions) */}
+      <div style={{fontSize:12,color:C.inkFaint,marginTop:3,lineHeight:1.5}}>{tr.mixed
+        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This model name covers more than one powertrain, so each row is tagged with which one — compare against the rows matching your car.</>
+        : <>The manufacturer's price for every {a.model} trim in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This is the factory range the quote should be read against.</>}</div>
       <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
         {trims.map((t,i)=>(
           <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"6px 10px",borderRadius:8,background:C.paper2,border:`1px solid ${C.line}`}}>
-            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}</span>
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}{t.powertrain?<span style={{marginLeft:6,fontSize:10.5,fontWeight:800,letterSpacing:.3,color:C.inkFaint,textTransform:"uppercase"}}>{t.powertrain==="phev"?"Plug-in":t.powertrain==="bev"?"Electric":t.powertrain}</span>:null}</span>
             <span style={{fontSize:12.5,fontWeight:800,color:C.ink,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{money(t.msrp)}{t.price_basis==="excl_freight"?<span style={{color:C.inkFaint,fontWeight:600}}> + freight</span>:null}</span>
           </div>
         ))}
@@ -9321,7 +9436,12 @@ function canonicalReport(a){
     // Mirrors supabase/functions/_shared/report-sign.ts -- keep both in sync.
     // Additive-only: /verify re-hashes whatever bytes are embedded in its own
     // link, never rebuilds this from a live object, so v1..v3 links still verify.
-    v:4,
+    // v5: `gate` records that the dealer's rendered page refused to display a
+    // price while the page's own machine-readable data carried one (D2C
+    // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
+    // signed canonical because it is a material claim about the listing, and
+    // /verify must be able to show it as sealed rather than as a re-assertion.
+    v:5,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9338,6 +9458,7 @@ function canonicalReport(a){
     odo:num(a.odometerKm),
     dol:a.daysOnLot&&Number(a.daysOnLot.days)>0?{d:Math.round(Number(a.daysOnLot.days)),s:a.daysOnLot.since||null}:null,
     pd:a.priceDisclosure||null,
+    gate:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:!!a.priceGateGoogleAdsBacked}:null,
     basis:a.msrpBasis?{b:a.msrpBasis,t:a.msrpTrim||null,y:a.msrpYear||null}:null,
     allIn:a.allInPricing?.body||null,
     disc:a.disclaimerCheck?{e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
@@ -9720,6 +9841,12 @@ function VerifyPage(){
                   {o.t==="value" && o.cpo && o.cpo.prem!=null && <Row t="Certified (CPO) premium" v={money(o.cpo.prem)+" more than non-certified"}/>}
                   {o.t==="value" && o.rw && (o.rw.basic||o.rw.pt) && <Row t="Factory warranty (est.)" v={[o.rw.basic&&`Basic ${o.rw.basic.a?"active":"expired"}`,o.rw.pt&&`Powertrain ${o.rw.pt.a?"active":"expired"}`].filter(Boolean).join(" · ")}/>}
                   {o.t!=="value" && <Row t="Asking price" v={o.price?.asking?money(o.price.asking)+(o.allIn?" · all-in":""):(o.pd==="contact_for_price"?"Hidden by the dealer":"Not shown")} c={(!o.price?.asking&&o.pd==="contact_for_price")?"#f0997b":undefined}/>}
+                  {/* Sealed in the signed payload (canonical v5), so this is
+                      tamper-evident here rather than a re-assertion: the
+                      dealer's own page declined to show a price while its own
+                      data carried one. Without it /verify displayed the
+                      recovered number as an ordinary advertised price. */}
+                  {o.t!=="value" && o.gate && o.price?.asking ? <Row t="Price was gated" v={`page showed "${o.gate.m||"Call for pricing"}"${o.gate.g?" · also public via Google vehicle ads":""}`}/> : null}
                   {/* The label came from o.price.verified, which is the ASKING
                       PRICE's flag, not the MSRP's — so a dealer's own unverified
                       sticker was printed as "MSRP (verified)" in green on the
@@ -9768,9 +9895,15 @@ function VerifyPage(){
                   {o.recalls&&(o.recalls.items||[]).length>0&&(
                     <div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:9,marginTop:2}}>
                       <div style={{fontSize:12,color:T.soft,marginBottom:4,fontWeight:700}}>Open recalls</div>
-                      {(o.recalls.items||[]).slice(0,6).map((it,i)=>(
+                      {/* List every item the payload carries — never a cap that
+                          leaves the list saying less than the count above it
+                          (recalls-detail-list-must-match-count). */}
+                      {(o.recalls.items||[]).map((it,i)=>(
                         <div key={i} style={{fontSize:12.5,color:"#f0997b",padding:"2px 0"}}>{it.system||"Recall"}{it.date&&!Number.isNaN(new Date(it.date).getFullYear())?` · ${new Date(it.date).getFullYear()}`:""}</div>
                       ))}
+                      {o.recalls.count>(o.recalls.items||[]).length&&(
+                        <div style={{fontSize:11,color:T.soft,marginTop:4}}>Transport Canada lists {o.recalls.count} in total for this model — check the rest by VIN at Transport Canada.</div>
+                      )}
                     </div>
                   )}
                   {o.summary&&<div style={{borderTop:`1px solid ${T.rowBd}`,paddingTop:10,marginTop:4,fontSize:12.5,color:T.soft,lineHeight:1.6,fontStyle:"italic"}}>{o.summary}</div>}
@@ -9972,9 +10105,29 @@ function QuoteCheckPage(){
           // it right here with our public key so the recipient sees a live
           // authenticity verdict on top of the FULL report.
           if(rep.verifyPayload&&rep.sig&&rep.keyId){
-            verifyReportSignature(rep.verifyPayload,rep.sig,rep.keyId)
-              .then((ok)=>setSharedAuth(ok?"valid":"invalid"))
-              .catch(()=>setSharedAuth(null));
+            // INFLATE BEFORE VERIFYING. report-sign.ts signs the RAW canonical
+            // string and then gzips it for the payload ("the SIGNATURE is still
+            // made over the raw canonical string, never the gzip bytes" —
+            // report-sign.ts:142). This called verifyReportSignature(), which
+            // verifies over b64urlToBytes(payload) — the STILL-GZIPPED bytes —
+            // so the signature could never match and EVERY genuine signed
+            // report opened from a share link rendered
+            // "Seal broken — this copy was altered", accusing the owner of
+            // tampering with their own report. Reported live 2026-08-27 by Vic
+            // clicking the app's own verify link on a fresh report.
+            //
+            // The correct pair already existed and is what /verify's runVerify
+            // uses: maybeGunzip() (passes legacy uncompressed payloads through
+            // unchanged, so old links keep working) + verifyReportSignature-
+            // Bytes(). Use the same path here so the two surfaces cannot
+            // disagree about the same signature again.
+            (async()=>{
+              try{
+                const canonBytes=await maybeGunzip(b64urlToBytes(rep.verifyPayload));
+                const ok=await verifyReportSignatureBytes(canonBytes,rep.sig,rep.keyId);
+                setSharedAuth(ok?"valid":"invalid");
+              }catch{ setSharedAuth(null); }
+            })();
           }
         }
       }
@@ -10031,7 +10184,24 @@ function QuoteCheckPage(){
       });
       const data=await res.json();
       if(!res.ok||data.error||!data.dealerSentiment) return;
-      setAnalysis(prev=>prev?{...prev,dealerSentiment:data.dealerSentiment}:prev);
+      // NEVER OVERWRITE A FIGURE THE SERVER ALREADY SIGNED. `dealerSentiment`
+      // is projected into the signed canonical as `reputation`
+      // (report-sign.ts), so writing a different rating/review-count here --
+      // after finalizeServerSide has signed -- makes the live object disagree
+      // with its own signature. email-quote-report recomputes the canonical
+      // from the submitted body and checks it against that signature, so a
+      // late arrival here could make a genuine report fail its own
+      // authenticity gate and refuse to send. Exactly the class recorded in
+      // [[report-email-signature-drift]]: "signing a new canonicalReport()
+      // field isn't enough -- audit every client SETTER of it too."
+      //
+      // Fill-only: if the server already resolved reputation, its value stands.
+      // This lookup exists for the case the server could not run it.
+      setAnalysis(prev=>{
+        if(!prev) return prev;
+        if(prev.dealerSentiment&&Number(prev.dealerSentiment.rating)>0) return prev;
+        return {...prev,dealerSentiment:data.dealerSentiment};
+      });
     }catch{
       // Silent by design -- see comment above.
     }
@@ -11428,18 +11598,25 @@ function QuoteCheckPage(){
             // Authenticity banner for OPENED shared links — sits above the full
             // report in every view, so "verify" = see the whole report + verdict.
             const sharedBanner = sharedReport ? (
-              <div style={{...cardStyle, background: sharedAuth==="invalid"?C.coralBg:C.tealBg, border:`1px solid ${(sharedAuth==="invalid"?C.coral:C.teal)}55`, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
-                {(analysis.sig||analysis.reportId)&&<Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={44} gid="shseal" ink={sharedAuth==="invalid"?C.coralInk:C.tealInk}/>}
+              // THREE STATES, NOT TWO. This painted TEAL for both "valid" and
+              // null, so a report whose signature could not be checked at all
+              // (crypto unavailable, verify threw, or the link carries no
+              // signature) rendered in exactly the same reassuring green as a
+              // cryptographically verified one -- the false all-clear this
+              // product exists to prevent, on its own authenticity banner.
+              // Unverified is now visually NEUTRAL and says so.
+              <div style={{...cardStyle, background: sharedAuth==="invalid"?C.coralBg:sharedAuth==="valid"?C.tealBg:C.card, border:`1px solid ${(sharedAuth==="invalid"?C.coral:sharedAuth==="valid"?C.teal:C.line)}55`, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+                {(analysis.sig||analysis.reportId)&&<Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={44} gid="shseal" ink={sharedAuth==="invalid"?C.coralInk:sharedAuth==="valid"?C.tealInk:C.inkFaint}/>}
                 <div style={{flex:"1 1 240px",minWidth:0}}>
-                  <div style={{fontSize:14.5,fontWeight:900,color:sharedAuth==="invalid"?C.coralInk:C.tealInk}}>
-                    {sharedAuth==="invalid"?"Seal broken — this copy was altered":sharedAuth==="valid"?"Authentic LotCheck report":"Shared LotCheck report"}
+                  <div style={{fontSize:14.5,fontWeight:900,color:sharedAuth==="invalid"?C.coralInk:sharedAuth==="valid"?C.tealInk:C.inkSoft}}>
+                    {sharedAuth==="invalid"?"Seal broken — this copy was altered":sharedAuth==="valid"?"Authentic LotCheck report":"Seal not checked on this copy"}
                   </div>
                   <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5,marginTop:2}}>
                     {sharedAuth==="invalid"
                       ?"This copy does not match what LotCheck issued — at least one figure was changed after signing. Ask the sender for the original link."
                       :sharedAuth==="valid"
                         ?`Signed by LotCheck${analysis.issuedAt?` on ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""} — not one figure has been changed since. The full report is below.`
-                        :`Report ${analysis.reportId||""} — the ID is a fingerprint of its contents; the full report is below.`}
+                        :`Report ${analysis.reportId||""} — this copy carries no signature we could check here, so it is shown as unverified rather than confirmed. Open the verify link for a full check.`}
                   </div>
                 </div>
               </div>
@@ -11612,6 +11789,16 @@ function QuoteCheckPage(){
                 const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
                 const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
                 const gated=!analysis.quotedPrice&&analysis.priceDisclosure==="contact_for_price";
+                // This view was the ONLY one printing a bare "over/under MSRP"
+                // without saying whether the listing price was actually
+                // verified -- the emailed cover, the PDF deck and /verify all
+                // qualify it. Same signed report, two different confidence
+                // levels depending on which view you opened. Mirrors the PDF's
+                // wording rather than hiding the delta, so no finding is lost.
+                const priceVerifiedScroll=analysis.priceVerified!==undefined?!!analysis.priceVerified:(Number(analysis.quotedPrice)>0);
+                // The dealer's page refuses to show this number; the page's own
+                // data carries it. Shared helper so every surface agrees.
+                const gatedNoteScroll=gatedPriceNote(analysis);
                 return (
                   <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:gated?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
                     <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price{analysis.allInPricing?" · all-in":""}</div>
@@ -11621,9 +11808,13 @@ function QuoteCheckPage(){
                         The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp&&isManufacturerFigure(analysis.msrpBasis)?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
                       </div>
                     )}
+                    {gatedNoteScroll&&(
+                      <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>{gatedNoteScroll}</div>
+                    )}
                     {hasMsrpCompare&&(
                       <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
                         {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
+                        {!priceVerifiedScroll&&<span style={{fontWeight:600,color:C.inkFaint}}> (vs catalog MSRP — listing price not yet verified)</span>}
                       </div>
                     )}
                     {!hasMsrpCompare&&analysis.msrp&&analysis.quotedPrice&&(
