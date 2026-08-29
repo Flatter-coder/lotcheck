@@ -6006,11 +6006,10 @@ function FoundersPanel(){
 
   if(!allowed) return shell(
     <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:14,padding:"20px 22px"}}>
-      <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>Not a founder account</div>
+      <div style={{fontSize:16,fontWeight:800,color:C.ink,marginBottom:6}}>This email isn't on the founder list yet</div>
       <div style={{fontSize:13.5,color:C.inkSoft,lineHeight:1.65}}>
-        This page is limited to the accounts that fund LotCheck's operating cost. If that should include
-        you, ask Vic to add your address to the founder list — access follows the same list the monthly
-        split is calculated from, so it cannot drift from who is actually being billed.
+        You're signed in, but that address doesn't match what's on file — probably just needs adding or
+        a typo fixed. Send Vic the exact email you used to sign in and he'll get it sorted.
       </div>
     </div>
   );
