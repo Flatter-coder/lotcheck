@@ -63,6 +63,10 @@ const OUTPUT_SHAPING = [
   // plainest sense, in shared modules the gate did not watch. Same blind spot
   // as recalls and scrapfly above, one file further out.
   /^supabase\/functions\/_shared\/(capture|vision-limits)\./,
+  // multi-vehicle joined on 2026-08-27. It decides whether a URL produces a
+  // report AT ALL, and which vehicle that report is about -- the most
+  // output-shaping decision in the whole scan.
+  /^supabase\/functions\/_shared\/multi-vehicle\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
