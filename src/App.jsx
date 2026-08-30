@@ -11078,13 +11078,33 @@ function QuoteCheckPage(){
           return;
         }
         if(body.error==="multi_vehicle_page"){
-          // Deterministic VIN-count detection (analyze-listing-url) -- a
-          // pasted link to an inventory/search-results page rather than one
-          // vehicle's own page. Not charged.
+          // The page is a genuine inventory/search-results grid -- it declares
+          // several vehicles, or several with none declared as its subject.
+          // Not charged. (A DETAIL page that merely mentions neighbours in a
+          // similar-vehicles rail is no longer refused; see
+          // _shared/multi-vehicle.ts.)
           setStatus("error");
           setErrorMsg(body.message||"Sorry, we can't process a page with multiple vehicles. Paste the link to the ONE vehicle you want checked instead.");
           return;
         }
+        if(body.error==="subject_mismatch"){
+          // The page mentions several vehicles and the read came back
+          // describing one of the NEIGHBOURS, not the vehicle the page
+          // declares. We refuse rather than report on the wrong car. Not
+          // charged. [[ai-defamation-entity-match-lesson]]
+          setStatus("error");
+          setErrorMsg(body.message||"This page shows several vehicles alongside the one it's for, and we couldn't be certain which one we read. You haven't been charged — paste the link again, or upload a screenshot of the vehicle you want checked.");
+          return;
+        }
+        // ANY OTHER 422 ENDS HERE TOO. res.json() can only run once, and the
+        // body is already consumed above -- so an unrecognised code used to
+        // fall through to `await res.json()` below and throw "body stream
+        // already read", turning a specific server message into a generic
+        // failure. Answering from the body we already have closes that for
+        // every future code, not just the two added today.
+        setStatus("error");
+        setErrorMsg(body.message||body.error||"Something went wrong analyzing that listing.");
+        return;
       }
       const data=await res.json();
       if(!res.ok||data.error){

@@ -7,6 +7,75 @@
 // @type, an array of nodes, or an @graph with @type arrays like
 // ["Product","Car"] (EDealer) -- and every shape here came off a real page.
 
+// What the page DECLARES it is about -- a different question from what it
+// mentions, and the one that tells a detail page from an inventory grid.
+// See _shared/multi-vehicle.ts.
+//
+// Returns the NODE COUNT as well as the VINs, because those are not the same
+// question either. A detail page that declares one vehicle whose VIN string we
+// cannot use (a placeholder, a typo, an omitted field) is still a detail page;
+// counting VINs alone would score it "declares nothing" and refuse it.
+//
+// `pageUrl` resolves the shape that would otherwise cost a real VDP its scan:
+// platforms that mark up their similar-vehicles rail give every card its own
+// Car node, so the page declares several. The one whose url/@id/
+// mainEntityOfPage is THIS page is the subject; the rest are the rail.
+//
+// Deliberately NOT built on extractJsonLdVehicle: that returns the FIRST
+// priced vehicle node and stops, so it can never answer "how many".
+export function jsonLdVehicles(html, pageUrl) {
+  const empty = { count: 0, vins: [], anchoredVin: null };
+  if (typeof html !== "string" || !html) return empty;
+  const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
+    .map((m) => m[1].trim());
+  const out = new Set();
+  const seenNodes = new Set();
+  let anchoredVin = null;
+  const norm = (u) => String(u ?? "").trim().toLowerCase().replace(/[?#].*$/, "").replace(/\/+$/, "");
+  const here = norm(pageUrl);
+  const typeOf = (n) => {
+    const t = n?.["@type"];
+    return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
+  };
+  const isVehicle = (n) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
+  const vinOf = (n) => {
+    // Four fields real dealer schemas use for it, in decreasing directness.
+    const vin = n.vehicleIdentificationNumber ?? n.vin ?? n.sku ?? n.mpn;
+    return (typeof vin === "string" && /^[A-HJ-NPR-Z0-9]{17}$/i.test(vin.trim())) ? vin.trim().toUpperCase() : null;
+  };
+  const anchorOf = (n) => norm(
+    typeof n.url === "string" ? n.url
+      : typeof n["@id"] === "string" ? n["@id"]
+      : typeof n.mainEntityOfPage === "string" ? n.mainEntityOfPage
+      : n?.mainEntityOfPage?.["@id"],
+  );
+  const walk = (n, depth) => {
+    if (!n || typeof n !== "object" || depth > 6) return;
+    if (Array.isArray(n)) { for (const x of n) walk(x, depth + 1); return; }
+    if (isVehicle(n)) {
+      const vin = vinOf(n);
+      // Identity for counting: the VIN when there is one, otherwise the node's
+      // own anchor or its name -- so one vehicle described twice across two
+      // blocks (common: a Product node and a Car node for the same unit) is
+      // counted once, and a VIN-less node is still counted.
+      const key = vin || anchorOf(n) || String(n.name ?? "").trim().toLowerCase() || `node:${seenNodes.size}`;
+      seenNodes.add(key);
+      if (vin) out.add(vin);
+      if (vin && here && anchorOf(n) === here) anchoredVin = vin;
+    }
+    for (const v of Object.values(n)) walk(v, depth + 1);
+  };
+  for (const b of blocks) {
+    try { walk(JSON.parse(b), 0); } catch { /* one malformed block never sinks the rest */ }
+  }
+  return { count: seenNodes.size, vins: [...out], anchoredVin };
+}
+
+/** Back-compat shim: the VINs alone. */
+export function jsonLdVehicleVins(html) {
+  return jsonLdVehicles(html, null).vins;
+}
+
 export function extractJsonLdVehicle(html) {
   const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
     .map((m) => m[1].trim());

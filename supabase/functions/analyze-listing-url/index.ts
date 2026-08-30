@@ -59,7 +59,8 @@ import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedSc
 import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
-import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
+import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
+import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch } from "../_shared/multi-vehicle.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
@@ -109,7 +110,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27t";  // + the sealed capture is the WHOLE page again: a too-large full-page shot is re-shot narrower and still whole (twice, the second from its own measurement) instead of being replaced by a photo of the top of the listing; a short capture now states its measured coverage
+const CACHE_VER = "2026-08-27u";  // + a page is CLASSIFIED before a report is built about it: a VDP that mentions neighbours in a similar-vehicles rail is no longer refused as an inventory grid, and the report is pinned to the vehicle the page declares
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -158,27 +159,16 @@ async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
 // ── Multi-vehicle-page detection (URL path) ─────────────────────────────────
 // analyze-quote (uploads) already rejects a multi-vehicle image without
 // charging. This is the URL-scan equivalent -- a pasted link to an inventory
-// or search-results page, not one vehicle's own page, had NO detection at
-// all until now (Vic, 2026-08-20: "reject with kind message ... some
-// professional"). Deterministic and cheap on purpose, run BEFORE the
-// expensive Claude extraction call: a single-vehicle detail page states
-// exactly one VIN; an inventory grid states several. Counting VINs rather
-// than re-running a vision classifier avoids a second paid model call just
-// to detect the same thing apr-extract.js's regex backstop already proves
-// works well for this class of signal -- deterministic, evidence-carrying,
-// never guesses. Checksum-VALID VINs only (validateVin), so a stray
-// 17-character stock/tracking number can't false-positive a real single-
-// vehicle page into a rejection.
-function countDistinctValidVins(text: string): string[] {
-  const seen = new Set<string>();
-  const re = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const check = validateVin(m[0]);
-    if (check.valid) seen.add(check.vin!);
-  }
-  return [...seen];
-}
+// or search-results page, not one vehicle's own page (Vic, 2026-08-20:
+// "reject with kind message ... some professional").
+//
+// THE RULE MOVED, because counting was answering the wrong question. It used
+// to be "more than one checksum-valid VIN means a grid", and a real Advantage
+// Ford VDP was refused for stating six: the GMC Acadia it is about, plus five
+// neighbours in a similar-vehicles rail. How many vehicles a page MENTIONS is
+// not how many it is ABOUT. See _shared/multi-vehicle.ts, which now owns both
+// the counter and the decision and has the test coverage the inline version
+// never had.
 
 // ── Repeat multi-vehicle attempt throttle (shared with analyze-quote) ──────
 // Same table/RPCs as analyze-quote's (20260820_scan_attempt_throttle.sql) --
@@ -3058,6 +3048,18 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // WHAT THIS PAGE IS ABOUT, established before any report is built about it
+    // and carried to the re-anchor check after extraction. Null until the page
+    // has been classified; a page we never classified never re-anchors.
+    let pageSubjectVin: string | null = null;
+    let pageMentionsOthers = false;
+    let pageDeclared: { year?: unknown; make?: unknown } | null = null;
+    // Hoisted out of the classification block: the subject-mismatch refusal
+    // far below is the most expensive exit in this function and needs the same
+    // repeat-spend throttle the multi-vehicle refusal uses.
+    let repeatIdentity = "";
+    let repeatInputHash = "";
+
     // Aggregator ToS gate. Runs before the credit hold and any scrape, so a
     // blocked link costs the user nothing. We do NOT auto-fetch AutoTrader/
     // CarGurus/etc.; instead we tell the buyer how to verify without LotCheck
@@ -3303,6 +3305,9 @@ Deno.serve(async (req: Request) => {
       if (!jl && !blob) return null;
       const blobFacts = blob ? {
         quotedPrice: blob.quotedPrice, msrp: blob.msrp ?? null, vin: blob.vin,
+        // Carried so the subject guard has something to corroborate a read
+        // against on a page with no schema.org markup at all.
+        year: blob.year ?? null, make: blob.make ?? null,
         // The dealer's OWN itemisation of the price they advertise. Kept apart
         // from addOns because these sit INSIDE the advertised figure, not on
         // top of it -- see _shared/d2c-vdp.js.
@@ -3407,6 +3412,26 @@ Deno.serve(async (req: Request) => {
       // feed fallback have already failed, so pages that load are unaffected.
       // Prefer the copy we started at t=0; only re-fetch if it came back empty.
       const jsonLdFallback = (await earlyJsonLd) || (await buildJsonLdFallbackAnalysis(url));
+      // CLASSIFY BEFORE REPORTING, ON THIS PATH TOO. extractJsonLdVehicle takes
+      // the FIRST priced vehicle node and stops -- so on an inventory grid whose
+      // cards each carry structured data, this branch would build a complete,
+      // enriched, sealed and CHARGED report about whichever card happened to be
+      // first in the markup. The page's own declaration answers it for free
+      // from HTML we already hold. [[establish-page-before-report]]
+      if (jsonLdFallback) {
+        const jlHtml = await directHtml.catch(() => null);
+        const jlDeclared = typeof jlHtml === "string" ? jsonLdVehicles(jlHtml, url) : { count: 0, vins: [], anchoredVin: null };
+        if (jlDeclared.count > 1 && !jlDeclared.anchoredVin) {
+          await releaseCredit(holdId);
+          holdId = null;
+          await logUsage({ success: false, errorMessage: `multi-vehicle page: JSON-LD declares ${jlDeclared.count} vehicles (not charged)` });
+          console.log(`Multi-vehicle page rejected on the JSON-LD fallback path: ${jlDeclared.count} declared vehicles; no credit charged.`);
+          return new Response(JSON.stringify({
+            error: "multi_vehicle_page",
+            message: "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead.",
+          }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+      }
       if (jsonLdFallback) {
         await detectTradeInWidget(url, jsonLdFallback, null, pageHtml); // S36 -- shares the scan's one page read
         // The structured data often lacks the price the RENDERED page displays.
@@ -3626,31 +3651,107 @@ Deno.serve(async (req: Request) => {
     // the expensive Claude call below, or the whole point (never pay to read
     // a page we can't build a single-vehicle report from) is lost.
     {
-      const repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
-      const repeatInputHash = await sha256Hex(url);
-      const cooldown = await checkRepeatCooldown(repeatIdentity, repeatInputHash);
-      if (cooldown.blocked) {
+      repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
+      repeatInputHash = await sha256Hex(url);
+      // ESTABLISH WHAT THE PAGE IS BEFORE BUILDING A REPORT ABOUT IT.
+      // (Vic, 2026-08-27: "you need verification process first establish
+      // what's on webpage then create report".) The page's own machine-
+      // readable declaration of its subject is the evidence -- schema.org
+      // vehicle nodes, or the platform's vehicle-data blob -- and both are
+      // already in flight from the SHARED direct fetch started at the top of
+      // this scan, so establishing it costs nothing extra and no extra call.
+      // BOUNDED. Both of these are promises started near the top of the
+      // handler and are, in practice, long resolved by the time the Nimble
+      // fetch above has finished -- but "in practice" is not a budget. A bare
+      // `await` here would put directHtml's 15s retry ladder, and whatever
+      // earlyStructuredFacts is still chained on, IN FRONT of the extraction
+      // on every scan. Supabase kills the function at ~150s with a raw 504
+      // that skips the credit-release path and STRANDS THE HOLD, so a slow
+      // promise must never be able to reach that ceiling from here.
+      // [[never-charge-to-ask-a-question]]
+      const settleMs = Math.max(1_000, Math.min(5_000, REQUEST_DEADLINE - Date.now() - 30_000));
+      const settled = <T,>(p: Promise<T>) => Promise.race([
+        p.catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), settleMs)),
+      ]);
+      const subjectHtml = await settled(directHtml);
+      const blobVin = ((await settled(earlyStructuredFacts))?.vin as string | undefined) ?? null;
+      // STRIP FORM CHROME BEFORE COUNTING. Every Convertus VDP ships a
+      // hardcoded, checksum-VALID VIN as the trade-in form's input placeholder.
+      // Counted as a vehicle it arms "this page mentions others" on 100% of
+      // that platform family -- telling the reader about a rail that is not
+      // there and arming the subject guard on every one of their listings.
+      const pageMarkup = typeof subjectHtml === "string"
+        ? subjectHtml.replace(/\s(?:placeholder|value)="[^"]*"/gi, " ")
+        : null;
+      const declared = pageMarkup !== null ? jsonLdVehicles(pageMarkup, url) : { count: 0, vins: [], anchoredVin: null };
+
+      // ARM THE GUARD FROM EVERYTHING WE CAN SEE, not from one source. The
+      // count came from Nimble's MARKDOWN, truncated to 100,000 chars, while
+      // the declaration comes from the full HTML -- so a rail whose VINs live
+      // in markup the markdown drops would leave the count at 1, silently
+      // disarming the wrong-vehicle guard on exactly the pages it exists for.
+      // The union is the honest answer to "does this page mention others".
+      const htmlVins = pageMarkup !== null ? distinctValidVins(pageMarkup) : [];
+      const vins = [...new Set([...distinctValidVins(pageContent), ...htmlVins])];
+
+      // "We never read the page" is not "the page declares nothing" -- see
+      // classifyVehiclePage. Both refuse; only the first is the page's fault.
+      const sawPageSource = typeof subjectHtml === "string" || blobVin !== null;
+      const page = classifyVehiclePage(vins, declared, blobVin, sawPageSource);
+      console.log(`Page subject: ${page.kind} -- ${page.why} (found ${vins.length}, declared ${declared.count} node(s)/${declared.vins.length} vin(s)${blobVin ? `, blob ${blobVin}` : ""}, html ${pageMarkup !== null ? "ok" : "unavailable"}).`);
+      if (page.kind === "multi") {
+        // THE THROTTLE IS CONSULTED ONLY ONCE WE STILL MEAN TO REFUSE, and it
+        // moved here from ABOVE the classification for a reason that would
+        // otherwise have shipped this fix broken. It exists to stop repeated
+        // vendor spend on a page we refuse -- so a page we no longer refuse has
+        // nothing to throttle. Left where it was, every URL already recorded
+        // under the OLD count-based rule stayed locked out for 2h/24h, and the
+        // very first person that hit is the owner, whose Advantage Ford link is
+        // already on the counter from the refusal that prompted this change. He
+        // would have installed the fix and still been unable to scan the link.
+        //
+        // It still runs BEFORE the expensive Claude call, which is the property
+        // that mattered: classification costs nothing beyond the page fetch
+        // this branch has already paid for.
+        // Only consult and only record when the PAGE is why we refused. A
+        // refusal caused by our own unreadable fetch must not write a 2h/24h
+        // lockout against a real listing.
+        const cooldown = page.blameThePage
+          ? await checkRepeatCooldown(repeatIdentity, repeatInputHash)
+          : { blocked: false as const };
         await releaseCredit(holdId);
         holdId = null;
-        await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
-        return new Response(JSON.stringify({
-          error: "repeat_multivehicle_cooldown",
-          message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
-          cooldownUntil: cooldown.cooldownUntil,
-        }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
-      }
-      const vins = countDistinctValidVins(pageContent);
-      if (vins.length > 1) {
-        await releaseCredit(holdId);
-        holdId = null;
-        await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
-        await logUsage({ success: false, errorMessage: `multi-vehicle page: ${vins.length} distinct VINs found (not charged)` });
-        console.log(`Multi-vehicle page detected via VIN count: ${vins.length} distinct VINs; rejecting, no credit charged.`);
+        if (cooldown.blocked) {
+          await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
+          return new Response(JSON.stringify({
+            error: "repeat_multivehicle_cooldown",
+            message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
+            cooldownUntil: cooldown.cooldownUntil,
+          }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+        if (page.blameThePage) await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
+        await logUsage({ success: false, errorMessage: `multi-vehicle page: ${page.why} (not charged)` });
+        console.log(`Multi-vehicle page rejected: ${page.why}; no credit charged.`);
         return new Response(JSON.stringify({
           error: "multi_vehicle_page",
-          message: "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead.",
+          // SAY WHICH IT WAS. Telling a buyer "this looks like a search-results
+          // page" when the truth is that we could not read their page is the
+          // same unbacked claim the whole change is about, aimed at them.
+          message: page.blameThePage
+            ? "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead."
+            : "We couldn't read enough of that page to tell which vehicle it's for, and it mentions several. You haven't been charged. Try the link again in a moment, or upload a screenshot of the vehicle you want checked.",
         }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
       }
+      // Accepting a page that mentions several vehicles is only safe while the
+      // report is pinned to the one it is ABOUT -- see the subject re-anchor
+      // after extraction.
+      pageSubjectVin = page.subjectVin;
+      pageMentionsOthers = vins.length > 1;
+      // Kept for the identity check after extraction: the VIN is the field a
+      // wrong read is most likely to get RIGHT, so comparing it alone is not
+      // enough. The declaration also carries year and make.
+      pageDeclared = (await settled(earlyStructuredFacts)) as { year?: unknown; make?: unknown } | null;
     }
 
     // Tighter per-attempt timeout than analyze-quote's (~45s) because the Nimble
@@ -3687,7 +3788,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}${pageMentionsOthers ? `\n\nIMPORTANT: this page also shows OTHER vehicles below the one it is for -- a \"similar vehicles\" or \"recently viewed\" rail. Report ONLY the vehicle the page is about${pageSubjectVin ? ` (VIN ${pageSubjectVin})` : ""}. Every figure you return -- price, MSRP, odometer, trim, fees, financing -- must come from THAT vehicle, never from one of the others. If a figure is visible only on another vehicle's card, return null rather than borrowing it.` : ""}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -4101,8 +4202,77 @@ Deno.serve(async (req: Request) => {
     // gap. Same ordering-vs-derived-value class as the computeLeverageScore /
     // allInPricing bug fixed in 63fa164 -- moving the producer above its
     // consumers is the structural fix, not re-deriving after the fact.
+    // THE OTHER HALF OF ACCEPTING A PAGE THAT MENTIONS SEVERAL VEHICLES.
+    // DELIBERATELY OUTSIDE the try/catch below, whose stated policy is that
+    // "the safety net must never sink the scan" -- correct for a gap-fill, and
+    // exactly wrong for the one check standing between a buyer and a signed
+    // report about somebody else's car. Inside it, any future awaited call
+    // added above this return would be swallowed and the scan would carry on
+    // and ship. Safe by structure, not by luck.
+    //
+    // A detail page with a similar-vehicles rail is now processed instead of
+    // refused, which is only safe while the report is about the vehicle the
+    // page DECLARES. If the reader came back with one of the neighbours' VINs
+    // it was reading the wrong card, and its price, odometer and trim are all
+    // about the wrong car -- there is no field-by-field repair for that, only
+    // a refusal. [[ai-defamation-entity-match-lesson]]
+    if (pageMentionsOthers && pageSubjectVin) {
+      const readVin = String(analysis.vin ?? "").trim();
+      const vinRead = readVin.length === 17;
+      const idClash = identityMismatch(analysis, pageDeclared);
+      // THE VIN IS THE FIELD A WRONG READ IS MOST LIKELY TO GET RIGHT. It is
+      // stated once, prominently, at the top of the page, while year and make
+      // come off whichever card was actually being read -- and those are what
+      // drive the recall lookup and the catalogue MSRP denominator. So the pin
+      // is three questions, not one:
+      const reason =
+        subjectMismatch(analysis.vin, pageSubjectVin)
+          ? `the VIN read (${readVin}) is not the ${pageSubjectVin} this page declares`
+        : idClash
+          ? `the vehicle read does not match the one this page declares (${idClash})`
+        // NOTHING READ, NOTHING PINNED. A read that returns no VIN at all used
+        // to sail through here, and the gap-fill sixteen lines below would then
+        // stamp the DECLARED subject's VIN onto whatever was actually read --
+        // manufacturing a report that looks internally consistent (right VIN,
+        // valid check digit) while its price, trim and odometer could belong to
+        // a rail neighbour. Rail cards do not print VINs, so this is the SHAPE
+        // a wrong read takes here. It needs at least one corroborating field.
+        // Fires only when there IS a declared make to corroborate against and
+        // the read produced none. It must never fire because OUR OWN structured
+        // facts happen to omit the field -- a page with no schema.org markup at
+        // all would then be refused after the full spend on every scan, which
+        // is the reported bug wearing a different hat.
+        : (!vinRead && String(pageDeclared?.make ?? "").trim() && !String((analysis as any).make ?? "").trim())
+          ? "nothing in what was read ties it to the vehicle this page declares"
+        : null;
+      if (reason) {
+        console.error(`Subject mismatch on ${url}: ${reason}. Refusing rather than reporting on the wrong vehicle.`);
+        // The same repeat-spend throttle the multi-vehicle refusal uses. This
+        // exit is the most expensive in the function -- it lands after Nimble,
+        // after the sealed screenshot, and after the paid extraction -- and a
+        // VIN mismatch is deterministic for a given page, so it repeats rather
+        // than self-heals. [[cost-exploit-guards]]
+        const cooldown = repeatIdentity ? await checkRepeatCooldown(repeatIdentity, repeatInputHash) : { blocked: false as const };
+        await releaseCredit(holdId);
+        holdId = null;
+        if (!cooldown.blocked && repeatIdentity) await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
+        await logUsage({ success: false, errorMessage: `subject mismatch: ${reason} (not charged)` });
+        return new Response(JSON.stringify({
+          error: "subject_mismatch",
+          message: "This page shows several vehicles alongside the one it's for, and we couldn't be certain which one we read. You haven't been charged. Upload a screenshot of the vehicle you want checked and we'll read that instead.",
+          cooldownUntil: cooldown.blocked ? cooldown.cooldownUntil : undefined,
+        }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+      // Pinned, and the pin is recorded rather than thrown away: it rides into
+      // the cached row, so anyone auditing why this report says what it says
+      // can see which vehicle we anchored to and that a rail was present.
+      analysis.pageSubjectVin = pageSubjectVin;
+      analysis.pageMentionsOtherVehicles = true;
+    }
+
     let structuredGapFilledPrice = false;
     try {
+      // (the subject guard used to sit here, inside this catch -- see above)
       const early = await earlyStructuredFacts;
       if (early) {
         for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {

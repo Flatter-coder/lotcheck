@@ -310,6 +310,18 @@ jobs:
       # fact that no surface claims "full-page" from a field it cannot back.
       - name: Whole-page capture (a too-large page is re-shot whole, never cropped)
         run: npm run test:capture-whole-page
+      # A real Advantage Ford VDP was refused as an inventory grid because it
+      # states six VINs: the GMC Acadia it is about, plus five neighbours in a
+      # similar-vehicles rail. How many vehicles a page MENTIONS is not how
+      # many it is ABOUT, so the page's own declaration decides -- and the
+      # report is pinned to the vehicle it declares.
+      - name: Single-vehicle page (a VDP with a similar-vehicles rail is not a grid)
+        run: npm run test:multi-vehicle
+      # subject_mismatch shipped server-side with no client branch, and the
+      # 422 handler would have thrown on the already-read body rather than
+      # showing the buyer the message written for them. Mechanical from now on.
+      - name: Error codes reach the buyer (every server refusal has a client branch)
+        run: npm run check:error-codes
       # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
       # the LISTING path only; a dealer red-team found the identical accusation
       # still live on the UPLOAD path, which carried its own unguarded copy and
