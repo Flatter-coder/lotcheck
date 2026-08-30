@@ -35,6 +35,8 @@
     "test:market-catalog": "node scripts/test-market-vs-catalog.mjs",
     "test:structured-inventory": "node scripts/test-structured-inventory.mjs",
     "test:carry-forward": "node scripts/test-carry-forward.mjs",
+    "test:dealer-catalog": "node --experimental-strip-types supabase/functions/_shared/dealer-catalog.test.ts",
+    "catalog:build": "node --experimental-strip-types scripts/build-dealer-catalog.mjs",
     "check:error-codes": "node scripts/check-error-codes.mjs",
     "test:multi-vehicle": "node --experimental-strip-types supabase/functions/_shared/multi-vehicle.test.ts",
     "test:capture": "node --experimental-strip-types supabase/functions/_shared/capture.test.ts",

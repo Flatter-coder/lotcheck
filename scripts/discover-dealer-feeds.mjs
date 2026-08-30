@@ -33,6 +33,10 @@
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
 import { writeFileSync } from "node:fs";
 import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
+// ONE definition of what a dealer website reduces to. The scanner keys the
+// catalogue on this and the probe files hosts by it; two copies would drift,
+// and then a host the probe catalogued would be one the scanner cannot find.
+import { toOrigin } from "../supabase/functions/_shared/dealer-catalog.ts";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -140,19 +144,6 @@ async function fetchOverpass() {
 
 // A tag can be "example.com", "http://example.com/inventory?x=1", or junk.
 // Reduce to a bare https origin, or null if it isn't usable as one.
-function toOrigin(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  let s = raw.trim();
-  if (!s || /^(mailto:|tel:)/i.test(s)) return null;
-  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
-  try {
-    const u = new URL(s);
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(u.hostname)) return null;
-    // Social pages are not dealer sites and will never carry a feed.
-    if (/facebook|instagram|twitter|x\.com|linkedin|youtube|google\./i.test(u.hostname)) return null;
-    return `https://${u.hostname}`;
-  } catch { return null; }
-}
 
 // Why a host produced nothing is the whole diagnostic value of this probe, and
 // until now it was thrown away: every detector returned a bare null, so 1,607
