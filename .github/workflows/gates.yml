@@ -322,6 +322,12 @@ jobs:
       # showing the buyer the message written for them. Mechanical from now on.
       - name: Error codes reach the buyer (every server refusal has a client branch)
         run: npm run check:error-codes
+      # 28% of Alberta's 1,639 dealer hosts refuse a datacenter IP. The
+      # catalogue remembers which, so a scan stops paying to rediscover it --
+      # advisory only, so a wrong or stale verdict costs one attempt, never
+      # the scan.
+      - name: Dealer catalogue (which way to fetch a host, learned not guessed)
+        run: npm run test:dealer-catalog
       # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
       # the LISTING path only; a dealer red-team found the identical accusation
       # still live on the UPLOAD path, which carried its own unguarded copy and

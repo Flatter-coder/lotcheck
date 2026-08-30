@@ -94,11 +94,28 @@ for (const file of FILES) {
     schema.set(norm(m[1]), cols);
   }
 
-  // ALTER TABLE name ADD COLUMN [IF NOT EXISTS] col
-  for (const m of sql.matchAll(/alter\s+table\s+([\w".]+)\s+add\s+column\s+(?:if\s+not\s+exists\s+)?([\w"]+)/gi)) {
-    const t = norm(m[1]);
-    if (!schema.has(t)) schema.set(t, new Set());
-    schema.get(t).add(m[2].replace(/"/g, "").toLowerCase());
+  // ALTER TABLE name ADD COLUMN [IF NOT EXISTS] col, ADD COLUMN ... , ...
+  //
+  // ONE statement can add SEVERAL columns, and this used to read only the
+  // first. Postgres takes a comma-separated action list, so
+  // `alter table t add column a int, add column b text` really does add both --
+  // and the gate registered only `a`, then failed an insert naming `b` with
+  // "no column b", pointing at a fault that was its own. It reads the whole
+  // statement now: match up to the terminating semicolon, then take every
+  // ADD COLUMN inside it.
+  //
+  // Non-greedy to the first `;` is right for ALTER specifically -- an ALTER
+  // action list cannot contain a function body, so there is no $$-quoted
+  // semicolon to run past.
+  for (const stmt of sql.matchAll(/alter\s+table\s+([\w".]+)([\s\S]*?);/gi)) {
+    const t = norm(stmt[1]);
+    let added = false;
+    for (const c of stmt[2].matchAll(/add\s+column\s+(?:if\s+not\s+exists\s+)?([\w"]+)/gi)) {
+      if (!schema.has(t)) schema.set(t, new Set());
+      schema.get(t).add(c[1].replace(/"/g, "").toLowerCase());
+      added = true;
+    }
+    void added;
   }
 
   // INSERT INTO name (cols) — validated against the schema as of RIGHT NOW.

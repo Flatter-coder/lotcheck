@@ -61,6 +61,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch } from "../_shared/multi-vehicle.ts";
+import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
@@ -110,7 +111,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-27u";  // + a page is CLASSIFIED before a report is built about it: a VDP that mentions neighbours in a similar-vehicles rail is no longer refused as an inventory grid, and the report is pinned to the vehicle the page declares
+const CACHE_VER = "2026-08-30a";  // + the dealer-website catalogue: a scan now reads what we already know about the host before choosing how to fetch it, and writes back what it learned
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2307,7 +2308,11 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // 404/parse miss will never succeed on a retry, while a 429 or a Cloudflare
 // challenge is a TIMING signal -- and hammering it converts a transient block
 // into a sustained one.
-type DirectOutcome = { status: "ok" | "rate_limited" | "challenged" | "http_error" | "empty" | "network"; code?: number };
+// `finalUrl` is the URL that actually ANSWERED. fetch follows redirects, so a
+// dealer's legacy or vanity domain can 301 to a group site — and filing the
+// group site's wall verdict and platform under the vanity domain's key writes
+// one host's facts onto another host's row.
+type DirectOutcome = { status: "ok" | "rate_limited" | "challenged" | "http_error" | "empty" | "network"; code?: number; finalUrl?: string };
 
 async function fetchDirectHtml(url: string, timeoutMs: number, outcome?: DirectOutcome): Promise<string | null> {
   const note = (status: DirectOutcome["status"], code?: number) => { if (outcome) { outcome.status = status; outcome.code = code; } };
@@ -2336,6 +2341,7 @@ async function fetchDirectHtml(url: string, timeoutMs: number, outcome?: DirectO
       redirect: "follow",
       signal: controller.signal,
     });
+    if (outcome) outcome.finalUrl = res.url || undefined;
     if (!res.ok) { note(res.status === 429 || res.status === 503 ? "rate_limited" : "http_error", res.status); return null; }
     const html = await res.text();
     if (!html || html.length < 500) { note("empty", res.status); return null; }
@@ -2372,11 +2378,28 @@ async function fetchDirectHtml(url: string, timeoutMs: number, outcome?: DirectO
 // to roll over, and costs no wall-clock in practice because these attempts run
 // in parallel with Nimble's own 30-100s extraction. A retry that cannot help
 // (404, unparseable) is not retried at all.
-async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3): Promise<string | null> {
+// `sink` receives THIS scan's outcome. lastDirectOutcome below is module-level
+// and an edge isolate serves several requests at once, so reading it to decide
+// what to record about a host would attribute one scan's verdict to another
+// scan's dealer. The log line can live with that; the catalogue cannot.
+async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3, sink?: DirectOutcome): Promise<string | null> {
   // 2s, 8s -- plus up to 1s of jitter, so concurrent scans of the same host do
   // not line their retries up on the same tick.
+  //
+  // NOT SHORTENED FOR A KNOWN-WALLED HOST, though an earlier draft did. The
+  // spacing is the point: Cloudflare's bot scoring rejects a first request and
+  // passes a retry MOMENTS LATER, so a retry that lands too soon is the same
+  // moment and buys nothing but a second refusal -- and test-page-read pins
+  // these values for exactly that reason. The count is not shortened either:
+  // the challenge is intermittent (lexussouthpointe, measured: 57 of 67
+  // requests challenged, so ~15% of attempts pass), three tries clear it 39% of
+  // the time against one try's 15%, and a successful direct read is the ONLY
+  // thing that lifts a wall verdict. Fewer free reads would mean fewer
+  // liftings, which would mean more scans down the paid path -- a loop that
+  // closes on itself. What the catalogue shortens instead is the per-attempt
+  // TIMEOUT; see the call site.
   const BACKOFF_MS = [2_000, 8_000];
-  const outcome: DirectOutcome = { status: "network" };
+  const outcome: DirectOutcome = sink ?? { status: "network" };
   for (let i = 1; i <= attempts; i++) {
     const html = await fetchDirectHtml(url, timeoutMs, outcome);
     if (html) { if (i > 1) console.log(`Direct fetch succeeded on attempt ${i}/${attempts}.`); return html; }
@@ -3183,6 +3206,10 @@ Deno.serve(async (req: Request) => {
     // record exactly one — and recorded NOTHING at all on the failure path,
     // where two paid shots were logged as free. The callback counts them.
     const SCRAPFLY_SHOT_CREDITS = 80, SCRAPFLY_SHOT_USD = 0.012;
+    // A /scrape render with asp=true. Same order as a screenshot on these
+    // pages, and the same caveat: 60 is the documented floor, 80 is what the
+    // dashboard shows for real dealer VDPs. Carry what we are charged.
+    const SCRAPFLY_RENDER_CREDITS = 80, SCRAPFLY_RENDER_USD = 0.012;
     let scrapflyShots = 0;
     const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
       ? (() => {
@@ -3227,7 +3254,70 @@ Deno.serve(async (req: Request) => {
     // executed even once in production, despite passing 18/18 against a saved
     // copy of the very page it was written for. Anything needing real HTML
     // must come through here.
-    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, 15_000).catch(() => null);
+    // ---- THE CATALOGUE, READ BEFORE WE DECIDE HOW TO FETCH ----------------
+    //
+    // Vic, 2026-08-30: "we should have them all listed on place ... and read
+    // them on as soones lotcheck user makes request". This is that read.
+    //
+    // 28% of Alberta's 1,639 dealer hosts refuse a datacenter IP outright. On
+    // one of those, the ladder below spends three attempts and two backoffs
+    // proving a wall we have already met, and only THEN starts the anti-bot
+    // render that was always going to be the answer. The catalogue remembers,
+    // so the second buyer to scan a walled host does not pay for the first
+    // buyer's discovery.
+    //
+    // ADVISORY ONLY, in three ways that matter: the lookup is bounded so a slow
+    // catalogue cannot delay a scan, an unknown host takes exactly today's
+    // ladder, and a wrong verdict costs one attempt rather than the scan.
+    // [[no-single-point-of-failure]]
+    // SERIAL, AND IT HAS TO BE: the plan decides how directHtml is constructed,
+    // so nothing downstream can start until it is known. That makes its cost a
+    // tax on EVERY scan, including the ~1,609 hosts with no row yet -- so the
+    // budget is one indexed single-row read plus a wide margin for a hiccup,
+    // not a comfortable round number. The duration is logged because a tax on
+    // every scan is exactly the kind of cost that should be visible rather
+    // than assumed. If it ever reads high, this moves behind the render.
+    const catalogHost = catalogKey(url);
+    const catalogT0 = Date.now();
+    const catalogRow = catalogHost
+      ? await Promise.race([
+          supabase.rpc("fn_dealer_catalog_lookup", { p_host: catalogHost })
+            .then(({ data, error }: any) => (error ? null : data))
+            .catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 400)),
+        ])
+      : null;
+    const catalogMs = Date.now() - catalogT0;
+    const fetchPlan = chooseFetchPlan(
+      catalogRow
+        ? {
+            host: catalogRow.host,
+            platform: catalogRow.platform,
+            fetchStrategy: catalogRow.fetch_strategy,
+            lastDirectStatus: catalogRow.last_direct_status,
+            lastDirectOkAt: catalogRow.last_direct_ok_at,
+            lastDirectFailAt: catalogRow.last_direct_fail_at,
+            lastAspOkAt: catalogRow.last_asp_ok_at,
+            observedCount: catalogRow.observed_count,
+          }
+        : null,
+      Date.now(),
+    );
+    console.log(`Catalogue [${catalogHost ?? "unkeyable"}] in ${catalogMs}ms: ${fetchPlan.why}${fetchPlan.aspFirst ? " -> one confirming direct attempt, then render" : ""}.`);
+
+    // This scan's own copy of the direct-read verdict, for the write-back.
+    const directOutcome: DirectOutcome = { status: "network" };
+    // WHAT THE CATALOGUE ACTUALLY SHORTENS: the per-attempt timeout, not the
+    // attempts and not the spacing between them.
+    //
+    // A host that refuses us refuses us FAST -- a 403 or a challenge shell
+    // comes back in well under a second -- so on a host we already know walls
+    // us, an attempt still running at 6s is one that is hanging, and hanging is
+    // not an answer we are waiting for. Left at 15s, three hanging attempts
+    // spend 45s of a 140s budget re-learning something recorded. Every attempt
+    // survives, the spacing survives, and the ceiling drops from ~55s to ~28s
+    // on exactly the hosts that were eating the deadline that strands a credit.
+    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, fetchPlan.aspFirst ? 6_000 : 15_000, 3, directOutcome).catch(() => null);
     // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
     // fails (all retries exhausted) -- the strongest early signal the rescue
     // will be needed. Started here, ~20-50s into the request, it runs in
@@ -3240,8 +3330,45 @@ Deno.serve(async (req: Request) => {
     // spent ONLY on scans whose direct fetch failed -- exactly the scans that
     // were otherwise losing data outright. Resolves null when the direct
     // fetch succeeded (rescue then renders fresh only if it actually fires).
+    // STILL CHAINED ON THE DIRECT FETCH, and deliberately so.
+    //
+    // The reason the render used to be late is not that it waited for the
+    // direct fetch -- it is that the direct fetch took THREE attempts with 2s
+    // and 8s backoffs between them, so "conclusively failed" arrived ~11s after
+    // a wall that announces itself in under one. Cutting the retries to one on
+    // a known-walled host (above) removes that delay at the source.
+    //
+    // An earlier draft started the render unconditionally when the catalogue
+    // said "walled". That bought about a second and created a way to pay for a
+    // render nobody uses: the verdict is trusted for 7 days, so a host that
+    // quietly stopped walling us would answer the direct fetch, resolvePageSource
+    // would prefer it, and the render would be billed and discarded. Chaining
+    // keeps the latency win and spends nothing on a wall that has lifted.
     const earlyRender: Promise<RenderResult | null> = scrapflyEnabled()
-      ? directHtml.then((html) => (html ? null : (console.log("Direct fetch failed -- pre-warming Scrapfly render for a possible rescue."), scrapflyRender(url, 70_000)))).catch(() => null)
+      ? directHtml.then((html) => {
+          if (html) return null;
+          console.log(`Direct fetch failed -- pre-warming Scrapfly render for a possible rescue${fetchPlan.aspFirst ? " (catalogue expected this)" : ""}.`);
+          // THE ONE SCRAPFLY CALL WITH NO LEDGER ROW, until now. The screenshot
+          // logs its credits (operation "screenshot") and the render never did
+          // -- the `operation: "render"` value has been declared and unused --
+          // so the admin panel's per-scan cost has always been the screenshot
+          // alone. This change is specifically a change to how OFTEN the render
+          // fires, so shipping it without the row would make the panel drift
+          // from the Scrapfly invoice by exactly the amount this change adds,
+          // invisibly. [[always-show-cost-first]]
+          const rt0 = Date.now();
+          return scrapflyRender(url, 70_000).then((r) => {
+            logProviderCall({
+              provider: "scrapfly", operation: "render", ok: !!r,
+              driver: fetchPlan.aspFirst ? "catalogue-asp" : "direct-failed",
+              listingHost: hostOf(url), durationMs: Date.now() - rt0,
+              errorCode: r ? null : (lastScrapflyError ?? "empty"),
+              credits: r ? SCRAPFLY_RENDER_CREDITS : null,
+              costUsd: r ? SCRAPFLY_RENDER_USD : null,
+            });
+            return r;
+          });
+        }).catch(() => null)
       : Promise.resolve(null);
     // THE PAGE SOURCE EVERY READER USES -- direct fetch first, the render second.
     //
@@ -3268,7 +3395,43 @@ Deno.serve(async (req: Request) => {
     const pageHtml: Promise<string | null> = directHtml.then(async (html) => {
       const r = await earlyRender.catch(() => null);
       const picked = resolvePageSource(html, r, (m) => console.log(m));
-      if (picked.source === "none") console.warn(`No page source: direct read ${lastDirectOutcome}, render produced no usable HTML.`);
+      if (picked.source === "none") console.warn(`No page source: direct read ${directOutcome.status}, render produced no usable HTML.`);
+
+      // WHAT THIS SCAN LEARNED ABOUT THE HOST, written back so the next
+      // buyer's scan starts knowing it. This is not a crawl and causes no
+      // request to anyone: the buyer asked us to read this page, we read it,
+      // and how it answered is a fact we already hold.
+      //
+      // WRAPPED, and that is not defensive clutter. This block sits inside
+      // pageHtml's `.then`, and pageHtml ends in a blanket `.catch(() => null)`
+      // -- so a synchronous throw anywhere in here would resolve pageHtml to
+      // null and empty EVERY structured reader in the scan. That is precisely
+      // the single point of failure page-source.js was written to remove, and
+      // an optimisation must never be able to re-create it. The comment used to
+      // claim it could not; now the code makes it so.
+      try {
+        // Key on the host that ANSWERED. A vanity domain that 301s to a group
+        // site must not have the group site's verdict filed under its own name.
+        const answeredHost = directOutcome.finalUrl ? catalogKey(directOutcome.finalUrl) : null;
+        const obs = buildObservation(
+          answeredHost ?? catalogHost,
+          html ? "ok" : directVerdict(directOutcome.status, directOutcome.code),
+          picked.source === "render",
+          detectPlatform(picked.html),
+          new Date().toISOString(),
+        );
+        if (obs) {
+          // Fire and forget: the catalogue is an optimisation and must never be
+          // able to slow, fail or sink a scan.
+          supabase.rpc("fn_dealer_catalog_observe", {
+            p_host: obs.host, p_direct_status: obs.directStatus,
+            p_used_asp: obs.usedAsp, p_platform: obs.platform,
+          }).then(({ error }: any) => { if (error) console.warn("catalogue write skipped:", error.message); })
+            .catch((e: unknown) => console.warn("catalogue write skipped:", (e as Error)?.message));
+        }
+      } catch (e) {
+        console.warn("catalogue write skipped:", (e as Error)?.message);
+      }
       return picked.html;
     }).catch(() => null);
 
@@ -3419,7 +3582,7 @@ Deno.serve(async (req: Request) => {
       // first in the markup. The page's own declaration answers it for free
       // from HTML we already hold. [[establish-page-before-report]]
       if (jsonLdFallback) {
-        const jlHtml = await directHtml.catch(() => null);
+        const jlHtml = await pageHtml.catch(() => null);
         const jlDeclared = typeof jlHtml === "string" ? jsonLdVehicles(jlHtml, url) : { count: 0, vins: [], anchoredVin: null };
         if (jlDeclared.count > 1 && !jlDeclared.anchoredVin) {
           await releaseCredit(holdId);
@@ -3674,8 +3837,13 @@ Deno.serve(async (req: Request) => {
         p.catch(() => null),
         new Promise<null>((r) => setTimeout(() => r(null), settleMs)),
       ]);
-      const subjectHtml = await settled(directHtml);
-      const blobVin = ((await settled(earlyStructuredFacts))?.vin as string | undefined) ?? null;
+      // TOGETHER, not one after the other. Both are already in flight and
+      // independent, and settling them in sequence spends the budget TWICE --
+      // which matters more now that pageHtml waits on the render (bounded ~127s)
+      // where directHtml was bounded at ~57s. The margin these eat into is what
+      // stands between the scan and the ~150s kill that strands a credit hold.
+      const [subjectHtml, subjectFacts] = await Promise.all([settled(pageHtml), settled(earlyStructuredFacts)]);
+      const blobVin = ((subjectFacts as any)?.vin as string | undefined) ?? null;
       // STRIP FORM CHROME BEFORE COUNTING. Every Convertus VDP ships a
       // hardcoded, checksum-VALID VIN as the trade-in form's input placeholder.
       // Counted as a vehicle it arms "this page mentions others" on 100% of

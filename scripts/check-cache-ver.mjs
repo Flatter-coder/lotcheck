@@ -67,6 +67,10 @@ const OUTPUT_SHAPING = [
   // report AT ALL, and which vehicle that report is about -- the most
   // output-shaping decision in the whole scan.
   /^supabase\/functions\/_shared\/multi-vehicle\./,
+  // dealer-catalog joined on 2026-08-30. It decides HOW a page is fetched --
+  // and on a bot-walled host that is the difference between a report and a
+  // 502, so it shapes the output as directly as anything in this list.
+  /^supabase\/functions\/_shared\/dealer-catalog\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
