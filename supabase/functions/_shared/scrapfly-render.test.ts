@@ -13,6 +13,7 @@
 // Run: node --experimental-strip-types supabase/functions/_shared/scrapfly-render.test.ts
 
 (globalThis as any).Deno = { env: { get: (k: string) => (k === "SCRAPFLY_API_KEY" ? "test-key" : undefined) } };
+import { readFileSync } from "node:fs";
 const { scrapflyRender } = await import("./scrapfly.ts");
 
 let pass = 0, fail = 0;
@@ -25,12 +26,12 @@ type Call = { shot: string; autoScroll: string; wait: string | null };
 
 /** Stub Scrapfly. `behave(n)` decides what the n-th attempt does. */
 function stub(behave: (n: number) => "timeout" | { html?: string | null; shotBytes?: number }) {
-  const calls: Call[] = [];
+  const calls: (Call & { format?: string })[] = [];
   (globalThis as any).fetch = async (u: unknown) => {
     const url = String(u);
     if (url.includes("api.scrapfly.io")) {
       const q = new URL(url).searchParams;
-      calls.push({ shot: q.get("screenshots[main]") ?? "none", autoScroll: q.get("auto_scroll") ?? "off", wait: q.get("rendering_wait") });
+      calls.push({ shot: q.get("screenshots[main]") ?? "none", autoScroll: q.get("auto_scroll") ?? "off", wait: q.get("rendering_wait"), format: q.get("format") ?? "(unset)" });
       const r = behave(calls.length);
       if (r === "timeout") throw new Error("Signal timed out.");
       return { ok: true, status: 200, json: async () => ({ result: { content: r.html ?? null, screenshots: r.shotBytes ? { main: { url: "https://shot.invalid/x" } } : undefined } }) };
@@ -139,5 +140,30 @@ function stub(behave: (n: number) => "timeout" | { html?: string | null; shotByt
   check("a null analysis does not throw", !threw);
 }
 
+// ---------------------------------------------------------------------------
+// THE RENDER MUST ASK FOR HTML.
+//
+// `format` on Scrapfly's scrape api is the format of the PAGE CONTENT, not of
+// the response envelope: raw | clean_html | json | markdown | text. We sent
+// `json`, which asks Scrapfly to parse a dealer's HTML page AS JSON -- so
+// result.content was never HTML on this path. Every structured reader we have
+// looks inside <script> tags: extractJsonLdVehicle wants application/ld+json,
+// the Convertus reader wants `vmsData =`, the D2C reader wants `__vdpJSON`.
+// All three returned null on every page whose direct fetch was walled, which
+// is ~28% of Alberta's dealer hosts.
+//
+// The trace that showed it: pageSrc=737194 jsonLdVeh=null convertus=null
+// d2c=null. Three independent readers returning null on the same 737 KB is
+// not three bugs; it is one input that is not what they were promised.
+// ---------------------------------------------------------------------------
+{
+  const src = readFileSync(new URL("./scrapfly.ts", import.meta.url), "utf8");
+  const scrape = src.slice(src.indexOf("https://api.scrapfly.io/scrape"), src.indexOf("https://api.scrapfly.io/screenshot"));
+  check("the render asks Scrapfly for raw HTML, never a reformatted body",
+    /searchParams\.set\("format", "raw"\)/.test(scrape) &&
+    !/searchParams\.set\("format", "(json|markdown|text|clean_html)"\)/.test(scrape));
+  check("the screenshot call still asks for an image format",
+    /searchParams\.set\("format", "jpg"\)/.test(src));
+}
 console.log(`\n${pass}/${pass + fail} passed${fail ? `  — ${fail} FAILING` : "  ✓ all green"}`);
 if (fail) (globalThis as any).process?.exit?.(1);
