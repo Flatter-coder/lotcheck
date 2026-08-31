@@ -111,7 +111,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-30a";  // + the dealer-website catalogue: a scan now reads what we already know about the host before choosing how to fetch it, and writes back what it learned
+const CACHE_VER = "2026-08-30b";  // + a failed scan now records what page source it was holding and what each structured reader made of it, so "we could not read that page" names the reader that declined
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3746,7 +3746,36 @@ Deno.serve(async (req: Request) => {
       // Scrapfly's LAST render call failed (see lastScrapflyError).
       const dHtmlTrace = await directHtml.then((h) => (h ? `ok:${h.length}` : "fail")).catch(() => "fail");
       const preRenderTrace = await earlyRender.then((r) => (r ? `html:${r.html?.length ?? 0},shot:${r.screenshotB64?.length ?? 0}` : "null")).catch(() => "null");
-      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody} | direct=${dHtmlTrace} | preRender=${preRenderTrace} | ${rescueTrace} | sfErr=${lastScrapflyError ?? "none"}` });
+      // WHY THE FALLBACKS DECLINED, and not merely that they did.
+      //
+      // A real failure on advantageford.ca read: direct=fail, preRender=
+      // html:738421, nimble=content too short. So the anti-bot render had
+      // handed us 738 KB of the page and the buyer still got "we couldn't read
+      // that page". Every fallback that could have served it returned a bare
+      // null, and buildJsonLdFallbackAnalysis's own decline reasons go to the
+      // edge console -- which is exactly the place the breadcrumb exists
+      // because nobody can read.
+      //
+      // So the trace now says what the scan was HOLDING when it gave up: how
+      // much page source reached the readers, and what each reader made of it.
+      // Recomputed here from HTML already in memory -- no fetch, no vendor
+      // call, and each one caught separately so a thrown reader reports the
+      // throw instead of vanishing into the same silence.
+      const srcTrace = await (async () => {
+        const src = await pageHtml.catch(() => null);
+        if (!src) return "pageSrc=none";
+        const probe = (name: string, fn: () => unknown) => {
+          try { const v = fn(); return `${name}=${v ? "ok" : "null"}`; }
+          catch (e) { return `${name}=threw:${String((e as Error)?.message).slice(0, 60)}`; }
+        };
+        return [
+          `pageSrc=${src.length}`,
+          probe("jsonLdVeh", () => extractJsonLdVehicle(src)),
+          probe("convertus", () => extractConvertusVmsVehicle(src)),
+          probe("d2c", () => extractD2cVdpVehicle(src)),
+        ].join(" ");
+      })();
+      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody} | direct=${dHtmlTrace} | preRender=${preRenderTrace} | ${srcTrace} | url=${hostOf(url) ?? "?"} | ${rescueTrace} | sfErr=${lastScrapflyError ?? "none"}` });
       await releaseCredit(holdId);
       holdId = null;
       return new Response(

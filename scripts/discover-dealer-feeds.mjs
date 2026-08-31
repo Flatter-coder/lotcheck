@@ -549,6 +549,12 @@ async function main() {
 
   if (OUT) { flush(); console.log(`\nSaved -> ${OUT}`); }
 
+  // THE ANSWER TO "CAN LOTCHECK RUN ALL OF THEM", printed whether or not this
+  // run writes anything, and the verdicts written back so the LIVE SCAN gets the
+  // same knowledge rather than rediscovering each wall on a buyer's time.
+  reportReadCapability(results);
+  await recordReachability(results);
+
   if (!WRITE) { console.log("\n(no --write: nothing added to dealer_source)"); return; }
 
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -604,6 +610,94 @@ async function main() {
   const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }
   console.log(`\nSeeded ${seed.length} confirmed, AMVIC-Issued dealers into dealer_source (of ${beforeGate} platform-confirmed candidates).`);
+}
+
+// ---------------------------------------------------------------------------
+// CAN LOTCHECK READ ALBERTA? — the answer as a number, and written back.
+//
+// Vic, 2026-08-31: "i need to to know that every single car website all 1639
+// can by ran by lotcheck without issues". That is a measurement, not a promise,
+// and this probe already collects everything it needs — it just threw the
+// reachability half away, keeping only the hosts that turned out to have a
+// crawlable feed.
+//
+// EVERY probed host now writes its verdict into the catalogue, and the run
+// prints the coverage. Two things come of that. Vic gets a number. And the LIVE
+// SCAN gets it too: chooseFetchPlan reads exactly these columns, so a host this
+// probe found refuses a plain GET is one the next buyer's scan sends straight
+// to the anti-bot render instead of rediscovering the wall on their time.
+//
+// "Read" here means the page ANSWERED with real content, by whichever route —
+// which is the question that decides whether a report is possible. Whether the
+// host also has a crawlable inventory feed is the separate, narrower question
+// this probe was originally written for, and it is still reported separately.
+const READ_DIRECT = new Set(["responded-no-feed", "parser-bug"]);   // it answered us
+const NOT_A_WALL  = new Set(["timeout", "unreachable", "server-error", "no-trace"]);
+
+async function recordReachability(results) {
+  if (!WRITE) { console.log("\n(no --write: reachability not written to the catalogue)"); return; }
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(url, key);
+  const now = new Date().toISOString();
+
+  // Only hosts the catalogue already holds. Creating rows here would route
+  // around the AMVIC licence gate that dealer_source's roster rests on -- the
+  // loader and the observe RPC both apply it, and this must not be the third
+  // way in. A host we probed but never catalogued is simply not ours to file.
+  const known = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("dealer_source").select("id,host")
+      .order("id", { ascending: true }).range(from, from + 999);
+    if (error) { console.error("could not read dealer_source:", error.message); return; }
+    for (const r of data || []) known.set(r.host.toLowerCase().replace(/^https:\/\/www\./, "https://"), r.host);
+    if (!data || data.length < 1000) break;
+  }
+
+  let wrote = 0, skipped = 0;
+  for (const r of results) {
+    const host = known.get(String(r.host).toLowerCase().replace(/^https:\/\/www\./, "https://"));
+    if (!host) { skipped++; continue; }
+    const readDirect = !!r.platform && !r.rescued ? true : READ_DIRECT.has(r.miss);
+    const walled = r.miss === "blocked";
+    const patch = {
+      last_direct_status: readDirect ? "ok" : walled ? "refused" : (r.miss || "network"),
+      ...(readDirect ? { last_direct_ok_at: now, fetch_strategy: "direct" } : {}),
+      // A timeout or a DNS failure is a fact about the moment, not about
+      // whether this host takes datacenter traffic -- so it is recorded and
+      // NOT allowed to send every future scan down the paid path.
+      ...(walled ? { last_direct_fail_at: now, fetch_strategy: "asp" } : {}),
+      ...(r.rescued ? { last_asp_ok_at: now } : {}),
+      ...(r.platform ? { observed_platform: r.platform } : {}),
+    };
+    const { error } = await supabase.from("dealer_source").update(patch).eq("host", host);
+    if (!error) wrote++;
+  }
+  console.log(`\nCatalogue: reachability written for ${wrote} host(s)${skipped ? `, ${skipped} probed host(s) are not catalogued` : ""}.`);
+}
+
+function reportReadCapability(results) {
+  const n = results.length;
+  const direct = results.filter((r) => (r.platform && !r.rescued) || READ_DIRECT.has(r.miss)).length;
+  const viaAsp = results.filter((r) => r.rescued).length;
+  const blocked = results.filter((r) => r.miss === "blocked" && !r.rescued).length;
+  const flaky = results.filter((r) => NOT_A_WALL.has(r.miss) && !r.rescued).length;
+  const pct = (x) => n ? `${((x / n) * 100).toFixed(1)}%` : "-";
+  console.log("\n" + "=".repeat(64));
+  console.log("CAN LOTCHECK READ ALBERTA?");
+  console.log("=".repeat(64));
+  console.log(`  hosts probed                 ${String(n).padStart(5)}`);
+  console.log(`  answered a plain GET         ${String(direct).padStart(5)}   ${pct(direct)}`);
+  console.log(`  answered only via anti-bot   ${String(viaAsp).padStart(5)}   ${pct(viaAsp)}`);
+  console.log(`  refused us outright          ${String(blocked).padStart(5)}   ${pct(blocked)}`);
+  console.log(`  timed out / unreachable      ${String(flaky).padStart(5)}   ${pct(flaky)}`);
+  console.log(`  ${"-".repeat(60)}`);
+  console.log(`  READABLE BY LOTCHECK         ${String(direct + viaAsp).padStart(5)}   ${pct(direct + viaAsp)}`);
+  console.log("=".repeat(64));
+  // A number with no caveat is a claim. Say what this run could not settle.
+  if (flaky) console.log(`  ${flaky} host(s) neither answered nor refused -- a timeout is not a verdict, re-probe those before counting them out.`);
+  if (!results.some((r) => r.rescued)) console.log("  (no anti-bot pass in this run -- re-run with --rescue for the true readable figure)");
 }
 
 await main();
