@@ -1,0 +1,67 @@
+# DAILY 6AM (America/Edmonton): is every API key still alive, and when does it die?
+#
+# Vic, 2026-08-31, after learning the Scrapfly key had been answering 401 for an
+# unknown period while the code reported it as fine: "i need daily checks 6am
+# everty making sure all API Keys still running it will great to know when they
+# expire so i can reset then all".
+#
+# WHY 6AM IS TWO CRON LINES. GitHub cron is UTC and has no daylight-saving, so a
+# single line drifts an hour twice a year: 12:00 UTC is 06:00 MDT in summer and
+# 05:00 MST in winter. Both hours are scheduled and the job EXITS EARLY unless
+# the Edmonton local hour is actually 6 -- so it runs exactly once a day, at 6am
+# local, all year. A "daily 6am check" that quietly becomes a 5am check is the
+# same class of drift this whole job exists to catch.
+#
+# IT FAILS LOUDLY. A rejected or expiring key exits non-zero and the run goes
+# red. A check that logs a dead key and exits 0 is the same as no check at all.
+#
+# IT REPORTS, IT DOES NOT SEND. Nothing here emails anyone: Vic approves every
+# outbound message. The red run IS the report.
+name: API key health (daily 6am MT)
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # 06:00 MDT (summer)
+    - cron: "0 13 * * *"   # 06:00 MST (winter)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if it is not 6am in Edmonton"
+        type: boolean
+        default: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Is it actually 6am in Edmonton?
+        id: gate
+        run: |
+          HOUR=$(TZ=America/Edmonton date +%-H)
+          echo "Edmonton local hour: $HOUR"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$HOUR" = "6" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=no" >> "$GITHUB_OUTPUT"
+            echo "Not 6am in Edmonton - this is the other DST cron line. Skipping."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'yes'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          node-version: "24"
+
+      - name: Check every API key, both stores
+        if: steps.gate.outputs.run == 'yes'
+        env:
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: node scripts/check-api-keys.mjs
