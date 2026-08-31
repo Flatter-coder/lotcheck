@@ -83,6 +83,33 @@ if (set.status !== 0) {
 
 const list = sh("gh", ["secret", "list", "--repo", REPO]);
 const line = (list.stdout || "").split(/\r?\n/).find((l) => l.startsWith(SECRET));
-console.log(`\nStored and verified against Scrapfly.`);
+console.log(`\nStored in the GitHub repo secret, verified against Scrapfly.`);
 console.log(`  ${line ? line.trim() : SECRET + " (set)"}`);
-console.log(`\nThe key was never printed and never passed as an argument.`);
+console.log(`The key was never printed and never passed as an argument.`);
+
+// THE SECOND STORE, which is the one that matters to a buyer.
+//
+// This script used to end at "Stored and verified", and every reasonable
+// reading of that is "the key is fixed". It is not: SCRAPFLY_API_KEY also
+// lives as a SUPABASE FUNCTION SECRET, and that is the copy _shared/scrapfly.ts
+// reads -- the anti-bot render, the fallback for the ~28% of Alberta dealer
+// hosts that refuse our datacenter IP. Stopping here fixed the workflows and
+// left the buyer-facing half exactly as broken as before, silently.
+//
+// So finish the job. The sync workflow re-verifies the key, writes it into the
+// Supabase secret, and then PROVES it by making production render a real page.
+// It runs in Actions because SUPABASE_ACCESS_TOKEN lives there, not on a laptop.
+console.log(`\nPropagating to the Supabase function secret (what buyers depend on)...`);
+const run = sh("gh", ["workflow", "run", "sync-scrapfly-key.yml", "--repo", REPO, "--ref", "main"]);
+if (run.status === 0) {
+  console.log(`  started: gh run watch --repo ${REPO}`);
+  console.log(`  It re-verifies the key, writes it into Supabase, then renders a real`);
+  console.log(`  page to prove production works. If that run is RED, buyers are still`);
+  console.log(`  affected even though this step said "Stored".`);
+} else {
+  console.error(`  COULD NOT START IT: ${(run.stderr || "").trim().split("\n").pop()}`);
+  console.error(`  The workflows now have a good key. PRODUCTION DOES NOT YET.`);
+  console.error(`  Run this before considering the key fixed:`);
+  console.error(`     gh workflow run sync-scrapfly-key.yml --repo ${REPO} --ref main`);
+  process.exit(1);
+}

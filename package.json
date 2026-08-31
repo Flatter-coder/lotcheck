@@ -80,6 +80,8 @@
     "check:canonical": "node scripts/check-canonical-parity.mjs",
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "key:scrapfly": "node scripts/set-scrapfly-key.mjs",
+    "key:sync": "node scripts/sync-scrapfly-key.mjs",
+    "check:api-keys": "node scripts/check-api-keys.mjs",
     "check:syntax": "node scripts/check-script-syntax.mjs",
     "test:price-index": "node scripts/test-price-index-panel.mjs",
     "test:recall-sweep": "node scripts/test-recall-sweep.mjs",
