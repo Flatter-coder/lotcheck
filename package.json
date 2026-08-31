@@ -81,6 +81,8 @@
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "key:scrapfly": "node scripts/set-scrapfly-key.mjs",
     "key:sync": "node scripts/sync-scrapfly-key.mjs",
+    "key:shared": "node scripts/set-shared-secrets.mjs",
+    "key:shared-sync": "node scripts/sync-shared-secrets.mjs",
     "check:api-keys": "node scripts/check-api-keys.mjs",
     "check:key-health-endpoints": "node scripts/check-key-health-endpoints.mjs",
     "check:syntax": "node scripts/check-script-syntax.mjs",

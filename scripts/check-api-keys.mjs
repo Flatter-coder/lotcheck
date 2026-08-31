@@ -171,6 +171,50 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
       if (v.state === "absent" && v.buyerFacing) problems.push(`PRODUCTION ${v.key} is NOT CONFIGURED — the feature that needs it is silently off`);
       if (d !== null && d <= EXPIRY_WARN_DAYS) problems.push(`PRODUCTION ${v.key} expires in ${d} day(s) — rotate it`);
     }
+    // The shared secrets, ACTUALLY EXERCISED.
+    //
+    // key-health can only report these as present or absent -- there is no
+    // vendor to ask. But we hold the repo copy right here, so we can do the one
+    // thing that matters: send it and see whether the endpoint accepts it.
+    // "Set" is not "working" -- that mistake is the reason this whole check
+    // exists -- and a shared secret has a second way to fail that presence
+    // cannot see: the two stores drifting apart.
+    //
+    // NOTHING IS SENT OR RECORDED. founder-statement parses `mode` after the
+    // auth check and 400s on an unknown one, so 403-vs-anything-else isolates
+    // authentication and stops before the staging and sending branches.
+    // vendor-invoice-ingest gets a malformed body: auth passes, parsing stops
+    // it, no invoice is written. [[never-send-without-approval]]
+    const SHARED_PROBES = [
+      { name: "STATEMENT_SECRET", fn: "founder-statement", header: "x-statement-secret", query: "?mode=verify-secret-only", body: "{}" },
+      { name: "INVOICE_INGEST_SECRET", fn: "vendor-invoice-ingest", header: "x-invoice-secret", query: "", body: "not-json" },
+    ];
+    for (const p of SHARED_PROBES) {
+      const secret = (process.env[p.name] || "").trim();
+      if (!secret) continue;   // key-health already reports it absent
+      let state = "unclear", detail = "";
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/${p.fn}${p.query}`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY,
+            "content-type": "application/json", [p.header]: secret,
+          },
+          body: p.body,
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (res.status === 403) {
+          state = "rejected";
+          detail = "the function rejected it — the two stores have drifted apart";
+        } else {
+          state = "working";
+          detail = `accepted by ${p.fn} (HTTP ${res.status}, stopped before acting)`;
+        }
+      } catch (e) { detail = String(e?.name || e?.message).slice(0, 60); }
+      console.log(`  ${pad("shared / " + p.name, 40)} ${pad(state.toUpperCase(), 9)} ${detail}`);
+      if (state === "rejected") problems.push(`${p.name} is set in BOTH stores but ${p.fn} rejects it — they hold different values`);
+    }
+
     console.log("");
     for (const s of body.shared || []) {
       console.log(`  ${pad("internal / " + s.key, 40)} ${pad(String(s.state).toUpperCase(), 9)} ${s.detail}`);
