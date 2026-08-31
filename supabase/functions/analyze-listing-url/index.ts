@@ -60,7 +60,7 @@ import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
-import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch } from "../_shared/multi-vehicle.ts";
+import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
 import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
@@ -111,7 +111,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-31b";  // + aspAnswered: a 401 on our own Scrapfly key is no longer recorded as the dealer answering
+const CACHE_VER = "2026-08-31c";  // + days-on-lot read from the listing own purchaseDate (was reported "not published" on pages that publish it), and a URL-VIN identity guard
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3895,6 +3895,36 @@ Deno.serve(async (req: Request) => {
       // "We never read the page" is not "the page declares nothing" -- see
       // classifyVehiclePage. Both refuse; only the first is the page's fault.
       const sawPageSource = typeof subjectHtml === "string" || blobVin !== null;
+
+      // DID WE GET THE CAR THE URL ASKED FOR?
+      //
+      // Every other identity check compares the page against itself, so a
+      // response that is wrong but self-consistent passes all of them: the
+      // JSON-LD, the price and the odometer agree with each other, about a
+      // vehicle the buyer never asked about. A CDN serving a stale or
+      // mis-keyed page, a relisted stock number, a silent redirect -- all
+      // produce exactly that shape, and the report reads perfectly.
+      //
+      // A VIN in the URL is the one claim the response cannot forge, and many
+      // dealer platforms put one there. When the URL names a VIN and the page
+      // we read never mentions it, we are looking at a different car and the
+      // only safe move is to refuse. [[ai-defamation-entity-match-lesson]]
+      //
+      // Silent on every page that does not carry a VIN in its path, which is
+      // most of them -- including the Advantage Ford listing that prompted it.
+      // A guard that only sometimes applies is still worth its one comparison.
+      const askedForVin = vinFromUrl(url);
+      if (askedForVin && urlVinMismatch(url, pageContent) && urlVinMismatch(url, pageMarkup ?? "")) {
+        console.error(`URL/page VIN mismatch on ${url}: the URL names ${askedForVin} and the page we read never mentions it. Refusing rather than reporting on the wrong vehicle.`);
+        await releaseCredit(holdId);
+        // 422 like its siblings, so it lands in the client refusal branch
+        // rather than the generic network-error path.
+        return new Response(JSON.stringify({
+          error: "wrong_vehicle_served",
+          message: "That link names one vehicle and the page we received describes another. Nothing was charged. Please reload the dealer's page and try again.",
+        }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+
       const page = classifyVehiclePage(vins, declared, blobVin, sawPageSource);
       console.log(`Page subject: ${page.kind} -- ${page.why} (found ${vins.length}, declared ${declared.count} node(s)/${declared.vins.length} vin(s)${blobVin ? `, blob ${blobVin}` : ""}, html ${pageMarkup !== null ? "ok" : "unavailable"}).`);
       if (page.kind === "multi") {

@@ -118,5 +118,68 @@ for (const [label, parsed, jsonLd, want] of FILL_CASES) {
   ok ? pass++ : fail++;
 }
 
+// ---------------------------------------------------------------------------
+// DAYS ON LOT, from the listing's own inventory date.
+//
+// The Advantage Ford Acadia was reported to a buyer as "Days on lot: Not
+// published - ask the dealer" while its JSON-LD carried
+// "purchaseDate":"2026-07-30T11:27:42.000". schema.org purchaseDate is the date
+// the CURRENT OWNER acquired the item, and on a dealer's listing that owner is
+// the dealer -- so it is the inventory date, in a blob the scan already parsed.
+//
+// Dates are computed from now, never hardcoded: a fixture date would quietly
+// drift past the 3650-day guard and start passing for the wrong reason.
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+const isoDay = (n) => daysAgo(n).slice(0, 10);
+
+const DOL_CASES = [
+  ["purchaseDate 32 days ago -> 32 days on lot", { purchaseDate: daysAgo(32) }, 32, isoDay(32)],
+  ["availabilityStarts is accepted as a fallback", { offers: { "@type": "Offer", price: 1, availabilityStarts: daysAgo(9) } }, 9, isoDay(9)],
+  // 0 days is TRUE but gives a buyer nothing, and is what a mis-stamped date
+  // looks like. Report from one full day.
+  // The DATE is legitimately known here -- it is the CLAIM that is withheld.
+  // Extracting listedSince and declining to publish "0 days" are different
+  // decisions, and conflating them in the expectation would have hidden which
+  // one was under test.
+  ["listed today -> date known, but no days-on-lot claim", { purchaseDate: daysAgo(0) }, null, isoDay(0)],
+  ["a future date is a data error, not a prediction", { purchaseDate: new Date(Date.now() + 86400000).toISOString() }, null, null],
+  ["older than ten years is a data error too", { purchaseDate: daysAgo(4000) }, null, null],
+  ["no date at all -> no claim, and no invented one", {}, null, null],
+  ["unparseable date -> no claim", { purchaseDate: "not a date" }, null, null],
+];
+
+for (const [label, extra, wantDays, wantSince] of DOL_CASES) {
+  const node = { ...SIMPLE, ...extra };
+  const got = extractJsonLdVehicle(wrap(node));
+  const parsed = fillFromJsonLd({}, got);
+  const gotDays = parsed?.daysOnLot?.days ?? null;
+  const gotSince = got?.listedSince ?? null;
+  const ok = gotDays === wantDays && gotSince === wantSince;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` want ${wantDays}/${wantSince} got ${gotDays}/${gotSince}`}`);
+  ok ? pass++ : fail++;
+}
+
+{
+  // The platform feeds are the dealer's operational record and outrank a
+  // schema.org field. A scan that already has an answer must keep it.
+  const got = extractJsonLdVehicle(wrap({ ...SIMPLE, purchaseDate: daysAgo(32) }));
+  const already = { daysOnLot: { days: 7, since: isoDay(7), source: "dealer_platform_page" } };
+  fillFromJsonLd(already, got);
+  const ok = already.daysOnLot.days === 7 && already.daysOnLot.source === "dealer_platform_page";
+  console.log(`${ok ? "PASS" : "FAIL"}  a platform feed's days-on-lot is not overwritten${ok ? "" : ` got ${JSON.stringify(already.daysOnLot)}`}`);
+  ok ? pass++ : fail++;
+}
+
+{
+  // And it says where it came from, because a figure with no stated source is
+  // the thing this report exists to replace.
+  const got = extractJsonLdVehicle(wrap({ ...SIMPLE, purchaseDate: daysAgo(32) }));
+  const parsed = fillFromJsonLd({}, got);
+  const ok = parsed.daysOnLot.source === "listing_structured_data"
+    && /inventory date/i.test(parsed.daysOnLot.sourceLabel || "");
+  console.log(`${ok ? "PASS" : "FAIL"}  the claim names its own source${ok ? "" : ` got ${JSON.stringify(parsed.daysOnLot)}`}`);
+  ok ? pass++ : fail++;
+}
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);

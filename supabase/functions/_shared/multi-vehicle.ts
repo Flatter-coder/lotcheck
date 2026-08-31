@@ -163,6 +163,63 @@ export function classifyVehiclePage(
  * Compared only when BOTH sides have a value: a declaration that omits the
  * year, or a read that missed the make, is not a contradiction.
  */
+/**
+ * The VIN the URL itself names, if it names one.
+ *
+ * Many dealer platforms put the VIN in the path:
+ *   /inventory/used-2025-gmc-acadia-1gkennrs2sj181578/
+ * That is a free, independent statement of WHICH CAR the buyer asked about --
+ * independent of anything the page body says about itself.
+ *
+ * WHY THAT IS WORTH HAVING. Every other identity signal we hold comes out of
+ * the response we were served. If a CDN, a redirect, or a relisted stock number
+ * hands us a different vehicle at the requested URL, the body is internally
+ * consistent and every check passes: JSON-LD, price and odometer all agree --
+ * with each other, about the wrong car. The buyer gets a confident report on a
+ * vehicle they never asked about, which is the [[ai-defamation-entity-match-lesson]]
+ * failure exactly: a wrong entity match, stated as fact, relied upon.
+ *
+ * A VIN in the URL is the one assertion the response cannot forge.
+ *
+ * Deliberately narrow. It reads a 17-character VIN out of the path only, and
+ * only when the check digit position and character set are valid, because a
+ * false positive here would refuse a good scan.
+ */
+export function vinFromUrl(url: unknown): string | null {
+  let path: string;
+  try { path = new URL(String(url)).pathname; } catch { return null; }
+  // Hyphen/underscore separated slugs, so bound the match rather than letting
+  // it run into neighbouring path segments.
+  const m = path.toUpperCase().match(/(?:^|[^A-HJ-NPR-Z0-9])([A-HJ-NPR-Z0-9]{17})(?:[^A-HJ-NPR-Z0-9]|$)/);
+  if (!m) return null;
+  const vin = m[1];
+  // A VIN never contains I, O or Q, and a run of one repeated character is a
+  // placeholder rather than a vehicle.
+  if (/[IOQ]/.test(vin)) return null;
+  if (/^(.)\1{16}$/.test(vin)) return null;
+  // A real VIN carries digits AND letters; 17 digits is an id, not a VIN.
+  if (!/[0-9]/.test(vin) || !/[A-Z]/.test(vin)) return null;
+  return vin;
+}
+
+/**
+ * Did we get served a different vehicle than the URL asked for?
+ *
+ * True only when the URL names a VIN AND we read the page AND that VIN is
+ * nowhere in it. Every other combination returns false, because this must never
+ * refuse a scan it cannot actually judge:
+ *   - no VIN in the URL        -> nothing to compare (most dealer platforms)
+ *   - no page text             -> a fetch problem, not an identity problem
+ *   - VIN present              -> the page is about the car we asked for
+ */
+export function urlVinMismatch(url: unknown, pageText: unknown): boolean {
+  const want = vinFromUrl(url);
+  if (!want) return false;
+  const text = typeof pageText === "string" ? pageText : "";
+  if (text.length < 500) return false;      // nothing usable was read
+  return !text.toUpperCase().includes(want);
+}
+
 export function identityMismatch(
   read: { year?: unknown; make?: unknown },
   declared: { year?: unknown; make?: unknown } | null,

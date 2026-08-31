@@ -16,7 +16,7 @@
 //   node --experimental-strip-types supabase/functions/_shared/multi-vehicle.test.ts
 // ============================================================================
 
-import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch } from "./multi-vehicle.ts";
+import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "./multi-vehicle.ts";
 import { jsonLdVehicleVins, jsonLdVehicles } from "./jsonld-vehicle.js";
 import { readFileSync } from "node:fs";
 
@@ -361,6 +361,62 @@ check("the client has a branch for subject_mismatch",
   check("no 422 can fall through to a second read of the same body",
     /setErrorMsg\(body\.message\|\|body\.error/.test(block));
 }
+
+// ---------------------------------------------------------------------------
+// Did we get the car the URL asked for?
+//
+// Every other check here compares the page against itself, so a response that
+// is wrong but SELF-CONSISTENT passes all of them. A VIN in the path is the one
+// assertion the response cannot forge.
+console.log("\nThe VIN the URL itself names");
+
+check("reads the VIN out of a dealer platform path",
+  vinFromUrl("https://www.cmpauto.com/inventory/used-2025-gmc-acadia-1gkennrs2sj181578/") === "1GKENNRS2SJ181578");
+
+check("case-insensitive -- paths are usually lowercase",
+  vinFromUrl("https://x.ca/inventory/used-2025-gmc-acadia-1gkenrrs8sj192401/") === "1GKENRRS8SJ192401");
+
+check("a path with no VIN yields null, and the guard stays silent",
+  vinFromUrl("https://www.advantageford.ca/inventory/2025-gmc-acadia-elevation-2myB0oDfT3Sb5B7AhdvJIAvdp/") === null);
+
+check("a query string is not the path -- only the path is trusted",
+  vinFromUrl("https://x.ca/search?vin=1GKENNRS2SJ181578") === null);
+
+check("17 digits is an id, not a VIN",
+  vinFromUrl("https://x.ca/inventory/12345678901234567/") === null);
+
+check("I, O and Q never appear in a VIN, so a 17-char slug containing them is not one",
+  vinFromUrl("https://x.ca/inventory/1GKENNRSOSJ18157I/") === null);
+
+check("a repeated-character placeholder is not a VIN",
+  vinFromUrl("https://x.ca/inventory/00000000000000000/") === null);
+
+check("junk in, null out",
+  vinFromUrl(null) === null && vinFromUrl("") === null && vinFromUrl("not a url") === null);
+
+console.log("\nWrong car served at the right URL");
+
+const BODY_RIGHT = "Used 2025 GMC Acadia ... VIN 1GKENNRS2SJ181578 ... ".padEnd(900, ".");
+const BODY_WRONG = "Used 2024 GMC Acadia AT4 ... VIN 1GKENPKS1RJ206888 ... ".padEnd(900, ".");
+
+check("the URL's VIN is absent from the page -> MISMATCH, refuse",
+  urlVinMismatch("https://www.cmpauto.com/inventory/used-2025-gmc-acadia-1gkennrs2sj181578/", BODY_WRONG) === true);
+
+check("the URL's VIN is present -> fine",
+  urlVinMismatch("https://www.cmpauto.com/inventory/used-2025-gmc-acadia-1gkennrs2sj181578/", BODY_RIGHT) === false);
+
+check("matching is case-insensitive against the page too",
+  urlVinMismatch("https://x.ca/inventory/used-1gkennrs2sj181578/", BODY_RIGHT.toLowerCase()) === false);
+
+check("no VIN in the URL -> NEVER refuses, whatever the page says",
+  urlVinMismatch("https://www.advantageford.ca/inventory/2025-gmc-acadia-elevation-2myB0oDfT3Sb5B7AhdvJIAvdp/", BODY_WRONG) === false);
+
+check("an empty or tiny page is a FETCH problem, not an identity problem",
+  urlVinMismatch("https://x.ca/inventory/used-1gkennrs2sj181578/", "") === false &&
+  urlVinMismatch("https://x.ca/inventory/used-1gkennrs2sj181578/", "too short") === false);
+
+check("a non-string page body cannot make it refuse",
+  urlVinMismatch("https://x.ca/inventory/used-1gkennrs2sj181578/", null) === false);
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 if (fail) (globalThis as any).process?.exit?.(1);
