@@ -26,6 +26,21 @@
 // The response carries verdicts and vendor-supplied detail only. A health
 // endpoint that leaks the thing it is checking is worse than no endpoint.
 //
+// EVERY PROBE CALLS THE ENDPOINT THE PRODUCT CALLS, WITH THE SAME AUTH.
+// That is not tidiness, it is the difference between a check and an accusation.
+// The first run of this file used a plausible-looking endpoint for three
+// vendors instead of the real one, and reported three WORKING keys as REJECTED:
+// Nimble probed at api.webit.live with Basic auth when the product uses
+// sdk.nimbleway.com/v1/search with Bearer; Google probed at the LEGACY Places
+// endpoint when get-dealer-sentiment uses Places API (New), so Google answered,
+// accurately, "you are calling a legacy API, which is not enabled for your
+// project" -- a true statement about the probe and a lie about the key.
+//
+// A health check that tests a different endpoint tests nothing that matters,
+// and sends someone to rotate a credential that was fine. When a call site
+// moves, this file moves with it. [[dealers-are-adversaries]] applies to our
+// own output too: missing beats wrong.
+//
 // LOCKED DOWN the same way render-page is: service-role JWT required. The
 // signature is verified by Supabase's gateway before this code runs, so
 // checking the role claim is both safe and immune to key rotation.
@@ -171,31 +186,38 @@ Deno.serve(async (req) => {
       return fromStatus(r.status, "authenticated");
     }),
 
+    // Mirrors analyze-listing-url's own Nimble Search call exactly -- same host,
+    // same Bearer scheme, smallest body that still authenticates.
     check("NIMBLE_API_KEY", "Nimble", true, async () => {
-      const r = await fetch("https://api.webit.live/api/v1/realtime/web", {
+      const r = await fetch("https://sdk.nimbleway.com/v1/search", {
         method: "POST",
-        headers: { authorization: `Basic ${env("NIMBLE_API_KEY")}`, "content-type": "application/json" },
-        body: JSON.stringify({ url: "https://example.com", render: false }),
+        headers: { "Authorization": `Bearer ${env("NIMBLE_API_KEY")}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ query: "lotcheck key health", max_results: 1, deep_search: false, country: "CA", locale: "en" }),
         signal: AbortSignal.timeout(TIMEOUT),
       });
       return fromStatus(r.status, "authenticated");
     }),
 
+    // Places API (NEW) -- places.googleapis.com with X-Goog-Api-Key, exactly as
+    // get-dealer-sentiment calls it. The legacy maps.googleapis.com endpoint is
+    // a different product with its own enablement, and probing it reports a
+    // perfectly good key as denied.
     check("GOOGLE_PLACES_API_KEY", "Google Places", true, async () => {
-      const u = new URL("https://maps.googleapis.com/maps/api/place/findplacefromtext/json");
-      u.searchParams.set("input", "Calgary");
-      u.searchParams.set("inputtype", "textquery");
-      u.searchParams.set("fields", "place_id");
-      u.searchParams.set("key", env("GOOGLE_PLACES_API_KEY"));
-      const r = await fetch(u, { signal: AbortSignal.timeout(TIMEOUT) });
-      if (!r.ok) return fromStatus(r.status, "");
-      const j = await r.json().catch(() => null);
-      // Google answers 200 with a status field. REQUEST_DENIED is the key.
-      const st = String(j?.status || "");
-      if (st === "REQUEST_DENIED") return { state: "rejected" as State, detail: String(j?.error_message || "REQUEST_DENIED").slice(0, 120) };
-      if (st === "OVER_QUERY_LIMIT") return { state: "rejected" as State, detail: "OVER_QUERY_LIMIT - billing or quota" };
-      if (st === "OK" || st === "ZERO_RESULTS") return { state: "working" as State, detail: `accepted (${st})` };
-      return { state: "unclear" as State, detail: `Places status ${st || "(none)"}` };
+      const r = await fetch("https://places.googleapis.com/v1/places:searchText", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": env("GOOGLE_PLACES_API_KEY"),
+          "X-Goog-FieldMask": "places.id",
+        },
+        body: JSON.stringify({ textQuery: "car dealership Calgary" }),
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+      if (r.ok) return { state: "working" as State, detail: "accepted by Places API (New)" };
+      const body = await r.text().catch(() => "");
+      let msg = ""; try { msg = JSON.parse(body)?.error?.message || ""; } catch { /* not json */ }
+      const v = fromStatus(r.status, "");
+      return { ...v, detail: msg ? `${v.detail}: ${msg.slice(0, 110)}` : v.detail };
     }),
 
     // The Supabase keys are JWTs: these are the only ones with a real expiry,
@@ -210,10 +232,18 @@ Deno.serve(async (req) => {
       return { ...base, expiresAt: exp, expiryKnown: exp !== null };
     }),
 
+    // The anon key is what the browser bundle sends, and a supabase-js client
+    // always sends BOTH headers -- apikey and Authorization. Sending only the
+    // first is not how any caller uses it, and PostgREST answers 401.
+    //
+    // Supabase also RESERVES the SUPABASE_ prefix for function secrets and
+    // injects its own, so this may legitimately read absent here while the
+    // frontend's key is fine; that is reported as absent, never as rejected.
     check("SUPABASE_ANON_KEY", "Supabase", true, async () => {
-      const exp = jwtExpiry(env("SUPABASE_ANON_KEY"));
+      const anon = env("SUPABASE_ANON_KEY");
+      const exp = jwtExpiry(anon);
       const r = await fetch(`${env("SUPABASE_URL")}/rest/v1/`, {
-        headers: { apikey: env("SUPABASE_ANON_KEY") },
+        headers: { apikey: anon, authorization: `Bearer ${anon}` },
         signal: AbortSignal.timeout(TIMEOUT),
       });
       const base = fromStatus(r.status, "accepted by PostgREST");
