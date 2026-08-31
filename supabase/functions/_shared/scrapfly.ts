@@ -121,7 +121,37 @@ async function scrapflyRenderOnce(
     if (autoScroll) u.searchParams.set("auto_scroll", "true"); // trigger lazy-loaded sections
     u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     if (shot !== "none") u.searchParams.set("screenshots[main]", shot);
-    u.searchParams.set("format", "json");
+    // RAW, AND THIS ONE LINE WAS THE BUG.
+    //
+    // On Scrapfly's SCRAPE api, `format` is the format of the PAGE CONTENT --
+    // not of the response envelope, which is always JSON. Their own list:
+    //
+    //     raw         Original HTML as-is        (the default)
+    //     clean_html  Cleaned and sanitized HTML
+    //     json        Attempt to parse as JSON
+    //     markdown / text
+    //
+    // We were sending `json`, believing it described the envelope. It told
+    // Scrapfly to try to parse a dealer's HTML page AS JSON, so result.content
+    // came back as something that is not HTML -- 737,194 characters of it on
+    // the Advantage Ford page.
+    //
+    // AND EVERY STRUCTURED READER WE HAVE LOOKS INSIDE <script> TAGS:
+    // extractJsonLdVehicle wants application/ld+json, extractConvertusVmsVehicle
+    // wants `vmsData =`, extractD2cVdpVehicle wants `__vdpJSON`. All three found
+    // nothing, every time, on every page that reached this path -- which is
+    // every page whose direct fetch is walled. That is ~28% of Alberta's dealer
+    // hosts, and it is why "Scrapfly render fallback produced no usable data"
+    // kept being the last line before a 502.
+    //
+    // The trace that finally showed it, after four wrong theories on one URL:
+    //     pageSrc=737194 jsonLdVeh=null convertus=null d2c=null
+    // Three independent readers returning null on the same 737 KB is not three
+    // bugs. It is one input that is not what they were promised.
+    //
+    // Deliberately explicit rather than omitted: `raw` IS the default, but a
+    // default that silently produced this is worth naming at the call site.
+    u.searchParams.set("format", "raw");
 
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
     if (!res.ok) {
