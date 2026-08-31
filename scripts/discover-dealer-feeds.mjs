@@ -36,7 +36,7 @@ import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } 
 // ONE definition of what a dealer website reduces to. The scanner keys the
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
-import { toOrigin } from "../supabase/functions/_shared/dealer-catalog.ts";
+import { toOrigin, originVariants } from "../supabase/functions/_shared/dealer-catalog.ts";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -354,18 +354,49 @@ async function rescueHost(cand) {
   }
 }
 
+async function probeOrigin(host, trace) {
+  const sm = await trySM360(host, trace);
+  if (sm) return sm;
+  const cv = await tryConvertus(host, trace);
+  if (cv) return cv;
+  const jl = await tryJsonLdItemList(host, trace);
+  if (jl) return jl;
+  const ed = await tryEdealer(host, trace);
+  if (ed) return ed;
+  return null;
+}
+
 async function probe(cand) {
   const trace = [];
   try {
-    const sm = await trySM360(cand.host, trace);
-    if (sm) return { ...cand, ...sm };
-    const cv = await tryConvertus(cand.host, trace);
-    if (cv) return { ...cand, ...cv };
-    const jl = await tryJsonLdItemList(cand.host, trace);
-    if (jl) return { ...cand, ...jl };
-    const ed = await tryEdealer(cand.host, trace);
-    if (ed) return { ...cand, ...ed };
-    return { ...cand, platform: null, miss: classifyMiss(trace), trace };
+    const hit = await probeOrigin(cand.host, trace);
+    if (hit) return { ...cand, ...hit };
+    const miss = classifyMiss(trace);
+
+    // "unreachable" is a verdict about the URL WE CHOSE, not about the
+    // business, until the other forms of that URL have been tried. AMVIC
+    // records a website as it was typed, so the scheme and the www prefix are
+    // both guesses -- and re-probing the silent hosts on 2026-08-31 found 53
+    // of 78 TLS failures answering perfectly well, 47 over plain http://.
+    // Recording those as unreachable is our own request written down as the
+    // world's answer, the same shape as "EDealer: 0 across Alberta".
+    //
+    // Transport failures ONLY. A host that ANSWERED -- 200, 404, even a 403 --
+    // has told us something about itself, and re-asking on another scheme
+    // would spend requests to hear the same thing again.
+    if (miss === "unreachable") {
+      for (const alt of originVariants(cand.host)) {
+        const altTrace = [];
+        const altHit = await probeOrigin(alt, altTrace);
+        trace.push(`ALT ${alt}: ${altTrace.join(" | ") || "no trace"}`);
+        // Carry the origin that WORKED. Keeping the dead one would send every
+        // future probe, and the catalogue row, straight back to it.
+        if (altHit) return { ...cand, ...altHit, host: alt, reachedVia: alt, trace };
+        const altMiss = classifyMiss(altTrace);
+        if (altMiss !== "unreachable") return { ...cand, platform: null, miss: altMiss, host: alt, reachedVia: alt, trace };
+      }
+    }
+    return { ...cand, platform: null, miss, trace };
   } catch (e) {
     return { ...cand, platform: null, miss: "probe-threw", error: e.message, trace };
   }

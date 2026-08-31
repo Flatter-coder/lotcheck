@@ -14,7 +14,7 @@
 import {
   toOrigin, catalogKey, chooseFetchPlan, buildObservation,
   WALL_VERDICT_TTL_MS, THROTTLE_WINDOW_MS, CATALOG_PLATFORMS, CRAWLABLE_PLATFORMS,
-  directVerdict, REFUSAL_CODES,
+  directVerdict, REFUSAL_CODES, originVariants,
 } from "./dealer-catalog.ts";
 
 let pass = 0, fail = 0;
@@ -225,6 +225,46 @@ check("every crawlable platform is a catalogue platform",
 check("the crawler's set excludes the catalogue-only values",
   !CRAWLABLE_PLATFORMS.includes("unknown" as never) && !CRAWLABLE_PLATFORMS.includes("other" as never) &&
   !CRAWLABLE_PLATFORMS.includes("d2c" as never));
+
+// ---------------------------------------------------------------------------
+// The other forms of the same URL.
+//
+// 53 of 78 TLS "failures" in the 2026-08-31 re-probe were live sites we had
+// asked for on the wrong scheme. These pin that the fallback exists, that it
+// never re-spends the request that already failed, and that it cannot invent a
+// hostname that was never in the roster.
+console.log("\nOrigin variants (the same site, asked for differently)");
+
+check("plain http is tried first -- 47 of the 53 recoveries were exactly that",
+  originVariants("https://www.berniesauto.ca")[0] === "http://www.berniesauto.ca");
+
+check("the www-flipped name is offered too",
+  originVariants("https://www.parkmazda.ca").includes("https://parkmazda.ca"));
+
+check("a bare name gets its www form, not a stripped one",
+  originVariants("https://parkmazda.ca").includes("https://www.parkmazda.ca"));
+
+check("the origin we already tried is NOT returned -- it would re-spend the failed request",
+  !originVariants("https://www.autohub.ca").includes("https://www.autohub.ca"));
+
+check("every variant is a well-formed origin",
+  originVariants("https://www.autohub.ca").every((v) => /^https?:\/\/[a-z0-9.-]+$/i.test(v)));
+
+check("no duplicates -- a duplicate is a wasted request against a walled host",
+  new Set(originVariants("https://www.autohub.ca")).size === originVariants("https://www.autohub.ca").length);
+
+check("an IP address is not given an invented www form",
+  !originVariants("https://192.168.1.10").some((v) => v.includes("www.")));
+
+check("a hostname with no dot cannot be flipped into a fake domain",
+  originVariants("https://localhost").every((v) => !v.includes("www.")));
+
+check("junk in, empty out -- never a variant list built on nothing",
+  originVariants(null).length === 0 && originVariants("").length === 0 && originVariants("n/a").length === 0);
+
+check("variants preserve the hostname exactly; only scheme and www move",
+  originVariants("https://www.sherwoodparktoyota.com")
+    .every((v) => v.replace(/^https?:\/\//, "").replace(/^www\./, "") === "sherwoodparktoyota.com"));
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 if (fail) (globalThis as never as { process?: { exit?: (n: number) => void } }).process?.exit?.(1);
