@@ -135,6 +135,30 @@ export function originVariants(raw: unknown): string[] {
   return out;
 }
 
+/**
+ * Did the anti-bot pass actually COME BACK WITH A PAGE?
+ *
+ * The distinction this draws is the one a province-wide readability number
+ * rests on, and getting it wrong made the number move the wrong way. Three
+ * different outcomes all used to set `rescued: true`:
+ *
+ *   1. Scrapfly fetched the dealer's page          -> a real success
+ *   2. Scrapfly reached the host and it refused    -> a fact about the DEALER
+ *   3. Scrapfly refused US (401 on our key)        -> a fact about OUR KEY,
+ *                                                     nothing reached the host
+ *
+ * Counting all three as "answered only via anti-bot" means a completely dead
+ * key makes READABLE BY LOTCHECK go UP -- the more thoroughly broken our
+ * credential, the healthier Alberta looks. It also suppressed the "no anti-bot
+ * pass in this run" caveat, because something had been flagged as rescued.
+ *
+ * Only (1) is an answer. [[absence-read-as-knowledge]]
+ */
+export function aspAnswered(r: { rescued?: boolean; platform?: string | null; miss?: string | null } | null | undefined): boolean {
+  if (!r || !r.rescued) return false;
+  return !!r.platform || r.miss === "responded-no-feed";
+}
+
 export const REFUSAL_CODES = new Set([401, 403, 407, 451]);
 
 /** The catalogue's verdict for one direct read, from its status and code. */
