@@ -105,7 +105,16 @@ if (!changed.length) {
 }
 if (!changed.length) { console.log("cache-ver: no changes."); process.exit(0); }
 
-const shaping = changed.filter((f) => OUTPUT_SHAPING.some((re) => re.test(f)));
+// A TEST is not an output. Test files sit next to the modules they pin, so the
+// shaping patterns match them too -- and a cache bump is not free: it discards
+// every cached report and re-scans every host a buyer returns to. Making a
+// test-only edit demand one teaches the next person that this gate cries wolf,
+// and a gate people route around protects nothing. [[repeat-fix-pattern]]
+//
+// Narrow and provable: only *.test.ts / *.test.mjs, which are never imported by
+// an edge function. A module that genuinely shapes output still trips the gate.
+const IS_TEST = /(^|[\/])[^\/]*\.test\.(ts|mts|js|mjs)$/;
+const shaping = changed.filter((f) => !IS_TEST.test(f) && OUTPUT_SHAPING.some((re) => re.test(f)));
 if (!shaping.length) {
   console.log("cache-ver: no analysis-output files changed — no bump needed.");
   process.exit(0);
