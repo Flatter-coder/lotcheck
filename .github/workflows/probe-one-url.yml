@@ -1,0 +1,39 @@
+# Why can't we read THIS page? — reproduce one listing's read, exactly.
+#
+# The breadcrumb reader says which layer died. This says what the layers
+# actually returned: it fetches a named URL through Scrapfly with the same
+# parameters a scan uses, then runs every structured reader on the result and
+# prints what each one made of it.
+#
+# Written because one Advantage Ford link collected four theories in two days
+# while the only evidence available was a screenshot of the error card. The
+# failure it was built for had Scrapfly returning 738 KB of the real page and
+# every reader declining it — a reader problem, reproducible only against the
+# bytes Scrapfly actually returns, which are neither the raw HTML nor a
+# browser's DOM.
+#
+# COSTS ONE SCRAPFLY SCRAPE per run (~80 credits, a few cents). Cheap against a
+# round-trip. Spends no credit, writes nothing, and produces no report.
+name: Probe one URL
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "The listing URL to reproduce"
+        type: string
+        required: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Probe
+        env:
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+        run: node scripts/probe-one-url.mjs "${{ inputs.url }}"
