@@ -322,6 +322,8 @@ jobs:
       # showing the buyer the message written for them. Mechanical from now on.
       - name: Error codes reach the buyer (every server refusal has a client branch)
         run: npm run check:error-codes
+      - name: Key-health probes hit the endpoints the product calls
+        run: npm run check:key-health-endpoints
       # 28% of Alberta's 1,639 dealer hosts refuse a datacenter IP. The
       # catalogue remembers which, so a scan stops paying to rediscover it --
       # advisory only, so a wrong or stale verdict costs one attempt, never

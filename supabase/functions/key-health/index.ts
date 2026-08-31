@@ -232,21 +232,27 @@ Deno.serve(async (req) => {
       return { ...base, expiresAt: exp, expiryKnown: exp !== null };
     }),
 
-    // The anon key is what the browser bundle sends, and a supabase-js client
-    // always sends BOTH headers -- apikey and Authorization. Sending only the
-    // first is not how any caller uses it, and PostgREST answers 401.
+    // The anon key is what the browser bundle sends, so probe it the way the
+    // bundle uses it: an anon-PUBLIC RPC.
     //
-    // Supabase also RESERVES the SUPABASE_ prefix for function secrets and
-    // injects its own, so this may legitimately read absent here while the
-    // frontend's key is fine; that is reported as absent, never as rejected.
+    // `/rest/v1/` root and a POST to a table both answer 401 to a perfectly
+    // good anon key -- verified against the key actually shipped in App.jsx,
+    // which serves real customers. Two earlier drafts of this probe used those
+    // and reported the live frontend's own key as REJECTED.
+    //
+    // fn_alberta_msrp_deviation is the repo's anon-public precedent, so if this
+    // ever fails the frontend is genuinely broken, which is the only thing
+    // worth waking anyone for.
     check("SUPABASE_ANON_KEY", "Supabase", true, async () => {
       const anon = env("SUPABASE_ANON_KEY");
       const exp = jwtExpiry(anon);
-      const r = await fetch(`${env("SUPABASE_URL")}/rest/v1/`, {
-        headers: { apikey: anon, authorization: `Bearer ${anon}` },
+      const r = await fetch(`${env("SUPABASE_URL")}/rest/v1/rpc/fn_alberta_msrp_deviation`, {
+        method: "POST",
+        headers: { apikey: anon, authorization: `Bearer ${anon}`, "content-type": "application/json" },
+        body: "{}",
         signal: AbortSignal.timeout(TIMEOUT),
       });
-      const base = fromStatus(r.status, "accepted by PostgREST");
+      const base = fromStatus(r.status, "anon-public RPC answered");
       return { ...base, expiresAt: exp, expiryKnown: exp !== null };
     }),
   ]);
