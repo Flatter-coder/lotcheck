@@ -84,6 +84,12 @@ for (const r of data) {
   } else {
     console.log(`   ${msg.slice(0, 400)}`);
   }
+  // AND THE RAW LINE, ALWAYS. The pretty view above only knows the keys it was
+  // written for, so the first time the breadcrumb gained new fields
+  // (pageSrc / jsonLdVeh / convertus / d2c -- added the moment they were the
+  // answer) this reader silently dropped exactly the part worth reading.
+  // A diagnostic that filters its own evidence is the thing it replaces.
+  console.log(`   raw: ${msg}`);
   console.log();
 }
 
