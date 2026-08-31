@@ -14,7 +14,7 @@
 import {
   toOrigin, catalogKey, chooseFetchPlan, buildObservation,
   WALL_VERDICT_TTL_MS, THROTTLE_WINDOW_MS, CATALOG_PLATFORMS, CRAWLABLE_PLATFORMS,
-  directVerdict, REFUSAL_CODES, originVariants,
+  directVerdict, REFUSAL_CODES, originVariants, aspAnswered,
 } from "./dealer-catalog.ts";
 
 let pass = 0, fail = 0;
@@ -233,6 +233,35 @@ check("the crawler's set excludes the catalogue-only values",
 // asked for on the wrong scheme. These pin that the fallback exists, that it
 // never re-spends the request that already failed, and that it cannot invent a
 // hostname that was never in the roster.
+// ---------------------------------------------------------------------------
+// A 401 on OUR key is not a dealer answering.
+//
+// Three outcomes all used to set rescued:true, so a completely dead Scrapfly
+// key made the province-wide READABLE BY LOTCHECK figure go UP -- and silenced
+// the caveat that would have said the pass never ran.
+console.log("\nDid the anti-bot pass actually answer?");
+
+check("a page with a platform is an answer",
+  aspAnswered({ rescued: true, platform: "convertus" }) === true);
+
+check("a page with no feed markers is still an answer -- it is the HOST replying",
+  aspAnswered({ rescued: true, platform: null, miss: "responded-no-feed" }) === true);
+
+check("a 401 on our key is NOT an answer -- nothing reached the dealer",
+  aspAnswered({ rescueUnavailable: true, platform: null, miss: "blocked" } as never) === false);
+
+check("blocked-everywhere is not an answer -- the host refused a residential IP too",
+  aspAnswered({ rescued: true, platform: null, miss: "blocked-everywhere" }) === false);
+
+check("rescue-failed is not an answer",
+  aspAnswered({ rescued: true, platform: null, miss: "rescue-failed" }) === false);
+
+check("a host never sent to the rescue pass is not an answer",
+  aspAnswered({ platform: "sm360", miss: null }) === false);
+
+check("null and undefined are not answers",
+  aspAnswered(null) === false && aspAnswered(undefined) === false);
+
 console.log("\nOrigin variants (the same site, asked for differently)");
 
 check("plain http is tried first -- 47 of the 53 recoveries were exactly that",

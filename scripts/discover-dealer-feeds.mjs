@@ -36,7 +36,7 @@ import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } 
 // ONE definition of what a dealer website reduces to. The scanner keys the
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
-import { toOrigin, originVariants } from "../supabase/functions/_shared/dealer-catalog.ts";
+import { toOrigin, originVariants, aspAnswered } from "../supabase/functions/_shared/dealer-catalog.ts";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -96,6 +96,28 @@ const SCRAPFLY_CONCURRENCY = 5;      // the plan's hard ceiling
 const SCRAPFLY_TIMEOUT_MS = 45_000;  // asp negotiation is slow by design
 const RESCUABLE = new Set(["blocked", "unreachable", "timeout", "server-error"]);
 
+// Set when a rescue was ASKED FOR and could not run. The report must say so:
+// silently skipping the pass and printing a readable figure is the same false
+// all-clear as counting the failures as successes.
+let RESCUE_UNAVAILABLE = null;
+
+/** One cheap call, before spending a 50-minute pass on a key that cannot work. */
+async function verifyScrapflyKey() {
+  try {
+    const u = new URL("https://api.scrapfly.io/account");
+    u.searchParams.set("key", SCRAPFLY_KEY);
+    const r = await fetch(u, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20_000) });
+    if (r.status === 401 || r.status === 403) return { ok: false, why: `Scrapfly rejects it (HTTP ${r.status})` };
+    if (r.status === 402) return { ok: false, why: "HTTP 402 - payment required / quota exhausted" };
+    if (!r.ok) return { ok: false, why: `Scrapfly answered HTTP ${r.status}` };
+    const j = await r.json().catch(() => null);
+    if (j?.account?.suspended) return { ok: false, why: "the Scrapfly account is SUSPENDED" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, why: `could not reach Scrapfly (${String(e?.name || e?.message).slice(0, 40)})` };
+  }
+}
+
 async function scrapflyGet(url, accept = "text/html") {
   const u = new URL("https://api.scrapfly.io/scrape");
   u.searchParams.set("key", SCRAPFLY_KEY);
@@ -109,7 +131,15 @@ async function scrapflyGet(url, accept = "text/html") {
     // identical failures say nothing about which one it was.
     let why = "";
     try { why = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch { /* body already gone */ }
-    throw new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
+    // OUR failure, or the HOST's? A 401/402/403 from api.scrapfly.io means
+    // Scrapfly refused US and never contacted the dealer at all -- so nothing
+    // in that response is evidence about the dealer, and recording it as one
+    // writes a fact about our key into a column whose other values are facts
+    // about the site. Tagged so the rescue pass can tell them apart.
+    const e = new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
+    e.scrapflyRefusedUs = r.status === 401 || r.status === 402 || r.status === 403;
+    e.scrapflyStatus = r.status;
+    throw e;
   }
   const j = await r.json();
   const res = j?.result || {};
@@ -350,6 +380,14 @@ async function rescueHost(cand) {
     return { ...cand, platform: null, miss: "responded-no-feed", rescued: true, trace };
   } catch (e) {
     note(trace, "rescue", e.message);
+    // `rescued` means SCRAPFLY REACHED THE HOST. On an auth failure it reached
+    // nobody, so the flag stays off and the host keeps the verdict the direct
+    // probe already earned -- otherwise a dead key turns every walled host into
+    // "answered only via anti-bot", and the province-wide READABLE number goes
+    // UP the more completely our key is broken.
+    if (e?.scrapflyRefusedUs) {
+      return { ...cand, platform: null, miss: cand.miss, rescueUnavailable: true, trace };
+    }
     return { ...cand, platform: null, miss: "rescue-failed", rescued: true, trace };
   }
 }
@@ -517,8 +555,16 @@ async function main() {
 
   if (RESCUE) {
     const stuck = results.filter((r) => !r.platform && RESCUABLE.has(r.miss));
-    if (!SCRAPFLY_KEY) {
-      console.warn(`\n--rescue asked for but SCRAPFLY_API_KEY is not set — ${stuck.length} unreachable host(s) left unrescued.`);
+    // PRESENCE IS NOT VALIDITY. The old guard was `if (!SCRAPFLY_KEY)`, so a
+    // REJECTED key sailed straight through and every host came back 401 --
+    // which, before the two fixes above, was recorded as an anti-bot SUCCESS.
+    // The repo's copy of this key has been answering 401 for days.
+    const keyState = SCRAPFLY_KEY ? await verifyScrapflyKey() : { ok: false, why: "SCRAPFLY_API_KEY is not set" };
+    if (!keyState.ok) {
+      console.warn(`\n--rescue asked for, but the Scrapfly key is unusable: ${keyState.why}`);
+      console.warn(`   ${stuck.length} host(s) left unrescued, and NOT counted as readable.`);
+      console.warn(`   Fix with: npm run key:scrapfly`);
+      RESCUE_UNAVAILABLE = keyState.why;
     } else if (!stuck.length) {
       console.log("\n--rescue: every host answered directly, nothing to retry.");
     } else {
@@ -699,7 +745,11 @@ async function recordReachability(results) {
       // whether this host takes datacenter traffic -- so it is recorded and
       // NOT allowed to send every future scan down the paid path.
       ...(walled ? { last_direct_fail_at: now, fetch_strategy: "asp" } : {}),
-      ...(r.rescued ? { last_asp_ok_at: now } : {}),
+      // Only when the anti-bot pass actually CAME BACK WITH A PAGE. `rescued`
+      // alone is true for blocked-everywhere too -- a host that refused even a
+      // residential IP -- and stamping "asp ok" there records a success that
+      // did not happen, on a row the live scan reads.
+      ...(aspAnswered(r) ? { last_asp_ok_at: now } : {}),
       ...(r.platform ? { observed_platform: r.platform } : {}),
     };
     const { error } = await supabase.from("dealer_source").update(patch).eq("host", host);
@@ -711,7 +761,8 @@ async function recordReachability(results) {
 function reportReadCapability(results) {
   const n = results.length;
   const direct = results.filter((r) => (r.platform && !r.rescued) || READ_DIRECT.has(r.miss)).length;
-  const viaAsp = results.filter((r) => r.rescued).length;
+  // Same rule as the write-back: answered means a page came back.
+  const viaAsp = results.filter(aspAnswered).length;
   const blocked = results.filter((r) => r.miss === "blocked" && !r.rescued).length;
   const flaky = results.filter((r) => NOT_A_WALL.has(r.miss) && !r.rescued).length;
   const pct = (x) => n ? `${((x / n) * 100).toFixed(1)}%` : "-";
@@ -728,7 +779,16 @@ function reportReadCapability(results) {
   console.log("=".repeat(64));
   // A number with no caveat is a claim. Say what this run could not settle.
   if (flaky) console.log(`  ${flaky} host(s) neither answered nor refused -- a timeout is not a verdict, re-probe those before counting them out.`);
-  if (!results.some((r) => r.rescued)) console.log("  (no anti-bot pass in this run -- re-run with --rescue for the true readable figure)");
+  if (RESCUE_UNAVAILABLE) {
+    // The loudest line in the report. A rescue that was ASKED FOR and could not
+    // run leaves the refusing hosts counted as unreadable, and saying nothing
+    // would present a floor as if it were the measurement.
+    console.log(`  !! THE ANTI-BOT PASS DID NOT RUN: ${RESCUE_UNAVAILABLE}`);
+    console.log("     Every host that refuses a plain fetch is counted UNREADABLE above.");
+    console.log("     This number is a FLOOR, not the answer. Fix the key and re-run.");
+  } else if (!results.some((r) => r.rescued)) {
+    console.log("  (no anti-bot pass in this run -- re-run with --rescue for the true readable figure)");
+  }
 }
 
 await main();
