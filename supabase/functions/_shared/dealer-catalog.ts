@@ -99,6 +99,42 @@ const WALLED = new Set(["challenged", "refused"]);
 
 // HTTP statuses that mean "not you". 451 is legal blocking, 407 a proxy
 // demanding auth; both are about the requester, like 401 and 403.
+/**
+ * The other URLs that are the SAME SITE.
+ *
+ * A host string out of AMVIC's roster is a guess about two things nobody
+ * verified: the scheme, and whether the site lives on `www`. Both guesses fail
+ * silently at the transport layer, and a transport failure is indistinguishable
+ * from "this business is gone" unless something tries the alternatives.
+ *
+ * MEASURED, 2026-08-31. Re-probing the 336 hosts that never answered the
+ * province-wide probe: 78 failed on TLS, and **53 of those 78 answer perfectly
+ * well** — 47 of them over plain `http://`, 6 on the www-flipped name. They
+ * were never unreachable. We asked for the wrong URL and recorded the answer as
+ * a fact about the dealer.
+ *
+ * That is the same shape as the 403s that produced "EDealer: 0 across Alberta":
+ * our own request recorded as the world's answer. [[repeat-fix-pattern]]
+ *
+ * Ordered by how much of the original they keep, so the first hit is the
+ * closest match: same name over http, then the flipped name over https, then
+ * flipped over http. The input origin itself is NOT included — the caller has
+ * already tried it, and returning it would re-spend the request that failed.
+ */
+export function originVariants(raw: unknown): string[] {
+  const origin = toOrigin(raw);
+  if (!origin) return [];
+  let hostname: string;
+  try { hostname = new URL(origin).hostname; } catch { return []; }
+  const flipped = hostname.startsWith("www.") ? hostname.slice(4) : `www.${hostname}`;
+  // A bare TLD-less name or an IP has no meaningful www form; flipping it
+  // would invent a hostname that was never in the roster.
+  const flippable = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(hostname) && !/^\d+(\.\d+){3}$/.test(hostname);
+  const out = [`http://${hostname}`];
+  if (flippable) out.push(`https://${flipped}`, `http://${flipped}`);
+  return out;
+}
+
 export const REFUSAL_CODES = new Set([401, 403, 407, 451]);
 
 /** The catalogue's verdict for one direct read, from its status and code. */
