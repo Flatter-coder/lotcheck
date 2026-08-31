@@ -47,7 +47,7 @@ function toOrigin(raw) {
 }
 const key_ = (o) => o && o.replace(/^https:\/\/www\./, "https://");
 
-const rows = await all("amvic_licensees", "id,business_name,facility_status,website,activities");
+const rows = await all("amvic_licensees", "id,name,trade_name,facility_status,facility_type,website,activities");
 console.log(`roster rows: ${rows.length}`);
 
 const issued = rows.filter((r) => String(r.facility_status || "").trim() === "Issued");
