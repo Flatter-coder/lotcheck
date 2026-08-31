@@ -148,6 +148,28 @@ export function extractJsonLdVehicle(html) {
   let condition = /new/.test(cond) ? "new" : (/used|refurb/.test(cond) ? "used" : null);
   if (condition == null && odometerKm != null) condition = odometerKm <= 100 ? "new" : "used";
 
+  // WHEN THE DEALER GOT IT. schema.org purchaseDate is "the date the item was
+  // purchased by the current owner" -- and on a dealer's own listing the current
+  // owner is the dealer, so this is the date it landed in their inventory.
+  //
+  // We were reporting "Days on lot: not published - ask the dealer" on pages
+  // that publish it, in a blob the scan had already parsed. Advantage Ford's
+  // Acadia carried "purchaseDate":"2026-07-30T11:27:42.000" the whole time.
+  // [[days-on-lot-own-engine]] is our own leverage feature; handing it back
+  // because nobody read one field is the cheapest possible miss.
+  //
+  // Guarded, because a date is easy to publish wrong: a future date or one more
+  // than ten years old is a data error, not a very patient dealer.
+  let listedSince = null;
+  {
+    const raw = node.purchaseDate ?? offer?.availabilityStarts ?? null;
+    const t = raw ? Date.parse(String(raw)) : NaN;
+    if (Number.isFinite(t)) {
+      const days = Math.floor((Date.now() - t) / 86400000);
+      if (days >= 0 && days <= 3650) listedSince = new Date(t).toISOString().slice(0, 10);
+    }
+  }
+
   const currency = str(offer?.priceCurrency);
   const seller = offer?.seller || node?.seller;
   const addr = seller?.address;
@@ -156,7 +178,7 @@ export function extractJsonLdVehicle(html) {
   const dealerCity = locality ? (region ? `${locality}, ${region}` : locality) : null;
 
   if (!year && !make && !model && price == null) return null;
-  return { year, make, model, trim, vin, odometerKm, price, currency, condition, dealerName: str(seller?.name), dealerCity };
+  return { year, make, model, trim, vin, odometerKm, price, currency, condition, listedSince, dealerName: str(seller?.name), dealerCity };
 }
 
 // Fill blanks in a Claude-extracted analysis object (`parsed`) using a
@@ -176,6 +198,29 @@ export function fillFromJsonLd(parsed, jsonLd) {
   if (!parsed.vehicleCondition && jsonLd.condition) parsed.vehicleCondition = jsonLd.condition;
   if (!parsed.dealerName && jsonLd.dealerName) parsed.dealerName = jsonLd.dealerName;
   if (!parsed.dealerCity && jsonLd.dealerCity) parsed.dealerCity = jsonLd.dealerCity;
+  // DAYS ON LOT, from the listing's own inventory date.
+  //
+  // Only when nothing better already found one: the platform feeds (SM360's
+  // date_on_lot, Convertus's date_added) are the dealer's operational record
+  // and outrank a schema.org field, exactly as the existing capture order says.
+  // This fills the case where there was no answer at all -- which is what the
+  // buyer saw as "Not published, ask the dealer" on a page that published it.
+  if (!parsed.daysOnLot && jsonLd.listedSince) {
+    const t = Date.parse(jsonLd.listedSince + "T00:00:00Z");
+    const days = Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : NaN;
+    // A car listed today is 0 days on the lot, which is TRUE and worth saying --
+    // but it is also what a mis-stamped date looks like, and "brand new to the
+    // lot" is the one reading that gives a buyer no leverage and costs nothing
+    // to omit. Report it from one full day.
+    if (Number.isFinite(days) && days >= 1 && days <= 3650) {
+      parsed.daysOnLot = {
+        days,
+        since: jsonLd.listedSince,
+        source: "listing_structured_data",
+        sourceLabel: "the listing's own inventory date",
+      };
+    }
+  }
   if (parsed.odometerKm == null && jsonLd.odometerKm != null) parsed.odometerKm = jsonLd.odometerKm;
   if (!parsed.vehicle) {
     const vehicleStr = [jsonLd.year, jsonLd.make, jsonLd.model, jsonLd.trim].filter(Boolean).join(" ");

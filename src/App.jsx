@@ -11087,6 +11087,16 @@ function QuoteCheckPage(){
           setErrorMsg(body.message||"Sorry, we can't process a page with multiple vehicles. Paste the link to the ONE vehicle you want checked instead.");
           return;
         }
+        if(body.error==="wrong_vehicle_served"){
+          // The URL names a VIN and the page we were served never mentions it,
+          // so the response describes a different car than the link asked for.
+          // Every field in it would agree with every other field -- about the
+          // wrong vehicle -- so there is nothing to repair, only a refusal.
+          // Not charged. [[ai-defamation-entity-match-lesson]]
+          setStatus("error");
+          setErrorMsg(body.message||"That link names one vehicle and the page we received describes another. Nothing was charged — please reload the dealer's page and try again.");
+          return;
+        }
         if(body.error==="subject_mismatch"){
           // The page mentions several vehicles and the read came back
           // describing one of the NEIGHBOURS, not the vehicle the page
