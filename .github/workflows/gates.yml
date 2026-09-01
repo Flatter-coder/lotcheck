@@ -330,6 +330,8 @@ jobs:
       # the scan.
       - name: Dealer catalogue (which way to fetch a host, learned not guessed)
         run: npm run test:dealer-catalog
+      - name: Fee ladder (a ladder is only claimed when the arithmetic closes)
+        run: npm run test:fee-ladder
       # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
       # the LISTING path only; a dealer red-team found the identical accusation
       # still live on the UPLOAD path, which carried its own unguarded copy and

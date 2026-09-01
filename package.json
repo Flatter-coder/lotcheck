@@ -36,6 +36,7 @@
     "test:structured-inventory": "node scripts/test-structured-inventory.mjs",
     "test:carry-forward": "node scripts/test-carry-forward.mjs",
     "test:dealer-catalog": "node --experimental-strip-types supabase/functions/_shared/dealer-catalog.test.ts",
+    "test:fee-ladder": "node --experimental-strip-types supabase/functions/_shared/fee-ladder.test.ts",
     "catalog:build": "node --experimental-strip-types scripts/build-dealer-catalog.mjs",
     "check:error-codes": "node scripts/check-error-codes.mjs",
     "test:multi-vehicle": "node --experimental-strip-types supabase/functions/_shared/multi-vehicle.test.ts",
