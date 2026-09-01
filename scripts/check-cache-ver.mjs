@@ -41,7 +41,11 @@ const OUTPUT_SHAPING = [
   // from it to shape docFeeCheck, so a change to a ceiling value changes what a
   // report SAYS -- the same blind spot recalls/scrapfly had (logic feeding the
   // analysis object living in a shared module the gate didn't watch).
-  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
+  // fee-ladder joined on 2026-09-01. It decides whether the add-ons point
+  // reads ITEMIZED or NONE LISTED and what the buyer is told is negotiable,
+  // which is squarely what a report SAYS -- the same reason recalls, scrapfly
+  // and fee-schedule are on this list.
+  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls|fee-ladder)\./,
   // scrapfly joined this list on 2026-08-20, for the same reason recalls did
   // the day before: attachSealedScreenshot() stamps sourceUrl/capturedAt onto
   // `analysis` before it's signed, and a change to what it stamps (or when)

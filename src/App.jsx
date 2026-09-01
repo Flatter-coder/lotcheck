@@ -8502,7 +8502,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const dli = a.dealerLineItems; const dliTotal = dli && Array.isArray(dli.fees) ? dli.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0) : 0;
     // A dealer who itemises is TRANSPARENT, not "none listed". The old value
     // keyed only on addOns, which never carried the listing's own breakdown.
-    const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : dliTotal > 0 ? "ITEMIZED" : "NONE LISTED";
+    // AND "we looked" is not "we could not look". A report built from the
+    // page's structured data alone never sees a rendered fee box, and used to
+    // publish that gap as "NONE LISTED" -- a clean bill on a page printing an
+    // $899 doc fee. [[report-never-empty]] means backed, not filled in.
+    const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : dliTotal > 0 ? "ITEMIZED" : (a.feesRead === true ? "NONE LISTED" : "NOT READ");
     const body = (!(a.addOns || []).length && dliTotal > 0)
       ? <DealerLineItems items={dli} money={money} ink="#e2e8f0" faint={MUT2} line={BORD} teal={TEAL} />
       : (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;

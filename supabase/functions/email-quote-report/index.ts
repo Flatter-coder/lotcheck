@@ -809,7 +809,15 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // itemisation, so the 2025 Mazda CX-90's openly-stated $795 Admin. Fee
   // reported as nothing at all.
   else if (dealerFeeTotal(a) > 0) P.push({ t: "Add-ons & fee audit", v: "ITEMIZED", tone: "muted" });
-  else P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
+  // AND "WE LOOKED" IS NOT "WE COULD NOT LOOK". The Advantage Ford Acadia was
+  // reported to a buyer as "NONE LISTED -- no dealer extras were itemized" on a
+  // page printing Doc Fee +$899 and an AMVIC levy, because that report came off
+  // the JSON-LD path and a fee box is rendered html, not schema.org markup. The
+  // report knew it was incomplete -- its own bottom line said so -- and still
+  // published the gap as a finding. Now the absence is only claimed when the
+  // page was actually read. [[report-never-empty]] means backed, not filled in.
+  else if (a.feesRead === true) P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
+  else P.push({ t: "Add-ons & fee audit", v: "NOT READ", tone: "muted" });
   const fr = a.financeRates;
   // See the fuller comment at the deck-card version above: an untrusted
   // (LLM-only) dealer APR falls through to the same states as if none were
@@ -922,6 +930,9 @@ function pointExplain(t: string, a: any): string | null {
       if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
       return "This exact model couldn't be confirmed in the registry - not an all-clear. Check by VIN at Transport Canada (free) before signing.";
     case "Add-ons & fee audit":
+      if (!(a.addOns || []).length && dealerFeeTotal(a) <= 0 && a.feesRead !== true) {
+        return "We could not read this page's pricing section, so we cannot say whether extras are itemized - this is a gap in our read, not a clean bill. Ask for the full out-the-door breakdown in writing.";
+      }
       return (a.addOns || []).length
         ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
         : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";

@@ -61,6 +61,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
+import { readFeeLadder, ladderFees } from "../_shared/fee-ladder.ts";
 import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
@@ -111,7 +112,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-31c";  // + days-on-lot read from the listing own purchaseDate (was reported "not published" on pages that publish it), and a URL-VIN identity guard
+const CACHE_VER = "2026-09-01a";  // + the dealer fee ladder is read off the page, so an itemised doc fee stops reporting as "NONE LISTED"
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2476,10 +2477,40 @@ async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<str
       financeContingent: detectFinanceContingent(html),
       standardWarranty: null,
       addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      // WE READ THE PAGE FOR FEES. Recorded whether or not any were found,
+      // because "we looked and there were none" and "we never looked" are
+      // different answers and the report used to print the first when it
+      // meant the second. [[report-never-empty]] means backed, not filled in.
+      feesRead: true,
       source: "structured_data_fallback",
       sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own structured product data (schema.org). Core vehicle details and the advertised price come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
       summary: `${vehicleStr ?? "This vehicle"}${v.price != null ? ` is listed at $${v.price.toLocaleString()}${v.currency && v.currency !== "CAD" ? " " + v.currency : ""}` : ""}. This report was built from the page's structured data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
+    // THE DEALER'S OWN PRICE LADDER, off the same html this function already
+    // holds. A fee box is rendered HTML, not schema.org markup, so the JSON-LD
+    // read alone could never see it -- which is exactly how a page printing
+    // "Doc Fee +$899" was reported to a buyer as "no dealer extras were
+    // itemized". readFeeLadder only returns when the arithmetic closes, so a
+    // ladder here is the dealer's own breakdown and not a guess.
+    try {
+      const ladder = readFeeLadder(html);
+      if (ladder) {
+        const fees = ladderFees(ladder);
+        if (fees.length) {
+          analysis.dealerLineItems = {
+            fees: fees.map((f) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
+            incentives: ladder.lines.filter((l) => l.kind === "deduct").map((l) => ({ name: l.label, amount: l.amount })),
+            // The ladder RECONCILED to the advertised total, which is the
+            // strongest possible evidence that these fees sit inside the price
+            // rather than on top of it. [[fee-decomposition-and-capture]]
+            insideAdvertisedPrice: true,
+            source: "the dealer's own price breakdown on the listing",
+          };
+        }
+        console.log(`Fee ladder read: base ${ladder.base}, total ${ladder.total}, ${ladder.lines.length} line(s), ${fees.length} dealer charge(s).`);
+      }
+    } catch (e) { console.warn("fee ladder skipped:", (e as Error)?.message); }
+
     console.log(`JSON-LD fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.price ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
     return analysis;
   } catch (err) {
@@ -4544,6 +4575,38 @@ Deno.serve(async (req: Request) => {
           const t = early.dealerFees.reduce((sum: number, f: any) => sum + (Number(f?.amount) || 0), 0);
           console.log(`Dealer line items read: ${early.dealerFees.length} fee(s) totalling ${t}, inside the advertised price = ${early.feesInsideAdvertised}.`);
         }
+        // BACKFILL FROM THE PAGE ITSELF. The branch above uses fees the
+        // extractor found; this reads the dealer's printed ladder straight out
+        // of the html when it did not. Only when nothing was found already --
+        // an extractor that DID read the fees knows more than a regex does.
+        //
+        // The ladder is only returned when base + additions - deductions equals
+        // the advertised total exactly, so this cannot invent a fee: a
+        // misread line makes the sum miss and the whole ladder is discarded.
+        if (!analysis.dealerLineItems) {
+          try {
+            // pageContent is the reader's own view of the page -- markdown when
+            // it produced markdown, raw html otherwise. Both flatten to the same
+            // "label $amount" pairs the ladder matches on, and it is already
+            // resolved here, so this costs no fetch and no await.
+            const ladder = readFeeLadder(pageContent);
+            const fees = ladderFees(ladder);
+            if (fees.length) {
+              analysis.dealerLineItems = {
+                fees: fees.map((f) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
+                incentives: (ladder?.lines || []).filter((l) => l.kind === "deduct").map((l) => ({ name: l.label, amount: l.amount })),
+                insideAdvertisedPrice: true,
+                source: "the dealer's own price breakdown on the listing",
+              };
+              console.log(`Fee ladder backfill: ${fees.length} dealer charge(s) from the page's own breakdown.`);
+            }
+          } catch (e) { console.warn("fee ladder backfill skipped:", (e as Error)?.message); }
+        }
+        // WHETHER WE COULD LOOK AT ALL is a separate fact from what we found,
+        // and the report needs both: "no itemised fees on this page" and "we
+        // never saw the price area" are different answers to a buyer.
+        if (typeof pageContent === "string" && pageContent.length > 500) analysis.feesRead = true;
+
         if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
         // Carry the D2C "page says Call for pricing, blob says $X" tell
         // through -- only when THIS gap-fill is what actually supplied the
