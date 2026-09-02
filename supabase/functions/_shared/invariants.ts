@@ -283,7 +283,7 @@ export const INVARIANTS: Invariant[] = [
     repair: (a) => { a.marketCount = { ...a.marketCount, state: "unchecked", reason: "provenance_missing" }; },
   },
   {
-    // "If you do nothing, this page gives you N months..." is a claim about
+    // "This page's payment default is N months..." is a claim about
     // the page's PRE-SELECTED state. Only the page's own feed, embedded
     // settings or visible sentence can back that (page-default.js); the
     // model's financing read cannot say what was pre-selected, and an

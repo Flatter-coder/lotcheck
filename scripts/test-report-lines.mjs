@@ -1,6 +1,6 @@
 // Regression suite for the two count/default report lines:
 //   "M of the N other listings LotCheck read ... advertised below this one"  (market-count.js)
-//   "If you do nothing, this page shows N months ..."                        (page-default.js)
+//   "This page's payment default is N months ..."                          (page-default.js)
 // and the one shared sentence builder every surface renders (report-lines.js).
 // Run: node scripts/test-report-lines.mjs
 //
@@ -210,7 +210,7 @@ console.log("\n-- report-lines --");
   check("LINE 1 confirmed value names what it is below", l.value === "0 OF 12 BELOW THIS PRICE", l.value);
   check("LINE 1 confirmed headline (past tense)", l.headline === "None of 12 advertised below this one", l.headline);
   check("LINE 1 confirmed body names count, vehicle, reader, dealers, price with cents, date and the model-wide clause",
-    l.body === "None of the 12 other 2027 Honda HR-V Sport listings LotCheck read from 3 Alberta dealers' own pages advertised below this one ($39,713.70) when read on Aug 18, 2026. Across all HR-V trims read: 9 of 32 below. Counts of dealers' own advertised prices, this vehicle excluded; not a valuation.", l.body);
+    l.body === "None of the 12 other 2027 Honda HR-V Sport listings LotCheck read from 3 Alberta dealers' own pages advertised below this one ($39,713.70) when read on Aug 18, 2026. Across all HR-V trims read: 9 of 32 below. These are dealers' own advertised prices with this vehicle left out: a count, not a valuation.", l.body);
   check("LINE 1 meta line", l.meta === "2027 Honda HR-V Sport · Alberta · read on Aug 18, 2026", l.meta);
   const one = marketCountLine({ marketCount: { ...a.marketCount, n: 1, below: 1, same: 0, dealers: 1, modelN: 1, modelBelow: 1 } });
   check("LINE 1 singular grammar", /1 of the 1 other 2027 Honda HR-V Sport listing LotCheck read from 1 Alberta dealer's own pages advertised below this one/.test(one.body), one.body);
@@ -246,12 +246,12 @@ console.log("\n-- report-lines --");
   const pd = readPageDefault({ html, price: 39713.7, readAt: "2026-09-02" });
   const l = pageDefaultLine({ pageDefault: pd });
   check("LINE 2 confirmed value", l.value === "84 MO · BI-WEEKLY · 5.99%", l.value);
-  check("LINE 2 confirmed body carries the page's own qualifiers and the one instruction", l.body === "If you do nothing, this page shows 84 months, bi-weekly payments of $267 at 5.99% APR with $0 down (the page calls the rate an estimate; plus taxes and licence; cost of borrowing $8,951.19 as stated) — the finance figure this page shows first, from its own text, read Sep 2, 2026. Ask the dealer for the term, frequency, rate and total cost of borrowing in writing.", l.body);
+  check("LINE 2 confirmed body carries the page's own qualifiers and the one instruction", l.body === "This page shows financing first as 84 months, bi-weekly payments of $267, 5.99% APR and $0 down. The page notes the rate is an estimate and taxes and licence are extra, with a stated cost of borrowing of $8,951.19. Read from the page's own text on Sep 2, 2026. It helps to have the term, payment frequency, rate and total cost of borrowing from the dealer in writing.", l.body);
   check("LINE 2 meta", l.meta === "read Sep 2, 2026", l.meta);
   const sm = pageDefaultLine({ pageDefault: readSm360PageDefault(SM360_LIVE, "2026-09-02") });
-  check("LINE 2 SM360 cash-first page leads with it in value, headline and body", sm.value === "OPENS ON CASH · 84 MO · WEEKLY · 2.99%" && /^Opens on cash · 84 months · weekly · 2\.99% APR$/.test(sm.headline) && /^This page opens on its cash price\. Its finance option, if you change nothing else, shows 84 months, weekly payments of \$196\.48 at 2\.99% APR with \$0 down — from the dealer's own listing data, read Sep 2, 2026\./.test(sm.body), sm.body + " | " + sm.value);
+  check("LINE 2 SM360 cash-first page leads with it in value, headline and body", sm.value === "OPENS ON CASH · 84 MO · WEEKLY · 2.99%" && /^Opens on cash · 84 months · weekly · 2\.99% APR$/.test(sm.headline) && /^This page opens on its cash price; its finance option starts at 84 months, weekly payments of \$196\.48, 2\.99% APR and \$0 down\. Read from the dealer's own listing data on Sep 2, 2026\./.test(sm.body), sm.body + " | " + sm.value);
   const partial = pageDefaultLine({ pageDefault: { checked: true, state: "confirmed", termMonths: 84, apr: 5.99, source: "page_text", readAt: "2026-09-02" } });
-  check("LINE 2 partial: missing frequency is said, not guessed", /84 months at 5\.99% APR/.test(partial.body) && /does not state a payment frequency/.test(partial.body) && partial.value === "84 MO · 5.99%", partial.body + " | " + partial.value);
+  check("LINE 2 partial: missing frequency is said, not guessed", /84 months and 5\.99% APR/.test(partial.body) && /does not state a payment frequency/.test(partial.body) && partial.value === "84 MO · 5.99%", partial.body + " | " + partial.value);
   const noDown = pageDefaultLine({ pageDefault: { checked: true, state: "confirmed", termMonths: 72, paymentFrequency: "biweekly", apr: 4.99, downPayment: null, source: "sm360_feed", readAt: "2026-09-02" } });
   check("LINE 2 never prints '$0 down' when no down payment was read", !/down/.test(noDown.body.split("—")[0]), noDown.body);
   const notShown = pageDefaultLine({ pageDefault: { checked: true, state: "absent", reason: "panel_hidden" } });
@@ -259,7 +259,7 @@ console.log("\n-- report-lines --");
   const noneFound = pageDefaultLine({ pageDefault: { checked: true, state: "absent", reason: "none_found" } });
   check("LINE 2 a miss -> NONE FOUND, a statement about the reader", noneFound.value === "NONE FOUND" && /LotCheck did not find/.test(noneFound.body), noneFound.body);
   const un = pageDefaultLine({});
-  check("LINE 2 unchecked never claims an attempt failed", un.value === "NOT READ" && un.body === "Not read — no payment settings were read for this report. Ask the dealer for the term, payment frequency and rate in writing.", un.body);
+  check("LINE 2 unchecked never claims an attempt failed", un.value === "NOT READ" && /^No payment settings were read for this report\./.test(un.body), un.body);
   const noPage = pageDefaultLine({ pageDefault: { checked: false, state: "unchecked", reason: "no_page" } });
   check("LINE 2 upload path says a page is needed", /uploaded quote/.test(noPage.body), noPage.body);
   const compact = pageDefaultLine({ dflt: { st: "confirmed", t: 84, f: "biweekly", a: 5.99, d: 0, p: 267, src: "page_text", at: "2026-09-02", pm: null, rs: null, q: "the page calls the rate an estimate; plus taxes and licence", cob: 8951.19 } });
@@ -284,7 +284,7 @@ console.log("\n-- copy sweep (every state x both lines) --");
     /100% (accurate|correct|reliable)/i, /always (saves|beats|wins)/i, /never wrong/i,
     /10[-\s]point/, /(never|nothing|not) stored/i,
     // neutral-language + no-accusation memory rules (not yet in the gate)
-    /\b(avoid|overpriced|best value|negotiate|should|lowball|steer|steers|hidden by|designed to|to make the payment look|nearby|gives you)\b/i,
+    /\b(avoid|overpriced|best value|negotiate|should|lowball|steer|steers|hidden by|designed to|to make the payment look|nearby|gives you|if you do nothing|if you change nothing)\b/i,
     /\p{Extended_Pictographic}/u,
   ];
   const mcStates = [

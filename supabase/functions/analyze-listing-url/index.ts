@@ -115,7 +115,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-02a";  // + marketCount ("of N other listings read, M below") and pageDefault ("if you do nothing, this page gives you...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly
+const CACHE_VER = "2026-09-02b";  // + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -4483,7 +4483,7 @@ Deno.serve(async (req: Request) => {
       analysis.financeRates.dealer = { apr: Number(analysis.financing.rate), source: analysis.financing.source || "llm" };
     }
 
-    // The page's DEFAULT payment scenario -- "if you do nothing, this page
+    // The page's DEFAULT payment scenario -- "this page's payment default is
     // gives you N months, <frequency> payments at X% APR". Read by CODE from
     // the page's own html/text (page-default.js), never from the model's
     // financing object, which cannot say what was pre-selected. The SM360
