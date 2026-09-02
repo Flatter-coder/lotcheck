@@ -10256,7 +10256,7 @@ function QuoteCheckPage(){
   };
   // Dark = the cosmic palette from public/live-price-index.html: near-black indigo
   // chrome + cyan hero accent. Coral (flags) and butter (caution) stay warm so
-  // the color-coding still reads. Light/outdoor modes are unchanged.
+  // the color-coding still reads. Light mode is unchanged.
   const QC_DARK={
     ink:"#eaf0ff", inkSoft:"#c7cee6", inkFaint:"#9aa2c4",
     paper:"#080a1c", paper2:"#0f1228", card:"#15163a",
@@ -10265,36 +10265,19 @@ function QuoteCheckPage(){
     coral:"#F2836B", coralInk:"#FF9E85", coralBg:"rgba(242,131,107,.18)",
     butter:"#F5C95C", butterInk:"#F5C95C", butterBg:"rgba(245,201,92,.18)",
   };
-  // Outdoor/bright: for viewing on a phone in direct sunlight, where the
-  // usual cream paper and mid-tone teal/coral wash out badly against
-  // glare. Pure white paper and near-black ink maximize contrast; teal
-  // and coral are darkened and more saturated than the standard palette
-  // so the color-coding (principal vs. interest, verified vs. flagged)
-  // stays legible even when ambient light flattens subtle hue
-  // differences. No soft box-shadow here -- shadows are exactly the kind
-  // of low-contrast cue that disappears in bright glare, so a visibly
-  // bolder border does the job of defining the card edge instead.
-  const QC_OUTDOOR={
-    ink:"#141127", inkSoft:"#3A3660", inkFaint:"#514C82",
-    paper:"#FFFFFF", paper2:"#F1F1EC", card:"#FFFFFF",
-    line:"rgba(20,17,39,.22)", borderWidth:"1.5px", cardShadow:"none",
-    teal:"#0E7A6C", tealInk:"#0A5A50", tealBg:"#D9F0EB",
-    coral:"#C8431F", coralInk:"#8F2E12", coralBg:"#FBE1D6",
-    butter:"#B8860B", butterInk:"#6B4E08", butterBg:"#F5E8C8",
-  };
   // Same key and same fallback logic as the homepage's inline head script:
   // explicit "dark" wins, otherwise fall back to the OS preference -- so a
   // first-time visitor who lands directly on /quote-check (never having
   // touched the homepage toggle) still gets a theme that matches their
-  // system, not a hardcoded default. "outdoor" is a third saved value now,
-  // but only ever reached by explicit user choice below -- there's no OS
-  // media feature for "in bright sunlight," so a first-time visitor with
-  // nothing saved still only ever falls back to dark or light.
+  // system, not a hardcoded default. "outdoor" was a third light mode
+  // (retired 2026-09-01: two of three tabs were light modes, which read as
+  // a duplicate). Anyone who saved it keeps a working page: it maps to
+  // light here, exactly as the verify and used-market pages already did.
   const [qcTheme,setQcTheme]=useState(()=>{
     try{
       const saved=localStorage.getItem("lc-theme");
-      if(saved==="dark"||saved==="outdoor") return saved;
-      if(saved==="light") return "light";
+      if(saved==="dark") return "dark";
+      if(saved==="light"||saved==="outdoor") return "light";
       return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
     }catch{ return "light"; }
   });
@@ -10302,7 +10285,7 @@ function QuoteCheckPage(){
     setQcTheme(next);
     try{ localStorage.setItem("lc-theme",next); }catch{}
   }
-  const C=qcTheme==="dark"?QC_DARK:qcTheme==="outdoor"?QC_OUTDOOR:QC_LIGHT;
+  const C=qcTheme==="dark"?QC_DARK:QC_LIGHT;
 
   // 5-star reviews green, 3-star amber, 1-star red -- with 4 and 2 filled
   // in sensibly on the same gradient (existing teal/butter/coral palette,
@@ -11170,12 +11153,6 @@ function QuoteCheckPage(){
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <circle cx="12" cy="12" r="4"/>
                     <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
-                  </svg>
-                )],
-                ["outdoor","Outdoor",(
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="12" cy="12" r="5" fill="currentColor"/>
-                    <path d="M12 1v3M12 20v3M1 12h3M20 12h3M4 4l2 2M18 18l2 2M20 4l-2 2M6 18l-2 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
                   </svg>
                 )],
               ].map(([k,label,icon])=>(
