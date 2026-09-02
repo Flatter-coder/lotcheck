@@ -11104,7 +11104,14 @@ function QuoteCheckPage(){
     <>
       <style>{GLOBAL_CSS}</style>
       <style>{QC_CSS}</style>
-      <div style={{minHeight:"100dvh",background:qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper,backgroundColor:qcTheme==="dark"?"#05060f":undefined,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
+      {/* backgroundColor must be set in BOTH themes. It used to be `undefined`
+          for light, and React applies `background` (shorthand) then removes
+          the `background-color` longhand for the undefined key -- which clears
+          the colour the shorthand had just set. Net effect: light mode had NO
+          page ground, and only looked fine while tall content covered the dark
+          <body>. The short error view exposed it: dark page, cream nav, and a
+          dark-ink title on a near-black ground (2026-09-01). */}
+      <div style={{minHeight:"100dvh",background:qcTheme==="dark"?"radial-gradient(125% 120% at 78% 4%,#141238 0%,#080a1c 46%,#05060f 100%) no-repeat":C.paper,backgroundColor:qcTheme==="dark"?"#05060f":C.paper,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif"}}>
         {/* Full-width site nav -- the same tabs as the rest of LotCheck, so the
             Quote Check page reads as part of the site, not a detached tool. The
             theme toggle, credits chip and Sign in live on its right side. */}
