@@ -477,6 +477,11 @@
     .lpi-hero{min-height:auto;padding-bottom:8px}
   }
   @media (prefers-reduced-motion:reduce){ .lpi-plate{filter:brightness(.92) contrast(1.05) saturate(1.32)} }
+
+  /* The board that sat under the hero is gone; the wrap now carries only the
+     back control, so it stops being a layout and becomes a footer. */
+  .wrap-min{padding-top:22px;padding-bottom:8px}
+  .wrap-min .backbar{margin:0}
 </style>
 <script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
 <script>
@@ -545,7 +550,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     <p class="lpi-sub">MSRP is set nationally by the manufacturer, not by the lot. Everything on this
       page is read live from LotCheck&rsquo;s verified catalog &mdash; <b id="hTrims">&mdash;</b> trims
       across <b id="hMakes">&mdash;</b> makes, checked against what Alberta dealers advertise.</p>
-    <a class="lpi-cta" href="#idx">See the index <i>&darr;</i></a>
+    <a class="lpi-cta" href="/quote-check">Analyze my quote <i>&rarr;</i></a>
   </div>
 
   <div class="lpi-strip">
@@ -564,75 +569,8 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   </div>
   <div class="lpi-scroll">Scroll</div>
 </section>
-<a id="idx" aria-hidden="true"></a>
 
-<div class="wrap">
-  <h1>MSRP Live Index</h1>
-  <div class="lede">LotCheck · Alberta new-vehicle pricing</div>
-
-  <!-- HERO: median MSRP on the 3D pedestal -->
-  <section class="card hero">
-    <div class="k">Middle value MSRP<span class="lv lv-cat"><i></i>Live</span></div>
-    <div class="idx-stage">
-      <div class="idx-podium" id="idxPodium">
-        <div class="idx mono" id="fig">—</div>
-        <div class="pedestal" aria-hidden="true"><i class="p-ring"></i><i class="p-side"></i><i class="p-top"></i></div>
-      </div>
-    </div>
-    <div class="hero-stats mono">
-      <span>verified trims <b id="stTrims">—</b></span>
-      <span>makes <b id="stMakes">—</b></span>
-      <span title="Needs a second month of catalog history before a change can be computed">m/m <b id="stMm">—</b></span>
-    </div>
-  </section>
-
-  <!-- TWO MARKET CARDS -->
-  <div class="two">
-    <section class="card chart-card mkt-card">
-      <h2>Alberta asking price vs manufacturer-verified sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
-      <p class="mkt-say" id="mktSay"></p>
-      <div class="mkt-strip" id="mktStrip"></div>
-      <div class="mkt-cap" id="mktCap"></div>
-      <div class="mkt-terr" id="mktTerr"></div>
-      <p class="mkt-foot" id="mktFoot"></p>
-    </section>
-
-    <section class="card chart-card">
-      <h2>Asking price against the manufacturer's sticker<span class="lv lv-mkt"><i></i>Live</span></h2>
-      <canvas id="chart3d" height="300" tabindex="0" role="img"
-        aria-label="3D bar chart of Alberta listings grouped by distance from the manufacturer-verified sticker, split into below, at and above. Drag or use arrow keys to rotate."></canvas>
-      <div class="chart-wait" id="histWait" style="display:none"></div>
-      <div class="lg">
-        <span><i class="sq" style="background:var(--cyan)"></i>Below MSRP</span>
-        <span><i class="sq" style="background:var(--up)"></i>At sticker</span>
-        <span><i class="sq" style="background:var(--down)"></i>Above MSRP</span>
-      </div>
-    </section>
-  </div>
-
-  <!-- POWERTRAIN -->
-  <div class="sect-h"><span>Verified trims by powertrain<span class="lv lv-cat"><i></i>Live</span></span><span class="n" id="ptTotal">—</span></div>
-  <section class="card pt-card">
-    <div class="ptrows" id="ptRows"></div>
-    <p class="pt-note" id="ptNote"></p>
-  </section>
-
-  <!-- MARKET INSIGHTS -->
-  <div class="sect-h"><span>Market insights<span class="lv lv-cat"><i></i>Live</span></span><span class="n">data &amp; coverage</span></div>
-  <div class="tiles" id="tiles"></div>
-
-  <div class="foot-bar">
-    <button class="foot-btn" id="footBtn" aria-expanded="false" aria-controls="foot">
-      About this data <span class="car" aria-hidden="true"></span>
-    </button>
-  </div>
-  <div class="foot" id="foot">
-    <span id="footCat">Data source: LotCheck's verified MSRP catalog, read live. MSRP is set nationally
-    by manufacturers; the market cards show what Alberta dealers advertise against it, from their own
-    public listings.</span>
-    <span id="footMkt"></span>
-  </div>
-
+<div class="wrap wrap-min">
   <div class="backbar">
     <a class="back-btn" href="/" aria-label="Back to welcome page">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -738,6 +676,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   }
   /* ================= hero count-up ================= */
   function countUp(el,target,format){
+    // The board this once painted into is gone; a missing target is now a
+    // normal state, not a bug.
+    if(!el) return;
     var f=format||function(v){ return Math.round(v).toLocaleString("en-CA"); };
     // Truth first: rAF does not run in a background tab, so the value is
     // written immediately and the count-up is only an enhancement.
@@ -765,6 +706,15 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   }
   // Light (or extinguish) a family of live-tracking dots. A dot may only turn
   // on AFTER its read succeeded — never while loading, never on error.
+  // Writing to a surface that no longer exists must be a no-op, not an
+  // exception. An unguarded write in the SUCCESS path threw, which ran the
+  // catch, which threw again on the same missing elements -- and the figures
+  // the page exists to show were never painted.
+  function put(id,prop,val){
+    var el=document.getElementById(id);
+    if(el) el[prop]=val;
+  }
+
   function setLive(cls,on){
     document.querySelectorAll(".lv."+cls).forEach(function(el){ el.classList.toggle("on",!!on); });
   }
@@ -796,6 +746,11 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     });
     // m/m stays "—": there is no second month of catalog history yet, and an
     // invented change figure is worse than an honest dash.
+
+    // Everything past this point painted the board that used to sit under the
+    // hero. The figures above are the page now; if the board is absent there is
+    // nothing further to draw.
+    if(!document.getElementById("tiles")) return;
 
     // insight tiles
     document.getElementById("tiles").innerHTML=[
@@ -883,16 +838,16 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       '</div>';
 
     var unrec=catalog.trims-catalog.fuelTagged;
-    document.getElementById("ptTotal").textContent=
-      catalog.fuelTagged.toLocaleString("en-CA")+" of "+catalog.trims.toLocaleString("en-CA")+" trims";
+    put("ptTotal","textContent",
+      catalog.fuelTagged.toLocaleString("en-CA")+" of "+catalog.trims.toLocaleString("en-CA")+" trims");
     // Stated in words, once. This is the honest version of the grey block: it
     // says what is missing AND why the counts above are not a market share.
-    document.getElementById("ptNote").innerHTML=
+    put("ptNote","innerHTML",
       "Powertrain is recorded for <b>"+catalog.fuelTagged.toLocaleString("en-CA")+"</b> of "+
       "<b>"+catalog.trims.toLocaleString("en-CA")+"</b> verified trims. The other "+
       "<b>"+unrec.toLocaleString("en-CA")+"</b> are not shown here. "+
       "These counts describe what LotCheck has verified, not the share of cars on the road — "+
-      "the recorded set is not a representative sample of the catalogue.";
+      "the recorded set is not a representative sample of the catalogue.");
 
   }
 
@@ -995,6 +950,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   }
   function updateFootMkt(m){
     var el=document.getElementById("footMkt");
+    if(!el) return;
     if(m&&m.err){ el.textContent="Couldn't reach the market reading — reload to try again."; return; }
     if(!m){ el.textContent=""; return; }
     if(!m.enough){
@@ -1023,6 +979,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     var say=document.getElementById("mktSay"), strip=document.getElementById("mktStrip");
     var cap=document.getElementById("mktCap"), terr=document.getElementById("mktTerr");
     var foot=document.getElementById("mktFoot");
+    if(!say||!strip||!cap||!terr||!foot) return;
     // Three distinct non-data states, never conflated -- loading, failed, and
     // genuinely below the publication gate. A failed read must not render as
     // "0 listings", which would fabricate a market count.
@@ -1137,7 +1094,10 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     ];
   }
 
-  var ch=document.getElementById("chart3d"), g=ch.getContext("2d");
+  // The chart canvas lived in the board that used to sit under the hero.
+  // This runs at load, so an unguarded getContext threw before paintReal
+  // ever wrote the figures -- the page lost the numbers it exists to show.
+  var ch=document.getElementById("chart3d"), g=ch?ch.getContext("2d"):null;
   var CW=0,CH=0,cdpr=1,grow=0,yaw=0.62,dragging=false,lastX=0,colsCache=null;
   function chartSize(){
     cdpr=Math.min(devicePixelRatio||1,2);
@@ -1240,32 +1200,38 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     clearTimeout(rzT);
     rzT=setTimeout(function(){ redrawHist(false); },200);
   });
-  ch.addEventListener("pointerdown",function(e){ dragging=true; lastX=e.clientX; ch.setPointerCapture(e.pointerId); });
-  ch.addEventListener("pointerup",function(){ dragging=false; });
-  // touch-action:pan-y means a touch that becomes a page scroll ends in
-  // pointercancel, not pointerup — without this, dragging sticks true and the
-  // next buttonless mouse move would spin the chart.
-  ch.addEventListener("pointercancel",function(){ dragging=false; });
-  // One paint per display frame: high-rate mice deliver several pointermoves
-  // per frame, and a synchronous full-chart redraw for each is wasted work.
-  var dragRaf=0;
-  function paintDrag(){ dragRaf=0; grow=1; chart(); }
-  ch.addEventListener("pointermove",function(e){
-    if(!dragging) return;
-    if(e.pointerType==="mouse" && !e.buttons){ dragging=false; return; }
-    yaw=Math.max(0.18,Math.min(1.25,yaw+(e.clientX-lastX)*0.006));
-    lastX=e.clientX;
-    if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
-  });
-  // Keyboard path for the same rotation (the canvas is focusable).
-  ch.addEventListener("keydown",function(e){
-    if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
-    e.preventDefault();
-    yaw=Math.max(0.18,Math.min(1.25,yaw+(e.key==="ArrowRight"?0.06:-0.06)));
-    if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
-  });
+  // These bound the chart canvas at load. The canvas lived in the board that
+  // used to sit under the hero, so an unguarded bind threw before the
+  // figures were ever painted.
+  if(ch){
+    ch.addEventListener("pointerdown",function(e){ dragging=true; lastX=e.clientX; ch.setPointerCapture(e.pointerId); });
+    ch.addEventListener("pointerup",function(){ dragging=false; });
+    // touch-action:pan-y means a touch that becomes a page scroll ends in
+    // pointercancel, not pointerup — without this, dragging sticks true and the
+    // next buttonless mouse move would spin the chart.
+    ch.addEventListener("pointercancel",function(){ dragging=false; });
+    // One paint per display frame: high-rate mice deliver several pointermoves
+    // per frame, and a synchronous full-chart redraw for each is wasted work.
+    var dragRaf=0;
+    function paintDrag(){ dragRaf=0; grow=1; chart(); }
+    ch.addEventListener("pointermove",function(e){
+      if(!dragging) return;
+      if(e.pointerType==="mouse" && !e.buttons){ dragging=false; return; }
+      yaw=Math.max(0.18,Math.min(1.25,yaw+(e.clientX-lastX)*0.006));
+      lastX=e.clientX;
+      if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
+    });
+    // Keyboard path for the same rotation (the canvas is focusable).
+    ch.addEventListener("keydown",function(e){
+      if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
+      e.preventDefault();
+      yaw=Math.max(0.18,Math.min(1.25,yaw+(e.key==="ArrowRight"?0.06:-0.06)));
+      if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
+    });
+  }
 
   function drawHist(dev){
+    if(!ch) return;
     var wait=document.getElementById("histWait");
     var lg=ch.parentNode&&ch.parentNode.querySelector(".lg");
     if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
@@ -1284,10 +1250,14 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   // "About this data" — the provenance text is folded behind a click so the
   // page ends clean; the full wording is one tap away, never gone.
   var footBtn=document.getElementById("footBtn"), footEl=document.getElementById("foot");
-  footBtn.addEventListener("click",function(){
-    var open=footEl.classList.toggle("open");
-    footBtn.setAttribute("aria-expanded",open?"true":"false");
-  });
+  // The provenance panel lived in the board under the hero. Binding it
+  // unguarded threw at load, which stopped the figures being painted at all.
+  if(footBtn && footEl){
+    footBtn.addEventListener("click",function(){
+      var open=footEl.classList.toggle("open");
+      footBtn.setAttribute("aria-expanded",open?"true":"false");
+    });
+  }
 
   drawMarket(null); drawHist(null);
   document.querySelectorAll(".card").forEach(function(c,i){
@@ -1341,10 +1311,10 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // partial response must not become "$0 median". Say so instead.
       if(!catalog.loaded||!catalog.median||catalog.trims<50) throw new Error("thin catalog read ("+catalog.trims+" trims)");
       paintReal();
-      document.getElementById("footCat").innerHTML=
+      put("footCat","innerHTML",
         "Data source: LotCheck's verified MSRP catalog — <b>"+catalog.trims.toLocaleString("en-CA")+
         "</b> trims across <b>"+catalog.makes+"</b> makes, read live. MSRP is set nationally by manufacturers; "+
-        "the market cards show what Alberta dealers advertise against it, from their own public listings.";
+        "the market cards show what Alberta dealers advertise against it, from their own public listings.");
     })
     .catch(function(e){
       // Every surface the catalog feeds says so, rather than leaving a stale
@@ -1354,19 +1324,17 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       ["hFig","hTrims","hTrims2","hMakes","hMakes2"].forEach(function(id){
         var el=document.getElementById(id); if(el) el.textContent="\u2014";
       });
-      document.getElementById("fig").textContent="—";
-      document.getElementById("ptTotal").textContent="catalog unavailable";
-      document.getElementById("ptRows").innerHTML="";
-      document.getElementById("ptNote").innerHTML=
-        "Couldn&rsquo;t reach the MSRP catalog — reload to try again.";
-      document.getElementById("tiles").innerHTML=[
+      put("fig","textContent","—");
+      put("ptTotal","textContent","catalog unavailable");
+      put("ptRows","innerHTML","");
+      put("ptNote","innerHTML","Couldn&rsquo;t reach the MSRP catalog — reload to try again.");
+      put("tiles","innerHTML",[
         ["Makes tracked","verified makes"],["Trims verified","current models"],["Middle value new MSRP","across all trims"]
       ].map(function(t){
         return '<div class="card tile in"><div><div class="k">'+t[0]+'</div>'+
           '<div class="v mono">—</div><div class="k sub">'+t[1]+'</div></div></div>';
-      }).join("");
-      document.getElementById("footCat").textContent=
-        "Couldn't reach the MSRP catalog — reload to try again.";
+      }).join(""));
+      put("footCat","textContent","Couldn't reach the MSRP catalog — reload to try again.");
     });
 
   fetch(SUPA+"/rpc/fn_alberta_market_vs_catalog",
