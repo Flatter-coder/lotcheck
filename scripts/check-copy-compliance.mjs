@@ -41,7 +41,6 @@ const SURFACES = [
   "public/statcan-zev-map.html",
   "src/App.jsx",
   "src/DealOrrery.jsx",
-  "src/PlanetAlerts.jsx",
   // SERVER-SIDE COPY IS STILL COPY. The counter-script the buyer reads ALOUD at
   // the dealership is generated in deal.ts, and this gate scanned only the
   // frontend -- which is how "(the FTC CARS Rule in the US; AMVIC/OMVIC in
@@ -248,11 +247,21 @@ function lineOf(text, index) {
 let failed = 0;
 const report = [];
 const counts = new Map(RULES.map((r) => [r.id, []]));
+const missing = [];
 
 for (const file of SURFACES) {
   let raw;
   try { raw = readFileSync(file, "utf8"); }
-  catch { report.push(`  ! ${file} — not found, skipped`); continue; }
+  catch {
+    // A surface that cannot be read is NOT a surface that passed. This used to
+    // note-and-continue, so deleting or renaming a file silently dropped it out
+    // of copy-compliance scope while the gate still printed "all rules clean" --
+    // the warn-instead-of-refuse shape. If a surface is genuinely gone, delete
+    // its entry above; that is a deliberate edit, which is the point.
+    report.push(`  ✗ ${file} — listed as a surface but could not be read`);
+    missing.push(file);
+    continue;
+  }
   const text = userFacingText(raw, file);
 
   for (const rule of RULES) {
@@ -294,5 +303,16 @@ for (const rule of RULES.filter((r) => r.kind === "guarded")) {
 
 if (report.length) { console.log("\n── notes ──"); for (const l of report) console.log(l); }
 
-console.log(`\n${failed === 0 ? "✅" : "❌"} copy compliance: ${RULES.length - failed} of ${RULES.length} rules clean`);
-process.exit(failed > 0 ? 1 : 0);
+// A surface this gate could not open is a surface it did not check. Skipping one
+// with a note while still exiting 0 is how a renamed or deleted file silently
+// drops out of copy-compliance scope under a green result. If a surface is
+// genuinely gone, delete its SURFACES entry -- that is a deliberate edit.
+if (missing.length) {
+  console.error(`\n❌ ${missing.length} listed surface(s) could not be read: ${missing.join(", ")}`);
+  console.error("   Delete the SURFACES entry if the file is gone. Do not let it pass unexamined.");
+}
+
+const clean = failed === 0 && missing.length === 0;
+console.log(`\n${clean ? "✅" : "❌"} copy compliance: ${RULES.length - failed} of ${RULES.length} rules clean` +
+  (missing.length ? `, ${missing.length} surface(s) unreadable` : ""));
+process.exit(clean ? 0 : 1);

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>LotCheck — MSRP Live Index</title>
 <style>/* ================= THEME TOKENS =================
-     Cosmic palette matched to the MSRP Notifier page. One hero accent (cyan);
+     Cosmic palette, the canonical copy for the app's dark surfaces. One hero accent (cyan);
      green/red reserved for meaning (under / over sticker). */
   
   :root{
@@ -209,7 +209,6 @@
   .wrap-min{padding-top:22px;padding-bottom:8px}
   .wrap-min .backbar{margin:0}
 </style>
-<script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
 <script>
 /* Site-wide theme sync (lc-theme, same key as index.html/App.jsx): the saved
    choice wins, else the OS preference. Runs before first paint so a light-mode
@@ -243,7 +242,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <a class="sn-live" href="/live-price-index" aria-current="page"><span class="sn-dot" aria-hidden="true"></span>MSRP Price Index</a>
       <a href="/alberta">Alberta Dealers Map</a>
       <a href="/crawl">Used-car market</a>
-      <a href="/msrp-alerts">MSRP Notifier</a>
       <a href="/verify">Verify</a>
       <details class="nav-more"><summary>More</summary><div class="nav-more-panel">
         <a href="/#how">How it works</a>

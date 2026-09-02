@@ -1,4 +1,8 @@
 {
+  "redirects": [
+    { "source": "/msrp-alerts", "destination": "/", "permanent": true },
+    { "source": "/alert-confirm", "destination": "/", "permanent": true }
+  ],
   "rewrites": [
     { "source": "/", "destination": "/index.html" },
     { "source": "/live-price-index", "destination": "/live-price-index.html" },

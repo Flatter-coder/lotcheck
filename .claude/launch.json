@@ -1,41 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "lotcheck-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev"
-      ],
-      "port": 5173,
-      "autoPort": true
-    },
-    {
-      "name": "lotcheck-dev-5199",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--",
-        "--port",
-        "5199",
-        "--strictPort"
-      ],
-      "port": 5199
-    },
-    {
-      "name": "lotcheck-dev-5217",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--",
-        "--port",
-        "5217",
-        "--strictPort"
-      ],
-      "port": 5217
-    }
+    { "name": "lotcheck-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173 }
   ]
 }

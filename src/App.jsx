@@ -152,7 +152,6 @@ function RegionBlockCard({ state, onDeclare }){
     </div>
   );
 }
-import PlanetAlerts from "./PlanetAlerts.jsx";
 
 // ── Supabase client (anon key — safe to expose in frontend) ───────────────────
 // Public anon key. Named once so the credit-aware fetches below can send it as
@@ -3527,201 +3526,6 @@ function GiveCheckTab(){
   );
 }
 
-// ── MSRP Alerts tab ───────────────────────────────────────────────────────
-// The demand "folders": every waitlist signup grouped by make (with a city
-// breakdown), drill-down to the buyer list. This is the Dealer Bridge's
-// inventory ([[alerts-are-bridge-inventory]]) — owner-only. Reads the RLS-locked
-// msrp_alert_subscription via the admin-gated fn_admin_alert_folders RPC.
-// The owner's dispatch console: enter one at/below-MSRP car a dealer is offering,
-// see how many CONFIRMED buyers it matches (make + city), and send them the alert.
-// fn_admin_push_candidate records the car + returns the match count; the
-// alert-dispatch edge fn emails the matched buyers and logs each send (dedupe).
-function PushCarPanel({C,onDispatched}){
-  const blank={make:"",model:"",year:"",city:"",province:"AB",price:"",below:false,dealer:"",note:""};
-  const [f,setF]=useState(blank);
-  const [open,setOpen]=useState(false);
-  const [cand,setCand]=useState(null);      // {id,matches} after matching
-  const [busy,setBusy]=useState("");         // "match" | "send" | ""
-  const [msg,setMsg]=useState(null);         // {kind,text}
-  const set=(k)=>(e)=>{ setF(s=>({...s,[k]:e.target.type==="checkbox"?e.target.checked:e.target.value})); setCand(null); setMsg(null); };
-
-  async function match(){
-    setMsg(null);
-    if(!f.make.trim()||!f.city.trim()){ setMsg({kind:"bad",text:"Make and city are required."}); return; }
-    setBusy("match");
-    const {data,error}=await supabase.rpc("fn_admin_push_candidate",{
-      p_make:f.make.trim(), p_model:f.model.trim()||null, p_year:f.year?+f.year:null,
-      p_city:f.city.trim(), p_province:f.province.trim()||"AB",
-      p_price:f.price?+f.price:null, p_below:f.below, p_dealer:f.dealer.trim()||null, p_note:f.note.trim()||null,
-    });
-    setBusy("");
-    if(error){ setMsg({kind:"bad",text:error.message||"Couldn't record that car."}); return; }
-    setCand({id:data.id,matches:data.matches});
-  }
-
-  async function send(){
-    if(!cand?.id) return;
-    setBusy("send"); setMsg(null);
-    try{
-      const {data,error}=await supabase.functions.invoke("alert-dispatch",{body:{candidate_id:cand.id}});
-      if(error||!data?.ok) throw new Error(data?.error||error?.message||"Dispatch failed.");
-      setMsg({kind:"ok",text:`Sent ${data.sent} alert${data.sent===1?"":"s"}${data.failed?`, ${data.failed} failed`:""}.`});
-      setCand(null); setF(blank); onDispatched&&onDispatched();
-    }catch(e){ setMsg({kind:"bad",text:e.message||"Dispatch failed. Is the alert-dispatch function deployed + RESEND_API_KEY set?"}); }
-    setBusy("");
-  }
-
-  const inp={background:C.paper2,border:`1px solid ${C.line}`,borderRadius:8,padding:"8px 10px",color:C.ink,fontSize:14,fontWeight:600,width:"100%",boxSizing:"border-box"};
-  const lab={fontSize:12,fontWeight:800,color:C.inkFaint,letterSpacing:.4,display:"block",marginBottom:4,textTransform:"uppercase"};
-  return (
-    <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:16,marginBottom:16}}>
-      <div onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-        <div style={{fontSize:14.5,fontWeight:900,color:C.ink}}><Icon3D name="megaphone" size={14}/> Push a car → alert matching buyers</div>
-        <span style={{fontSize:13,color:C.inkFaint,marginLeft:"auto"}}>{open?"▲":"▼"}</span>
-      </div>
-      {!open && <div style={{fontSize:13,color:C.inkFaint,marginTop:6,lineHeight:1.6}}>When a dealer has a unit at or below MSRP, enter it here. LotCheck emails only the buyers who <b style={{color:C.inkSoft}}>confirmed</b> an alert for that make in that city.</div>}
-      {open && <>
-        <div style={{fontSize:13,color:C.inkFaint,margin:"8px 0 14px",lineHeight:1.6,maxWidth:720}}>
-          <b style={{color:C.inkSoft}}>The process:</b> a signup emails the buyer a confirm link → they click it (now “confirmed”). When you enter an at/below-MSRP car below, step 1 shows how many confirmed buyers match; step 2 emails them and logs each send so no one is emailed twice for the same car.
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
-          <div><label style={lab}>Make *</label><input style={inp} value={f.make} onChange={set("make")} placeholder="Toyota"/></div>
-          <div><label style={lab}>Model</label><input style={inp} value={f.model} onChange={set("model")} placeholder="RAV4"/></div>
-          <div><label style={lab}>Year</label><input style={inp} value={f.year} onChange={set("year")} placeholder="2025" inputMode="numeric"/></div>
-          <div><label style={lab}>City *</label><input style={inp} value={f.city} onChange={set("city")} placeholder="Calgary"/></div>
-          <div><label style={lab}>Province</label><input style={inp} value={f.province} onChange={set("province")} placeholder="AB"/></div>
-          <div><label style={lab}>Price (CAD)</label><input style={inp} value={f.price} onChange={set("price")} placeholder="41990" inputMode="numeric"/></div>
-          <div><label style={lab}>Dealer</label><input style={inp} value={f.dealer} onChange={set("dealer")} placeholder="ABC Toyota"/></div>
-          <div style={{gridColumn:"1/-1"}}><label style={lab}>Note (internal)</label><input style={inp} value={f.note} onChange={set("note")} placeholder="e.g. demo unit, in stock this week"/></div>
-        </div>
-        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13.5,color:C.inkSoft,fontWeight:700,margin:"12px 0 4px",cursor:"pointer"}}>
-          <input type="checkbox" checked={f.below} onChange={set("below")} style={{accentColor:C.teal}}/> This car is <b>below</b> MSRP (not just at it)
-        </label>
-        {msg && <div style={{fontSize:13.5,fontWeight:700,margin:"10px 0 2px",color:msg.kind==="ok"?C.tealInk:C.coralInk}}>{msg.text}</div>}
-        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:12,flexWrap:"wrap"}}>
-          <button onClick={match} disabled={busy==="match"} style={{background:C.card,border:`1px solid ${C.teal}`,borderRadius:9,padding:"9px 16px",color:C.tealInk,fontSize:14,fontWeight:800,cursor:"pointer"}}>{busy==="match"?"Matching…":"1 · Match buyers"}</button>
-          {cand && (cand.matches>0
-            ? <button onClick={send} disabled={busy==="send"} style={{background:C.teal,border:"none",borderRadius:9,padding:"9px 18px",color:"#fff",fontSize:14,fontWeight:800,cursor:"pointer"}}>{busy==="send"?"Sending…":`2 · Send ${cand.matches} alert${cand.matches===1?"":"s"}`}</button>
-            : <span style={{fontSize:13.5,color:C.inkFaint,fontWeight:700}}>No confirmed buyers match this make + city yet.</span>)}
-        </div>
-      </>}
-    </div>
-  );
-}
-
-function AlertFoldersTab(){
-  const {C}=useAdminTheme();
-  const [data,setData]=useState(null);
-  const [loading,setLoading]=useState(true);
-  const [err,setErr]=useState(null);
-  const [openMake,setOpenMake]=useState(null);
-
-  async function load(){
-    setLoading(true); setErr(null);
-    try{
-      const {data:d,error}=await supabase.rpc("fn_admin_alert_folders",{p_limit:2000});
-      if(error) throw error;
-      setData(d||null);
-    }catch(e){
-      console.warn("⚠️ fn_admin_alert_folders failed (run 20260731_admin_alert_folders.sql; confirm your login is in admin_config.admin_emails):",e.message);
-      setErr(e.message||"Couldn't load the alert folders."); setData(null);
-    }finally{ setLoading(false); }
-  }
-  useEffect(()=>{ load(); },[]);
-
-  const thLabel=(t,pct)=> t==="at_msrp"?"At MSRP":t==="below_msrp"?"Below MSRP":t==="pct_below"?`${pct||5}%+ under`:t||"—";
-  const fmtDate=(s)=>{ try{ return new Date(s).toISOString().slice(0,10); }catch{ return ""; } };
-
-  // Group rows client-side into make folders (+ per-city counts + the list).
-  const folders=(()=>{
-    const rows=data?.rows||[]; const m=new Map();
-    for(const r of rows){
-      const mk=r.make||"—";
-      if(!m.has(mk)) m.set(mk,{make:mk,list:[],cities:new Map()});
-      const f=m.get(mk); f.list.push(r);
-      const c=r.city||"—"; f.cities.set(c,(f.cities.get(c)||0)+1);
-    }
-    return [...m.values()].map(f=>({...f,cities:[...f.cities.entries()].sort((a,b)=>b[1]-a[1])}))
-      .sort((a,b)=>b.list.length-a.list.length);
-  })();
-
-  function exportCsv(f){
-    const rows=[["email","make","model","year","city","province","alert_when","status","signed_up"],
-      ...f.list.map(r=>[r.email,r.make,r.model,r.year,r.city,r.province,thLabel(r.threshold,r.pct),r.status,fmtDate(r.created_at)])];
-    const csv=rows.map(r=>r.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n");
-    const url=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
-    const a=document.createElement("a"); a.href=url; a.download=`msrp-alerts-${f.make.toLowerCase().replace(/[^a-z0-9]+/g,"-")}.csv`; a.click(); URL.revokeObjectURL(url);
-  }
-
-  const card={background:C.card,border:`1px solid ${C.line}`,borderRadius:12,padding:"16px"};
-  if(loading) return <AdminEmpty>Loading MSRP alert folders…</AdminEmpty>;
-  if(err) return (
-    <div style={{background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:12,padding:"16px 18px",fontSize:14.5,color:C.coralInk,lineHeight:1.6}}>
-      <div style={{fontWeight:800,marginBottom:6}}>Couldn't load the alert folders.</div><div>{err}</div>
-      <div style={{marginTop:8,color:C.inkFaint}}>Confirm <code style={{background:C.paper2,padding:"1px 5px",borderRadius:4}}>20260731_admin_alert_folders.sql</code> is applied.</div>
-      <button onClick={load} style={{marginTop:12,background:C.teal,border:"none",borderRadius:8,padding:"8px 14px",color:"#fff",fontSize:13.5,fontWeight:800,cursor:"pointer"}}>Retry</button>
-    </div>
-  );
-
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10,marginBottom:6}}>
-        <div style={{fontSize:14.5,fontWeight:800,color:C.inkFaint,letterSpacing:1}}>MSRP ALERT FOLDERS</div>
-        <button onClick={load} style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 12px",color:C.inkSoft,fontSize:13.5,fontWeight:700,cursor:"pointer"}}>Refresh</button>
-      </div>
-      <div style={{fontSize:13,color:C.inkFaint,marginBottom:16,lineHeight:1.6,maxWidth:760}}>
-        Every waitlist signup, filed by make — the Dealer Bridge's demand inventory. <b style={{color:C.inkSoft}}>{data?.total||0}</b> total signup{(data?.total||0)===1?"":"s"}. Owner-only; buyers are never handed to a dealer without a separate, explicit consent.
-      </div>
-
-      <PushCarPanel C={C} onDispatched={load}/>
-
-      {folders.length===0?(
-        <AdminEmpty icon={<Icon3D name="inboxEmpty" size={40}/>}>No MSRP alert signups yet — they'll appear here filed by make as buyers join the waitlist.</AdminEmpty>
-      ):(
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {folders.map(f=>{
-            const open=openMake===f.make;
-            return (
-              <div key={f.make} style={card}>
-                <div onClick={()=>setOpenMake(open?null:f.make)} style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",flexWrap:"wrap"}}>
-                  <div style={{fontSize:16,fontWeight:900,color:C.ink,minWidth:120}}>{f.make}</div>
-                  <div style={{fontSize:14.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:999,padding:"3px 11px"}}>{f.list.length} buyer{f.list.length===1?"":"s"}</div>
-                  <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
-                    {f.cities.slice(0,4).map(([c,n])=><span key={c} style={{fontSize:13,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:6,padding:"2px 8px"}}>{c} · {n}</span>)}
-                  </div>
-                  <button onClick={(e)=>{e.stopPropagation();exportCsv(f);}} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"6px 11px",color:C.inkSoft,fontSize:13.5,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>Export CSV</button>
-                  <span style={{fontSize:13,color:C.inkFaint}}>{open?"▲":"▼"}</span>
-                </div>
-                {open&&(
-                  <div style={{marginTop:12,borderTop:`1px solid ${C.line}`,overflowX:"auto"}}>
-                    <table style={{width:"100%",borderCollapse:"collapse",minWidth:560,fontSize:14}}>
-                      <thead><tr>{["Email","Model","Year","City","Alert when","Status","Signed up"].map(h=>(
-                        <th key={h} style={{textAlign:"left",fontSize:12,color:C.inkFaint,fontWeight:800,padding:"9px 10px",letterSpacing:0.4,whiteSpace:"nowrap",borderBottom:`1px solid ${C.line}`}}>{h.toUpperCase()}</th>))}</tr></thead>
-                      <tbody>{f.list.map((r,i)=>(
-                        <tr key={i}>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink,fontWeight:700,fontFamily:"monospace",fontSize:13.5}}>{r.email}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.ink}}>{r.model||"—"}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.year||"—"}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkSoft}}>{r.city||"—"}{r.province?`, ${r.province}`:""}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}><span style={{fontSize:13,fontWeight:800,color:C.butterInk,background:C.butter+"44",borderRadius:5,padding:"2px 7px"}}>{thLabel(r.threshold,r.pct)}</span></td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`}}>{r.status==="confirmed"
-                            ? <span style={{fontSize:12.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px"}}>✓ Confirmed</span>
-                            : <span style={{fontSize:12.5,fontWeight:800,color:C.inkFaint,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:5,padding:"2px 7px"}}>Waitlist</span>}</td>
-                          <td style={{padding:"9px 10px",borderBottom:`1px solid ${C.line}`,color:C.inkFaint,fontFamily:"monospace",fontSize:13}}>{fmtDate(r.created_at)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Verification ledger (admin tab 9) ────────────────────────────────────────
 // Every scan, every checkpoint, every send. This is the instrument panel for
 // the promise that a report delivers all of its points with backed results.
@@ -6325,7 +6129,6 @@ function AdminPanel(){
           <AdminTabButton active={tab==="profit"} onClick={()=>setTab("profit")}>Profit</AdminTabButton>
           <AdminTabButton active={tab==="economics"} onClick={()=>setTab("economics")}>Unit Economics</AdminTabButton>
           <AdminTabButton active={tab==="gifts"} onClick={()=>setTab("gifts")}>Give a Check</AdminTabButton>
-          <AdminTabButton active={tab==="alerts"} onClick={()=>setTab("alerts")}>MSRP Alerts</AdminTabButton>
           <AdminTabButton active={tab==="verification"} onClick={()=>setTab("verification")}>Verification</AdminTabButton>
           <AdminTabButton active={tab==="price-index"} onClick={()=>setTab("price-index")}>Price Index</AdminTabButton>
           <AdminTabButton active={tab==="lot-leverage"} onClick={()=>setTab("lot-leverage")}>Days on Market</AdminTabButton>
@@ -6485,7 +6288,6 @@ function AdminPanel(){
         {tab==="profit" && <ProfitTrackerTab/>}
         {tab==="economics" && <UnitEconomicsTab econ={econ} econLoading={econLoading} econError={econError} apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} onSetCap={setFreeCap} onRefresh={fetchEcon}/>}
         {tab==="gifts" && <GiveCheckTab/>}
-        {tab==="alerts" && <AlertFoldersTab/>}
         {tab==="verification" && <VerificationTab apiUsage={apiUsage} apiUsageLoading={apiUsageLoading} apiUsageReadAt={apiUsageReadAt}/>}
         {tab==="price-index" && <CityPriceIndexTab C={C}/>}
         {tab==="lot-leverage" && <LotLeverageTab C={C}/>}
@@ -9814,7 +9616,7 @@ function VerifyPage(){
   const P=state.phase;
   const authentic=P==="signed"||P==="ok", isBad=P==="altered"||P==="bad";
   // Dark/bright toggle — synced to the site-wide lc-theme key, colors identical
-  // to the MSRP Alerts / Price Index tokens so Verify matches the rest of the site.
+  // to the Price Index tokens (public/live-price-index.html) so Verify matches the rest of the site.
   const [vTheme,setVTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
   const toggleVTheme=()=>{ const n=vTheme==="dark"?"light":"dark"; setVTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
   const vdark=vTheme==="dark";
@@ -9853,7 +9655,7 @@ function VerifyPage(){
   .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
   return (
     <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
@@ -10452,7 +10254,7 @@ function QuoteCheckPage(){
     coral:"#F2836B", coralInk:"#A63C25", coralBg:"#FDEAE5",
     butter:"#F5C95C", butterInk:"#8A6414", butterBg:"#FDF4DF",
   };
-  // Dark = the cosmic palette from the MSRP Notifier page: near-black indigo
+  // Dark = the cosmic palette from public/live-price-index.html: near-black indigo
   // chrome + cyan hero accent. Coral (flags) and butter (caution) stay warm so
   // the color-coding still reads. Light/outdoor modes are unchanged.
   const QC_DARK={
@@ -11338,7 +11140,6 @@ function QuoteCheckPage(){
                 ["/#pipeline","10-point lane"],
                 ["/#report","Sample report"],
                 ["/#what","What LotCheck does"],
-                ["/msrp-alerts","MSRP Notifier"],
                 ["/verify","Verify report"],
               ].filter(([href])=>!NAV_MORE_HREFS.has(href)).map(([href,label])=>(
                 <a key={href} href={href}
@@ -11436,7 +11237,10 @@ function QuoteCheckPage(){
             </div>
           </div>
         </nav>
-        <div style={{maxWidth:640,margin:"0 auto",padding:"24px 16px"}}>
+        {/* The intake screen is a two-panel chooser and needs room for both
+            panels side by side; everything after it is a document, which reads
+            badly past ~640px. So the measure follows the content, not the page. */}
+        <div style={{maxWidth:status==="idle"?1060:640,margin:"0 auto",padding:"24px 16px"}}>
           <div style={{marginBottom:24}}>
             <div style={{fontWeight:1000,fontSize:22,color:C.ink}}>LotCheck Quote Check</div>
             <div style={{fontSize:13,color:C.inkSoft,marginTop:2}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
@@ -11471,6 +11275,23 @@ function QuoteCheckPage(){
 
           {status==="idle"&&(
             <>
+            {/* The two ways in sit SIDE BY SIDE so both are visible without
+                scrolling — a buyer should not have to scroll to discover that
+                uploading is an option (avoid-scrolling-one-page). Below 980px
+                there isn't room for two readable columns, so they stack and the
+                divider turns back through 90 degrees. */}
+            <style dangerouslySetInnerHTML={{__html:`
+              .qc-two{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:20px;align-items:stretch}
+              .qc-or{display:flex;flex-direction:column;align-items:center;gap:10px;align-self:stretch}
+              .qc-or .qc-ln{flex:1;width:1px;min-height:20px;background:${C.line}}
+              .qc-or .qc-w{font-size:11px;font-weight:800;letter-spacing:.5px;color:${C.inkFaint};white-space:nowrap}
+              @media(max-width:980px){
+                .qc-two{grid-template-columns:minmax(0,1fr);gap:14px}
+                .qc-or{flex-direction:row;width:100%}
+                .qc-or .qc-ln{width:auto;height:1px;min-height:0}
+              }
+            `}}/>
+            <div className="qc-two">
             {/* PRIMARY: paste a DEALER-OWN listing link (hybrid). Third-party
                 aggregators/marketplaces (AutoTrader, CarGurus, Kijiji, eBay,
                 Facebook) are blocked client-side (isAggregatorUrl) AND in the
@@ -11508,10 +11329,10 @@ function QuoteCheckPage(){
               </div>
             </div>
 
-            <div style={{display:"flex",alignItems:"center",gap:12,margin:"18px 0"}}>
-              <div style={{flex:1,height:1,background:C.line}}/>
-              <div style={{fontSize:11,color:C.inkFaint,fontWeight:800}}>OR UPLOAD A QUOTE</div>
-              <div style={{flex:1,height:1,background:C.line}}/>
+            <div className="qc-or">
+              <div className="qc-ln"/>
+              <div className="qc-w">OR</div>
+              <div className="qc-ln"/>
             </div>
 
             <div
@@ -11576,6 +11397,7 @@ function QuoteCheckPage(){
               </div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
+            </div>
             </div>
 
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
@@ -12719,7 +12541,7 @@ function QuoteCheckPage(){
 // VinAudit can only post a "beware" banner; we can prove authenticity, so this
 // page teaches the one-scan check. Nav on top per the site-wide rule.
 function TrustPage(){
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
   const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
   const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
   @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
@@ -12787,78 +12609,6 @@ function TrustPage(){
   );
 }
 
-// ── MSRP Alerts page (concept #11 "Cosmic Weather Station") ───────────────────
-// A React route (/msrp-alerts) that replaces the old static live-price-index
-// widget. The 3D planet is decorative; the copy stays an HONEST WAITLIST — live
-// price tracking isn't running yet, so we never imply an alert will fire. Submits
-// to the same SECURITY DEFINER RPC fn_alert_subscribe (CASL consent required;
-// anon can insert, never read). [[nothing-published-without-verification]],
-// [[alerts-are-bridge-inventory]] (signups file by make+city into demand folders).
-// Top new models sold in Canada (trucks, SUVs, sedans, minivans, EVs) — the cars
-// a buyer is most likely to want an MSRP alert on. year=2026 model-year default.
-// Full A-Z Canadian lineup (2027 model year) — mainstream, luxury, exotic, EV,
-// PHEV. Grouped by make (alphabetical). Obvious non-real entries from the source
-// directory (e.g. Bentley "Torcal", a revived BMW "i3") were dropped so a dealer
-// can actually match every option.
-const MAL_VEHICLE_MAP={
-  Acura:["Integra","TLX","MDX","RDX","ZDX"],
-  "Alfa Romeo":["Giulia","Stelvio","Tonale"],
-  "Aston Martin":["Vantage","DB12","DBX707"],
-  Audi:["A4","A5","Q3","Q4 e-tron","Q5","Q6 e-tron","Q7","Q8","Q8 e-tron"],
-  Bentley:["Continental GT","Flying Spur","Bentayga"],
-  BMW:["3 Series","5 Series","X1","X3","X5","X7","i4","iX","iX3"],
-  Buick:["Encore GX","Envista","Envision","Enclave"],
-  Cadillac:["CT5","XT4","XT5","XT6","Escalade","Escalade IQ","Lyriq","Optiq","Celestiq"],
-  Chevrolet:["Trax","Trailblazer","Equinox","Equinox EV","Blazer","Blazer EV","Traverse","Tahoe","Suburban","Colorado","Silverado 1500","Silverado EV","Bolt EV","Corvette"],
-  Chrysler:["Pacifica","Pacifica PHEV","Grand Caravan"],
-  Dodge:["Hornet","Durango","Charger","Charger Daytona EV"],
-  Ferrari:["Roma","296 GTB","12Cilindri","Purosangue","F80"],
-  Fiat:["500e"],
-  Ford:["Maverick","Ranger","F-150","F-150 Lightning","Super Duty","Escape","Edge","Explorer","Bronco Sport","Bronco","Expedition","Mustang","Mustang Mach-E"],
-  Genesis:["G70","G80","G90","GV60","GV70","GV80","GV80 Coupe"],
-  GMC:["Terrain","Acadia","Canyon","Sierra 1500","Sierra EV","Yukon","Hummer EV"],
-  Honda:["Civic","Accord","HR-V","CR-V","Passport","Pilot","Ridgeline","Odyssey","Prologue"],
-  Hyundai:["Venue","Kona","Kona Electric","Tucson","Santa Fe","Palisade","Elantra","Sonata","Santa Cruz","Ioniq 5","Ioniq 6","Ioniq 9"],
-  Infiniti:["QX50","QX60","QX80"],
-  Jaguar:["F-Pace","I-Pace"],
-  Jeep:["Compass","Wrangler","Wrangler 4xe","Grand Cherokee","Grand Cherokee 4xe","Gladiator","Wagoneer","Grand Wagoneer","Wagoneer S","Recon"],
-  Kia:["Soul","Seltos","Sportage","Sorento","Telluride","Forte","K5","Carnival","Niro","EV3","EV6","EV9"],
-  Lamborghini:["Revuelto","Temerario","Urus SE"],
-  "Land Rover":["Range Rover","Range Rover Sport","Range Rover Velar","Range Rover Evoque","Range Rover Electric","Defender","Discovery"],
-  Lexus:["UX","NX","RX","TX","GX","ES","IS","RZ"],
-  Lincoln:["Corsair","Nautilus","Aviator","Navigator"],
-  Lotus:["Emira","Eletre","Emeya"],
-  Maserati:["Grecale","GranTurismo","MC20"],
-  Mazda:["Mazda3","CX-30","CX-5","CX-50","CX-70","CX-90","MX-5"],
-  McLaren:["Artura","750S"],
-  "Mercedes-Benz":["GLA","GLB","GLC","GLC EV","GLE","GLS","G-Class","C-Class","E-Class","EQB","EQE","EQS"],
-  MINI:["Cooper","Countryman"],
-  Mitsubishi:["RVR","Eclipse Cross","Outlander","Outlander PHEV"],
-  Nissan:["Versa","Sentra","Altima","Kicks","Rogue","Murano","Pathfinder","Armada","Frontier","Titan","Leaf","Ariya"],
-  Polestar:["Polestar 2","Polestar 3","Polestar 4"],
-  Porsche:["Macan","Macan Electric","Cayenne","911","Panamera","Taycan"],
-  Ram:["1500","1500 REV","Ramcharger","2500","3500","ProMaster"],
-  Rivian:["R1T","R1S"],
-  "Rolls-Royce":["Ghost","Phantom","Cullinan","Spectre"],
-  Subaru:["Impreza","Crosstrek","Forester","Outback","Legacy","Ascent","WRX","BRZ","Solterra"],
-  Tesla:["Model 3","Model Y","Model S","Model X","Cybertruck"],
-  Toyota:["Corolla","Corolla Cross","Camry","Prius","RAV4","RAV4 Prime","Highlander","Grand Highlander","4Runner","Tacoma","Tundra","Sequoia","Sienna","C-HR","Crown","bZ","GR86","Supra"],
-  Volkswagen:["Jetta","Golf GTI","Golf R","Taos","Tiguan","Atlas","Atlas Cross Sport","ID.4","ID.Buzz"],
-  Volvo:["XC40","XC40 Recharge","XC60","XC90","S60","C40","EX30","EX90"],
-};
-const MAL_VEHICLES=Object.entries(MAL_VEHICLE_MAP).flatMap(([make,models])=>models.map((model)=>({label:`2027 ${make} ${model}`,make,model,year:2027})));
-
-// Alberta municipalities that have new-car dealerships. Major metros first, then
-// alphabetical, so a buyer can find their town. All province "AB".
-const MAL_CITIES=(()=>{const c=[
-  "Calgary","Edmonton","Red Deer","Lethbridge","Medicine Hat","Fort McMurray","Grande Prairie",
-  "Airdrie","St. Albert","Sherwood Park","Spruce Grove","Leduc","Camrose","Lloydminster","Cochrane",
-  "Okotoks","Fort Saskatchewan","Wetaskiwin","Lacombe","Sylvan Lake","Brooks","Cold Lake","Canmore",
-  "High River","Stony Plain","Drayton Valley","Hinton","Edson","Whitecourt","Peace River","Drumheller",
-  "Olds","Ponoka","Wainwright","Vegreville","Stettler","Rocky Mountain House","Bonnyville","Slave Lake",
-  "Taber","Strathmore","Innisfail","Westlock","Barrhead","St. Paul","Vermilion","Claresholm","Pincher Creek",
-  "Cardston","Provost",
-];return c.map(city=>({label:`${city}, AB`,city,province:"AB"}));})();
 // The homepage-explainer tabs fold into a "More" dropdown so the top nav fits one
 // desktop row instead of overflowing/scrolling (tabs-always-on-top, but tidy).
 const NAV_MORE_HREFS=new Set(["/#how","/#pipeline","/#report","/#what"]);
@@ -12877,201 +12627,8 @@ function NavMore({items,c,h,bg,bd}){
     </div>
   );
 }
-const MAL_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["MSRP Notifier","/msrp-alerts"],["Verify report","/verify"]];
+const SITE_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
 
-function MsrpAlertsPage(){
-  const [tilt,setTilt]=useState(23);
-  const [dens,setDens]=useState(9);          // slider 0–20; density = dens/10
-  const [veh,setVeh]=useState(0);
-  const [city,setCity]=useState(0);
-  const [email,setEmail]=useState("");
-  const [thr,setThr]=useState("at_msrp");
-  const [consent,setConsent]=useState(false);
-  const [busy,setBusy]=useState(false);
-  const [done,setDone]=useState(false);
-  const [emailed,setEmailed]=useState(false);   // did the confirmation email actually send?
-  const [err,setErr]=useState("");
-
-  const climate = dens<5?"Clear — near MSRP":dens<12?"Cloudy — small markup":"Stormy — over sticker";
-
-  // Dark/bright toggle — shares the site-wide "lc-theme" key so it stays in sync
-  // with Quote Check / the Price Index. Defaults to the OS preference.
-  // Only "dark" is dark; light + outdoor both map to the bright theme, so landing
-  // here from any Quote Check / Price Index mode reads consistently.
-  const [theme,setTheme]=useState(()=>{ try{ const s=localStorage.getItem("lc-theme"); if(s==="dark")return "dark"; if(s==="light"||s==="outdoor")return "light"; return window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"; }catch{ return "dark"; } });
-  const toggleTheme=()=>{ const n=theme==="dark"?"light":"dark"; setTheme(n); try{ localStorage.setItem("lc-theme",n); }catch{} };
-  const dark=theme==="dark";
-  // Colors mirror the MSRP Price Index tokens exactly (dark: cosmic + #3ae0ff;
-  // light: #f5f7fa bg, #0d8fb0 cyan, #141c28 ink) so the two pages never diverge.
-  // Starry in both modes (cosmic scene). Dark = deep night; "light" = a lighter
-  // blue-twilight sky — both keep white stars visible and light, readable text.
-  const T = dark ? {
-    pageBg:"radial-gradient(ellipse at bottom,#1b2735 0%,#090a0f 100%)", text:"#e7ecf3", soft:"#c7cee6", faint:"#8b95a6",
-    navBg:"rgba(10,10,22,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#b6b1d6",
-    panelBg:"rgba(16,18,38,.6)", panelBorder:"rgba(150,170,255,.22)", panel2Bg:"rgba(16,18,38,.5)", panel2Border:"rgba(150,170,255,.2)",
-    inputBg:"rgba(8,10,24,.6)", inputBorder:"rgba(150,170,255,.25)", segBg:"rgba(8,10,24,.5)", segBorder:"rgba(150,170,255,.2)",
-    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#071018", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
-  } : {
-    pageBg:"radial-gradient(ellipse at bottom,#26324f 0%,#0e1424 100%)", text:"#eef2fb", soft:"#c3cbe0", faint:"#8f99b4",
-    navBg:"rgba(14,20,36,.55)", navBorder:"rgba(255,255,255,.08)", logoText:"#fff", link:"#c3cbe0",
-    panelBg:"rgba(20,26,48,.58)", panelBorder:"rgba(150,170,255,.24)", panel2Bg:"rgba(20,26,48,.48)", panel2Border:"rgba(150,170,255,.2)",
-    inputBg:"rgba(12,16,32,.55)", inputBorder:"rgba(150,170,255,.26)", segBg:"rgba(12,16,32,.5)", segBorder:"rgba(150,170,255,.2)",
-    rangeTrack:"rgba(150,170,255,.25)", thumbBorder:"#0b1220", cyan:"#3ae0ff", heroGrad:"linear-gradient(100deg,#eaf0ff,#3ae0ff 55%,#b090ff)",
-  };
-
-  async function submit(){
-    setErr("");
-    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())){ setErr("Enter a valid email so we can reach you."); return; }
-    if(!consent){ setErr("Please tick the box so we're allowed to email you."); return; }
-    setBusy(true);
-    const v=MAL_VEHICLES[veh], c=MAL_CITIES[city];
-    const body={ email:email.trim(), make:v.make, model:v.model, year:v.year,
-      province:c.province, city:c.city, threshold:thr, pct:null, consent:true };
-    // Preferred path: the alert-subscribe edge fn records the row AND sends the
-    // CASL confirmation email. If it's unreachable, fall back to the anon RPC so
-    // the signup is never lost — the buyer just won't get a confirm email (no SPOF).
-    let ok=false, sentEmail=false;
-    try{
-      const {data,error}=await supabase.functions.invoke("alert-subscribe",{body});
-      if(!error && data && data.ok){ ok=true; sentEmail=!!data.emailed; }
-      else if(data && data.error){ setErr("Couldn't save that — "+data.error); }
-    }catch(_){ /* fall through to RPC */ }
-    if(!ok){
-      const {error}=await supabase.rpc("fn_alert_subscribe",{
-        p_email:email.trim(), p_make:v.make, p_model:v.model, p_year:v.year,
-        p_province:c.province, p_city:c.city, p_threshold:thr, p_pct:null, p_consent:true,
-      });
-      if(!error){ ok=true; }
-      else if(!err){ setErr("Couldn't save that — "+(error.message||"please try again.")); }
-    }
-    setBusy(false);
-    if(ok){ setEmailed(sentEmail); setDone(true); setErr(""); }
-  }
-
-  const css=`
-    .mal-hero h1{font-size:clamp(30px,5vw,52px);line-height:1.02;letter-spacing:-.02em;margin:14px 0 10px;font-weight:800;
-      background:${T.heroGrad};-webkit-background-clip:text;background-clip:text;color:transparent}
-    .mal select,.mal input[type=email]{width:100%;background:${T.inputBg};color:${T.text};border:1px solid ${T.inputBorder};
-      border-radius:11px;padding:10px 11px;font:600 13px/1.1 inherit;outline:none;box-sizing:border-box}
-    .mal select:focus,.mal input[type=email]:focus{border-color:${T.cyan}}
-    .mal input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:3px;background:${T.rangeTrack};outline:none}
-    .mal input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:${T.cyan};box-shadow:0 0 12px ${T.cyan};cursor:pointer;border:2px solid ${T.thumbBorder}}
-    .mal-seg{display:flex;gap:6px}
-    .mal-seg button{flex:1;background:${T.segBg};border:1px solid ${T.segBorder};color:${T.faint};border-radius:9px;padding:7px;font:700 11px inherit;cursor:pointer}
-    .mal-seg button.on{border-color:${T.cyan};color:${T.cyan};background:${dark?"rgba(58,224,255,.08)":"rgba(14,138,168,.10)"}}
-    .mal-col{scrollbar-width:none;-ms-overflow-style:none}
-    .mal-col::-webkit-scrollbar{display:none}
-    .mal-navlinks{scrollbar-width:none;-ms-overflow-style:none}
-    .mal-navlinks::-webkit-scrollbar{display:none}
-    @media(max-width:900px){.mal-panel{display:none!important}.mal-hero h1{font-size:34px}}
-    @media(max-width:640px){.mal-col{position:static!important;transform:none!important;margin:78px auto 24px!important;width:min(400px,92vw)!important;max-height:none!important}}
-    @media(max-height:780px){.mal-col{top:70px!important;transform:none!important}}
-    .mal-stars{position:absolute;inset:0;overflow:hidden;z-index:0;pointer-events:none}
-    .mal-star{position:absolute;top:0;left:0;background:transparent;animation-name:malStar;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform}
-    @keyframes malStar{from{transform:translateY(0)}to{transform:translateY(-2000px)}}
-    @media(prefers-reduced-motion:reduce){.mal-star{animation:none}}`;
-
-  // Generate the three star layers once (stable across re-renders) — a
-  // box-shadow starfield scrolling upward behind the planet, in both themes.
-  const [starLayers,setStarLayers]=useState([]);
-  useEffect(()=>{
-    let t;
-    const build=()=>{
-      // Cover the FULL current viewport width (TVs, wide monitors, browser
-      // zoom-out). Density scales with width so phones stay light.
-      const W=Math.max(window.innerWidth,document.documentElement.clientWidth,360);
-      const gen=(n)=>{const a=[];const cnt=Math.max(1,Math.round(n*W/2000));for(let i=0;i<cnt;i++)a.push(`${Math.random()*W|0}px ${Math.random()*2000|0}px #fff`);return a.join(",");};
-      setStarLayers([{sh:gen(600),sz:1,dur:"50s"},{sh:gen(220),sz:2,dur:"100s"},{sh:gen(90),sz:3,dur:"150s"}]);
-    };
-    build();
-    const onR=()=>{clearTimeout(t);t=setTimeout(build,200);};  // rebuild on resize/zoom/rotate
-    window.addEventListener("resize",onR);
-    return ()=>{clearTimeout(t);window.removeEventListener("resize",onR);};
-  },[]);
-
-  return (
-    <div style={{position:"relative",height:"100vh",overflow:"hidden",background:T.pageBg,fontFamily:"'Nunito',system-ui,-apple-system,sans-serif",color:T.text,transition:"background .4s ease,color .4s ease"}}>
-      <style dangerouslySetInnerHTML={{__html:css}}/>
-      <div className="mal-stars" aria-hidden="true">
-        {starLayers.flatMap((L,i)=>[
-          <div key={i+"a"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur}}/>,
-          <div key={i+"b"} className="mal-star" style={{width:L.sz,height:L.sz,boxShadow:L.sh,animationDuration:L.dur,top:2000}}/>,
-        ])}
-      </div>
-      <PlanetAlerts tilt={tilt} density={dens/10} theme={theme}/>
-
-      <nav style={{position:"absolute",top:0,left:0,right:0,zIndex:20,background:T.navBg,backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:`1px solid ${T.navBorder}`}}>
-        <div style={{maxWidth:1320,margin:"0 auto",padding:"11px clamp(16px,3vw,26px)",display:"flex",alignItems:"center",gap:14}}>
-          <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.logoText,fontWeight:800,fontSize:"1.05rem"}}><SiteLogo size={45}/>LotCheck</a>
-          <div className="mal-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
-            {navPrimary(MAL_NAV).map(([label,href])=>{const active=label==="MSRP Notifier";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.cyan:T.link,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
-          </div>
-          <NavMore items={navMoreItems(MAL_NAV)} c={T.link} h={T.cyan} bg={dark?"#141a2e":"#ffffff"} bd={T.navBorder}/>
-          <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.navBorder}`,color:T.link,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:15,flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
-          <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap"}}>Analyze my quote</a>
-        </div>
-      </nav>
-
-      <div className="mal-col" style={{position:"absolute",left:"clamp(20px,4vw,48px)",top:"50%",transform:"translateY(-50%)",width:"min(400px,90vw)",maxHeight:"calc(100vh - 92px)",overflowY:"auto",zIndex:10,display:"flex",flexDirection:"column"}}>
-      <div className="mal-hero" style={{marginBottom:16}}>
-        <div style={{font:"800 11px/1 ui-monospace,Menlo,Consolas,monospace",letterSpacing:".32em",color:T.cyan,textTransform:"uppercase"}}>LotCheck · MSRP Alerts</div>
-        <h1>The moment it's at MSRP, you'll know.</h1>
-        <p style={{fontSize:15,lineHeight:1.6,color:T.soft,maxWidth:"36ch",margin:0}}>Pick your car and city. Join the waitlist — MSRP tracking launches in Alberta soon, and you'll be first in line.</p>
-      </div>
-
-      <div className="mal" style={{width:"100%",padding:18,borderRadius:20,boxSizing:"border-box",
-        background:T.panelBg,border:`1px solid ${T.panelBorder}`,backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",boxShadow:dark?"0 20px 60px rgba(0,0,0,.5)":"0 20px 50px rgba(51,48,90,.14)"}}>
-        {done ? (
-          <div style={{textAlign:"center",padding:"6px 4px"}}>
-            <div style={{fontSize:26,marginBottom:8,color:T.cyan}}>✦</div>
-            <div style={{fontWeight:800,fontSize:16,marginBottom:8}}>{emailed?"Check your email to confirm.":"You're on the waitlist."}</div>
-            <div style={{fontSize:13,color:T.soft,lineHeight:1.5}}>
-              {emailed
-                ? <>We sent a confirmation link for the {MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} in {MAL_CITIES[city].city}. Click it and you're set — that one click is what lets us email you. Live tracking rolls out across Alberta soon.</>
-                : <>{MAL_VEHICLES[veh].label.replace(/^\d+\s/,"")} · {MAL_CITIES[city].city}. Live tracking isn't running there yet — we'll email you the moment it launches.</>}
-            </div>
-            <button onClick={()=>{setDone(false);setConsent(false);}} style={{marginTop:14,background:"none",border:`1px solid ${T.panelBorder}`,color:T.faint,borderRadius:10,padding:"8px 14px",font:"700 12px inherit",cursor:"pointer"}}>Add another car</button>
-          </div>
-        ) : (
-          <>
-            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Vehicle</label>
-              <select value={veh} onChange={e=>setVeh(+e.target.value)}>{Object.keys(MAL_VEHICLE_MAP).map((mk)=>(
-                <optgroup key={mk} label={mk}>{MAL_VEHICLES.map((v,i)=>v.make===mk?<option key={i} value={i}>{v.model}</option>:null)}</optgroup>
-              ))}</select></div>
-            <div style={{display:"flex",gap:8,marginBottom:11}}>
-              <div style={{flex:1}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>City</label>
-                <select value={city} onChange={e=>setCity(+e.target.value)}>{MAL_CITIES.map((c,i)=><option key={i} value={i}>{c.label}</option>)}</select></div>
-            </div>
-            <div style={{marginBottom:11}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Alert me when it's</label>
-              <div className="mal-seg">
-                <button className={thr==="at_msrp"?"on":""} onClick={()=>setThr("at_msrp")}>At MSRP</button>
-                <button className={thr==="below_msrp"?"on":""} onClick={()=>setThr("below_msrp")}>Below MSRP</button>
-              </div></div>
-            <div style={{marginBottom:12}}><label style={{font:"700 11px/1 inherit",letterSpacing:".06em",textTransform:"uppercase",color:T.faint,display:"block",marginBottom:5}}>Email</label>
-              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@email.com"/></div>
-            <label style={{display:"flex",gap:9,alignItems:"flex-start",fontSize:11.5,color:T.faint,lineHeight:1.4,cursor:"pointer",marginBottom:12}}>
-              <input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} style={{marginTop:2,accentColor:T.cyan}}/>
-              <span>Email me when MSRP tracking launches for this car in my city. I can unsubscribe anytime. No spam.</span></label>
-            {err && <div style={{fontSize:12,color:"#e05a3c",marginBottom:9}}>{err}</div>}
-            <button onClick={submit} disabled={busy} style={{width:"100%",border:"none",borderRadius:12,padding:12,font:"800 14px inherit",color:"#04121a",cursor:busy?"default":"pointer",opacity:busy?.7:1,
-              background:"linear-gradient(100deg,#3ae0ff,#b090ff)",boxShadow:"0 8px 26px rgba(58,224,255,.35)"}}>{busy?"Joining…":"Notify me when it hits MSRP"}</button>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:11}}>
-              <span style={{font:"800 9.5px/1 ui-monospace,monospace",letterSpacing:".08em",textTransform:"uppercase",color:T.cyan,border:`1px solid ${T.cyan}`,borderRadius:999,padding:"5px 8px"}}>Waitlist</span>
-              <small style={{fontSize:11.5,color:T.faint,lineHeight:1.4}}>Live price tracking isn't running yet — join to be first when it launches in Alberta.</small>
-            </div>
-          </>
-        )}
-      </div>
-      </div>
-
-      <div style={{position:"absolute",left:0,right:0,bottom:8,textAlign:"center",fontSize:11,color:T.faint,letterSpacing:".4px",zIndex:5,pointerEvents:"none"}}>drag to orbit · scroll to zoom</div>
-    </div>
-  );
-}
-
-// The CASL double-opt-in landing page. The confirmation email links here with
-// ?token=<uuid>; we call fn_alert_confirm (anon; the token IS the auth) which
-// flips the row 'waitlist' -> 'confirmed'. Only confirmed rows are ever alerted.
 // ── /crawl — LIVE used-car coverage from our OWN Alberta crawl ─────────────
 // Reads fn_crawl_coverage (used-only aggregate) on load. Shows the dataset the
 // used-value gauge is built on: how many used cars, how many dealers, which
@@ -13228,9 +12785,9 @@ function CrawlCoverage(){
           <button onClick={goBack} aria-label="Back" style={{background:T.panel2,border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:9,padding:"7px 11px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:mono,flexShrink:0}}>‹</button>
           <a href="/" style={{display:"flex",alignItems:"center",gap:9,textDecoration:"none",color:T.text,fontWeight:800,fontSize:"1.05rem",flexShrink:0}}><SiteLogo size={42}/>LotCheck</a>
           <div className="crawl-navlinks" style={{display:"flex",gap:14,marginLeft:"auto",alignItems:"center",flexWrap:"nowrap"}}>
-            {navPrimary(MAL_NAV).map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
+            {navPrimary(SITE_NAV).map(([label,href])=>{const active=href==="/crawl";return <a key={label} href={href} style={{fontSize:".9rem",fontWeight:active?800:600,color:active?T.amber:T.muted,textDecoration:"none",whiteSpace:"nowrap"}}>{label}</a>;})}
           </div>
-          <NavMore items={navMoreItems(MAL_NAV)} c={T.muted} h={T.amber} bg={T.panel} bd={T.hair}/>
+          <NavMore items={navMoreItems(SITE_NAV)} c={T.muted} h={T.amber} bg={T.panel} bd={T.hair}/>
           <button onClick={toggleTheme} aria-label={dark?"Switch to bright mode":"Switch to dark mode"} title={dark?"Bright mode":"Dark mode"} style={{background:"transparent",border:`1px solid ${T.hairS}`,color:T.muted,borderRadius:999,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>{dark?<Icon3D name="sun" size={15}/>:<Icon3D name="moon" size={15}/>}</button>
           <a href="/quote-check" style={{background:"#2FA79A",color:"#fff",fontWeight:800,fontSize:".85rem",textDecoration:"none",padding:"8px 15px",borderRadius:10,whiteSpace:"nowrap",flexShrink:0}}>Analyze my quote</a>
         </div>
@@ -13396,44 +12953,6 @@ function CrawlCoverage(){
             </div>
           </div>
         </>)}
-      </div>
-    </div>
-  );
-}
-
-function AlertConfirmPage(){
-  const [state,setState]=useState("working");   // working | ok | bad
-  const [veh,setVeh]=useState("");
-  useEffect(()=>{
-    const token=new URLSearchParams(window.location.search).get("token");
-    if(!token){ setState("bad"); return; }
-    (async()=>{
-      const {data,error}=await supabase.rpc("fn_alert_confirm",{p_token:token});
-      if(!error && data && data.ok){
-        setVeh([data.make,data.model].filter(Boolean).join(" ")+(data.city?" · "+data.city:""));
-        setState("ok");
-      }else setState("bad");
-    })();
-  },[]);
-  return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,
-      background:"radial-gradient(120% 90% at 72% 25%,#141238 0%,#080a1c 55%,#05060f 100%)",fontFamily:"'Nunito',system-ui,sans-serif",color:"#eaf0ff"}}>
-      <div style={{maxWidth:440,textAlign:"center",background:"rgba(16,18,38,.6)",border:"1px solid rgba(150,170,255,.22)",borderRadius:20,padding:"34px 28px",backdropFilter:"blur(16px)"}}>
-        <div style={{font:"800 11px/1 ui-monospace,monospace",letterSpacing:".32em",color:"#3ae0ff",textTransform:"uppercase",marginBottom:14}}>LotCheck · MSRP Alerts</div>
-        {state==="working" && <div style={{fontSize:15,color:"#c7cee6"}}>Confirming…</div>}
-        {state==="ok" && <>
-          <div style={{fontSize:34,marginBottom:10}}>✦</div>
-          <h1 style={{fontSize:24,fontWeight:800,margin:"0 0 10px"}}>You're confirmed.</h1>
-          <p style={{fontSize:14.5,lineHeight:1.6,color:"#c7cee6",margin:"0 0 8px"}}>{veh?<>We'll email you when a <b style={{color:"#fff"}}>{veh}</b> is offered at or below MSRP.</>:"Your MSRP alert is active."}</p>
-          <p style={{fontSize:12.5,color:"#8a92b4",margin:"0 0 20px"}}>Live tracking is rolling out city by city in Alberta — you're in line.</p>
-          <a href="/quote-check" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Check a quote now →</a>
-        </>}
-        {state==="bad" && <>
-          <div style={{marginBottom:10}}><Icon3D name="warning" size={34}/></div>
-          <h1 style={{fontSize:22,fontWeight:800,margin:"0 0 10px"}}>That link didn't work.</h1>
-          <p style={{fontSize:14,lineHeight:1.6,color:"#c7cee6",margin:"0 0 20px"}}>The confirmation link may have expired or already been used. You can sign up again in a moment.</p>
-          <a href="/msrp-alerts" style={{display:"inline-block",background:"linear-gradient(100deg,#3ae0ff,#b090ff)",color:"#04121a",fontWeight:800,fontSize:14,textDecoration:"none",padding:"12px 24px",borderRadius:12}}>Back to MSRP Alerts</a>
-        </>}
       </div>
     </div>
   );
@@ -13608,8 +13127,6 @@ export default function App(){
         : path.startsWith("/verify") ? <VerifyPage/>
         : path.startsWith("/real") ? <TrustPage/>
         : path.startsWith("/quote-check") ? <QuoteCheckPage/>
-        : path.startsWith("/alert-confirm") ? <AlertConfirmPage/>
-        : path.startsWith("/msrp-alerts") ? <MsrpAlertsPage/>
         : path.startsWith("/crawl") ? <CrawlCoverage/>
         : path.startsWith("/value") ? <ValueReportPage/>
         : <LotCheckApp/>}
