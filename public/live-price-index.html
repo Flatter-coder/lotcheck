@@ -420,6 +420,63 @@
   .pt-note b,.mkt-say b,.mkt-cap b{font-variant-numeric:tabular-nums}
 
   @media (prefers-reduced-motion:reduce){ .card::before{transition:none} }
+
+  /* ================= CINEMATIC HERO =================
+     The page opened on a 1,120 px column in a 2,000 px window. It now opens on
+     the lake, and the three figures in the glass strip are the SAME live values
+     the board below paints -- read once from msrp_catalog, written to both.
+
+     Every class here is lpi- prefixed so it cannot collide with the mkt-/ptx-
+     families the panel gate greps for, and nothing above this block is altered.
+     The hero is deliberately single-look: the footage is dark in both themes,
+     so its type stays light in both. */
+  .lpi-hero{position:relative;min-height:min(86vh,760px);display:flex;flex-direction:column;
+    overflow:hidden;background:#12303a;isolation:isolate}
+  .lpi-plate{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+    filter:brightness(.92) contrast(1.05) saturate(1.32)}
+  .lpi-grade{position:absolute;inset:0;mix-blend-mode:soft-light;
+    background:linear-gradient(186deg,rgba(255,190,126,.24),rgba(255,164,108,.08) 26%,
+      rgba(30,120,160,.06) 62%,rgba(6,26,58,.24))}
+  .lpi-wash{position:absolute;inset:0;background:linear-gradient(180deg,
+    rgba(4,8,18,.84) 0%,rgba(4,8,18,.48) 22%,rgba(4,8,18,.44) 46%,
+    rgba(4,8,18,.16) 68%,rgba(4,8,18,.36) 86%,rgba(4,8,18,.74) 100%)}
+
+  .lpi-mid{position:relative;z-index:3;margin:auto;text-align:center;padding:34px 20px 0;
+    max-width:860px}
+  .lpi-eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:10.5px;font-weight:600;
+    letter-spacing:.17em;text-transform:uppercase;color:#C4CFDE;border:1px solid rgba(255,255,255,.17);
+    border-radius:999px;padding:6px 14px;margin-bottom:18px;background:rgba(8,12,22,.4)}
+  .lpi-eyebrow i{width:6px;height:6px;border-radius:50%;background:#35E29B;display:block}
+  .lpi-h{margin:0 0 13px;font-size:clamp(31px,5.4vw,64px);line-height:.98;letter-spacing:-.042em;
+    font-weight:700;color:#F2F5FA;text-shadow:0 4px 40px rgba(3,6,12,.72)}
+  .lpi-h em{font-style:normal;color:#C8F24E}
+  .lpi-sub{margin:0 auto 24px;font-size:clamp(13.5px,1.3vw,16px);line-height:1.55;color:#DCE4EE;
+    max-width:56ch;text-shadow:0 2px 10px rgba(3,6,12,.95)}
+  .lpi-sub b{color:#F2F5FA;font-variant-numeric:tabular-nums}
+  .lpi-cta{display:inline-flex;align-items:center;gap:11px;background:#C8F24E;color:#0C1206;
+    border-radius:999px;padding:9px 10px 9px 22px;font-size:12.5px;font-weight:700;
+    letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
+  .lpi-cta i{width:28px;height:28px;border-radius:50%;background:#0C1206;color:#C8F24E;
+    display:grid;place-items:center;font-style:normal;font-size:13px}
+
+  .lpi-strip{position:relative;z-index:3;margin:0 auto 34px;width:min(1120px,92vw);
+    display:grid;grid-template-columns:repeat(3,1fr);gap:1px;overflow:hidden;border-radius:16px;
+    background:rgba(255,255,255,.11);border:1px solid rgba(255,255,255,.14);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  .lpi-cell{background:rgba(9,13,24,.62);padding:15px 18px}
+  .lpi-cell span{display:block;font-size:9.5px;font-weight:700;letter-spacing:.15em;
+    text-transform:uppercase;color:#8B98AC;margin-bottom:8px}
+  .lpi-cell b{display:block;font-size:clamp(21px,2.5vw,29px);font-weight:700;letter-spacing:-.035em;
+    font-variant-numeric:tabular-nums;line-height:1.04;color:#35E29B;margin-bottom:6px}
+  .lpi-cell p{margin:0;font-size:11.5px;line-height:1.45;color:#B7C2D2}
+  .lpi-scroll{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:4;
+    font-size:9px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:#7C8798}
+
+  @media (max-width:760px){
+    .lpi-strip{grid-template-columns:1fr}
+    .lpi-hero{min-height:auto;padding-bottom:8px}
+  }
+  @media (prefers-reduced-motion:reduce){ .lpi-plate{filter:brightness(.92) contrast(1.05) saturate(1.32)} }
 </style>
 <script>if(new URLSearchParams(location.search).get('view')==='alerts')location.replace('/msrp-alerts');</script>
 <script>
@@ -473,6 +530,41 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   </div>
 </nav>
 
+
+<section class="lpi-hero">
+  <video class="lpi-plate" id="lpiPlate" autoplay muted loop playsinline preload="auto"
+    aria-label="Moraine Lake in Banff National Park, Alberta">
+    <source src="/media/moraine-lake.mp4" type="video/mp4">
+  </video>
+  <div class="lpi-grade"></div>
+  <div class="lpi-wash"></div>
+
+  <div class="lpi-mid">
+    <span class="lpi-eyebrow"><i></i>Alberta &middot; manufacturers&rsquo; own published prices</span>
+    <h1 class="lpi-h">Know the sticker<br>before you <em>walk in</em>.</h1>
+    <p class="lpi-sub">MSRP is set nationally by the manufacturer, not by the lot. Everything on this
+      page is read live from LotCheck&rsquo;s verified catalog &mdash; <b id="hTrims">&mdash;</b> trims
+      across <b id="hMakes">&mdash;</b> makes, checked against what Alberta dealers advertise.</p>
+    <a class="lpi-cta" href="#idx">See the index <i>&darr;</i></a>
+  </div>
+
+  <div class="lpi-strip">
+    <div class="lpi-cell">
+      <span>Middle value MSRP</span><b id="hFig">&mdash;</b>
+      <p>The middle of every verified trim we hold. National manufacturer price, before freight and fees.</p>
+    </div>
+    <div class="lpi-cell">
+      <span>Verified trims</span><b id="hTrims2">&mdash;</b>
+      <p>Current models we hold a manufacturer-published price for. Our coverage, not the whole market.</p>
+    </div>
+    <div class="lpi-cell">
+      <span>Makes tracked</span><b id="hMakes2">&mdash;</b>
+      <p>Manufacturers with at least one verified trim in the catalog.</p>
+    </div>
+  </div>
+  <div class="lpi-scroll">Scroll</div>
+</section>
+<a id="idx" aria-hidden="true"></a>
 
 <div class="wrap">
   <h1>MSRP Live Index</h1>
@@ -694,6 +786,14 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     countUp(document.getElementById("fig"), catalog.median, money);
     countUp(document.getElementById("stTrims"), catalog.trims);
     countUp(document.getElementById("stMakes"), catalog.makes);
+    // The hero strip shows the same three figures as the board. Painted here,
+    // from the same catalog read, so the top of the page can never disagree
+    // with the middle of it.
+    countUp(document.getElementById("hFig"), catalog.median, money);
+    [["hTrims",catalog.trims],["hTrims2",catalog.trims],
+     ["hMakes",catalog.makes],["hMakes2",catalog.makes]].forEach(function(p){
+      var el=document.getElementById(p[0]); if(el) countUp(el, p[1]);
+    });
     // m/m stays "—": there is no second month of catalog history yet, and an
     // invented change figure is worse than an honest dash.
 
@@ -1251,6 +1351,9 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // figure standing beside a failure notice.
       console.warn("catalog read failed:",e.message);
       setLive("lv-cat",false);
+      ["hFig","hTrims","hTrims2","hMakes","hMakes2"].forEach(function(id){
+        var el=document.getElementById(id); if(el) el.textContent="\u2014";
+      });
       document.getElementById("fig").textContent="—";
       document.getElementById("ptTotal").textContent="catalog unavailable";
       document.getElementById("ptRows").innerHTML="";
@@ -1312,5 +1415,19 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 })();
 </script>
 <script src="/_lpi-3d.js" defer></script>
+<script>
+/* The autoplay attribute alone is refused by most browsers unless the muted
+   property is set from script, and some refuse until a first interaction. */
+(function(){
+  var v=document.getElementById("lpiPlate"); if(!v||!v.play) return;
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches){ try{v.pause();}catch(e){} return; }
+  v.muted=true; v.defaultMuted=true;
+  var kick=function(){ var p=v.play(); if(p&&p.catch) p.catch(function(){}); };
+  kick();
+  ["pointerdown","keydown","touchstart"].forEach(function(ev){
+    addEventListener(ev,function once(){ removeEventListener(ev,once); kick(); },{passive:true});
+  });
+})();
+</script>
 </body>
 </html>
