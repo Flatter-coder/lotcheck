@@ -8,7 +8,7 @@ import heic2any from "heic2any";
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
 // The two lines that speak in COUNTS and DEFAULTS ("Of N other listings read,
-// M advertise below this one" / "If you do nothing, this page gives you...")
+// M advertise below this one" / "This page's payment default is...")
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
@@ -8679,7 +8679,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
-  // LINE -- "If you do nothing, this page gives you N months, <frequency>
+  // LINE -- "Payment default: this page's payment default is N months, <frequency>
   // payments at X%." The page's OWN pre-selected calculator scenario, read by
   // code (page-default.js), sealed in the canonical (`dflt`), and worded once
   // in report-lines.js (pageDefaultLine). ALWAYS built: "Not published" and
@@ -8693,7 +8693,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
       <div>
         <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} note={line.body} />
         {meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{meta}</div>}
-        <ExplainBox txt="The settings this page's payment calculator opened on. A longer term and more frequent payments lower each payment and change the total cost of borrowing. Ask the dealer for term, frequency, rate and total cost in writing." />
+        <ExplainBox txt="Where this page's payment calculator starts. A longer term and more frequent payments make each payment smaller, so the total cost of borrowing is the number to compare across offers. The dealer can give term, frequency, rate and total cost in writing." />
       </div>
     )};
   }
@@ -9467,7 +9467,7 @@ function MarketCountCard({analysis,C,cardStyle}){
     </div>
   );
 }
-// LINE -- "If you do nothing, this page gives you N months, <frequency>
+// LINE -- "Payment default: this page's payment default is N months, <frequency>
 // payments at X%." The page's own pre-selected calculator scenario
 // (page-default.js), worded once in report-lines.js pageDefaultLine. Same
 // never-empty rule: "Not published" / "Not read" render as cards, not gaps.
@@ -9927,7 +9927,7 @@ function VerifyPage(){
                       by the same builder every other surface uses, so /verify
                       shows the sealed claim, not a re-assertion. */}
                   {o.mc&&<Row t="Other listings read" v={[marketCountLine({mc:o.mc}).value,o.mc.pv||null,o.mc.to?fmtDateEn(o.mc.to):null].filter(Boolean).join(" · ")}/>}
-                  {o.dflt&&<Row t="If you do nothing" v={[pageDefaultLine({dflt:o.dflt}).value,o.dflt.at?`read ${fmtDateEn(o.dflt.at)}`:null].filter(Boolean).join(" · ")}/>}
+                  {o.dflt&&<Row t="Payment starting point" v={[pageDefaultLine({dflt:o.dflt}).value,o.dflt.at?`read ${fmtDateEn(o.dflt.at)}`:null].filter(Boolean).join(" · ")}/>}
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.leverage!=null&&o.lvn&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>{o.lvn}</div>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
@@ -11738,7 +11738,7 @@ function QuoteCheckPage(){
             if(analysis.tradeInWidget&&analysis.tradeInWidget.detected) tiles.push({label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",sub:"wholesale-anchored — keep it a separate written line",flag:false});
             if(analysis.financeContingent&&analysis.financeContingent.contingent) tiles.push({label:"Price conditions",value:"Financing-tied",sub:"cash or your own bank may not get this price — ask in writing",flag:true});
             { const pdl=pageDefaultLine(analysis), pdv=analysis.pageDefault;
-              tiles.push({label:"If you do nothing",value:pdl.value,sub:pageDefaultMeta(pdv)||(pdv&&pdv.state==="confirmed"?"pre-selected on the page":pdl.headline),flag:false}); }
+              tiles.push({label:"Payment starting point",value:pdl.value,sub:pageDefaultMeta(pdv)||(pdv&&pdv.state==="confirmed"?"pre-selected on the page":pdl.headline),flag:false}); }
             if(analysis.dealerLicence&&analysis.dealerLicence.status) tiles.push({label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,sub:analysis.dealerLicence.licenceNumber?`licence ${analysis.dealerLicence.licenceNumber}`:"AMVIC public registry",flag:analysis.dealerLicence.state!=="valid"});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";

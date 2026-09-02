@@ -159,7 +159,7 @@ export function marketCountLine(a) {
   if (same > 0) body += ` ${same} ${verb} the same price.`;
   if (scope === "model") body += mc.trimLabel ? " The trim on this page did not match enough listings, so the count is for the model." : " No trim was established for this page, so the count is for the model.";
   else if (Number(mc.modelN) > n) body += ` Across all ${[mc.model, mc.powertrain].filter(Boolean).join(" ")} trims read: ${Number(mc.modelBelow) || 0} of ${Number(mc.modelN)} below.`;
-  body += mc.subjectExcluded ? " Counts of dealers' own advertised prices, this vehicle excluded; not a valuation." : " Counts of dealers' own advertised prices; this vehicle may be among them; not a valuation.";
+  body += mc.subjectExcluded ? " These are dealers' own advertised prices with this vehicle left out: a count, not a valuation." : " These are dealers' own advertised prices, and this vehicle may be among them: a count, not a valuation.";
   out.value = `${below} OF ${n} BELOW THIS PRICE${scopeTag}`;
   out.headline = below === 0 ? `None of ${n} advertised below this one` : `${below} of ${n} advertised below this one`;
   out.body = body;
@@ -167,28 +167,31 @@ export function marketCountLine(a) {
 }
 
 // ---------------------------------------------------------------------------
-// LINE 2 -- "If you do nothing, this page shows N months, <freq> payments at X%."
+// LINE 2 -- "Payment starting point": where this page's payment calculator
+// starts (term, payment frequency, rate, down payment), stated plainly and
+// helpfully, never as a warning about the dealer.
+const ASK = "It helps to have the term, payment frequency, rate and total cost of borrowing from the dealer in writing.";
 export function pageDefaultLine(a) {
   const pd = normDflt(a?.pageDefault ?? a?.dflt);
-  const out = { key: "pagedefault", title: "If you do nothing", tone: "muted", state: "unchecked", value: "NOT READ", headline: "Not read — ask the dealer", body: "", meta: "Not read" };
+  const out = { key: "pagedefault", title: "Payment starting point", tone: "muted", state: "unchecked", value: "NOT READ", headline: "Not read", body: "", meta: "Not read" };
   if (!pd || !pd.state || pd.state === "unchecked") {
     out.body = pd?.reason === "no_page"
-      ? "Not read — a pre-selected payment scenario is read from a listing page, not from an uploaded quote. Ask the dealer for the term, payment frequency and rate in writing."
-      : "Not read — no payment settings were read for this report. Ask the dealer for the term, payment frequency and rate in writing.";
+      ? `A payment starting point is read from a listing page, not from an uploaded quote. ${ASK}`
+      : `No payment settings were read for this report. ${ASK}`;
     return out;
   }
   out.state = pd.state;
   if (pd.state === "absent") {
     if (POSITIVE_ABSENCE.has(String(pd.reason))) {
       out.value = "NOT SHOWN";
-      out.headline = "Not shown — ask the dealer";
+      out.headline = "Not shown on this page";
       out.meta = "Not shown";
-      out.body = "Not shown — this page's own settings show no pre-selected finance scenario, so no default is reported. Ask the dealer for the term, payment frequency and rate in writing.";
+      out.body = `This page's own settings show no pre-selected finance scenario, so there is no starting point to report here. ${ASK}`;
     } else {
       out.value = "NONE FOUND";
-      out.headline = "None found — ask the dealer";
+      out.headline = "None found on this page";
       out.meta = "None found";
-      out.body = "None found — LotCheck did not find a pre-selected term, payment frequency or rate in this page's own text or data, so no default is reported. Ask the dealer for all three in writing.";
+      out.body = `LotCheck did not find a pre-selected term, payment frequency or rate in this page's own text or data. ${ASK}`;
     }
     return out;
   }
@@ -201,28 +204,37 @@ export function pageDefaultLine(a) {
   if (t) parts.push(`${t} months`);
   if (f) parts.push(`${f} payments${pay ? ` of ${fmtMoney(pay)}` : ""}`);
   else if (pay) parts.push(`payments of ${fmtMoney(pay)}`);
-  if (apr != null) parts.push(`at ${apr}% APR`);
-  if (down != null) parts.push(`with ${fmtMoney(down)} down`);
-  const shows = parts.length ? parts.join(", ").replace(", at ", " at ").replace(", with ", " with ") : "a pre-selected payment scenario";
-  const quals = [];
-  if (pd.qualifier) quals.push(pd.qualifier);
-  if (pd.costOfBorrowing != null && Number(pd.costOfBorrowing) > 0) quals.push(`cost of borrowing ${fmtMoney(pd.costOfBorrowing)} as stated`);
-  const qual = quals.length ? ` (${quals.join("; ")})` : "";
+  if (apr != null) parts.push(`${apr}% APR`);
+  if (down != null) parts.push(`${fmtMoney(down)} down`);
+  const scenario = parts.length ? (parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0]) : "a pre-selected payment scenario";
+  const cashFirst = pd.purchaseMethod === "cash";
+  const opener = cashFirst
+    ? `This page opens on its cash price; its finance option starts at ${scenario}.`
+    : pd.source === "edealer_js"
+      ? `This page's payment calculator starts at ${scenario}.`
+      : pd.source === "sm360_feed"
+        ? `This listing's payment default is ${scenario}.`
+        : `This page shows financing first as ${scenario}.`;
+  const notes = [];
+  if (pd.qualifier) {
+    const q = String(pd.qualifier);
+    const bits = [];
+    if (/estimate/i.test(q)) bits.push("the rate is an estimate");
+    if (/plus taxes and licence/i.test(q)) bits.push("taxes and licence are extra");
+    if (bits.length) notes.push(`The page notes ${bits.join(" and ")}${pd.costOfBorrowing != null && Number(pd.costOfBorrowing) > 0 ? `, with a stated cost of borrowing of ${fmtMoney(pd.costOfBorrowing)}` : ""}.`);
+  } else if (pd.costOfBorrowing != null && Number(pd.costOfBorrowing) > 0) {
+    notes.push(`The page states a cost of borrowing of ${fmtMoney(pd.costOfBorrowing)}.`);
+  }
+  if (!t) notes.push("No term is pre-selected on the page.");
+  if (!f) notes.push("The page does not state a payment frequency next to this figure.");
+  if (apr == null) notes.push("No rate is pre-selected on the page.");
   const basis = pd.source === "sm360_feed"
-    ? "from the dealer's own listing data"
+    ? "the dealer's own listing data"
     : pd.source === "edealer_js"
       ? "the page's own calculator settings"
-      : "the finance figure this page shows first, from its own text";
-  const when = fmtDateEn(pd.readAt) ? `, read ${fmtDateEn(pd.readAt)}` : "";
-  const cashFirst = pd.purchaseMethod === "cash";
-  let body = cashFirst
-    ? `This page opens on its cash price. Its finance option, if you change nothing else, shows ${shows}${qual} — ${basis}${when}.`
-    : `If you do nothing, this page shows ${shows}${qual} — ${basis}${when}.`;
-  if (!t) body += " No term is pre-selected on the page.";
-  if (!f) body += " The page does not state a payment frequency next to this figure.";
-  if (apr == null) body += " No rate is pre-selected on the page.";
-  body += " Ask the dealer for the term, frequency, rate and total cost of borrowing in writing.";
-  out.body = body;
+      : "the page's own text";
+  const when = fmtDateEn(pd.readAt) ? ` on ${fmtDateEn(pd.readAt)}` : "";
+  out.body = [opener, ...notes, `Read from ${basis}${when}.`, ASK].join(" ");
   const core = [t ? `${t} MO` : "NO TERM", f ? f.toUpperCase() : null, apr != null ? `${apr}%` : "NO RATE"].filter(Boolean).join(" · ");
   out.value = cashFirst ? `OPENS ON CASH · ${core}` : core;
   out.headline = (cashFirst ? "Opens on cash · " : "") + [t ? `${t} months` : "no term", f || null, apr != null ? `${apr}% APR` : "no rate"].filter(Boolean).join(" · ");

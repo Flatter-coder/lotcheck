@@ -1,4 +1,4 @@
-// The page's own DEFAULT payment scenario: "if you do nothing, this page shows
+// The page's own DEFAULT payment scenario: "this page's payment default is
 // N months, <frequency> payments at X% APR with $D down".
 //
 // Plain ES module so it runs in Deno and in the Node test suite.

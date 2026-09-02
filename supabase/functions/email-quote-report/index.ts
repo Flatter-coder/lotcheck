@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-02a";
+const PDF_BUILDER_VER = "2026-09-02b";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -370,7 +370,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     deck.push({ label: "Financing APR", tone: high ? "flag" : "muted", glow: high, body });
   }
 
-  // 3a -- If you do nothing: the page's own pre-selected payment scenario
+  // 3a -- Payment default: the page's own pre-selected payment scenario
   // (pageDefault), read by code, sealed in the canonical (dflt), worded by the
   // shared builder. ALWAYS RENDERS -- "not published" and "not read" are
   // answers the buyer can act on; a missing card is not. Same rule as
@@ -379,7 +379,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     const line = pageDefaultLine(a);
     const confirmed = line.state === "confirmed";
     const meta = line.meta || (PD_STATE_WORD[line.state] || PD_STATE_WORD.unchecked);
-    deck.push({ label: "If you do nothing", tone: "muted", glow: false, body:
+    deck.push({ label: "Payment starting point", tone: "muted", glow: false, body:
       `<div style="font-size:18px;font-weight:900;color:${confirmed ? "#33305A" : "#706D96"};">${escapeHtml(line.headline)}</div>` +
       `<div style="font-size:12px;color:#706D96;margin-top:2px;">${escapeHtml(meta)}</div>` +
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(line.body)}</div>` });
@@ -929,9 +929,9 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (a.financeContingent?.contingent) {
     P.push({ t: "Price depends on financing", v: "FLAGGED", tone: "flag" });
   }
-  // "If you do nothing" ALWAYS prints, same builder rule as the count above:
+  // "Payment default" ALWAYS prints, same builder rule as the count above:
   // NOT PUBLISHED and NOT READ are results, not gaps.
-  P.push({ t: "If you do nothing", v: pageDefaultLine(a).value, tone: "muted" });
+  P.push({ t: "Payment starting point", v: pageDefaultLine(a).value, tone: "muted" });
   return P;
 }
 
@@ -1039,10 +1039,10 @@ function pointExplain(t: string, a: any): string | null {
     // explanation, and it is the same sentence the HTML deck and PDF narrative
     // print. Em dash -> hyphen for the WinAnsi fonts.
     // Both lines carry their full sentence in their own narrative section
-    // (OTHER LISTINGS READ / IF YOU DO NOTHING), so the audit row prints the
+    // (OTHER LISTINGS READ / PAYMENT DEFAULT), so the audit row prints the
     // value alone -- one place per sentence, same as Days on lot.
     case "Other listings read":
-    case "If you do nothing":
+    case "Payment starting point":
       return null;
     default: return null;
   }
@@ -1554,12 +1554,12 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- IF YOU DO NOTHING -- the page's own pre-selected payment scenario ----
+  // ---- PAYMENT DEFAULT -- the page's own pre-selected payment scenario ----
   // ALWAYS RENDERS, same rule: "not published" and "not read" are answers.
   {
     const line = pageDefaultLine(a);
     need(60);
-    kicker("IF YOU DO NOTHING");
+    kicker("PAYMENT STARTING POINT");
     T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
     para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
     rule();

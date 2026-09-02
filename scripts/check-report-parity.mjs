@@ -146,24 +146,24 @@ const SURFACES = [
     },
   },
   {
-    // Added 2026-09-02 with the line itself. "If you do nothing, this page
+    // Added 2026-09-02 with the line itself. "Payment default: this page
     // gives you N months, <frequency> payments at X%" is the page's own
     // pre-selected calculator scenario, read by code (page-default.js), sealed
     // in the canonical (dflt), rendered by report-lines.js pageDefaultLine.
-    field: "pageDefault (if you do nothing, this page gives you...)",
+    field: "pageDefault (this page's payment default is...)",
     app: {
       "sidebar card pool":           "pageDefaultItem = {",
       "scroll view card":            "<PageDefaultCard analysis={analysis}",
-      "scroll summary tile strip":   'tiles.push({label:"If you do nothing"',
+      "scroll summary tile strip":   'tiles.push({label:"Payment starting point"',
       "share link encode":           "dflt:a.pageDefault?",
       "share link decode":           "pageDefault:c.dflt",
       "signed verify payload":       "dflt:a.pageDefault?{st:",
-      "verify page row":             'o.dflt&&<Row t="If you do nothing"',
+      "verify page row":             'o.dflt&&<Row t="Payment starting point"',
     },
     email: {
-      "emailed HTML deck": 'deck.push({ label: "If you do nothing"',
-      "emailed PDF":       'kicker("IF YOU DO NOTHING")',
-      "emailed PDF audit row": 't: "If you do nothing"',
+      "emailed HTML deck": 'deck.push({ label: "Payment starting point"',
+      "emailed PDF":       'kicker("PAYMENT STARTING POINT")',
+      "emailed PDF audit row": 't: "Payment starting point"',
     },
   },
   {
