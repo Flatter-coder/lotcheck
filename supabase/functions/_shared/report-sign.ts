@@ -21,6 +21,11 @@ function num(x: unknown): number | null {
   const v = Number(x);
   return Number.isFinite(v) ? v : null;
 }
+// Null-preserving: num(null) is 0, which would seal a figure the page never
+// showed. Used for every nullable number in the v6 fields.
+function nn(x: unknown): number | null {
+  return x == null ? null : num(x);
+}
 
 // Canonical, fixed-order projection of ONLY what the report shows. Mirrors the
 // client's canonicalReport(). This exact string is hashed AND signed.
@@ -39,7 +44,12 @@ export function canonicalReport(a: any): any {
     // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
     // signed canonical because it is a material claim about the listing, and
     // /verify must be able to show it as sealed rather than as a re-assertion.
-    v: 5,
+    // v6: `mc` (other listings read: how many, how many advertise below this
+    // one, from how many dealers, read when) and `dflt` (the page's own
+    // pre-selected payment scenario: term, frequency, rate, down payment, and
+    // the page data it was read from). Both are claims about the listing that
+    // the server computed from its own reads, so they are sealed like fcx/gate.
+    v: 6,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -72,6 +82,11 @@ export function canonicalReport(a: any): any {
     // /verify for any signed report. Same defect the v2 bump was fixing, two
     // fields further down. Copied verbatim from the client so the shapes match.
     fcx: a.financeContingent?.contingent ? { r: a.financeContingent.reasons || [] } : null,
+    // nn(): a missing figure stays null (num(null) would seal a $0 down payment
+    // or a 0% rate the page never showed). Every field the sentence depends on
+    // rides here, so /verify renders the same sentence as the report.
+    mc: a.marketCount ? { st: a.marketCount.state || null, sc: a.marketCount.scope || null, n: nn(a.marketCount.n), b: nn(a.marketCount.below), s: nn(a.marketCount.same), d: nn(a.marketCount.dealers), from: a.marketCount.seenMin || null, to: a.marketCount.seenMax || null, pv: a.marketCount.province || null, x: !!a.marketCount.subjectExcluded, p: nn(a.marketCount.price), tl: a.marketCount.trimLabel || null, pt: a.marketCount.powertrain || null, mn: nn(a.marketCount.modelN), mb: nn(a.marketCount.modelBelow), rs: a.marketCount.reason || null, w: nn(a.marketCount.windowDays), as: a.marketCount.asOf || null, tr: !!a.marketCount.truncated, up: nn(a.marketCount.unpriced) } : null,
+    dflt: a.pageDefault ? { st: a.pageDefault.state || null, t: nn(a.pageDefault.termMonths), f: a.pageDefault.paymentFrequency || null, a: nn(a.pageDefault.apr), d: nn(a.pageDefault.downPayment), p: nn(a.pageDefault.paymentAmount), src: a.pageDefault.source || null, at: a.pageDefault.readAt || null, pm: a.pageDefault.purchaseMethod || null, rs: a.pageDefault.reason || null, q: a.pageDefault.qualifier || null, cob: nn(a.pageDefault.costOfBorrowing) } : null,
     source: (a.sourceUrl || a.capturedAt) ? { url: a.sourceUrl || null, capturedAt: a.capturedAt || null } : null,
     issuedAt: a.issuedAt || null,
   };

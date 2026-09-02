@@ -27,6 +27,7 @@
 // missing from a fourth; a gate carrying a fifth copy would be a gate asserting
 // a stale version of the rule it is supposed to enforce. See msrp-basis.ts.
 import { applyConditionToMsrp, msrpIsPresentTense } from "./msrp-basis.ts";
+import { PAGE_DEFAULT_SOURCES } from "./page-default.js";
 
 // ── VIN ──────────────────────────────────────────────────────────────────────
 // Moved here from BOTH analyze-listing-url and analyze-quote, which each carried
@@ -256,6 +257,49 @@ export const INVARIANTS: Invariant[] = [
     why: "a leverage claim must name the inventory data it rests on",
     applies: (a) => !!a?.daysOnLot && num(a.daysOnLot.days) > 0,
     holds: (a) => !!a.daysOnLot.source && !!a.daysOnLot.sourceLabel,
+  },
+  {
+    // "Of N other listings read, M advertise below this one" is a count of
+    // things we read. A confirmed count that cannot say what it is of --
+    // which vehicle, which province, read when, against which price -- is a
+    // bare number, and a bare number is exactly what present-without-
+    // creating-questions forbids. Flag, never guess the missing basis.
+    id: "MARKET_COUNT_HAS_PROVENANCE",
+    severity: "repair",
+    why: "a count of other listings must name what it is of: identity, province, read dates, the price it was counted against, and an arithmetic that closes",
+    applies: (a) => a?.marketCount?.state === "confirmed",
+    holds: (a) => {
+      const m = a.marketCount;
+      const n = num(m.n), below = num(m.below), same = num(m.same);
+      return n > 0 && !!m.province && !!m.seenMax && !!m.year && !!m.make && !!m.model && num(m.price) > 0
+        && below + same <= n
+        && (m.dealers == null || (num(m.dealers) > 0 && num(m.dealers) <= n))
+        && ((m.scope !== "trim" && m.scope !== "trim_family") || !!m.trimLabel)
+        && !m.truncated
+        && (a.quotedPrice == null || Math.abs(num(m.price) - num(a.quotedPrice)) < 1);
+    },
+    // A count that cannot name its basis is demoted to unchecked: the card then
+    // says no listing set was read, which is the only claim still backed.
+    repair: (a) => { a.marketCount = { ...a.marketCount, state: "unchecked", reason: "provenance_missing" }; },
+  },
+  {
+    // "If you do nothing, this page gives you N months..." is a claim about
+    // the page's PRE-SELECTED state. Only the page's own feed, embedded
+    // settings or visible sentence can back that (page-default.js); the
+    // model's financing read cannot say what was pre-selected, and an
+    // injected value (the old hardcoded "monthly") is not a reading. A
+    // confirmed default from anywhere else is demoted to unchecked -- the card
+    // then says "Not read -- ask the dealer" instead of asserting a default.
+    id: "PAGE_DEFAULT_READ_FROM_PAGE",
+    severity: "repair",
+    why: "a 'this page pre-selects' claim may only come from the page's own data or text, never the model",
+    applies: (a) => a?.pageDefault?.state === "confirmed",
+    holds: (a) => a.pageDefault.checked === true && PAGE_DEFAULT_SOURCES.has(String(a.pageDefault.source))
+      && ((a.pageDefault.termMonths != null && num(a.pageDefault.termMonths) > 0)
+        || (a.pageDefault.apr != null && num(a.pageDefault.apr) >= 0)),
+    repair: (a) => {
+      a.pageDefault = { ...a.pageDefault, state: "unchecked", reason: "source_not_page", termMonths: null, paymentFrequency: null, apr: null, downPayment: null, paymentAmount: null };
+    },
   },
   {
     // Kramer Mazda family, narrative half. The NUMBERS get gap-filled after

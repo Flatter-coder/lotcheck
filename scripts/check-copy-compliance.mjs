@@ -51,6 +51,11 @@ const SURFACES = [
   "supabase/functions/_shared/point-state.ts",
   "supabase/functions/_shared/settled-claims.ts",
   "supabase/functions/_shared/reference-financing.ts",
+  // The two count/default lines ("Of N other listings read..." and "If you do
+  // nothing, this page gives you...") are built ONCE here and rendered by every
+  // surface, so this is where their copy lives -- scan it or the sentences the
+  // buyer reads on screen, in the email and in the PDF are all ungated.
+  "supabase/functions/_shared/report-lines.js",
   // The emailed HTML body and the PDF deck are the artifacts the buyer
   // FORWARDS TO THE DEALER -- the most adversarially-read copy LotCheck
   // produces -- and this gate never scanned them. Every rule below (no

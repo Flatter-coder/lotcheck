@@ -45,7 +45,12 @@ const OUTPUT_SHAPING = [
   // reads ITEMIZED or NONE LISTED and what the buyer is told is negotiable,
   // which is squarely what a report SAYS -- the same reason recalls, scrapfly
   // and fee-schedule are on this list.
-  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls|fee-ladder)\./,
+  // market-count, page-default, report-lines and report-sign joined on
+  // 2026-09-02: they decide what the "other listings read" and "if you do
+  // nothing" lines SAY and what the v6 canonical seals, so an edit to the
+  // window, the trim grouping, the sentence regex or the projection changes a
+  // signed report and must not replay from cache.
+  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls|fee-ladder|market-count|page-default|report-lines|report-sign)\./,
   // scrapfly joined this list on 2026-08-20, for the same reason recalls did
   // the day before: attachSealedScreenshot() stamps sourceUrl/capturedAt onto
   // `analysis` before it's signed, and a change to what it stamps (or when)

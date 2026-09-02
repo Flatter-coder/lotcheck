@@ -265,8 +265,12 @@ jobs:
       # The rebuilt value report's math: the mileage regression steps a high-km
       # subject DOWN from the raw median (Collette's bar), the three-exit tiers
       # order correctly, and thin/no-signal comps fabricate nothing.
-      - name: Value-report mileage + tiers math
-        run: npm run test:value-math
+      # test:value-math is NOT on main yet: its script and the marketvalue helpers
+      # it imports (mileageAdjustedValue, valueTiers, pickNamedComps) live on
+      # feat/value-report-collette. The step reached main inside ad477ed without
+      # them and turned every main run red from 2026-09-01. It returns with that
+      # branch -- see check-scheduled-jobs for the rule that a step must name a
+      # script that exists.
       # The band the value report is built ON. computeBand decides whether a
       # comparable set is dense and clean enough to produce a number at all --
       # the comp floor, the salvage-cheap/typo-high trim, the mileage and trim
@@ -300,6 +304,8 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      - name: Report lines (other listings read; if you do nothing) + page-default reader
+        run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
         run: npm run test:jsonld-vehicle
       # Go Auto is 70+ dealerships across AB and BC behind ONE endpoint, and

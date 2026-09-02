@@ -215,6 +215,62 @@ const CASES: Case[] = [
     repaired: [],
     flagged: [],
   },
+  // -- report lines (2026-09-02): counts and defaults must name their basis ----
+  {
+    name: "a confirmed market count without province, dates or identity is demoted to unchecked -- a count must name what it is of",
+    analysis: { marketCount: { state: "confirmed", n: 12, below: 0, price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a confirmed market count with identity, province, dates and price is fine",
+    analysis: { quotedPrice: 39713.7, marketCount: { state: "confirmed", scope: "trim", trimLabel: "Sport", n: 12, below: 0, same: 0, dealers: 3, province: "AB", seenMin: "2026-08-18", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39713.7 } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a market count whose dealer count is 0 or exceeds n cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "model", n: 12, below: 0, same: 0, dealers: 0, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a market count whose below + same exceeds n cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "model", n: 12, below: 10, same: 5, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a trim-scoped count with no trim label cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "trim", trimLabel: null, n: 12, below: 0, same: 0, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a count sealed against a price that no longer matches the report's asking price is demoted",
+    analysis: { quotedPrice: 41000, marketCount: { state: "confirmed", scope: "model", n: 12, below: 0, same: 0, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "an absent or unchecked market count is never flagged (no claim is being made)",
+    analysis: { marketCount: { state: "absent", n: 0 } },
+    flagged: [],
+  },
+  {
+    name: "a page default sourced from the model is demoted to unchecked, never shown as read from the page",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: 84, paymentFrequency: "biweekly", apr: 6.99, source: "llm" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
+  },
+  {
+    name: "a page default that was never checked cannot be confirmed",
+    analysis: { pageDefault: { checked: false, state: "confirmed", termMonths: 84, apr: 5.99, source: "page_text" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
+  },
+  {
+    name: "a page default read from the page's own text is fine",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: 84, paymentFrequency: "biweekly", apr: 5.99, downPayment: 0, paymentAmount: 267, source: "page_text", readAt: "2026-09-02" } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a confirmed page default with neither a term nor a rate is not a reading",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: null, apr: null, paymentFrequency: "weekly", source: "sm360_feed", readAt: "2026-09-02" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
+  },
 ];
 
 let pass = 0, fail = 0;

@@ -470,15 +470,6 @@ const I = {
     </g>
   </>),
 
-  inboxEmpty:()=>(<>
-    <defs><Lit id="i3-inbx-a" from="#C6D2EA" mid="#8A98B8" to="#4B5771"/></defs>
-    <Ground cy={20.6} rx={7.6}/>
-    <path d="M4 10.4h4.2l1.4 2.8h4.8l1.4-2.8H20v6.9a2 2 0 01-2 2H6a2 2 0 01-2-2z" fill="url(#i3-inbx-a)"/>
-    <path d="M6.9 4.6h10.2l2.9 5.8h-4.2l-1.4 2.8H9.6l-1.4-2.8H4z" fill="url(#i3-inbx-a)" opacity=".62"/>
-    <path d="M6.9 4.6h2.2L6.6 10.4H4z" fill="#EDF2FB" opacity=".3"/>
-    <g className="i3-rise" opacity=".85"><circle cx="12" cy="9.4" r="1.15" fill="#9FB0CE"/></g>
-  </>),
-
   megaphone:()=>(<>
     <defs>
       <Lit id="i3-meg-a" from="#FFD9A6" mid="#F08A3C" to="#9C4A07"/>
