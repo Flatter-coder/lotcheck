@@ -8684,6 +8684,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // when the dealer hides the trim or prints their own sticker).
   const trimRange = useTrimRange(a);
   let trimRangeItem = null;
+  // The catalog holds this model, but not THIS car's powertrain. Say so; do not
+  // show another powertrain's ladder as if it were the factory range (a gas
+  // RX 350 was shown the RX Hybrid / Plug-in ladder, 2026-09-02).
+  if (trimRange.status === "none_for_powertrain") {
+    const pt = { gas: "gasoline", hybrid: "hybrid", phev: "plug-in hybrid", bev: "electric", diesel: "diesel" }[trimRange.wantFuel] || trimRange.wantFuel;
+    trimRangeItem = { key: "trimrange", title: "MSRP per trim", tone: "muted", v: "not held", body: (
+      <div>
+        <div style={{ fontSize: 12, color: MUT, lineHeight: 1.5 }}>Our catalog holds {trimRange.year} {a.make} {a.model} prices for {trimRange.otherRows} trims of a <b>different powertrain</b>, and none for the {pt} version this listing is. Showing those would compare this price to cars it is not, so no range is shown.</div>
+        {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Check the {pt} trims on the manufacturer's site ↗</a>}
+      </div>
+    )};
+  }
   if (trimRange.status === "ready" && trimRange.trims?.length) {
     const trs = trimRange.trims, aboveN = qp > 0 ? trs.filter(t => qp > Number(t.msrp)).length : 0;
     const allExcl = trs.every(t => t.price_basis === "excl_freight");
@@ -8699,7 +8711,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
           ))}
         </div>
           {trs.length > TRIM_ROWS_SHOWN && (<div style={{ fontSize: 11, color: MUT, marginTop: 6 }}>Showing {TRIM_ROWS_SHOWN} of {trs.length} published trims — the full ladder is on the manufacturer's own page.</div>)}
-        {qp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.{allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>}
+        {qp > 0 && !trimRange.mixed && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.{allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>}
         {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Source: confirm on the manufacturer's site ↗</a>}
       </div>
     )};
@@ -8989,9 +9001,24 @@ function useTrimRange(a){
         const wantFuel=fuelKind(a?.fuelType);
         const sameYear=rows.filter(r=>r.year===year);
         const matched=wantFuel?sameYear.filter(r=>fuelKind(r.fuel_type)===wantFuel):[];
-        // Only narrow when it leaves a usable ladder; otherwise show all and
-        // LABEL each row's powertrain rather than silently mixing them.
-        const mixed=!(wantFuel&&matched.length>=2);
+        // FAIL CLOSED when we know the powertrain and the catalog has no rows
+        // for it. This used to fall back to "show all, labelled" -- and on a
+        // gasoline 2026 Lexus RX 350 (lexusofroyaloak.com, 2026-09-02) that
+        // meant the buyer was shown the RX HYBRID and PLUG-IN ladder as "the
+        // factory range the quote should be read against", with "asking sits
+        // above 2 of 10" computed across the wrong car's prices. The catalog
+        // held no gas RX at all (a series-level fuel mis-tag upstream). No
+        // ladder is honest; another powertrain's ladder is a false anchor.
+        // [[powertrain-identity-rule]]
+        if(wantFuel&&matched.length===0&&sameYear.length>0){
+          const v={status:"none_for_powertrain",readAt:Date.now(),year,make,model,wantFuel,src:MAKE_BP_SITE[make]||null,otherRows:sameYear.length};
+          trimRangeCache[key]=v; if(alive)setSt(v); return;
+        }
+        // Unknown powertrain: show all and LABEL each row's powertrain rather
+        // than silently mixing them -- and the render sites suppress the
+        // "sits above N of M" claim on a mixed pool, because a count across
+        // powertrains compares the asking price to cars it is not.
+        const mixed=!(wantFuel&&matched.length>=1);
         const pool=mixed?sameYear:matched;
         const seen=new Set();
         const trims=pool.filter(r=>{

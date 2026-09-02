@@ -178,7 +178,25 @@ export function extractJsonLdVehicle(html) {
   const dealerCity = locality ? (region ? `${locality}, ${region}` : locality) : null;
 
   if (!year && !make && !model && price == null) return null;
-  return { year, make, model, trim, vin, odometerKm, price, currency, condition, listedSince, dealerName: str(seller?.name), dealerCity };
+  // The page's own fuel declaration, mapped to the pipeline's vocabulary
+  // (Gas | Hybrid | PHEV | BEV | Diesel). schema.org puts it on the Car node
+  // (fuelType), on vehicleEngine (an EngineSpecification with fuelType), or --
+  // EDealer's shape -- as a sibling EngineSpecification. A gasoline 2026 Lexus
+  // RX 350 declared "Gasoline" right here while the report showed the buyer
+  // the hybrid ladder (2026-09-02); nothing was reading it.
+  const fuelRaw = str(node.fuelType) || str(node.vehicleEngine?.fuelType)
+    || str((Array.isArray(node.vehicleEngine) ? node.vehicleEngine[0] : null)?.fuelType);
+  const fuelType = (() => {
+    const f = (fuelRaw || "").toLowerCase();
+    if (!f) return null;
+    if (/plug|phev/.test(f)) return "PHEV";
+    if (/hybrid|hev/.test(f)) return "Hybrid";
+    if (/electric|\bbev\b|battery/.test(f)) return "BEV";
+    if (/diesel/.test(f)) return "Diesel";
+    if (/gas|petrol|unleaded/.test(f)) return "Gas";
+    return null;
+  })();
+  return { year, make, model, trim, vin, odometerKm, price, currency, condition, listedSince, fuelType, dealerName: str(seller?.name), dealerCity };
 }
 
 // Fill blanks in a Claude-extracted analysis object (`parsed`) using a
@@ -196,6 +214,7 @@ export function fillFromJsonLd(parsed, jsonLd) {
   if (!parsed.model && jsonLd.model) parsed.model = jsonLd.model;
   if (!parsed.trim && jsonLd.trim) parsed.trim = jsonLd.trim;
   if (!parsed.vehicleCondition && jsonLd.condition) parsed.vehicleCondition = jsonLd.condition;
+  if (!parsed.fuelType && jsonLd.fuelType) parsed.fuelType = jsonLd.fuelType;
   if (!parsed.dealerName && jsonLd.dealerName) parsed.dealerName = jsonLd.dealerName;
   if (!parsed.dealerCity && jsonLd.dealerCity) parsed.dealerCity = jsonLd.dealerCity;
   // DAYS ON LOT, from the listing's own inventory date.

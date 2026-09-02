@@ -597,28 +597,45 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
 // Falls back to whatever the page extraction said when there's no
 // catalog match, so a make whose fuel_type column hasn't been backfilled
 // yet degrades quietly. Never throws, never blocks the report either way.
+// "Verify" a fuel type only from catalog rows that are THE SAME CAR. This used
+// to take the first fuel_type of the first row whose model ilike-matched --
+// which is exactly how a gasoline nameplate inherits a hybrid sibling's fuel
+// (and then its ladder, and then its sticker). A bare model match is not
+// identity: powertrainCompatible() decides whether a catalog row may stand in
+// for the listing at all, and rows that disagree with each other verify
+// nothing. Missing beats wrong. [[powertrain-identity-rule]]
 async function applyVerifiedFuelType(analysis: any): Promise<void> {
   if (!analysis || !analysis.year || !analysis.make || !analysis.model) return;
   try {
     const { data, error } = await supabase
       .from("msrp_catalog")
-      .select("fuel_type")
+      .select("model,fuel_type")
       .eq("year", analysis.year)
       .ilike("make", analysis.make)
-      .ilike("model", analysis.model)
+      .ilike("model", `%${stripPowertrain(String(analysis.model)).split(/\s+/)[0]}%`)
       .not("fuel_type", "is", null)
-      .limit(1)
-      .maybeSingle();
+      .limit(50);
     if (error) {
       console.warn("⚠️ msrp_catalog fuel_type lookup failed:", error.message);
       analysis.fuelTypeVerified = false;
       return;
     }
-    if (!data?.fuel_type) {
+    const same = (data || []).filter((r: any) => powertrainCompatible(String(analysis.model), String(r.model)));
+    const fuels = new Set(same.map((r: any) => String(r.fuel_type)));
+    if (fuels.size !== 1) {
+      // No compatible row, or compatible rows that disagree: nothing here can
+      // vouch for this car's powertrain. Leave whatever the page said.
       analysis.fuelTypeVerified = false;
       return;
     }
-    analysis.fuelType = data.fuel_type;
+    const [fuel] = [...fuels];
+    // A page that declared a DIFFERENT fuel wins over the catalog: the catalog
+    // is a price list, the page is the car in front of the buyer.
+    if (analysis.fuelType && String(analysis.fuelType).toLowerCase() !== fuel.toLowerCase()) {
+      analysis.fuelTypeVerified = false;
+      return;
+    }
+    analysis.fuelType = fuel;
     analysis.fuelTypeVerified = true;
   } catch (err) {
     console.warn("⚠️ applyVerifiedFuelType threw:", err);
@@ -4399,7 +4416,10 @@ Deno.serve(async (req: Request) => {
     try {
       const earlyIdentity = await earlyStructuredFacts;
       if (earlyIdentity) {
-        for (const k of ["vehicleCondition", "odometerKm"] as const) {
+        // fuelType is identity too: the ladder and the trim matcher both
+        // partition on it, and the page's own declaration ("Gasoline") must
+        // land before the catalog gets a chance to "verify" a sibling's fuel.
+        for (const k of ["vehicleCondition", "odometerKm", "fuelType"] as const) {
           const cur = (analysis as any)[k];
           const alt = (earlyIdentity as any)[k];
           const missing = cur == null || cur === "";
@@ -4588,7 +4608,7 @@ Deno.serve(async (req: Request) => {
       // (the subject guard used to sit here, inside this catch -- see above)
       const early = await earlyStructuredFacts;
       if (early) {
-        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
+        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition", "fuelType"] as const) {
           const cur = (analysis as any)[k];
           const alt = (early as any)[k];
           const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));

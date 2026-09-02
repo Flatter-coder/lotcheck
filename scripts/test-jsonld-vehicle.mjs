@@ -66,6 +66,37 @@ const CASES = [
   ["no json-ld at all -> null", "<html><body>nothing here</body></html>", null],
 ];
 
+// ── Fuel type is identity ────────────────────────────────────────────────────
+// A gasoline 2026 Lexus RX 350 (lexusofroyaloak.com, 2026-09-02) declared
+// "Gasoline" in its JSON-LD while the report showed the buyer the RX Hybrid /
+// Plug-in ladder: nothing was reading the field. The ladder and the trim matcher
+// both partition on fuel, so the page's own declaration must come through, in
+// the pipeline's vocabulary (Gas | Hybrid | PHEV | BEV | Diesel).
+const rxGas = (fuel, shape) => wrap({
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "AutomotiveBusiness", name: "Lexus of Royal Oak" },
+    {
+      "@type": ["Product", "Car"],
+      brand: { "@type": "Brand", name: "Lexus" },
+      itemCondition: "https://schema.org/UsedCondition",
+      model: "RX 350",
+      offers: { "@type": "Offer", priceCurrency: "CAD", price: 69898, seller: { "@type": "Organization", name: "Lexus of Royal Oak" } },
+      vehicleIdentificationNumber: "2T2BAMCA0TC124633",
+      vehicleModelDate: 2026,
+      mileageFromOdometer: { "@type": "QuantitativeValue", unitCode: "KMT", value: 12270 },
+      ...(shape === "node" ? { fuelType: fuel } : { vehicleEngine: { "@type": "EngineSpecification", name: "2.4L 4Cyl", fuelType: fuel } }),
+    },
+  ],
+});
+CASES.push(
+  ["EDealer RX 350: fuelType on the Car node, 'Gasoline' -> Gas", rxGas("Gasoline", "node"), { make: "Lexus", model: "RX 350", price: 69898, fuelType: "Gas" }],
+  ["EDealer RX 350: fuelType inside vehicleEngine (EngineSpecification) -> Gas", rxGas("Gasoline", "engine"), { fuelType: "Gas" }],
+  ["Hybrid declared on the page -> Hybrid", rxGas("Hybrid", "node"), { fuelType: "Hybrid" }],
+  ["Plug-in declared on the page -> PHEV, never Hybrid", rxGas("Plug-in Hybrid", "node"), { fuelType: "PHEV" }],
+  ["Electric declared on the page -> BEV", rxGas("Electric", "node"), { fuelType: "BEV" }],
+);
+
 let pass = 0, fail = 0;
 for (const [label, html, want] of CASES) {
   let got;
