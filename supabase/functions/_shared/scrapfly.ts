@@ -75,6 +75,12 @@ function base64FromBytes(bytes: Uint8Array): string {
 // log said "sfErr=none" about a scan whose renders demonstrably died
 // (albertahonda.com, 2026-08-14 05:19). Callers read the accumulated trail.
 export let lastScrapflyError: string | null = null;
+
+/** A challenge page or an empty shell, not a dealer listing. Exported for the test. */
+export function isWalledShell(html: string): boolean {
+  if (html.length < 2_000) return true;
+  return /just a moment|cf-chl|challenge-platform|attention required|access denied|enable javascript and cookies/i.test(html.slice(0, 6_000));
+}
 function noteScrapflyError(msg: string): void {
   lastScrapflyError = lastScrapflyError ? `${lastScrapflyError} ;; ${msg}` : msg;
 }
@@ -118,6 +124,12 @@ async function scrapflyRenderOnce(
     u.searchParams.set("render_js", "true");      // execute JS so dynamic price loads
     u.searchParams.set("country", "ca");          // Canadian residential IP
     u.searchParams.set("rendering_wait", String(waitMs));
+    // Scrapfly keeps rendering -- and billing -- after our AbortSignal fires
+    // unless told otherwise. Their `timeout` (ms) is the server-side cap; keep
+    // it just inside ours so the two fail together instead of us paying for a
+    // render we have already walked away from. (lexusofroyaloak.com, 2026-09-02:
+    // two 70s renders abandoned client-side, both still running on their side.)
+    u.searchParams.set("timeout", String(Math.max(5_000, Math.min(150_000, budgetMs - 2_000))));
     if (autoScroll) u.searchParams.set("auto_scroll", "true"); // trigger lazy-loaded sections
     u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     if (shot !== "none") u.searchParams.set("screenshots[main]", shot);
@@ -160,7 +172,15 @@ async function scrapflyRenderOnce(
       return null;
     }
     const j: any = await res.json();
-    const html: string | null = j?.result?.content ?? null;
+    let html: string | null = j?.result?.content ?? null;
+    // A Cloudflare interstitial is a 200 with content, and it is NOT the page.
+    // Nimble already refuses a 74-char shell as "content too short"; this path
+    // must too, or an HTML-only first attempt "succeeds" on the wall and the
+    // screenshot retry that could have beaten it never runs.
+    if (html && isWalledShell(html)) {
+      noteScrapflyError(`render 200 but the content is a bot-wall shell (${html.length} chars)`);
+      html = null;
+    }
     if (!html) noteScrapflyError(`render 200 but no content (success=${j?.result?.success}, status=${j?.result?.status_code}, reason=${String(j?.result?.reason ?? "").slice(0, 80)})`);
 
     // Screenshots come back as authenticated URLs; fetch the main one to bytes.
@@ -243,22 +263,32 @@ export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { sho
   if (!SCRAPFLY_API_KEY) return null;
   const deadline = Date.now() + budgetMs;
 
-  // Attempt 1: viewport shot. Bounded by construction, so it cannot produce the
-  // oversized capture the vision call refuses, and it renders far faster than a
-  // fullpage stitch of a 17,000px page.
-  const first = await scrapflyRenderOnce(url, budgetMs, opts.shot ?? "viewport", true, 8_000);
-  if (first?.html || first?.screenshotB64) return first;
+  // Attempt 1: HTML ONLY, on a short slice of the budget. No screenshot, no
+  // auto_scroll, a short JS wait. The rendered HTML is the valuable part -- it
+  // carries the JSON-LD, the Convertus vmsData blob and the D2C __vdpJSON that
+  // every fallback reads -- and it is the cheapest thing Scrapfly can return.
+  //
+  // This used to run SECOND, after a viewport-shot attempt with auto_scroll and
+  // an 8s wait. On lexusofroyaloak.com (Cloudflare, 972 KB, 2026-09-02) that
+  // first attempt burned the entire 70s budget, the HTML-only retry never got
+  // to run, the rescue rendered fresh and burned 70s more, and the scan died --
+  // over a page whose static HTML held the whole vehicle. Cheapest first.
+  const htmlSlice = Math.min(25_000, budgetMs);
+  const first = await scrapflyRenderOnce(url, htmlSlice, "none", false, 2_500);
+  if (first?.html) return first;
 
-  // Attempt 2: HTML only. No screenshot, no auto_scroll, a short JS wait. This
-  // is the cheapest thing that still yields JSON-LD and vmsData, and it only
-  // runs after a failure -- the common path remains a single call.
+  // Attempt 2: the viewport shot, with whatever budget remains. Still never
+  // fullpage -- a 17,729px capture is past the vision ceiling by construction
+  // (stampedetoyotacalgary.com, 2026-08-16). It only runs after HTML-only came
+  // back empty or walled, so the common path stays one cheap call.
   const left = deadline - Date.now();
   if (left < 6_000) {
-    console.warn("scrapflyRender: no budget left for the HTML-only retry.");
+    console.warn("scrapflyRender: no budget left for the screenshot retry.");
     return first;
   }
-  console.log(`scrapflyRender: first attempt yielded nothing; retrying HTML-only with ${Math.round(left / 1000)}s left.`);
-  return await scrapflyRenderOnce(url, left, "none", false, 2_500);
+  console.log(`scrapflyRender: HTML-only yielded nothing; retrying with a viewport shot and ${Math.round(left / 1000)}s left.`);
+  const second = await scrapflyRenderOnce(url, left, opts.shot ?? "viewport", true, 8_000);
+  return second ?? first;
 }
 
 // Per-scan sealed screenshot via Scrapfly's dedicated Screenshot API

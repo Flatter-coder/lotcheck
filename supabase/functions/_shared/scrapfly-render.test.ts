@@ -22,7 +22,7 @@ const check = (label: string, cond: boolean, detail?: string) => {
   cond ? pass++ : fail++;
 };
 
-type Call = { shot: string; autoScroll: string; wait: string | null };
+type Call = { shot: string; autoScroll: string; wait: string | null; format: string; timeout: string | null };
 
 /** Stub Scrapfly. `behave(n)` decides what the n-th attempt does. */
 function stub(behave: (n: number) => "timeout" | { html?: string | null; shotBytes?: number }) {
@@ -31,7 +31,7 @@ function stub(behave: (n: number) => "timeout" | { html?: string | null; shotByt
     const url = String(u);
     if (url.includes("api.scrapfly.io")) {
       const q = new URL(url).searchParams;
-      calls.push({ shot: q.get("screenshots[main]") ?? "none", autoScroll: q.get("auto_scroll") ?? "off", wait: q.get("rendering_wait"), format: q.get("format") ?? "(unset)" });
+      calls.push({ shot: q.get("screenshots[main]") ?? "none", autoScroll: q.get("auto_scroll") ?? "off", wait: q.get("rendering_wait"), format: q.get("format") ?? "(unset)", timeout: q.get("timeout") });
       const r = behave(calls.length);
       if (r === "timeout") throw new Error("Signal timed out.");
       return { ok: true, status: 200, json: async () => ({ result: { content: r.html ?? null, screenshots: r.shotBytes ? { main: { url: "https://shot.invalid/x" } } : undefined } }) };
@@ -47,12 +47,26 @@ function stub(behave: (n: number) => "timeout" | { html?: string | null; shotByt
 // 1. The common path is still ONE call — and never asks for fullpage.
 // ---------------------------------------------------------------------------
 {
-  const calls = stub(() => ({ html: "<html><body>ok</body></html>" }));
+  // A real dealer page is 700 KB-1 MB. The wall guard treats anything under
+  // 2,000 chars as a bot-wall shell (Nimble refuses a 74-char one the same
+  // way), so the stub has to look like a page, not a token.
+  const calls = stub(() => ({ html: '<html><body><script type="application/ld+json">{"@type":"Car"}</script>ok</body></html>'.padEnd(2_500, " ") }));
   const out = await scrapflyRender("https://example.com/vdp", 30_000);
   check("a successful render is a single call", calls.length === 1, JSON.stringify(calls));
-  check("THE FIX: it asks for a VIEWPORT shot, never fullpage",
-    calls[0].shot === "viewport",
-    `asked for "${calls[0].shot}" — a fullpage capture of a 17,729px page is past the vision ceiling by construction`);
+  // 2026-09-02 (lexusofroyaloak.com): the first attempt is now HTML-ONLY. The
+  // rendered HTML is the valuable part -- JSON-LD, vmsData, __vdpJSON -- and it
+  // is the cheapest thing Scrapfly returns. The viewport shot is the retry.
+  check("THE FIX: the first call is HTML-only -- no screenshot at all",
+    calls[0].shot === "none",
+    `asked for "${calls[0].shot}" — a screenshot-first attempt burned a whole 70s budget on a Cloudflare-walled EDealer page whose static HTML held the vehicle`);
+  check("...and no auto_scroll, which is what makes a long page slow",
+    calls[0].autoScroll === "off", JSON.stringify(calls[0]));
+  check("never fullpage, on any attempt",
+    calls.every((c) => c.shot !== "fullpage"),
+    "a fullpage capture of a 17,729px page is past the vision ceiling by construction (2026-08-16)");
+  check("Scrapfly's own timeout rides with the request, inside our budget",
+    Number(calls[0].timeout) > 0 && Number(calls[0].timeout) < 30_000,
+    `timeout=${calls[0].timeout} on a 30s budget — without it Scrapfly keeps rendering, and billing, after our AbortSignal fires`);
   check("the HTML comes back", !!out?.html, JSON.stringify(out));
 }
 
@@ -60,16 +74,34 @@ function stub(behave: (n: number) => "timeout" | { html?: string | null; shotByt
 // 2. THE STAMPEDE CASE: attempt 1 times out, and we still get the HTML.
 // ---------------------------------------------------------------------------
 {
-  const calls = stub((n) => (n === 1 ? "timeout" : { html: '<script type="application/ld+json">{"@type":"Car"}</script>' }));
+  const calls = stub((n) => (n === 1 ? "timeout" : { html: '<script type="application/ld+json">{"@type":"Car"}</script>'.padEnd(2_500, " "), shotBytes: 4_000 }));
   const out = await scrapflyRender("https://example.com/vdp", 30_000);
   check("THE BUG: a timeout no longer loses the whole render",
-    !!out?.html, "attempt 1 timed out and the HTML-only retry recovered it");
-  check("the retry drops the screenshot entirely",
-    calls[1]?.shot === "none", JSON.stringify(calls[1]));
-  check("...and drops auto_scroll, which is what makes a long page slow",
-    calls[1]?.autoScroll === "off", JSON.stringify(calls[1]));
-  check("...and shortens the JS wait",
-    Number(calls[1]?.wait) < Number(calls[0]?.wait), `${calls[0]?.wait} -> ${calls[1]?.wait}`);
+    !!out?.html, "attempt 1 timed out and the viewport retry recovered it");
+  check("the retry is the viewport shot",
+    calls[1]?.shot === "viewport", JSON.stringify(calls[1]));
+  check("...with auto_scroll, since the cheap path already failed",
+    calls[1]?.autoScroll === "true", JSON.stringify(calls[1]));
+  check("...and a longer JS wait than the cheap attempt",
+    Number(calls[1]?.wait) > Number(calls[0]?.wait), `${calls[0]?.wait} -> ${calls[1]?.wait}`);
+  check("the HTML-only slice is bounded, so a hang there cannot eat the whole budget",
+    Number(calls[0]?.timeout) <= 25_000, `first-attempt timeout=${calls[0]?.timeout}`);
+}
+
+// ---------------------------------------------------------------------------
+// 2b. THE LEXUS CASE: a bot-wall answers the HTML-only attempt with a shell.
+//     That is a 200 with content, and it is NOT the page. It must fall through
+//     to the screenshot attempt, not be returned as a "render".
+// ---------------------------------------------------------------------------
+{
+  const calls = stub((n) => (n === 1
+    ? { html: "<html><head><title>Just a moment...</title></head><body>Enable JavaScript and cookies to continue</body></html>" }
+    : { html: '<script type="application/ld+json">{"@type":"Car","offers":{"price":69898}}</script>'.padEnd(2_500, " "), shotBytes: 4_000 }));
+  const out = await scrapflyRender("https://example.com/vdp", 30_000);
+  check("a Cloudflare shell is not accepted as the render",
+    calls.length === 2, `${calls.length} call(s) — the wall was returned as if it were the listing`);
+  check("...and the real page comes back from the screenshot attempt",
+    !!out?.html && /69898/.test(out.html), JSON.stringify(out?.html?.slice(0, 80)));
 }
 
 // ---------------------------------------------------------------------------
