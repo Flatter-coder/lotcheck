@@ -7,6 +7,12 @@ import heic2any from "heic2any";
 // surfaces ended up with six different answers to "may this MSRP support a
 // claim". Pure TypeScript, no Deno APIs, so Vite compiles it for the browser.
 import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../supabase/functions/_shared/msrp-claim.ts";
+// The two lines that speak in COUNTS and DEFAULTS ("Of N other listings read,
+// M advertise below this one" / "If you do nothing, this page gives you...")
+// are built ONCE here and rendered verbatim by every surface -- scroll,
+// sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
+// the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
+import { marketCountLine, pageDefaultLine, fmtDateEn } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -7756,15 +7762,24 @@ function encodeReport(a){
     // a shared link. mc: msrpCeiling, without which a shared report renders
     // "no over/under-MSRP claim is made" beside a leverage note asserting a
     // specific ceiling-exceeded dollar figure -- one page, two answers.
+    // (`mc` here meant msrpCeiling until 2026-09-02; it is `ceil` now, because
+    // the signed canonical took `mc` for marketCount and one abbreviation must
+    // mean one thing across the payload the banner verifies and the projection
+    // the page renders. decodeReport still reads a legacy `mc` by shape.)
     pv:a.priceVerified===true?1:(a.priceVerified===false?0:null),
     pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:a.priceGateGoogleAdsBacked?1:0}:null,
-    mc:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
+    ceil:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
     mai:a.msrpAllIn??null,
     ai:a.allInPricing?{b:a.allInPricing.body}:null,
     cs:a.counterScript?{m:(a.counterScript.moves||[]).slice(0,12).map(x=>({t:x.topic,s:x.say})),c:!!a.counterScript.clean}:null,
     dcx:a.disclaimerCheck?{t:String(a.disclaimerCheck.text).slice(0,500),n:a.disclaimerCheck.note,e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     tw:a.tradeInWidget&&a.tradeInWidget.detected?{v:a.tradeInWidget.vendor||null}:null,
     fcx:a.financeContingent&&a.financeContingent.contingent?{r:a.financeContingent.reasons||[],e:a.financeContingent.evidence||""}:null,
+    // Same compact keys as the signed canonical (v6) carries, so the
+    // projection the page renders from and the payload the banner verifies
+    // say the same thing about the count and the page's default scenario.
+    mc:a.marketCount?{st:a.marketCount.state||null,sc:a.marketCount.scope||null,n:a.marketCount.n??null,b:a.marketCount.below??null,s:a.marketCount.same??null,d:a.marketCount.dealers??null,from:a.marketCount.seenMin||null,to:a.marketCount.seenMax||null,pv:a.marketCount.province||null,x:!!a.marketCount.subjectExcluded,p:a.marketCount.price??null,tl:a.marketCount.trimLabel||null,pt:a.marketCount.powertrain||null,mn:a.marketCount.modelN??null,mb:a.marketCount.modelBelow??null,rs:a.marketCount.reason||null,w:a.marketCount.windowDays??null,as:a.marketCount.asOf||null,tr:!!a.marketCount.truncated,up:a.marketCount.unpriced??null}:null,
+    dflt:a.pageDefault?{st:a.pageDefault.state||null,t:a.pageDefault.termMonths??null,f:a.pageDefault.paymentFrequency||null,a:a.pageDefault.apr??null,d:a.pageDefault.downPayment??null,p:a.pageDefault.paymentAmount??null,src:a.pageDefault.source||null,at:a.pageDefault.readAt||null,pm:a.pageDefault.purchaseMethod||null,rs:a.pageDefault.reason||null,q:a.pageDefault.qualifier||null,cob:a.pageDefault.costOfBorrowing??null}:null,
     pb:a.msrpPriceBasis||null,
     omsrp:a.originalMsrp?{m:a.originalMsrp.msrp,t:a.originalMsrp.trim||null,y:a.originalMsrp.year||null}:null,
     mun:a.msrpUnavailable?{n:a.msrpUnavailable.note}:null,
@@ -7805,6 +7820,12 @@ function decodeReport(s){
   try{
     const b=s.replace(/-/g,"+").replace(/_/g,"/");
     const c=JSON.parse(decodeURIComponent(escape(atob(b))));
+    // The ceiling rides as `ceil` since 2026-09-02. A link minted before that
+    // carries it as `mc`, and a link minted after carries marketCount as `mc`;
+    // the two shapes never share a key (`st` is the count's state), so a
+    // legacy link keeps its ceiling and never has it misread as a count.
+    const isCount=(x)=>!!x&&typeof x==="object"&&("st" in x);
+    const ceil=c.ceil||(c.mc&&!isCount(c.mc)?c.mc:null);
     return {vehicle:c.v,year:c.y,make:c.mk,model:c.md,trim:c.tr,dealerName:c.dn,dealerCity:c.dc,vehicleCondition:c.cond,
       quotedPrice:c.qp,msrp:c.ms,
       financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
@@ -7826,13 +7847,18 @@ function decodeReport(s){
       priceGatedButRecovered:c.pg?true:undefined,
       priceGateMessage:c.pg?(c.pg.m||null):undefined,
       priceGateGoogleAdsBacked:c.pg?c.pg.g===1:undefined,
-      msrpCeiling:c.mc?{allIn:c.mc.a??null,floorAllIn:c.mc.f??null,trim:c.mc.t||null,trimsConsidered:c.mc.n??0}:null,
+      msrpCeiling:ceil?{allIn:ceil.a??null,floorAllIn:ceil.f??null,trim:ceil.t||null,trimsConsidered:ceil.n??0}:null,
       msrpAllIn:c.mai??null,
       allInPricing:c.ai?{body:c.ai.b}:null,
       counterScript:c.cs?{moves:(c.cs.m||[]).map(x=>({topic:x.t,say:x.s})),clean:!!c.cs.c}:null,
       disclaimerCheck:c.dcx?{text:c.dcx.t,note:c.dcx.n,escapeHatch:!!c.dcx.e,contradiction:!!c.dcx.x}:null,
       tradeInWidget:c.tw?{detected:true,vendor:c.tw.v||null}:null,
       financeContingent:c.fcx?{contingent:true,reasons:c.fcx.r||[],evidence:c.fcx.e||""}:null,
+      // Analysis-shaped again, so the same builder (report-lines.js) words the
+      // forwarded copy exactly as it worded the original. year/make/model ride
+      // along for the vehicle label; trimLabel is not in the compact form.
+      marketCount:c.mc&&isCount(c.mc)?{state:c.mc.st,scope:c.mc.sc,n:c.mc.n,below:c.mc.b,same:c.mc.s,dealers:c.mc.d??null,seenMin:c.mc.from,seenMax:c.mc.to,province:c.mc.pv,subjectExcluded:!!c.mc.x,price:c.mc.p,trimLabel:c.mc.tl||null,powertrain:c.mc.pt||null,modelN:c.mc.mn??0,modelBelow:c.mc.mb??0,reason:c.mc.rs||null,windowDays:c.mc.w??30,asOf:c.mc.as||null,truncated:!!c.mc.tr,unpriced:c.mc.up??0,year:c.y,make:c.mk,model:c.md}:undefined,
+      pageDefault:c.dflt?{checked:true,state:c.dflt.st,termMonths:c.dflt.t,paymentFrequency:c.dflt.f,apr:c.dflt.a,downPayment:c.dflt.d,paymentAmount:c.dflt.p,source:c.dflt.src,readAt:c.dflt.at,purchaseMethod:c.dflt.pm||null,reason:c.dflt.rs||null,qualifier:c.dflt.q||null,costOfBorrowing:c.dflt.cob??null}:undefined,
       msrpPriceBasis:c.pb||null,
       originalMsrp:c.omsrp?{msrp:c.omsrp.m,trim:c.omsrp.t||null,year:c.omsrp.y||null}:null,
       msrpUnavailable:c.mun?{note:c.mun.n}:null,
@@ -8653,6 +8679,25 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "If you do nothing, this page gives you N months, <frequency>
+  // payments at X%." The page's OWN pre-selected calculator scenario, read by
+  // code (page-default.js), sealed in the canonical (`dflt`), and worded once
+  // in report-lines.js (pageDefaultLine). ALWAYS built: "Not published" and
+  // "Not read" are answers too, each ending in the one sanctioned instruction.
+  // [[report-never-empty]] [[report-features-all-views]]
+  let pageDefaultItem = null;
+  {
+    const line = pageDefaultLine(a);
+    const meta = pageDefaultMeta(a.pageDefault);
+    pageDefaultItem = { key: "pagedefault", title: line.title, tone: "muted", glow: false, v: line.value, body: (
+      <div>
+        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} note={line.body} />
+        {meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{meta}</div>}
+        <ExplainBox txt="The settings this page's payment calculator opened on. A longer term and more frequent payments lower each payment and change the total cost of borrowing. Ask the dealer for term, frequency, rate and total cost in writing." />
+      </div>
+    )};
+  }
+
   // #11 — AMVIC dealer licence. Only rendered on a confident registry match;
   // the status is the regulator's own wording, verbatim. A valid licence is
   // quiet reassurance; expired/closed/suspended is a real flag with the ask.
@@ -8757,6 +8802,27 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "Of N other listings read, M advertise below this one."
+  //
+  // The sentence is built ONCE, in report-lines.js (marketCountLine), from the
+  // fields the server computed and sealed in the canonical (`mc`), and this
+  // card renders it verbatim -- so the words here are the words in the emailed
+  // HTML, the PDF and on /verify. ALWAYS built: a listing set that could not be
+  // read still says so, the same never-empty rule as daysLotItem's "Not
+  // published" branch. [[report-never-empty]] [[report-features-all-views]]
+  let marketCountItem = null;
+  {
+    const line = marketCountLine(a);
+    const meta = marketCountMeta(a.marketCount);
+    marketCountItem = { key: "marketcount", title: line.title, tone: "muted", glow: false, v: line.value, body: (
+      <div>
+        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} note={line.body} />
+        {meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{meta}</div>}
+        <ExplainBox txt="A count of other listings LotCheck read from Alberta dealers' own pages, on the dates shown. A tie is not below. Ask the dealer how this price compares with other units advertised in Alberta." />
+      </div>
+    )};
+  }
+
   // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
   //
   // We advertise a 10-point verification and we over-deliver on it (Vic,
@@ -8795,9 +8861,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   const extraItems = [
     ...(trimRangeItem ? [trimRangeItem] : []),
     ...(comparableItem ? [comparableItem] : []),
+    ...(marketCountItem ? [marketCountItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
+    ...(pageDefaultItem ? [pageDefaultItem] : []),
     ...(finExampleItem ? [finExampleItem] : []),
     ...(licItem ? [licItem] : []),
     // MEMBERSHIP MUST NOT DIFFER BY VIEW. The Heatmap built its own pool and
@@ -9369,12 +9437,58 @@ function ComparableListingsCard({analysis:a, C, cardStyle}){
     </div>
   );
 }
+// Meta line under the two count/default lines: scope · province · the dates
+// the listing set was read (market count), or the day the calculator was read
+// (page default). Derived only from fields the builder itself prints, so the
+// meta can never say more than the sentence does. Shared by the scroll cards,
+// the sidebar cards and the summary tiles so no surface formats its own.
+function marketCountMeta(mc){
+  if(!mc||!(mc.state==="confirmed"||mc.state==="not_counted")) return "";
+  const when=mc.seenMin&&mc.seenMax&&mc.seenMin!==mc.seenMax?`${fmtDateEn(mc.seenMin)} – ${fmtDateEn(mc.seenMax)}`:((mc.seenMax||mc.seenMin)?fmtDateEn(mc.seenMax||mc.seenMin):"");
+  return [mc.scope==="trim"?"same trim":"all trims",mc.province||null,when||null].filter(Boolean).join(" · ");
+}
+function pageDefaultMeta(pd){
+  if(!pd||pd.state!=="confirmed"||!pd.readAt) return "";
+  return `read ${fmtDateEn(pd.readAt)}`;
+}
+// LINE -- "Of N other listings read, M advertise below this one." One shared
+// builder (report-lines.js marketCountLine) writes the sentence; this card only
+// lays it out, in the same label / value / note rhythm as the Days on lot and
+// S37 cards beside it. Renders in EVERY state -- an unread or empty set still
+// says so and points at the dealer, never a missing card. [[report-never-empty]]
+function MarketCountCard({analysis,C,cardStyle}){
+  const line=marketCountLine(analysis);
+  const meta=marketCountMeta(analysis?.marketCount);
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>{line.title}{meta?` · ${meta}`:""}</div>
+      <div style={{fontSize:22,fontWeight:1000,color:line.state==="confirmed"?C.ink:C.inkSoft,lineHeight:1.2}}>{line.headline}</div>
+      {line.body&&<div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>{line.body}</div>}
+    </div>
+  );
+}
+// LINE -- "If you do nothing, this page gives you N months, <frequency>
+// payments at X%." The page's own pre-selected calculator scenario
+// (page-default.js), worded once in report-lines.js pageDefaultLine. Same
+// never-empty rule: "Not published" / "Not read" render as cards, not gaps.
+function PageDefaultCard({analysis,C,cardStyle}){
+  const line=pageDefaultLine(analysis);
+  const meta=pageDefaultMeta(analysis?.pageDefault);
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>{line.title}{meta?` · ${meta}`:""}</div>
+      <div style={{fontSize:22,fontWeight:1000,color:line.state==="confirmed"?C.ink:C.inkSoft,lineHeight:1.2}}>{line.headline}</div>
+      {line.body&&<div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>{line.body}</div>}
+    </div>
+  );
+}
 function makeReportId(fpHex){ return "LC-"+fpHex.slice(0,4).toUpperCase()+"-"+fpHex.slice(4,7).toUpperCase(); }
 // Canonical, fixed-order projection of ONLY what the report shows. This exact
 // object is what gets fingerprinted and what /verify re-hashes — so both sides
 // must build it identically.
 function canonicalReport(a){
   const num=(x)=>{const v=Number(x);return Number.isFinite(v)?v:null;};
+  const nn=(x)=>x==null?null:num(x); // null-preserving: num(null) is 0, which would seal a $0 down payment the page never showed
   return {
     // v4: marketValue also carries true low/high (lo/hi), comp count (n) and
     // capture date (as) so /verify shows the used-value band, not a bare median.
@@ -9388,7 +9502,8 @@ function canonicalReport(a){
     // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
     // signed canonical because it is a material claim about the listing, and
     // /verify must be able to show it as sealed rather than as a re-assertion.
-    v:5,
+    // v6: mc (other listings read) + dflt (page's pre-selected payment scenario); mirrors report-sign.ts
+    v:6,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9410,6 +9525,8 @@ function canonicalReport(a){
     allIn:a.allInPricing?.body||null,
     disc:a.disclaimerCheck?{e:!!a.disclaimerCheck.escapeHatch,x:!!a.disclaimerCheck.contradiction}:null,
     fcx:a.financeContingent?.contingent?{r:a.financeContingent.reasons||[]}:null,
+    mc:a.marketCount?{st:a.marketCount.state||null,sc:a.marketCount.scope||null,n:nn(a.marketCount.n),b:nn(a.marketCount.below),s:nn(a.marketCount.same),d:nn(a.marketCount.dealers),from:a.marketCount.seenMin||null,to:a.marketCount.seenMax||null,pv:a.marketCount.province||null,x:!!a.marketCount.subjectExcluded,p:nn(a.marketCount.price),tl:a.marketCount.trimLabel||null,pt:a.marketCount.powertrain||null,mn:nn(a.marketCount.modelN),mb:nn(a.marketCount.modelBelow),rs:a.marketCount.reason||null,w:nn(a.marketCount.windowDays),as:a.marketCount.asOf||null,tr:!!a.marketCount.truncated,up:nn(a.marketCount.unpriced)}:null,
+    dflt:a.pageDefault?{st:a.pageDefault.state||null,t:nn(a.pageDefault.termMonths),f:a.pageDefault.paymentFrequency||null,a:nn(a.pageDefault.apr),d:nn(a.pageDefault.downPayment),p:nn(a.pageDefault.paymentAmount),src:a.pageDefault.source||null,at:a.pageDefault.readAt||null,pm:a.pageDefault.purchaseMethod||null,rs:a.pageDefault.reason||null,q:a.pageDefault.qualifier||null,cob:nn(a.pageDefault.costOfBorrowing)}:null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };
@@ -9805,6 +9922,12 @@ function VerifyPage(){
                   {o.odo!=null&&<Row t="Odometer" v={`${Number(o.odo).toLocaleString()} km`}/>}
                   {o.dol&&<Row t="Days on lot" v={`${Number(o.dol.d).toLocaleString()} days${o.dol.s?` · since ${o.dol.s}`:""}`} c={o.dol.d>=90?"#f0997b":o.dol.d>=31?"#eab308":"#34d399"}/>}
                   {o.fcx&&<Row t="Price conditions" v="Tied to dealer financing" c="#f0997b"/>}
+                  {/* Sealed in canonical v6: the count of other listings read
+                      and the page's own pre-selected payment scenario. Worded
+                      by the same builder every other surface uses, so /verify
+                      shows the sealed claim, not a re-assertion. */}
+                  {o.mc&&<Row t="Other listings read" v={[marketCountLine({mc:o.mc}).value,o.mc.pv||null,o.mc.to?fmtDateEn(o.mc.to):null].filter(Boolean).join(" · ")}/>}
+                  {o.dflt&&<Row t="If you do nothing" v={[pageDefaultLine({dflt:o.dflt}).value,o.dflt.at?`read ${fmtDateEn(o.dflt.at)}`:null].filter(Boolean).join(" · ")}/>}
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.leverage!=null&&o.lvn&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>{o.lvn}</div>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
@@ -11607,8 +11730,15 @@ function QuoteCheckPage(){
             })();
             if(rebate?.eligible) tiles.push({label:"EVAP rebate",value:`$${rebate.total.toLocaleString()}`,sub:`$${rebate.federal.toLocaleString()} federal${rebate.provincial>0?` + $${rebate.provincial.toLocaleString()}`:""}`});
             if(analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0) tiles.push({label:"Days on lot",value:Number(analysis.daysOnLot.days).toLocaleString(),sub:analysis.daysOnLot.since?`first seen ${analysis.daysOnLot.since}`:"dealer inventory data",flag:Number(analysis.daysOnLot.days)>=90});
+            // The two count/default lines ride the strip in every state: the
+            // value is the shared builder's own short form, the sub the meta
+            // (scope · date) or the builder's own state wording.
+            { const mcl=marketCountLine(analysis), mcv=analysis.marketCount;
+              tiles.push({label:"Other listings read",value:mcl.value,sub:marketCountMeta(mcv)||(mcv&&mcv.state==="absent"?`none in the last ${mcv.windowDays||30} days`:"not read"),flag:false}); }
             if(analysis.tradeInWidget&&analysis.tradeInWidget.detected) tiles.push({label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",sub:"wholesale-anchored — keep it a separate written line",flag:false});
             if(analysis.financeContingent&&analysis.financeContingent.contingent) tiles.push({label:"Price conditions",value:"Financing-tied",sub:"cash or your own bank may not get this price — ask in writing",flag:true});
+            { const pdl=pageDefaultLine(analysis), pdv=analysis.pageDefault;
+              tiles.push({label:"If you do nothing",value:pdl.value,sub:pageDefaultMeta(pdv)||(pdv&&pdv.state==="confirmed"?"pre-selected on the page":pdl.headline),flag:false}); }
             if(analysis.dealerLicence&&analysis.dealerLicence.status) tiles.push({label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,sub:analysis.dealerLicence.licenceNumber?`licence ${analysis.dealerLicence.licenceNumber}`:"AMVIC public registry",flag:analysis.dealerLicence.state!=="valid"});
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
@@ -11736,8 +11866,10 @@ function QuoteCheckPage(){
                   with the full matrix behind an expander. */}
               <TrimMsrpRange analysis={analysis} C={C} cardStyle={cardStyle}/>
               <ComparableListingsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
+              <MarketCountCard analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
+              <PageDefaultCard analysis={analysis} C={C} cardStyle={cardStyle}/>
 
               {/* ── Detail cards in a 2-column grid on desktop, collapsing to a
                      single column on mobile. auto-fit + minmax does the collapse

@@ -123,6 +123,50 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-02 with the line itself. "Of N other listings read, M
+    // advertise below this one" is computed ONCE on the server (marketCount),
+    // sealed in the canonical (mc), and rendered by one shared builder
+    // (report-lines.js marketCountLine) on every surface. Each anchor below is
+    // one render path; a dropped surface names itself.
+    field: "marketCount (other listings read, M below this one)",
+    app: {
+      "shared line builder import":  "marketCountLine, pageDefaultLine",
+      "sidebar card pool":           "marketCountItem = {",
+      "scroll view card":            "<MarketCountCard analysis={analysis}",
+      "scroll summary tile strip":   'tiles.push({label:"Other listings read"',
+      "share link encode":           "mc:a.marketCount?",
+      "share link decode":           "marketCount:c.mc",
+      "signed verify payload":       "mc:a.marketCount?{st:",
+      "verify page row":             'o.mc&&<Row t="Other listings read"',
+    },
+    email: {
+      "emailed HTML deck": 'deck.push({ label: "Other listings read"',
+      "emailed PDF":       'kicker("OTHER LISTINGS READ")',
+      "emailed PDF audit row": 't: "Other listings read"',
+    },
+  },
+  {
+    // Added 2026-09-02 with the line itself. "If you do nothing, this page
+    // gives you N months, <frequency> payments at X%" is the page's own
+    // pre-selected calculator scenario, read by code (page-default.js), sealed
+    // in the canonical (dflt), rendered by report-lines.js pageDefaultLine.
+    field: "pageDefault (if you do nothing, this page gives you...)",
+    app: {
+      "sidebar card pool":           "pageDefaultItem = {",
+      "scroll view card":            "<PageDefaultCard analysis={analysis}",
+      "scroll summary tile strip":   'tiles.push({label:"If you do nothing"',
+      "share link encode":           "dflt:a.pageDefault?",
+      "share link decode":           "pageDefault:c.dflt",
+      "signed verify payload":       "dflt:a.pageDefault?{st:",
+      "verify page row":             'o.dflt&&<Row t="If you do nothing"',
+    },
+    email: {
+      "emailed HTML deck": 'deck.push({ label: "If you do nothing"',
+      "emailed PDF":       'kicker("IF YOU DO NOTHING")',
+      "emailed PDF audit row": 't: "If you do nothing"',
+    },
+  },
+  {
     // Added 2026-08-22 after a post-ship audit found this shipped to exactly
     // TWO surfaces (ReportViews + the emailed PDF) and was missing from the
     // DEFAULT scroll view, the flipbook, /verify and the share link -- the

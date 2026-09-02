@@ -878,6 +878,15 @@ Deno.serve(async (req: Request) => {
     // price-gating accusation gate stays out of scope. See invariants.ts.
     assertInvariants(analysis);
 
+    // The two count/default lines are read from a LISTING PAGE. An uploaded
+    // quote has no page, so both land "unchecked" with a reason that says so --
+    // the cards then read "not from an uploaded quote", never "could not be
+    // read", which would describe an attempt that never happened. (Follow-up:
+    // year/make/model/condition/price are known here, so the count itself
+    // could run on this path once captureMarketCount moves to _shared.)
+    if (!analysis.marketCount) analysis.marketCount = { state: "unchecked", reason: "no_page", n: 0, below: 0, same: 0, dealers: null };
+    if (!analysis.pageDefault) analysis.pageDefault = { checked: false, state: "unchecked", reason: "no_page" };
+
     // Server-authoritative identity: stamps issuedAt from the trusted server
     // clock (so a device-clock change can't alter the date), computes the
     // report ID + verify payload, and SIGNS them (ECDSA P-256) when the signing

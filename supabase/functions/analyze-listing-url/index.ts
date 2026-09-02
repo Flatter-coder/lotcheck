@@ -66,6 +66,8 @@ import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVe
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
+import { readPageDefault, readSm360PageDefault } from "../_shared/page-default.js";
+import { computeMarketCount, emptyMarketCount, POOL_CAP } from "../_shared/market-count.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
@@ -73,7 +75,7 @@ import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts"
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
-import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { fetchMarketValue, servesComps } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
@@ -113,7 +115,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-01a";  // + the dealer fee ladder is read off the page, so an itemised doc fee stops reporting as "NONE LISTED"
+const CACHE_VER = "2026-09-02a";  // + marketCount ("of N other listings read, M below") and pageDefault ("if you do nothing, this page gives you...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2062,11 +2064,42 @@ function captureSm360Financing(v: any, analysis: any): void {
     rate: apr,
     termMonths: Number.isFinite(term) && term > 0 ? Math.round(term) : null,
     paymentAmount: Number.isFinite(payment) && payment > 0 ? Math.round(payment * 100) / 100 : null,
-    paymentFrequency: "monthly",
+    // The feed states payments per year (52/26/12). This used to be hardcoded
+    // "monthly", so a WEEKLY feed payment ($186 x 84 on a live VW feed,
+    // 2026-09-02) was reconciled against the total obligation as if it were
+    // monthly (ratio ~4.5) and the report printed "Numbers don't add up" -- a
+    // false flag against the dealer. Unmapped -> null, and computeFinancingCheck
+    // then declines to run rather than guess.
+    paymentFrequency: sm360Frequency(v?.paymentOptions?.finance?.paymentFrequency),
     totalObligation: Number.isFinite(totalObl) && totalObl > 0 ? Math.round(totalObl * 100) / 100 : null,
     source: "sm360_feed",
   };
-  console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"}/mo (dealer feed).`);
+  console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"} per ${analysis.financing.paymentFrequency ?? "?"} (dealer feed).`);
+}
+
+function sm360Frequency(perYear: unknown): "weekly" | "biweekly" | "monthly" | null {
+  const n = Number(perYear);
+  return n === 52 ? "weekly" : n === 26 ? "biweekly" : n === 12 ? "monthly" : null;
+}
+
+// The day in Alberta, not UTC: a 6 pm Mountain read on Sep 2 must not print
+// "read Sep 3" or shift the 30-day window by a day. en-CA formats as YYYY-MM-DD.
+function todayIso(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Edmonton", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  } catch { return new Date().toISOString().slice(0, 10); }
+}
+
+// The page's DEFAULT payment scenario off the same feed object: which tab the
+// page opens on, and the finance term/frequency/rate/down it pre-selects.
+// Read unconditionally -- unlike the financing fill above it does not defer to
+// a page-stated rate, because it describes the page's pre-selected state, not
+// the best rate on the page. See _shared/page-default.js.
+function captureSm360PageDefault(v: any, analysis: any): void {
+  try {
+    const r = readSm360PageDefault(v, todayIso());
+    if (r && r.checked) analysis.pageDefault = r;
+  } catch (e) { console.warn("SM360 page default skipped:", (e as Error)?.message); }
 }
 
 // Identity + add-ons from the feed the page scrape misses: VIN (serialNo),
@@ -2127,6 +2160,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
         if (Number(v?.vehicleId) === vehicleId) {
           captureSm360DaysOnLot(v, analysis);
           captureSm360Financing(v, analysis);
+          captureSm360PageDefault(v, analysis);
           captureSm360Extras(v, analysis);
           const price = sm360PriceOf(v);
           if (price != null) {
@@ -2154,6 +2188,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
       const price = sm360PriceOf(priced[0])!;
       captureSm360DaysOnLot(priced[0], analysis);
       captureSm360Financing(priced[0], analysis);
+      captureSm360PageDefault(priced[0], analysis);
       captureSm360Extras(priced[0], analysis);
       analysis.quotedPrice = price;
       analysis.quotedPriceSource = "sm360_feed_fallback";
@@ -2298,6 +2333,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 
     captureSm360DaysOnLot(match, analysis);
     captureSm360Financing(match, analysis);
+    captureSm360PageDefault(match, analysis);
     captureSm360Extras(match, analysis);
     console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
     return analysis;
@@ -2504,6 +2540,10 @@ async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<str
       sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own structured product data (schema.org). Core vehicle details and the advertised price come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
       summary: `${vehicleStr ?? "This vehicle"}${v.price != null ? ` is listed at $${v.price.toLocaleString()}${v.currency && v.currency !== "CAD" ? " " + v.currency : ""}` : ""}. This report was built from the page's structured data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
+    // The page's own DEFAULT payment scenario, off the same html (page-default.js).
+    try {
+      analysis.pageDefault = readPageDefault({ html, price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null, readAt: todayIso() });
+    } catch (e) { console.warn("page default (JSON-LD path) skipped:", (e as Error)?.message); }
     // THE DEALER'S OWN PRICE LADDER, off the same html this function already
     // holds. A fee box is rendered HTML, not schema.org markup, so the JSON-LD
     // read alone could never see it -- which is exactly how a page printing
@@ -2585,6 +2625,12 @@ async function buildConvertusVmsFallbackAnalysis(url: string, sharedHtml?: Promi
       sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details, the dealer's stated price/MSRP, and the advertised financing rate come straight from that data. Itemized add-on fees couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
       summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized add-on fees aren't included -- confirm the out-the-door price and any add-on fees directly with the dealer.`,
     };
+    // The page's own DEFAULT payment scenario (page-default.js). vmsData lists
+    // several terms with no default marker, so this usually lands "absent" for
+    // Convertus pages -- which is the honest answer, not the longest term.
+    try {
+      analysis.pageDefault = readPageDefault({ html, price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null, readAt: todayIso() });
+    } catch (e) { console.warn("page default (Convertus path) skipped:", (e as Error)?.message); }
     try {
       const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
       if (m) {
@@ -2681,6 +2727,67 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // Guarding each enricher individually would leave the next one added unguarded
 // by default; guarding the boundary covers every one of them, including the
 // ones nobody has written yet.
+// ONE definition of "the price came from the page's own machine-readable
+// data". priceVerified is stamped from it on the main path; the fallback
+// builders never reach that stamp, so the count reads the same rule here.
+function isVerifiedPriceSource(src: unknown): boolean {
+  const s = String(src || "");
+  return s === "structured_data" || s === "sm360_feed" || s === "sm360_feed_fallback" || s === "convertus_vms" || s === "d2c_vdp";
+}
+
+// "Of N other listings LotCheck read, M advertised below this one when read."
+// Our OWN crawl rows (fn_market_comps: exact model year, same make/model/
+// condition/province, not delisted, subject VIN excluded when known), counted
+// in code by _shared/market-count.js. Sets analysis.marketCount in EVERY case
+// -- the card never goes silent; an unchecked read says so and why. Never
+// sinks a scan.
+//
+// RUNS LAST, after the price is final. It used to run inside enrichAnalysis,
+// BEFORE the structured-data price gap-fill and the priceVerified stamp -- so
+// a JSON-LD-priced page was counted with no price and the card said "this
+// page shows no asking price" beside a price card that showed one. Every path
+// now calls this right before finalizeServerSide, with the url in hand so the
+// hostname counts as a province signal.
+async function captureMarketCount(analysis: any, urlHint?: string | null): Promise<void> {
+  try {
+    const year = Number(analysis?.year);
+    const make = String(analysis?.make || "").trim();
+    const model = String(analysis?.model || "").trim();
+    const condition = String(analysis?.vehicleCondition || "").toLowerCase();
+    const prov = String(resolveJurisdiction({ ...analysis, url: analysis?.sourceUrl || urlHint || null }).code || "").toUpperCase();
+    const price = Number(analysis?.quotedPrice);
+    const priceVerified = analysis?.priceVerified === true
+      || (analysis?.priceVerified == null && price > 0 && isVerifiedPriceSource(analysis?.quotedPriceSource));
+    const today = todayIso();
+    const base = emptyMarketCount({ province: prov || null, year: year > 0 ? year : null, make: make || null, model: model || null, price: price > 0 ? price : null, priceVerified, asOf: today });
+    if (!(year > 0) || !make || !model) { analysis.marketCount = { ...base, reason: "identity_missing" }; return; }
+    if (condition !== "new" && condition !== "used") { analysis.marketCount = { ...base, reason: "condition_unknown" }; return; }
+    if (!prov) { analysis.marketCount = { ...base, reason: "province_unknown" }; return; }
+    if (!servesComps(prov)) { analysis.marketCount = { ...base, reason: "outside_province" }; return; }
+    const vin = String(analysis?.vin || "").toUpperCase();
+    const excludeVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null;
+    // Bounded: an optional card must not spend the request budget.
+    const rpc = supabase.rpc("fn_market_comps", {
+      p_year: year, p_make: make, p_model: model, p_condition: condition,
+      p_exclude_vin: excludeVin, p_province: prov, p_year_span: 0, p_limit: POOL_CAP,
+    });
+    const timeout = new Promise<{ data: null; error: { message: string } }>((resolve) => setTimeout(() => resolve({ data: null, error: { message: "timeout" } }), 4_000));
+    const { data, error } = await Promise.race([rpc, timeout]) as any;
+    if (error) { console.warn("market count: fn_market_comps failed:", error.message); analysis.marketCount = { ...base, reason: error.message === "timeout" ? "timeout" : "rpc_error" }; return; }
+    const rows = Array.isArray(data) ? data : [];
+    analysis.marketCount = computeMarketCount(rows, {
+      year, make, model, trim: analysis?.trim ?? null, price: price > 0 ? price : null,
+      priceVerified, contingent: !!analysis?.financeContingent?.contingent,
+      province: prov, subjectExcluded: !!excludeVin, today, truncated: rows.length >= POOL_CAP,
+    });
+    const m = analysis.marketCount;
+    console.log(`market count: ${m.state}${m.scope ? ` (${m.scope})` : ""} n=${m.n} below=${m.below} same=${m.same} dealers=${m.dealers} seen ${m.seenMin ?? "?"}..${m.seenMax ?? "?"}${m.reason ? ` -- ${m.reason}` : ""}`);
+  } catch (e) {
+    console.warn("market count skipped:", (e as Error)?.message);
+    analysis.marketCount = emptyMarketCount({ reason: "error" });
+  }
+}
+
 async function enrichAnalysis(a: any, deadline: number): Promise<void> {
   try {
     await enrichAnalysisInner(a, deadline);
@@ -3612,6 +3719,7 @@ Deno.serve(async (req: Request) => {
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, fallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(fallback, url);
         await finalizeServerSide(fallback);
         try {
           await supabase
@@ -3687,6 +3795,7 @@ Deno.serve(async (req: Request) => {
         assertInvariants(jsonLdFallback, { priceRenderChecked: true, renderConfirmed: jlRenderConfirmedGated });
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(jsonLdFallback, url);
         await finalizeServerSide(jsonLdFallback);
         try {
           await supabase
@@ -3734,6 +3843,7 @@ Deno.serve(async (req: Request) => {
         assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
         await enrichAnalysis(convertusFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, convertusFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(convertusFallback, url);
         await finalizeServerSide(convertusFallback);
         try {
           await supabase
@@ -3780,6 +3890,7 @@ Deno.serve(async (req: Request) => {
           if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle || gateCtaDetected) {
             await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
             await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+            await captureMarketCount(renderOnly, url);
             await finalizeServerSide(renderOnly);
             try {
               await supabase
@@ -4372,6 +4483,33 @@ Deno.serve(async (req: Request) => {
       analysis.financeRates.dealer = { apr: Number(analysis.financing.rate), source: analysis.financing.source || "llm" };
     }
 
+    // The page's DEFAULT payment scenario -- "if you do nothing, this page
+    // gives you N months, <frequency> payments at X% APR". Read by CODE from
+    // the page's own html/text (page-default.js), never from the model's
+    // financing object, which cannot say what was pre-selected. The SM360
+    // resolver may already have set it from the feed; a checked read is never
+    // overwritten. Always lands in SOME state, so the card never goes silent.
+    try {
+      if (analysis.pageDefault?.state !== "confirmed") {
+        // `rawHtml` is a mirage (Nimble only ever returns markdown, see the
+        // stacked-incentive read above); the page's own bytes come from the
+        // SHARED direct fetch, and only genuine markdown goes in as text --
+        // raw html handed in as text would defeat the <script> strip.
+        const pdHtml = await directHtml;
+        const sm360Absent = analysis.pageDefault?.checked && analysis.pageDefault?.state === "absent" ? analysis.pageDefault : null;
+        const read = readPageDefault({
+          html: typeof pdHtml === "string" ? pdHtml : null,
+          text: typeof rawMarkdown === "string" ? rawMarkdown : null,
+          price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null,
+          readAt: todayIso(),
+        });
+        // A feed that says "no finance term" is the page's own statement; keep
+        // it unless the page's text or data confirmed a default.
+        analysis.pageDefault = read.state === "confirmed" || !sm360Absent ? read : sm360Absent;
+        console.log(`page default: ${analysis.pageDefault.state}${analysis.pageDefault.source ? ` (${analysis.pageDefault.source})` : ""}${analysis.pageDefault.reason ? ` -- ${analysis.pageDefault.reason}` : ""}`);
+      }
+    } catch (e) { console.warn("page default read skipped:", (e as Error)?.message); }
+
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
@@ -4724,11 +4862,12 @@ Deno.serve(async (req: Request) => {
     // Anything read out of page text is priceVerified: false. The surfaces
     // already render "price not verified" for that case; it just never fired.
     {
-      const src = String(analysis.quotedPriceSource || "");
-      analysis.priceVerified = Number(analysis.quotedPrice) > 0
-        && (src === "structured_data" || src === "sm360_feed" || src === "sm360_feed_fallback"
-            || src === "convertus_vms" || src === "d2c_vdp");
+      analysis.priceVerified = Number(analysis.quotedPrice) > 0 && isVerifiedPriceSource(analysis.quotedPriceSource);
     }
+
+    // The count runs HERE, with the price final and verified (or not), so the
+    // sealed count and the price card can never disagree. See captureMarketCount.
+    await captureMarketCount(analysis, url);
 
     // ASSERT (render check done). The accusation gate lives in invariants.ts
     // now: "contact for price" may stand ONLY when the rendered page was

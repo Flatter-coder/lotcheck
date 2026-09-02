@@ -300,6 +300,8 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      - name: Report lines (other listings read; if you do nothing) + page-default reader
+        run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
         run: npm run test:jsonld-vehicle
       # Go Auto is 70+ dealerships across AB and BC behind ONE endpoint, and

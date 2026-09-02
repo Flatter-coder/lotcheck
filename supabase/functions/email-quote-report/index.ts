@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-08-14a";
+const PDF_BUILDER_VER = "2026-09-02a";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -370,6 +370,21 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     deck.push({ label: "Financing APR", tone: high ? "flag" : "muted", glow: high, body });
   }
 
+  // 3a -- If you do nothing: the page's own pre-selected payment scenario
+  // (pageDefault), read by code, sealed in the canonical (dflt), worded by the
+  // shared builder. ALWAYS RENDERS -- "not published" and "not read" are
+  // answers the buyer can act on; a missing card is not. Same rule as
+  // days-on-lot below. [[report-never-empty]]
+  {
+    const line = pageDefaultLine(a);
+    const confirmed = line.state === "confirmed";
+    const meta = line.meta || (PD_STATE_WORD[line.state] || PD_STATE_WORD.unchecked);
+    deck.push({ label: "If you do nothing", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${confirmed ? "#33305A" : "#706D96"};">${escapeHtml(line.headline)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${escapeHtml(meta)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(line.body)}</div>` });
+  }
+
   // 4 -- Recalls (every branch; glow only when there are open recalls)
   const rc = a.recalls;
   if (rc) {
@@ -528,6 +543,24 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     }
   }
 
+  // 5b1b -- Other listings read: "Of N other listings read, M advertise below
+  // this one." Computed once on the server (marketCount), sealed in the
+  // canonical (mc), worded by the shared builder. Sits outside the market-value
+  // conditional above so it ALWAYS RENDERS -- an unread or empty set still gets
+  // its card, its headline and the reason, same rule as days-on-lot.
+  // [[report-never-empty]]
+  {
+    const line = marketCountLine(a);
+    const confirmed = line.state === "confirmed";
+    // The builder's own meta line (vehicle · province · read <dates>), so the
+    // date range here is the same one the sentence names.
+    const meta = line.meta || (MC_STATE_WORD[line.state] || MC_STATE_WORD.unchecked);
+    deck.push({ label: "Other listings read", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${confirmed ? "#33305A" : "#706D96"};">${escapeHtml(line.headline)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${escapeHtml(meta)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(line.body)}</div>` });
+  }
+
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
   if (a.msrpBasis === "exact" && a.allInPricing?.body && a.msrpPriceBasis !== "incl_freight" && Number(a.msrp) > 0 && Number(a.quotedPrice) > Number(a.msrp) + 100) {
     deck.push({ label: "Basis note - freight & PDI", tone: "muted", glow: false, body:
@@ -658,6 +691,22 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
+import { marketCountLine, pageDefaultLine, fmtDateEn } from "../_shared/report-lines.js";
+
+// The two count/default lines (marketCount, pageDefault) come from ONE shared
+// builder, so the sentence in this email is the sentence on screen. Nothing in
+// this file writes a new sentence for them: value / headline / body are used
+// as returned on every surface below (HTML deck, audit rows, PDF narrative).
+// The PDF fonts encode WinAnsi only, so the em dash becomes a hyphen there.
+const noEmDash = (s: unknown): string => String(s ?? "").replace(/—/g, "-");
+// Province code -> name, mirroring report-lines.js so the meta line under the
+// headline and the body sentence never name the same place two ways.
+const provinceNameEn = (code: unknown): string => (String(code || "").toUpperCase() === "AB" ? "Alberta" : String(code || "Alberta"));
+// The meta line under each card's headline when there is no confirmed read to
+// date: the state, in words. Keyed per line because "absent" means "no other
+// listings" for the count and "nothing pre-selected" for the page default.
+const MC_STATE_WORD: Record<string, string> = { confirmed: "Confirmed", not_counted: "Not counted", absent: "None read", unchecked: "Not read" };
+const PD_STATE_WORD: Record<string, string> = { confirmed: "Read", absent: "None found", unchecked: "Not read" };
 
 // A capture the server has PROVEN is the sealed original: its SHA-256 was
 // recomputed here over the actual bytes AND that hash sits inside the report's
@@ -862,9 +911,11 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (Number(a.msrpCeiling?.trimsConsidered) >= 2 && Number(a.msrpCeiling?.allIn) > 0) {
     P.push({ t: "MSRP per trim", v: `${a.msrpCeiling.trimsConsidered} TRIMS`, tone: "muted" });
   }
-  if (Array.isArray(a.comparableListings) && a.comparableListings.length > 0) {
-    P.push({ t: "Other listings of this model", v: `${a.comparableListings.length} NEARBY`, tone: "muted" });
-  }
+  // "Other listings read" ALWAYS prints: the shared builder returns a value for
+  // every state, including unchecked, so the row is never blank. The
+  // comparableListings branch that stood here read a field no code ever set,
+  // so it never printed at all.
+  P.push({ t: "Other listings read", v: marketCountLine(a).value, tone: "muted" });
   if (Number(a.daysOnLot?.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
     P.push({ t: "Days on lot", v: `${d} DAY${d === 1 ? "" : "S"}${a.daysOnLot.atLeast ? "+" : ""}`, tone: d >= 90 ? "flag" : "muted" });
@@ -878,6 +929,9 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (a.financeContingent?.contingent) {
     P.push({ t: "Price depends on financing", v: "FLAGGED", tone: "flag" });
   }
+  // "If you do nothing" ALWAYS prints, same builder rule as the count above:
+  // NOT PUBLISHED and NOT READ are results, not gaps.
+  P.push({ t: "If you do nothing", v: pageDefaultLine(a).value, tone: "muted" });
   return P;
 }
 
@@ -981,6 +1035,15 @@ function pointExplain(t: string, a: any): string | null {
         : "Factory warranty terms couldn't be confirmed from this listing. Ask exactly what's covered and for how long, in writing, before considering paid coverage.";
     case "Dealer reputation":
       return dealerReputationPoint(a.dealerSentiment).explain;
+    // Both lines gloss themselves: the builder's body IS the plain-language
+    // explanation, and it is the same sentence the HTML deck and PDF narrative
+    // print. Em dash -> hyphen for the WinAnsi fonts.
+    // Both lines carry their full sentence in their own narrative section
+    // (OTHER LISTINGS READ / IF YOU DO NOTHING), so the audit row prints the
+    // value alone -- one place per sentence, same as Days on lot.
+    case "Other listings read":
+    case "If you do nothing":
+      return null;
     default: return null;
   }
 }
@@ -1451,6 +1514,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     }
   }
 
+  // ---- OTHER LISTINGS READ -- the count, from the shared builder ----
+  // Outside the market-value conditional above so it ALWAYS RENDERS: an unread
+  // or empty set still gets its heading, its headline and the reason -- the
+  // same never-empty rule as the DAYS ON LOT else-branch.
+  {
+    const line = marketCountLine(a);
+    need(60);
+    kicker("OTHER LISTINGS READ");
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
+    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
+    rule();
+  }
+
   // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
   if (a.dealerLicence && a.dealerLicence.status) {
     const L = a.dealerLicence, good = L.state === "valid";
@@ -1475,6 +1551,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     if (a.financeContingent.evidence) { advance(2); para(`"...${String(a.financeContingent.evidence).replace(/[^ -~]/g, " ")}..."`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
     advance(2);
     para('Ask before you go in: "What is the price if I pay cash or use my own bank - and if it changes, by exactly how much?" In writing.', { size: 9, color: INK, lead: 4 });
+    rule();
+  }
+
+  // ---- IF YOU DO NOTHING -- the page's own pre-selected payment scenario ----
+  // ALWAYS RENDERS, same rule: "not published" and "not read" are answers.
+  {
+    const line = pageDefaultLine(a);
+    need(60);
+    kicker("IF YOU DO NOTHING");
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
+    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
     rule();
   }
 
