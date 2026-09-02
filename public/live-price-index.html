@@ -4,10 +4,10 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>LotCheck — MSRP Live Index</title>
-<style>
-  /* ================= THEME TOKENS =================
+<style>/* ================= THEME TOKENS =================
      Cosmic palette matched to the MSRP Notifier page. One hero accent (cyan);
      green/red reserved for meaning (under / over sticker). */
+  
   :root{
     --bg:#06060f;
     --panel:rgba(150,170,255,.045);
@@ -65,9 +65,10 @@
   .star{position:absolute;top:0;left:0;background:transparent;animation:starDrift linear infinite;will-change:transform}
   @keyframes starDrift{from{transform:translateY(0)}to{transform:translateY(-2000px)}}
   @media(prefers-reduced-motion:reduce){.star{animation:none}}
-  .mono{font-family:"SF Mono",ui-monospace,"Roboto Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.2px}
 
   /* ---------------- persistent site nav (matches the welcome page) ---------------- */
+
+  
   .sitenav{position:sticky;top:0;z-index:300;background:var(--panel-solid);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
   .sitenav-in{max-width:1120px;margin:0 auto;padding:11px clamp(16px,3vw,28px);display:flex;align-items:center;gap:24px}
   .sn-logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:1.02rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none;flex:none}
@@ -102,7 +103,9 @@
   @keyframes lc-gate-flash{0%,40%{opacity:.22;} 50%{opacity:.68;} 60%,100%{opacity:.22;}}
   .lc-gate-car{animation:lc-gate-drive 4s linear infinite;}
   .lc-gate-window{animation:lc-gate-flash 4s linear infinite;}
+
   /* theme toggle */
+  
   .theme-toggle{position:relative;width:58px;height:29px;border-radius:20px;border:1px solid var(--hair);
     background:var(--panel-2);cursor:pointer;flex:none;transition:border-color .3s}
   .theme-toggle:hover{border-color:var(--hair-strong)}
@@ -111,261 +114,25 @@
     display:flex;align-items:center;justify-content:center;font-size:12px;transition:transform .35s cubic-bezier(.16,1,.3,1)}
   :root[data-theme="light"] .theme-toggle .knob{transform:translateX(29px)}
 
-
   /* ---------------- page frame ---------------- */
+
+
+  
   .wrap{max-width:1120px;margin:0 auto;padding:26px clamp(16px,3vw,28px) 0}
   h1{font-size:clamp(23px,3.2vw,30px);letter-spacing:-.6px;font-weight:700}
-  .lede{font-size:10.5px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-top:4px}
-  .k{font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim)}
-
-  .card{background:var(--panel);border:1px solid var(--hair);border-radius:18px;backdrop-filter:blur(var(--blur));
-    box-shadow:var(--lift);position:relative;
-    transition:transform .35s cubic-bezier(.2,.7,.3,1),box-shadow .35s,border-color .3s;
-    opacity:0;translate:0 18px}
-  .card.in{opacity:1;translate:0 0;transition:opacity .55s ease,translate .55s cubic-bezier(.16,1,.3,1),
-    transform .35s cubic-bezier(.2,.7,.3,1),box-shadow .35s}
-  .card:hover{transform:translateY(-3px)}
-  @media (prefers-reduced-motion:reduce){.card{transition:none;opacity:1;translate:0 0}.card:hover{transform:none}}
-
-  /* live-tracking badge — the green dot means "this read is live and it
-     SUCCEEDED". It stays dark while loading and on error: a lit dot on a
-     failed read would be a false tracking claim. */
-  .lv{display:inline-flex;align-items:center;gap:6px;margin-left:10px;font-size:9px;
-    letter-spacing:1.6px;font-weight:700;color:var(--up);text-transform:uppercase;
-    opacity:0;transition:opacity .4s;vertical-align:middle}
-  .lv.on{opacity:1}
-  /* Stale/paused reading: an amber "Paused" badge, never a green "Live" one. */
-  .lv.paused{opacity:1;color:#e0a800}
-  .lv.paused i{background:#e0a800;box-shadow:0 0 7px #e0a800;animation:none}
-  .lv i{width:7px;height:7px;border-radius:50%;background:var(--up);flex:none;
-    box-shadow:0 0 7px var(--up);animation:pulse 2s ease-in-out infinite}
-  @media (prefers-reduced-motion:reduce){.lv i{animation:none}}
-
-  /* section headings — magazine rule with a right-aligned counter label */
-  .sect-h{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
-    font-size:12.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--dim);font-weight:600;
-    padding-bottom:11px;border-bottom:1px solid var(--hair-strong);margin:30px 0 16px}
-  .sect-h .n{color:var(--dimmer);font-weight:500;letter-spacing:1.4px;font-size:11px}
-
-  /* ---------------- hero: median on the 3D pedestal ---------------- */
-  .hero{margin-top:18px;padding:30px 20px 24px;text-align:center;overflow:hidden}
-  .hero::after{content:"";position:absolute;left:50%;top:-30%;width:640px;height:340px;transform:translateX(-50%);
-    background:radial-gradient(ellipse at center,var(--cyan) 0%,transparent 62%);opacity:.09;pointer-events:none}
-  .idx-stage{perspective:900px;display:inline-block;max-width:100%;margin-top:14px}
-  .idx-podium{transform-style:preserve-3d;position:relative;display:inline-block;
-    transform:rotateX(var(--prx,13deg)) rotateY(var(--pry,0deg));
-    transition:transform .5s cubic-bezier(.2,.7,.3,1)}
-  .idx{font-size:clamp(52px,10vw,96px);font-weight:700;line-height:.95;letter-spacing:-3px;
-    transform:translateZ(46px);text-shadow:0 14px 34px rgba(0,0,0,.55)}
-  :root[data-theme="light"] .idx{text-shadow:0 12px 26px rgba(22,32,52,.18)}
-  .pedestal{position:relative;height:56px;margin:-2px auto 0;width:min(340px,80%);transform-style:preserve-3d}
-  .pedestal i{position:absolute;display:block}
-  .pedestal .p-top{inset:0;border-radius:50%;transform:rotateX(74deg);
-    background:linear-gradient(180deg,rgba(150,170,255,.20),rgba(150,170,255,.04));
-    border:1px solid var(--hair-strong)}
-  .pedestal .p-side{left:0;right:0;top:10px;height:18px;border-radius:50%;
-    transform:rotateX(74deg) translateZ(-12px);
-    background:linear-gradient(180deg,rgba(120,140,220,.16),transparent)}
-  .pedestal .p-ring{inset:-14px;border-radius:50%;border:1px solid var(--cyan);opacity:.18;
-    transform:rotateX(74deg);animation:idxPulse 3.6s ease-in-out infinite}
-  @keyframes idxPulse{50%{opacity:.05;transform:rotateX(74deg) scale(1.06)}}
-  @media(max-width:560px){.pedestal{height:40px;width:min(240px,88%)}.idx{transform:translateZ(30px)}}
-  .hero-stats{display:flex;gap:26px;justify-content:center;flex-wrap:wrap;margin-top:14px;
-    font-size:11.5px;color:var(--dim)}
-  .hero-stats b{color:var(--ink);font-weight:600}
-
-  /* ---------------- two chart cards ---------------- */
-  .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:16px;margin-top:16px}
-  .chart-card{padding:18px}
-  .chart-card h2{font-size:13.5px;margin:0 0 10px;font-weight:600}
-  /* STICKER TERRAIN — replaces the radar.
-     A radar was the wrong shape for this data. The bands are ordered magnitudes
-     on ONE axis, and bending an ordered axis into a circle makes the enclosed
-     area -- the most salient thing on a radar -- mean nothing. It also spent a
-     colour, a legend entry and a whole petal on "Above MSRP", which is 0
-     listings, while never showing the actual headline: that two thirds of
-     listings sit EXACTLY at sticker.
-     Here the strip teaches below / at / above to scale first, so the three
-     colours are learned before the chart below uses them. Then the discounted
-     third is broken out around the sticker wall, with DEPTH carrying the ordered
-     magnitude axis (nearest the viewer = closest to sticker) and HEIGHT carrying
-     count. Above-sticker keeps a permanent labelled home so it reads as an empty
-     container rather than a broken mark, and needs no layout change when it goes
-     non-zero.
-     Positions are FLUID, not the concept's fixed pixels: the terrain is a flex
-     row so it holds from a narrow card to a wide one. */
-  .mkt-card{display:flex;flex-direction:column}
-  .mkt-say{margin:9px 0 0;font-size:12.5px;line-height:1.4;color:var(--ink)}
-  .mkt-say b{color:#fff;font-weight:650}
-  .mkt-say .cy{color:var(--cyan)} .mkt-say .co{color:var(--down)}
-  .mkt-strip{display:flex;height:32px;margin-top:11px;border-radius:5px;overflow:hidden;background:var(--panel-2)}
-  .mkt-seg{display:flex;align-items:center;gap:7px;padding:0 9px;white-space:nowrap;overflow:hidden;min-width:0}
-  .mkt-seg b{font-size:14px;font-weight:700;letter-spacing:-.01em}
-  .mkt-seg em{font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;font-style:normal}
-  .mkt-below{background:linear-gradient(180deg,rgba(58,224,255,.30),rgba(58,224,255,.13));border-right:1px solid var(--bg);color:#d7f4ff}
-  .mkt-below b{color:var(--cyan)}
-  .mkt-at{background:linear-gradient(180deg,rgba(139,123,255,.42),rgba(139,123,255,.17));border-right:1px solid var(--bg);color:#e6e2ff}
-  .mkt-at b{color:#c6bcff}
-  /* the freight window: matched, real, and deliberately UNCALLED — a neutral
-     tone so it never reads as either a discount or a markup */
-  .mkt-win{background:linear-gradient(180deg,rgba(139,149,166,.26),rgba(139,149,166,.09));color:var(--dim)}
-  .mkt-win b{color:var(--ink)}
-  .mkt-abovebar{width:3px;background:var(--down);box-shadow:0 0 10px rgba(240,104,138,.7)}
-  .mkt-cap{display:flex;justify-content:space-between;margin-top:5px;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
-  .mkt-cap i{font-style:normal;color:var(--down)}
-  /* the terrain: one flex row -- 7 discount columns, the wall, then one column
-     per above-sticker band that actually has listings */
-  /* Scrolls rather than crushes. Nothing is above sticker today, so the row is
-     seven columns and never scrolls -- but if every band on both sides fills, that
-     is fourteen columns of real counts and a narrow card cannot hold them. Dropping
-     or shrinking columns would hide real listings, so the terrain gives up its
-     width instead. */
-  .mkt-terr{position:relative;height:176px;margin-top:12px;display:flex;align-items:flex-end;
-    gap:2px;perspective:1000px;perspective-origin:50% 8%;
-    overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;overscroll-behavior-x:contain}
-  .mkt-terr::-webkit-scrollbar{height:4px}
-  .mkt-terr::-webkit-scrollbar-thumb{background:rgba(150,170,255,.3);border-radius:2px}
-  .mkt-col{flex-shrink:0}
-  .mkt-col{position:relative;flex:1 0 auto;min-width:26px;display:flex;flex-direction:column;
-    justify-content:flex-end;align-items:center;height:100%;transform-style:preserve-3d;
-    transform:translateZ(calc(-1 * var(--mz,0px)))}
-  .mkt-bar{position:relative;width:78%;max-width:26px;height:var(--mh,0px);border-radius:2px 2px 0 0;
-    transform-style:preserve-3d;background:linear-gradient(180deg,#8aecff,var(--cyan) 42%,#1b93b8);
-    box-shadow:0 0 16px rgba(58,224,255,.22);animation:mkt-rise .9s cubic-bezier(.2,.85,.25,1) both;
-    animation-delay:var(--md,0s)}
-  .mkt-bar::before{content:"";position:absolute;left:0;right:0;top:0;height:10px;background:#bdf3ff;
-    transform:rotateX(-90deg);transform-origin:50% 0}
-  .mkt-bar::after{content:"";position:absolute;top:0;bottom:0;right:0;width:10px;
-    background:linear-gradient(180deg,#2b9bbd,#12596f);transform:rotateY(-90deg);transform-origin:100% 50%}
-  /* Absolutely positioned so a wide count ("1,446") cannot widen its column and
-     push the whole terrain into overflow -- the row is only as wide as the bars. */
-  .mkt-n{position:absolute;bottom:calc(var(--mh,0px) + 22px);left:50%;transform:translateX(-50%);
-    font-size:11px;font-weight:650;color:#eaf7ff;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none}
-  .mkt-t{margin-top:5px;font-size:9px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .mkt-above .mkt-t{color:rgba(240,104,138,.6)}
-  .mkt-wall{position:relative;flex:0 0 12px;height:70%;border-radius:3px 3px 0 0;align-self:flex-end;
-    background:linear-gradient(180deg,#dad5ff,var(--gate) 42%,#4b3fae);
-    box-shadow:0 0 22px rgba(139,123,255,.5);animation:mkt-glow 5s ease-in-out infinite}
-  .mkt-wall span{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:5px;
-    font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:#a99cff;white-space:nowrap}
-  .mkt-foot{margin:auto 0 0;padding-top:9px;font-size:9.5px;color:var(--dim)}
-  .mkt-wait{display:flex;align-items:center;justify-content:center;height:176px;margin-top:12px;
-    font-size:11.5px;color:var(--dim);text-align:center;padding:0 12px}
-  @keyframes mkt-rise{from{height:0;opacity:.3}}
-  @keyframes mkt-glow{0%,100%{opacity:.86}50%{opacity:1}}
-  /* Stands in for the whole above-sticker side when nothing is priced over
-     sticker. Shown at every width: it is a statement about the data, not a
-     small-screen fallback. */
-  .mkt-zero{display:flex;flex:0 0 auto;align-self:flex-end;margin-left:6px;padding:5px 8px;
-    border:1px dashed rgba(240,104,138,.36);border-radius:6px;font-size:9px;line-height:1.3;
-    color:rgba(240,104,138,.85);text-align:center;white-space:nowrap}
-  .mkt-zero b{display:block;font-size:13px;font-weight:700;color:var(--down)}
-  @media (max-width:560px){
-    .mkt-terr{height:150px} .mkt-n{font-size:9.5px} .mkt-t{font-size:8px}
-  }
-  @media (prefers-reduced-motion:reduce){.mkt-bar,.mkt-wall{animation:none}}
-  .dash{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:draw 1.5s ease forwards .2s}
-  @keyframes draw{to{stroke-dashoffset:0}}
-  #chart3d{width:100%;height:300px;display:block;cursor:grab;touch-action:pan-y}
-  @media (max-width:620px){#chart3d{height:235px}}
-  #chart3d:active{cursor:grabbing}
-  #chart3d:focus-visible{outline:2px solid var(--cyan);outline-offset:3px;border-radius:8px}
-  .lg{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-top:8px;font-size:10px;color:var(--dim)}
-  .lg span{display:flex;align-items:center;gap:6px}
-  .lg i{width:14px;height:2.5px;border-radius:2px;display:inline-block}
-  .lg i.sq{width:9px;height:9px;border-radius:2px}
-  .chart-wait{display:flex;align-items:center;justify-content:center;text-align:center;
-    min-height:180px;font-size:12.5px;color:var(--dim);line-height:1.6;padding:0 14px}
-
-  /* ---------------- powertrain: coverage rows ---------------- */
-  .pt-card{padding:18px 18px 16px}
-  /* EXPLODED ISO STACK — five IDENTICAL plates drifting apart in Z, beside a
-     ledger that carries the numbers as text.
-     The plates are deliberately equal-sized and that is the entire point: they
-     encode no magnitude, so there is nothing on the geometry to misread. This
-     panel reports COVERAGE -- powertrain is recorded for ~36% of the catalogue
-     and that subset is skewed toward electrified, which is why per-powertrain
-     medians are withheld here -- so any shape carrying magnitude invites a
-     reader to convert our coverage into an apparent market share. Equal plates
-     cannot. The counts live in the ledger, labelled, where they are read rather
-     than estimated.
-     Every class is ptx- prefixed. A bare name once collided with the ticker's
-     global .track and dragged the whole panel sideways; in a single-file page an
-     unprefixed class inherits whatever else in the file defines it. */
-  .ptrows{margin-top:2px}
-  .ptx-body{display:flex;align-items:center;gap:18px}
-  .ptx-stage{flex:none;width:206px;height:212px;display:flex;align-items:center;justify-content:center;
-    perspective:900px;perspective-origin:50% 50%}
-  .ptx-stack{position:relative;width:120px;height:120px;transform-style:preserve-3d;
-    transform:rotateX(58deg) rotateZ(-44deg);animation:ptx-turn 15s ease-in-out infinite alternate}
-  @keyframes ptx-turn{from{transform:rotateX(58deg) rotateZ(-44deg)}to{transform:rotateX(58deg) rotateZ(-30deg)}}
-  .ptx-plate{position:absolute;left:8px;top:8px;width:104px;height:104px;border-radius:16px;
-    border:1px solid var(--ptx-b);background:var(--ptx-g);
-    box-shadow:0 6px 0 -2px rgba(4,6,12,.75),0 0 26px -8px var(--ptx-c);
-    transform:translateZ(var(--ptx-z));animation:ptx-float 6.2s ease-in-out infinite}
-  @keyframes ptx-float{0%,100%{transform:translateZ(var(--ptx-z))}50%{transform:translateZ(calc(var(--ptx-z) + 8px))}}
-  .ptx-plate::before{content:"";position:absolute;inset:14px;border-radius:8px;border:1px dashed rgba(231,236,243,.12)}
-  .ptx-list{flex:1;min-width:0;margin:0;padding:0;list-style:none;perspective:800px}
-  .ptx-row{display:flex;align-items:center;gap:10px;height:36px;padding:0 13px;margin-bottom:6px;
-    border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
-    border:1px solid rgba(231,236,243,.08);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 8px 14px -10px rgba(0,0,0,.9);
-    transform-style:preserve-3d;transform:translateZ(0) rotateY(-4deg);
-    animation:ptx-slide 6.2s ease-in-out infinite}
-  .ptx-row:last-child{margin-bottom:0}
-  @keyframes ptx-slide{0%,100%{transform:translateZ(0) rotateY(-4deg)}50%{transform:translateZ(12px) rotateY(-4deg)}}
-  .ptx-chip{position:relative;width:19px;height:16px;flex:none;transform-style:preserve-3d}
-  .ptx-chip::before{content:"";position:absolute;left:3px;top:1px;width:13px;height:13px;border-radius:3px;
-    background:var(--ptx-c);box-shadow:0 0 12px -2px var(--ptx-c);transform:rotateX(52deg) rotateZ(-40deg)}
-  .ptx-lab{font-size:12px;font-weight:600;color:var(--ink)}
-  .ptx-num{margin-left:auto;font-size:17px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink)}
-  .ptx-unit{font-size:10px;color:var(--dim);min-width:26px}
-  .pt-note{margin:16px 0 0;font-size:11px;line-height:1.6;color:var(--dim);max-width:74ch}
-  .pt-note b{color:var(--ink);font-weight:600}
-  @media (max-width:620px){
-    /* The exploded stack needs room to read as depth. Below this it becomes a
-       smudge beside a squeezed ledger, so it steps aside and the ledger -- which
-       is where the numbers actually live -- takes the full width. */
-    .ptx-body{flex-direction:column;align-items:stretch;gap:10px}
-    .ptx-stage{width:100%;height:150px}
-    .ptx-list{width:100%}
-  }
-  @media (prefers-reduced-motion:reduce){
-    .ptx-stack{animation:none;transform:rotateX(58deg) rotateZ(-38deg)}
-    .ptx-plate{animation:none;transform:translateZ(var(--ptx-z))}
-    .ptx-row{animation:none;transform:translateZ(0) rotateY(-4deg)}
-  }
+  
+  
+  
+  
+  
+  
+  
 
   /* continuously-animated powertrain icons (the app's real FuelIcon set) */
-  @keyframes lc-charge{0%,100%{opacity:.5;transform:scale(.85)}50%{opacity:1;transform:scale(1.2)}}
-  @keyframes lc-pump{0%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}60%{transform:translateY(0)}80%{transform:translateY(-1px)}}
-  @keyframes lc-spin{to{transform:rotate(360deg)}}
-  .fuel-ico{overflow:visible}
-  @media (prefers-reduced-motion:reduce){.fuel-ico{animation:none!important}}
-
-  /* ---------------- insight tiles with 3D hex icons ---------------- */
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:14px}
-  .tile{padding:16px;display:flex;align-items:center;gap:14px;perspective:600px}
-  .tile .v{font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1.05;margin:3px 0}
-  .tile .k.sub{letter-spacing:.4px;text-transform:none}
-  .hex{width:54px;height:54px;flex:none;transform-style:preserve-3d;animation:bob 5.5s ease-in-out infinite}
-  @keyframes bob{50%{transform:rotateY(24deg) translateY(-4px)}}
-  @media (prefers-reduced-motion:reduce){.hex{animation:none}}
-
-  /* ---------------- footnote (collapsed behind a click) + back ---------------- */
-  .foot-bar{display:flex;justify-content:center;margin:26px auto 0}
-  .foot-btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:11px;
-    font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--dim);
-    background:var(--panel-2);border:1px solid var(--hair);border-radius:999px;
-    padding:8px 16px;cursor:pointer;transition:border-color .2s,color .2s}
-  .foot-btn:hover{border-color:var(--cyan-dim);color:var(--ink)}
-  .foot-btn .car{width:8px;height:8px;border-right:1.6px solid currentColor;
-    border-bottom:1.6px solid currentColor;transform:rotate(45deg) translateY(-1px);transition:transform .25s}
-  .foot-btn[aria-expanded="true"] .car{transform:rotate(-135deg) translateY(-1px)}
-  .foot{max-width:min(72ch,1120px);margin:14px auto 0;padding:0 clamp(16px,3vw,28px);
-    font-size:11.5px;color:var(--dim);line-height:1.7;text-align:center;display:none}
-  .foot.open{display:block}
-  .foot b{color:var(--ink)}
+  
+  
+  
+  
   .backbar{max-width:1120px;margin:0 auto;padding:20px clamp(16px,3vw,28px) 46px;display:flex;justify-content:center}
   .back-btn{display:inline-flex;align-items:center;gap:9px;padding:10px 18px;font:inherit;font-size:.92rem;font-weight:600;
     color:var(--ink);background:var(--panel-2);border:1px solid var(--hair);border-radius:11px;cursor:pointer;
@@ -376,50 +143,7 @@
   @media (prefers-reduced-motion:reduce){
     .back-btn,.back-btn svg{transition:none}
     .lc-gate-car,.lc-gate-window{animation:none!important}
-    .pedestal .p-ring{animation:none!important}
-    .idx-podium{transition:none!important}
-    .dash{animation:none;stroke-dashoffset:0}
   }
-
-  /* ================= INSTRUMENT REFRESH =================
-     Additive only. Nothing below removes or renames a rule, and no id or class
-     the JavaScript writes into is touched, so every live figure keeps painting
-     exactly as it did -- verified before and after against the real catalog
-     read ($59,999 middle value, 1,129 trims, 32 makes, 379 of 1,129 tagged).
-
-     Written entirely against the existing tokens, so light mode inherits it
-     without a second block. */
-
-  /* Each card gets the brand gate-purple tick at its top-left corner. One
-     detail, repeated, is what makes a page of boxes read as a set of
-     instruments. */
-  .card{position:relative}
-  .card::before{content:"";position:absolute;left:0;top:0;width:34px;height:1px;
-    background:var(--gate);opacity:.85}
-  .hero::before{width:56px;opacity:1}
-
-  /* Section heads carry a hairline through to their counter, so the eye reads
-     one band per subject instead of a stack. */
-  .sect-h{border-bottom:1px solid var(--hair);padding-bottom:9px}
-
-  /* The middle-value figure is the number this page exists to show. */
-  .idx{text-shadow:0 0 46px var(--cyan-dim)}
-  .hero-stats{gap:30px}
-  .hero-stats b{font-variant-numeric:tabular-nums;letter-spacing:-.3px}
-
-  /* A live badge is a claim about freshness, so it should look like a reading
-     rather than a caption: boxed, and unmistakably on, paused or off. */
-  .lv{border:1px solid var(--hair);border-radius:999px;padding:2px 9px 2px 7px;
-    background:var(--panel-2)}
-  .lv.on{border-color:var(--cyan-dim)}
-  .lv.paused{border-color:rgba(224,168,0,.55)}
-
-  /* Figures line up in columns wherever they are stacked. */
-  .tile .v{letter-spacing:-1.2px;font-variant-numeric:tabular-nums}
-  .tile .k.sub{opacity:.92}
-  .pt-note b,.mkt-say b,.mkt-cap b{font-variant-numeric:tabular-nums}
-
-  @media (prefers-reduced-motion:reduce){ .card::before{transition:none} }
 
   /* ================= CINEMATIC HERO =================
      The page opened on a 1,120 px column in a 2,000 px window. It now opens on
@@ -430,6 +154,8 @@
      families the panel gate greps for, and nothing above this block is altered.
      The hero is deliberately single-look: the footage is dark in both themes,
      so its type stays light in both. */
+
+  
   .lpi-hero{position:relative;min-height:min(86vh,760px);display:flex;flex-direction:column;
     overflow:hidden;background:#12303a;isolation:isolate}
   .lpi-plate{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
@@ -469,8 +195,6 @@
   .lpi-cell b{display:block;font-size:clamp(21px,2.5vw,29px);font-weight:700;letter-spacing:-.035em;
     font-variant-numeric:tabular-nums;line-height:1.04;color:#35E29B;margin-bottom:6px}
   .lpi-cell p{margin:0;font-size:11.5px;line-height:1.45;color:#B7C2D2}
-  .lpi-scroll{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:4;
-    font-size:9px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:#7C8798}
 
   @media (max-width:760px){
     .lpi-strip{grid-template-columns:1fr}
@@ -480,6 +204,8 @@
 
   /* The board that sat under the hero is gone; the wrap now carries only the
      back control, so it stops being a layout and becomes a footer. */
+
+  
   .wrap-min{padding-top:22px;padding-bottom:8px}
   .wrap-min .backbar{margin:0}
 </style>
@@ -549,7 +275,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     <h1 class="lpi-h">Know the sticker<br>before you <em>walk in</em>.</h1>
     <p class="lpi-sub">MSRP is set nationally by the manufacturer, not by the lot. Everything on this
       page is read live from LotCheck&rsquo;s verified catalog &mdash; <b id="hTrims">&mdash;</b> trims
-      across <b id="hMakes">&mdash;</b> makes, checked against what Alberta dealers advertise.</p>
+      across <b id="hMakes">&mdash;</b> makes, each with a manufacturer-published price.</p>
     <a class="lpi-cta" href="/quote-check">Analyze my quote <i>&rarr;</i></a>
   </div>
 
@@ -567,7 +293,6 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       <p>Manufacturers with at least one verified trim in the catalog.</p>
     </div>
   </div>
-  <div class="lpi-scroll">Scroll</div>
 </section>
 
 <div class="wrap wrap-min">
@@ -599,30 +324,7 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
   document.getElementById("themeToggle").addEventListener("click",function(){
     theme = theme==="light" ? "dark" : "light"; applyTheme();
     try{ localStorage.setItem("lc-theme", theme); }catch(e){}
-    redrawHist(false);          // recolor only — don't replay the entry animation
-    if(lastDev) drawMarket(lastDev);
   });
-  function tok(name,fb){
-    var v=getComputedStyle(root).getPropertyValue(name).trim();
-    return v||fb;
-  }
-
-  /* ================= REAL powertrain icons =================
-     The app's FuelIcon geometry (src/App.jsx), strokes switched to
-     currentColor so one set serves the dark slab face and the label row. */
-  function icon(kind){
-    var A={
-      Gas:['lc-pump 2.2s ease-in-out infinite','<path d="M3 22V5a2 2 0 012-2h8a2 2 0 012 2v17H3z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 9h12" stroke-width="2"/><path d="M15 7l4-2 2 2v9a2 2 0 01-2 2h-1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M17 13h2" stroke-width="2" stroke-linecap="round"/><rect x="6" y="13" width="5" height="4" rx="1" stroke-width="1.5"/>'],
-      Hybrid:['lc-spin 4s linear infinite','<path d="M12 2a10 10 0 0110 10" stroke-width="2" stroke-linecap="round"/><path d="M22 12a10 10 0 01-10 10" stroke-width="2" stroke-linecap="round"/><path d="M12 22a10 10 0 01-10-10" stroke-width="2" stroke-linecap="round"/><path d="M2 12a10 10 0 0110-10" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 3"/><path d="M22 10l-1.5 2.5L18 11" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14l1.5-2.5L6 13" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>'],
-      PHEV:['lc-charge 2s ease-in-out infinite','<path d="M7 2v4M11 2v4" stroke-width="2" stroke-linecap="round"/><path d="M5 6h8v5a4 4 0 01-8 0V6z" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 17v4" stroke-width="2" stroke-linecap="round"/><path d="M15 8h2a2 2 0 012 2v7a1 1 0 001 1h0a1 1 0 001-1V8" stroke-width="1.8" stroke-linecap="round"/><rect x="17" y="5" width="4" height="3" rx="1" stroke-width="1.8"/>'],
-      BEV:['lc-charge 1.6s ease-in-out infinite','<rect x="2" y="6" width="18" height="13" rx="2" stroke-width="2" fill="none"/><path d="M20 10h2v5h-2" stroke-width="2" stroke-linecap="round"/><path d="M13 7l-5 6h5l-3 5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'],
-      None:['','<rect x="3.5" y="3.5" width="17" height="17" rx="3" stroke-width="1.8" stroke-dasharray="3.4 3"/><path d="M8 16L16 8" stroke-width="1.8" stroke-linecap="round"/>'],
-      Other:['','<path d="M12 3.5c3.2 4 5.5 6.8 5.5 9.7a5.5 5.5 0 11-11 0C6.5 10.3 8.8 7.5 12 3.5z" stroke-width="1.8" stroke-linejoin="round"/>']
-    }[kind];
-    return '<svg class="fuel-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"'+
-      (A[0]&&!reduce?' style="animation:'+A[0]+'"':'')+'>'+A[1]+'</svg>';
-  }
-
   /* ================= REAL data: msrp_catalog =================
      Read live via the anon key (RLS-protected). The hero, ticker, powertrain
      counts and tiles are computed from these rows — real, checkable, ours. */
@@ -642,38 +344,10 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // Median, not mean: the catalog leans premium/EV depending on which
       // manufacturer sites are backfilled, and a mean would carry that skew.
       median:prices.length?prices[Math.floor(prices.length/2)]:null,
-      byMake:makeMedians(priced),
-      byFuel:fuelCounts(priced),
-      fuelTagged:priced.filter(function(r){ return !!r.fuel_type; }).length,
       loaded:true
     };
   }
-  function fuelCounts(rows){
-    var g={};
-    rows.forEach(function(r){ if(r.fuel_type) g[r.fuel_type]=(g[r.fuel_type]||0)+1; });
-    return g;
-  }
-  // Median MSRP per make, richest coverage first. Makes with too few verified
-  // trims are dropped rather than shown as a "median" of two cars.
-  function makeMedians(rows){
-    var g={};
-    rows.forEach(function(r){ if(r.make) (g[r.make]=g[r.make]||[]).push(Number(r.msrp)); });
-    return Object.keys(g).map(function(k){
-      var v=g[k].sort(function(a,b){ return a-b; });
-      return { make:k, n:v.length, median:v[Math.floor(v.length/2)] };
-    }).filter(function(m){ return m.n>=5; })
-      .sort(function(a,b){ return b.n-a.n; });
-  }
 
-  /* ================= ticker: real per-make medians ================= */
-  // Entity-encode anything that originated outside this file before it touches
-  // innerHTML. Make names are written by our own scrapers today, but the page
-  // must not structurally trust table content as markup (stored-XSS class).
-  function esc(s){
-    return String(s).replace(/[&<>"']/g,function(c){
-      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
-    });
-  }
   /* ================= hero count-up ================= */
   function countUp(el,target,format){
     // The board this once painted into is gone; a missing target is now a
@@ -693,576 +367,21 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
     setTimeout(function(){ el.textContent=f(target); }, dur+250);
   }
 
-  /* ================= hero + tiles + powertrain paint ================= */
-  var hexId=0;
-  function hex(col,inner){
-    var id="hx"+(++hexId);
-    return '<svg class="hex" viewBox="0 0 60 60" aria-hidden="true">'+
-      '<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1">'+
-      '<stop offset="0" stop-color="'+col+'" stop-opacity=".55"/><stop offset="1" stop-color="'+col+'" stop-opacity=".12"/>'+
-      '</linearGradient></defs>'+
-      '<path d="M30 5 52 17.5v25L30 55 8 42.5v-25z" fill="url(#'+id+')" stroke="'+col+'" stroke-opacity=".7"/>'+
-      '<path d="M30 5 52 17.5 30 30 8 17.5z" fill="'+col+'" fill-opacity=".22"/>'+inner+'</svg>';
-  }
-  // Light (or extinguish) a family of live-tracking dots. A dot may only turn
-  // on AFTER its read succeeded — never while loading, never on error.
-  // Writing to a surface that no longer exists must be a no-op, not an
-  // exception. An unguarded write in the SUCCESS path threw, which ran the
-  // catch, which threw again on the same missing elements -- and the figures
-  // the page exists to show were never painted.
-  function put(id,prop,val){
-    var el=document.getElementById(id);
-    if(el) el[prop]=val;
-  }
-
-  function setLive(cls,on){
-    document.querySelectorAll(".lv."+cls).forEach(function(el){ el.classList.toggle("on",!!on); });
-  }
-  // The market-reading badges have THREE states, not two: 'live' (green, current),
-  // 'paused' (amber, data exists but stale — must not pose as live), 'off' (hidden,
-  // read failed/loading). A stale reading showing "Live" was the bug.
-  function setMktLive(state){
-    document.querySelectorAll(".lv-mkt").forEach(function(el){
-      el.classList.toggle("on", state==="live");
-      el.classList.toggle("paused", state==="paused");
-      var i=el.querySelector("i");
-      while(i && i.nextSibling){ el.removeChild(i.nextSibling); }
-      el.appendChild(document.createTextNode(state==="paused"?"Paused":"Live"));
-    });
-  }
-
+  /* ================= hero paint ================= */
+  // The headline figure and the strip are painted from ONE read, and the
+  // sentence above them names the same two counts, so the top of the page can
+  // never disagree with the bottom of it.
   function paintReal(){
-    setLive("lv-cat",true);
-    countUp(document.getElementById("fig"), catalog.median, money);
-    countUp(document.getElementById("stTrims"), catalog.trims);
-    countUp(document.getElementById("stMakes"), catalog.makes);
-    // The hero strip shows the same three figures as the board. Painted here,
-    // from the same catalog read, so the top of the page can never disagree
-    // with the middle of it.
     countUp(document.getElementById("hFig"), catalog.median, money);
     [["hTrims",catalog.trims],["hTrims2",catalog.trims],
      ["hMakes",catalog.makes],["hMakes2",catalog.makes]].forEach(function(p){
-      var el=document.getElementById(p[0]); if(el) countUp(el, p[1]);
-    });
-    // m/m stays "—": there is no second month of catalog history yet, and an
-    // invented change figure is worse than an honest dash.
-
-    // Everything past this point painted the board that used to sit under the
-    // hero. The figures above are the page now; if the board is absent there is
-    // nothing further to draw.
-    if(!document.getElementById("tiles")) return;
-
-    // insight tiles
-    document.getElementById("tiles").innerHTML=[
-      ["Makes tracked", catalog.makes, "verified makes",
-        hex("var(--cyan)",'<path d="M22 34h16M22 28h16" stroke="var(--cyan)" stroke-width="2"/>'), null],
-      ["Trims verified", catalog.trims, "current models",
-        hex("var(--gate)",'<circle cx="30" cy="31" r="7" fill="none" stroke="var(--gate)" stroke-width="2"/>'), null],
-      ["Middle value new MSRP", catalog.median, "across all trims",
-        hex("var(--up)",'<path d="M30 22v18M25 27h10M25 35h10" stroke="var(--up)" stroke-width="2"/>'), money]
-    ].map(function(t,i){
-      return '<div class="card tile">'+t[3]+'<div><div class="k">'+t[0]+'</div>'+
-        '<div class="v mono" data-t="'+t[1]+'" data-m="'+(t[4]?"$":"n")+'">—</div>'+
-        '<div class="k sub">'+t[2]+'</div></div></div>';
-    }).join("");
-    document.querySelectorAll("#tiles .tile").forEach(function(c,i){
-      setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*90);
-    });
-    document.querySelectorAll("#tiles .v").forEach(function(el){
-      countUp(el, +el.dataset.t, el.dataset.m==="$"?money:null);
-    });
-
-    // POWERTRAIN COVERAGE — what LotCheck has verified, not what the market is.
-    //
-    // The old version was a 100%-stacked bar whose largest segment was
-    // "Unrecorded", 695 of 1,084 trims. Two things were wrong with it. It spent
-    // 64% of the width telling a buyer we do not know something, which is not
-    // information they can act on; and the remaining 36% is a SKEWED subset --
-    // the untagged majority is overwhelmingly gas -- so any reader who mentally
-    // rescaled the coloured part would conclude the market is mostly electrified.
-    // It is not. That is the same inversion the median figures are withheld for.
-    //
-    // Rows sized against the largest RECORDED count fix both: no whole is drawn,
-    // so no share can be inferred, and the numbers shown are exactly true -- these
-    // are the trims we hold a verified MSRP for. Coverage is stated once, in
-    // words, where it cannot be mistaken for a market claim.
-    // Each rail carries three tones because it is a solid: the lit front face,
-    // the receding top face, and the darker right end cap. These are the app's
-    // own accents (--blue/--teal/--amber/--up/--gate) with a lift and a shade.
-    var FUELS=[
-      ["Gas",   "#4a80d4","rgba(74,128,212,.6)","linear-gradient(135deg,rgba(74,128,212,.34),rgba(74,128,212,.06))"],
-      ["Hybrid","#2dd4bf","rgba(45,212,191,.6)","linear-gradient(135deg,rgba(45,212,191,.32),rgba(45,212,191,.05))"],
-      ["PHEV",  "#f59e0b","rgba(245,158,11,.6)","linear-gradient(135deg,rgba(245,158,11,.30),rgba(245,158,11,.05))","Plug-in Hybrid"],
-      ["BEV",   "#3ecf8e","rgba(62,207,142,.6)","linear-gradient(135deg,rgba(62,207,142,.30),rgba(62,207,142,.05))"]
-    ];
-    var rows=[], known=0;
-    FUELS.forEach(function(f){
-      var n=catalog.byFuel[f[0]]||0; known+=n;
-      if(n>0) rows.push({key:f[0],label:f[4]||f[0],n:n,c:f[1],b:f[2],g:f[3]});
-    });
-    // A fuel_type outside the four mapped keys (an FCEV, a Diesel) still counts
-    // as recorded, so it must appear rather than silently vanish.
-    var other=catalog.fuelTagged-known;
-    if(other>0) rows.push({key:"Other",label:"Other",n:other,c:"#8b7bff",b:"rgba(139,123,255,.6)",g:"linear-gradient(135deg,rgba(139,123,255,.30),rgba(139,123,255,.05))"});
-    // FIXED powertrain order, never sorted by count. Sorting produces a
-    // leaderboard, and a leaderboard of OUR coverage reads as a ranking of what
-    // is common on the road -- which is exactly the inference this panel must
-    // not invite. The rail lengths and printed counts do all the talking, and
-    // both are labelled as coverage.
-    var max=rows.reduce(function(m,r){ return Math.max(m,r.n); },1);
-
-    // The plates encode NO magnitude -- all five identical -- so the stack cannot
-    // be read as a share of anything. Depth order alone distinguishes them, and
-    // the ledger beside it carries the counts as text, where they are read.
-    document.getElementById("ptRows").innerHTML=
-      '<div class="ptx-body">'+
-        '<div class="ptx-stage"><div class="ptx-stack">'+
-          rows.map(function(r,idx){
-            // Evenly spaced in Z, centred on the middle plate: spacing is a
-            // constant, never derived from the counts.
-            var z=(2-idx)*26;
-            return '<div class="ptx-plate" style="--ptx-c:'+r.c+';--ptx-b:'+r.b+';--ptx-g:'+r.g+';'+
-                   '--ptx-z:'+z+'px;animation-delay:'+(idx*0.38).toFixed(2)+'s"></div>';
-          }).join("")+
-        '</div></div>'+
-        '<ul class="ptx-list">'+
-          rows.map(function(r,idx){
-            return '<li class="ptx-row" style="--ptx-c:'+r.c+';animation-delay:'+(idx*0.38).toFixed(2)+'s">'+
-              '<span class="ptx-chip"></span>'+
-              '<span class="ptx-lab">'+r.label+'</span>'+
-              '<span class="ptx-num">'+r.n.toLocaleString("en-CA")+'</span>'+
-              '<span class="ptx-unit">trim'+(r.n===1?"":"s")+'</span>'+
-            '</li>';
-          }).join("")+
-        '</ul>'+
-      '</div>';
-
-    var unrec=catalog.trims-catalog.fuelTagged;
-    put("ptTotal","textContent",
-      catalog.fuelTagged.toLocaleString("en-CA")+" of "+catalog.trims.toLocaleString("en-CA")+" trims");
-    // Stated in words, once. This is the honest version of the grey block: it
-    // says what is missing AND why the counts above are not a market share.
-    put("ptNote","innerHTML",
-      "Powertrain is recorded for <b>"+catalog.fuelTagged.toLocaleString("en-CA")+"</b> of "+
-      "<b>"+catalog.trims.toLocaleString("en-CA")+"</b> verified trims. The other "+
-      "<b>"+unrec.toLocaleString("en-CA")+"</b> are not shown here. "+
-      "These counts describe what LotCheck has verified, not the share of cars on the road — "+
-      "the recorded set is not a representative sample of the catalogue.");
-
-  }
-
-
-  /* ================= market reading: fn_alberta_market_vs_catalog =============
-     Aggregate-only RPC: dealers' own advertised prices vs LotCheck's verified
-     MSRP catalog, exact trim matches only. THE REFERENCE IS OURS — the old
-     read (fn_alberta_msrp_deviation) measured against the sticker the DEALER
-     stated on their own page, so a dealer printing MSRP = asking price was
-     invisible to the over-sticker stat (an $89,130 Tacoma proved it).
-     Basis-aware: each listing is judged against a window that is guaranteed to
-     contain the true all-in figure, so every percentage here is a FLOOR of the
-     real distance — the read can understate, never overstate. Listings inside
-     the freight window are disclosed as their own count, not guessed into a
-     direction. Gated below 25 directional calls, and stale readings say so. */
-  var lastDev=null;
-
-  // Fraction of listings whose %-vs-sticker falls in [a,b), recovered from the
-  // 21-point percentile curve (inverse CDF at 5% steps). Flat stretches — half
-  // the market priced at MSRP to the dollar — land in the band containing 0.
-  function shareBetween(curve,a,b){
-    var n=curve.length; if(n<2) return 0;
-    var total=0, seg=1/(n-1);
-    for(var i=0;i<n-1;i++){
-      var lo=Number(curve[i]), hi=Number(curve[i+1]);
-      if(hi<=a||lo>=b) continue;
-      if(hi===lo){ total+=(lo>=a&&lo<b)?seg:0; continue; }
-      var f=(Math.min(b,hi)-Math.max(a,lo))/(hi-lo);
-      total+=seg*Math.max(0,Math.min(1,f));
-    }
-    return total;
-  }
-
-  // Shared magnitude bands: how far a price sits from sticker, either side.
-  var BAND_EDGES=[0.05,1,2.5,5,10,15,25,1000];
-  var BAND_LABS=["at","≤1%","≤2.5%","≤5%","≤10%","≤15%","≤25%","25%+"];
-
-  // Largest-remainder apportionment: split `total` across bands in proportion
-  // to `shares`, with the results summing to total EXACTLY.
-  function apportion(shares,total){
-    var sum=shares.reduce(function(a,b){ return a+b; },0);
-    if(total<=0) return shares.map(function(){ return 0; });
-    // The 21-point curve can't resolve a direction holding under ~5% of the
-    // market. The listings still exist (the RPC counted them), so they land in
-    // the band closest to sticker rather than being dropped.
-    if(sum<=0){ var z=shares.map(function(){ return 0; }); z[0]=total; return z; }
-    var raw=shares.map(function(s){ return s/sum*total; });
-    var flo=raw.map(Math.floor);
-    var rem=total-flo.reduce(function(a,b){ return a+b; },0);
-    var order=raw.map(function(v,i){ return [v-flo[i],i]; }).sort(function(a,b){ return b[0]-a[0]; });
-    for(var i=0;i<rem;i++) flo[order[i%order.length][1]]++;
-    return flo;
-  }
-
-  // The curve gives the SHAPE of each direction; the RPC's exact under_n /
-  // over_n give the totals. Interpolating counts straight off the coarse
-  // percentile curve smeared the at-sticker mass into the first discount band
-  // (327 "below" against the RPC's exact 298), so the bands are fitted to the
-  // exact totals instead.
-  function bandCounts(dev,dir){ // dir=-1 below, +1 above
-    var shares=[];
-    for(var i=0;i<BAND_EDGES.length-1;i++){
-      var lo=BAND_EDGES[i], hi=BAND_EDGES[i+1];
-      shares.push(dir<0?shareBetween(dev.curve,-hi,-lo):shareBetween(dev.curve,lo,hi));
-    }
-    // the "at" position (index 0) belongs to the At series
-    return [0].concat(apportion(shares, dir<0?dev.under_n:dev.over_n));
-  }
-
-  /* ---- honest non-data states ----------------------------------------------
-     Three distinct states, never conflated: still loading, read failed, and
-     genuinely below the 25-listing publication gate. A failed read must NOT
-     render as "0 of 25 listings" — that would fabricate a market count. */
-  var MKT_ERROR={err:true};
-  var MIN_LISTINGS=25;   // display fallback only — the RPC's m.min is authoritative
-  function mktMsg(m){
-    if(m&&m.err) return ["Couldn't reach the market reading —","reload to try again."];
-    if(!m)       return ["Reading Alberta listings…",""];
-    // A stale reading is a fourth state, not "awaiting": the data exists but
-    // has aged past the point where "live" would be honest.
-    if(m.stale)  return ["Market reading paused — last computed "+(m.as_of||"over a week ago")+";",
-                         "it republishes after the next inventory pass."];
-    return ["Awaiting Alberta listings — "+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" matched to the catalog",
-            "before a market reading is published."];
-  }
-  // The RPC's response shape is validated before anything renders from it:
-  // schema drift must land in the error state, never NaN-cascade into empty
-  // charts or a fabricated "awaiting" count.
-  function validDev(d){
-    if(!d||typeof d!=="object"||Array.isArray(d)) return null;
-    if(d.enough!==true) return { enough:false, n:Number(d.n)||0, min:Number(d.min)||MIN_LISTINGS,
-                                 stale:d.stale===true, as_of:typeof d.as_of==="string"?d.as_of:null };
-    var ok=["n","dealers","median","under_n","over_n","at_n"].every(function(k){
-      return isFinite(Number(d[k]));
-    });
-    if(!ok) return null;
-    if(!Array.isArray(d.curve)||d.curve.length<2||
-       d.curve.some(function(x){ return !isFinite(Number(x)); })) return null;
-    return d;
-  }
-  function updateFootMkt(m){
-    var el=document.getElementById("footMkt");
-    if(!el) return;
-    if(m&&m.err){ el.textContent="Couldn't reach the market reading — reload to try again."; return; }
-    if(!m){ el.textContent=""; return; }
-    if(!m.enough){
-      if(m.stale){
-        el.textContent="The market reading was last computed "+(m.as_of||"over a week ago")+
-          " and is paused until the next inventory pass — a stale reading must not pose as current.";
-        return;
-      }
-      el.textContent="A market reading publishes once at least "+(Number(m.min)||MIN_LISTINGS)+
-        " current listings match the verified catalog exactly ("+(Number(m.n)||0)+" of "+(Number(m.min)||MIN_LISTINGS)+" so far).";
-      return;
-    }
-    el.innerHTML="Market reading"+(m.as_of?" as of "+esc(m.as_of):"")+": <b>"+(Number(m.n)||0)+
-      "</b> exact-trim catalog matches called from <b>"+(Number(m.dealers)||0)+
-      "</b> dealers — <b>"+(Number(m.under_n)||0)+"</b> below the manufacturer-verified sticker, <b>"+(Number(m.at_n)||0)+
-      "</b> at it (callable only where the manufacturer's all-in figure is held), <b>"+(Number(m.over_n)||0)+
-      "</b> above it even after a full freight-and-fees allowance; a further <b>"+(Number(m.indeterminate_n)||0)+
-      "</b> sit inside that allowance and are not called either way. Distances are floors — the read can understate, "+
-      "never overstate. Band split approximated from the market's percentile curve; direction totals exact.";
-  }
-
-  /* ---- sticker terrain: the strip teaches the split, the terrain breaks
-     out the discounted third. Replaces the radar; see the CSS note above for
-     why a radar could not carry this data honestly. ---- */
-  function drawMarket(dev){
-    var say=document.getElementById("mktSay"), strip=document.getElementById("mktStrip");
-    var cap=document.getElementById("mktCap"), terr=document.getElementById("mktTerr");
-    var foot=document.getElementById("mktFoot");
-    if(!say||!strip||!cap||!terr||!foot) return;
-    // Three distinct non-data states, never conflated -- loading, failed, and
-    // genuinely below the publication gate. A failed read must not render as
-    // "0 listings", which would fabricate a market count.
-    if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
-      var ln=mktMsg(dev);
-      say.textContent=""; strip.innerHTML=""; strip.style.display="none"; cap.textContent=""; foot.textContent="";
-      terr.className="mkt-wait"; terr.textContent=ln.filter(Boolean).join(" ");
-      return;
-    }
-    strip.style.display=""; terr.className="mkt-terr";
-
-    var n=Number(dev.n)||0, under=Number(dev.under_n)||0, over=Number(dev.over_n)||0;
-    var at=Number(dev.at_n)||0, ind=Number(dev.indeterminate_n)||0;
-    var total=n+ind;   // every exact-matched listing, called or not
-    var pc=function(v){ return total?Math.round(v/total*100):0; };
-    var num=function(v){ return (Number(v)||0).toLocaleString("en-CA"); };
-    var med=Number(dev.median_discount);
-
-    // The sentence first: a reader who stops here still has the answer.
-    // The reference is OURS — LotCheck's manufacturer-verified catalog, exact
-    // trim matches only — never the sticker the dealer states (a dealer can
-    // print MSRP = asking price, which made over-sticker asking invisible to
-    // the old read; an $89,130 Tacoma proved it). Every figure is a FLOOR:
-    // each listing is judged against a window guaranteed to contain the true
-    // all-in sticker, so a distance can be understated, never overstated.
-    var stk="";
-    var stated=Number(dev.sticker_stated_n)||0, inflN=Number(dev.sticker_inflated_n)||0;
-    var inflMed=Number(dev.sticker_inflated_median_pct);
-    if(stated){
-      stk=inflN
-        ? " Of <b>"+num(stated)+"</b> listings that print their own sticker, <b class='co'>"+num(inflN)+
-          "</b> print one above the manufacturer's figure for that exact trim"+
-          (isFinite(inflMed)&&inflMed>0?" — at least <b class='co'>+"+inflMed.toFixed(1)+"%</b> at the middle value":"")+"."
-        : " Of <b>"+num(stated)+"</b> listings that print their own sticker, none print one above the manufacturer's figure for that exact trim.";
-    }
-    say.innerHTML="<b>"+pc(under)+"%</b> of matched Alberta listings ask <b>less than the manufacturer-verified sticker</b>"+
-      (isFinite(med)&&med<0?" — at least <b class='cy'>"+Math.abs(med).toFixed(1)+"% off</b> at the middle value":"")+". "+
-      (over?("<b class='co'>"+num(over)+"</b> ask more than sticker plus a full freight-and-fees allowance.")
-           :"<b class='co'>None</b> ask more than sticker plus a full freight-and-fees allowance.")+
-      " <b>"+num(ind)+"</b> land inside that allowance, where only the row's exact freight figure could decide — so no call is made."+stk;
-
-    // To-scale strip over ALL matched listings. Zero-count segments are
-    // skipped (nothing to say), except Above, which keeps a visible sliver
-    // even at 0 so it reads as a container rather than a missing element.
-    var seg=function(cls,count,label){
-      if(!count) return "";
-      return '<div class="mkt-seg '+cls+'" style="width:'+(count/total*100).toFixed(2)+'%">'+
-        '<b>'+num(count)+'</b><em>'+label+'</em></div>';
-    };
-    strip.innerHTML=
-      seg("mkt-below",under,pc(under)+"% below")+
-      seg("mkt-at",at,"at sticker")+
-      seg("mkt-win",ind,"freight window")+
-      '<div class="mkt-abovebar"'+(over?' style="width:'+(over/total*100).toFixed(2)+'%"':'')+'></div>';
-    cap.innerHTML='<span>all '+num(total)+' matched listings, to scale</span><i>above sticker: '+num(over)+'</i>';
-
-    // Terrain. bandCounts returns [at, <=1%, <=2.5%, <=5%, <=10%, <=15%, <=25%, 25%+];
-    // index 0 is the at-sticker mass and belongs to the wall, not to a column.
-    var below=bandCounts(dev,-1).slice(1), above=bandCounts(dev,1).slice(1);
-    var labs=BAND_LABS.slice(1);
-    var max=Math.max(1,Math.max.apply(null,below.concat(above)));
-    var H=118;   // px available for the tallest column
-    var html="";
-    // Left side runs 25%+ .. <=1%, so the nearest column to the wall is the one
-    // closest to sticker and depth increases with distance. Order is fixed and
-    // never sorted by count.
-    for(var i=below.length-1;i>=0;i--){
-      var z=i*20, h=Math.round(below[i]/max*H);
-      html+='<div class="mkt-col" style="--mz:'+z+'px;--mh:'+h+'px">'+
-        '<span class="mkt-n">'+num(below[i])+'</span>'+
-        '<span class="mkt-bar" style="--mh:'+h+'px;--md:'+(0.06*(below.length-i))+'s"></span>'+
-        '<span class="mkt-t">'+labs[i]+'</span></div>';
-    }
-    html+='<div class="mkt-wall"><span>sticker 0%</span></div>';
-    // Only bands that actually hold listings get a column. Reserving a slot for
-    // every band painted seven empty placeholders whenever nothing was above
-    // sticker -- which is the usual case -- and those placeholders squeezed the
-    // real columns until their count labels bled outside the card. An empty band
-    // has nothing to say, so it gets no column at any width.
-    var drawn=0;
-    for(var j=0;j<above.length;j++){
-      if(!above[j]) continue;
-      var z2=j*20, h2=Math.round(above[j]/max*H);
-      drawn++;
-      html+='<div class="mkt-col mkt-above" style="--mz:'+z2+'px;--mh:'+h2+'px">'+
-        '<span class="mkt-n">'+num(above[j])+'</span>'+
-        '<span class="mkt-bar" style="--mh:'+h2+'px;--md:'+(0.06*(j+1))+'s"></span>'+
-        '<span class="mkt-t">'+labs[j]+'</span></div>';
-    }
-    // With no above-sticker column drawn the axis would just stop at the wall,
-    // which reads as a missing half rather than an empty one. Name the zero.
-    if(!drawn) html+='<div class="mkt-zero"><b>'+num(over)+'</b>above<br>sticker</div>';
-    terr.innerHTML=html;
-
-    var p25=Number(dev.p25);
-    foot.textContent="Ticks are distance from the manufacturer-verified sticker, mirrored either side — "+
-      "floors, so a bar can understate its distance, never overstate it."+
-      (isFinite(med)?"  Middle-value discount at least "+Math.abs(med).toFixed(2)+"%":"")+
-      (isFinite(p25)?" · 25th percentile "+p25.toFixed(1)+"%":"");
-  }
-
-  /* ---- 3D histogram: three series receding on a CATEGORY axis ----
-     Depth separates direction (below / at / above sticker); it never scales a
-     value. The projection is axonometric, so a bar at the back is drawn at
-     exactly the same scale as the same value at the front. */
-  var SERIES=[];
-  function buildSeries(dev){
-    SERIES=[
-      { name:"Below MSRP", tok:"--cyan", fb:"#3ae0ff", d:bandCounts(dev,-1) },
-      { name:"At sticker", tok:"--up",   fb:"#3ecf8e", d:[dev.at_n].concat(BAND_EDGES.slice(1).map(function(){return 0;})) },
-      { name:"Above MSRP", tok:"--down", fb:"#f0688a", d:bandCounts(dev,1) }
-    ];
-  }
-
-  // The chart canvas lived in the board that used to sit under the hero.
-  // This runs at load, so an unguarded getContext threw before paintReal
-  // ever wrote the figures -- the page lost the numbers it exists to show.
-  var ch=document.getElementById("chart3d"), g=ch?ch.getContext("2d"):null;
-  var CW=0,CH=0,cdpr=1,grow=0,yaw=0.62,dragging=false,lastX=0,colsCache=null;
-  function chartSize(){
-    cdpr=Math.min(devicePixelRatio||1,2);
-    CW=ch.width=ch.clientWidth*cdpr; CH=ch.height=ch.clientHeight*cdpr;
-  }
-  function hex2rgb(h){
-    h=h.replace("#","");
-    if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-    var n=parseInt(h,16);
-    return [n>>16&255,n>>8&255,n&255];
-  }
-  function shade(hexCol,amt){
-    var c=hex2rgb(hexCol);
-    return "rgb("+c.map(function(v){ return Math.max(0,Math.min(255,Math.round(v*amt))); }).join(",")+")";
-  }
-  function chart(){
-    if(!SERIES.length) return;
-    var light=root.getAttribute("data-theme")==="light";
-    g.clearRect(0,0,CW,CH);
-    var P=28*cdpr;
-    var depth=Math.min(CW*0.27,124*cdpr);
-    var dxu=Math.cos(yaw)*depth, dyu=Math.sin(yaw)*depth*0.92;
-    var axisW=30*cdpr;
-    var plotW=CW-P-axisW-dxu-10*cdpr, plotH=CH-P-dyu-30*cdpr;
-    var ox=P+axisW, oy=CH-P-14*cdpr;
-    var zN=SERIES.length, xN=BAND_LABS.length;
-    var maxV=1; SERIES.forEach(function(s){ s.d.forEach(function(v){ maxV=Math.max(maxV,v); }); });
-    var px=function(gx,gy,gz){ return [ox+gx*plotW+gz*dxu, oy-gy*plotH-gz*dyu]; };
-    var line=function(a){ return light?"rgba(22,32,52,"+a+")":"rgba(160,190,255,"+a+")"; };
-    var txt=light?"#5a6579":"#8b95a6";
-    // Colors resolve via getComputedStyle only when the cache is cold — doing
-    // it per frame forces a style recalc on every tick of the growth pass.
-    if(!colsCache) colsCache=SERIES.map(function(s){
-      var v=tok(s.tok,s.fb); return /^#/.test(v)?v:s.fb;
-    });
-    var cols=colsCache;
-
-    g.lineWidth=cdpr;
-    for(var i=0;i<=zN;i++){ var gz=i/zN;
-      g.beginPath(); var a=px(0,0,gz), b=px(1,0,gz);
-      g.moveTo(a[0],a[1]); g.lineTo(b[0],b[1]); g.strokeStyle=line(.30); g.stroke(); }
-    for(i=0;i<=xN;i++){ var gx=i/xN;
-      g.beginPath(); var a2=px(gx,0,0), b2=px(gx,0,1);
-      g.moveTo(a2[0],a2[1]); g.lineTo(b2[0],b2[1]); g.strokeStyle=line(.18); g.stroke(); }
-    g.font=(10*cdpr)+"px ui-monospace,monospace"; g.fillStyle=txt; g.textAlign="right";
-    for(var t=0;t<=3;t++){ var gy=t/3, v=Math.round(maxV*gy);
-      var a3=px(0,gy,1), b3=px(1,gy,1);
-      g.beginPath(); g.moveTo(a3[0],a3[1]); g.lineTo(b3[0],b3[1]); g.strokeStyle=line(.16); g.stroke();
-      var l=px(0,gy,1); g.fillText(v,l[0]-7*cdpr,l[1]+3.5*cdpr);
-    }
-
-    var bw=plotW/xN*0.62, bd=1/zN*0.50;
-    for(var zi=zN-1;zi>=0;zi--){
-      var S=SERIES[zi], gz0=(zi+0.19)/zN, c=cols[zi];
-      for(var xi=xN-1;xi>=0;xi--){
-        var val=S.d[xi]*grow; if(val<=0) continue;
-        var gyv=val/maxV;
-        var gx0=xi/xN+(plotW/xN-bw)/2/plotW;
-        var p=function(ax,ay,az){ return px(gx0+ax*(bw/plotW),ay,gz0+az*bd); };
-        var A=p(0,gyv,0),B=p(1,gyv,0),C=p(1,gyv,1),D=p(0,gyv,1);
-        var A0=p(0,0,0),B0=p(1,0,0),C0=p(1,0,1);
-        g.beginPath(); g.moveTo(A[0],A[1]); g.lineTo(B[0],B[1]); g.lineTo(B0[0],B0[1]); g.lineTo(A0[0],A0[1]); g.closePath();
-        g.fillStyle=shade(c,.72); g.fill();
-        g.beginPath(); g.moveTo(B[0],B[1]); g.lineTo(C[0],C[1]); g.lineTo(C0[0],C0[1]); g.lineTo(B0[0],B0[1]); g.closePath();
-        g.fillStyle=shade(c,.46); g.fill();
-        g.beginPath(); g.moveTo(A[0],A[1]); g.lineTo(B[0],B[1]); g.lineTo(C[0],C[1]); g.lineTo(D[0],D[1]); g.closePath();
-        g.fillStyle=shade(c,1.05); g.fill();
-        g.strokeStyle=light?"rgba(255,255,255,.5)":"rgba(255,255,255,.10)"; g.stroke();
-      }
-    }
-
-    g.fillStyle=txt; g.textAlign="center";
-    var step=(plotW/xN)<30*cdpr?2:1;
-    BAND_LABS.forEach(function(b,i){ if(i%step) return; var q=px(i/xN+0.5/xN,0,0);
-      g.fillText(b,q[0],q[1]+15*cdpr); });
-    g.textAlign="left";
-    g.fillText("distance from sticker →", ox, CH-4*cdpr);
-
-    if(!reduce && grow<1){ grow=Math.min(1,grow+0.028); requestAnimationFrame(chart); }
-    else if(reduce) grow=1;
-  }
-  // Correct first, animated second: if rAF never runs (background tab,
-  // reduced motion) the chart must still show every bar. The growth pass only
-  // runs when asked (first data paint) — a theme flip or window resize just
-  // recolors/refits at full size instead of replaying the entry animation.
-  function redrawHist(animate){
-    if(!SERIES.length) return;
-    colsCache=null;          // theme may have flipped — re-resolve tokens once
-    chartSize();
-    grow=1; chart();
-    if(animate && !reduce && document.visibilityState==="visible"){
-      grow=0; requestAnimationFrame(chart);
-      setTimeout(function(){ if(grow<1){ grow=1; chart(); } },1600);
-    }
-  }
-  // Debounced: a live window drag fires resize per frame, and each un-debounced
-  // redraw would stack another rAF growth chain on the ones still running.
-  var rzT;
-  addEventListener("resize",function(){
-    clearTimeout(rzT);
-    rzT=setTimeout(function(){ redrawHist(false); },200);
-  });
-  // These bound the chart canvas at load. The canvas lived in the board that
-  // used to sit under the hero, so an unguarded bind threw before the
-  // figures were ever painted.
-  if(ch){
-    ch.addEventListener("pointerdown",function(e){ dragging=true; lastX=e.clientX; ch.setPointerCapture(e.pointerId); });
-    ch.addEventListener("pointerup",function(){ dragging=false; });
-    // touch-action:pan-y means a touch that becomes a page scroll ends in
-    // pointercancel, not pointerup — without this, dragging sticks true and the
-    // next buttonless mouse move would spin the chart.
-    ch.addEventListener("pointercancel",function(){ dragging=false; });
-    // One paint per display frame: high-rate mice deliver several pointermoves
-    // per frame, and a synchronous full-chart redraw for each is wasted work.
-    var dragRaf=0;
-    function paintDrag(){ dragRaf=0; grow=1; chart(); }
-    ch.addEventListener("pointermove",function(e){
-      if(!dragging) return;
-      if(e.pointerType==="mouse" && !e.buttons){ dragging=false; return; }
-      yaw=Math.max(0.18,Math.min(1.25,yaw+(e.clientX-lastX)*0.006));
-      lastX=e.clientX;
-      if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
-    });
-    // Keyboard path for the same rotation (the canvas is focusable).
-    ch.addEventListener("keydown",function(e){
-      if(e.key!=="ArrowLeft"&&e.key!=="ArrowRight") return;
-      e.preventDefault();
-      yaw=Math.max(0.18,Math.min(1.25,yaw+(e.key==="ArrowRight"?0.06:-0.06)));
-      if(!dragRaf) dragRaf=requestAnimationFrame(paintDrag);
+      countUp(document.getElementById(p[0]), p[1]);
     });
   }
 
-  function drawHist(dev){
-    if(!ch) return;
-    var wait=document.getElementById("histWait");
-    var lg=ch.parentNode&&ch.parentNode.querySelector(".lg");
-    if(!dev||dev.err||!dev.enough||!dev.curve||!dev.curve.length){
-      ch.style.display="none"; wait.style.display="flex";
-      if(lg) lg.style.display="none";   // no chart -> no orphaned legend
-      wait.textContent=mktMsg(dev).join(" ");
-      return;
-    }
-    ch.style.display="block"; wait.style.display="none";
-    if(lg) lg.style.display="";
-    buildSeries(dev);
-    redrawHist(true);
-  }
 
   /* ================= boot ================= */
-  // "About this data" — the provenance text is folded behind a click so the
-  // page ends clean; the full wording is one tap away, never gone.
-  var footBtn=document.getElementById("footBtn"), footEl=document.getElementById("foot");
-  // The provenance panel lived in the board under the hero. Binding it
-  // unguarded threw at load, which stopped the figures being painted at all.
-  if(footBtn && footEl){
-    footBtn.addEventListener("click",function(){
-      var open=footEl.classList.toggle("open");
-      footBtn.setAttribute("aria-expanded",open?"true":"false");
-    });
-  }
 
-  drawMarket(null); drawHist(null);
-  document.querySelectorAll(".card").forEach(function(c,i){
-    setTimeout(function(){ c.classList.add("in"); }, reduce?0:i*70);
-  });
 
   // Paginated, fail-CLOSED catalog read. Two failure shapes both matter:
   // (1) the server silently caps a response (db-max-rows defaults to 1000 and
@@ -1311,51 +430,23 @@ window.LC_ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
       // partial response must not become "$0 median". Say so instead.
       if(!catalog.loaded||!catalog.median||catalog.trims<50) throw new Error("thin catalog read ("+catalog.trims+" trims)");
       paintReal();
-      put("footCat","innerHTML",
-        "Data source: LotCheck's verified MSRP catalog — <b>"+catalog.trims.toLocaleString("en-CA")+
-        "</b> trims across <b>"+catalog.makes+"</b> makes, read live. MSRP is set nationally by manufacturers; "+
-        "the market cards show what Alberta dealers advertise against it, from their own public listings.");
     })
     .catch(function(e){
       // Every surface the catalog feeds says so, rather than leaving a stale
       // figure standing beside a failure notice.
       console.warn("catalog read failed:",e.message);
-      setLive("lv-cat",false);
+      // Every figure on the page comes from this one read. If it fails they all
+      // go back to a dash: the markup ships dashes, never a hard-coded number,
+      // so a failed read can never leave a stale figure standing under copy
+      // that says it was read live.
       ["hFig","hTrims","hTrims2","hMakes","hMakes2"].forEach(function(id){
         var el=document.getElementById(id); if(el) el.textContent="\u2014";
       });
-      put("fig","textContent","—");
-      put("ptTotal","textContent","catalog unavailable");
-      put("ptRows","innerHTML","");
-      put("ptNote","innerHTML","Couldn&rsquo;t reach the MSRP catalog — reload to try again.");
-      put("tiles","innerHTML",[
-        ["Makes tracked","verified makes"],["Trims verified","current models"],["Middle value new MSRP","across all trims"]
-      ].map(function(t){
-        return '<div class="card tile in"><div><div class="k">'+t[0]+'</div>'+
-          '<div class="v mono">—</div><div class="k sub">'+t[1]+'</div></div></div>';
-      }).join(""));
-      put("footCat","textContent","Couldn't reach the MSRP catalog — reload to try again.");
+      var sub=document.querySelector(".lpi-sub");
+      if(sub) sub.textContent=
+        "Couldn't reach the MSRP catalog just now — reload to try again.";
     });
 
-  fetch(SUPA+"/rpc/fn_alberta_market_vs_catalog",
-        { method:"POST", headers:{ apikey:window.LC_ANON, Authorization:"Bearer "+window.LC_ANON,
-          "Content-Type":"application/json" }, body:"{}" })
-    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
-    .then(function(d){
-      var v=validDev(d);
-      if(!v) throw new Error("market payload failed shape validation");
-      lastDev=v; drawMarket(v); drawHist(v); updateFootMkt(v);
-      // Live only when the reading is CURRENT. A stale reading (data exists but
-      // aged past "live") shows an amber "Paused" badge, not green "Live" — the
-      // badge must never contradict the "Market reading paused" message below it.
-      setMktLive(v.stale ? "paused" : "live");
-    })
-    .catch(function(e){
-      // A failed or malformed read is an error state, never "0 of 25 listings".
-      console.warn("deviation read failed:",e.message);
-      setMktLive("off");
-      drawMarket(MKT_ERROR); drawHist(MKT_ERROR); updateFootMkt(MKT_ERROR);
-    });
 })();
 </script>
 
