@@ -11243,7 +11243,19 @@ function QuoteCheckPage(){
         <div style={{maxWidth:status==="idle"?1060:640,margin:"0 auto",padding:"24px 16px"}}>
           <div style={{marginBottom:24}}>
             <div style={{fontWeight:1000,fontSize:22,color:C.ink}}>LotCheck Quote Check</div>
-            <div style={{fontSize:13,color:C.inkSoft,marginTop:2}}>Upload your dealer quote. We'll tell you what's real and what's padding.</div>
+            <div style={{fontSize:13,color:C.inkSoft,marginTop:2}}>Paste a dealer's link or upload a quote. We'll tell you what's real and what's padding.</div>
+            {/* Scope, answered before it's asked and ONCE for the whole page: the
+                #1 question ("is this for new or used?") applies to both ways in,
+                so the chips sit under the title rather than inside one card. */}
+            {status==="idle"&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:10}}>
+                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>Works with</span>
+                {["New","Demo","Certified","Used"].map(c=>(
+                  <span key={c} style={{fontSize:11.5,fontWeight:800,color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}44`,borderRadius:999,padding:"3px 10px"}}>{c}</span>
+                ))}
+                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>— dealer listings and written quotes</span>
+              </div>
+            )}
           </div>
 
           {/* Gift-link claim banner: someone arrived via …/quote-check?gift=CODE */}
@@ -11323,9 +11335,43 @@ function QuoteCheckPage(){
                   <span>{urlCompletenessHint(urlInput)}</span>
                 </div>
               )}
-              <div style={{fontSize:11.5,color:C.inkFaint,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                <Icon3D name="blocked" size={15}/>
-                <span><strong>Don't use listing marketplaces</strong> — AutoTrader, CarGurus, Kijiji, eBay, or Facebook Marketplace links aren't supported here. Paste the dealer's own site, or upload a screenshot instead.</span>
+              {/* The marketplace notice used to be permanent red text on the
+                  primary path, before the buyer had typed a character. The
+                  detector already exists (isAggregatorUrl, also enforced in the
+                  edge function) -- so say it when it applies, not as a standing
+                  threat over an empty box. */}
+              {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
+                <div style={{fontSize:12,color:C.coralInk,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                  <Icon3D name="blocked" size={15}/>
+                  <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
+                </div>
+              )}
+
+              {/* WHAT THE BUYER GETS. After the side-by-side layout, this card
+                  was ~60% empty below the input -- and nothing on the page said
+                  what a report actually contains. The eye lands here right after
+                  "Paste a link", so this is where the answer belongs. These are
+                  the ten titles the canonical audit pushes (see "the canonical
+                  10-point audit" near the top of the report renderer); every
+                  report carries all ten, each with a result, never a blank
+                  (report-never-empty). Ordered by what a buyer asks first. */}
+              <div style={{marginTop:22,paddingTop:18,borderTop:`1px solid ${C.line}`}}>
+                <div style={{fontSize:11.5,fontWeight:900,color:C.tealInk,letterSpacing:".5px",marginBottom:10}}>EVERY REPORT CHECKS ALL 10</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"7px 16px"}}>
+                  {[
+                    "Price vs MSRP","Add-ons & fee audit",
+                    "Financing APR","Financing math",
+                    "Transport Canada recalls","Included warranty",
+                    "VIN check","Odometer",
+                    "EV / PHEV rebate","Dealer reputation",
+                  ].map((t,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+                      <span aria-hidden="true" style={{flex:"0 0 auto",width:5,height:5,borderRadius:"50%",background:C.teal,marginTop:7}}/>
+                      <span style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.45}}>{t}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:11.5,color:C.inkFaint,marginTop:12,lineHeight:1.5}}>Same ten checks whichever way you send it. Each one names its source, so you can put the report on the desk.</div>
               </div>
             </div>
 
@@ -11385,16 +11431,6 @@ function QuoteCheckPage(){
                   </div>
                 ))}
               </div>
-              {/* Scope, answered before it's asked: LotCheck covers every
-                  condition — the #1 user question ("is this for new or used?")
-                  should never need asking. Chips, not fine print. */}
-              <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:6,flexWrap:"wrap",marginTop:12}}>
-                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>Works with</span>
-                {["New","Demo","Certified","Used"].map(c=>(
-                  <span key={c} style={{fontSize:11.5,fontWeight:800,color:C.tealInk,background:C.tealBg,border:`1px solid ${C.teal}44`,borderRadius:999,padding:"3px 10px"}}>{c}</span>
-                ))}
-                <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>— listings & quotes</span>
-              </div>
               <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
                 onChange={e=>handleFile(e.target.files[0])}/>
             </div>
@@ -11402,7 +11438,7 @@ function QuoteCheckPage(){
 
             <div style={{display:"flex",gap:20,marginTop:26,flexWrap:"wrap"}}>
               {[
-                {n:"1",label:"Upload your quote",desc:"Drop a file, click to browse, or paste a screenshot (Ctrl+V / Cmd+V)"},
+                {n:"1",label:"Paste a link or drop a quote",desc:"A dealer's own listing page, a PDF, or a screenshot (Ctrl+V / Cmd+V)"},
                 {n:"2",label:"We read it",desc:"Every line item, fee, and warranty term — parsed in seconds"},
                 {n:"3",label:"See what's real",desc:"True MSRP, flagged add-ons, and any EVAP rebate you qualify for"},
               ].map((s,i)=>(

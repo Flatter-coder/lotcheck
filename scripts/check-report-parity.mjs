@@ -293,6 +293,35 @@ for (const { field, app, email } of SURFACES) {
   }
 }
 
+// ── The intake page's "Every report checks all 10" list vs the audit itself ──
+// The Quote Check intake card names the ten checks a report contains, as a
+// static list. The canonical audit pushes those titles in the report renderer.
+// Two copies of the same ten strings drift the moment someone renames a check
+// in one place -- and a promise on the intake screen that the report does not
+// keep is exactly the claim-without-a-check-behind-it this repo forbids. So the
+// intake list is read back out of the source and compared, as a SET, to the
+// titles the audit actually pushes. Rename one, and this is the gate that says so.
+{
+  const auditStart = src.indexOf("the canonical 10-point audit");
+  const auditEnd = auditStart === -1 ? -1 : src.indexOf("\n}\n", auditStart);
+  const auditRegion = auditStart === -1 ? "" : src.slice(auditStart, auditEnd === -1 ? undefined : auditEnd);
+  const audit = new Set([...auditRegion.matchAll(/P\.push\(\{ title: "([^"]+)"/g)].map((m) => m[1]));
+
+  const intakeAnchor = "EVERY REPORT CHECKS ALL 10";
+  // Read only the array literal itself -- from its opening "{[" to "].map(" --
+  // not from the heading, or the style strings between them ("grid",
+  // "1fr 1fr") get counted as promised checks.
+  const anchorAt = src.indexOf(intakeAnchor);
+  const intakeStart = anchorAt === -1 ? -1 : src.indexOf("{[", anchorAt);
+  const intakeRegion = intakeStart === -1 ? "" : src.slice(intakeStart, src.indexOf("].map(", intakeStart));
+  const intake = [...intakeRegion.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+
+  if (audit.size !== 10) failures.push(`${FILE}: expected the canonical audit to push 10 titled checks, found ${audit.size} (${[...audit].join(", ") || "none"}). If the audit grew, the intake list and its heading must grow with it.`);
+  if (intake.length !== 10) failures.push(`${FILE}: the intake card's "${intakeAnchor}" list has ${intake.length} entries, not 10.`);
+  for (const t of intake) if (!audit.has(t)) failures.push(`${FILE}: intake promises "${t}" but no audit check carries that title -- the report would not keep that promise.`);
+  for (const t of audit) if (!intake.includes(t)) failures.push(`${FILE}: the audit runs "${t}" but the intake list omits it -- the page undersells the report.`);
+}
+
 if (failures.length) {
   console.error("REPORT PARITY GATE — FAILED\n");
   for (const f of failures) console.error("  ✗ " + f);
