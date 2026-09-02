@@ -186,6 +186,29 @@ const CASES: Case[] = [
     analysis: { msrpInflation: "not an object" },
     flagged: ["MSRP_INFLATION_ANCHORED"],
   },
+  // ── Sale condition vs MSRP basis ───────────────────────────────────────────
+  // THE ADVANTAGE FORD SHAPE. A used listing whose page stated an MSRP came back
+  // with basis "exact", and the report told the buyer a years-old vehicle was
+  // thousands "under MSRP" -- a fabricated bargain claim that flatters the
+  // dealer. The guard existed in two of the three MSRP branches and was missing
+  // from the one that runs when the page supplies a figure.
+  {
+    name: "a used car's catalog MSRP may not carry a present-tense basis",
+    analysis: {
+      msrp: 68400, quotedPrice: 49995, msrpSource: "catalog", msrpBasis: "exact",
+      vehicleCondition: "used", odometerKm: 31000,
+    },
+    repaired: ["MSRP_BASIS_MATCHES_CONDITION"],
+    after: { msrpBasis: "original_when_new" },
+  },
+  {
+    name: "a demo IS measured against its own sticker, so 'exact' stands",
+    analysis: {
+      msrp: 61000, quotedPrice: 52000, msrpSource: "catalog", msrpBasis: "exact",
+      vehicleCondition: "new", saleCondition: "demo", odometerKm: 9000,
+    },
+    repaired: [],
+  },
   {
     name: "an empty analysis passes cleanly",
     analysis: {},

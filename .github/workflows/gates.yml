@@ -223,6 +223,19 @@ jobs:
       # gets swallowed as plain used; a certified badge never upgrades a new car.
       - name: Sale-condition granularity (new/demo/certified/used)
         run: npm run test:condition
+      # What that granularity is FOR. An MSRP is only this car's sticker if the
+      # car is still new, and analyze-listing-url had three branches writing
+      # msrpBasis with the used-vehicle guard hand-copied into two of them and
+      # missing from the third -- the branch that runs whenever the dealer's own
+      # page states an MSRP. A used listing came back basis "exact" and the
+      # report told the buyer a years-old vehicle was thousands "under MSRP":
+      # a bargain we invented, in the dealer's favour (Advantage Ford, a used
+      # GMC Acadia, 2026-08-31). No gate tied report content to sale condition,
+      # and the one test of the rule re-implemented it as a local copy, so it
+      # asserted against its own stale duplicate and reported green on any code.
+      # This one imports _shared/msrp-basis.ts itself.
+      - name: MSRP basis vs sale condition (a used car has no present-tense sticker)
+        run: npm run test:msrp-basis
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
@@ -249,6 +262,21 @@ jobs:
       # canonical stays byte-identical, so signatures/verify never silently drift.
       - name: Value-report signing canonical (value + quote-unchanged)
         run: npm run test:value-canonical
+      # The rebuilt value report's math: the mileage regression steps a high-km
+      # subject DOWN from the raw median (Collette's bar), the three-exit tiers
+      # order correctly, and thin/no-signal comps fabricate nothing.
+      - name: Value-report mileage + tiers math
+        run: npm run test:value-math
+      # The band the value report is built ON. computeBand decides whether a
+      # comparable set is dense and clean enough to produce a number at all --
+      # the comp floor, the salvage-cheap/typo-high trim, the mileage and trim
+      # windows. It had a package.json script from the day it was written and
+      # was never named in ANY workflow, so the used-car band math has been
+      # shipping unguarded while 60+ gates around it ran on every push. Exactly
+      # the shape of the update-statcan-zev job that sat invisible for 46 days:
+      # a check nothing runs cannot go red, so it always looks fine.
+      - name: Used-value band math (comp floor, outlier trim, km/trim windows)
+        run: npm run test:market-value
       # Standing-crawl robots.txt guardrail: locks the parser + longest-match
       # Allow/Disallow + crawl-delay so a future edit can't start ignoring a
       # dealer that asked not to be crawled (legal brief Q17 guardrail).

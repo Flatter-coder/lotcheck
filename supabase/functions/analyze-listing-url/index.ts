@@ -78,6 +78,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTru
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
+import { msrpIsPresentTense, applyConditionToMsrp } from "../_shared/msrp-basis.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { resolveCity, resolveJurisdiction } from "../_shared/jurisdiction.ts";
@@ -2744,10 +2745,12 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       // A USED car's catalog match is the price when it was NEW. That is useful
       // context ("this cost $X new") but it is NOT a sticker to measure today's
       // asking price against -- a 2014 truck is not "$35,000 under MSRP". Mark
-      // it so every over/under claim stays switched off.
-      const isUsed = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-        || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
-      if (isUsed) {
+      // it so every over/under claim stays switched off. The rule itself lives in
+      // _shared/msrp-basis.ts: it was copy-pasted here, again below, again in
+      // analyze-quote, and MISSING from the stated-MSRP branch further down, which
+      // is how a used listing came back "exact". One definition now, and it fails
+      // closed -- an unflagged 3,800 km unit is no longer treated as new.
+      if (!msrpIsPresentTense(analysis)) {
         analysis.originalMsrp = { msrp: catMsrp.msrp, trim: catMsrp.trim || null, year: catMsrp.year || analysis.year, sourceUrl: catMsrp.sourceUrl || null };
         analysis.msrpBasis = "original_when_new";
       }
@@ -2772,9 +2775,10 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
         // it is not proof we matched THIS trim, drivetrain and options, so it
         // must not support an over/under claim. If the lookup ever proves an
         // exact configuration match, it can upgrade this itself.
-        const isUsedUnit = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-          || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
-        analysis.msrpBasis = isUsedUnit ? "original_when_new" : "starting_at";
+        // Same shared used-vehicle gate as the catalog branch above: on anything
+        // that isn't present tense, a manufacturer figure is what the car cost
+        // when it was new, not a sticker to price today's car against.
+        analysis.msrpBasis = msrpIsPresentTense(analysis) ? "starting_at" : "original_when_new";
       }
     }
   }
@@ -2783,8 +2787,10 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   // is that we don't hold original MSRPs that far back, plus the ask that gets
   // the buyer the real number. Never leave the point blank (report-never-empty).
   {
-    const used = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-      || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
+    // Was a fourth hand-written copy of the used test, with the same fail-open
+    // shape the shared module replaced -- and it disagreed with the basis the
+    // branches above had just decided. One rule (_shared/msrp-basis.ts).
+    const used = !msrpIsPresentTense(analysis);
     if (used && !(Number(analysis.msrp) > 0)) {
       analysis.msrpUnavailable = {
         reason: "used_original_msrp_not_held",
@@ -2823,14 +2829,27 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
     // dealer inflated, so a dealer-stated figure silently became the report's
     // MSRP in every other case.
     const decided = resolveMsrpAuthority({ statedMsrp: Number(analysis.msrp), ref, make: analysis.make || null });
+    // THIS is where the used-vehicle guard was missing. The two branches above
+    // each carried their own copy; this one re-decided the basis from the catalog
+    // cross-check and stored it raw, so a used listing whose page printed a
+    // sticker came back "exact" and the report told the buyer a years-old car was
+    // thousands "under MSRP" -- a bargain we invented, in the dealer's favour.
+    // The same call also withholds the padded-sticker accusation on a used unit,
+    // where the stated figure is the original as-optioned sticker and our catalog
+    // row is a base trim: that gap is a data gap, not a tactic.
+    const outcome = applyConditionToMsrp(decided, {
+      vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition,
+      saleConditionHint: analysis.saleConditionHint, odometerKm: analysis.odometerKm, year: analysis.year,
+    });
     analysis.msrp = decided.msrp;
-    analysis.msrpBasis = decided.basis;
+    analysis.msrpBasis = outcome.basis;
     analysis.msrpSource = decided.source;
     if (decided.trim) analysis.msrpTrim = decided.trim; else if (decided.basis !== "dealer_stated") delete analysis.msrpTrim;
     if (decided.sourceUrl) analysis.msrpSourceUrl = decided.sourceUrl;
     if (decided.priceBasis) analysis.msrpPriceBasis = decided.priceBasis;
     if (decided.dealerStatedMsrp) analysis.dealerStatedMsrp = decided.dealerStatedMsrp;
-    if (decided.inflation) analysis.msrpInflation = decided.inflation;
+    if (outcome.originalMsrp) analysis.originalMsrp = outcome.originalMsrp;
+    if (outcome.inflation) analysis.msrpInflation = outcome.inflation;
     if (decided.reference) analysis.msrpReference = decided.reference;
 
   }
@@ -4366,6 +4385,34 @@ Deno.serve(async (req: Request) => {
     if (willNeedVisionRescue && enrichDeadline < REQUEST_DEADLINE) {
       console.log(`Reserving ${VISION_RESCUE_RESERVE_MS}ms for vision rescue -- enrichAnalysis gets until ${new Date(enrichDeadline).toISOString()} instead of ${new Date(REQUEST_DEADLINE).toISOString()}.`);
     }
+    // IDENTITY BEFORE PRICE. vehicleCondition and odometerKm decide whether this
+    // car's MSRP may be read as today's sticker (_shared/msrp-basis.ts), and
+    // enrichAnalysis settles that basis. But the structured-data gap-fill that
+    // supplies both of them from JSON-LD / Convertus vmsData / D2C __vdpJSON used
+    // to run ~120 lines BELOW this call, so the basis was decided before the
+    // platform's own authoritative "this is a used unit" flag had arrived. That
+    // is the ordering behind the fabricated-bargain defect, and it cuts both
+    // ways: it also suppressed the comparison on new cars whose condition landed
+    // late. These two are identity facts, not price facts, and the promise is
+    // already resolved by here -- so fill them first and let the price gap-fill
+    // below stay where it is.
+    try {
+      const earlyIdentity = await earlyStructuredFacts;
+      if (earlyIdentity) {
+        for (const k of ["vehicleCondition", "odometerKm"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (earlyIdentity as any)[k];
+          const missing = cur == null || cur === "";
+          if (missing && alt != null && alt !== "") {
+            (analysis as any)[k] = alt;
+            console.log(`Gap-filled ${k} from structured data (pre-enrichment).`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("pre-enrichment identity gap-fill skipped:", (e as Error)?.message);
+    }
+
     await enrichAnalysis(analysis, enrichDeadline);
 
     // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
@@ -4433,7 +4480,15 @@ Deno.serve(async (req: Request) => {
           // Screenshot showed a dealer MSRP above the manufacturer catalog figure ->
           // inflated-sticker tactic. Anchor stays the TRUE catalog MSRP; record the
           // gap and refresh the counter-script so the "Inflated MSRP" move appears.
+          // msrpIsPresentTense is asserted HERE rather than trusting msrpBasis:
+          // this path builds the accusation itself instead of going through
+          // applyConditionToMsrp, so without its own gate it is protected only
+          // by a side effect of what some other branch happened to store.
+          // On a used car the "padded sticker" is the ORIGINAL as-optioned one
+          // and the catalog row is a base trim -- naming that a tactic is an
+          // accusation manufactured from a data gap.
           if (rescuedMsrp && Number(analysis.msrp) > 0 && analysis.msrpSource === "catalog" && analysis.msrpBasis === "exact"
+              && msrpIsPresentTense(analysis)
               && rescuedMsrp > Number(analysis.msrp) * 1.03 && rescuedMsrp - Number(analysis.msrp) > 800 && !analysis.msrpInflation) {
             analysis.dealerStatedMsrp = rescuedMsrp;
             analysis.msrpInflation = { dealerStated: rescuedMsrp, manufacturer: Number(analysis.msrp), overBy: Math.round(rescuedMsrp - Number(analysis.msrp)) };

@@ -20,6 +20,7 @@
 
 import { resolveMsrpAuthority } from "../supabase/functions/_shared/msrp-authority.js";
 import { pickTrimMsrp } from "../supabase/functions/_shared/trim-match.js";
+import { applyConditionToMsrp } from "../supabase/functions/_shared/msrp-basis.ts";
 
 // Mirrors analyze-quote's buildAnalysis mapping exactly.
 function decide({ statedOnDocument, catalogValue, catalogMatchType, catalogTrim = null, make = "Hyundai" }) {
@@ -124,11 +125,16 @@ const check = (label, cond, detail = "") => {
 // line added in 63fa164 printed an MSRP-gap finding on used vehicles. Mirrors
 // the exact condition now in buildAnalysis.
 {
-  const basisFor = (cond, odo, decidedBasis) => {
-    const isUsed = String(cond || "").toLowerCase() === "used"
-      || (Number(odo) > 5000 && String(cond || "").toLowerCase() !== "new");
-    return (isUsed && decidedBasis !== "dealer_stated") ? "original_when_new" : decidedBasis;
-  };
+  // THIS BLOCK USED TO LIE. It re-implemented the rule as a local copy, so it
+  // asserted against its own stale duplicate: the shipped guard could be edited
+  // to anything and these five checks stayed green. They did, while the listing
+  // path shipped a fabricated bargain claim on a used car. Now it calls the
+  // real module, so editing the rule changes what these cases see.
+  const basisFor = (cond, odo, decidedBasis) =>
+    applyConditionToMsrp(
+      { msrp: 61000, basis: decidedBasis },
+      { vehicleCondition: cond, odometerKm: odo },
+    ).basis;
   check("used quote downgrades an exact catalog match to original_when_new",
     basisFor("used", 61000, "exact") === "original_when_new");
   check("high-odometer quote with no stated condition is treated as used",

@@ -65,6 +65,11 @@ import { deriveSaleCondition } from "../_shared/condition.ts";
 import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+// Whether a manufacturer MSRP may be read as THIS car's sticker today. The rule
+// used to be a copy-pasted expression -- twice in analyze-listing-url, once
+// here, and missing from the branch that reads a page-stated MSRP, which is how
+// a used listing came back "exact". One definition now (_shared/msrp-basis.ts).
+import { applyConditionToMsrp } from "../_shared/msrp-basis.ts";
 // The SAME trim scorer the listing path uses -- powertrain filter, drivetrain
 // confirmation and the implausible-gap ceiling. See lookupVerifiedMsrp.
 import { pickTrimMsrp } from "../_shared/trim-match.js";
@@ -377,6 +382,7 @@ const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing,
   "vin": string|null,
   "odometerKm": number|null,
   "vehicleCondition": "new"|"used"|null,
+  "saleCondition": "new"|"demo"|"certified"|"used"|null,
   "fuelType": "BEV"|"PHEV"|"hybrid"|"gas"|null,
   "dealerName": string|null,
   "dealerCity": string|null,
@@ -417,6 +423,8 @@ Field notes:
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
 - "vin": the full 17-character VIN if it appears anywhere on the quote. Copy it EXACTLY as printed, no spaces. null if not shown.
 - "odometerKm": the odometer reading / mileage in kilometres if shown (e.g. "41,220 km" -> 41220). Numbers only, no units or commas. null if not shown.
+- "vehicleCondition": "used" if the document shows meaningful mileage, a model year clearly older than the current one, or explicitly says used/pre-owned/certified pre-owned. A "new" vehicle showing only delivery mileage (under ~100 km) is still new. Use null only when the document genuinely gives you nothing to go on -- do NOT leave it null on a document that plainly sells a new vehicle: an unset condition is read downstream as "not new", and the report then withholds the MSRP comparison the buyer came for.
+- "saleCondition": finer than vehicleCondition. "certified" only if the document shows a manufacturer/OEM certified pre-owned badge (e.g. "Toyota Certified", "H-Promise", "Certified Pre-Owned"); "demo" if it says demo/demonstrator/dealer-demo; else mirror vehicleCondition (new->"new", used->"used").
 - "financing": the lease/finance terms if the quote discloses a payment plan (often in a dense fine-print paragraph). "paymentAmount" is the periodic payment BEFORE tax if both are shown; "totalObligation" is the total of all payments as literally disclosed, with "totalObligationTaxIncluded" true if that total includes tax. Use null for the whole object if no financing is disclosed.
 - "standardWarranty": the vehicle's INCLUDED manufacturer warranty (what already comes free) -- separate from any extended plan being sold.
 - "warranty": an extended warranty or protection plan being OFFERED/SOLD on this quote, if any. Use nulls throughout if none is being sold.
@@ -1508,22 +1516,41 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
   // over/under claim off; this path never set it, so an uploaded quote for a
   // used vehicle ran the full new-car comparison, and the leverage line added
   // in 63fa164 printed an MSRP-gap finding against a car whose MSRP stopped
-  // being the relevant number years ago. Same guard, same thresholds.
-  const isUsedQuote = String(vehicleCondition || "").toLowerCase() === "used"
-    || (Number(extracted?.odometerKm) > 5000 && String(vehicleCondition || "").toLowerCase() !== "new");
-  const msrpBasis = (isUsedQuote && msrp && decided.basis !== "dealer_stated") ? "original_when_new" : decided.basis;
-  const originalMsrp = (isUsedQuote && msrp && decided.basis !== "dealer_stated")
-    ? { msrp, trim: msrpLookup.trim ?? null, year: year ?? null, sourceUrl: msrpLookup.sourceUrl ?? null }
-    : null;
+  // being the relevant number years ago. The guard itself now lives in
+  // _shared/msrp-basis.ts -- this was its third hand-written copy, and the
+  // fourth site (the listing path's stated-MSRP branch) never got one at all,
+  // which is how a used listing came back "exact". One rule, and it fails
+  // CLOSED: an unflagged 3,800 km unit is no longer treated as new because
+  // 3,800 is not greater than 5,000.
+  //
+  // It also gates the inflated-sticker accusation, which was NOT gated here:
+  // the basis was downgraded on this line and `msrpInflation` was still written
+  // into the summary prose and the signed field below, so the accusation
+  // outlived the downgrade. On a used quote the MSRP printed on the document is
+  // the ORIGINAL as-optioned sticker and our catalog row is a base trim, so the
+  // gap is a data gap -- naming it accuses the dealer of padding a number they
+  // did not invent (no-accusation-language).
+  const conditioned = applyConditionToMsrp(
+    { msrp, basis: decided.basis, trim: msrpLookup.trim ?? null, sourceUrl: msrpLookup.sourceUrl ?? null, inflation: decided.inflation ?? null },
+    {
+      vehicleCondition: vehicleCondition ?? null,
+      saleCondition: extracted.saleCondition ?? null,
+      odometerKm: extracted.odometerKm ?? null,
+      year: year ?? null,
+    },
+  );
+  const msrpBasis = conditioned.basis;
+  const originalMsrp = conditioned.originalMsrp;
+  const inflation: any = conditioned.inflation;
 
   // The accusation now comes only from the resolver, which requires an EXACT
   // trim match AND its own materiality floor (>3% and >$800) -- not the bare
   // 2%-off-a-possibly-wrong-number test this used to run.
   let summary = extracted.summary || "";
-  if (decided.inflation) {
+  if (inflation) {
     summary +=
       (summary ? " " : "") +
-      `Also worth flagging: this quote lists MSRP as $${Number(decided.inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(decided.inflation.manufacturer).toLocaleString()} -- $${Number(decided.inflation.overBy).toLocaleString()} higher than the published figure.`;
+      `Also worth flagging: this quote lists MSRP as $${Number(inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(inflation.manufacturer).toLocaleString()} -- $${Number(inflation.overBy).toLocaleString()} higher than the published figure.`;
   } else if (decided.reference && Number(decided.reference.msrp) > 0) {
     // A floor is context, not a claim: state it as the model's starting price
     // and never call it "the verified MSRP for this trim".
@@ -1545,6 +1572,11 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     fuelType: fuelType ?? null,
     fuelTypeVerified: fuelTypeVerified ?? false,
     vehicleCondition: vehicleCondition ?? null,
+    // The finer new | demo | certified | used read, carried forward so the
+    // normalizer that runs next (deriveSaleCondition) and the CPO-premium
+    // checks see a demo or a certified unit as itself. Dropped here, a value
+    // the extractor just supplied would collapse back to the binary condition.
+    saleCondition: extracted.saleCondition ?? null,
     dealerName: dealerName ?? null,
     dealerCity: dealerCity ?? null,
     msrp,
@@ -1560,7 +1592,7 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     originalMsrp,
     ...(decided.trim ? { msrpTrim: decided.trim } : {}),
     ...(decided.dealerStatedMsrp ? { dealerStatedMsrp: decided.dealerStatedMsrp } : {}),
-    ...(decided.inflation ? { msrpInflation: decided.inflation } : {}),
+    ...(inflation ? { msrpInflation: inflation } : {}),
     ...(decided.reference ? { msrpReference: decided.reference } : {}),
     quotedPrice: quotedPrice ?? null,
     vin: extracted.vin ?? null,
@@ -1579,7 +1611,7 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
       catalogMatchType: msrpLookup.matchType ?? null,
       verifiedValue: verifiedMsrp,
       statedOnDocument: statedMsrpOnDocument ?? null,
-      mismatch: !!decided.inflation,
+      mismatch: !!inflation,
       matchedTrim: msrpLookup.trim ?? null,
       verifiedAsOf: msrpLookup.fetchedAt ?? null,
     },

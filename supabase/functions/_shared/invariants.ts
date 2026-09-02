@@ -22,6 +22,12 @@
 // Nothing here throws and nothing here blocks a report. A gate that can take
 // the whole report down would violate report-never-empty.
 
+// The sale-condition rule is IMPORTED, never restated here. It already existed
+// as a copy-pasted expression in three branches of analyze-listing-url and was
+// missing from a fourth; a gate carrying a fifth copy would be a gate asserting
+// a stale version of the rule it is supposed to enforce. See msrp-basis.ts.
+import { applyConditionToMsrp, msrpIsPresentTense } from "./msrp-basis.ts";
+
 // ── VIN ──────────────────────────────────────────────────────────────────────
 // Moved here from BOTH analyze-listing-url and analyze-quote, which each carried
 // a byte-identical copy -- so a correction to one silently missed the other.
@@ -138,14 +144,24 @@ export const INVARIANTS: Invariant[] = [
     repair: (a) => { a.vinCheck = validateVin(a.vin); },
   },
   {
-    // A catalog MSRP is either pinned to the exact trim or it's an honest
-    // "starting at" floor -- the UI label flips on msrpBasis. An unlabelled
-    // catalog figure would render a floor as if it were the trim's real MSRP.
+    // A catalog MSRP is either pinned to the exact trim, an honest "starting
+    // at" floor, or -- on a vehicle that is no longer new -- the ORIGINAL
+    // sticker it wore when it was. The UI label flips on msrpBasis, so an
+    // unlabelled catalog figure would render a floor as the trim's real MSRP.
+    //
+    // "original_when_new" was missing from that list, which pointed this rule
+    // backwards at the defect sitting right beneath it: every CORRECTLY handled
+    // used listing raised a violation, while a used listing wrongly carrying
+    // "exact" -- the fabricated "thousands under MSRP" -- raised nothing at
+    // all. A signal that fires on the right answer and stays silent on the
+    // wrong one is worse than no signal, because it trains the reader to skip
+    // it.
     id: "CATALOG_MSRP_BASIS_LABELLED",
     severity: "flag",
     why: "a 'starting at' floor must never be presented as the exact trim MSRP",
     applies: (a) => a?.msrpSource === "catalog" && num(a.msrp) > 0,
-    holds: (a) => a.msrpBasis === "exact" || a.msrpBasis === "starting_at",
+    holds: (a) => a.msrpBasis === "exact" || a.msrpBasis === "starting_at"
+      || a.msrpBasis === "original_when_new",
   },
   {
     // Inflated-sticker tactic. When we name it, the arithmetic has to survive a
@@ -160,6 +176,64 @@ export const INVARIANTS: Invariant[] = [
       return num(i.dealerStated) > num(i.manufacturer)
         && num(i.overBy) === Math.round(num(i.dealerStated) - num(i.manufacturer))
         && num(a.msrp) === num(i.manufacturer);
+    },
+  },
+  {
+    // The half of CATALOG_MSRP_BASIS_LABELLED that was never written. Labelling
+    // the basis is only half the job; the label also has to match the CAR. On a
+    // vehicle that is no longer new the manufacturer figure is what it cost when
+    // new, and carrying "exact" instead makes every surface read it as today's
+    // sticker -- which is how a used listing came back "$28,400 under MSRP"
+    // (Advantage Ford Mach-E, 2026-08-11). That is a bargain we invented, and it
+    // flatters the dealer at the buyer's expense.
+    //
+    // REPAIRS rather than flags. The correct value is derivable and the shipped
+    // code already derives it exactly this way at every write site, which is
+    // this file's stated bar for a repair. A flag would let the false claim ship
+    // while logging that it did -- warn-instead-of-refuse, which is one of the
+    // documented ways a defect gets marked fixed and stays open.
+    //
+    // Repairs the WHOLE state, not just the label. The original-sticker context
+    // the report renders and the padded-sticker accusation are condition-
+    // dependent for the same reason the comparison is: a used car's stated MSRP
+    // is its original as-optioned sticker while our catalog row is a base trim,
+    // so that gap is a data gap, not a tactic (no-accusation-language). Fixing
+    // the label alone would leave the accusation standing beside it -- and the
+    // Scrapfly rescue path builds msrpInflation directly, without going through
+    // applyConditionToMsrp, so this is the only thing standing between that path
+    // and a padded-sticker accusation on a used car.
+    //
+    // Deliberately ordered AFTER MSRP_INFLATION_ANCHORED. Withholding the claim
+    // removes it, and a rule that runs first would take the arithmetic check's
+    // input away with it -- silently retiring a diagnostic about OUR maths that
+    // still matters on every new car. Both signals fire; neither eats the other.
+    //
+    // "dealer_stated" is exempt on purpose: it cannot carry an over/under claim
+    // anyway, and relabelling it would lose the fact that the DEALER said it.
+    id: "MSRP_BASIS_MATCHES_CONDITION",
+    severity: "repair",
+    why: "a manufacturer MSRP on a vehicle that is no longer new is the ORIGINAL sticker, and may never license an over/under claim",
+    applies: (a) => num(a?.msrp) > 0
+      && (a.msrpSource === "catalog" || a.msrpSource === "manufacturer_site")
+      && a.msrpBasis !== "dealer_stated"
+      && !msrpIsPresentTense(a),
+    holds: (a) => a.msrpBasis === "original_when_new",
+    repair: (a) => {
+      const outcome = applyConditionToMsrp(
+        {
+          msrp: a.msrp, basis: a.msrpBasis, trim: a.msrpTrim ?? null,
+          sourceUrl: a.msrpSourceUrl ?? null, inflation: a.msrpInflation ?? null,
+        },
+        {
+          vehicleCondition: a.vehicleCondition, saleCondition: a.saleCondition,
+          saleConditionHint: a.saleConditionHint, odometerKm: a.odometerKm, year: a.year,
+        },
+      );
+      a.msrpBasis = outcome.basis;
+      if (outcome.originalMsrp) a.originalMsrp = outcome.originalMsrp;
+      // Deleted rather than set to null: this object gets canonicalized and
+      // signed, so introducing a key that wasn't there changes the payload.
+      if (a.msrpInflation && !outcome.inflation) delete a.msrpInflation;
     },
   },
   {
