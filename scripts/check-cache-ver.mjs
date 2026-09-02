@@ -110,6 +110,13 @@ if (!changed.length) {
   if (parent) {
     changed = sh(`git diff --name-only ${parent}..HEAD`).split("\n").filter(Boolean);
     if (changed.length) console.log("cache-ver: base resolved to HEAD (push event) — checking the pushed commit against HEAD~1 instead.");
+    // The BEFORE version must come from the same parent the diff was taken
+    // against. It used to be read from `base` (= HEAD on a push), so before and
+    // after were the same string and every push to main that touched an
+    // output-shaping file failed as "not bumped" -- including bc0ae73
+    // (2026-09-02), which HAD bumped it. A gate that fails on the very fix it
+    // asks for teaches people to ignore it.
+    base = parent;
   }
 }
 if (!changed.length) { console.log("cache-ver: no changes."); process.exit(0); }
