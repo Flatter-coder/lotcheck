@@ -78,6 +78,13 @@ the next instance.
 
 ---
 
+## 2026-09-02
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `1dc6ef9` | **A Cloudflare-walled EDealer page (lexusofroyaloak.com, 2026 Lexus RX 350) died with "we couldn't read that page" while its static HTML held the whole vehicle.** `api_usage_log` breadcrumb: Nimble returned a 74-char shell, the direct fetch from the edge runtime was blocked, and the one path that beats a wall — Scrapfly's real browser on residential IPs — was cut off by OUR AbortSignal twice. The 70s pre-warm ran attempt 1 as viewport screenshot + auto_scroll + 8s wait, burned the whole budget, so the HTML-only retry never ran; the rescue rendered fresh and burned 70s more. ~150s on two renders inside a 140s request, over a page whose JSON-LD carried price $69,898, VIN, condition and odometer. Scrapfly kept rendering — and billing — after we hung up, because no server-side `timeout` was sent. | **Optional step, fatal failure** (the screenshot is optional; it consumed the budget that the HTML needed) + **Absence read as knowledge** (an HTML-first attempt would have accepted a bot-wall interstitial as "the page" without a guard) | `_shared/scrapfly.ts`: the ladder is inverted — HTML-only first on a bounded 25s slice, viewport shot as the retry, never fullpage. `isWalledShell()` refuses a challenge page the way Nimble refuses "content too short". Scrapfly's own `timeout` rides with every request, just inside ours. `scrapfly-render.test.ts` 22/22, including the Lexus case (a wall on the HTML attempt falls through to the screenshot); mutation-tested — disabling the guard turns that case red. Checked and ruled out: the Tuesday 08:41Z `published-msrp` job renders one page at a time, so it held one of five Scrapfly slots, not all of them. |
+| `88bf38e` | **Logged retroactively (2026-09-02).** The 2026-07-20 fix that only ever lived as a code comment: centaursubaru.ca (also EDealer) timed out on Nimble's vx8 path three times (~a minute of nothing) while the same URL succeeded immediately on vx6. Not the same class as `1dc6ef9` — that site was reachable; this one is walled — but it is the first EDealer read failure and the reason `grep lexus` finds nothing when the next one hits. | **Optional step, fatal failure** (a slow extractor path ahead of a working one) | vx6 is tried first in the Nimble ladder. No test pins it. |
+
 ## 2026-08-26
 
 | fix | what broke | class | guard now in place |
