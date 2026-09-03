@@ -336,6 +336,22 @@ const SURFACES = [
     // surfaces now call ONE builder that words the sentence from the check's
     // own recorded fields, so a change to what the check reads cannot leave a
     // stale description standing on four surfaces. [[report-features-all-views]]
+    // "price unverified" answered nothing and asked one thing: against WHAT?
+    // The builder that fixed it was wired into the emailed deck and the PDF and
+    // NOT into App.jsx, so the screen kept saying nothing at all -- the
+    // all-views defect, committed inside the fix for it. This anchor is why the
+    // next one fails the build instead of shipping. [[report-features-all-views]]
+    field: "price read state (priceCheckState)",
+    app: {
+      "shared line builder import": "priceCheckState",
+      "scroll + sidebar explainer": "priceCheckState(a).line",
+    },
+    email: {
+      "shared line builder import": "priceCheckState",
+      "emailed cover chip": "priceCheckState(a).short",
+    },
+  },
+  {
     field: "financing math sentence (financingMathNote)",
     app: {
       "shared line builder import": "financingMathNote",
