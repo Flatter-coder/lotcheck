@@ -17,6 +17,12 @@ the next instance.
 
 ---
 
+## 2026-09-03
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `efa32a7` | **The report said nothing about the one thing a buyer arranges AFTER signing.** A lender requires collision and comprehensive; the AIRB reports Alberta's Take All Comers rule (Insurance Act s. 555) obliges insurers to write only the MANDATORY coverages, and that from early 2024 insurers denied the optional ones to drivers with an at-fault claim in six years or a serious conviction in four. The contract is signed at the dealership; the insurance comes after. Nobody at the desk mentions it. | **Built, not wired** (the regulator publishes it; the report never carried it) | `financeCoverageLine` (report-lines.js) states it in five clauses, every one attributed to the AIRB and quoted in a DATED CAPTURE (`docs/airb-2026-capture.md`, read 2026-09-03); `check:citations` fails the build if the card prints a statute section, regulation, bulletin or page number the capture does not carry, in either direction — the first version of that test compared the citation string with itself. Both halves always ship together (2024 restriction AND the October 2025 correction). It never says a buyer may be unable to insure: the AIRB's own consequence is shopping, and a test pins that. Alberta only, on all five surfaces, with the gate pinned by `check:parity` on the emailed surfaces too. Canonical v9 marks reports issued with the line so /verify cannot add a section the buyer's own PDF lacks. The dealer-APR field is deliberately not a trigger — it once stated 25% for a page that disclosed none. |
+
 ## 2026-09-02
 
 | fix | what broke | class | guard now in place |
