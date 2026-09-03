@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { priceMovesLine, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -638,6 +638,31 @@ console.log("\n-- copy sweep (every state x both lines) --");
   for (const t of texts) for (const re of FORBIDDEN) if (re.test(t)) { hits++; console.log(`    banned: ${re} in "${t}"`); }
   check(`${texts.length} strings, 0 banned-word hits`, hits === 0, `${hits} hit(s)`);
   check("every state renders a non-empty string", texts.every((t) => typeof t === "string" && t.length > 0), texts.filter((t) => typeof t !== "string" || !t.length).length + " empty");
+}
+
+// ── price moves: the half of the price-drop watch that needs no consent ──────
+console.log("\n-- advertised price moves --");
+{
+  const H = (rows) => ({ daysOnLot: { priceHistory: rows } });
+  const drop = priceMovesLine(H([{ observedOn: "2026-08-18", price: 68890 }, { observedOn: "2026-09-03", price: 65756 }]));
+  check("a drop names both ends and both dates, not a bare delta",
+    /\$68,890 on Aug 18, 2026/.test(drop.line) && /\$65,756 on Sep 3, 2026/.test(drop.line) && /down \$3,134/.test(drop.line), drop.line);
+  check("the headline value is readable on its own", drop.value === "DOWN $3,134", drop.value);
+  // A line that only appeared on good news would be an advertisement.
+  const rise = priceMovesLine(H([{ observedOn: "2026-07-02", price: 41900 }, { observedOn: "2026-08-30", price: 43400 }]));
+  check("a RISE is reported as plainly as a fall", rise && /up \$1,500/.test(rise.line) && rise.value === "UP $1,500", String(rise && rise.value));
+  check("a rise is not flagged as a buyer win", rise.tone === "muted");
+  const flat = priceMovesLine(H([{ observedOn: "2026-06-01", price: 52000 }, { observedOn: "2026-09-01", price: 52000 }]));
+  check("no movement says so rather than vanishing", flat && /has not moved from \$52,000/.test(flat.line));
+  // One price is not a move -- the same rule days-on-lot uses for duration.
+  check("one observed price is not a change", priceMovesLine(H([{ observedOn: "2026-08-18", price: 65756 }])) === null);
+  check("no history at all yields no line", priceMovesLine({}) === null);
+  // Our crawl is not continuous, and a drop we did not see is not a drop that
+  // did not happen. Every state has to say so.
+  check("every state disclaims completeness",
+    [drop, rise, flat].every((r) => /not (read every dealer every day|see every day)/.test(r.line)));
+  check("no state assigns the dealer a motive",
+    [drop, rise, flat].every((r) => !/hiding|desperate|panic|confess|admits?/i.test(r.line)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed${fail ? `\n  ${failures.join("\n  ")}` : ""}`);

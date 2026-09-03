@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03h";  // 03h: days-on-lot is scoped to THIS dealer and gated on two observations; one sighting is published as a date, not a duration.
+const CACHE_VER = "2026-09-03i";  // 03i: the dealer's own observed price moves are read back and shown -- listing_price_history has logged them since 08-11 and nothing ever displayed one.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2029,6 +2029,7 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
         since: firstSeenOn,
         observations,
         state: "single_sighting",
+        priceHistory: Array.isArray(mine.priceHistory) ? mine.priceHistory : [],
         atLeast: true,
         source: "lotcheck_first_seen",
         sourceLabel: "LotCheck's own inventory tracking",
@@ -2048,6 +2049,10 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
       // exactly the overclaim a dealer can disprove on the spot.
       unobservedDaysInSpan: Number(mine.unobservedDaysInSpan) || 0,
       state: "observed",
+      // Every advertised price we recorded at THIS dealer. Read back for the
+      // first time here: listing_price_history has logged moves since
+      // 2026-08-11 and nothing has ever shown one to a buyer.
+      priceHistory: Array.isArray(mine.priceHistory) ? mine.priceHistory : [],
       atLeast: true,                                    // renderers must not state this as exact
       source: "lotcheck_first_seen",
       sourceLabel: "LotCheck's own inventory tracking",

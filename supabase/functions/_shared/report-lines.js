@@ -928,3 +928,49 @@ export function sameVinElsewhereLine(a) {
     tone: "muted",
   };
 }
+
+/**
+ * "This dealer's advertised price, every time we saw it move."
+ *
+ * listing_price_history has recorded a row on every price MOVE since
+ * 2026-08-11 and nothing has ever read it back. A buyer had no way to know the
+ * car was $3,000 dearer a fortnight ago, or that it has not moved in ninety
+ * days -- two of the very few facts that change what a person says at the desk.
+ *
+ * WHAT THIS MUST NEVER IMPLY. Our crawl is not continuous, so this is a record
+ * of the moves we OBSERVED, never "the price history". A drop we did not see is
+ * not a drop that did not happen, and the wording says so rather than letting
+ * the reader assume completeness. It also never assigns a motive: a dealer who
+ * drops a price is competing, not confessing. [[no-accusation-language]]
+ *
+ * A rise is reported as plainly as a fall. A line that only ever appeared on
+ * good news would be an advertisement, not a check.
+ */
+export function priceMovesLine(a) {
+  const h = a?.daysOnLot?.priceHistory;
+  const rows = Array.isArray(h) ? h.filter((r) => r && Number(r.price) > 0 && r.observedOn) : [];
+  // One observed price is not a move. Same rule as days-on-lot: a change is a
+  // claim about two points in time, so it needs two of them.
+  if (rows.length < 2) return null;
+
+  const first = rows[0], last = rows[rows.length - 1];
+  const from = Number(first.price), to = Number(last.price);
+  const delta = to - from;
+  if (!Number.isFinite(delta) || delta === 0) {
+    return {
+      value: "NO CHANGE SEEN",
+      line: `We have read this dealer's advertised price ${rows.length.toLocaleString()} times since ${fmtDateEn(first.observedOn)} and it has not moved from ${fmtMoney(to)}. We do not see every day, so this is the moves we observed, not a complete history.`,
+      tone: "muted",
+    };
+  }
+  const down = delta < 0;
+  const size = fmtMoney(Math.abs(delta));
+  // Name both ends and both dates. A bare "down $3,134" invites the question
+  // this product exists to answer first: down from what, and when?
+  // [[present-without-creating-questions]]
+  return {
+    value: `${down ? "DOWN " : "UP "}${size}`,
+    line: `This dealer advertised this car at ${fmtMoney(from)} on ${fmtDateEn(first.observedOn)} and ${fmtMoney(to)} on ${fmtDateEn(last.observedOn)} — ${down ? "down" : "up"} ${size}${rows.length > 2 ? `, across ${rows.length.toLocaleString()} price changes we recorded` : ""}. We do not read every dealer every day, so treat this as the moves we saw rather than a complete history.${down ? " A price that has already moved once has room in it that the seller has shown you." : ""}`,
+    tone: down ? "flag" : "muted",
+  };
+}
