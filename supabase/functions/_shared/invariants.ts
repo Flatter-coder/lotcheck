@@ -304,6 +304,33 @@ export const INVARIANTS: Invariant[] = [
     repair: (a) => { a.marketValue = { ...a.marketValue, average: null, below: null, above: null, low: null, high: null, cpoPremium: null, insufficient: true, reason: "basis_missing" }; },
   },
   {
+    // "What older model years ask today" prints a middle per model year with
+    // how many listings, their kilometre range, dealers and read dates. A rung
+    // that cannot say what it is of, or an older year that is not older, is
+    // demoted to not-enough with a reason the card words honestly.
+    id: "OLDER_YEARS_HAS_BASIS",
+    severity: "repair",
+    why: "a per-model-year asking figure must name what it is of: at least the floor of listings, a range, a year older than the subject, make, model, province and read dates",
+    applies: (a) => a?.olderYears?.state === "confirmed",
+    holds: (a) => {
+      const o = a.olderYears;
+      const sy = num(o.subjectYear);
+      const floor = num(o.need) || 5;
+      const rungs = Array.isArray(o.rungs) ? o.rungs : [];
+      return sy > 0 && !!o.make && !!o.model && !!o.province && !!o.seenMax && rungs.length > 0 && !o.truncated
+        && ((o.scope !== "trim" && o.scope !== "trim_family") || !!o.trimLabel)
+        && rungs.every((r: any) => {
+          const n = num(r.n), med = num(r.median), lo = num(r.low), hi = num(r.high), y = num(r.year);
+          return n >= floor && med > 0 && lo > 0 && hi >= lo && med >= lo && med <= hi && y > 0 && y < sy && y >= sy - 3
+            && (r.dealers == null || (num(r.dealers) > 0 && num(r.dealers) <= n))
+            && (r.nRead == null || num(r.nRead) >= n)
+            && (r.kmKnown == null || (num(r.kmKnown) <= n && (num(r.kmKnown) > 0 || (r.kmLow == null && r.kmHigh == null))))
+            && (r.kmLow == null || r.kmHigh == null || num(r.kmHigh) >= num(r.kmLow));
+        });
+    },
+    repair: (a) => { a.olderYears = { ...a.olderYears, state: "insufficient", rungs: [], reason: "basis_missing" }; },
+  },
+  {
     // "This page's payment default is N months..." is a claim about
     // the page's PRE-SELECTED state. Only the page's own feed, embedded
     // settings or visible sentence can back that (page-default.js); the

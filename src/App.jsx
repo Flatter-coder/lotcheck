@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -7780,6 +7780,7 @@ function encodeReport(a){
     // say the same thing about the count and the page's default scenario.
     mc:a.marketCount?{st:a.marketCount.state||null,sc:a.marketCount.scope||null,n:a.marketCount.n??null,b:a.marketCount.below??null,s:a.marketCount.same??null,d:a.marketCount.dealers??null,from:a.marketCount.seenMin||null,to:a.marketCount.seenMax||null,pv:a.marketCount.province||null,x:!!a.marketCount.subjectExcluded,p:a.marketCount.price??null,tl:a.marketCount.trimLabel||null,pt:a.marketCount.powertrain||null,mn:a.marketCount.modelN??null,mb:a.marketCount.modelBelow??null,rs:a.marketCount.reason||null,w:a.marketCount.windowDays??null,as:a.marketCount.asOf||null,tr:!!a.marketCount.truncated,up:a.marketCount.unpriced??null}:null,
     dflt:a.pageDefault?{st:a.pageDefault.state||null,t:a.pageDefault.termMonths??null,f:a.pageDefault.paymentFrequency||null,a:a.pageDefault.apr??null,d:a.pageDefault.downPayment??null,p:a.pageDefault.paymentAmount??null,src:a.pageDefault.source||null,at:a.pageDefault.readAt||null,pm:a.pageDefault.purchaseMethod||null,rs:a.pageDefault.reason||null,q:a.pageDefault.qualifier||null,cob:a.pageDefault.costOfBorrowing??null}:null,
+    oy:a.olderYears?{st:a.olderYears.state||null,rs:a.olderYears.reason||null,sy:a.olderYears.subjectYear??null,mk:a.olderYears.make||null,md:a.olderYears.model||null,pv:a.olderYears.province||null,cd:a.olderYears.condition||null,sc:a.olderYears.scope||null,tl:a.olderYears.trimLabel||null,pt:a.olderYears.powertrain||null,nr:a.olderYears.nRead??null,nd:a.olderYears.need??null,as:a.olderYears.asOf||null,from:a.olderYears.seenMin||null,to:a.olderYears.seenMax||null,r:(a.olderYears.rungs||[]).map(x=>({y:x.year??null,n:x.n??null,rd:x.nRead??null,m:x.median??null,lo:x.low??null,hi:x.high??null,kn:x.kmKnown??null,kl:x.kmLow??null,kh:x.kmHigh??null,d:x.dealers??null,from:x.seenMin||null,to:x.seenMax||null})),ms:(a.olderYears.missing||[]).map(x=>({y:x.year??null,rd:x.nRead??null,k:x.nKept??null}))}:null,
     pb:a.msrpPriceBasis||null,
     omsrp:a.originalMsrp?{m:a.originalMsrp.msrp,t:a.originalMsrp.trim||null,y:a.originalMsrp.year||null}:null,
     mun:a.msrpUnavailable?{n:a.msrpUnavailable.note}:null,
@@ -7868,6 +7869,7 @@ function decodeReport(s){
       // along for the vehicle label; trimLabel is not in the compact form.
       marketCount:c.mc&&isCount(c.mc)?{state:c.mc.st,scope:c.mc.sc,n:c.mc.n,below:c.mc.b,same:c.mc.s,dealers:c.mc.d??null,seenMin:c.mc.from,seenMax:c.mc.to,province:c.mc.pv,subjectExcluded:!!c.mc.x,price:c.mc.p,trimLabel:c.mc.tl||null,powertrain:c.mc.pt||null,modelN:c.mc.mn??0,modelBelow:c.mc.mb??0,reason:c.mc.rs||null,windowDays:c.mc.w??30,asOf:c.mc.as||null,truncated:!!c.mc.tr,unpriced:c.mc.up??0,year:c.y,make:c.mk,model:c.md}:undefined,
       pageDefault:c.dflt?{checked:true,state:c.dflt.st,termMonths:c.dflt.t,paymentFrequency:c.dflt.f,apr:c.dflt.a,downPayment:c.dflt.d,paymentAmount:c.dflt.p,source:c.dflt.src,readAt:c.dflt.at,purchaseMethod:c.dflt.pm||null,reason:c.dflt.rs||null,qualifier:c.dflt.q||null,costOfBorrowing:c.dflt.cob??null}:undefined,
+      olderYears:c.oy?{state:c.oy.st||null,reason:c.oy.rs||null,subjectYear:c.oy.sy??null,make:c.oy.mk||null,model:c.oy.md||null,province:c.oy.pv||null,condition:c.oy.cd||null,scope:c.oy.sc||null,trimLabel:c.oy.tl||null,powertrain:c.oy.pt||null,nRead:c.oy.nr??null,need:c.oy.nd??null,asOf:c.oy.as||null,seenMin:c.oy.from||null,seenMax:c.oy.to||null,rungs:(c.oy.r||[]).map(x=>({year:x.y??null,n:x.n??null,nRead:x.rd??null,median:x.m??null,low:x.lo??null,high:x.hi??null,kmKnown:x.kn??null,kmLow:x.kl??null,kmHigh:x.kh??null,dealers:x.d??null,seenMin:x.from||null,seenMax:x.to||null})),missing:(c.oy.ms||[]).map(x=>({year:x.y??null,nRead:x.rd??null,nKept:x.k??null}))}:null,
       msrpPriceBasis:c.pb||null,
       originalMsrp:c.omsrp?{msrp:c.omsrp.m,trim:c.omsrp.t||null,year:c.omsrp.y||null}:null,
       msrpUnavailable:c.mun?{note:c.mun.n}:null,
@@ -8862,6 +8864,38 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "What older model years ask today": the model-year ladder as one
+  // report line. This vehicle's asking price, then one line per older model
+  // year: what used ones with the same powertrain ask on Alberta dealers' own
+  // pages today, and how far from this asking price that middle sits. Worded
+  // ONCE in report-lines.js (olderYearsLine) from the sealed ladder, so the
+  // lines here are the lines in the emailed HTML, the PDF and on /verify.
+  // Built whenever the ladder rode along, including the not-read and
+  // not-enough states -- the sidebar never goes quiet where the scroll view
+  // speaks. No gauge: asking prices today, not a forecast.
+  // [[report-never-empty]] [[report-features-all-views]]
+  let olderYearsItem = null;
+  if (a.olderYears) {
+    const line = olderYearsLine(a);
+    olderYearsItem = { key: "olderyears", title: line.title, tone: "muted", glow: false, v: line.value, body: (
+      <div>
+        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} />
+        {line.lines.length === 0 && line.body && <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>{line.body}</div>}
+        {line.lines.map((l, i) => (
+          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
+            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
+            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === 0 ? 400 : 700 }}>{l.v}</span>
+          </div>
+        ))}
+        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
+        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
+        <ExplainBox txt={line.state === "confirmed"
+          ? `What used ones of this model, one to three model years older with the same powertrain, are asking on Alberta dealers' own pages on the dates shown. Asking prices, not sale prices. Ask the dealer how this price compares with those listings.`
+          : line.body} />
+      </div>
+    )};
+  }
+
   // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
   //
   // We advertise a 10-point verification and we over-deliver on it (Vic,
@@ -8902,6 +8936,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(comparableItem ? [comparableItem] : []),
     ...(marketCountItem ? [marketCountItem] : []),
     ...(marketCompareItem ? [marketCompareItem] : []),
+    ...(olderYearsItem ? [olderYearsItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
@@ -9569,6 +9604,38 @@ function MarketCompareCard({analysis,C,cardStyle}){
     </div>
   );
 }
+// LINE -- "What older model years ask today": the model-year ladder as one
+// report line -- this vehicle's asking price, then one line per older model
+// year (used, same powertrain, one trim scope for every rung, the kilometre
+// range each rung holds, dealers, read dates): the middle asking price on
+// dealers' own pages today and how far from this asking price it sits.
+// Worded once in report-lines.js olderYearsLine from the sealed ladder
+// (canonical v8 `oy`), so the card on screen is the card in the emailed
+// HTML, the PDF and on /verify. Same never-empty rule as its sibling above:
+// "Not read" and "Not enough to state" render as cards that say why, not as
+// gaps. No gauge -- these are asking prices today, not a forecast.
+// [[report-never-empty]] [[report-features-all-views]]
+function OlderYearsCard({analysis,C,cardStyle}){
+  if(!analysis?.olderYears) return null;
+  const line=olderYearsLine(analysis);
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:6}}>{line.title}</div>
+      <div style={{fontSize:20,fontWeight:1000,color:line.state==="confirmed"?C.ink:C.inkSoft,lineHeight:1.25,marginBottom:8}}>{line.headline}</div>
+      {line.lines.length===0&&line.body&&<div style={{fontSize:12,color:C.inkSoft,lineHeight:1.55,marginBottom:4}}>{line.body}</div>}
+      <div>
+        {line.lines.map((l,i)=>(
+          <div key={i} style={{display:"flex",flexWrap:"wrap",gap:"2px 14px",alignItems:"baseline",padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+            <div style={{flex:"0 0 auto",minWidth:120,fontSize:11.5,fontWeight:700,color:C.inkFaint}}>{l.k}</div>
+            <div style={{flex:"1 1 220px",fontSize:13,color:C.ink,lineHeight:1.5,fontWeight:i===0?500:700}}>{l.v}</div>
+          </div>
+        ))}
+      </div>
+      {line.meta&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{line.meta}</div>}
+      {line.note&&<div style={{fontSize:11.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>{line.note}</div>}
+    </div>
+  );
+}
 // LINE -- "Payment default: this page's payment default is N months, <frequency>
 // payments at X%." The page's own pre-selected calculator scenario
 // (page-default.js), worded once in report-lines.js pageDefaultLine. Same
@@ -9608,7 +9675,8 @@ function canonicalReport(a){
     // v7 (2026-09-02): the comparison's basis rides with marketValue, and its
     // projection is NOT additive (mileage null was 0; a not-enough set is an
     // object, was null). Mirrors report-sign.ts.
-    v:7,
+    // v8: `oy` added (what older model years ask today). Additive.
+    v:8,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9632,6 +9700,8 @@ function canonicalReport(a){
     fcx:a.financeContingent?.contingent?{r:a.financeContingent.reasons||[]}:null,
     mc:a.marketCount?{st:a.marketCount.state||null,sc:a.marketCount.scope||null,n:nn(a.marketCount.n),b:nn(a.marketCount.below),s:nn(a.marketCount.same),d:nn(a.marketCount.dealers),from:a.marketCount.seenMin||null,to:a.marketCount.seenMax||null,pv:a.marketCount.province||null,x:!!a.marketCount.subjectExcluded,p:nn(a.marketCount.price),tl:a.marketCount.trimLabel||null,pt:a.marketCount.powertrain||null,mn:nn(a.marketCount.modelN),mb:nn(a.marketCount.modelBelow),rs:a.marketCount.reason||null,w:nn(a.marketCount.windowDays),as:a.marketCount.asOf||null,tr:!!a.marketCount.truncated,up:nn(a.marketCount.unpriced)}:null,
     dflt:a.pageDefault?{st:a.pageDefault.state||null,t:nn(a.pageDefault.termMonths),f:a.pageDefault.paymentFrequency||null,a:nn(a.pageDefault.apr),d:nn(a.pageDefault.downPayment),p:nn(a.pageDefault.paymentAmount),src:a.pageDefault.source||null,at:a.pageDefault.readAt||null,pm:a.pageDefault.purchaseMethod||null,rs:a.pageDefault.reason||null,q:a.pageDefault.qualifier||null,cob:nn(a.pageDefault.costOfBorrowing)}:null,
+    // v8: `oy` (what older model years ask today). Mirrors report-sign.ts.
+    oy:a.olderYears?{st:a.olderYears.state||null,rs:a.olderYears.reason||null,sy:nn(a.olderYears.subjectYear),mk:a.olderYears.make||null,md:a.olderYears.model||null,pv:a.olderYears.province||null,cd:a.olderYears.condition||null,sc:a.olderYears.scope||null,tl:a.olderYears.trimLabel||null,pt:a.olderYears.powertrain||null,nr:nn(a.olderYears.nRead),nd:nn(a.olderYears.need),as:a.olderYears.asOf||null,from:a.olderYears.seenMin||null,to:a.olderYears.seenMax||null,r:(a.olderYears.rungs||[]).map(x=>({y:nn(x.year),n:nn(x.n),rd:nn(x.nRead),m:nn(x.median),lo:nn(x.low),hi:nn(x.high),kn:nn(x.kmKnown),kl:nn(x.kmLow),kh:nn(x.kmHigh),d:nn(x.dealers),from:x.seenMin||null,to:x.seenMax||null})),ms:(a.olderYears.missing||[]).map(x=>({y:nn(x.year),rd:nn(x.nRead),k:nn(x.nKept)}))}:null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };
@@ -9988,6 +10058,10 @@ function VerifyPage(){
               // leading year is dropped, or the line reads "2024 to 2025 2026
               // Lexus RX"; a legacy canonical with no window keeps its year.
               const mcl=o.marketValue?marketCompareLine({price:o.price,marketValue:o.marketValue,fcx:o.fcx,vehicle:(o.marketValue.yf&&o.marketValue.yt)?String(o.vehicle||"").replace(/^\s*(?:19|20)\d{2}\s+/,""):o.vehicle}):null;
+              // The sealed ladder (canonical v8 `oy`) worded by the same builder
+              // as the scroll card and the email, from the sealed price and
+              // finance-contingent flag, so /verify reads what the report said.
+              const oyl=o.oy?olderYearsLine({price:o.price,oy:o.oy,fcx:o.fcx}):null;
               const title=P==="signed"?"Genuine — nothing changed":P==="ok"?"Nothing was changed":P==="altered"?"This doesn't check out":"Check the report number";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
@@ -10052,6 +10126,12 @@ function VerifyPage(){
                   {o.marketValue&&mcl.lines.length>0&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
                     {(mcl.lightLabel||mcl.meta)&&<div style={{fontWeight:700,color:T.text}}>{[mcl.lightLabel,mcl.meta].filter(Boolean).join(" · ")}</div>}
                     {mcl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>)}
+                  </div>}
+                  {o.oy&&<Row t="What older model years ask today" v={oyl.value}/>}
+                  {o.oy&&(oyl.lines.length>0||oyl.body)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
+                    {oyl.meta&&<div style={{fontWeight:700,color:T.text}}>{oyl.meta}</div>}
+                    {oyl.lines.length>0?oyl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>):<div>{oyl.body}</div>}
+                    {oyl.note&&<div>{oyl.note}</div>}
                   </div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
@@ -12092,6 +12172,16 @@ function QuoteCheckPage(){
                   anchor — NOT the dealer's trade-in number. [[report-never-empty]] */}
               {analysis.marketValue&&(
                 <MarketCompareCard analysis={analysis} C={C} cardStyle={cardStyle}/>
+              )}
+
+              {/* What older model years ask today: the model-year ladder as
+                  one line -- this vehicle, then each older model year's middle
+                  asking price on Alberta dealers' own pages and how far from
+                  this asking price it sits. Mounted whenever the ladder rode
+                  along, so "not read" / "not enough to state" render as cards
+                  that say why, not as gaps. [[report-never-empty]] */}
+              {analysis.olderYears&&(
+                <OlderYearsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
               )}
 
               {analysis.leverageScore?.computed&&(

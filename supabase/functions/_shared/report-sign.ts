@@ -55,7 +55,8 @@ export function canonicalReport(a: any): any {
     // seals as null (was 0) and a not-enough set seals as an object (was null).
     // A report sealed under v6 and re-verified from its body after this deploy
     // will not hash the same -- fail-closed by design; the cache moved with it.
-    v: 7,
+    // v8 (2026-09-02): `oy` added (what older model years ask today). Additive.
+    v: 8,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -96,6 +97,9 @@ export function canonicalReport(a: any): any {
     // rides here, so /verify renders the same sentence as the report.
     mc: a.marketCount ? { st: a.marketCount.state || null, sc: a.marketCount.scope || null, n: nn(a.marketCount.n), b: nn(a.marketCount.below), s: nn(a.marketCount.same), d: nn(a.marketCount.dealers), from: a.marketCount.seenMin || null, to: a.marketCount.seenMax || null, pv: a.marketCount.province || null, x: !!a.marketCount.subjectExcluded, p: nn(a.marketCount.price), tl: a.marketCount.trimLabel || null, pt: a.marketCount.powertrain || null, mn: nn(a.marketCount.modelN), mb: nn(a.marketCount.modelBelow), rs: a.marketCount.reason || null, w: nn(a.marketCount.windowDays), as: a.marketCount.asOf || null, tr: !!a.marketCount.truncated, up: nn(a.marketCount.unpriced) } : null,
     dflt: a.pageDefault ? { st: a.pageDefault.state || null, t: nn(a.pageDefault.termMonths), f: a.pageDefault.paymentFrequency || null, a: nn(a.pageDefault.apr), d: nn(a.pageDefault.downPayment), p: nn(a.pageDefault.paymentAmount), src: a.pageDefault.source || null, at: a.pageDefault.readAt || null, pm: a.pageDefault.purchaseMethod || null, rs: a.pageDefault.reason || null, q: a.pageDefault.qualifier || null, cob: nn(a.pageDefault.costOfBorrowing) } : null,
+    // v8 (2026-09-02): `oy` -- what older model years ask today (the ladder's
+    // basis and every rung), sealed like mc/dflt/marketValue. Additive.
+    oy: a.olderYears ? { st: a.olderYears.state || null, rs: a.olderYears.reason || null, sy: nn(a.olderYears.subjectYear), mk: a.olderYears.make || null, md: a.olderYears.model || null, pv: a.olderYears.province || null, cd: a.olderYears.condition || null, sc: a.olderYears.scope || null, tl: a.olderYears.trimLabel || null, pt: a.olderYears.powertrain || null, nr: nn(a.olderYears.nRead), nd: nn(a.olderYears.need), as: a.olderYears.asOf || null, from: a.olderYears.seenMin || null, to: a.olderYears.seenMax || null, r: (a.olderYears.rungs || []).map((x: any) => ({ y: nn(x.year), n: nn(x.n), rd: nn(x.nRead), m: nn(x.median), lo: nn(x.low), hi: nn(x.high), kn: nn(x.kmKnown), kl: nn(x.kmLow), kh: nn(x.kmHigh), d: nn(x.dealers), from: x.seenMin || null, to: x.seenMax || null })), ms: (a.olderYears.missing || []).map((x: any) => ({ y: nn(x.year), rd: nn(x.nRead), k: nn(x.nKept) })) } : null,
     source: (a.sourceUrl || a.capturedAt) ? { url: a.sourceUrl || null, capturedAt: a.capturedAt || null } : null,
     issuedAt: a.issuedAt || null,
   };

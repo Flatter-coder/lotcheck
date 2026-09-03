@@ -262,6 +262,36 @@ const CASES: Case[] = [
     repaired: ["MARKET_VALUE_HAS_BASIS"],
   },
   {
+    name: "an older-model-year ladder that names its basis is fine",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMin: "2026-08-03", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, kmLow: 11223, kmHigh: 23580, dealers: 2 }, { year: 2024, n: 9, median: 57389, low: 49251, high: 62700, kmLow: 11294, kmHigh: 80308, dealers: 3 }] } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a rung with fewer than five listings, or a year not older than the subject, demotes the ladder",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2026, n: 4, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a rung whose mileage range covers fewer listings than it claims, or that read fewer than it kept, cannot stand",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, nRead: 4, median: 58700, low: 53489, high: 72995, kmKnown: 9, kmLow: 11223, kmHigh: 23580, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a truncated pool can never be a confirmed ladder",
+    analysis: { olderYears: { state: "confirmed", truncated: true, subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a ladder with no province or read date cannot stand",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", condition: "used", scope: "model", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a not-enough older-year ladder is never flagged",
+    analysis: { olderYears: { state: "insufficient", nRead: 3, need: 5, rungs: [] } },
+    flagged: [],
+  },
+  {
     name: "a not-enough comparison is never flagged (no number is being shown)",
     analysis: { marketValue: { average: null, insufficient: true, nRead: 2, need: 5 } },
     flagged: [],

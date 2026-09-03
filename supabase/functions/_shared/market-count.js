@@ -283,3 +283,111 @@ export function likeForLikePool(rows, ctx = {}) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// OLDER MODEL YEARS ("What older model years ask today").
+//
+// The market page's model-year ladder, brought to the report with the same
+// like-for-like rules as the comparison card: same powertrain (page fuel type
+// read too), the same 30-day window, one scope for every rung (same trim, then
+// the trim family, then all trims of the model), at least `minRows` listings
+// per rung, the price-outlier trim within each rung. Every rung is a used
+// listing one to `maxRungs` model years older than the subject. Mileage is
+// NOT windowed (an older car has more kilometres); each rung prints the
+// kilometre range it actually holds instead.
+//
+// rows: fn_market_comps rows for years (subject - maxRungs) .. (subject - 1),
+// condition "used". Returns rungs newest-first, each with the figures the card
+// prints, or `insufficient` with how many like-for-like rows were read.
+function medianOf(sorted) {
+  const n = sorted.length;
+  if (!n) return 0;
+  return n % 2 ? sorted[(n - 1) / 2] : Math.round((sorted[n / 2 - 1] + sorted[n / 2]) / 2);
+}
+function dealersOfRows(set) {
+  const named = set.filter((r) => r.dealerName || r.city);
+  return named.length ? new Set(named.map((r) => String(r.dealerName || r.city).trim().toLowerCase().replace(/\s+/g, " "))).size : null;
+}
+function seenOf(set) {
+  return {
+    seenMin: set.reduce((mn, r) => (r.asOf && (!mn || String(r.asOf) < mn) ? String(r.asOf) : mn), null),
+    seenMax: set.reduce((mx, r) => (r.asOf && (!mx || String(r.asOf) > mx) ? String(r.asOf) : mx), null),
+  };
+}
+export function olderYearsLadder(rows, ctx = {}) {
+  const { model, trim: rawTrim, year, minRows = 5, maxRungs = 3, today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", lowerMult = 0.4, upperMult = 2.0, truncated = false } = ctx;
+  const y = Number(year);
+  const trim = dropModelWords(rawTrim ?? null, model);
+  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
+  const out = {
+    state: "insufficient", reason: null, subjectYear: y > 0 ? y : null, condition: "used",
+    scope: null, trimLabel: null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    nRead: 0, need: minRows, rungs: [], missing: [], truncated: !!truncated, asOf: null, seenMin: null, seenMax: null,
+  };
+  if (!(y > 0)) { out.reason = "year_missing"; return out; }
+  const cutoff = today ? dayMinus(today, windowDays) : null;
+  const compatible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
+    && Number(r.year) > 0 && Number(r.year) < y && Number(r.year) >= y - maxRungs
+    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff)
+    && powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
+  out.nRead = compatible.length;
+  Object.assign(out, seenOf(compatible));
+  out.asOf = out.seenMax;
+  // The RPC returns the CHEAPEST rows first and caps at POOL_CAP, so a pool at
+  // the cap is missing its dearest listings and every middle would print low.
+  // Refuse, the way the count line refuses a truncated pool.
+  if (truncated) { out.reason = "pool_truncated"; return out; }
+  const family = normTrim(trim);
+  const trimOk = !!family && !GENERIC_TRIMS.has(family);
+  const exactKey = trimOk ? fullTrimKey(trim) : "";
+  out.trimLabel = trimOk ? trimLabelOf(trim) : null;
+  const scopes = [
+    ["trim", exactKey ? compatible.filter((r) => fullTrimKey(dropModelWords(r.trim, model)) === exactKey) : []],
+    ["trim_family", trimOk ? compatible.filter((r) => normTrim(dropModelWords(r.trim, model)) === family) : []],
+    ["model", compatible],
+  ];
+  let best = null;
+  for (const [scope, set] of scopes) {
+    const rungs = [], missing = [];
+    for (let d = 1; d <= maxRungs; d++) {
+      const yr = set.filter((r) => Number(r.year) === y - d);
+      // Every model year read at this scope is accounted for: it becomes a rung
+      // or it is named as a year that could not be stated. A year that reached
+      // the floor and then lost rows to the price-outlier trim must never be
+      // reported as "no listings" -- that sentence was false and a dealer
+      // holding those listings could show it.
+      const prices0 = yr.map((r) => Number(r.price)).sort((a, b) => a - b);
+      const m0 = medianOf(prices0);
+      const kept = m0 > 0 ? yr.filter((r) => Number(r.price) >= m0 * lowerMult && Number(r.price) <= m0 * upperMult) : [];
+      if (kept.length >= minRows) {
+        const prices = kept.map((r) => Number(r.price)).sort((a, b) => a - b);
+        const kms = kept.map((r) => Number(r.odometerKm)).filter((v) => Number.isFinite(v) && v > 0);
+        rungs.push({
+          year: y - d, n: kept.length, nRead: yr.length, median: medianOf(prices), low: prices[0], high: prices[prices.length - 1],
+          // The kilometre range is of the listings that SHOW a reading; how many
+          // did is carried so the sentence can never attribute it to the rest.
+          kmKnown: kms.length, kmLow: kms.length ? Math.min(...kms) : null, kmHigh: kms.length ? Math.max(...kms) : null,
+          dealers: dealersOfRows(kept), ...seenOf(kept),
+        });
+      } else if (yr.length > 0) {
+        missing.push({ year: y - d, nRead: yr.length, nKept: kept.length });
+      }
+    }
+    // The scope that states the most model years wins; ties go to the tightest,
+    // which is scope order. A looser scope is only worth taking when it says
+    // more, and whatever it cannot state is named either way. When NO scope can
+    // state a year, the one that read the most rows wins, so the card names the
+    // years it saw instead of falling silent on an empty tighter scope.
+    const read = missing.reduce((t, m) => t + Number(m.nRead), 0);
+    if (!best || rungs.length > best.rungs.length
+        || (rungs.length === 0 && best.rungs.length === 0 && read > best.read)) best = { scope, rungs, missing, read };
+    if (best.rungs.length === maxRungs) break;
+  }
+  if (!best || !best.rungs.length) {
+    const m = best ? best.missing : [];
+    return { ...out, missing: m, scope: best ? best.scope : null };
+  }
+  const all = best.rungs.flatMap((r) => [r.seenMin, r.seenMax]).filter(Boolean).sort();
+  return { ...out, state: "confirmed", scope: best.scope, rungs: best.rungs, missing: best.missing,
+    seenMin: all[0] || null, seenMax: all[all.length - 1] || null, asOf: all[all.length - 1] || null };
+}

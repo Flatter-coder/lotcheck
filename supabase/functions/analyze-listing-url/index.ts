@@ -75,7 +75,7 @@ import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts"
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
-import { fetchMarketValue, servesComps } from "../_shared/marketvalue.ts";
+import { fetchMarketValue, servesComps, fetchOlderYears } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
@@ -115,7 +115,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-02c";  // 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
+const CACHE_VER = "2026-09-02d";  // 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2823,6 +2823,12 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
     );
     if (mv) analysis.marketValue = mv;
   }
+  // What older model years ask today: no VIN needed (the VIN only excludes this
+  // listing from the set when known). Always an object -- unread says why.
+  analysis.olderYears = await fetchOlderYears({
+    year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+    province: resolveJurisdiction(analysis).code, today: todayIso(), fuelType: analysis.fuelType ?? null, vin: analysis.vin ?? null,
+  });
   analysis.vinCheck = validateVin(analysis.vin);
   // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
   // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model

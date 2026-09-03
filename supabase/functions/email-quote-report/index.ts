@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-02c";
+const PDF_BUILDER_VER = "2026-09-02d";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -581,6 +581,35 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       (line.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(line.note)}</div>` : "") });
   }
 
+  // 5b1a -- What older model years ask today: the market page's model-year
+  // ladder as ONE report line (this vehicle / one, two, three years older),
+  // worded by the shared builder (report-lines.js olderYearsLine) from the
+  // sealed ladder (canonical v8 `oy`), with the comparison card's own
+  // like-for-like rules. Renders whenever the ladder exists, INCLUDING the
+  // not-read and not-enough states -- an unmade read still gets its card and
+  // its reason. Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (a.olderYears) {
+    const oyLine = olderYearsLine(a);
+    const oyConfirmed = oyLine.state === "confirmed";
+    const oyLines: Array<{ k: string; v: string }> = Array.isArray(oyLine.lines) ? oyLine.lines : [];
+    const oyRows = oyLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The not-read state carries its reason in the builder's body and no
+    // lines, so the body is what prints when there is no table to print.
+    const oyDetail = oyLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${oyRows}</table>`
+      : (oyLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(oyLine.body)}</div>` : "");
+    deck.push({ label: oyLine.title, tone: oyLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${oyConfirmed ? "#33305A" : "#706D96"};">${escapeHtml(oyLine.headline)}</div>` +
+      oyDetail +
+      (oyLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(oyLine.meta)}</div>` : "") +
+      (oyLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(oyLine.note)}</div>` : "") });
+  }
+
   // 5b1b -- Other listings read: "Of N other listings read, M advertise below
   // this one." Computed once on the server (marketCount), sealed in the
   // canonical (mc), worded by the shared builder. Sits outside the market-value
@@ -729,11 +758,12 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn } from "../_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn } from "../_shared/report-lines.js";
 
-// The count, default and comparison lines (marketCount, pageDefault,
-// marketValue) come from ONE shared builder, so the sentence in this email is
-// the sentence on screen. Nothing in this file writes a new sentence for them:
+// The count, default, comparison and older-model-year lines (marketCount,
+// pageDefault, marketValue, olderYears) come from ONE shared builder, so the
+// sentence in this email is the sentence on screen. Nothing in this file
+// writes a new sentence for them:
 // value / headline / lines / body are used as returned on every surface below
 // (HTML deck, audit rows, PDF narrative). The PDF fonts encode WinAnsi only,
 // so the em dash becomes a hyphen there.
@@ -1553,6 +1583,37 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       advance(3);
     }
     if (line.note) para(noEmDash(line.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- WHAT OLDER MODEL YEARS ASK TODAY ----
+  // The model-year ladder as one line (this vehicle / one, two, three years
+  // older) from the shared builder (report-lines.js olderYearsLine): the words
+  // in this PDF are the words in the HTML deck and on screen. A context section
+  // like the comparison above, and it renders whenever the ladder exists -- the
+  // not-read and not-enough states still get their heading and their reason.
+  // T/para run every string through pdfSafe; the builder's em dashes print as
+  // hyphens (the PDF fonts encode WinAnsi only).
+  if (a.olderYears) {
+    const oyLine = olderYearsLine(a);
+    const oyLines: Array<{ k: string; v: string }> = Array.isArray(oyLine.lines) ? oyLine.lines : [];
+    need(96);
+    kicker(oyLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline can be a
+    // full sentence -- it would run off the right edge of the page.
+    para(noEmDash(oyLine.headline), { size: 13, font: serifB, color: oyLine.state === "confirmed" ? INK : SOFT, lead: 4 });
+    advance(4);
+    if (oyLine.meta) { T(noEmDash(oyLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of oyLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // The not-read state carries its reason in the body and no lines, so the
+    // body is what prints when there is no line to print.
+    if (!oyLines.length && oyLine.body) para(noEmDash(oyLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (oyLine.note) para(noEmDash(oyLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }
 
