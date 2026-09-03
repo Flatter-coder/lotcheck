@@ -858,3 +858,73 @@ export function priceCheckState(a) {
     tone: "neutral",
   };
 }
+
+/**
+ * "Days on lot", worded from what we can actually prove.
+ *
+ * A DURATION IS A CLAIM ABOUT TIME, SO IT NEEDS TWO OBSERVATIONS SEPARATED IN
+ * TIME. Until 2026-09-03 this card printed "N days on the dealer's lot" from a
+ * single `first_seen_on` -- and with the crawl cron off and one successful run
+ * behind us, that number was really "days since we last looked". It also took
+ * the earliest sighting for a VIN across ALL dealers while naming THIS dealer,
+ * so a car that moved lots carried the previous lot's time. Both are the kind
+ * of claim a dealer disproves at the desk, on the one card whose whole purpose
+ * is leverage. [[days-on-lot-needs-real-observations]] [[make-it-dispute-proof]]
+ *
+ * Three states, and the middle one is the point: one sighting is a DATE, not a
+ * duration, and saying so is better than saying nothing.
+ */
+export function daysOnLotLine(a) {
+  const d = a?.daysOnLot;
+  if (!d || !d.since) return null;
+  const seen = fmtDateEn(d.since);
+  const obs = Number(d.observations) || 0;
+
+  if (d.state === "single_sighting" || !(Number(d.days) > 0)) {
+    return {
+      value: "FIRST SEEN " + seen.toUpperCase(),
+      line: `We first saw this car in our own tracking on ${seen}. That is a single sighting, so it tells you nothing yet about how long it has been on the lot — we will know once we have seen it on two separate days. Ask the dealer directly how long they have had it, and ask to see the in-service or acquisition date.`,
+      tone: "muted",
+    };
+  }
+
+  const days = Math.round(Number(d.days));
+  const months = days >= 60 ? Math.round(days / 30) : null;
+  const gap = Number(d.unobservedDaysInSpan) || 0;
+  // A car that vanished from the lot and came back has not been sitting. Naming
+  // the gap is what keeps "N days" from quietly meaning "N continuous days".
+  const gapClause = gap > 0
+    ? ` We did not see it on ${gap.toLocaleString()} day${gap === 1 ? "" : "s"} inside that window, so it may not have been listed the whole time.`
+    : "";
+  return {
+    value: `${days.toLocaleString()} DAY${days === 1 ? "" : "S"}+`,
+    line: `We have seen this exact car listed by this dealer on ${obs.toLocaleString()} separate day${obs === 1 ? "" : "s"}, first on ${seen}${d.lastSeenOn ? ` and most recently on ${fmtDateEn(d.lastSeenOn)}` : ""} — ${months ? `about ${months} months` : `${days.toLocaleString()} days`}.${gapClause} It may have been on the lot before we first saw it, so treat this as a floor, not a total. Dealers pay interest on unsold stock every week.`,
+    tone: "flag",
+  };
+}
+
+/**
+ * The same VIN advertised by ANOTHER dealer. A stronger, more checkable fact
+ * than a day count, and one no aggregator will hand a buyer: found live on
+ * 2026-09-03, VIN KMUHBESB0SU232048 sat at Okotoks Chevrolet at $68,890 and, a
+ * fortnight later, at Genesis North Calgary at $65,756 and certified.
+ *
+ * Never states WHY it moved and never says "the dealer is hiding" anything --
+ * cars move between lots for ordinary reasons. It reports what was advertised,
+ * by whom, and when. [[no-accusation-language]]
+ */
+export function sameVinElsewhereLine(a) {
+  const rows = Array.isArray(a?.sameVinElsewhere) ? a.sameVinElsewhere.filter(Boolean) : [];
+  if (!rows.length) return null;
+  const parts = rows.slice(0, 2).map((r) => {
+    const who = [r.dealerName, r.city].filter(Boolean).join(", ") || "another Alberta dealer";
+    const px = Number(r.listPrice) > 0 ? ` at ${fmtMoney(Number(r.listPrice))}` : "";
+    const when = r.lastSeenOn ? ` (last read ${fmtDateEn(r.lastSeenOn)})` : "";
+    return `${who}${px}${when}${r.certified ? ", certified" : ""}`;
+  });
+  return {
+    value: rows.length === 1 ? "ALSO SEEN AT 1 OTHER DEALER" : `ALSO SEEN AT ${rows.length} OTHER DEALERS`,
+    line: `We have read this exact VIN on another Alberta dealer's own pages: ${parts.join("; ")}. Cars move between lots for ordinary reasons, so this is not a mark against anyone — but it is worth asking how long they have had it and what it was advertised at before.`,
+    tone: "muted",
+  };
+}
