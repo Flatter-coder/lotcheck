@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03e";
+const PDF_BUILDER_VER = "2026-09-03f";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -853,7 +853,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { recallDigest, recallsShownNote, warrantyLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1057,8 +1057,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   else if (a.evapRebate && a.evapRebate.ineligibleReason) P.push({ t: "EV / PHEV rebate", v: "NOT ELIGIBLE", tone: "muted" });
   else if (a.fuelType === "BEV" || a.fuelType === "PHEV") { const over = (Number(a.quotedPrice) || Number(a.msrp) || 0) > 50000; P.push({ t: "EV / PHEV rebate", v: over ? "OVER $50K CAP" : "CHECK ELIGIBILITY", tone: "muted" }); }
   else P.push({ t: "EV / PHEV rebate", v: "N/A (GAS)", tone: "muted" });
-  if (a.standardWarranty?.coverage) P.push({ t: "Included warranty", v: "INCLUDED", tone: "pass" });
-  else P.push({ t: "Included warranty", v: "SEE FACTORY TERMS", tone: "muted" });
+  { const wl = warrantyLine(a); P.push({ t: "Included warranty", v: wl.value, tone: wl.tone }); }
+
   // THREE states, not two. "NOT FOUND" used to cover a lookup that never ran,
   // which printed "No public reviews were found" about Charlesglen Toyota --
   // a dealer with 4.7 stars from 5,930 Google reviews.
@@ -1201,9 +1201,8 @@ function pointExplain(t: string, a: any): string | null {
       if (a.fuelType === "BEV" || a.fuelType === "PHEV") return "This electric/plug-in doesn't qualify (price cap or model list). Don't let anyone imply a government discount that isn't there.";
       return "Rebates apply only to electric and plug-in vehicles - none is in play on a gas vehicle.";
     case "Included warranty":
-      return a.standardWarranty?.coverage
-        ? "Every new vehicle already includes the factory warranty at no charge. When the finance office pitches an extended warranty, remember this coverage is already yours for free."
-        : "Factory warranty terms couldn't be confirmed from this listing. Ask exactly what's covered and for how long, in writing, before considering paid coverage.";
+      return warrantyLine(a).line;
+
     case "Dealer reputation":
       return dealerReputationPoint(a.dealerSentiment).explain;
     // Both lines gloss themselves: the builder's body IS the plain-language
@@ -1875,12 +1874,24 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     kicker("OPEN RECALLS - TRANSPORT CANADA");
     para("Public safety-recall campaigns Transport Canada publishes for this year, make and model - government data, not our opinion. Confirm by VIN with the dealer; every listed repair is free of charge.", { size: 9, color: SOFT, lead: 4 });
     advance(4);
-    for (const it of a.recalls.items.slice(0, 5)) {
-      const yr = it.date ? " (" + (new Date(it.date).getFullYear() || "") + ")" : "";
-      need(16); T("-  " + (it.system || "Recall") + yr, { size: 10, font: serifB, color: CORAL }); y -= 14;
-      if (it.summary) para(it.summary, { size: 9, color: SOFT, lead: 3, x: M + 12, maxW: W - 12 });
+    // EVERY recall, not the first five. A slice(0, 5) under a printed count of
+    // seven is the silent cap fixed on 2026-08-20 growing back in a second
+    // place, and a recall dropped to save paper is the one failure this card
+    // cannot have. [[recalls-detail-list-must-match-count]] [[make-recalls-fail-safe]]
+    //
+    // Each is reduced to the campaign and the SAFETY RISK -- the sentence that
+    // changes what a buyer does. Transport Canada's full three-paragraph text
+    // is public and one click away, which is where it should be read.
+    const shown = a.recalls.items.length;
+    for (const it of a.recalls.items) {
+      const d = recallDigest(it);
+      if (!d) continue;
+      need(16); T("-  " + d.title, { size: 10, font: serifB, color: CORAL }); y -= 14;
+      para(d.line, { size: 9, color: SOFT, lead: 3, x: M + 12, maxW: W - 12 });
       advance(3);
     }
+    const capNote = recallsShownNote(a.recalls.count, shown);
+    if (capNote) { advance(2); para(capNote, { size: 9, color: SOFT, lead: 3 }); }
     rule();
   }
 

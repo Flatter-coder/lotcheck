@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { warrantyLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8403,8 +8403,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : notEv ? `N/A (${String(eft).toUpperCase()})` : "NOT DETERMINED");
     P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : notEv ? `N/A — ${String(eft).toLowerCase()} vehicle` : "Not determined")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : notEv ? "Federal and provincial EV incentives don't apply to this drivetrain." : "We couldn't confirm this vehicle's drivetrain from the listing, so no rebate claim is made — ask the dealer to confirm it in writing.")} /> }); }
   // 9 Included warranty
-  { const w = a.standardWarranty; const tone = w?.coverage ? "pass" : "muted"; const v = w?.coverage ? "INCLUDED" : "NOT SHOWN";
-    P.push({ title: "Included warranty", tone, v, body: <Simple big={w?.coverage ? "✓ Manufacturer warranty" : "Not shown"} c={w?.coverage ? TEAL : MUT2} note={w?.coverage || "No standard warranty coverage was stated on the quote."} /> }); }
+  // Worded once in report-lines.js. On a USED car this reads what is LEFT of
+  // the factory warranty from our own manufacturer_warranties catalogue -- the
+  // answer applyRemainingWarranty already computed and only this file ever
+  // rendered. [[report-features-all-views]]
+  { const wl = warrantyLine(a); const w = a.standardWarranty; const tone = wl.tone; const v = wl.value;
+    P.push({ title: "Included warranty", tone, v, body: <Simple big={wl.value} c={wl.tone === "pass" ? TEAL : MUT2} note={wl.line} /> }); }
   // 10 Dealer reputation
   { const d = a.dealerSentiment; const rated = Number(d?.rating) > 0; const ran = d?.checked === true || rated; const tone = rated ? (Number(d.rating) >= 4 ? "pass" : "muted") : "muted"; /* three states: a lookup that never ran must NOT read as "no reviews exist" -- Charlesglen has 5,930 */ const rc = d && d.reviewCount != null && Number.isFinite(Number(d.reviewCount)) ? Number(d.reviewCount) : null;
     const v = rated ? Number(d.rating).toFixed(1) + "★" + (rc == null ? "" : " / " + rc.toLocaleString()) : (ran ? "NONE FOUND" : "NOT CHECKED");
@@ -8522,9 +8526,11 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
         : evap.effectiveFuelType
           ? `Rebates only apply to electric and plug-in vehicles — this one is ${String(evap.effectiveFuelType).toLowerCase()}, so there's no government money in play.`
           : "We couldn't confirm this vehicle's drivetrain from the listing, so we make no rebate claim either way — ask the dealer to state it in writing.",
-    "Included warranty": a.standardWarranty?.coverage
-      ? "Every new vehicle already includes the manufacturer's factory warranty at no charge — shown here. When the finance office pitches an 'extended warranty,' remember this coverage is already yours for free."
-      : "We couldn't confirm the factory warranty terms from this listing. Every new vehicle includes one — ask exactly what's covered and for how long, in writing, before considering any paid coverage.",
+    // Worded once in report-lines.js (warrantyLine). The old text here only
+    // knew about a NEW car's included warranty, so every used report read
+    // "we couldn't confirm the factory warranty terms" while the used path had
+    // already worked out exactly how much cover was left.
+    "Included warranty": warrantyLine(a).line,
     "Dealer reputation": a.dealerSentiment?.rating
       ? `This is the dealer's public Google rating from real customers — ${Number(a.dealerSentiment.rating).toFixed(1)} stars${Number(a.dealerSentiment.reviewCount) > 0 ? ` over ${Number(a.dealerSentiment.reviewCount).toLocaleString()} reviews` : ""}. It tells you how they treat people after the handshake.`
       : "We couldn't find public reviews for this dealer. That's not a red flag by itself — but walk in knowing you have no track record to lean on.",

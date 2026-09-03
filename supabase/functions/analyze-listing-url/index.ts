@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03i";  // 03i: the dealer's own observed price moves are read back and shown -- listing_price_history has logged them since 08-11 and nothing ever displayed one.
+const CACHE_VER = "2026-09-03j";  // 03j: used cars now show REMAINING factory warranty; every recall reaches the PDF; the market-count chip names what was read; a short promo term says so.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different

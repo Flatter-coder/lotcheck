@@ -99,13 +99,22 @@ export function computeReferenceFinancing(analysis: any): ReferenceFinancing | n
 
   const make = analysis?.make || "the manufacturer";
   const rateLabel = `${make}'s published ${apr}% over ${termMonths} months`;
+  // A SHORT PROMO TERM MAKES A BIG MONTHLY NUMBER, and the report printed
+  // "about ,881.86/month ... use it as the number to beat" off a genuine
+  // 4.9%-over-24-months Genesis promotion. The term was real; nobody
+  // benchmarks a ,882 payment, so the line created a question instead of
+  // answering one. The comparable thing is the RATE. Say that where the term
+  // is short. [[present-without-creating-questions]]
+  const shortTerm = termMonths <= 36
+    ? ` That is a ${termMonths}-month promotional term, which is short, so the monthly figure is large -- the number to take to the dealer is the RATE, not this payment.`
+    : "";
   let note: string;
   if (monthlyDelta !== null && atAsking && atManufacturerPrice) {
     note = monthlyDelta > 0
-      ? `This dealer quotes no financing, so here is the arithmetic on ${rateLabel}: their asking price works out to about $${atAsking.monthly.toLocaleString()}/month, against $${atManufacturerPrice.monthly.toLocaleString()}/month at ${make}'s own all-in price — about $${Math.abs(monthlyDelta).toLocaleString()} more every month, roughly $${Math.abs(lifetimeDelta ?? 0).toLocaleString()} over the full term. Before tax, down payment or trade-in.`
-      : `This dealer quotes no financing. On ${rateLabel}, their asking price works out to about $${atAsking.monthly.toLocaleString()}/month — at or below the $${atManufacturerPrice.monthly.toLocaleString()}/month that ${make}'s own all-in price would cost on the same terms. Before tax, down payment or trade-in.`;
+      ? `This dealer quotes no financing, so here is the arithmetic on ${rateLabel}: their asking price works out to about $${atAsking.monthly.toLocaleString()}/month, against $${atManufacturerPrice.monthly.toLocaleString()}/month at ${make}'s own all-in price — about $${Math.abs(monthlyDelta).toLocaleString()} more every month, roughly $${Math.abs(lifetimeDelta ?? 0).toLocaleString()} over the full term. Before tax, down payment or trade-in.${shortTerm}`
+      : `This dealer quotes no financing. On ${rateLabel}, their asking price works out to about $${atAsking.monthly.toLocaleString()}/month — at or below the $${atManufacturerPrice.monthly.toLocaleString()}/month that ${make}'s own all-in price would cost on the same terms. Before tax, down payment or trade-in.${shortTerm}`;
   } else if (atAsking) {
-    note = `This dealer quotes no financing. On ${rateLabel}, their asking price works out to about $${atAsking.monthly.toLocaleString()}/month before tax, down payment or trade-in — use it as the number to beat, and ask what rate they will actually write.`;
+    note = `This dealer quotes no financing. On ${rateLabel}, their asking price works out to about $${atAsking.monthly.toLocaleString()}/month before tax, down payment or trade-in.${shortTerm} Use the rate as the number to beat, and ask what rate they will actually write.`;
   } else {
     note = `${make} publishes ${apr}% over ${termMonths} months for this model. This dealer quotes no financing, so ask them to quote against that rate.`;
   }
