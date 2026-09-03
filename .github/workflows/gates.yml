@@ -470,6 +470,16 @@ jobs:
       # instances is what let it come back nine times; this refuses the shape.
       - name: A missing number is never read as 0
         run: npm run check:coercion
+      # An archived MSRP is the denominator of every price comparison we make
+      # about a used car, and unlike a live scrape there is nothing to
+      # cross-check it against tomorrow — the page will say the same thing
+      # forever, right or wrong. The parser is pinned offline against three real
+      # Toyota grade ladders read by hand, plus the rule that decides whether a
+      # row may be published at all: a price whose BASIS we cannot name is
+      # refused, because storing a freight-inclusive figure as MSRP would be
+      # wrong by ~$2,000 in the dealer's favour on every comparison.
+      - name: Archived MSRP parser and its refusals
+        run: npm run test:archived-msrp
       - name: The shared reader keeps absences (read-num)
         run: npm run test:read-num
       # Two promises to the buyer that are control flow, not data: a report
