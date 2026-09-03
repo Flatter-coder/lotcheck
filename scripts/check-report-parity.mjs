@@ -167,6 +167,20 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-03 after report LC-FE77-C58 printed "No financing rate is
+    // advertised" on page 1 and "3.9% APR ... read from the page's own text"
+    // on page 4. One wording, from report-lines.js, on both surfaces.
+    field: "financing APR note (never contradicts the payment card)",
+    app: {
+      "shared wording":  "financingAprNote(a,",
+      "shared value":    "financingAprValue(a, dr,",
+    },
+    email: {
+      "shared wording":  "financingAprNote(a,",
+      "shared value":    "financingAprValue(a, null, null, false)",
+    },
+  },
+  {
     // Added 2026-09-03. "Your premium after this purchase": what a change of
     // vehicle does to a renewal, and what the two-million-dollar liability
     // limit typically costs. Same Alberta gate as its sibling, worded once in

@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8354,7 +8354,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     P.push({ title: "Add-ons & fee audit", tone, v, body }); }
   // 4 Financing APR
   { const dr = (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
-    const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" }; const tone = high ? "flag" : "muted"; const v = dr != null ? dr + "%" + (high ? " HIGH" : "") : (mr != null ? mr + "% OEM REF" : "NONE ADVERTISED");
+    const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" }; const tone = high ? "flag" : "muted"; const v = financingAprValue(a, dr, mr ?? null, high);
     const body = (dr != null || a.financing?.paymentAmount) ? <div>{a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}{dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}{high ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div> : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}</div> : <Simple big="Not shown" c={MUT2} note="No financing rate was quoted." />;
     P.push({ title: "Financing APR", tone, v, body }); }
   // 5 Financing math
@@ -8459,9 +8459,9 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     "Add-ons & fee audit": (a.addOns || []).length
       ? "These are things the DEALER added on top of the car's price — packages, accessories, protection products. They're where dealers make extra margin, and you can say no to most of them. Every line here is one you're allowed to question."
       : "The listing doesn't itemize any dealer extras. That doesn't mean there are none — ask for the full out-the-door breakdown in writing before you agree to anything.",
-    "Financing APR": (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source))
-      ? `APR is the yearly interest rate on the loan. This dealer advertises ${a.financeRates.dealer.apr}% — compare it against your own bank or credit union before accepting, because dealer rates often carry hidden markup.`
-      : "The listing doesn't advertise a financing rate. Get the APR in writing and compare it with your own bank before you sign anything in the finance office.",
+    // Worded once in report-lines.js so this sentence can never contradict the
+    // Payment starting point card on the same report. [[report-features-all-views]]
+    "Financing APR": financingAprNote(a, (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null),
     "Financing math": a.financingCheck?.checked
       ? (a.financingCheck.consistent
         ? "We recomputed the advertised payment from the price, rate and term — the numbers line up. No hidden amount is baked into the payment."

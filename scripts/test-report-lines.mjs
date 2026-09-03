@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -547,6 +547,31 @@ console.log("\n-- insurancePremiumLine --");
   check("it says nothing about this listing -- it is regulator copy, identical for every Alberta report", JSON.stringify(insurancePremiumLine({ marketCount: { province: "AB" }, quotedPrice: 69898, pageDefault: { state: "confirmed", termMonths: 84 } })) === JSON.stringify(l));
 }
 
+// ── 3f. the financing APR note never contradicts the payment card ─────────────
+console.log("\n-- financingAprNote --");
+{
+  // The real report that exposed this: LC-FE77-C58, 2026 Lexus RX 350 at Lexus
+  // of Royal Oak. The page's calculator opened at 3.9%; the advertised-rate
+  // reader did not credit the source; page 1 said no rate was advertised.
+  const RX = { pageDefault: { state: "confirmed", termMonths: 72, paymentFrequency: "biweekly", apr: 3.9, paymentAmount: 535, source: "edealer_js" } };
+  const note = financingAprNote(RX, null);
+  check("a page whose calculator opens at a rate is never told it advertises none", !/No financing rate is advertised/.test(note) && /This page's payment calculator opens at 3\.9%/.test(note), note);
+  check("... and the rate is still not presented as the dealer's advertised APR", /not the same as a rate confirmed from the page's own listing data/.test(note) && !/This dealer advertises/.test(note), note);
+  check("... nor is the tile allowed to say NONE ADVERTISED", financingAprValue(RX, null, null, false) === "3.9% ON THIS PAGE" && financingAprValue(RX, null, 3.9, false) === "3.9% OEM REF", financingAprValue(RX, null, null, false));
+  const trusted = financingAprNote(RX, 6.99);
+  check("a trusted dealer rate still leads, and names no motive", /^APR is the yearly interest rate on the loan\. This dealer advertises 6\.99%/.test(trusted) && /often carry a markup/.test(trusted) && !/hidden/.test(trusted), trusted);
+  check("the trusted tile keeps its HIGH flag", financingAprValue(RX, 6.99, 3.9, true) === "6.99% HIGH" && financingAprValue(RX, 6.99, 3.9, false) === "6.99%");
+  for (const pd of [undefined, null, { state: "absent", reason: "none_found" }, { state: "unchecked" }, { state: "confirmed", apr: null }, { state: "confirmed", apr: "abc" }]) {
+    const l = financingAprNote({ pageDefault: pd }, null);
+    check(`no page rate (${JSON.stringify(pd)}) -> the original sentence stands`, /^No financing rate is advertised\./.test(l) && financingAprValue({ pageDefault: pd }, null, null, false) === "NONE ADVERTISED", l);
+  }
+  check("a real 0% promotional rate on the page is a rate, not an absence", pageDefaultApr({ pageDefault: { state: "confirmed", apr: 0 } }) === 0 && financingAprValue({ pageDefault: { state: "confirmed", apr: 0 } }, null, null, false) === "0% ON THIS PAGE");
+  check("the sealed compact form reads the same rate", pageDefaultApr({ dflt: { st: "confirmed", a: 3.9 } }) === 3.9 && pageDefaultApr({ dflt: { st: "absent" } }) === null);
+  // The regression this locks: the two cards on ONE report must agree.
+  const pd = pageDefaultLine(RX);
+  check("on one report, the payment card and the APR note tell the same story", /3\.9%/.test(pd.body) && /3\.9%/.test(note) && !(/3\.9%/.test(pd.body) && /No financing rate is advertised/.test(note)), `${pd.body.slice(0, 60)} | ${note.slice(0, 60)}`);
+}
+
 // ── 4. every emitted sentence passes the copy gate's own rules ───────────────
 console.log("\n-- copy sweep (every state x both lines) --");
 {
@@ -598,6 +623,8 @@ console.log("\n-- copy sweep (every state x both lines) --");
     const l = insurancePremiumLine({ marketCount: { province: "AB" } });
     texts.push(l.value, l.headline, l.body, l.title, l.meta, l.note, l.explain, ...l.lines.map((x) => `${x.k}: ${x.v}`));
   }
+  for (const d of [null, 6.99]) texts.push(financingAprNote({ pageDefault: { state: "confirmed", apr: 3.9 } }, d));
+  texts.push(financingAprNote({}, null));
   let hits = 0;
   for (const t of texts) for (const re of FORBIDDEN) if (re.test(t)) { hits++; console.log(`    banned: ${re} in "${t}"`); }
   check(`${texts.length} strings, 0 banned-word hits`, hits === 0, `${hits} hit(s)`);
