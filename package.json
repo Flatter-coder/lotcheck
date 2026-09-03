@@ -104,7 +104,8 @@
     "test:dealer-line-items": "node --experimental-strip-types scripts/test-dealer-line-items.mjs",
     "test:reputation-budget": "node scripts/test-reputation-budget.mjs",
     "test:fee-stack": "node scripts/test-fee-stack.mjs",
-    "test:share-round-trip": "node scripts/test-share-round-trip.mjs"
+    "test:share-round-trip": "node scripts/test-share-round-trip.mjs",
+    "test:archived-msrp": "node scripts/test-archived-msrp.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
