@@ -145,8 +145,14 @@ export function marketCountLine(a) {
         : mc.reason === "pool_truncated"
           ? `More than ${n} were read, more than this count can hold, so no below-this-one count is made — ask the dealer how this price compares with other units advertised in ${prov}.`
           : "This page's asking price could not be verified from the page's own data, so no below-this-one count is made — ask the dealer for the all-in price in writing.";
-    out.value = "NOT COUNTED";
-    out.headline = "Not counted";
+    // "NOT COUNTED" over a body that says "1 listing was read" is one chip
+    // contradicting the sentence under it -- and it leaves the reader asking
+    // the question the chip was meant to answer: not counted out of WHAT? The
+    // count we DID make is the number we read; the one we could not make is
+    // how many undercut this price. Say the first.
+    // [[present-without-creating-questions]]
+    out.value = n > 0 ? `${n} READ` : "NOT COUNTED";
+    out.headline = n > 0 ? `${n} read, not counted` : "Not counted";
     out.meta = "Not counted";
     out.body = `${readSentence} ${reason}`;
     return out;
@@ -973,4 +979,122 @@ export function priceMovesLine(a) {
     line: `This dealer advertised this car at ${fmtMoney(from)} on ${fmtDateEn(first.observedOn)} and ${fmtMoney(to)} on ${fmtDateEn(last.observedOn)} — ${down ? "down" : "up"} ${size}${rows.length > 2 ? `, across ${rows.length.toLocaleString()} price changes we recorded` : ""}. We do not read every dealer every day, so treat this as the moves we saw rather than a complete history.${down ? " A price that has already moved once has room in it that the seller has shown you." : ""}`,
     tone: down ? "flag" : "muted",
   };
+}
+
+/**
+ * "Included warranty" — and on a USED car, how much of it is left.
+ *
+ * THE DEFECT THIS ENDS. Point 9 read `standardWarranty`, which
+ * applyVerifiedWarranty refuses to populate unless
+ * `vehicleCondition === "new"`. So EVERY used-car report said "Factory warranty
+ * terms couldn't be confirmed from this listing" — while the used path,
+ * applyRemainingWarranty, had already looked the make up in our own
+ * manufacturer_warranties table and worked out exactly how much cover was left.
+ * That answer rendered in src/App.jsx and NOWHERE else: not the emailed deck,
+ * not the PDF, which are the copies a buyer actually carries into the
+ * dealership. Built, computed, and shown to almost nobody.
+ *
+ * On a real report — a 2025 Genesis GV80 with 9,994 km — that was roughly four
+ * years and ninety thousand kilometres of transferable factory cover, worth
+ * real money against the extended warranty the finance office will pitch, and
+ * the PDF said we could not confirm any of it.
+ *
+ * HONESTY. The clock really starts on the in-service date, and we only have the
+ * model year, so this can be out by up to about a year. It is labelled an
+ * estimate every time and always tells the buyer to ask for the in-service
+ * date. A warranty ends at whichever limit comes FIRST, time or distance, so
+ * both are stated and neither is quietly dropped.
+ */
+export function warrantyLine(a) {
+  const std = a?.standardWarranty;
+  const rw = a?.remainingWarranty;
+  const isNew = String(a?.vehicleCondition || "").toLowerCase() === "new";
+
+  if (isNew && std?.coverage) {
+    return {
+      value: "INCLUDED",
+      line: `Every new vehicle already includes the manufacturer's factory warranty at no charge: ${std.coverage}. When the finance office pitches an extended warranty, remember this coverage is already yours for free.`,
+      tone: "pass",
+    };
+  }
+
+  // The used-car answer, from our own catalogue of the make's official terms.
+  const terms = rw ? [
+    ["comprehensive", rw.basic],
+    ["powertrain", rw.powertrain],
+    ["corrosion", rw.corrosion],
+  ].filter(([, t]) => t && t.term) : [];
+
+  if (terms.length) {
+    const live = terms.filter(([, t]) => t.active);
+    const say = (t) => {
+      const yrs = Math.max(0, Math.round(t.yearsLeft * 10) / 10);
+      const yTxt = yrs >= 1 ? `about ${yrs % 1 === 0 ? yrs : yrs.toFixed(1)} year${yrs === 1 ? "" : "s"}` : "under a year";
+      if (t.kmUnlimited) return `${yTxt} (distance unlimited)`;
+      if (!t.odometerKnown) return `${yTxt}; the distance left cannot be worked out because this listing publishes no odometer reading`;
+      const km = Math.max(0, Math.round(t.kmLeft));
+      return `${yTxt} or about ${km.toLocaleString()} km, whichever comes first`;
+    };
+    if (!live.length) {
+      return {
+        value: "LIKELY EXPIRED",
+        line: `${rw.make || "The manufacturer"}'s factory warranty on a ${rw.modelYear} is ${terms.map(([n, t]) => `${t.term} ${n}`).join(", ")}, and on this car's model year and odometer all of it looks to have run out. That is an estimate from the model year, not the in-service date, so ask the dealer for the in-service date in writing — it can move this by up to a year. Any cover being sold to you now is a purchased product, not the factory's.`,
+        tone: "muted",
+      };
+    }
+    const parts = live.map(([name, t]) => `${name}: ${say(t)}`);
+    return {
+      value: "COVER REMAINING",
+      line: `This is a used vehicle, so what matters is what is LEFT of the factory warranty, and ${rw.make || "the manufacturer"} publishes ${live.map(([n, t]) => `${t.term} ${n}`).join(", ")}. On this car's model year and odometer that leaves — ${parts.join("; ")}. Estimated from the ${rw.modelYear} model year, not the in-service date, so ask for the in-service date in writing; it can move these by up to a year. Check what is still covered before you pay for an extended warranty that overlaps it.`,
+      tone: "pass",
+    };
+  }
+
+  return {
+    value: "SEE FACTORY TERMS",
+    line: "We could not confirm the factory warranty terms for this vehicle. Ask exactly what is covered, for how long, and from what date — in writing — before considering any paid coverage.",
+    tone: "muted",
+  };
+}
+
+/**
+ * A recall, reduced to the two things a buyer acts on: what it is, and what it
+ * could do. Transport Canada's own text runs three paragraphs per campaign
+ * (Issue / Safety Risk / Corrective Actions), so a five-recall vehicle put four
+ * pages of government prose into a PDF a person is meant to read in a car park.
+ *
+ * The full text is public and one click away at Transport Canada, which is
+ * where a buyer should read it anyway -- so the report carries the campaign and
+ * the risk, and says where the rest is. What it must NEVER do is drop a recall
+ * to save space: the count and the list have to agree, and a silent
+ * `slice(0, 5)` under a printed "7 open recalls" is the defect fixed on
+ * 2026-08-20 growing back. [[recalls-detail-list-must-match-count]]
+ */
+export function recallDigest(item) {
+  if (!item) return null;
+  const yr = item.date ? new Date(item.date).getFullYear() : null;
+  const title = `${item.system || "Recall"}${yr ? ` (${yr})` : ""}`;
+  const text = String(item.summary || "").replace(/\s+/g, " ").trim();
+  // Transport Canada labels the consequence "Safety Risk:" (occasionally
+  // "Safety risk:"). That sentence is the one that changes what a buyer does.
+  const m = text.match(/Safety\s*[Rr]isk\s*:\s*([^]*?)(?:\s*Corrective\s*Actions?\s*:|$)/);
+  const risk = m ? m[1].replace(/\s+/g, " ").trim() : "";
+  const issue = text.replace(/\s*Safety\s*[Rr]isk\s*:[^]*$/, "").replace(/^Issue\s*:\s*/i, "").trim();
+  return {
+    title,
+    risk: risk || null,
+    // Fall back to the issue when Transport Canada did not label a risk, so a
+    // recall never prints as a bare heading with nothing under it.
+    line: risk || (issue ? issue.slice(0, 300) : "Transport Canada publishes no summary for this campaign."),
+  };
+}
+
+/**
+ * Says out loud when a list is shorter than its own count. A cap is defensible;
+ * a SILENT cap is how "9 open recalls" came to show six.
+ */
+export function recallsShownNote(count, shown) {
+  const c = Number(count) || 0, s = Number(shown) || 0;
+  if (!c || s >= c) return null;
+  return `${c.toLocaleString()} open recalls are on record for this vehicle and ${s.toLocaleString()} are detailed here. Confirm the full list by VIN with Transport Canada before you sign.`;
 }

@@ -217,7 +217,13 @@ console.log("\n-- report-lines --");
   const notEx = marketCountLine({ marketCount: { ...a.marketCount, subjectExcluded: false } });
   check("LINE 1 without VIN exclusion drops 'other' and says the vehicle may be among them", !/other 2027/.test(notEx.body) && /may be among them/.test(notEx.body), notEx.body);
   const nc = marketCountLine({ marketCount: computeMarketCount(ROWS, { ...SUBJ, priceVerified: false }) });
-  check("LINE 1 not_counted says why and asks the dealer", nc.value === "NOT COUNTED" && /12 other 2027 Honda HR-V Sport listings were read/.test(nc.body) && /could not be verified/.test(nc.body) && /ask the dealer/.test(nc.body), nc.body);
+  // This used to pin value === "NOT COUNTED" while its own next clause asserted
+  // the body says "12 ... were read". The test was encoding the contradiction:
+  // a chip reading NOT COUNTED over a sentence naming twelve listings leaves
+  // the reader asking the question the chip was meant to answer. The count we
+  // DID make is what was read; the one we could not make is how many undercut
+  // this price. [[present-without-creating-questions]]
+  check("LINE 1 not_counted names what WAS read, and says why no count was made", nc.value === "12 READ" && /12 other 2027 Honda HR-V Sport listings were read/.test(nc.body) && /could not be verified/.test(nc.body) && /ask the dealer/.test(nc.body), nc.body);
   const cont = marketCountLine({ marketCount: computeMarketCount(ROWS, { ...SUBJ, contingent: true }) });
   check("LINE 1 price_contingent has its own sentence", /depends on financing with the dealer/.test(cont.body), cont.body);
   const ab = marketCountLine({ marketCount: computeMarketCount([], SUBJ) });
@@ -639,7 +645,7 @@ console.log("\n-- copy sweep (every state x both lines) --");
   check(`${texts.length} strings, 0 banned-word hits`, hits === 0, `${hits} hit(s)`);
   check("every state renders a non-empty string", texts.every((t) => typeof t === "string" && t.length > 0), texts.filter((t) => typeof t !== "string" || !t.length).length + " empty");
 }
-
+
 // ── price moves: the half of the price-drop watch that needs no consent ──────
 console.log("\n-- advertised price moves --");
 {
