@@ -135,6 +135,7 @@ async function verify(args) {
   }
   const snap = JSON.parse(readFileSync(SNAP, "utf8"));
   let failed = false;
+  const failedTables = [];   // named, so the job summary can say WHAT went stale
   for (const [short, table] of Object.entries(TABLES)) {
     const level = args[short];
     if (!level || level === "skip") continue;
@@ -154,12 +155,27 @@ async function verify(args) {
       } else {
         const msg = `${make} / ${table}: ${v.reasons.join("; ")}`;
         console.log(`::${v.status === "fail" ? "error" : "warning"} title=Catalog guard — ${step}::${msg}`);
-        if (v.status === "fail") failed = true;
+        if (v.status === "fail") { failed = true; failedTables.push(`${make}/${table}`); }
       }
     }
   }
   if (failed) {
     console.error(`Guard FAILED for step "${step}" — the step above ran green but did not refresh these rows.`);
+    // THE HEADLINE HAS TO COUNT THIS. failed-makes.txt is appended by the
+    // SCRAPER steps only (`node scrape-x.mjs || echo "x" >> ...`), so a make
+    // whose scraper exits 0 while writing nothing never reached the summary.
+    // On 2026-09-03 the job reported "1 make(s) did not write: honda" while the
+    // guard annotations showed SIX makes across TEN tables stale — Honda,
+    // Acura, Buick, Cadillac, Chevrolet and GMC, the last since 2026-08-08.
+    // Anyone reading that mail would have fixed Honda and believed they were
+    // done. A summary that undercounts by 6x is worse than no summary, because
+    // it is trusted. The guard knows exactly what failed, so the guard records
+    // it — one change here instead of a line on each of 26 workflow steps.
+    const f = process.env.RUNNER_TEMP && join(process.env.RUNNER_TEMP, "failed-makes.txt");
+    if (f) {
+      try { appendFileSync(f, `${step} (guard: ${failedTables.join(", ") || "no fresh rows"})\n`); }
+      catch (e) { console.warn(`guard: could not record the failure for the summary: ${e.message}`); }
+    }
     process.exit(1);
   }
 }
