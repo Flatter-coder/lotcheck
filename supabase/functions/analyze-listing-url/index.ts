@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03g";  // 03g: the price-read sentence reaches the screen too, not just the email and the PDF.
+const CACHE_VER = "2026-09-03h";  // 03h: days-on-lot is scoped to THIS dealer and gated on two observations; one sighting is published as a date, not a duration.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1978,43 +1978,81 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
     const vin = String(analysis?.vin || "").toUpperCase();
     if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return;     // no VIN, nothing to join on
 
-    // Two own sources, best first. vehicle_listing carries the dealer's own
-    // inventory date from the SM360 crawl — exact, but only for SM360 dealers.
-    // listing_seen carries the first time WE saw the VIN on any platform: less
-    // precise, but it cannot have a coverage gap, because it is written by the
-    // very scan that would otherwise find nothing.
-    let firstSeen: string | null = null;
+    // THE DEALER WHOSE REPORT THIS IS. The old lookup selected on VIN alone and
+    // took the EARLIEST first_seen_on -- but vehicle_listing is keyed
+    // (dealer_id, vin), so a car that moved lots has a row per dealer. On a
+    // real 2025 GV80 (KMUHBESB0SU232048) the only row we held was Okotoks
+    // Chevrolet while the report was for Genesis North Calgary, and the card
+    // still printed "16 days on THE DEALER'S lot" with sitting-time leverage
+    // beside it. Say that at the desk and they answer "we got it last week".
+    // [[make-it-dispute-proof]] [[days-on-lot-needs-real-observations]]
+    let host: string | null = null;
+    try {
+      const u = new URL(String(analysis?.sourceUrl || ""));
+      host = u.origin;                                  // dealer_source.host is an origin
+    } catch { /* not parseable -- fall through, scoped to nothing */ }
 
-    const { data, error } = await supabase
-      .from("vehicle_listing")
-      .select("first_seen_on")
-      .eq("vin", vin)
-      .order("first_seen_on", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) console.warn("vehicle_listing days-on-lot lookup failed:", error.message);
-    if (data?.first_seen_on) firstSeen = String(data.first_seen_on) + "T00:00:00Z";
+    const { data: onLot, error } = await supabase.rpc("fn_listing_on_lot", { p_vin: vin, p_host: host });
+    if (error) { console.warn("fn_listing_on_lot failed:", error.message); return; }
 
-    if (!firstSeen) {
-      const { data: seen, error: seenErr } = await supabase.rpc("fn_listing_first_seen", { p_vin: vin });
-      if (seenErr) console.warn("listing_seen lookup failed:", seenErr.message);
-      if (seen) firstSeen = String(seen);
+    // The same VIN advertised by ANOTHER Alberta dealer is a stronger fact than
+    // a day count, and nobody else tells a buyer this. Carried on its own,
+    // never folded into the duration.
+    const others = Array.isArray(onLot?.otherDealers) ? onLot.otherDealers : [];
+    if (others.length) {
+      analysis.sameVinElsewhere = others.slice(0, 3).map((o: any) => ({
+        dealerName: o.dealerName ?? null, city: o.city ?? null,
+        listPrice: o.listPrice == null ? null : Number(o.listPrice),
+        certified: o.certified === true,
+        lastSeenOn: o.lastSeenOn ?? null,
+      }));
+      console.log(`Same VIN at ${others.length} other dealer(s) in our crawl.`);
     }
-    if (!firstSeen) return;
 
-    const t = Date.parse(firstSeen);
+    const mine = onLot?.thisDealer;
+    if (!mine || !mine.firstSeenOn) return;
+
+    // A DURATION IS A CLAIM ABOUT TIME, SO IT NEEDS TWO OBSERVATIONS SEPARATED
+    // IN TIME. With the crawl cron off and one successful run behind us, every
+    // listing has exactly one sighting -- and "days since first_seen" was
+    // silently reporting DAYS SINCE WE LAST LOOKED. One sighting is a date, not
+    // a duration, and the honest thing is to publish the date and say so.
+    const observations = Number(mine.observations) || 0;
+    const firstSeenOn = String(mine.firstSeenOn);
+    const t = Date.parse(firstSeenOn + "T00:00:00Z");
     if (!Number.isFinite(t)) return;
     const days = Math.floor((Date.now() - t) / 86_400_000);
+
+    if (observations < 2) {
+      analysis.daysOnLot = {
+        days: null,                                     // no duration is claimed
+        since: firstSeenOn,
+        observations,
+        state: "single_sighting",
+        atLeast: true,
+        source: "lotcheck_first_seen",
+        sourceLabel: "LotCheck's own inventory tracking",
+      };
+      console.log(`Days-on-lot: ONE sighting (${firstSeenOn}) -- a date, not a duration. No day count published.`);
+      return;
+    }
     if (days <= 0 || days > 3650) return;
 
     analysis.daysOnLot = {
       days,
-      since: String(data.first_seen_on),
-      atLeast: true,                                     // renderers must not state this as exact
+      since: firstSeenOn,
+      lastSeenOn: mine.lastSeenOn ?? null,
+      observations,
+      // Days inside the span we did NOT see it. A car that vanished and came
+      // back has not been sitting, and selling that as continuous lot time is
+      // exactly the overclaim a dealer can disprove on the spot.
+      unobservedDaysInSpan: Number(mine.unobservedDaysInSpan) || 0,
+      state: "observed",
+      atLeast: true,                                    // renderers must not state this as exact
       source: "lotcheck_first_seen",
-      sourceLabel: "LotCheck's own daily inventory tracking",
+      sourceLabel: "LotCheck's own inventory tracking",
     };
-    console.log(`Own days-on-lot: at least ${days} days (first seen ${data.first_seen_on}).`);
+    console.log(`Own days-on-lot: at least ${days} days at this dealer, ${observations} sightings since ${firstSeenOn}.`);
   } catch (e) {
     console.warn("own days-on-lot threw (non-fatal):", e);
   }

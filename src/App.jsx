@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8574,7 +8574,18 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // A missing answer is information: "ask the dealer" is a usable instruction,
   // an absent card is not. Same rule as VIN (vin-every-scan).
   let daysLotItem = null;
-  if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
+  // Worded once in report-lines.js (daysOnLotLine). One sighting is a DATE,
+  // not a duration, and this card must not dress it as a span.
+  // [[days-on-lot-needs-real-observations]] [[report-features-all-views]]
+  const dolLine = daysOnLotLine(a);
+  // NOT a P.push: days-on-lot is an ALSO-CHECKED item, not one of the ten
+  // points. Pushing it into P made the audit eleven, and check:parity and
+  // check:points both caught it — the "10-point" claim is a promise about
+  // exactly which ten. [[ten-point-claim-policy]] [[claims-must-stay-backed]]
+  if (a.daysOnLot && dolLine && !(Number(a.daysOnLot.days) > 0)) {
+    daysLotItem = { key: "dayslot", title: "Days on lot", tone: "muted", v: dolLine.value,
+      body: <Simple big="First sighting" c={MUT2} note={dolLine.line} /> };
+  } else if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Number(a.daysOnLot.days);
     const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
     // FOUR tiers. The comment promised "120+ blinking red" and the code had
@@ -9036,7 +9047,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(olderYearsItem ? [olderYearsItem] : []),
     ...(financeCoverItem ? [financeCoverItem] : []),
     ...(insurancePremiumItem ? [insurancePremiumItem] : []),
-    ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
+    ...(daysLotItem ? [{ ...daysLotItem, v: dolLine ? dolLine.value : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
     ...(pageDefaultItem ? [pageDefaultItem] : []),

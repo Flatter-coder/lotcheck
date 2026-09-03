@@ -492,6 +492,17 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   // the buyer had no idea the question had even been asked. A missing answer is
   // information: "ask the dealer" is a usable instruction, an absent card is
   // not. Same rule as VIN (vin-every-scan).
+  // ONE SIGHTING IS A DATE, NOT A DURATION. Worded once in report-lines.js so
+  // the deck, the PDF and the screen say the same thing about the same fact.
+  // [[days-on-lot-needs-real-observations]] [[report-features-all-views]]
+  {
+    const dl = daysOnLotLine(a);
+    if (a.daysOnLot && dl && !(Number(a.daysOnLot.days) > 0)) {
+      deck.push({ label: "Days on lot", value: dl.value, note: dl.line, tone: "muted" });
+    }
+    const sv = sameVinElsewhereLine(a);
+    if (sv) deck.push({ label: "Also advertised elsewhere", value: sv.value, note: sv.line, tone: "muted" });
+  }
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
     // FOUR tiers, matching the on-screen card. Email clients strip CSS
@@ -840,7 +851,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1072,9 +1083,11 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // comparableListings branch that stood here read a field no code ever set,
   // so it never printed at all.
   P.push({ t: "Other listings read", v: marketCountLine(a).value, tone: "muted" });
-  if (Number(a.daysOnLot?.days) > 0) {
-    const d = Math.round(Number(a.daysOnLot.days));
-    P.push({ t: "Days on lot", v: `${d} DAY${d === 1 ? "" : "S"}${a.daysOnLot.atLeast ? "+" : ""}`, tone: d >= 90 ? "flag" : "muted" });
+  {
+    const dl = daysOnLotLine(a);
+    if (dl) P.push({ t: "Days on lot", v: dl.value, tone: Number(a.daysOnLot?.days) >= 90 ? "flag" : dl.tone });
+    const sv = sameVinElsewhereLine(a);
+    if (sv) P.push({ t: "Also advertised elsewhere", v: sv.value, tone: "muted" });
   }
   if (a.dealerLicence?.status) {
     P.push({ t: "Dealer licence · AMVIC", v: String(a.dealerLicence.status).toUpperCase(), tone: a.dealerLicence.state === "ok" ? "pass" : "muted" });
@@ -1559,6 +1572,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // Rendered as the same alert card the app shows (white frame, tier-coloured
   // panel, first-seen date box, traffic light, CTA chip) so the PDF carries the
   // report's visual language, not a plain-text shadow of it.
+  {
+    // The single-sighting state on paper too: the PDF is what a buyer carries
+    // into the dealership, so it must not be the one surface still implying a
+    // duration we never measured.
+    const dl = daysOnLotLine(a);
+    if (a.daysOnLot && dl && !(Number(a.daysOnLot.days) > 0)) {
+      kicker("DAYS ON LOT");
+      para(dl.line);
+    }
+    const sv = sameVinElsewhereLine(a);
+    if (sv) { kicker("ALSO ADVERTISED ELSEWHERE"); para(sv.line); }
+  }
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
     const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
