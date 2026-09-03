@@ -18,9 +18,9 @@
 //      copy gate forbids -- so a state no surface exercises today cannot ship a
 //      banned word tomorrow.
 import { readFileSync } from "node:fs";
-import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint } from "../supabase/functions/_shared/market-count.js";
+import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -371,7 +371,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is v7 and seals the basis keys", c.v === 7 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is v8 and seals the basis keys", c.v === 8 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -386,6 +386,97 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   check("the retired phrasing is gone", !texts.some((t) => old.some((w) => t.toLowerCase().includes(w))), texts.filter((t) => old.some((w) => t.toLowerCase().includes(w))).join(" | "));
 }
 
+// ── 3c. older model years: the ladder + the line ──────────────────────────────
+console.log("\n-- olderYearsLadder + olderYearsLine --");
+{
+  const mk = (rows) => rows.map(([year, trim, odometerKm, price, dealerName, asOf]) => ({ year, trim, odometerKm, price, dealerName, asOf: asOf || (year === 2023 ? "2026-08-03" : "2026-08-18") }));
+  // The eleven real RX rows (LC-0F75-A93) plus nine shaped like them, as
+  // fn_market_comps returns them for a 2026 subject (p_year 2024, span 1, used).
+  const RX = mk([[2024, "RX 350", 80308, 49251, "A"], [2024, "RX 350", 40654, 53489, "B"], [2024, "RX 350", 34033, 57389, "B"], [2024, "350", 25847, 57999, "C"],
+    [2025, "RX 350", 11223, 58700, "A"], [2024, "RX 350h", 15305, 59990, "A"], [2024, "RX 350", 11294, 62700, "A"], [2024, "RX 350h", 28970, 65995, "A"],
+    [2024, "RX 500h", 24095, 70998, "A"], [2025, "RX 350", 23580, 72995, "B"], [2024, "RX 500h", 53993, 77988, "B"],
+    [2025, "RX 350", 30100, 61500, "C"], [2025, "RX 350", 18000, 60900, "A"], [2025, "RX 350", 41000, 55900, "B"],
+    [2023, "RX 350", 60000, 47900, "A"], [2023, "RX 350", 71000, 45500, "B"], [2023, "RX 350", 52000, 49900, "C"], [2023, "RX 350", 88000, 41900, "A"], [2023, "RX 350h", 50000, 52900, "B"], [2023, "RX 350", 95000, 39900, "B"]]);
+  const lad = olderYearsLadder(RX, { model: "RX", trim: "350 Luxury AWD", year: 2026, today: "2026-09-02" });
+  check("2026 RX 350: three rungs (2025, 2024, 2023), gas only, all trims, newest first", lad.state === "confirmed" && lad.scope === "model" && lad.rungs.map((r) => r.year).join(",") === "2025,2024,2023" && lad.rungs.every((r) => r.n >= 5), JSON.stringify(lad.rungs.map((r) => [r.year, r.n])));
+  check("... each rung carries what it read, what it kept, how many showed mileage, its own range, dealers and dates", lad.rungs[0].n === 5 && lad.rungs[0].nRead === 5 && lad.rungs[0].kmKnown === 5 && lad.rungs[0].kmLow === 11223 && lad.rungs[0].kmHigh === 41000 && lad.rungs[0].dealers === 3 && lad.rungs[0].median === 60900 && lad.rungs[0].seenMax === "2026-08-18", JSON.stringify(lad.rungs[0]));
+  check("... the 2024 rung leaves the four hybrids out (5 gas of 9 RX rows)", lad.rungs[1].n === 5 && lad.rungs[1].median === 57389, JSON.stringify(lad.rungs[1]));
+  check("... the 2023 rung is dated by its own rows (Aug 3), the ladder by all of them (Aug 3 to Aug 18)", lad.rungs[2].seenMax === "2026-08-03" && lad.seenMin === "2026-08-03" && lad.seenMax === "2026-08-18", `${lad.seenMin}..${lad.seenMax}`);
+  const stale = olderYearsLadder(RX, { model: "RX", trim: "350 Luxury AWD", year: 2026, today: "2026-09-10" });
+  check("the 30-day window applies per rung: on Sep 10 the Aug 3 rows (2023) drop out and that rung is gone", stale.rungs.map((r) => r.year).join(",") === "2025,2024", JSON.stringify(stale.rungs.map((r) => r.year)));
+  const hybLad = olderYearsLadder(RX, { model: "RX", trim: "350h Luxury", year: 2026, minRows: 2 });
+  check("a hybrid subject's rungs hold only hybrid rows", hybLad.rungs.length > 0 && hybLad.rungs.every((r) => r.n <= 4) && hybLad.rungs[0].low === 59990, JSON.stringify([hybLad.scope, hybLad.rungs.map((r) => [r.year, r.n])]));
+  const hybModel = olderYearsLadder(RX, { model: "RX", trim: "Luxury", year: 2026, minRows: 2, powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("... and a page-declared hybrid with no marker in its trim sees the four 2024 hybrids, none of the gas ones", hybModel.rungs.length >= 1 && hybModel.rungs[0].n === 4 && hybModel.rungs[0].low === 59990 && hybModel.rungs[0].high === 77988, JSON.stringify(hybModel.rungs.map((r) => [r.year, r.n])));
+  check("no subject year -> reason year_missing; a subject-year or newer row is never a rung", olderYearsLadder(RX, { model: "RX", trim: "350", year: null }).reason === "year_missing" && olderYearsLadder(RX, { model: "RX", trim: "350", year: 2024 }).rungs.every((r) => r.year < 2024));
+  // A pool at the RPC's size limit is the CHEAPEST rows: every middle would print low.
+  const trunc = olderYearsLadder(RX, { model: "RX", trim: "350 Luxury AWD", year: 2026, today: "2026-09-02", truncated: true });
+  check("a truncated pool states nothing, with its own reason -- never a middle built from the cheapest rows", trunc.state === "insufficient" && trunc.reason === "pool_truncated" && trunc.rungs.length === 0, JSON.stringify({ st: trunc.state, rs: trunc.reason }));
+
+  const A = { year: 2026, make: "Lexus", model: "RX", priceVerified: true };
+  const OY = { ...lad, make: "Lexus", model: "RX", province: "AB" };
+  const c = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: OY });
+  check("CONFIRMED: this vehicle, then one line per older year with count, mileage range, dealers, dates, middle and the difference", c.state === "confirmed" && c.lines.length === 4 && c.lines[0].v === "2026 · $69,898 asking" && c.lines[1].k === "One year older (2025)" && c.lines[1].v === "5 used 2025 Lexus RX (all trims, same powertrain), 11,000 km to 41,000 km at 3 Alberta dealers, read on Aug 18, 2026: middle $60,900, $8,998 less than this asking price", JSON.stringify(c.lines));
+  check("... the tile and the verify row carry ONE short figure; every model year is in the lines", c.value === "ONE YEAR OLDER $8,998 LESS" && c.value.length <= 32 && c.headline === "One year older asks $8,998 less" && c.meta === "3 model years stated · all trims, same powertrain · read between Aug 3 and Aug 18, 2026" && c.askUsed === 69898, `${c.value} | ${c.headline}`);
+  check("... the note names asking prices and dates, and claims nothing about this vehicle's value", c.note === "Middle asking prices of older ones on dealers' own pages on the dates shown, not sale prices.");
+  // A rung that reached the floor and then lost rows to the price-outlier trim
+  // must never be reported as "no listings" -- the dealer can show those rows.
+  const out6 = mk([[2025, "RX 350", 20000, 1000, "A"], [2025, "RX 350", 21000, 500000, "B"], [2025, "RX 350", 22000, 50000, "C"], [2025, "RX 350", 23000, 51000, "A"], [2025, "RX 350", 24000, 52000, "B"], [2025, "RX 350", 25000, 53000, "C"]]);
+  const lo = olderYearsLadder(out6, { model: "RX", trim: "350", year: 2026, today: "2026-09-02" });
+  check("six read in one year, four kept after the outlier trim: the year is NAMED, not silently dropped", lo.state === "insufficient" && lo.rungs.length === 0 && JSON.stringify(lo.missing) === JSON.stringify([{ year: 2025, nRead: 6, nKept: 4 }]), JSON.stringify(lo.missing));
+  const lol = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });
+  check("... and the sentence says so, never 'no single model year had 5 or more listings'", lol.lines[1].v === "6 used 2025 Lexus RX (all trims, same powertrain) were read and 2 were left out as price outliers, leaving 4; 5 are needed, so nothing is stated for that model year" && /No single model year had 5 or more once price outliers were left out/.test(lol.body) && !/had 5 or more listings/.test(lol.body), lol.body);
+  // A mileage range covers only the listings that show a reading.
+  const part = mk([[2025, "RX 350", null, 50000, "A"], [2025, "RX 350", 21000, 51000, "B"], [2025, "RX 350", 0, 52000, "C"], [2025, "RX 350", 22000, 53000, "A"], [2025, "RX 350", null, 54000, "B"]]);
+  const lp = olderYearsLadder(part, { model: "RX", trim: "350", year: 2026, today: "2026-09-02" });
+  const lpl = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...lp, make: "Lexus", model: "RX", province: "AB" } });
+  check("a kilometre range is never attributed to listings that show no reading", lp.rungs[0].kmKnown === 2 && /21,000 km to 22,000 km on the 2 of 5 that show a reading/.test(lpl.lines[1].v), lpl.lines[1].v);
+  const noKm = olderYearsLadder(mk([[2025, "RX 350", null, 50000, "A"], [2025, "RX 350", null, 51000, "B"], [2025, "RX 350", null, 52000, "C"], [2025, "RX 350", null, 53000, "A"], [2025, "RX 350", null, 54000, "B"]]), { model: "RX", trim: "350", year: 2026 });
+  const noKmL = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...noKm, make: "Lexus", model: "RX", province: "AB" } });
+  check("... and when none shows one, the line says so instead of a range", /no odometer reading on those pages/.test(noKmL.lines[1].v) && !/km to/.test(noKmL.lines[1].v), noKmL.lines[1].v);
+  const trl = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...trunc, make: "Lexus", model: "RX", province: "AB" } });
+  check("a truncated set says the dearest listings are missing, and states nothing", trl.state === "insufficient" && /came back at its size limit, so the dearest listings are missing from it/.test(trl.body) && !/middle \$/.test(trl.body), trl.body);
+  const noAsk = olderYearsLine({ ...A, quotedPrice: null, olderYears: OY });
+  check("no asking price: middles stated per year, no differences", noAsk.state === "confirmed" && noAsk.askUsed === null && /no asking price shown/.test(noAsk.lines[0].v) && !/less than/.test(noAsk.lines[1].v) && noAsk.value === "ONE YEAR OLDER MIDDLE $60,900", noAsk.value);
+  const unv = olderYearsLine({ ...A, priceVerified: false, quotedPrice: 69898, olderYears: OY });
+  const fc = olderYearsLine({ ...A, quotedPrice: 69898, financeContingent: { contingent: true }, olderYears: OY });
+  check("an unverified or finance-contingent price is shown but never measured", unv.askUsed === null && /could not be verified/.test(unv.lines[0].v) && !/less than/.test(unv.lines[1].v) && fc.askUsed === null && /depends on financing/.test(fc.lines[0].v), unv.lines[0].v + " | " + fc.lines[0].v);
+  const cheaper = olderYearsLine({ ...A, quotedPrice: 50000, olderYears: OY });
+  check("an older year asking MORE than this vehicle says so, never a negative 'less'", /\$10,900 more than this asking price/.test(cheaper.lines[1].v) && /MORE/.test(cheaper.value), cheaper.lines[1].v);
+  const thin = olderYearsLadder(RX.filter((r) => r.year === 2023).slice(0, 3), { model: "RX", trim: "350", year: 2026 });
+  const ins = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...thin, make: "Lexus", model: "RX", province: "AB", seenMin: "2026-08-03", seenMax: "2026-08-03" } });
+  check("NOT ENOUGH: names the powertrain scope, how many were read and that nothing is stated per year", ins.state === "insufficient" && ins.value === "NOT ENOUGH TO STATE" && ins.body === "3 used Lexus RX (all trims, same powertrain) one to three model years older than this 2026 were read from Alberta dealers' own pages on Aug 3, 2026. No single model year had 5 or more listings, so nothing is stated per model year.", ins.body);
+  const zero = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { state: "insufficient", nRead: 0, need: 5, subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", rungs: [], missing: [] } });
+  check("NONE READ: no date attributed to an empty set", /^No used Lexus RX one to three model years older than this 2026 were among the listings read from Alberta dealers' own pages/.test(zero.body) && !/Aug/.test(zero.body), zero.body);
+  for (const [reason, needle] of [["outside_province", /British Columbia/], ["province_unknown", /province could not be established/], ["identity_missing", /year, make or model/], ["condition_unknown", /new or used/], ["timeout", /did not come back in time/], ["no_page", /uploaded quote/], [null, /no older listings were read/]]) {
+    const l = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { state: "unchecked", reason, province: reason === "outside_province" ? "BC" : null, rungs: [] } });
+    check(`unchecked (${reason}) says why, and prints no meta beside the same words`, l.state === "unchecked" && l.value === "NOT READ" && needle.test(l.body) && !l.meta, l.body);
+  }
+  check("no olderYears at all -> not read, never a number", olderYearsLine({ ...A }).value === "NOT READ");
+  const bm = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { state: "insufficient", reason: "basis_missing", rungs: [] } });
+  check("basis not recorded says exactly that", bm.value === "NOT COMPARED" && /was not recorded/.test(bm.body), bm.body);
+  const noSy = olderYearsLine({ ...A, quotedPrice: 69898, olderYears: { ...OY, subjectYear: null } });
+  check("a ladder that did not record what it is older than describes nothing (never the subject's own year)", noSy.value === "NOT COMPARED" && !/2025|2024|2023/.test(noSy.body), noSy.body);
+  // The scope that states the most model years wins; whatever it cannot state is named.
+  const sc = mk([...Array(5).fill(0).map((_, i) => [2025, "350 Luxury AWD", 20000 + i * 1000, 60000 + i * 100, "A"]), ...Array(3).fill(0).map((_, i) => [2024, "350 Luxury AWD", 40000 + i * 1000, 55000 + i * 100, "B"]), ...Array(8).fill(0).map((_, i) => [2024, "350 Premium", 45000 + i * 1000, 52000 + i * 100, "C"])]);
+  const ls = olderYearsLadder(sc, { model: "RX", trim: "350 Luxury AWD", year: 2026, today: "2026-09-02" });
+  check("one scope for every rung: the scope that states the most model years wins", ls.scope === "model" && ls.rungs.map((r) => [r.year, r.n]).flat().join(",") === "2025,5,2024,11", JSON.stringify([ls.scope, ls.rungs.map((r) => [r.year, r.n])]));
+  // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
+  const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
+  const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
+  check("the canonical is v8 and seals every rung with its basis", cc.v === 8 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
+  check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
+  const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });
+  check("... and the outlier-named state round-trips (the years it could not state ride along)", olderYearsLine({ price: ccOut.price, oy: ccOut.oy }).lines[1].v === lol.lines[1].v, JSON.stringify(ccOut.oy.ms));
+  const ccFcx = canonicalReport({ ...A, quotedPrice: 69898, financeContingent: { contingent: true, reasons: ["x"] }, olderYears: OY });
+  check("... and the finance-contingent refusal round-trips through fcx", olderYearsLine({ price: ccFcx.price, oy: ccFcx.oy, fcx: ccFcx.fcx }).askUsed === null);
+  const ccIns = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...thin, make: "Lexus", model: "RX", province: "AB", seenMin: "2026-08-03", seenMax: "2026-08-03" } });
+  check("... and the not-enough state round-trips", olderYearsLine({ price: ccIns.price, oy: ccIns.oy }).body === ins.body, olderYearsLine({ price: ccIns.price, oy: ccIns.oy }).body);
+  const texts = [c, noAsk, unv, fc, cheaper, ins, zero, bm, lol, lpl, trl, noKmL].flatMap((l) => [l.body, l.headline, l.value, l.note || "", l.meta || "", ...l.lines.map((x) => x.v)]);
+  check("nothing empty in any state", texts.every((t) => typeof t === "string"));
+}
+
 // ── 4. every emitted sentence passes the copy gate's own rules ───────────────
 console.log("\n-- copy sweep (every state x both lines) --");
 {
@@ -396,6 +487,7 @@ console.log("\n-- copy sweep (every state x both lines) --");
     /10[-\s]point/, /(never|nothing|not) stored/i,
     // neutral-language + no-accusation memory rules (not yet in the gate)
     /\b(avoid|overpriced|best value|negotiate|should|lowball|steer|steers|hidden by|designed to|to make the payment look|nearby|gives you|if you do nothing|if you change nothing)\b/i,
+    /\bworth\b|\bforecast\b|\bdepreciat/i,
     /\p{Extended_Pictographic}/u,
   ];
   const mcStates = [
@@ -423,6 +515,11 @@ console.log("\n-- copy sweep (every state x both lines) --");
   const mv6 = { average: 57999, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18", seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025, trimScope: "model", trimLabel: "Luxury", kmLow: 0, kmHigh: 62000, condition: "used", dealers: 2, make: "Lexus", model: "RX", province: "AB" };
   for (const extra of [{ quotedPrice: 56000 }, { quotedPrice: 59900 }, { quotedPrice: 76000 }, { quotedPrice: null }, { quotedPrice: 59900, priceVerified: false }, { quotedPrice: 59900, financeContingent: { contingent: true } }]) { const l = marketCompareLine({ year: 2024, make: "Lexus", model: "RX", ...extra, marketValue: mv6 }); texts.push(l.value, l.headline, l.body, l.title, l.meta, ...(l.lightLabel ? [l.lightLabel] : []), ...(l.note ? [l.note] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
   for (const mv of [{ average: null, insufficient: true, nRead: 2, need: 5, yearFrom: 2025, yearTo: 2025, kmLow: 0, kmHigh: 37178, condition: "used", dealers: 2, asOf: "2026-08-18", make: "Lexus", model: "RX", province: "AB" }, { average: null, insufficient: true, nRead: 0, need: 5, yearFrom: 2025, yearTo: 2026, kmLow: 0, kmHigh: 37178, condition: "used" }, { average: null, insufficient: true, nRead: 6, nKept: 4, need: 5, trimScope: "model", yearFrom: 2024, yearTo: 2025, condition: "used", asOf: "2026-08-18" }, { average: null, insufficient: true, reason: "basis_missing" }, { average: null, insufficient: true, reason: "odometer_missing", yearFrom: 2026, yearTo: 2026, condition: "used" }, { avg: 57999, below: 55000, above: 60000 }, { avg: 59990, lo: 49251, hi: 77988, n: 11, as: "2026-08-18" }, undefined]) { const l = marketCompareLine({ year: 2026, make: "Lexus", model: "RX", quotedPrice: 69898, marketValue: mv }); texts.push(l.value, l.headline, l.body, l.title, l.meta, ...(l.lightLabel ? [l.lightLabel] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
+  {
+    const OYC = { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMin: "2026-08-03", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 5, median: 60900, low: 55900, high: 72995, kmLow: 11223, kmHigh: 41000, dealers: 3 }, { year: 2024, n: 6, median: 57694, low: 49251, high: 62700, kmLow: 11294, kmHigh: 80308, dealers: 3 }] };
+    for (const extra of [{ quotedPrice: 69898 }, { quotedPrice: null }, { quotedPrice: 69898, priceVerified: false }, { quotedPrice: 69898, financeContingent: { contingent: true } }, { quotedPrice: 50000 }]) { const l = olderYearsLine({ year: 2026, make: "Lexus", model: "RX", priceVerified: true, ...extra, olderYears: OYC }); texts.push(l.value, l.headline, l.body, l.title, ...(l.meta ? [l.meta] : []), ...(l.note ? [l.note] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
+    for (const oy of [{ state: "insufficient", nRead: 3, need: 5, make: "Lexus", model: "RX", province: "AB", subjectYear: 2026, seenMax: "2026-08-03", rungs: [] }, { state: "insufficient", nRead: 0, need: 5, make: "Lexus", model: "RX", province: "AB", subjectYear: 2026, rungs: [] }, { state: "insufficient", reason: "basis_missing", rungs: [] }, { state: "unchecked", reason: "outside_province", province: "BC", rungs: [] }, { state: "unchecked", reason: "no_page", rungs: [] }, undefined]) { const l = olderYearsLine({ year: 2026, make: "Lexus", model: "RX", quotedPrice: 69898, olderYears: oy }); texts.push(l.value, l.headline, l.body, l.title, ...(l.meta ? [l.meta] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
+  }
   let hits = 0;
   for (const t of texts) for (const re of FORBIDDEN) if (re.test(t)) { hits++; console.log(`    banned: ${re} in "${t}"`); }
   check(`${texts.length} strings, 0 banned-word hits`, hits === 0, `${hits} hit(s)`);

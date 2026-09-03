@@ -167,6 +167,25 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-02. "What older model years ask today": the model-year
+    // ladder as a report line, worded once (report-lines.js olderYearsLine)
+    // from the sealed ladder (canonical v8 `oy`).
+    field: "olderYears (what older model years ask today)",
+    app: {
+      "shared line builder import":  "olderYearsLine",
+      "sidebar card pool":           "olderYearsItem = {",
+      "scroll view card":            "<OlderYearsCard analysis={analysis}",
+      "share link encode":           "oy:a.olderYears?{st:",
+      "share link decode":           "olderYears:c.oy?{state:c.oy.st",
+      "signed verify payload":       "oy:a.olderYears?{st:a.olderYears.state||null,rs:a.olderYears.reason||null,sy:nn(",
+      "verify page row":             'o.oy&&<Row t="What older model years ask today"',
+    },
+    email: {
+      "emailed HTML deck": 'deck.push({ label: oyLine.title',
+      "emailed PDF":       'kicker(oyLine.title.toUpperCase())',
+    },
+  },
+  {
     // Added 2026-09-02 with the line itself. "Payment default: this page
     // gives you N months, <frequency> payments at X%" is the page's own
     // pre-selected calculator scenario, read by code (page-default.js), sealed

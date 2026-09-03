@@ -56,7 +56,7 @@ import { canonicalMake } from "../_shared/makes.ts";
 // already drifted apart. See _shared/recalls.ts for what the drift cost.
 import { lookupRecalls } from "../_shared/recalls.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
-import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { fetchMarketValue, fetchOlderYears } from "../_shared/marketvalue.ts";
 import { todayLocal } from "../_shared/market-count.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
@@ -822,6 +822,10 @@ Deno.serve(async (req: Request) => {
       );
       if (mv) analysis.marketValue = mv;
     }
+    analysis.olderYears = await fetchOlderYears({
+      year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+      province: resolveJurisdiction(analysis).code, today: todayLocal(), fuelType: analysis.fuelType ?? null, vin: analysis.vin ?? null,
+    });
     analysis.vinCheck = validateVin(analysis.vin);
     if (analysis.year && analysis.make && analysis.model) {
       analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model, baseModel);

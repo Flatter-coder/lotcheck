@@ -406,3 +406,138 @@ export function marketCompareLine(a) {
   out.body = `This vehicle: ${thisLine.v}. ${simK}: ${simV}. Difference: ${diff}.`;
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// LINE -- "What older model years ask today": the model-year ladder as a
+// report line. This vehicle's asking price, then one line per older model
+// year (used, same powertrain, one trim scope for every rung, the kilometre
+// range each rung holds, dealers, read dates): the middle asking price and
+// how far below this asking price it sits. Asking prices on dealers' own
+// pages today -- never a forecast of what this vehicle will be worth.
+function normOy(x) {
+  if (!x || typeof x !== "object") return null;
+  if ("state" in x && "rungs" in x) return x;
+  return {
+    state: x.st || null, reason: x.rs || null, subjectYear: x.sy ?? null, make: x.mk || null, model: x.md || null,
+    province: x.pv || null, condition: x.cd || null, scope: x.sc || null, trimLabel: x.tl || null, powertrain: x.pt || null,
+    nRead: x.nr ?? null, need: x.nd ?? null, asOf: x.as || null, seenMin: x.from || null, seenMax: x.to || null,
+    rungs: Array.isArray(x.r) ? x.r.map((r) => ({ year: r.y ?? null, n: r.n ?? null, nRead: r.rd ?? null, median: r.m ?? null, low: r.lo ?? null, high: r.hi ?? null, kmKnown: r.kn ?? null, kmLow: r.kl ?? null, kmHigh: r.kh ?? null, dealers: r.d ?? null, seenMin: r.from || null, seenMax: r.to || null })) : [],
+    missing: Array.isArray(x.ms) ? x.ms.map((m) => ({ year: m.y ?? null, nRead: m.rd ?? null, nKept: m.k ?? null })) : [],
+  };
+}
+const OY_NOTE = "Middle asking prices of older ones on dealers' own pages on the dates shown, not sale prices.";
+const OLDER_WORD = { 1: "One year older", 2: "Two years older", 3: "Three years older" };
+const olderWord = (d) => OLDER_WORD[d] || `${d} years older`;
+export function olderYearsLine(a) {
+  const oy = normOy(a?.olderYears ?? a?.oy);
+  const prov = provinceName(oy?.province);
+  const out = { key: "olderyears", title: "What older model years ask today", tone: "muted", state: "unchecked", value: "NOT READ", headline: "Not read", body: "", lines: [], meta: "", note: null, askUsed: null };
+  const ask = Number(a?.quotedPrice ?? a?.price?.asking);
+  const hasAsk = Number.isFinite(ask) && ask >= 1;
+  const unverified = a?.priceVerified === false || a?.price?.verified === false;
+  const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
+  const canCompare = hasAsk && !unverified && !contingent;
+  // The subject's own year is taken from the SEALED ladder only: a set that did
+  // not record what it was older than describes nothing, on every surface.
+  const sy = Number(oy?.subjectYear) || null;
+  if (!oy || oy.state === "unchecked" || !oy.state) {
+    const reason = oy?.reason || null;
+    out.body = reason === "outside_province" && oy?.province
+      ? `Not read — this dealer's page places it in ${prov}, and LotCheck reads only Alberta dealers' pages today.`
+      : reason === "province_unknown"
+        ? "Not read — the dealer's province could not be established, so no older listings were read."
+        : reason === "identity_missing"
+          ? "Not read — the listing's year, make or model could not be established, so no older listings were read."
+          : reason === "condition_unknown"
+            ? "Not read — whether this vehicle is new or used could not be established, so no older listings were read."
+            : reason === "timeout"
+              ? "Not read — the listing set did not come back in time, so nothing is stated per model year."
+              : reason === "no_page"
+                ? "Not read — older model years are read for link checks; this report was built from an uploaded quote."
+                : "Not read — no older listings were read for this report.";
+    return out;
+  }
+  const mk = oy.make || a?.make || null, md = oy.model || a?.model || null;
+  const hasBasis = !!((mk || md) && sy);
+  const nameplate = [mk, md, oy.powertrain].filter(Boolean).join(" ");
+  const scopeWord = oy.scope === "trim" && oy.trimLabel ? ` ${oy.trimLabel}` : oy.scope === "trim_family" && oy.trimLabel ? ` whose trim begins "${oy.trimLabel.split(/\s+/)[0]}"` : " (all trims, same powertrain)";
+  const when = readClause(oy);
+  const thisV = !hasAsk ? `${sy ? sy + " · " : ""}no asking price shown, so no difference is worked out`
+    : contingent ? `${sy ? sy + " · " : ""}${fmtMoney(ask)} asking (depends on financing with the dealer, so no difference is worked out)`
+    : unverified ? `${sy ? sy + " · " : ""}${fmtMoney(ask)} asking (could not be verified from the page's own data, so no difference is worked out)`
+    : `${sy ? sy + " · " : ""}${fmtMoney(ask)} asking`;
+  const thisLine = { k: "This vehicle", v: thisV };
+  const need = Number(oy.need) || 5;
+  const missing = Array.isArray(oy.missing) ? oy.missing.filter((m) => Number(m.year) > 0 && Number(m.nRead) > 0) : [];
+  const missLine = (m) => {
+    const left = Number(m.nRead) - Number(m.nKept || 0);
+    const d = sy ? sy - Number(m.year) : 0;
+    return { k: `${d >= 1 ? olderWord(d) : "Older"} (${m.year})`, v: left > 0
+      ? `${m.nRead} used ${m.year} ${nameplate}${scopeWord} were read and ${left} ${left === 1 ? "was" : "were"} left out as ${left === 1 ? "a price outlier" : "price outliers"}, leaving ${m.nKept}; ${need} are needed, so nothing is stated for that model year`
+      : `${m.nRead} used ${m.year} ${nameplate}${scopeWord} ${Number(m.nRead) === 1 ? "was" : "were"} read; ${need} are needed, so nothing is stated for that model year` };
+  };
+  const rungs = (Array.isArray(oy.rungs) ? oy.rungs : []).map((r) => ({ ...r, d: sy ? sy - Number(r.year) : 0 }))
+    .filter((r) => r.d >= 1 && r.d <= 3 && Number(r.median) > 0 && Number(r.n) > 0);
+
+  if (oy.state !== "confirmed" || !hasBasis || !rungs.length) {
+    const n = Number(oy.nRead) || 0;
+    out.state = "insufficient";
+    out.value = "NOT ENOUGH TO STATE";
+    out.headline = "Not enough older listings to state a price per model year";
+    out.meta = `${n} read, ${need} per model year needed`;
+    if (oy.reason === "basis_missing" || !hasBasis) {
+      out.value = "NOT COMPARED";
+      out.headline = "Older-year set not recorded";
+      out.meta = "Basis not recorded";
+      out.lines = [thisLine, { k: "Older model years", v: "a set was read, but what it was made of was not recorded" }];
+      out.body = "Older listings were read for this report, but what they were made of was not recorded, so nothing is stated per model year.";
+      return out;
+    }
+    if (oy.reason === "pool_truncated") {
+      out.meta = "More were read than this line can hold";
+      out.lines = [thisLine, { k: "Older model years", v: `the listing set came back at its size limit, so the dearest listings are missing from it and nothing is stated per model year` }];
+      out.body = `The set of used ${nameplate} one to three model years older than this ${sy} came back at its size limit, so the dearest listings are missing from it and nothing is stated per model year.`;
+      return out;
+    }
+    const older = `used ${nameplate}${n > 0 ? " (all trims, same powertrain)" : ""} one to three model years older than this ${sy}`.replace(/\s+/g, " ").trim();
+    const anyOutliers = missing.some((m) => Number(m.nRead) > Number(m.nKept || 0));
+    out.lines = [thisLine, ...missing.map(missLine)];
+    if (!missing.length) out.lines.push({ k: "Older model years", v: n === 0 ? `none read: no ${older} were among the listings read from ${prov} dealers' own pages` : `${n} read${when ? " " + when : ""}, but no single model year had ${need} or more` });
+    out.body = n === 0
+      ? `No ${older} were among the listings read from ${prov} dealers' own pages, so nothing is stated per model year.`
+      : `${n} ${older} ${n === 1 ? "was" : "were"} read from ${prov} dealers' own pages${when ? " " + when : ""}. ${anyOutliers ? `No single model year had ${need} or more once price outliers were left out` : `No single model year had ${need} or more listings`}, so nothing is stated per model year.`;
+    return out;
+  }
+
+  const lines = [thisLine];
+  for (const r of rungs) {
+    const n = Number(r.n), med = Number(r.median);
+    const d = Number(r.dealers) || 0;
+    const known = r.kmKnown == null ? n : Number(r.kmKnown);
+    const range = r.kmLow != null && r.kmHigh != null && known > 0
+      ? (Number(r.kmLow) < 1000 ? `up to ${kmCeil(r.kmHigh)}` : `${kmFloor(r.kmLow)} to ${kmCeil(r.kmHigh)}`)
+      : null;
+    const km = range ? `, ${range}${known < n ? ` on the ${known} of ${n} that show a reading` : ""}` : ", no odometer reading on those pages";
+    const dealersClause = d > 0 ? ` at ${d} ${prov} dealer${d === 1 ? "" : "s"}` : ` at ${prov} dealers`;
+    const rWhen = readClause(r) || when;
+    const delta = canCompare ? Math.round(ask - med) : null;
+    const diff = delta == null ? "" : delta > 0 ? `, ${fmtMoney(delta)} less than this asking price` : delta < 0 ? `, ${fmtMoney(-delta)} more than this asking price` : ", the same as this asking price";
+    const left = r.nRead != null && Number(r.nRead) > n ? Number(r.nRead) - n : 0;
+    const outlier = left > 0 ? `; ${left} more ${left === 1 ? "was" : "were"} read and left out as ${left === 1 ? "a price outlier" : "price outliers"}` : "";
+    lines.push({ k: `${olderWord(r.d)} (${r.year})`, v: `${n} used ${r.year} ${nameplate}${scopeWord}${km}${dealersClause}${rWhen ? `, read ${rWhen}` : ""}: middle ${fmtMoney(med)}${diff}${outlier}` });
+  }
+  for (const m of missing) lines.push(missLine(m));
+  // The tile and the /verify row carry ONE figure -- the nearest model year --
+  // and every model year is in the lines below them.
+  const first = rungs[0];
+  const fd = canCompare ? Math.round(ask - Number(first.median)) : null;
+  out.state = "confirmed";
+  out.askUsed = canCompare ? ask : null;
+  out.note = OY_NOTE;
+  out.value = `${olderWord(first.d).toUpperCase()} ${fd == null ? `MIDDLE ${fmtMoney(first.median)}` : fd > 0 ? `${fmtMoney(fd)} LESS` : fd < 0 ? `${fmtMoney(-fd)} MORE` : "THE SAME"}`;
+  out.headline = fd == null ? `${olderWord(first.d)}: middle ${fmtMoney(first.median)}` : `${olderWord(first.d)} asks ${fd > 0 ? `${fmtMoney(fd)} less` : fd < 0 ? `${fmtMoney(-fd)} more` : "the same"}`;
+  out.meta = [`${rungs.length} model year${rungs.length === 1 ? "" : "s"} stated`, oy.scope === "model" ? "all trims, same powertrain" : oy.scope === "trim" ? "same trim" : oy.scope === "trim_family" ? "trim family" : null, when ? `read ${when}` : null].filter(Boolean).join(" · ");
+  out.lines = lines;
+  out.body = `${thisLine.k}: ${thisLine.v}. ${lines.slice(1).map((l) => `${l.k}: ${l.v}`).join(". ")}.`;
+  return out;
+}

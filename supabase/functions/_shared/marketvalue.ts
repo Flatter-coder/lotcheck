@@ -24,7 +24,7 @@
 
 // The like-for-like pool chooser and the powertrain wall are shared with the
 // count line (market-count.js), so the two cards never disagree on one report.
-import { likeForLikePool, fuelPowertrainHint, todayLocal } from "./market-count.js";
+import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP } from "./market-count.js";
 import { powertrainCompatible } from "./model-identity.js";
 
 export interface MarketValue {
@@ -450,6 +450,95 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
   } catch (e) {
     console.warn("lotcheck market value error (suppressing):", (e as Error)?.message);
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OLDER MODEL YEARS -- "What older model years ask today". One RPC for the
+// used listings one to three model years older than the subject, then the
+// pure ladder (market-count.js olderYearsLadder) with the comparison card's
+// own rules. Never null: an unread or thin set comes back with its reason so
+// the card prints why, not a gap. [[report-never-empty]]
+// ---------------------------------------------------------------------------
+export interface OlderYearRung {
+  year: number; n: number; nRead?: number | null; median: number; low: number; high: number;
+  kmKnown?: number | null; kmLow: number | null; kmHigh: number | null; dealers: number | null;
+  seenMin?: string | null; seenMax?: string | null;
+}
+export interface OlderYearMiss { year: number; nRead: number; nKept: number; }
+export interface OlderYears {
+  state: "confirmed" | "insufficient" | "unchecked";
+  reason?: string | null;
+  subjectYear: number | null;
+  make: string | null; model: string | null; province: string | null;
+  condition: "used";
+  scope: "trim" | "trim_family" | "model" | null;
+  trimLabel: string | null; powertrain: string | null;
+  nRead: number; need: number;
+  asOf: string | null; seenMin: string | null; seenMax: string | null;
+  rungs: OlderYearRung[];
+  missing: OlderYearMiss[];   // model years read but not stated, with how many
+  truncated?: boolean;
+}
+const OLDER_YEARS_MAX_RUNGS = 3;
+export async function fetchOlderYears(ctx: MarketCtx & { vin?: string | null }): Promise<OlderYears> {
+  const y = Number(ctx.year);
+  const prov = String(ctx.province || "").toUpperCase();
+  const base: OlderYears = {
+    state: "unchecked", reason: null, subjectYear: y > 0 ? y : null,
+    make: ctx.make ? String(ctx.make) : null, model: ctx.model ? String(ctx.model) : null, province: prov || null,
+    condition: "used", scope: null, trimLabel: null, powertrain: null, nRead: 0, need: COMP_FLOOR,
+    asOf: null, seenMin: null, seenMax: null, rungs: [], missing: [], truncated: false,
+  };
+  if (!(y > 0) || !ctx.make || !ctx.model) return { ...base, reason: "identity_missing" };
+  const cond = String(ctx.condition || "").toLowerCase();
+  if (cond !== "new" && cond !== "used") return { ...base, reason: "condition_unknown" };
+  if (!prov) return { ...base, reason: "province_unknown" };
+  if (!servesComps(prov)) return { ...base, reason: "outside_province" };
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
+  if (!url || !key) return { ...base, reason: "rpc_unavailable" };
+  try {
+    const vin = String(ctx.vin || "").toUpperCase();
+    // Bounded like the count line's own call: an optional card must not spend
+    // the request budget the MSRP point needs.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 4_000);
+    let res: Response;
+    try {
+      res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+        signal: ac.signal,
+        body: JSON.stringify({
+          // Years y-3 .. y-1: centre on y-2 with a span of 1. Condition "used":
+          // an older model year on a lot is a used car.
+          p_year: y - 2, p_make: String(ctx.make), p_model: String(ctx.model),
+          p_condition: "used", p_exclude_vin: /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null,
+          p_province: prov, p_year_span: 1, p_limit: POOL_CAP,
+        }),
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      const timedOut = (e as Error)?.name === "AbortError";
+      console.warn("older years: fn_market_comps", timedOut ? "timed out" : (e as Error)?.message);
+      return { ...base, reason: timedOut ? "timeout" : "rpc_error" };
+    }
+    clearTimeout(timer);
+    if (!res.ok) { console.warn("older years: fn_market_comps HTTP", res.status); return { ...base, reason: "rpc_error" }; }
+    const rows = await res.json();
+    const all = Array.isArray(rows) ? (rows as any[]) : [];
+    const lad = olderYearsLadder(all, {
+      model: ctx.model, trim: ctx.trim ?? null, year: y, minRows: COMP_FLOOR, maxRungs: OLDER_YEARS_MAX_RUNGS,
+      today: ctx.today || todayLocal(), powertrainHint: fuelPowertrainHint(ctx.fuelType),
+      truncated: all.length >= POOL_CAP,
+    });
+    const out: OlderYears = { ...base, ...lad, state: lad.state as OlderYears["state"], reason: lad.reason || null };
+    console.log(`older years: ${out.state}${out.scope ? ` (${out.scope})` : ""} rungs=${out.rungs.map((r) => `${r.year}:${r.n}`).join(",") || "none"} read=${out.nRead}${out.reason ? ` -- ${out.reason}` : ""}`);
+    return out;
+  } catch (e) {
+    console.warn("older years error (suppressing):", (e as Error)?.message);
+    return { ...base, reason: "rpc_error" };
   }
 }
 
