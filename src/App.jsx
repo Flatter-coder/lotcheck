@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8896,6 +8896,39 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "Insurance before you sign": the order the two commitments happen
+  // in. A lender or lessor requires collision and comprehensive -- the coverage
+  // that repairs or replaces THIS vehicle -- and Alberta's Take All Comers rule
+  // (Insurance Act s. 555) obliges an insurer to write only the MANDATORY
+  // coverages. The finance contract is signed at the dealership; the insurance
+  // is arranged afterwards. Worded ONCE in report-lines.js
+  // (financeCoverageLine), so the lines here are the lines in the scroll card,
+  // the emailed HTML, the PDF and on /verify. BOTH states are built -- a page
+  // with no financing signal still gets it, worded conditionally -- and only in
+  // Alberta, because it cites Alberta statute and an Alberta regulator.
+  // No gauge and no traffic light: this is a sequence, not a measurement.
+  // [[report-never-empty]] [[report-features-all-views]]
+  let financeCoverItem = null;
+  if (financeCoverageApplies(a)) {
+    const line = financeCoverageLine(a);
+    financeCoverItem = { key: "financecover", title: line.title, tone: "muted", glow: false, v: line.value, body: (
+      <div>
+        {/* Full ink in BOTH states: "general" is not a degraded reading, it is
+            the same warning worded for a page that shows no financing. */}
+        <Simple big={line.headline} c="#e2e8f0" />
+        {line.lines.map((l, i) => (
+          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
+            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
+            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
+          </div>
+        ))}
+        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
+        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
+        <ExplainBox txt={line.explain} />
+      </div>
+    )};
+  }
+
   // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
   //
   // We advertise a 10-point verification and we over-deliver on it (Vic,
@@ -8937,6 +8970,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(marketCountItem ? [marketCountItem] : []),
     ...(marketCompareItem ? [marketCompareItem] : []),
     ...(olderYearsItem ? [olderYearsItem] : []),
+    ...(financeCoverItem ? [financeCoverItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
@@ -9636,6 +9670,45 @@ function OlderYearsCard({analysis,C,cardStyle}){
     </div>
   );
 }
+// LINE -- "Insurance before you sign": a SEQUENCING warning, not a figure and
+// not a check. A lender or lessor requires collision and comprehensive -- the
+// coverage that repairs or replaces THIS vehicle -- and Alberta's Take All
+// Comers rule (Insurance Act s. 555) obliges an insurer to write only the
+// MANDATORY coverages, not those. The finance contract is signed at the
+// dealership and the insurance is arranged afterwards, so a buyer can commit
+// to a payment before knowing they can bind the cover the contract requires.
+// Worded once in report-lines.js financeCoverageLine, so the card on screen is
+// the card in the emailed HTML, the PDF and on /verify.
+//
+// BOTH states render the same five lines: a page that shows financing gets the
+// warning aimed at it, a page that does not gets it worded conditionally --
+// the buyer chooses the payment method after the report, not before.
+//
+// No gauge, no traffic light, no band: there is one number in it and the
+// regulator named it. Alberta only -- it cites Alberta statute and an Alberta
+// regulator, so the card is gated on financeCoverageApplies() and prints
+// nothing anywhere else. Missing beats wrong.
+// [[report-never-empty]] [[report-features-all-views]]
+function FinanceCoverCard({analysis,C,cardStyle}){
+  if(!financeCoverageApplies(analysis)) return null;
+  const line=financeCoverageLine(analysis);
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:6}}>{line.title}</div>
+      <div style={{fontSize:20,fontWeight:1000,color:C.ink,lineHeight:1.25,marginBottom:8}}>{line.headline}</div>
+      <div>
+        {line.lines.map((l,i)=>(
+          <div key={i} style={{display:"flex",flexWrap:"wrap",gap:"2px 14px",alignItems:"baseline",padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+            <div style={{flex:"0 0 auto",minWidth:120,fontSize:11.5,fontWeight:700,color:C.inkFaint}}>{l.k}</div>
+            <div style={{flex:"1 1 220px",fontSize:13,color:C.ink,lineHeight:1.5,fontWeight:i===line.lines.length-1?700:500}}>{l.v}</div>
+          </div>
+        ))}
+      </div>
+      {line.meta&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{line.meta}</div>}
+      {line.note&&<div style={{fontSize:11.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>{line.note}</div>}
+    </div>
+  );
+}
 // LINE -- "Payment default: this page's payment default is N months, <frequency>
 // payments at X%." The page's own pre-selected calculator scenario
 // (page-default.js), worded once in report-lines.js pageDefaultLine. Same
@@ -9676,7 +9749,11 @@ function canonicalReport(a){
     // projection is NOT additive (mileage null was 0; a not-enough set is an
     // object, was null). Mirrors report-sign.ts.
     // v8: `oy` added (what older model years ask today). Additive.
-    v:8,
+    // v9 (2026-09-03): no shape change. It marks the reports issued WITH the
+    // "Insurance before you sign" line, so /verify can withhold that section
+    // from a report whose own PDF predates it -- the one page whose job is to
+    // prove the paper and the page agree.
+    v:9,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -10062,6 +10139,14 @@ function VerifyPage(){
               // as the scroll card and the email, from the sealed price and
               // finance-contingent flag, so /verify reads what the report said.
               const oyl=o.oy?olderYearsLine({price:o.price,oy:o.oy,fcx:o.fcx}):null;
+              // "Insurance before you sign", worded by the same builder as the
+              // scroll card and the email. Nothing new is sealed for it: the
+              // builder reads only fields the canonical already carries (dflt,
+              // fcx, finance, and the province off mc/marketValue), so a report
+              // minted before this line existed still renders it identically.
+              // Alberta only -- it cites Alberta statute and an Alberta
+              // regulator, and /verify prints nothing elsewhere.
+              const fcl=(financeCoverageApplies(o)&&Number(o.v)>=9)?financeCoverageLine(o):null;
               const title=P==="signed"?"Genuine — nothing changed":P==="ok"?"Nothing was changed":P==="altered"?"This doesn't check out":"Check the report number";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
@@ -10132,6 +10217,12 @@ function VerifyPage(){
                     {oyl.meta&&<div style={{fontWeight:700,color:T.text}}>{oyl.meta}</div>}
                     {oyl.lines.length>0?oyl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>):<div>{oyl.body}</div>}
                     {oyl.note&&<div>{oyl.note}</div>}
+                  </div>}
+                  {financeCoverageApplies(o)&&Number(o.v)>=9&&<Row t="Insurance before you sign" v={fcl.value}/>}
+                  {financeCoverageApplies(o)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
+                    {fcl.meta&&<div style={{fontWeight:700,color:T.text}}>{fcl.meta}</div>}
+                    {fcl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>)}
+                    {fcl.note&&<div>{fcl.note}</div>}
                   </div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
@@ -12182,6 +12273,17 @@ function QuoteCheckPage(){
                   that say why, not as gaps. [[report-never-empty]] */}
               {analysis.olderYears&&(
                 <OlderYearsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
+              )}
+
+              {/* Insurance before you sign: the order the two commitments
+                  happen in. A lender requires collision and comprehensive, no
+                  insurer is obliged to sell those, and the finance contract is
+                  signed before the insurance is arranged. Mounted for BOTH
+                  states -- a page with no financing signal still gets it,
+                  worded conditionally -- and only in Alberta, because it cites
+                  Alberta statute and an Alberta regulator. */}
+              {financeCoverageApplies(analysis)&&(
+                <FinanceCoverCard analysis={analysis} C={C} cardStyle={cardStyle}/>
               )}
 
               {analysis.leverageScore?.computed&&(

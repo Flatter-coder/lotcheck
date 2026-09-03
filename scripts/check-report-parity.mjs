@@ -167,6 +167,28 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-03. "Insurance before you sign": a sequencing warning from
+    // Alberta's insurance regulator, worded once in report-lines.js
+    // (financeCoverageLine) and gated on financeCoverageApplies (Alberta only).
+    // Derived entirely from fields the canonical already seals (dflt, fcx,
+    // finance, mc.pv), so there is no new share-link field to keep in step.
+    field: "financeCoverage (insurance before you sign)",
+    app: {
+      "shared line builder import":  "financeCoverageLine",
+      "Alberta-only gate":           "financeCoverageApplies",
+      "sidebar card pool":           "financeCoverItem = {",
+      "scroll view card":            "<FinanceCoverCard analysis={analysis}",
+      "verify page row":             'financeCoverageApplies(o)&&Number(o.v)>=9&&<Row t="Insurance before you sign"',
+    },
+    email: {
+      "emailed HTML deck": "deck.push({ label: fcLine.title",
+      "emailed PDF":       "kicker(fcLine.title.toUpperCase())",
+      // The hardest rule of this line -- never print Alberta statute outside
+      // Alberta -- pinned on the emailed surfaces the way it is on the app.
+      "Alberta-only gate": "financeCoverageApplies(a)",
+    },
+  },
+  {
     // Added 2026-09-02. "What older model years ask today": the model-year
     // ladder as a report line, worded once (report-lines.js olderYearsLine)
     // from the sealed ladder (canonical v8 `oy`).

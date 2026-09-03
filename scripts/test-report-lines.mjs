@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -371,7 +371,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is v8 and seals the basis keys", c.v === 8 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is v9 and seals the basis keys", c.v === 9 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -464,7 +464,7 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
-  check("the canonical is v8 and seals every rung with its basis", cc.v === 8 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  check("the canonical is v9 and seals every rung with its basis", cc.v === 9 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
   const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
   check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
   const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });
@@ -475,6 +475,53 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   check("... and the not-enough state round-trips", olderYearsLine({ price: ccIns.price, oy: ccIns.oy }).body === ins.body, olderYearsLine({ price: ccIns.price, oy: ccIns.oy }).body);
   const texts = [c, noAsk, unv, fc, cheaper, ins, zero, bm, lol, lpl, trl, noKmL].flatMap((l) => [l.body, l.headline, l.value, l.note || "", l.meta || "", ...l.lines.map((x) => x.v)]);
   check("nothing empty in any state", texts.every((t) => typeof t === "string"));
+}
+
+// ── 3d. insurance before you sign ─────────────────────────────────────────────
+console.log("\n-- financeCoverageLine --");
+{
+  const AB = { marketCount: { province: "AB" } };
+  const fin = financeCoverageLine({ ...AB, pageDefault: { state: "confirmed", termMonths: 84, apr: 5.99, paymentAmount: 267 } });
+  check("a page showing a financing payment leads with that fact", fin.state === "confirmed" && /^This page shows a financing payment\. The AIRB reports that optional coverages/.test(fin.lines[0].v) && fin.meta === "Financing shown on this page · Alberta", fin.lines[0].v);
+  const gen = financeCoverageLine({ ...AB });
+  check("a page with no financing signal still carries the warning, worded conditionally", gen.state === "general" && /^The AIRB reports that optional coverages/.test(gen.lines[0].v) && gen.lines.length === 5 && gen.meta === "Alberta rules · applies whether or not you finance", gen.meta);
+  const fcx = financeCoverageLine({ ...AB, financeContingent: { contingent: true } });
+  check("a finance-contingent price counts as financing shown", fcx.state === "confirmed" && /^This page's price depends on financing with the dealer\./.test(fcx.lines[0].v));
+  check("a finance-contingent flag that is FALSE does not", financeCoverageLine({ ...AB, financeContingent: { contingent: false } }).state === "general");
+  const cash = financeCoverageLine({ ...AB, pageDefault: { state: "confirmed", purchaseMethod: "cash", termMonths: 84, apr: 2.99, paymentAmount: 196 } });
+  check("a cash-first page is worded as the payment card words it, never as 'shows a financing payment'", /^This page opens on its cash price and also shows a financing option\./.test(cash.lines[0].v), cash.lines[0].v);
+  // The dealer APR field carries the model's own unconfirmed read on some paths
+  // (it once stated 25% for a page that disclosed none). It is never a trigger.
+  const aprOnly = financeCoverageLine({ ...AB, financeRates: { dealer: { apr: 25, source: "llm" } } });
+  const sealedAprOnly = financeCoverageLine({ mc: { pv: "AB" }, finance: { dealer: 25 } });
+  check("an untrusted dealer APR never makes the card claim the page shows financing", aprOnly.state === "general" && !/advertises a financing rate/.test(JSON.stringify(aprOnly)) && sealedAprOnly.state === "general", `${aprOnly.state}/${sealedAprOnly.state}`);
+  const quote = financeCoverageLine({ marketCount: { state: "unchecked", reason: "no_page", province: "AB" }, pageDefault: { state: "unchecked", reason: "no_page" }, financeRates: { dealer: { apr: 25, source: "llm" } } });
+  check("an uploaded quote with no page never says 'this page' anything", quote.state === "general" && !/This page/.test(quote.body), quote.lines[0].v);
+  const zeroApr = financeCoverageLine({ ...AB, pageDefault: { state: "confirmed", apr: 0 } });
+  check("a real 0% promotional rate on the page still counts as financing shown", zeroApr.state === "confirmed");
+  const sealed = financeCoverageLine({ mc: { pv: "AB" }, dflt: { st: "confirmed", t: 84, a: 5.99, p: 267 }, fcx: null });
+  const sealedGen = financeCoverageLine({ mc: { pv: "AB" } });
+  check("the sealed compact form (the /verify shape) renders the SAME lines in both states", JSON.stringify(sealed.lines) === JSON.stringify(fin.lines) && sealed.meta === fin.meta && JSON.stringify(sealedGen.lines) === JSON.stringify(gen.lines) && sealedGen.meta === gen.meta, JSON.stringify(sealed.lines[0]));
+  check("Alberta statute is printed only where it applies, and a user-typed province never arms it", financeCoverageApplies({ marketCount: { province: "AB" } }) === true
+    && financeCoverageApplies({ marketCount: { province: "BC" } }) === false
+    && financeCoverageApplies({ marketValue: { province: "AB" } }) === true
+    && financeCoverageApplies({ oy: { pv: "AB" } }) === true
+    && financeCoverageApplies({ province: "AB" }) === false
+    && financeCoverageApplies({ marketCount: { province: "ab" } }) === true
+    && financeCoverageApplies({ marketCount: { province: " AB " } }) === false
+    && financeCoverageApplies({}) === false
+    && financeCoverageApplies(null) === false
+    && provinceOf({ mc: { pv: "AB" } }) === "AB");
+  check("a province conflict fails to the dealer page's own reading", financeCoverageApplies({ marketCount: { province: "BC" }, olderYears: { province: "AB" } }) === false
+    && financeCoverageApplies({ marketCount: { state: "unchecked", reason: "outside_province", province: "BC" } }) === false);
+  check("both halves always ship together: the 2024 restriction and the October 2025 correction", /starting in early 2024/.test(fin.lines[2].v) && /as of October 2025 AR 227\/2025/.test(fin.lines[3].v) && /removing these restrictions/.test(fin.lines[3].v));
+  check("it never says a buyer may be unable to insure the vehicle", ![...fin.lines.map((l) => l.v), fin.body, fin.headline, fin.explain].some((t) => /unable to insure|cannot insure|can't insure|uninsurable|refused insurance|no insurer will/i.test(t)));
+  check("every clause is attributed to the AIRB, never asserted in our own voice", fin.lines.slice(0, 4).every((l) => /The AIRB reports/.test(l.v)), JSON.stringify(fin.lines.map((l) => l.v.slice(0, 40))));
+  check("it names its source, both pages, and the date it was read", /pages 8 and 22, published 2026\. Read 2026-09-03/.test(fin.note) && /docs\/airb-2026-capture\.md/.test(fin.note), fin.note);
+  check("the only dollar figure names what it is a deductible OF, and keeps the regulator's 'such as'", (fin.body.match(/\$[\d,]+/g) || []).join(",") === "$2,000" && /forced them to choose a deductible such as \$2,000 or more/.test(fin.lines[2].v), fin.lines[2].v);
+  check("the action names the buyer's own insurer, and the sequence is stated as the general case", /Ask your own insurer to confirm/.test(fin.lines[4].v) && /A finance or lease contract is typically signed at the dealership, before the insurance is bound\./.test(fin.lines[4].v));
+  check("the one-sentence explain is worded by the builder, carries the hedge and the attribution, and is no stronger than the lines", /^The AIRB reports that collision and comprehensive may be required/.test(fin.explain) && /Take All Comers rule covers only the mandatory coverages/.test(fin.explain) && fin.explain === gen.explain, fin.explain);
+  check("the tile value is short enough for a rail tile and a verify row", fin.value.length <= 32 && fin.headline.length <= 48, `${fin.value.length}/${fin.headline.length}`);
 }
 
 // ── 4. every emitted sentence passes the copy gate's own rules ───────────────
@@ -519,6 +566,10 @@ console.log("\n-- copy sweep (every state x both lines) --");
     const OYC = { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMin: "2026-08-03", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 5, median: 60900, low: 55900, high: 72995, kmLow: 11223, kmHigh: 41000, dealers: 3 }, { year: 2024, n: 6, median: 57694, low: 49251, high: 62700, kmLow: 11294, kmHigh: 80308, dealers: 3 }] };
     for (const extra of [{ quotedPrice: 69898 }, { quotedPrice: null }, { quotedPrice: 69898, priceVerified: false }, { quotedPrice: 69898, financeContingent: { contingent: true } }, { quotedPrice: 50000 }]) { const l = olderYearsLine({ year: 2026, make: "Lexus", model: "RX", priceVerified: true, ...extra, olderYears: OYC }); texts.push(l.value, l.headline, l.body, l.title, ...(l.meta ? [l.meta] : []), ...(l.note ? [l.note] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
     for (const oy of [{ state: "insufficient", nRead: 3, need: 5, make: "Lexus", model: "RX", province: "AB", subjectYear: 2026, seenMax: "2026-08-03", rungs: [] }, { state: "insufficient", nRead: 0, need: 5, make: "Lexus", model: "RX", province: "AB", subjectYear: 2026, rungs: [] }, { state: "insufficient", reason: "basis_missing", rungs: [] }, { state: "unchecked", reason: "outside_province", province: "BC", rungs: [] }, { state: "unchecked", reason: "no_page", rungs: [] }, undefined]) { const l = olderYearsLine({ year: 2026, make: "Lexus", model: "RX", quotedPrice: 69898, olderYears: oy }); texts.push(l.value, l.headline, l.body, l.title, ...(l.meta ? [l.meta] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
+  }
+  for (const extra of [{ pageDefault: { state: "confirmed", termMonths: 84, apr: 5.99 } }, { pageDefault: { state: "confirmed", purchaseMethod: "cash", termMonths: 84, apr: 2.99 } }, { financeContingent: { contingent: true } }, {}]) {
+    const l = financeCoverageLine({ marketCount: { province: "AB" }, ...extra });
+    texts.push(l.value, l.headline, l.body, l.title, l.meta, l.note, l.explain, ...l.lines.map((x) => `${x.k}: ${x.v}`));
   }
   let hits = 0;
   for (const t of texts) for (const re of FORBIDDEN) if (re.test(t)) { hits++; console.log(`    banned: ${re} in "${t}"`); }

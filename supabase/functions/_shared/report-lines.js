@@ -13,7 +13,7 @@
 // COPY RULES this file is scanned against (scripts/check-copy-compliance.mjs):
 // no scrape vocabulary, no guarantees, no foreign regulators, no verdict words
 // (overpriced, avoid, negotiate, should), no motive attributed to the dealer.
-// The one instruction any line may carry is: ask the dealer, in writing.
+// The one instruction any line may carry is: ask the dealer, in writing — or, where a regulator's own guidance is the point, ask your own insurer (financeCoverageLine). No other advice.
 // Absence states say what was established, never more: "Not shown" only when
 // the page's own data says so, "None found" for a miss, "Not read" when no
 // attempt was made.
@@ -539,5 +539,87 @@ export function olderYearsLine(a) {
   out.meta = [`${rungs.length} model year${rungs.length === 1 ? "" : "s"} stated`, oy.scope === "model" ? "all trims, same powertrain" : oy.scope === "trim" ? "same trim" : oy.scope === "trim_family" ? "trim family" : null, when ? `read ${when}` : null].filter(Boolean).join(" · ");
   out.lines = lines;
   out.body = `${thisLine.k}: ${thisLine.v}. ${lines.slice(1).map((l) => `${l.k}: ${l.v}`).join(". ")}.`;
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// LINE -- "Insurance before you sign".
+//
+// Not a figure and not a check: a SEQUENCING warning, from Alberta's own
+// insurance regulator, about the order in which a buyer does two things.
+//
+// A lender or lessor requires collision and comprehensive -- the coverage that
+// pays to repair or replace THIS vehicle. Alberta's "Take All Comers" rule
+// (Insurance Act s. 555) obliges every insurer to quote and write the
+// MANDATORY coverages for any Albertan, and the AIRB reports it does not
+// extend to the OPTIONAL ones. So the contract signed at the dealership
+// requires coverage no insurer is obliged to sell, and the contract is signed
+// before the insurance is bound.
+//
+// Two halves, and they always ship together: the AIRB reports insurers applied
+// this from early 2024 to drivers with an at-fault claim in six years or a
+// serious conviction in four, AND that since October 2025 it regulates those
+// underwriting rules and insurers are removing the restrictions. Printing the
+// first without the second would describe a 2024 world in 2026.
+//
+// What it must never say: that a buyer may be unable to insure the vehicle.
+// The AIRB's own sentence is that such drivers "would not accept the basic-only
+// policy and look for another insurer" -- the outcome it describes is having to
+// shop, under time pressure, already committed. That is the warning.
+//
+// Alberta only: it cites Alberta statute and an Alberta regulator, so the
+// surfaces gate on financeCoverageApplies() and print nothing elsewhere.
+// Source: AIRB, 2026 Annual Market and Trends Report, page 8, published 2026.
+const AIRB_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 8 and 22, published 2026. Read 2026-09-03; quoted in docs/airb-2026-capture.md.";
+// Province comes from the DEALER's page (resolveJurisdiction), never from a
+// user-typed field: it decides whether an Alberta statute is printed at all.
+export function provinceOf(a) {
+  return a?.marketCount?.province || a?.mc?.pv || a?.olderYears?.province || a?.oy?.pv
+    || a?.marketValue?.province || a?.marketValue?.pv || null;
+}
+// Alberta statute and an Alberta regulator: printed only where they apply.
+export function financeCoverageApplies(a) {
+  return String(provinceOf(a) || "").toUpperCase() === "AB";
+}
+// True when the LISTING ITSELF shows financing: the page's own pre-selected
+// payment scenario (read from the page by page-default.js) or a price that
+// depends on financing. A dealer APR is deliberately NOT a trigger -- that
+// field carries the model's own unconfirmed read on some paths, and it once
+// stated a 25% rate for a page that disclosed none (2026-08-19). The guidance
+// holds either way, so a page with no financing signal still gets the card,
+// worded conditionally.
+function financingShown(a) {
+  const pd = normDflt(a?.pageDefault ?? a?.dflt);
+  const hasScenario = !!pd && pd.state === "confirmed"
+    && (Number(pd.termMonths) > 0 || Number(pd.paymentAmount) > 0 || (pd.apr != null && Number.isFinite(Number(pd.apr))));
+  const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
+  // The payment-starting-point card words a cash-first page as opening on cash;
+  // this one must not call the same page a financing payment.
+  const cashFirst = !!pd && pd.purchaseMethod === "cash";
+  return { any: hasScenario || contingent, hasScenario, contingent, cashFirst };
+}
+export function financeCoverageLine(a) {
+  const f = financingShown(a);
+  const out = {
+    key: "financecover", title: "Insurance before you sign", tone: "muted",
+    state: f.any ? "confirmed" : "general",
+    value: "CONFIRM COVER BEFORE SIGNING", headline: "Confirm your cover before you sign",
+    body: "", lines: [], meta: "", note: AIRB_CITE, explain: "",
+  };
+  const lead = f.contingent ? "This page's price depends on financing with the dealer. "
+    : f.hasScenario && f.cashFirst ? "This page opens on its cash price and also shows a financing option. "
+    : f.hasScenario ? "This page shows a financing payment. " : "";
+  out.meta = f.any ? "Financing shown on this page · Alberta" : "Alberta rules · applies whether or not you finance";
+  out.lines = [
+    { k: "If you finance or lease", v: `${lead}The AIRB reports that optional coverages — collision and comprehensive, which pay to repair or replace this vehicle — may be required for a leased or financed vehicle.` },
+    { k: "The gap", v: "The AIRB reports that insurers are typically required, under section 555 of the Insurance Act — colloquially the Take All Comers rule — to provide a quote and write the business for any Albertan, but that this only applies to mandatory coverages, so insurers could deny access to the optional ones." },
+    { k: "Who it reached", v: "The AIRB reports that starting in early 2024 insurers began to deny those coverages to drivers with an at-fault claim in the past six years or a serious traffic conviction within the past four years, or at least forced them to choose a deductible such as $2,000 or more." },
+    { k: "Where it stands", v: "The AIRB reports that as of October 2025 AR 227/2025 gave it authority over those underwriting rules, that Bulletin 08-2025 advises insurers they will not receive any approval to increase rates until the rules are relaxed, and that with the implementation of Care-First many insurers are increasing their risk appetite and removing these restrictions (page 22)." },
+    { k: "Before you sign", v: "Ask your own insurer to confirm they will write collision and comprehensive on this vehicle, at the deductible your contract requires. A finance or lease contract is typically signed at the dealership, before the insurance is bound." },
+  ];
+  // One sentence for surfaces that show a short "what this means" panel. Worded
+  // HERE so it sweeps with the rest and says the same thing everywhere.
+  out.explain = "The AIRB reports that collision and comprehensive may be required for a leased or financed vehicle, and that Alberta's Take All Comers rule covers only the mandatory coverages. Confirm your own insurer will write them, at the deductible your contract requires, before you sign.";
+  out.body = out.lines.map((l) => l.v).join(" ");
   return out;
 }
