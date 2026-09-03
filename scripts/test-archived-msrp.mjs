@@ -28,6 +28,19 @@ ok("MY2018 read from the headline", readModelYear("The 2018 Toyota Highlander: w
 ok("a headline with no year yields null", readModelYear("Toyota Canada announces pricing") === null);
 ok("model parsed off the headline", modelFromTitle("Ignite your desire to explore in the 2020 Toyota RAV4") === "RAV4");
 ok("model stops before prose", modelFromTitle("The 2018 Toyota Highlander is here") === "Highlander");
+// The full MY2018-2024 sweep produced these three as MODEL NAMES. The prices
+// were right; the models were sentences, and a catalogue row nothing can match
+// is a row that quietly fails a buyer's report.
+ok("a headline verb does not become part of the model",
+   modelFromTitle("The 2024 Toyota Grand Highlander Touches Down in Canada") === "Grand Highlander");
+ok("a description does not become part of the model",
+   modelFromTitle("The 2023 Toyota Mirai hydrogen fuel cell electric vehicle") === "Mirai");
+ok("a verb in lower case does not become part of the model",
+   modelFromTitle("The 2024 Toyota Corolla combines stunning design") === "Corolla");
+ok("'Family' is not a trim level", modelFromTitle("The 2024 Toyota RAV4 Family expands") === "RAV4");
+ok("a real two-word nameplate survives", modelFromTitle("The 2019 Toyota Corolla Hatchback arrives") === "Corolla Hatchback");
+ok("a nameplate starting lower case survives", modelFromTitle("The 2024 Toyota bZ4X electric SUV") === "bZ4X");
+ok("GR Supra survives", modelFromTitle("The 2021 Toyota GR Supra is here") === "GR Supra");
 
 console.log("-- a price is a price, and nothing else is --");
 ok("reads a comma price", readPrice("(starting MSRP: $28,090)") === 28090);

@@ -45,14 +45,33 @@ const CURRENT_YEAR_FLOOR = 2025;   // the daily scrapers own 2025+
 const TRIM_OK = /^[A-Z0-9][A-Za-z0-9''.\-+/ ]{0,38}$/;
 const NOT_A_TRIM = /\b(price|msrp|freight|pdi|dealer|starting|includes?|available|models?|grades?|lineup|toyota|canada|vehicle)\b/i;
 
-/** "2020 Toyota RAV4 Hybrid" -> "RAV4 Hybrid". Never guesses. */
+/**
+ * "2020 Toyota RAV4 Hybrid" -> "RAV4 Hybrid". Never guesses.
+ *
+ * Headlines are sentences, so the model name runs straight into prose: the full
+ * sweep produced "Grand Highlander Touches Down", "Mirai hydrogen fuel cell
+ * elec" and "Corolla combines stunning des" as model names. Those are not wrong
+ * PRICES -- the prices were right -- but they are rows that can never match a
+ * real vehicle, and a catalogue row nothing can match is a row that quietly
+ * fails a buyer's report. Cut at the first prose word, cap the length, and
+ * refuse anything still not model-shaped. [[missing-beats-wrong]]
+ */
+const PROSE = /\b(touches|down|combines?|stunning|hydrogen|fuel|cell|electric|elec|family|delivers?|arrives?|brings?|gets?|adds?|debuts?|returns?|joins?|takes?|makes?|offers?|features?|introduces?|unveils?|celebrates?|welcomes?|redefines?|raises?|sets?|goes|comes|revs?|is|are|the|all|new|now|and|with|for|in|on|to|a|an)\b/i;
+
 export function modelFromTitle(title) {
   if (typeof title !== "string") return null;
   const m = title.match(/\b20\d{2}\s+Toyota\s+([A-Za-z0-9][A-Za-z0-9\- ]{1,28})/);
   if (!m) return null;
-  return m[1]
-    .replace(/\b(is|are|the|all|new|now|arrives?|gets?|adds?|brings?|revs?|and|with|for|in|on|to|a|an)\b.*$/i, "")
-    .replace(/\s+/g, " ").trim() || null;
+  const words = [];
+  for (const w of m[1].split(/\s+/)) {
+    if (!w) continue;
+    if (PROSE.test(w)) break;                      // prose starts here; the model ended
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(w)) break;
+    words.push(w);
+    if (words.length === 3) break;                 // no Toyota nameplate is longer
+  }
+  const name = words.join(" ").trim();
+  return name.length >= 2 ? name : null;
 }
 
 /**
@@ -219,6 +238,8 @@ async function main() {
   await writeCatalogs(MAKE, { msrpRows: rows }, { upsert: true, label: "archived MSRP" });
 }
 
-if (import.meta.url === `file://${process.argv[1].replace(/\\/g, "/")}` || process.argv[1].endsWith("scrape-archived-toyota.mjs")) {
+// Run as a script, importable as a module. `process.argv[1]` is undefined when
+// this is imported from `node -e`, which is exactly how the tests load it.
+if (typeof process.argv[1] === "string" && process.argv[1].endsWith("scrape-archived-toyota.mjs")) {
   main().catch((e) => { console.error(e); process.exit(1); });
 }
