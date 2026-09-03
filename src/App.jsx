@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8578,6 +8578,12 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // not a duration, and this card must not dress it as a span.
   // [[days-on-lot-needs-real-observations]] [[report-features-all-views]]
   const dolLine = daysOnLotLine(a);
+  // The dealer's own advertised price, every time we saw it move. Its own
+  // also-checked item, never folded into days-on-lot: how long a car has sat
+  // and what it has cost are two different facts. [[report-features-all-views]]
+  const pmLine = priceMovesLine(a);
+  let priceMovesItem = pmLine ? { key: "pricemoves", title: "Advertised price moves", tone: pmLine.tone, v: pmLine.value,
+    body: <Simple big={pmLine.value} c={pmLine.tone === "flag" ? TEAL : MUT2} note={pmLine.line} /> } : null;
   // NOT a P.push: days-on-lot is an ALSO-CHECKED item, not one of the ten
   // points. Pushing it into P made the audit eleven, and check:parity and
   // check:points both caught it — the "10-point" claim is a promise about
@@ -9048,6 +9054,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(financeCoverItem ? [financeCoverItem] : []),
     ...(insurancePremiumItem ? [insurancePremiumItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: dolLine ? dolLine.value : (daysLotItem.v || "Not published") }] : []),
+    ...(priceMovesItem ? [priceMovesItem] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
     ...(pageDefaultItem ? [pageDefaultItem] : []),

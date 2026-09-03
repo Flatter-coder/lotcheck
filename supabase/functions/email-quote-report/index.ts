@@ -502,6 +502,8 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     }
     const sv = sameVinElsewhereLine(a);
     if (sv) deck.push({ label: "Also advertised elsewhere", value: sv.value, note: sv.line, tone: "muted" });
+    const pm = priceMovesLine(a);
+    if (pm) deck.push({ label: "Advertised price moves", value: pm.value, note: pm.line, tone: pm.tone });
   }
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
@@ -851,7 +853,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1088,6 +1090,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     if (dl) P.push({ t: "Days on lot", v: dl.value, tone: Number(a.daysOnLot?.days) >= 90 ? "flag" : dl.tone });
     const sv = sameVinElsewhereLine(a);
     if (sv) P.push({ t: "Also advertised elsewhere", v: sv.value, tone: "muted" });
+    const pm = priceMovesLine(a);
+    if (pm) P.push({ t: "Advertised price moves", v: pm.value, tone: pm.tone });
   }
   if (a.dealerLicence?.status) {
     P.push({ t: "Dealer licence · AMVIC", v: String(a.dealerLicence.status).toUpperCase(), tone: a.dealerLicence.state === "ok" ? "pass" : "muted" });
@@ -1583,6 +1587,8 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     }
     const sv = sameVinElsewhereLine(a);
     if (sv) { kicker("ALSO ADVERTISED ELSEWHERE"); para(sv.line); }
+    const pm = priceMovesLine(a);
+    if (pm) { kicker("ADVERTISED PRICE MOVES"); para(pm.line); }
   }
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));
