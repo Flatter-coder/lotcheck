@@ -460,6 +460,18 @@ jobs:
       # fixed. Needs full history for the merge-base diff.
       - name: Cache version bumped when analysis output changed
         run: npm run check:cache-ver
+      # A MISSING NUMBER IS NOT ZERO. Number(null) is 0, and 0 is a legal
+      # odometer reading, interest rate and review count — so for those fields
+      # "we read zero" and "we read nothing" become the same value and every
+      # guard written downstream is correct and unreachable. Ten defects
+      # between 2026-08-11 and 09-03 had this one cause, including "Odometer
+      # 0 km — consistent with a new vehicle" printed on a real customer
+      # report for a page that published no odometer at all. Patching the
+      # instances is what let it come back nine times; this refuses the shape.
+      - name: A missing number is never read as 0
+        run: npm run check:coercion
+      - name: The shared reader keeps absences (read-num)
+        run: npm run test:read-num
       # Two promises to the buyer that are control flow, not data: a report
       # email always carries the report, and nobody is charged for a report we
       # couldn't build. The first was broken in production (the PDF build was

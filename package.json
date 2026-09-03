@@ -61,6 +61,8 @@
     "golden:grade": "node scripts/grade-golden-set.mjs",
     "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
     "check:cache-ver": "node scripts/check-cache-ver.mjs",
+    "check:coercion": "node scripts/check-number-coercion.mjs",
+    "test:read-num": "node scripts/test-read-num.mjs",
     "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",
     "test:region-gate": "node scripts/test-region-gate.mjs",
     "test:catalog-guard": "node scripts/test-catalog-guard.mjs",

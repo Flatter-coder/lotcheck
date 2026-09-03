@@ -1,3 +1,4 @@
+import { readNum } from "./read-num.js";
 // Convertus VMS embedded vehicle data — present on every Convertus
 // "/vehicles/YYYY/make/model/city/prov/adId/" VDP as a single inline
 // `var vmsData = {...};` blob, REGARDLESS of whether the page also carries
@@ -83,7 +84,7 @@ export function extractConvertusVmsVehicle(html) {
         : (/used|pre-?owned/.test(saleClass) ? "used" : null)));
 
   const yearNum = Number(v.year);
-  const odoNum = Number(v.odometer);
+  const odoNum = readNum(v.odometer);   // a blank odometer field is not 0 km [[read-num]]
 
   const c = (v.company_data && typeof v.company_data === "object") ? v.company_data : {};
   const dealerCity = str(c.company_city)
@@ -152,7 +153,7 @@ export function extractConvertusVmsVehicle(html) {
     trim: str(v.trim) || str(v.search_trim),
     vin,
     stockNumber: str(v.stock_number),
-    odometerKm: Number.isFinite(odoNum) && odoNum >= 0 ? Math.round(odoNum) : null,
+    odometerKm: odoNum != null && odoNum >= 0 ? Math.round(odoNum) : null,
     condition,
     saleConditionHint,
     msrp: num(v.msrp),

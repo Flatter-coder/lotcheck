@@ -62,7 +62,11 @@ const base = {
   sourceUrl: "https://example.invalid/vehicles/2026/lexus/nx/70080163/",
   capturedAt: "2026-08-27T04:00:00.000Z",
   marketValue: { low: 57000, high: 63000, note: "band", source: "LotCheck comps" },
-  financingCheck: { reconciles: false, note: "payment does not reconcile at the stated rate" },
+  // The shape computeFinancingCheck actually writes. This fixture used to say
+  // `{ reconciles: false }` -- a field no writer in this repo has ever set --
+  // and the assertion below tested that phantom, so it passed green while the
+  // real result was dropped from every forwarded report.
+  financingCheck: { checked: true, consistent: false, note: "payment does not reconcile at the stated rate" },
   addOns: [{ name: "Protection package", price: 1995, flagged: true, reason: "not itemised on the quote" }],
   summary: "s",
 };
@@ -74,7 +78,13 @@ console.log("\nthe fields that were silently dropped");
   check("odometer survives", Number(r?.odometerKm) === 5, `got ${r?.odometerKm}`);
   check("market value survives", Number(r?.marketValue?.low) === 57000 && Number(r?.marketValue?.high) === 63000);
   check("capture provenance survives", r?.sourceUrl === base.sourceUrl && r?.capturedAt === base.capturedAt);
-  check("the financing-math result survives", r?.financingCheck?.reconciles === false);
+  // Both halves matter: `checked` is what every surface gates the sentence on,
+  // so without it the forwarded copy printed no financing-math line at all.
+  check("the financing-math result survives", r?.financingCheck?.checked === true
+    && r?.financingCheck?.consistent === false, `got ${JSON.stringify(r?.financingCheck)}`);
+  check("and a consistent result forwards as consistent",
+    decodeReport(encodeReport({ ...base, financingCheck: { checked: true, consistent: true, note: "n" } }))
+      ?.financingCheck?.consistent === true);
   check("an add-on keeps the REASON it was flagged",
     r?.addOns?.[0]?.reason === "not itemised on the quote",
     "a flag with nothing behind it is a bare accusation");

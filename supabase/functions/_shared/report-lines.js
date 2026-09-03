@@ -737,3 +737,37 @@ export function financingAprNote(a, dealerApr) {
   }
   return "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
 }
+
+/**
+ * "Financing math" -- worded from the fields computeFinancingCheck actually
+ * RECORDED, not from a description of what someone assumed it did.
+ *
+ * The old sentence, on screen and in the email, said "We recomputed the
+ * advertised payment from the price, rate and term". The check reads neither
+ * the price nor the rate: it multiplies the advertised payment by the number of
+ * payments in the term and compares that with the total obligation the page
+ * discloses. So the report named two inputs the check never looked at, and a
+ * buyer who took it at its word would believe the rate had been verified
+ * against the payment. It had not.
+ *
+ * That is this repo's most common defect shape: one author writes the check,
+ * another writes the sentence, and nothing forces them to agree. The fix is
+ * structural -- the sentence is built here, from `paymentsCounted`,
+ * `computedFromPayments` and `disclosedTotalObligation`, so a change to what
+ * the check reads cannot leave a stale description behind on four surfaces.
+ *
+ * @param {{ financingCheck?: any, referenceFinancing?: any }} a
+ * @returns {string}
+ */
+export function financingMathNote(a) {
+  const fc = a?.financingCheck;
+  if (!fc || fc.checked !== true) {
+    if (a?.referenceFinancing?.note) return a.referenceFinancing.note;
+    return "The listing doesn't publish enough financing detail (payment, term and total) for us to re-check the arithmetic. Ask for all three in writing -- then the payment can be checked.";
+  }
+  const n = Number(fc.paymentsCounted);
+  const counted = Number.isFinite(n) && n > 0 ? `${n.toLocaleString()} payments` : "the payments";
+  return fc.consistent
+    ? `We multiplied the advertised payment by ${counted} over the term and compared the result with the total obligation the page discloses. The two agree. This checks the page's own arithmetic -- it does not check the interest rate, which the listing does not publish in a form we can recompute.`
+    : `We multiplied the advertised payment by ${counted} over the term and compared the result with the total obligation the page discloses. The two do not agree. Ask them to show the calculation line by line before signing.`;
+}

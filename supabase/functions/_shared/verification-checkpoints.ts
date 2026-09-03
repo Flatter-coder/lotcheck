@@ -105,7 +105,10 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
   // ---- 2. Odometer --------------------------------------------------------
   // A new vehicle has no odometer history to verify. That is a fact about the
   // vehicle, not a gap in our reading, so it is the rare honest N/A.
-  const odometer: CheckRow = a.odometerCheck?.checked === true
+  // `checked === true` alone reported "verified" while the value column printed
+  // "? km" -- the telemetry went green on the scan that fabricated the reading
+  // and printed the evidence in the same row. A reading is required.
+  const odometer: CheckRow = a.odometerCheck?.checked === true && a.odometerKm != null
     ? row("odometer", "verified", `${a.odometerKm ?? "?"} km`)
     : isNew(a)
       ? row("odometer", "not_applicable", "new vehicle")
