@@ -283,6 +283,27 @@ export const INVARIANTS: Invariant[] = [
     repair: (a) => { a.marketCount = { ...a.marketCount, state: "unchecked", reason: "provenance_missing" }; },
   },
   {
+    // "How this vehicle compares with the Alberta market" prints a middle, a
+    // range, how many listings, their model years, mileage window, dealers
+    // and read dates. A middle with none of that behind it is the "$9,908
+    // above the local middle value" the card replaced (LC-0F75-A93,
+    // 2026-09-02). Demote to not-enough with a reason the card words honestly
+    // -- the number is never shown without what it is of.
+    id: "MARKET_VALUE_HAS_BASIS",
+    severity: "repair",
+    why: "a price comparison must name what it is of: how many listings, their range, model years, province, make and model, condition and read dates",
+    applies: (a) => !!a?.marketValue && a.marketValue.average != null && a.marketValue.insufficient !== true,
+    holds: (a) => {
+      const m = a.marketValue;
+      const n = num(m.comps), lo = num(m.low), hi = num(m.high), med = num(m.average);
+      return n > 0 && lo > 0 && hi >= lo && med >= lo && med <= hi && !!m.asOf && !!m.seenMax && !!m.yearFrom && !!m.yearTo
+        && !!m.province && !!m.make && !!m.model && !!m.condition
+        && (m.dealers == null || (num(m.dealers) > 0 && num(m.dealers) <= n))
+        && ((m.trimScope !== "trim" && m.trimScope !== "trim_family") || !!m.trimLabel);
+    },
+    repair: (a) => { a.marketValue = { ...a.marketValue, average: null, below: null, above: null, low: null, high: null, cpoPremium: null, insufficient: true, reason: "basis_missing" }; },
+  },
+  {
     // "This page's payment default is N months..." is a claim about
     // the page's PRE-SELECTED state. Only the page's own feed, embedded
     // settings or visible sentence can back that (page-default.js); the

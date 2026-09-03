@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-02b";
+const PDF_BUILDER_VER = "2026-09-02c";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -245,8 +245,8 @@ function coverCard(a: any): string {
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
   const rc = a.recalls;
   const chips: string[] = [];
-  if (flaggedN) chips.push(coverChip(`⚠ ${flaggedN} watch-out${flaggedN > 1 ? "s" : ""}`, "flag"));
-  if (rc?.checked && rc.count > 0) chips.push(coverChip(`⚠ ${rc.count} recall${rc.count > 1 ? "s" : ""}`, "flag"));
+  if (flaggedN) chips.push(coverChip(`✗ ${flaggedN} watch-out${flaggedN > 1 ? "s" : ""}`, "flag"));
+  if (rc?.checked && rc.count > 0) chips.push(coverChip(`✗ ${rc.count} recall${rc.count > 1 ? "s" : ""}`, "flag"));
   else if (rc?.checked && rc.count === 0 && rc.confirmed !== false) chips.push(coverChip("✓ No recalls", "ok"));
   if (a.vinCheck?.present && a.vinCheck.valid) chips.push(coverChip("✓ VIN valid", "ok"));
   if (a.financingCheck?.checked && a.financingCheck.consistent) chips.push(coverChip("✓ Math checks", "ok"));
@@ -287,7 +287,7 @@ function deckCard(idx: number, total: number, label: string, tone: string, bodyH
   const n = (v: number) => String(v).padStart(2, "0");
   return `<div style="background:${bg};border:1px solid ${bd};border-radius:14px;padding:14px 16px;margin-bottom:11px;${glowCss}">
     <table style="width:100%;margin-bottom:6px;"><tr>
-      <td style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;">${label}</td>
+      <td style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;">${escapeHtml(label)}</td>
       <td style="text-align:right;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:#b9b3a4;font-weight:700;white-space:nowrap;">CARD ${n(idx)} OF ${n(total)}</td>
     </tr></table>
     ${bodyHtml}</div>`;
@@ -337,10 +337,10 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   // 2 -- Add-ons & fees (glow if anything flagged)
   if ((a.addOns || []).length) {
     const rows = a.addOns.map((x: any) => `<tr>
-      <td style="padding:7px 0;border-top:1px solid #eee;font-size:13px;color:#33305A;">${x.verdict === "flagged" ? "🔻 " : ""}${escapeHtml(x.name)}${x.reason ? `<div style="font-size:11.5px;color:#706D96;line-height:1.4;">${escapeHtml(x.reason)}</div>` : ""}</td>
+      <td style="padding:7px 0;border-top:1px solid #eee;font-size:13px;color:#33305A;">${x.verdict === "flagged" ? "✗ " : ""}${escapeHtml(x.name)}${x.reason ? `<div style="font-size:11.5px;color:#706D96;line-height:1.4;">${escapeHtml(x.reason)}</div>` : ""}</td>
       <td style="padding:7px 0;border-top:1px solid #eee;text-align:right;font-weight:700;color:${x.verdict === "flagged" ? "#A63C25" : "#33305A"};white-space:nowrap;">${money(x.price)}</td></tr>`).join("");
     deck.push({
-      label: flaggedN ? "⚠ Flagged add-ons" : "Add-ons & fees",
+      label: flaggedN ? "Flagged add-ons" : "Add-ons & fees",
       tone: flaggedN ? "flag" : "muted",
       glow: !!flaggedN,
       body: `${flaggedN ? `<div style="font-size:18px;font-weight:900;color:#A63C25;margin-bottom:4px;">${money(a.totalFlaggedCost || 0)} · ${flaggedN} item${flaggedN > 1 ? "s" : ""} to question</div>` : ""}<table style="width:100%;border-collapse:collapse;">${rows}</table>`,
@@ -396,7 +396,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
         const yr = it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? " · " + new Date(it.date).getFullYear() : "";
         return `<div style="font-size:12px;color:#33305A;margin-top:6px;padding-top:6px;border-top:1px solid #F2836B33;"><b>${escapeHtml(it.system || "Recall")}${yr}</b>${it.summary ? `<div style="color:#5B5885;margin-top:2px;line-height:1.45;">${escapeHtml(it.summary)}</div>` : ""}</div>`;
       }).join("");
-      deck.push({ label: "⚠ Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
+      deck.push({ label: "Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
     }
   }
 
@@ -422,10 +422,15 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     const anyFlag = core.some((p) => p.tone === "flag");
     const row = (p: { t: string; v: string; tone: string }) => {
       const c = p.tone === "flag" ? "#A63C25" : p.tone === "pass" ? "#17756B" : "#706D96";
-      const mark = p.tone === "flag" ? "\u26a0" : p.tone === "pass" ? "\u2713" : "\u00b7";
-      return `<div style="display:flex;justify-content:space-between;gap:10px;font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">`
-        + `<span>${mark} ${escapeHtml(p.t)}</span>`
-        + `<span style="color:${c};font-weight:700;white-space:nowrap;">${escapeHtml(p.v)}</span></div>`;
+      // ✗ / ✓ / · only: U+26A0 renders as an emoji in most mail clients, and
+      // display:flex is dropped by Gmail and Outlook, which ran the label and the
+      // value together ("Price vs MSRPPRICE UNVERIFIED", LC-0F75-A93, 2026-09-02).
+      // A two-cell table is what every client lays out.
+      const mark = p.tone === "flag" ? "\u2717" : p.tone === "pass" ? "\u2713" : "\u00b7";
+      return `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"><tr>`
+        + `<td style="padding:5px 8px 5px 0;font-size:13px;color:#33305A;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">${mark} ${escapeHtml(p.t)}</td>`
+        + `<td style="padding:5px 0;font-size:13px;color:${c};font-weight:700;white-space:nowrap;text-align:right;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">${escapeHtml(p.v)}</td>`
+        + `</tr></table>`;
     };
     deck.push({
       label: `The ${core.length}-point verification`,
@@ -466,7 +471,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     // buyer comparing the email against the app is not reading two counts.
     const HTML_ROWS_SHOWN = 12;
     const rows = tr.t.slice(0, HTML_ROWS_SHOWN).map((x: any) =>
-      `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${x.p ? escapeHtml(String(x.p)) + " · " : ""}${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
+      `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"><tr><td style="padding:3px 8px 3px 0;font-size:12px;color:#33305A;border-bottom:1px solid rgba(51,48,90,.08);">${x.p ? escapeHtml(String(x.p)) + " · " : ""}${escapeHtml(x.n)}</td><td style="padding:3px 0;font-size:12px;color:#33305A;font-weight:700;white-space:nowrap;text-align:right;border-bottom:1px solid rgba(51,48,90,.08);">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</td></tr></table>`).join("");
     deck.push({ label: "MSRP per trim", tone: "muted", body:
       `<div style="font-size:13px;font-weight:900;color:#33305A;">${tr.y} ${escapeHtml(tr.mk)} ${escapeHtml(tr.md)} — the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}</div>` +
       `<div style="margin-top:6px;">${rows}</div>` +
@@ -508,39 +513,72 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Worth asking outright: <b>&ldquo;How long has this exact car been on your lot?&rdquo;</b> A car that has sat 90+ days is carrying real cost for them, and the answer is easy for them to give and awkward to dodge. We could not read it here, so we are not guessing at it.</div>` });
   }
 
-  // 5b1 -- Used market value: the median-anchored band from our OWN comps
-  // (design 10 in dollars, never a score -- design-must-not-create-questions).
-  // Arcs don't survive email clients, so the same information rides on a linear
-  // low->median->high band with a "you are here" marker.
-  if (a.marketValue && a.marketValue.average != null) {
-    const mv = a.marketValue;
-    const median = Number(mv.average) || 0;
-    const low = Number(mv.low != null ? mv.low : mv.below) || 0;
-    const high = Number(mv.high != null ? mv.high : mv.above) || 0;
-    const ask = Number(a.quotedPrice) || 0;
-    const comps = mv.comps != null ? Number(mv.comps) : null;
-    const delta = (ask && median) ? ask - median : 0;
-    // Caution ONLY when asking above the whole local range (a watch-out), never
-    // for a below-range good deal or a missing price -- matches the 10-point line.
-    const aboveRange = ask > 0 && ask > high;
-    const pos = delta === 0 ? "at the local middle value" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local middle value`;
-    if (median && low && high) {
-      const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
-      const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
-      const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
-      const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
-      const band =
-        `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
-          `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
-          `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
-          `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
-        `</div>` +
-        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Middle value ${money(median)}</span><span>High ${money(high)}</span></div>`;
-      deck.push({ label: "Used market value", tone: aboveRange ? "flag" : "muted", glow: false, body:
-        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market middle value ${money(median)}`}</div>` +
-        band +
-        `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
+  // 5b1 -- How this vehicle compares with the Alberta market: three plain
+  // lines (this vehicle / similar listings in Alberta / difference) worded by
+  // ONE shared builder (report-lines.js marketCompareLine) and carrying a
+  // traffic light -- green at or below the middle, amber above the middle but
+  // inside the range, red above every similar listing read. Vic, 2026-09-02,
+  // after LC-0F75-A93 printed "$9,908 above the local middle value" against
+  // 2024 hybrids: "not easy to understand". Renders whenever a comparison set
+  // exists, INCLUDING the not-enough state -- an unmade comparison still gets
+  // its card and its reason. [[report-never-empty]]
+  if (a.marketValue) {
+    const line = marketCompareLine(a);
+    const lines: Array<{ k: string; v: string }> = Array.isArray(line.lines) ? line.lines : [];
+    const LIGHT: Record<string, { dot: string; bg: string; fg: string }> = {
+      green: { dot: "#17756B", bg: "#E3F4F1", fg: "#17756B" },
+      amber: { dot: "#8A6414", bg: "#FDF4DF", fg: "#8A6414" },
+      red:   { dot: "#A63C25", bg: "#FDEAE5", fg: "#A63C25" },
+    };
+    const lt = line.light && LIGHT[line.light] ? LIGHT[line.light] : null;
+    // Tables throughout: Gmail and Outlook drop display:flex, so the dot and
+    // its label are two cells, and each of the three lines is a two-cell row.
+    const lightRow = lt && line.lightLabel
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 10px;"><tr>` +
+          `<td style="padding:6px 12px 6px 10px;background:${lt.bg};border-radius:999px;">` +
+            `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>` +
+              `<td style="width:12px;height:12px;border-radius:50%;background:${lt.dot};font-size:0;line-height:0;">&nbsp;</td>` +
+              `<td style="padding-left:8px;font-size:12px;font-weight:800;color:${lt.fg};line-height:1.2;">${escapeHtml(line.lightLabel)}</td>` +
+            `</tr></table>` +
+          `</td>` +
+        `</tr></table>`
+      : "";
+    const rows = lines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    const linesTable = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">${rows}</table>`;
+    // The linear low -> middle -> high band with a "you are here" marker stays
+    // under the three lines, and only once a comparison was actually made.
+    let band = "";
+    if (line.state === "confirmed") {
+      const mv = a.marketValue;
+      const median = Number(mv.average) || 0;
+      const low = Number(mv.low != null ? mv.low : mv.below) || 0;
+      const high = Number(mv.high != null ? mv.high : mv.above) || 0;
+      // The marker sits only where the builder measured the asking price: an
+      // unverified or finance-contingent price is in the lines, not on the band.
+      const ask = Number(line.askUsed) || 0;
+      if (median && low && high) {
+        const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
+        const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
+        const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
+        const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
+        band =
+          `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
+            `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
+            `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
+            (ask >= 1 ? `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` : "") +
+          `</div>` +
+          `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;font-size:11px;color:#706D96;font-weight:700;"><tr>` +
+            `<td style="text-align:left;">Low ${money(low)}</td><td style="text-align:center;">Middle ${money(median)}</td><td style="text-align:right;">High ${money(high)}</td>` +
+          `</tr></table>`;
+      }
     }
+    deck.push({ label: line.title, tone: line.tone, glow: line.light === "red", body:
+      lightRow + linesTable + band +
+      (line.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(line.note)}</div>` : "") });
   }
 
   // 5b1b -- Other listings read: "Of N other listings read, M advertise below
@@ -675,7 +713,7 @@ function pdfSafe(s: unknown): string {
   return String(s ?? "")
     .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-").replace(/•/g, "-").replace(/…/g, "...")
-    .replace(/[★☆⭐]/g, "*").replace(/▲/g, "^").replace(/▼/g, "v")
+    .replace(/[★☆\u2B50]/g, "*").replace(/▲/g, "^").replace(/▼/g, "v")
     .replace(/[✓✔⚑⚐]/g, "").replace(/[^\x20-\x7E -ÿ]/g, "");
 }
 // Chunked base64 for the PDF bytes (Deno's btoa needs a binary string).
@@ -691,13 +729,14 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { marketCountLine, pageDefaultLine, fmtDateEn } from "../_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn } from "../_shared/report-lines.js";
 
-// The two count/default lines (marketCount, pageDefault) come from ONE shared
-// builder, so the sentence in this email is the sentence on screen. Nothing in
-// this file writes a new sentence for them: value / headline / body are used
-// as returned on every surface below (HTML deck, audit rows, PDF narrative).
-// The PDF fonts encode WinAnsi only, so the em dash becomes a hyphen there.
+// The count, default and comparison lines (marketCount, pageDefault,
+// marketValue) come from ONE shared builder, so the sentence in this email is
+// the sentence on screen. Nothing in this file writes a new sentence for them:
+// value / headline / lines / body are used as returned on every surface below
+// (HTML deck, audit rows, PDF narrative). The PDF fonts encode WinAnsi only,
+// so the em dash becomes a hyphen there.
 const noEmDash = (s: unknown): string => String(s ?? "").replace(/—/g, "-");
 // Province code -> name, mirroring report-lines.js so the meta line under the
 // headline and the body sentence never name the same place two ways.
@@ -844,10 +883,12 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
-  // NOTE: used market value is NOT one of the fixed 10 audit points -- it is a
-  // context module (like days-on-lot) and renders as its own deck card + a PDF
-  // narrative section. Pushing it here would overflow P.slice(0,10) and silently
-  // drop the last real point (Dealer reputation). Kept out on purpose.
+  // NOTE: the market comparison ("How this vehicle compares with the Alberta
+  // market", report-lines.js marketCompareLine) is NOT one of the fixed 10
+  // audit points -- it is a context module (like days-on-lot) and renders as
+  // its own deck card + a PDF narrative section. Pushing it here would overflow
+  // P.slice(0,10) and silently drop the last real point (Dealer reputation).
+  // Kept out on purpose.
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
   else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
@@ -1489,29 +1530,30 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- USED MARKET VALUE — our own comp band, in dollars (never a score) ----
-  // A context module like days-on-lot: it renders here as its own narrative
-  // section, NOT as one of the fixed 10 audit points.
-  if (a.marketValue && a.marketValue.average != null) {
-    const mv = a.marketValue;
-    const med = Number(mv.average) || 0;
-    const lo = Number(mv.low != null ? mv.low : mv.below) || 0;
-    const hi = Number(mv.high != null ? mv.high : mv.above) || 0;
-    const ask = Number(a.quotedPrice) || 0;
-    const comps = mv.comps != null ? Number(mv.comps) : null;
-    const d = (ask && med) ? ask - med : 0;
-    const aboveRange = ask > 0 && ask > hi;
-    const m = (n: number) => "$" + Math.round(n).toLocaleString("en-CA");
-    if (med && lo && hi) {
-      need(72);
-      kicker("USED MARKET VALUE");
-      T(ask ? `${m(ask)} - ${d === 0 ? "at the local middle value" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local middle value"}` : `Market middle value ${m(med)}`,
-        { size: 14, font: serifB, color: aboveRange ? CORAL : INK }); y -= 19;
-      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, middle value ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
-      advance(2);
-      para("Asking prices read from dealers' own listings, not confirmed sales - this is the market, not the dealer's trade-in number.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-      rule();
+  // ---- HOW THIS VEHICLE COMPARES WITH THE ALBERTA MARKET ----
+  // Three plain lines (this vehicle / similar listings in Alberta / difference)
+  // from the shared builder (report-lines.js marketCompareLine): the words in
+  // this PDF are the words in the HTML deck and on screen. A context section
+  // like DAYS ON LOT, not one of the fixed audit points, and it renders
+  // whenever a comparison set exists -- the not-enough state still gets its
+  // heading and its reason. T/para run every string through pdfSafe, so the
+  // builder's em dashes print as hyphens (the PDF fonts encode WinAnsi only).
+  if (a.marketValue) {
+    const line = marketCompareLine(a);
+    const lines: Array<{ k: string; v: string }> = Array.isArray(line.lines) ? line.lines : [];
+    const headColor = line.light === "red" ? CORAL : line.light === "green" ? TEAL : INK;
+    need(96);
+    kicker(line.title.toUpperCase());
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: headColor }); y -= 18;
+    if (line.lightLabel) { T(noEmDash(line.lightLabel), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of lines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
     }
+    if (line.note) para(noEmDash(line.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
   }
 
   // ---- OTHER LISTINGS READ -- the count, from the shared builder ----

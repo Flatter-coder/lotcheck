@@ -121,7 +121,7 @@ export function marketCountLine(a) {
   const withTrim = scope === "trim";
   const labelBase = vehicleLabel(mc, a, withTrim);
   const familyClause = scope === "trim_family" && mc.trimLabel ? ` with a trim beginning "${mc.trimLabel.split(/\s+/)[0]}"` : "";
-  const allTrims = scope === "model" ? " (all trims)" : "";
+  const allTrims = scope === "model" ? " (all trims, same powertrain)" : "";
   const other = mc.subjectExcluded ? "other " : "";
   const scopeTag = scope === "model" ? " · ALL TRIMS" : scope === "trim_family" && mc.trimLabel ? ` · ${mc.trimLabel.split(/\s+/)[0].toUpperCase()} FAMILY` : "";
   out.meta = [labelBase, prov, when ? `read ${when}` : null].filter(Boolean).join(" · ");
@@ -243,3 +243,166 @@ export function pageDefaultLine(a) {
 }
 
 export const REPORT_LINES = { marketCountLine, pageDefaultLine };
+
+// ---------------------------------------------------------------------------
+// LINE 3 -- "How this price compares": three plain lines. This car / similar
+// listings (what they are, how many, read when) / the difference. Built from
+// the like-for-like band (marketvalue.ts + market-count.js likeForLikePool).
+// Vic, 2026-09-02: "$9,908 above the local middle value" was not easy to
+// understand, and it compared a 2026 with 2024 hybrids. Every figure here
+// names what it is of, or the card says there is nothing to compare.
+function normMv(x) {
+  if (!x || typeof x !== "object") return null;
+  if ("average" in x || "insufficient" in x) return x;
+  return {
+    average: x.avg ?? null, below: x.below ?? null, above: x.above ?? null, low: x.lo ?? null, high: x.hi ?? null,
+    mileage: x.mileage ?? null, source: x.source || null, comps: x.n ?? null, asOf: x.as || null,
+    insufficient: !!x.ins, nRead: x.nr ?? null, need: x.nd ?? null, yearFrom: x.yf ?? null, yearTo: x.yt ?? null,
+    trimScope: x.ts || null, trimLabel: x.tl || null, powertrain: x.pt || null, kmLow: x.kl ?? null, kmHigh: x.kh ?? null,
+    condition: x.cd || null, dealers: x.d ?? null,
+    make: x.mk || null, model: x.md || null, province: x.pv || null, seenMin: x.from || null, seenMax: x.to || null,
+    nKept: x.nk ?? null, reason: x.rs || null,
+  };
+}
+
+// A mileage window is printed so that every row in the set fits inside it:
+// the floor rounds DOWN, the ceiling rounds UP (a 37,178 km ceiling is
+// "38,000 km", never "37,000 km" with a 37,100 km listing inside).
+function kmFloor(n) { return `${(Math.floor(Number(n) / 1000) * 1000).toLocaleString("en-CA")} km`; }
+function kmCeil(n) { return `${(Math.ceil(Number(n) / 1000) * 1000).toLocaleString("en-CA")} km`; }
+
+// "on Aug 18, 2026" when every row was last read the same day; "between Aug 3
+// and Aug 18, 2026" otherwise -- the freshest row's date alone would claim
+// all of them were read that day.
+function readClause(mv) {
+  const a = fmtDateEn(mv.seenMin), b = fmtDateEn(mv.seenMax || mv.asOf);
+  if (a && b && a !== b) {
+    // "between Aug 3 and Aug 18, 2026": the year once when both share it.
+    const ya = a.slice(-6), yb = b.slice(-6);
+    return `between ${ya === yb && /^, \d{4}$/.test(ya) ? a.slice(0, -6) : a} and ${b}`;
+  }
+  const d = b || a;
+  return d ? `on ${d}` : "";
+}
+
+// green  = at or below the middle of similar listings
+// amber  = above the middle, but not above every similar listing compared
+// red    = above all of the similar listings compared
+// (null when there is nothing to colour: no set, no asking price, a price the
+// page's own data could not back, one that depends on financing, or a report
+// sealed before the set's make-up rode along with it)
+const NOTE = "These are asking prices on dealers' own listings, not sale prices.";
+export function marketCompareLine(a) {
+  const mv = normMv(a?.marketValue);
+  const prov = provinceName(mv?.province);
+  const out = { key: "marketcompare", title: `How this vehicle compares with the ${prov} market`, tone: "muted", light: null, lightLabel: null, state: "unchecked", value: "NOT COMPARED", headline: "Not compared", body: "", lines: [], meta: "Not compared", note: null, askUsed: null };
+  if (!mv) {
+    out.body = "No comparison set was read for this report.";
+    return out;
+  }
+  const ask = Number(a?.quotedPrice ?? a?.price?.asking);
+  const hasAsk = Number.isFinite(ask) && ask >= 1;
+  // The count line's refusals, applied here too: a price the page's own data
+  // could not back, or one that depends on financing, is shown but never
+  // measured against other listings -- one report must not say both.
+  const unverified = a?.priceVerified === false || a?.price?.verified === false;
+  const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
+  const mk = mv.make || a?.make || null, md = mv.model || a?.model || null;
+  const cond = mv.condition || a?.vehicleCondition || null;
+  // The set's make-up: model years, condition, make/model. A report sealed
+  // before these rode along (v4-v6 seals carry avg/lo/hi/n/as only) must never
+  // be described from the subject's own vehicle string, year or freshest date
+  // -- that would name eleven 2024 hybrids as "2026 RX 350 Luxury AWD".
+  const hasBasis = !!(mv.yearFrom && mv.yearTo && cond && (mk || md));
+  const years = mv.yearFrom && mv.yearTo ? (mv.yearFrom === mv.yearTo ? String(mv.yearFrom) : `${mv.yearFrom} to ${mv.yearTo}`) : "";
+  const nameplate = [mk, md, mv.powertrain].filter(Boolean).join(" ");
+  // "(all trims, same powertrain)": the RX rows carry the hybrids AS trims
+  // ("RX 350h", "RX 500h") and the powertrain wall leaves them out on purpose,
+  // so "all trims" alone would not be true.
+  const allTrims = mv.trimScope === "model" || (mv.insufficient && !mv.trimScope && Number(mv.nRead) > 0);
+  const scopeWord = mv.trimScope === "trim" && mv.trimLabel ? ` ${mv.trimLabel}` : mv.trimScope === "trim_family" && mv.trimLabel ? ` whose trim begins "${mv.trimLabel.split(/\s+/)[0]}"` : allTrims ? " (all trims, same powertrain)" : "";
+  const kmClause = mv.kmLow != null && mv.kmHigh != null ? (Number(mv.kmLow) <= 0 ? ` with up to ${kmCeil(mv.kmHigh)}` : ` with ${kmFloor(mv.kmLow)} to ${kmCeil(mv.kmHigh)}`) : "";
+  const when = readClause(mv);
+  const what = `${cond ? cond + " " : ""}${years ? years + " " : ""}${nameplate}${scopeWord}${kmClause}`;
+  const d = mv.dealers != null ? Number(mv.dealers) : 0;
+  const dealersClause = d > 0 ? ` at ${d} ${prov} dealer${d === 1 ? "" : "s"}` : ` at ${prov} dealers`;
+  const source = `read from the ${d === 1 ? "dealer's own page" : "dealers' own pages"}${when ? " " + when : ""}`;
+  const thisLine = { k: "This vehicle", v: hasAsk ? `${fmtMoney(ask)} asking` : "no asking price shown" };
+  const simK = `Similar listings in ${prov}`;
+
+  if (mv.insufficient || mv.average == null) {
+    const n = Number(mv.nRead ?? mv.comps) || 0;
+    const kept = mv.nKept != null ? Number(mv.nKept) : null;
+    const left = kept != null && kept < n ? n - kept : 0;
+    const need = Number(mv.need) || 5;
+    const were = n === 1 ? "was" : "were";
+    out.state = "insufficient";
+    out.value = "NOT ENOUGH TO COMPARE";
+    out.headline = "Not enough similar listings to compare";
+    out.meta = `${n} read, ${need} needed`;
+    if (mv.reason === "odometer_missing") {
+      out.value = "NOT COMPARED";
+      out.headline = "Not compared: odometer not read";
+      out.meta = "Odometer not read";
+      out.lines = [thisLine, { k: simK, v: "not chosen: this listing's odometer was not read from the page, so similar-mileage listings could not be selected" }, { k: "Comparison", v: "not made" }];
+      out.body = "This listing's odometer was not read from the page, so similar-mileage listings could not be chosen and no comparison is made here. It helps to have the odometer reading from the dealer in writing.";
+      return out;
+    }
+    if (mv.reason === "basis_missing" || (!hasBasis && !mv.reason)) {
+      // The invariant demoted a middle that could not say what it was of, or
+      // a sealed set arrived without its make-up.
+      out.value = "NOT COMPARED";
+      out.headline = "Comparison set not recorded";
+      out.meta = "Basis not recorded";
+      out.lines = [thisLine, { k: simK, v: "a set was read, but what it was made of was not recorded" }, { k: "Comparison", v: "not made" }];
+      out.body = "A comparison set was read for this report, but what it was made of was not recorded, so no comparison is made here.";
+      return out;
+    }
+    const readSentence = n === 0
+      ? `No ${what} were among the listings read from ${prov} dealers' own pages.`
+      : `${n} ${what}${dealersClause} ${were} ${source}.`;
+    const outliers = left > 0 ? ` ${left} of them ${left === 1 ? "was" : "were"} left out as ${left === 1 ? "a price outlier" : "price outliers"}.` : "";
+    out.lines = [
+      thisLine,
+      { k: simK, v: n === 0 ? `none read: no ${what} were among the listings read from ${prov} dealers' own pages` : `${n} ${what}${dealersClause}, ${source}${left > 0 ? `; ${left} left out as ${left === 1 ? "a price outlier" : "price outliers"}` : ""}` },
+      { k: "Comparison", v: `not made: ${need} similar listings are needed, ${left > 0 ? `${kept} remained` : `${n} ${were} read`}` },
+    ];
+    out.body = `${readSentence}${outliers} ${need} are needed for a fair comparison, so none is made here.`;
+    return out;
+  }
+
+  const med = Number(mv.average), lo = Number(mv.low), hi = Number(mv.high);
+  const n = Number(mv.comps) || 0;
+  // A range is printed, and a light lit, only when the sealed set carries both
+  // its bounds AND its make-up: a report sealed before the basis rode along
+  // has the middle alone, and a missing bound is never a $0 bound nor a red.
+  const hasRange = hasBasis && n > 0 && Number.isFinite(lo) && Number.isFinite(hi) && lo > 0 && hi >= lo && med >= lo && med <= hi;
+  const canCompare = hasAsk && !unverified && !contingent;
+  const delta = canCompare ? Math.round(ask - med) : null;
+  const light = delta == null || !hasRange ? null : delta <= 0 ? "green" : ask > hi ? "red" : "amber";
+  const lightLabel = light === "green" ? "At or below the middle of similar listings" : light === "amber" ? "Above the middle, inside the range of similar listings" : light === "red" ? `Above all ${n} similar listings compared` : null;
+  const diff = !hasAsk ? "no asking price is shown on this page, so no difference is worked out"
+    : contingent ? "not worked out: this page's price depends on financing with the dealer — ask the dealer for the price without financing in writing"
+    : unverified ? "not worked out: this page's asking price could not be verified from the page's own data — ask the dealer for the all-in price in writing"
+    : delta === 0 ? "at the middle of those listings"
+    : `${fmtMoney(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the middle of those listings`;
+  // Rows read but left out by the price-outlier trim are named, so this N and
+  // the count line's N never differ on one page without a reason.
+  const leftC = mv.nRead != null && Number(mv.nRead) > n ? Number(mv.nRead) - n : 0;
+  const outlierC = leftC > 0 ? `; ${leftC} more ${leftC === 1 ? "was" : "were"} read and left out as ${leftC === 1 ? "a price outlier" : "price outliers"}` : "";
+  const simV = hasRange
+    ? `${n} ${what}${dealersClause}, ${source}: ${fmtMoney(lo)} to ${fmtMoney(hi)}, middle ${fmtMoney(med)} (the median of those ${n} asking prices)${outlierC}`
+    : `middle ${fmtMoney(med)}${n > 0 ? ` across ${n} listings` : ""}; what those listings were (model year, trim, mileage) was not sealed with this report, so no range is shown`;
+  out.state = "confirmed";
+  out.light = light;
+  out.lightLabel = lightLabel;
+  out.tone = light === "red" ? "flag" : light === "green" ? "pass" : "muted";
+  out.askUsed = canCompare ? ask : null;
+  out.note = NOTE;
+  out.value = delta == null ? `MIDDLE ${fmtMoney(med)}` : delta === 0 ? "AT THE MIDDLE" : `${fmtMoney(Math.abs(delta))} ${delta > 0 ? "ABOVE" : "BELOW"} THE MIDDLE`;
+  out.headline = delta == null ? `Middle of similar listings: ${fmtMoney(med)}` : delta === 0 ? "At the middle of similar listings" : `${fmtMoney(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the middle of similar listings`;
+  out.meta = hasRange ? [`${n} similar listing${n === 1 ? "" : "s"}`, years || null, when ? `read ${when}` : null].filter(Boolean).join(" · ") : "Middle only";
+  out.lines = [thisLine, { k: simK, v: simV }, { k: "Difference", v: diff }];
+  out.body = `This vehicle: ${thisLine.v}. ${simK}: ${simV}. Difference: ${diff}.`;
+  return out;
+}
