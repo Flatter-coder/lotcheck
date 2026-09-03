@@ -272,6 +272,8 @@ jobs:
       # The rebuilt value report's math: the mileage regression steps a high-km
       # subject DOWN from the raw median (Collette's bar), the three-exit tiers
       # order correctly, and thin/no-signal comps fabricate nothing.
+      - name: Value-report mileage + tiers math
+        run: npm run test:value-math
       # test:value-math is NOT on main yet: its script and the marketvalue helpers
       # it imports (mileageAdjustedValue, valueTiers, pickNamedComps) live on
       # feat/value-report-collette. The step reached main inside ad477ed without

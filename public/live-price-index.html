@@ -145,6 +145,45 @@
     .lc-gate-car,.lc-gate-window{animation:none!important}
   }
 
+  /* ================= INSTRUMENT REFRESH =================
+     Additive only. Nothing below removes or renames a rule, and no id or class
+     the JavaScript writes into is touched, so every live figure keeps painting
+     exactly as it did -- verified before and after against the real catalog
+     read ($59,999 middle value, 1,129 trims, 32 makes, 379 of 1,129 tagged).
+
+     Written entirely against the existing tokens, so light mode inherits it
+     without a second block. */
+
+  /* Each card gets the brand gate-purple tick at its top-left corner. One
+     detail, repeated, is what makes a page of boxes read as a set of
+     instruments. */
+  .card{position:relative}
+  .card::before{content:"";position:absolute;left:0;top:0;width:34px;height:1px;
+    background:var(--gate);opacity:.85}
+  .hero::before{width:56px;opacity:1}
+
+  /* Section heads carry a hairline through to their counter, so the eye reads
+     one band per subject instead of a stack. */
+  .sect-h{border-bottom:1px solid var(--hair);padding-bottom:9px}
+
+  /* The middle-value figure is the number this page exists to show. */
+  .idx{text-shadow:0 0 46px var(--cyan-dim)}
+  .hero-stats{gap:30px}
+  .hero-stats b{font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+
+  /* A live badge is a claim about freshness, so it should look like a reading
+     rather than a caption: boxed, and unmistakably on, paused or off. */
+  .lv{border:1px solid var(--hair);border-radius:999px;padding:2px 9px 2px 7px;
+    background:var(--panel-2)}
+  .lv.on{border-color:var(--cyan-dim)}
+  .lv.paused{border-color:rgba(224,168,0,.55)}
+
+  /* Figures line up in columns wherever they are stacked. */
+  .tile .v{letter-spacing:-1.2px;font-variant-numeric:tabular-nums}
+  .tile .k.sub{opacity:.92}
+  .pt-note b,.mkt-say b,.mkt-cap b{font-variant-numeric:tabular-nums}
+
+  @media (prefers-reduced-motion:reduce){ .card::before{transition:none} }
   /* ================= CINEMATIC HERO =================
      The page opened on a 1,120 px column in a 2,000 px window. It now opens on
      the lake, and the three figures in the glass strip are the SAME live values

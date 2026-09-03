@@ -135,6 +135,11 @@ export function canonicalValueReport(a: any): any {
       avg: num(mv.average), below: num(mv.below), above: num(mv.above),
       lo: num(mv.low), hi: num(mv.high), n: num(mv.comps), as: mv.asOf || null,
     } : null,
+    // The BACKED headline: the mileage-adjusted retail estimate (a least-squares
+    // read of our own comps AT the subject's km). adj=false -> not enough km
+    // signal, so it's the plain median. Private/trade exits are deliberately NOT
+    // signed — they apply a rule-of-thumb spread with no backed sold data.
+    retail: a.retailEstimate != null ? { est: num(a.retailEstimate), adj: !!a.adjusted } : null,
     // Market CPO premium: certified median − non-certified median (both from our
     // comps). Only present for a certified subject with enough comps on both sides.
     cpo: cpo ? {
@@ -152,6 +157,7 @@ export function canonicalValueReport(a: any): any {
     rw: a.remainingWarranty ? {
       basic: a.remainingWarranty.basic ? { t: a.remainingWarranty.basic.term, yl: num(a.remainingWarranty.basic.yearsLeft), kl: num(a.remainingWarranty.basic.kmLeft), a: !!a.remainingWarranty.basic.active } : null,
       pt: a.remainingWarranty.powertrain ? { t: a.remainingWarranty.powertrain.term, yl: num(a.remainingWarranty.powertrain.yearsLeft), kl: num(a.remainingWarranty.powertrain.kmLeft), a: !!a.remainingWarranty.powertrain.active } : null,
+      cor: a.remainingWarranty.corrosion ? { t: a.remainingWarranty.corrosion.term, yl: num(a.remainingWarranty.corrosion.yearsLeft), kl: num(a.remainingWarranty.corrosion.kmLeft), a: !!a.remainingWarranty.corrosion.active } : null,
     } : null,
     issuedAt: a.issuedAt || null,
   };

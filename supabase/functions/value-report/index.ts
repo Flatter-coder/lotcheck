@@ -16,7 +16,7 @@
 // ============================================================================
 
 import { finalizeServerSide, canonicalValueReport } from "../_shared/report-sign.ts";
-import { lotcheckValueBand, servesComps, type MarketCtx } from "../_shared/marketvalue.ts";
+import { lotcheckValueReport, servesComps, type MarketCtx } from "../_shared/marketvalue.ts";
 import { buildValuePdf, u8ToB64 } from "../_shared/value-pdf.ts";
 import { gateRequest } from "../_shared/region-gate.js";
 import { lookupRecalls } from "../_shared/recalls.ts";
@@ -41,7 +41,7 @@ async function fetchRemainingWarranty(make: string, year: number, km: number | n
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
     if (!url || !key || !make || !year) return null;
     const m = canonicalMake(make);
-    const q = `${url}/rest/v1/manufacturer_warranties?make=ilike.${encodeURIComponent(m)}&select=basic_coverage,powertrain_coverage,source_url&limit=1`;
+    const q = `${url}/rest/v1/manufacturer_warranties?make=ilike.${encodeURIComponent(m)}&select=basic_coverage,powertrain_coverage,corrosion_coverage,source_url&limit=1`;
     const res = await fetch(q, { headers: { apikey: key, authorization: `Bearer ${key}` } });
     if (!res.ok) return null;
     const rows = await res.json();
@@ -86,6 +86,12 @@ Deno.serve(async (req: Request) => {
     const province = String(body?.province ?? "").trim().toUpperCase();
     const vin = body?.vin ? String(body.vin).trim().toUpperCase() : null;
     const saleCondition = body?.condition ? String(body.condition).trim() : "used";
+    // Condition levers (optional) — like Collette telling us "no accidents · full
+    // service history". Strong condition places the subject at the TOP of each
+    // range and drives the "what holds this number up" section. Absent -> neutral.
+    const accidents = ["none", "minor", "major", "unknown"].includes(String(body?.accidents)) ? String(body.accidents) : "unknown";
+    const serviceHistory = ["full", "partial", "unknown"].includes(String(body?.serviceHistory)) ? String(body.serviceHistory) : "unknown";
+    const topEnd = accidents === "none" && serviceHistory === "full";
 
     if (!year || !make || !model) {
       return J({ error: "missing_vehicle", message: "Year, make and model are required." }, 400);
@@ -100,16 +106,18 @@ Deno.serve(async (req: Request) => {
       return J({ error: "outside_service_area", region: province, message: "LotCheck's live market coverage is Alberta today." }, 403);
     }
 
-    // ---- the band, from our OWN comps (asking + market CPO premium). VIN optional. ----
+    // ---- the RICH value report from our OWN comps: mileage-adjusted retail +
+    // three exits + comps for the chart/table (Collette's bar). VIN optional. ----
     const ctx: MarketCtx = { year, make, model, trim, condition: "used", province, saleCondition };
-    const mv = await lotcheckValueBand(ctx, km, vin);
-    if (!mv || mv.average == null) {
+    const report = await lotcheckValueReport(ctx, km, vin, { topEnd });
+    if (!report || report.band.average == null) {
       // Thin coverage -> honest 422, never fabricate. (Nothing charged in Phase 1.)
       return J({
         error: "insufficient_coverage",
         message: "There aren't enough comparable Alberta listings yet to value this one honestly.",
       }, 422);
     }
+    const mv = report.band;
 
     // ---- assemble, SIGN (canonicalValueReport), and build the PDF ----
     const analysis: any = {
@@ -117,7 +125,17 @@ Deno.serve(async (req: Request) => {
       vehicle: [year, make, model].filter(Boolean).join(" "),
       year, make, model, trim,
       odometerKm: km, saleCondition, condition: "used", province, vin,
+      accidents, serviceHistory, topEnd,
       marketValue: mv,
+      // Rich value fields. retailEstimate + adjusted are BACKED (mileage fit on
+      // our comps) and get signed; tiers.private/trade are typical-Alberta-spread
+      // CONTEXT (rule of thumb) and are shown labeled but NOT signed.
+      retailEstimate: report.retailEstimate,
+      adjusted: report.adjusted,
+      mileageAdj: report.mileageAdj,
+      tiers: report.tiers,
+      comps: report.comps,          // full pool for the price-vs-mileage chart
+      namedComps: report.namedComps, // curated named rows for the table
     };
 
     // Phase 2: recalls + remaining warranty. Independent of the band, both

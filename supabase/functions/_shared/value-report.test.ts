@@ -20,6 +20,9 @@ const idOf = (canon: any): string => {
 const valueA: any = {
   year: 2022, make: "Honda", model: "Odyssey", trim: "EX-L", odometerKm: 148000,
   saleCondition: "used", province: "ab", vin: "5FNRL6H61NB502518",
+  // Backed, signed number + the unsigned rule-of-thumb tiers (context only).
+  retailEstimate: 30500, adjusted: true,
+  tiers: { retail: { low: 29000, high: 32000, point: 32000 }, privateParty: { low: 26000, high: 28000, point: 28000 }, trade: { low: 22500, high: 25000, point: 25000 }, topEnd: true },
   marketValue: {
     average: 30000, below: 28000, above: 32000, low: 27000, high: 34000, mileage: 148000,
     source: "LotCheck market · same trim · 7 comparable listings", comps: 7, asOf: "2026-08-18",
@@ -30,6 +33,7 @@ const valueA: any = {
     modelYear: 2022, odometerKm: 148000, asOfYear: 2026, estimated: true,
     basic: { term: "3 yr / 60,000 km", termYears: 3, termKm: 60000, yearsLeft: -1, kmLeft: -88000, active: false },
     powertrain: { term: "5 yr / 100,000 km", termYears: 5, termKm: 100000, yearsLeft: 1, kmLeft: -48000, active: false },
+    corrosion: { term: "5 yr / unlimited km", termYears: 5, termKm: null, yearsLeft: 1, kmLeft: null, active: true },
     sourceUrl: "https://honda.ca/warranty",
   },
 };
@@ -43,8 +47,10 @@ ok("band projected (avg/lo/hi/n)", !!c.band && c.band.avg === 30000 && c.band.lo
 ok("market CPO premium projected", !!c.cpo && c.cpo.prem === 3000 && c.cpo.base === 31000 && c.cpo.cmed === 34000);
 ok("recalls projected (tri-state count + items)", !!c.recalls && c.recalls.count === 2 && c.recalls.confirmed === true && c.recalls.items.length === 2 && c.recalls.items[0].system === "Airbag SRS");
 ok("remaining warranty projected (both terms, active flags)", !!c.rw && !!c.rw.basic && c.rw.basic.a === false && !!c.rw.pt && c.rw.pt.a === false);
+ok("corrosion warranty projected (rust-through, still-active flag)", !!c.rw.cor && c.rw.cor.a === true);
+ok("mileage-adjusted RETAIL is signed (est + adj flag)", !!c.retail && c.retail.est === 30500 && c.retail.adj === true);
 ok("vehicle string composed", c.vehicle === "2022 Honda Odyssey");
-ok("NO trade/private tiering is signed (only band + cpo)", !("trade" in c) && !("private" in c) && !("spread" in c));
+ok("NO trade/private tiering is signed (backed retail only, spreads stay context)", !("trade" in c) && !("private" in c) && !("privateParty" in c) && !("tiers" in c) && !("spread" in c));
 
 // ---- determinism (parity) ----
 ok("canonical is deterministic", JSON.stringify(canonicalValueReport(valueA)) === JSON.stringify(canonicalValueReport(valueA)));
@@ -52,6 +58,7 @@ ok("canonical is deterministic", JSON.stringify(canonicalValueReport(valueA)) ==
 // ---- null-safety: thin/no coverage never invents a band ----
 const thin = canonicalValueReport({ year: 2022, make: "Honda", model: "Civic", province: "BC" });
 ok("no marketValue -> band null", thin.band === null);
+ok("no retailEstimate -> retail null (nothing invented)", thin.retail === null);
 ok("no cpoPremium -> cpo null", thin.cpo === null);
 ok("no recalls -> recalls null", thin.recalls === null);
 ok("no warranty -> rw null", thin.rw === null);

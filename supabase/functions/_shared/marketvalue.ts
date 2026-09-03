@@ -602,6 +602,210 @@ export async function lotcheckValueBand(
   }
 }
 
+// ===========================================================================
+// RICH value report (Collette's bar) — mileage-adjusted retail + three exits.
+//
+// The plain band (lotcheckValueBand) returns the median ASKING price of the
+// comp pool. For a high-mileage subject that median reads too high: the comps
+// are mostly lower-km cars, so "median asking" is the price of a fresher van,
+// not this one. The rich report fits price-vs-km on the comps and reads the
+// value AT the subject's mileage (the step-down the hand-built report did by
+// hand). Retail is backed + signable; private/trade are TYPICAL ALBERTA SPREADS
+// (rule of thumb, no backed sold/wholesale data) and are labeled context, never
+// signed (make-it-dispute-proof).
+// ===========================================================================
+
+// A comp for the price-vs-mileage chart + the named table (superset of CompRow).
+export interface ValueComp {
+  price: number;
+  odometerKm?: number | null;
+  trim?: string | null;
+  year?: number | null;
+  asOf?: string | null;
+  certified?: boolean | null;
+  dealerName?: string | null;
+  city?: string | null;
+}
+
+export interface MileageAdjust {
+  estimate: number;     // predicted retail at the subject's km (rounded)
+  slopePerKm: number;   // dollars lost per km (negative)
+  n: number;            // comps with a km reading used in the fit
+  r2: number;           // fit quality 0..1
+  kmMin: number; kmMax: number;
+  extrapolated: boolean; // subject km outside the comps' km range
+}
+
+// Least-squares fit price = a + b·km over comps that have a km reading, read at
+// subjectKm. A usable fit needs a NEGATIVE slope (used price falls with
+// distance) and real km spread; otherwise null and the caller falls back to the
+// plain median (labeled "not adjusted for mileage"). The estimate is clamped so
+// it never exceeds the raw median nor drops below half the cheapest comp — a far
+// extrapolation can't produce a silly number.
+export function mileageAdjustedValue(
+  comps: ValueComp[],
+  subjectKm: number | null | undefined,
+  medianFallback: number,
+): MileageAdjust | null {
+  const km = Number(subjectKm);
+  if (!Number.isFinite(km) || km <= 0) return null;
+  const pts = (comps || [])
+    .map((c) => ({ x: Number(c.odometerKm), y: Number(c.price) }))
+    .filter((p) => Number.isFinite(p.x) && p.x > 0 && Number.isFinite(p.y) && p.y > 0);
+  if (pts.length < 5) return null; // need a real cluster before trusting a slope
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const my = pts.reduce((s, p) => s + p.y, 0) / n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) { const dx = p.x - mx, dy = p.y - my; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  if (sxx <= 0) return null; // no km spread
+  const b = sxy / sxx;
+  const a = my - b * mx;
+  if (!(b < 0)) return null; // price must fall with km — else no usable mileage signal
+  const r2 = syy > 0 ? Math.max(0, Math.min(1, (sxy * sxy) / (sxx * syy))) : 0;
+  if (r2 < 0.10) return null; // the fit explains almost no variance -> no real mileage signal; fall back to the median (labeled unadjusted) rather than sign a noise line as "mileage-adjusted"
+  const ys = pts.map((p) => p.y), xs = pts.map((p) => p.x);
+  const kmMin = Math.min(...xs), kmMax = Math.max(...xs);
+  let est = a + b * km;
+  est = Math.max(Math.round(Math.min(...ys) * 0.5), Math.min(est, medianFallback));
+  // Monotonicity guard: a subject with MORE km than every comp cannot be worth
+  // more than the highest-km comp (a higher-mileage van isn't worth more than a
+  // lower-mileage one). Keeps a far extrapolation honest.
+  if (km > kmMax) {
+    const highKmPrice = pts.reduce((hi, p) => (p.x > hi.x ? p : hi), pts[0]).y;
+    est = Math.min(est, highKmPrice);
+  }
+  return { estimate: Math.round(est / 50) * 50, slopePerKm: b, n, r2, kmMin, kmMax, extrapolated: km > kmMax || km < kmMin };
+}
+
+export interface Tier { low: number; high: number; point: number; }
+export interface ValueTiers { retail: Tier; privateParty: Tier; trade: Tier; topEnd: boolean; }
+
+// The three exits from a mileage-adjusted RETAIL estimate. Retail is the backed
+// number; privateParty and trade apply typical Alberta spreads (private ≈ 8–15%
+// under retail, trade ≈ 15–25% under) — rule-of-thumb CONTEXT, never signed.
+// topEnd = strong condition (no accidents + full records) places the subject at
+// the top of each range rather than the middle.
+export function valueTiers(retailEstimate: number, opts: { topEnd?: boolean } = {}): ValueTiers | null {
+  const r = Number(retailEstimate);
+  if (!(r > 0)) return null;
+  const round = (x: number) => Math.round(x / 50) * 50;
+  const band = (lo: number, hi: number): Tier => {
+    const low = round(r * lo), high = round(r * hi);
+    return { low, high, point: opts.topEnd ? high : round((low + high) / 2) };
+  };
+  return {
+    retail: band(0.95, 1.06),        // dealer lot / relist: retail to a bit above
+    privateParty: band(0.85, 0.93),  // private ≈ 8–15% under retail
+    trade: band(0.73, 0.83),         // trade ≈ 15–25% under retail
+    topEnd: !!opts.topEnd,
+  };
+}
+
+// Pick a representative spread of NAMED comps for the table: sorted by mileage,
+// preferring rows that carry a dealer name + a km reading, capped so the table
+// stays legible. Shows the trend the chart draws, not just the cheapest N.
+export function pickNamedComps(comps: ValueComp[], cap = 8): ValueComp[] {
+  const withKm = (comps || []).filter((c) => Number(c.price) > 0 && Number(c.odometerKm) > 0)
+    .sort((a, b) => Number(a.odometerKm) - Number(b.odometerKm));
+  if (withKm.length <= cap) return withKm;
+  // Evenly sample across the mileage range so low/mid/high km are all represented.
+  const out: ValueComp[] = [];
+  const step = (withKm.length - 1) / (cap - 1);
+  for (let i = 0; i < cap; i++) out.push(withKm[Math.round(i * step)]);
+  return [...new Map(out.map((c) => [c, c])).keys()];
+}
+
+// The comps the report should REASON on — the mileage fit, the chart, and the
+// table. Trim-narrowed like computeBand, then outlier-trimmed (0.4x-2.0x the
+// median) to drop the data-entry typo / "$X down" teaser / accessory-only
+// listing that computeBand exists to remove. UNLIKE computeBand it does NOT
+// apply the +/- mileage window — the regression needs the full km spread to read
+// the slope. Feeding the RAW pool to the fit let one junk row halve the signed
+// retail value and blow out the chart axis; this is the set that prevents that.
+export function cleanComps(rows: ValueComp[], opts: { trim?: string | null; lowerMult?: number; upperMult?: number; minComps?: number } = {}): ValueComp[] {
+  const lowerMult = opts.lowerMult ?? 0.4, upperMult = opts.upperMult ?? 2.0, minComps = opts.minComps ?? COMP_FLOOR;
+  const priced = (rows || []).filter((r) => r && Number(r.price) > 0);
+  if (!priced.length) return [];
+  const normTrim = (t: unknown): string => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").trim().split(/\s+/)[0] || "";
+  const GENERIC = new Set(["other", "unknown", "na", "don", "n", "base", ""]);
+  let sel = priced;
+  const st = normTrim(opts.trim);
+  if (st && !GENERIC.has(st)) { const tset = priced.filter((r) => normTrim(r.trim) === st); if (tset.length >= minComps) sel = tset; }
+  const m = median(sel.map((r) => Number(r.price)));
+  if (!(m > 0)) return sel;
+  return sel.filter((r) => { const p = Number(r.price); return p >= m * lowerMult && p <= m * upperMult; });
+}
+
+export interface ValueReport {
+  band: MarketValue;             // the raw asking band (unchanged shape)
+  comps: ValueComp[];            // full pool, for the chart
+  namedComps: ValueComp[];       // curated named subset, for the table
+  retailEstimate: number;        // mileage-adjusted if available, else band median
+  adjusted: boolean;             // true = mileage-adjusted (vs plain median)
+  mileageAdj: MileageAdjust | null;
+  tiers: ValueTiers | null;      // trade/private/retail (private/trade = context)
+}
+
+// The rich value-report entry point: one fn_market_comps call -> band + comps +
+// mileage-adjusted retail + three exits. Same coverage gates as lotcheckValueBand
+// (non-served province or thin comps -> null), so it can never fabricate.
+export async function lotcheckValueReport(
+  ctx: MarketCtx,
+  mileage?: number | null,
+  vin?: string | null,
+  opts: { topEnd?: boolean } = {},
+): Promise<ValueReport | null> {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
+  if (!url || !key) return null;
+  if (!ctx.year || !ctx.make || !ctx.model || !ctx.condition) return null;
+  const prov = String(ctx.province || "").toUpperCase();
+  if (!servesComps(prov)) return null;
+  try {
+    const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
+        p_condition: String(ctx.condition), p_exclude_vin: vin || null, p_province: prov, p_year_span: 2,
+      }),
+    });
+    if (!res.ok) { console.warn("lotcheckValueReport market_comps: HTTP", res.status); return null; }
+    const raw = await res.json();
+    const comps: ValueComp[] = Array.isArray(raw) ? raw : [];
+    const band = computeBand(comps as CompRow[], { odometerKm: mileage ?? null, trim: ctx.trim ?? null, condition: String(ctx.condition) });
+    if (band.insufficient || band.n < COMP_FLOOR) {
+      console.warn(`lotcheckValueReport: thin coverage (${band.n} < ${COMP_FLOOR}) — suppressing value`);
+      return null;
+    }
+    const mvSource = `LotCheck market · ${band.trimBasis && band.kmBasis ? "same trim, similar mileage" : band.trimBasis ? "same trim" : band.kmBasis ? "similar mileage" : "all trims"} · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`;
+    const mv: MarketValue = {
+      average: band.median, below: band.p25, above: band.p75, low: band.low, high: band.high,
+      mileage: mileage ?? null, source: mvSource, comps: band.n, asOf: band.asOf,
+      confidence: band.n >= COMP_FLOOR ? "high" : "low",
+    };
+    const cpo = computeMarketCpoPremium(comps as CompRow[], { odometerKm: mileage ?? null, trim: ctx.trim ?? null, minComps: COMP_FLOOR });
+    if (cpo) mv.cpoPremium = cpo;
+
+    // The fit, chart, and table all reason on the CLEANED comps (trim-narrowed +
+    // outlier-trimmed), never the raw pool — one junk listing must not skew the
+    // signed number or blow out the chart. Fall back to the raw pool only if
+    // cleaning left too few to fit (the fit itself then returns null -> median).
+    const clean = cleanComps(comps, { trim: ctx.trim ?? null });
+    const reasoning = clean.length >= COMP_FLOOR ? clean : comps;
+    const mileageAdj = mileageAdjustedValue(reasoning, mileage, band.median);
+    const retailEstimate = mileageAdj ? mileageAdj.estimate : band.median;
+    const adjusted = !!mileageAdj;
+    const tiers = valueTiers(retailEstimate, { topEnd: opts.topEnd });
+    const namedComps = pickNamedComps(reasoning);
+    return { band: mv, comps: reasoning, namedComps, retailEstimate, adjusted, mileageAdj, tiers };
+  } catch (e) {
+    console.warn("lotcheckValueReport error (suppressing):", (e as Error)?.message);
+    return null;
+  }
+}
+
 export async function fetchMarketValue(
   vin: string | null | undefined,
   mileage?: number | null,
