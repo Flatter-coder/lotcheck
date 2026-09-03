@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03f";  // 03f: canonical v11 (a missing odometer seals as null, not 0), the prompt no longer hands Claude a fabricated "Odometer: 0 km" as authoritative, the financing-math sentence stops claiming agreement across the tax band, and review counts/APRs keep their absences.
+const CACHE_VER = "2026-09-03g";  // 03g: the price-read sentence reaches the screen too, not just the email and the PDF.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
