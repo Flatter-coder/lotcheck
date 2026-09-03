@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03e";  // 03e: a missing odometer/rate/review count is no longer read as 0, the fee ladder is read without schema.org, and a price two readers agree on counts as verified. Cached reports must not replay the fabricated readings.
+const CACHE_VER = "2026-09-03f";  // 03f: canonical v11 (a missing odometer seals as null, not 0), the prompt no longer hands Claude a fabricated "Odometer: 0 km" as authoritative, the financing-math sentence stops claiming agreement across the tax band, and review counts/APRs keep their absences.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2696,8 +2696,15 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
   if (msrp > 0) facts.push(`- MSRP (as stated on this page): $${msrp.toLocaleString("en-CA")}`);
   if (d.vin) facts.push(`- VIN: ${d.vin}`);
   if (d.vehicle) facts.push(`- Vehicle: ${d.vehicle}`);
-  const odo = Number(d.odometerKm);
-  if (Number.isFinite(odo) && odo >= 0) facts.push(`- Odometer: ${odo.toLocaleString("en-CA")} km`);
+  // THIS BLOCK IS LABELLED "authoritative" AND FORBIDS CLAUDE FROM CALLING A
+  // LISTED FACT MISSING. So a coerced null here does not just mislead the
+  // model, it launders a fabrication into a fact the rest of the pipeline is
+  // told not to question -- which is how "Odometer 0 km -- consistent with a
+  // new vehicle" reached report LC-FE77-C58. computeOdometerCheck's guard was
+  // moved to a null-preserving reader; this producer, one hop upstream, kept
+  // manufacturing the very reading that guard now refuses. [[read-num]]
+  const odo = readNum(d.odometerKm);
+  if (odo != null && odo >= 0) facts.push(`- Odometer: ${odo.toLocaleString("en-CA")} km`);
   if (d.vehicleCondition) facts.push(`- Condition: ${d.vehicleCondition}`);
   if (d.dealerName) facts.push(`- Dealer: ${d.dealerName}`);
   if (!facts.length) return "";

@@ -116,7 +116,10 @@ export function assessCertifiedClaim(input: {
   const p = resolveCpoProgram(input.make);
   if (!p) return null;
 
-  const odo = num(input.odometerKm);
+  // num() here is the coercing kind, so a listing with no odometer arrived as
+  // 0 km and the certified-premium comparison was built around a reading the
+  // page never published. [[read-num]]
+  const odo = input.odometerKm == null ? null : num(input.odometerKm);
   const my = num(input.modelYear);
   const cy = num(input.currentYear);
   const age = (my != null && cy != null) ? cy - my : null;

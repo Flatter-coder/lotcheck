@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03d";
+const PDF_BUILDER_VER = "2026-09-03e";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -257,7 +257,12 @@ function coverCard(a: any): string {
     ? `<div style="font-size:15px;font-weight:900;color:${over ? "#fca5a5" : "#5eead4"};">${diff === 0 ? "= at MSRP" : over ? "▲ " + money(diff) + " over" : "▼ " + money(diff) + " under"} MSRP</div>`
     : claim.msrp
       ? `<div style="font-size:13px;font-weight:800;color:#c9c6e8;">${escapeHtml(claim.label)} ${money(claim.msrp)}</div>${claim.refusal ? `<div style="font-size:11px;color:#a7a3d0;line-height:1.45;margin-top:3px;">no over/under-MSRP claim is made</div>` : ""}`
-      : (pv ? "" : `<div style="font-size:12px;color:#fca5a5;">price unverified</div>`);
+      // "price unverified" in red, under a price we had just printed in full,
+      // answered nothing and asked one: unverified against WHAT? And red beside
+      // a dealer's number reads as a verdict on the dealer, which we never make.
+      // Worded once in report-lines.js (priceCheckState) and rendered NEUTRAL.
+      // [[present-without-creating-questions]] [[no-accusation-language]]
+      : (pv ? "" : `<div style="font-size:11px;line-height:1.45;color:#c9c6e8;">${escapeHtml(priceCheckState(a).short)}</div>`);
   return `<div style="background:#211f3d;border-radius:18px;padding:20px;margin-bottom:14px;color:#fff;">
     <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#a7a3d0;font-weight:800;">The verdict${a.reportId ? " · " + escapeHtml(a.reportId) : ""}</div>
     <table style="width:100%;margin-top:10px;"><tr>
@@ -835,7 +840,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -989,7 +994,9 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
      :                                       money(ms) + " UNVERIFIED",
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
-  else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
+  // Not a flag: being unable to read the price a second way is a fact about
+  // OUR read, not a finding against the listing. The label now says which.
+  else P.push({ t: "Price vs MSRP", v: "PRICE READ ONCE", tone: "muted" });
   // NOTE: the market comparison ("How this vehicle compares with the Alberta
   // market", report-lines.js marketCompareLine) is NOT one of the fixed 10
   // audit points -- it is a context module (like days-on-lot) and renders as
@@ -1358,7 +1365,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   y -= 22;
 
   // ---- HEADLINE ----
-  T(priceVerified ? "STATUS  -  VERIFIED QUOTE" : "STATUS  -  PRICE UNVERIFIED", { size: 8.5, font: sansB, color: priceVerified ? TEAL : CORAL });
+  T(priceVerified ? "STATUS  -  VERIFIED QUOTE" : "STATUS  -  PRICE READ ONCE", { size: 8.5, font: sansB, color: priceVerified ? TEAL : CORAL });
   y -= 20;
   const headline = a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || "Your Quote";
   for (const ln of wrap(headline, serifB, 26, W)) { need(30); T(ln, { size: 26, font: serifB, color: INK }); y -= 30; }

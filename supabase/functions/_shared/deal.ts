@@ -292,7 +292,9 @@ export function buildCounterScript(analysis: any): CounterScript {
   if (r && r.checked && r.count > 0) {
     moves.push({ topic: "Recalls", say: `There ${r.count > 1 ? "are" : "is"} ${r.count} open recall${r.count > 1 ? "s" : ""} on this VIN — please have ${r.count > 1 ? "them" : "it"} fixed before delivery.` });
   }
-  const dApr = trustedDealerApr(analysis), pApr = num(analysis?.financeRates?.manufacturer?.apr);
+  // A manufacturer with no published promo rate is not a manufacturer
+  // publishing 0%. num() is the coercing kind. [[read-num]]
+  const dApr = trustedDealerApr(analysis), pApr = analysis?.financeRates?.manufacturer?.apr == null ? null : num(analysis.financeRates.manufacturer.apr);
   if (dApr != null && pApr != null && dApr > pApr + 0.1 && !analysis?.financingTrap) {
     moves.push({ topic: "Rate", say: `I see a ${pApr}% promo rate advertised — I'd want that, not ${dApr}%.` });
   }
@@ -354,7 +356,7 @@ export function computeFinancingTrap(analysis: any): FinancingTrap | null {
   if (!(discount > 0)) return null; // S11 only applies when there IS a discount
 
   const dealerApr = trustedDealerApr(analysis);
-  const promoApr = num(analysis?.financeRates?.manufacturer?.apr);
+  const promoApr = analysis?.financeRates?.manufacturer?.apr == null ? null : num(analysis.financeRates.manufacturer.apr);  // [[read-num]]
   const term = num(analysis?.financing?.termMonths);
   const loan = selling; // full price proxy (down payment unknown)
 

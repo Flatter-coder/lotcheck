@@ -226,7 +226,10 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
       ...base,
       label: labelFor(basis, a),
       refusal: asking
-        ? `The asking price could not be verified, so it is not measured against MSRP.`
+        // Same rule as the cover chip: never leave "could not be verified"
+        // standing beside a price without saying against WHAT.
+        // [[present-without-creating-questions]]
+        ? `We read this asking price on the page, but the page carries no second copy of it underneath for us to check against -- so it is shown as we found it and not measured against MSRP.`
         : null,
     };
   }
