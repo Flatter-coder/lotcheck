@@ -167,6 +167,28 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-03. "Your premium after this purchase": what a change of
+    // vehicle does to a renewal, and what the two-million-dollar liability
+    // limit typically costs. Same Alberta gate as its sibling, worded once in
+    // report-lines.js (insurancePremiumLine). Derived from no listing field at
+    // all -- it is regulator copy -- so /verify gates on the canonical version
+    // instead, and older reports do not grow a section their PDF lacks.
+    field: "insurancePremium (your premium after this purchase)",
+    app: {
+      "shared line builder import":  "insurancePremiumLine",
+      "sidebar card pool":           "insurancePremiumItem = {",
+      "scroll view card":            "<InsurancePremiumCard analysis={analysis}",
+      "Alberta-only gate":           "financeCoverageApplies",
+      "verify page row":             'financeCoverageApplies(o)&&Number(o.v)>=10&&<Row t="Your premium after this purchase"',
+      "verify detail is version-gated too": 'financeCoverageApplies(o)&&Number(o.v)>=10&&<div',
+    },
+    email: {
+      "emailed HTML deck": "deck.push({ label: ipLine.title",
+      "emailed PDF":       "kicker(ipLine.title.toUpperCase())",
+      "Alberta-only gate": "financeCoverageApplies(a)",
+    },
+  },
+  {
     // Added 2026-09-03. "Insurance before you sign": a sequencing warning from
     // Alberta's insurance regulator, worded once in report-lines.js
     // (financeCoverageLine) and gated on financeCoverageApplies (Alberta only).
@@ -179,6 +201,9 @@ const SURFACES = [
       "sidebar card pool":           "financeCoverItem = {",
       "scroll view card":            "<FinanceCoverCard analysis={analysis}",
       "verify page row":             'financeCoverageApplies(o)&&Number(o.v)>=9&&<Row t="Insurance before you sign"',
+      // The detail block reads .meta/.lines off the line, which is null below
+      // v9. Ungated, it blanked /verify for every pre-v9 Alberta report.
+      "verify detail is version-gated too": 'financeCoverageApplies(o)&&Number(o.v)>=9&&<div',
     },
     email: {
       "emailed HTML deck": "deck.push({ label: fcLine.title",

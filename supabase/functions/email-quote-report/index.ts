@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03a";
+const PDF_BUILDER_VER = "2026-09-03b";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -649,6 +649,44 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       (fcLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(fcLine.note)}</div>` : "") });
   }
 
+  // 5b1a3 -- Your premium after this purchase: the COST sibling of the card
+  // above, worded by the shared builder (report-lines.js insurancePremiumLine).
+  // The one above asks whether a buyer can GET the cover a lender requires;
+  // this one is what it costs -- buying this vehicle is a change of vehicle on
+  // the buyer's own policy, and the two-million-dollar liability limit is a
+  // choice made at the same desk.
+  //
+  // Alberta only, on the SAME gate as its sibling: it cites Alberta statute and
+  // an Alberta regulator, so financeCoverageApplies() decides it here exactly
+  // as it does on every other surface, and no reader outside Alberta is told an
+  // Alberta rule.
+  //
+  // The builder reads NOTHING from the listing -- it is regulator copy,
+  // identical for every Alberta report -- so there is ONE state, no confirmed/
+  // general split to grey out, and no conditional beyond the province gate.
+  // No figure, no traffic light, no band: four labelled lines and a citation.
+  // Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (financeCoverageApplies(a)) {
+    const ipLine = insurancePremiumLine(a);
+    const ipLines: Array<{ k: string; v: string }> = Array.isArray(ipLine.lines) ? ipLine.lines : [];
+    const ipRows = ipLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The builder always returns four lines, but if it ever returned none the
+    // body sentence is what prints -- this card is never empty.
+    const ipDetail = ipLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${ipRows}</table>`
+      : (ipLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(ipLine.body)}</div>` : "");
+    deck.push({ label: ipLine.title, tone: ipLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(ipLine.headline)}</div>` +
+      ipDetail +
+      (ipLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(ipLine.meta)}</div>` : "") +
+      (ipLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(ipLine.note)}</div>` : "") });
+  }
+
   // 5b1b -- Other listings read: "Of N other listings read, M advertise below
   // this one." Computed once on the server (marketCount), sealed in the
   // canonical (mc), worded by the shared builder. Sits outside the market-value
@@ -797,7 +835,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, fmtDateEn } from "../_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1691,6 +1729,45 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // no lines, its body sentence is what prints.
     if (!fcLines.length && fcLine.body) para(noEmDash(fcLine.body), { size: 9, color: SOFT, lead: 4 });
     if (fcLine.note) para(noEmDash(fcLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- YOUR PREMIUM AFTER THIS PURCHASE ----
+  // The COST sibling of the section above, from the shared builder
+  // (report-lines.js insurancePremiumLine): the words in this PDF are the words
+  // in the HTML deck and on screen. A context section like the ones above, not
+  // one of the fixed audit points, and it carries no figure, no traffic light
+  // and no band -- four labelled lines and a citation.
+  //
+  // Alberta only: financeCoverageApplies() gates every surface identically,
+  // because the line cites Alberta statute and an Alberta regulator.
+  //
+  // The builder reads NOTHING from the listing -- it is regulator copy,
+  // identical for every Alberta report -- so there is ONE state and the
+  // headline keeps INK; there is no unread half to grey out. T/para run every
+  // string through pdfSafe, which folds the builder's curly quotes around the
+  // regulator's quoted sentence to straight quotes and its em dashes to
+  // hyphens (the PDF fonts encode WinAnsi only).
+  if (financeCoverageApplies(a)) {
+    const ipLine = insurancePremiumLine(a);
+    const ipLines: Array<{ k: string; v: string }> = Array.isArray(ipLine.lines) ? ipLine.lines : [];
+    need(96);
+    kicker(ipLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline is a full
+    // sentence -- it would run off the right edge of the page.
+    para(noEmDash(ipLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
+    advance(4);
+    if (ipLine.meta) { T(noEmDash(ipLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of ipLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // Same never-empty rule as the sections above: if the builder ever returned
+    // no lines, its body sentence is what prints.
+    if (!ipLines.length && ipLine.body) para(noEmDash(ipLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (ipLine.note) para(noEmDash(ipLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }
 

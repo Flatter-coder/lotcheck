@@ -20,7 +20,7 @@
 import { readFileSync } from "node:fs";
 import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -371,7 +371,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is v9 and seals the basis keys", c.v === 9 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is v10 and seals the basis keys", c.v === 10 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -464,7 +464,7 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
-  check("the canonical is v9 and seals every rung with its basis", cc.v === 9 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  check("the canonical is v10 and seals every rung with its basis", cc.v === 10 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
   const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
   check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
   const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });
@@ -524,6 +524,29 @@ console.log("\n-- financeCoverageLine --");
   check("the tile value is short enough for a rail tile and a verify row", fin.value.length <= 32 && fin.headline.length <= 48, `${fin.value.length}/${fin.headline.length}`);
 }
 
+// ── 3e. your premium after this purchase ──────────────────────────────────────
+console.log("\n-- insurancePremiumLine --");
+{
+  const l = insurancePremiumLine({ marketCount: { province: "AB" } });
+  check("four lines, on the same Alberta gate as its sibling", l.state === "confirmed" && l.lines.length === 4 && albertaRulesApply({ marketCount: { province: "AB" } }) === true && albertaRulesApply({ marketCount: { province: "BC" } }) === false && financeCoverageApplies === albertaRulesApply);
+  check("it never asserts the reader HAS a policy or that this is a change: the claim is conditional, then attributed", /^If this vehicle replaces one on your own policy, that is a change of vehicle\. The AIRB reports that premiums also changed if, since the last renewal, a driver had a new at-fault claim, conviction, changed vehicles, or changed their home address\.$/.test(l.lines[0].v) && !/(excluded|lost|removed)/i.test(l.lines[0].v), l.lines[0].v);
+  check("the headline and tile hedge too -- neither asserts this reader's situation", l.headline === "Changing vehicles can change a premium" && l.value === "CHANGING VEHICLES CAN CHANGE IT");
+  check("the cap figures are dated and the missing 2026 figure is stated, so 2025 never reads as current", /greater than 3\.7% in 2024 and 7\.5% in 2025, and it gives no figure for 2026/.test(l.lines[1].v), l.lines[1].v);
+  check("the cap's scope keeps the regulator's own qualifier (PPV), never a wider one", /an insurer's PPV \(private passenger vehicle\) rating program/.test(l.lines[1].v), l.lines[1].v);
+  check("no unattributed generalisation about what a cap limits -- the report's own two sentences instead", !/A cap applies to the increases/.test(l.lines[1].v) && /moving to a new insurer means drivers are no longer protected by the 7\.5% cap/.test(l.lines[1].v), l.lines[1].v);
+  check("the quoted sentence is not silently truncated", /did not mean Alberta drivers did not see increases in their auto insurance premiums in 2023/.test(l.lines[1].v));
+  check("the buyer is never invited to decide whether they are a 'Good Driver'", !/if you are a good driver|you qualify|your cap|you are capped/i.test(l.body) && /airbfordrivers\.ca/.test(l.note), l.note);
+  check("9.0% is stated as the third-party liability part, never the whole premium, and never multiplied out", /typically increases third-party liability premiums by approximately 9\.0%/.test(l.lines[2].v) && /That is the third-party liability part of a premium, across Alberta, not a quote for this vehicle\./.test(l.lines[2].v) && !/58\.2|of your total|whole premium by/i.test(l.body), l.lines[2].v);
+  check("the take-up figures keep their own halves and dates", /rose from 45\.6% in the second half of 2024 to 47\.1% twelve months later/.test(l.lines[2].v));
+  check("every figure is attributed to the AIRB", l.lines.slice(0, 3).every((x) => /The AIRB reports/.test(x.v)));
+  check("the only figures printed are the ones the report carries", [...new Set(l.body.match(/\d+\.\d+%/g) || [])].sort().join(",") === ["0.0%", "3.7%", "45.6%", "47.1%", "7.5%", "9.0%"].sort().join(","), (l.body.match(/\d+\.\d+%/g) || []).join(","));
+  check("it names its source, both pages and the date it was read", /pages 5 and 16, published 2026\. Read 2026-09-03/.test(l.note) && /docs\/airb-2026-capture\.md/.test(l.note));
+  check("the action names the buyer's own insurer and both questions", /Ask your own insurer what this specific vehicle does to your renewal, and what the two-million-dollar limit costs on your policy\./.test(l.lines[3].v));
+  check("the one-sentence explain is worded by the builder, attributed throughout, and no stronger than the lines", /^The AIRB reports that a premium also changed when a driver changed vehicles/.test(l.explain) && /no longer protected by the 7\.5% Good Driver cap/.test(l.explain) && /about 9\.0% to the third-party liability part/.test(l.explain));
+  check("the tile value fits a rail tile and a verify row", l.value.length <= 32 && l.headline.length <= 48, `${l.value.length}/${l.headline.length}`);
+  check("it says nothing about this listing -- it is regulator copy, identical for every Alberta report", JSON.stringify(insurancePremiumLine({ marketCount: { province: "AB" }, quotedPrice: 69898, pageDefault: { state: "confirmed", termMonths: 84 } })) === JSON.stringify(l));
+}
+
 // ── 4. every emitted sentence passes the copy gate's own rules ───────────────
 console.log("\n-- copy sweep (every state x both lines) --");
 {
@@ -569,6 +592,10 @@ console.log("\n-- copy sweep (every state x both lines) --");
   }
   for (const extra of [{ pageDefault: { state: "confirmed", termMonths: 84, apr: 5.99 } }, { pageDefault: { state: "confirmed", purchaseMethod: "cash", termMonths: 84, apr: 2.99 } }, { financeContingent: { contingent: true } }, {}]) {
     const l = financeCoverageLine({ marketCount: { province: "AB" }, ...extra });
+    texts.push(l.value, l.headline, l.body, l.title, l.meta, l.note, l.explain, ...l.lines.map((x) => `${x.k}: ${x.v}`));
+  }
+  {
+    const l = insurancePremiumLine({ marketCount: { province: "AB" } });
     texts.push(l.value, l.headline, l.body, l.title, l.meta, l.note, l.explain, ...l.lines.map((x) => `${x.k}: ${x.v}`));
   }
   let hits = 0;
