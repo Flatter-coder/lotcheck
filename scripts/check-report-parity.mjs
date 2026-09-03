@@ -146,6 +146,27 @@ const SURFACES = [
     },
   },
   {
+    // Added 2026-09-02 after LC-0F75-A93 printed "$9,908 above the local middle
+    // value" against 2024 hybrids: the comparison is now like-for-like
+    // (marketvalue.ts + likeForLikePool) and worded by ONE builder
+    // (report-lines.js marketCompareLine) as three plain lines on every surface.
+    field: "marketValue comparison (this car / similar listings / difference)",
+    app: {
+      "shared line builder import":  "marketCompareLine",
+      "sidebar card pool":           "marketCompareItem = {",
+      "scroll view card":            "<MarketCompareCard analysis={analysis}",
+      "share link encode":           "mv:a.marketValue?{avg:",
+      "share link decode":           "marketValue:c.mv?{average:c.mv.avg",
+      "signed verify payload":       "marketValue:a.marketValue?{avg:nn(",
+      "verify page row":             'o.marketValue&&<Row t="How this vehicle compares"',
+      "verify passes fcx":           'marketCompareLine({price:o.price,marketValue:o.marketValue,fcx:o.fcx,',
+    },
+    email: {
+      "emailed HTML deck": 'deck.push({ label: line.title, tone: line.tone, glow: line.light === "red"',
+      "emailed PDF":       'kicker(line.title.toUpperCase())',
+    },
+  },
+  {
     // Added 2026-09-02 with the line itself. "Payment default: this page
     // gives you N months, <frequency> payments at X%" is the page's own
     // pre-selected calculator scenario, read by code (page-default.js), sealed

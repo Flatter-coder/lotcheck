@@ -83,6 +83,40 @@ export function powertrainLabel(model, trim) {
   return [...all].filter((m) => !inModel.has(m)).map((m) => PT_NAMES[m] || m).join(" ");
 }
 
+// Dealers (and JSON-LD vehicleConfiguration) often repeat the model inside the
+// trim -- "RX 350 Luxury AWD" for model "RX" -- which keyed the trim family to
+// "rx" and made every RX row one family. Model words are dropped from a trim
+// before it is keyed or labelled; a trim that was only the model degrades to
+// no trim, i.e. the model scope.
+export function dropModelWords(trim, model) {
+  const words = new Set(String(model || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  if (trim == null) return null;
+  if (!words.size) return String(trim);
+  return String(trim).split(/\s+/).filter((w) => w && !words.has(w.toLowerCase().replace(/[^a-z0-9]/g, ""))).join(" ");
+}
+
+// The page's own fuel-type declaration as a powertrain word the wall can read
+// ("Hybrid", "Plug-in Hybrid", "EV"), so a page-declared hybrid whose model and
+// trim strings carry no marker never lands in a gas set. Empty when unknown.
+export function fuelPowertrainHint(fuelType) {
+  const f = String(fuelType || "").toLowerCase();
+  if (!f) return "";
+  if (/plug|phev/.test(f)) return "Plug-in Hybrid";
+  if (/hybrid|hev/.test(f)) return "Hybrid";
+  if (/\belectric\b|\bev\b|\bbev\b|battery/.test(f)) return "EV";
+  return "";
+}
+
+// Today in the market's own time zone (Alberta): both cards on one report --
+// the count line and the comparison -- must take their 30-day window from the
+// same clock, or a row last seen exactly 30 days ago is in one and out of the
+// other for six hours a day.
+export function todayLocal(tz = "America/Edmonton") {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  } catch { return new Date().toISOString().slice(0, 10); }
+}
+
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 function dayMinus(isoToday, days) {
   const d = new Date(`${isoToday}T00:00:00Z`);
@@ -125,17 +159,18 @@ export function computeMarketCount(rows, ctx = {}) {
   const price = Number(ctx.price);
   const hasPrice = Number.isFinite(price) && price > 0;
   const model = ctx.model ?? null;
-  const trim = ctx.trim ?? null;
+  const trim = dropModelWords(ctx.trim ?? null, model);
+  const hint = ctx.powertrainHint || "";
   const out = emptyMarketCount({
     province: ctx.province || null, year: ctx.year ?? null, make: ctx.make ?? null, model,
     price: hasPrice ? price : null, priceVerified: !!ctx.priceVerified, subjectExcluded: !!ctx.subjectExcluded,
     windowDays, asOf: today, truncated: !!ctx.truncated,
-    powertrain: powertrainLabel(model, trim) || null,
+    powertrain: powertrainLabel(model, `${ctx.trim || ""} ${hint}`) || null,
   });
   if (!Array.isArray(rows)) { out.reason = "rows_unavailable"; return out; }
 
   const cutoff = today ? dayMinus(today, windowDays) : null;
-  const subjectPt = `${model || ""} ${trim || ""}`;
+  const subjectPt = `${model || ""} ${ctx.trim || ""} ${hint}`;
   const inWindow = rows.filter((r) => r && (!cutoff || !r.asOf || String(r.asOf) >= cutoff));
   const compatible = inWindow.filter((r) => powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
   out.unpriced = compatible.filter((r) => !(Number(r.price) > 0)).length;
@@ -151,8 +186,8 @@ export function computeMarketCount(rows, ctx = {}) {
   out.modelN = modelStats.n; out.modelBelow = modelStats.below; out.modelSame = modelStats.same;
   if (pool.length === 0) { out.state = "absent"; out.reason = "no_rows_in_window"; return out; }
 
-  const exactPool = exactKey ? pool.filter((r) => fullTrimKey(r.trim) === exactKey) : [];
-  const familyPool = trimOk ? pool.filter((r) => normTrim(r.trim) === family) : [];
+  const exactPool = exactKey ? pool.filter((r) => fullTrimKey(dropModelWords(r.trim, model)) === exactKey) : [];
+  const familyPool = trimOk ? pool.filter((r) => normTrim(dropModelWords(r.trim, model)) === family) : [];
   let chosen = modelStats;
   if (exactPool.length >= TRIM_SCOPE_MIN) { out.scope = "trim"; chosen = stats(exactPool, hasPrice, price); }
   else if (familyPool.length >= TRIM_SCOPE_MIN) { out.scope = "trim_family"; chosen = stats(familyPool, hasPrice, price); }
@@ -164,5 +199,87 @@ export function computeMarketCount(rows, ctx = {}) {
   if (!ctx.priceVerified) { out.state = "not_counted"; out.reason = "price_unverified"; return out; }
   if (ctx.contingent) { out.state = "not_counted"; out.reason = "price_contingent"; return out; }
   out.state = "confirmed";
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// LIKE-FOR-LIKE POOL for a price comparison ("how this price compares").
+//
+// The old band compared a 2026 RX 350 Luxury (12k km) with 2024 base and
+// hybrid RXs at up to 80k km and called the result "the local middle value"
+// (report LC-0F75-A93, 2026-09-02). This is the one place the comparison set
+// is chosen, and it tightens in this order, stopping at the first set with at
+// least `minRows` rows:
+//   powertrain  -- always the subject's (a hybrid never sits in a gas set);
+//   year        -- the subject's model year first, then one year either side;
+//   mileage     -- for a used subject with a known odometer, rows within
+//                  40% of its reading plus 20,000 km (the Cheaper-Lot rule);
+//   trim        -- the same trim, then the trim family, then all trims of the
+//                  model, each labelled as what it is.
+// Anything looser is not like-for-like and returns `insufficient` with how
+// many rows WERE read, so the card can say so instead of printing a number.
+export function likeForLikePool(rows, ctx = {}) {
+  const { model, trim: rawTrim, year, condition, odometerKm, minRows = 5, yearSteps = [0, 1], today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "" } = ctx;
+  const trim = dropModelWords(rawTrim ?? null, model);
+  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
+  // The count line's recency window (30 days to `today`), applied here too: a
+  // row last seen months ago may be a car that sold without a delisting, and
+  // the two cards on one report must read the same market.
+  const cutoff = today ? dayMinus(today, windowDays) : null;
+  const compatible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
+    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff)
+    && powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
+  const y = Number(year);
+  const used = String(condition || "").toLowerCase() === "used";
+  // An odometer that was never read (null) or reads 0 -- which the pipeline
+  // itself treats as "not read" -- is NOT a 0 km car: Number(null) is 0, and
+  // that once built a 0-20,000 km window around a car that may have 150,000.
+  const odo = odometerKm == null ? NaN : Number(odometerKm);
+  const odoKnown = Number.isFinite(odo) && odo > 0;
+  const kmHalf = used && odoKnown ? Math.round(odo * 0.4 + 20000) : null;
+  const inKm = (r) => kmHalf == null || (r.odometerKm != null && Math.abs(Number(r.odometerKm) - odo) <= kmHalf);
+  const family = normTrim(trim);
+  const trimOk = !!family && !GENERIC_TRIMS.has(family);
+  const exactKey = trimOk ? fullTrimKey(trim) : "";
+  const out = {
+    // `rows` is the set chosen for the comparison (empty when insufficient);
+    // `read` is every like-for-like row in the last year window tried -- what
+    // nRead counts, and the ONLY rows a dealer count or a read date may come
+    // from. (Reading those off the whole RPC pool printed "2 listings at 3
+    // dealers", dated by a hybrid that was never one of the two.)
+    rows: [], read: [], scope: null, yearFrom: null, yearTo: null, insufficient: true, nRead: 0, need: minRows, reason: null,
+    trimLabel: trimOk ? trimLabelOf(trim) : null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    kmLow: kmHalf == null ? null : Math.max(0, odo - kmHalf), kmHigh: kmHalf == null ? null : odo + kmHalf,
+    condition: used ? "used" : (String(condition || "").toLowerCase() || null),
+  };
+  if (!(y > 0)) { out.reason = "year_missing"; return out; }
+  // A used subject with no odometer cannot be given similar-mileage listings,
+  // and a light on an unwindowed used set is a similarity claim never checked.
+  // Missing beats wrong: no comparison, and the card says why.
+  if (used && !odoKnown) { out.reason = "odometer_missing"; return out; }
+  const yearsOf = (set, span) => {
+    const ys = set.map((r) => Number(r.year)).filter((v) => v > 0);
+    // The printed window is the years actually read; when nothing was read it
+    // is the window tried, capped at the subject's own model year (a "2027"
+    // that does not exist yet must never be printed).
+    return ys.length ? [Math.min(...ys), Math.max(...ys)] : [y - span, y];
+  };
+  for (const span of yearSteps) {
+    const yr = compatible.filter((r) => Number(r.year) >= y - span && Number(r.year) <= y + span && inKm(r));
+    [out.yearFrom, out.yearTo] = yearsOf(yr, span);
+    out.nRead = yr.length;
+    out.read = yr;
+    const ladder = [
+      ["trim", exactKey ? yr.filter((r) => fullTrimKey(dropModelWords(r.trim, model)) === exactKey) : []],
+      ["trim_family", trimOk ? yr.filter((r) => normTrim(dropModelWords(r.trim, model)) === family) : []],
+      ["model", yr],
+    ];
+    for (const [scope, set] of ladder) {
+      if (set.length >= minRows) {
+        const [yf, yt] = yearsOf(set, span);
+        return { ...out, rows: set, read: yr, scope, insufficient: false, nRead: yr.length, yearFrom: yf, yearTo: yt };
+      }
+    }
+  }
   return out;
 }

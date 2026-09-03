@@ -57,6 +57,7 @@ import { canonicalMake } from "../_shared/makes.ts";
 import { lookupRecalls } from "../_shared/recalls.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
 import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { todayLocal } from "../_shared/market-count.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
@@ -816,7 +817,8 @@ Deno.serve(async (req: Request) => {
         analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
         { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
           saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
-          province: resolveJurisdiction(analysis).code },
+          province: resolveJurisdiction(analysis).code,
+          today: todayLocal(), fuelType: analysis.fuelType ?? null },
       );
       if (mv) analysis.marketValue = mv;
     }

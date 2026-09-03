@@ -67,7 +67,7 @@ import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
 import { readPageDefault, readSm360PageDefault } from "../_shared/page-default.js";
-import { computeMarketCount, emptyMarketCount, POOL_CAP } from "../_shared/market-count.js";
+import { computeMarketCount, emptyMarketCount, POOL_CAP, fuelPowertrainHint } from "../_shared/market-count.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
@@ -115,7 +115,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-02b";  // + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
+const CACHE_VER = "2026-09-02c";  // 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2779,6 +2779,7 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
       year, make, model, trim: analysis?.trim ?? null, price: price > 0 ? price : null,
       priceVerified, contingent: !!analysis?.financeContingent?.contingent,
       province: prov, subjectExcluded: !!excludeVin, today, truncated: rows.length >= POOL_CAP,
+      powertrainHint: fuelPowertrainHint(analysis?.fuelType),
     });
     const m = analysis.marketCount;
     console.log(`market count: ${m.state}${m.scope ? ` (${m.scope})` : ""} n=${m.n} below=${m.below} same=${m.same} dealers=${m.dealers} seen ${m.seenMin ?? "?"}..${m.seenMax ?? "?"}${m.reason ? ` -- ${m.reason}` : ""}`);
@@ -2815,7 +2816,10 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
       { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
         saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
-        province: resolveJurisdiction(analysis).code },
+        province: resolveJurisdiction(analysis).code,
+        // The count line's clock and the page's own fuel type, so both market
+        // cards read one 30-day window and one powertrain.
+        today: todayIso(), fuelType: analysis.fuelType ?? null },
     );
     if (mv) analysis.marketValue = mv;
   }

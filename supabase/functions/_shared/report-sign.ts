@@ -49,7 +49,13 @@ export function canonicalReport(a: any): any {
     // pre-selected payment scenario: term, frequency, rate, down payment, and
     // the page data it was read from). Both are claims about the listing that
     // the server computed from its own reads, so they are sealed like fcx/gate.
-    v: 6,
+    // v7 (2026-09-02): the market comparison's BASIS rides with it (nr/nd/yf/yt/
+    // ts/tl/pt/kl/kh/cd/d/nk/mk/md/pv/from/to/rs) and, unlike every bump before
+    // it, the marketValue projection is NOT additive: a missing mileage now
+    // seals as null (was 0) and a not-enough set seals as an object (was null).
+    // A report sealed under v6 and re-verified from its body after this deploy
+    // will not hash the same -- fail-closed by design; the cache moved with it.
+    v: 7,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -59,7 +65,10 @@ export function canonicalReport(a: any): any {
     addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,
     reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
-    marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), lo: num(a.marketValue.low), hi: num(a.marketValue.high), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null, n: num(a.marketValue.comps), as: a.marketValue.asOf || null } : null,
+    // v6 (2026-09-02): the comparison's BASIS rides with it (year window, trim
+    // scope, powertrain, mileage window, condition, dealers) and an insufficient
+    // set is sealed as such (ins/nr/nd) so /verify says "not enough" too.
+    marketValue: a.marketValue ? { avg: nn(a.marketValue.average), below: nn(a.marketValue.below), above: nn(a.marketValue.above), lo: nn(a.marketValue.low), hi: nn(a.marketValue.high), mileage: nn(a.marketValue.mileage), source: a.marketValue.source || null, n: nn(a.marketValue.comps), as: a.marketValue.asOf || null, ins: !!a.marketValue.insufficient, nr: nn(a.marketValue.nRead), nd: nn(a.marketValue.need), yf: nn(a.marketValue.yearFrom), yt: nn(a.marketValue.yearTo), ts: a.marketValue.trimScope || null, tl: a.marketValue.trimLabel || null, pt: a.marketValue.powertrain || null, kl: nn(a.marketValue.kmLow), kh: nn(a.marketValue.kmHigh), cd: a.marketValue.condition || null, d: nn(a.marketValue.dealers), nk: nn(a.marketValue.nKept), mk: a.marketValue.make || null, md: a.marketValue.model || null, pv: a.marketValue.province || null, from: a.marketValue.seenMin || null, to: a.marketValue.seenMax || null, rs: a.marketValue.reason || null } : null,
     summary: a.summary || null,
     // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
     // signed canonical -- alter the image and the seal breaks.

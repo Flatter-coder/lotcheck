@@ -18,9 +18,9 @@
 //      copy gate forbids -- so a state no surface exercises today cannot ship a
 //      banned word tomorrow.
 import { readFileSync } from "node:fs";
-import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf } from "../supabase/functions/_shared/market-count.js";
+import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { marketCountLine, pageDefaultLine, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -275,6 +275,117 @@ console.log("\n-- report-lines --");
 check("fmtDateEn", fmtDateEn("2026-08-18") === "Aug 18, 2026" && fmtDateEn("2026-09-02T10:00:00Z") === "Sep 2, 2026" && fmtDateEn("2026-02-31") === "" && fmtDateEn("nope") === "");
 check("fmtMoney keeps cents only when present", fmtMoney(39713.7) === "$39,713.70" && fmtMoney(0) === "$0" && fmtMoney(196.48) === "$196.48" && fmtMoney(40343) === "$40,343");
 
+// ── 3b. like-for-like pool + the comparison card ──────────────────────────────
+console.log("\n-- likeForLikePool + marketCompareLine --");
+{
+  // The eleven rows behind LC-0F75-A93 (fn_market_comps, Lexus RX, used, AB, 2026-09-02).
+  const RX = [[2024, "RX 350", 80308, 49251, "A"], [2024, "RX 350", 40654, 53489, "B"], [2024, "RX 350", 34033, 57389, "B"], [2024, "350", 25847, 57999, "C"],
+    [2025, "RX 350", 11223, 58700, "A"], [2024, "RX 350h", 15305, 59990, "A"], [2024, "RX 350", 11294, 62700, "A"], [2024, "RX 350h", 28970, 65995, "A"],
+    [2024, "RX 500h", 24095, 70998, "A"], [2025, "RX 350", 23580, 72995, "B"], [2024, "RX 500h", 53993, 77988, "B"]]
+    .map(([year, trim, odometerKm, price, dealerName]) => ({ year, trim, odometerKm, price, dealerName, asOf: "2026-08-18" }));
+  const rx26 = likeForLikePool(RX, { model: "RX", trim: "350 Luxury AWD", year: 2026, condition: "used", odometerKm: 12270 });
+  check("2026 RX 350 Luxury, 12,270 km: no like-for-like set (2 read within a year and 37,000 km), so no comparison", rx26.insufficient && rx26.nRead === 2 && rx26.rows.length === 0 && rx26.kmHigh === 37178, JSON.stringify({ ...rx26, rows: undefined, read: undefined }));
+  check("... the rows it reports as read are the like-for-like two, never the whole pool (2 listings cannot sit at 3 dealers)", rx26.read.length === 2 && rx26.read.every((r) => r.year === 2025 && r.trim === "RX 350"), JSON.stringify(rx26.read));
+  check("... printed years never include a model year that was not read", rx26.yearFrom === 2025 && rx26.yearTo === 2025, `${rx26.yearFrom}-${rx26.yearTo}`);
+  const rx24 = likeForLikePool(RX, { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 30000 });
+  check("2024 RX 350, 30,000 km: 6 gas rows within a year and 62,000 km, all trims, no hybrid", rx24.scope === "model" && rx24.rows.length === 6 && rx24.rows.every((r) => !/h$/.test(r.trim)) && rx24.kmHigh === 62000, JSON.stringify({ scope: rx24.scope, n: rx24.rows.length }));
+  const stale = likeForLikePool(RX.map((r, i) => (i === 1 ? { ...r, asOf: "2026-07-01" } : r)), { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 30000, today: "2026-09-02" });
+  check("the count line's 30-day window applies here too: a row last seen before it is not read", stale.rows.length === 5 && stale.nRead === 5, `${stale.rows.length}`);
+  const hyb = likeForLikePool(RX, { model: "RX", trim: "350h Luxury", year: 2024, condition: "used", odometerKm: 20000, minRows: 2 });
+  check("a hybrid subject sees only hybrid rows", hyb.rows.length > 0 && hyb.rows.every((r) => /h$/.test(r.trim)), JSON.stringify(hyb.rows.map((r) => r.trim)));
+  const hinted = likeForLikePool(RX, { model: "RX", trim: "Luxury", year: 2024, condition: "used", odometerKm: 20000, minRows: 2, powertrainHint: fuelPowertrainHint("Hybrid Electric") });
+  check("a page-declared hybrid (fuelType) whose trim carries no marker still sees only hybrid rows", hinted.rows.length > 0 && hinted.rows.every((r) => /h$/.test(r.trim)) && fuelPowertrainHint("Plug-in Hybrid") === "Plug-in Hybrid" && fuelPowertrainHint("Gasoline") === "", JSON.stringify(hinted.rows.map((r) => r.trim)));
+  const newCar = likeForLikePool(RX.map((r) => ({ ...r, odometerKm: 5 })), { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "new", odometerKm: 5 });
+  check("a new subject applies no mileage window", newCar.kmLow == null && newCar.kmHigh == null);
+  const noOdo = likeForLikePool(RX, { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: null });
+  const zeroOdo = likeForLikePool(RX, { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 0 });
+  check("a used subject with no odometer (null or 0) is never a 0 km car: no 0-20,000 km window, no set, reason odometer_missing", noOdo.insufficient && noOdo.reason === "odometer_missing" && noOdo.kmLow == null && noOdo.kmHigh == null && noOdo.rows.length === 0 && zeroOdo.reason === "odometer_missing" && zeroOdo.kmHigh == null, JSON.stringify({ noOdo: [noOdo.reason, noOdo.kmHigh], zeroOdo: [zeroOdo.reason, zeroOdo.kmHigh] }));
+  const noYear = likeForLikePool(RX, { model: "RX", trim: "350", year: null, condition: "used" });
+  check("no model year -> insufficient, never a pool", noYear.insufficient && noYear.rows.length === 0 && noYear.reason === "year_missing");
+  check("model words are dropped from a trim before keying: 'RX 350 Luxury AWD' keys like '350 Luxury AWD' for model RX", dropModelWords("RX 350 Luxury AWD", "RX") === "350 Luxury AWD" && fullTrimKey(dropModelWords("RX 350 Luxury AWD", "RX")) === fullTrimKey("350 Luxury AWD") && normTrim(dropModelWords("RX 350", "RX")) === "" && dropModelWords("Sport AWD SUV", "HR-V") === "Sport AWD SUV");
+  const sameTrim = likeForLikePool(RX.map((r) => ({ ...r, trim: "RX 350 Luxury AWD" })).slice(0, 6), { model: "RX", trim: "350 Luxury AWD", year: 2024, condition: "used", odometerKm: 30000 });
+  check("... so six 'RX 350 Luxury AWD' rows match a '350 Luxury AWD' subject at the trim scope, not a meaningless 'RX' family", sameTrim.scope === "trim" && sameTrim.trimLabel === "Luxury", `${sameTrim.scope} ${sameTrim.trimLabel}`);
+  const mcModelInTrim = computeMarketCount(RX.map((r) => ({ ...r, year: 2024 })), { year: 2024, make: "Lexus", model: "RX", trim: "RX 350 Luxury AWD", price: 59900, priceVerified: true, province: "AB" });
+  check("the count line keys the same way (no 'RX' trim family)", mcModelInTrim.scope === "model" && mcModelInTrim.trimLabel === "Luxury", `${mcModelInTrim.scope} ${mcModelInTrim.trimLabel}`);
+
+  const A = { year: 2024, make: "Lexus", model: "RX", vehicleCondition: "used", priceVerified: true };
+  const mv6 = { average: 57999, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18", seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025, trimScope: "model", trimLabel: "Luxury", kmLow: 0, kmHigh: 62000, condition: "used", dealers: 2, make: "Lexus", model: "RX", province: "AB" };
+  const SIM = "6 used 2024 to 2025 Lexus RX (all trims, same powertrain) with up to 62,000 km at 2 Alberta dealers, read from the dealers' own pages between Aug 3 and Aug 18, 2026: $53,489 to $72,995, middle $57,999 (the median of those 6 asking prices)";
+  const g = marketCompareLine({ ...A, quotedPrice: 56000, marketValue: mv6 });
+  check("GREEN: at or below the middle", g.light === "green" && g.tone === "pass" && g.value === "$1,999 BELOW THE MIDDLE" && g.askUsed === 56000, `${g.light} ${g.value}`);
+  check("three plain lines: this vehicle / similar listings / difference, every figure named", g.lines.length === 3 && g.lines[0].k === "This vehicle" && g.lines[0].v === "$56,000 asking" && g.lines[1].k === "Similar listings in Alberta" && g.lines[1].v === SIM && g.lines[2].v === "$1,999 below the middle of those listings", JSON.stringify(g.lines));
+  const bc = marketCompareLine({ ...A, quotedPrice: 56000, marketValue: { ...mv6, province: "BC" } });
+  check("the title, the line and the dealers clause name the province the rows were read in", g.title === "How this vehicle compares with the Alberta market" && bc.title === "How this vehicle compares with the British Columbia market" && bc.lines[1].k === "Similar listings in British Columbia" && /at 2 British Columbia dealers/.test(bc.lines[1].v), bc.lines[1].v);
+  const am = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: mv6 });
+  check("AMBER: above the middle, inside the range", am.light === "amber" && am.tone === "muted" && am.headline === "$1,901 above the middle of similar listings", `${am.light} ${am.headline}`);
+  const r = marketCompareLine({ ...A, quotedPrice: 76000, marketValue: mv6 });
+  check("RED: above all of the listings compared (bounded to the printed set, never 'every listing read')", r.light === "red" && r.tone === "flag" && r.lightLabel === "Above all 6 similar listings compared", `${r.light} ${r.lightLabel}`);
+  const atMid = marketCompareLine({ ...A, quotedPrice: 57999, marketValue: mv6 });
+  check("boundaries: at the middle is green, at the top of the range is amber, one dollar above it is red", atMid.light === "green" && atMid.value === "AT THE MIDDLE" && marketCompareLine({ ...A, quotedPrice: 72995, marketValue: mv6 }).light === "amber" && marketCompareLine({ ...A, quotedPrice: 72996, marketValue: mv6 }).light === "red");
+  const one = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...mv6, dealers: 1, comps: 1, nRead: 1, seenMin: "2025-12-28", seenMax: "2026-01-03", kmLow: 40000, kmHigh: 160500 } });
+  check("grammar: one dealer, one listing, a floored/ceiled window, and read dates across a year change", /with 40,000 km to 161,000 km at 1 Alberta dealer, read from the dealer's own page between Dec 28, 2025 and Jan 3, 2026/.test(one.lines[1].v) && /^1 similar listing ·/.test(one.meta), `${one.lines[1].v} | ${one.meta}`);
+  const trimS = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...mv6, trimScope: "trim", trimLabel: "Luxury" } });
+  const famS = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...mv6, trimScope: "trim_family", trimLabel: "Luxury Executive" } });
+  const newS = marketCompareLine({ ...A, vehicleCondition: "new", quotedPrice: 59900, marketValue: { ...mv6, condition: "new", kmLow: null, kmHigh: null } });
+  check("scopes: same trim / trim family (no double 'with') / a new set with no mileage window", /^6 used 2024 to 2025 Lexus RX Luxury with up to 62,000 km/.test(trimS.lines[1].v) && /^6 used 2024 to 2025 Lexus RX whose trim begins "Luxury" with up to 62,000 km/.test(famS.lines[1].v) && /^6 new 2024 to 2025 Lexus RX \(all trims, same powertrain\) at 2 Alberta dealers/.test(newS.lines[1].v), [trimS.lines[1].v, famS.lines[1].v, newS.lines[1].v].join(" | "));
+  const outC = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...mv6, nRead: 8, comps: 6 } });
+  check("a confirmed set names the rows the price-outlier trim left out, so its N and the count line's N never disagree in silence", /\(the median of those 6 asking prices\); 2 more were read and left out as price outliers$/.test(outC.lines[1].v), outC.lines[1].v);
+  const MVN = { average: null, insufficient: true, nRead: 2, need: 5, yearFrom: 2025, yearTo: 2025, kmLow: 0, kmHigh: 37178, condition: "used", dealers: 2, asOf: "2026-08-18", seenMin: "2026-08-18", seenMax: "2026-08-18", make: "Lexus", model: "RX", province: "AB" };
+  const none = marketCompareLine({ ...A, quotedPrice: 69898, year: 2026, marketValue: MVN });
+  check("NOT ENOUGH: says how many were read (mileage ceiling rounded UP) and that none is made", none.state === "insufficient" && none.light === null && none.value === "NOT ENOUGH TO COMPARE" && none.body === "2 used 2025 Lexus RX (all trims, same powertrain) with up to 38,000 km at 2 Alberta dealers were read from the dealers' own pages on Aug 18, 2026. 5 are needed for a fair comparison, so none is made here.", none.body);
+  const oneRead = marketCompareLine({ ...A, quotedPrice: 69898, year: 2026, marketValue: { ...MVN, nRead: 1, dealers: 1 } });
+  check("... one row: 'was read', 'the dealer's own page'", oneRead.body.startsWith("1 used 2025 Lexus RX (all trims, same powertrain) with up to 38,000 km at 1 Alberta dealer was read from the dealer's own page on Aug 18, 2026."), oneRead.body);
+  const zero = marketCompareLine({ ...A, quotedPrice: 69898, year: 2026, marketValue: { ...MVN, nRead: 0, dealers: null, asOf: null, seenMin: null, seenMax: null, yearFrom: 2025, yearTo: 2026 } });
+  check("NONE READ: no dealer count and no date are attributed to an empty set", zero.state === "insufficient" && zero.body === "No used 2025 to 2026 Lexus RX with up to 38,000 km were among the listings read from Alberta dealers' own pages. 5 are needed for a fair comparison, so none is made here.", zero.body);
+  const outl = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...MVN, nRead: 6, nKept: 4, trimScope: "model", yearFrom: 2024, yearTo: 2025, kmHigh: 62000 } });
+  check("OUTLIERS: '6 read, 5 needed, none made' can never appear -- the rows left out are named", outl.body === "6 used 2024 to 2025 Lexus RX (all trims, same powertrain) with up to 62,000 km at 2 Alberta dealers were read from the dealers' own pages on Aug 18, 2026. 2 of them were left out as price outliers. 5 are needed for a fair comparison, so none is made here.", outl.body);
+  const sameN = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { ...MVN, nRead: 2, nKept: 2 } });
+  check("... and no outlier clause when nothing was left out", !/left out/.test(sameN.body), sameN.body);
+  const noOdoLine = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { average: null, insufficient: true, nRead: 0, reason: "odometer_missing", yearFrom: 2024, yearTo: 2024, condition: "used", make: "Lexus", model: "RX", province: "AB" } });
+  check("ODOMETER NOT READ: not compared, says why, never 'No ... were read'", noOdoLine.value === "NOT COMPARED" && noOdoLine.headline === "Not compared: odometer not read" && /odometer was not read from the page/.test(noOdoLine.body) && !/were among/.test(noOdoLine.body) && noOdoLine.lines[2].v === "not made", noOdoLine.body);
+  const noAsk = marketCompareLine({ ...A, quotedPrice: null, marketValue: mv6 });
+  check("no asking price: middle stated, no difference worked out, no light", noAsk.light === null && /no asking price is shown/.test(noAsk.lines[2].v) && noAsk.value === "MIDDLE $57,999" && noAsk.askUsed === null, noAsk.value);
+  const unv = marketCompareLine({ ...A, priceVerified: false, quotedPrice: 59900, marketValue: mv6 });
+  check("an unverified price is shown but never measured (the count line's refusal): no light, no difference", unv.light === null && unv.askUsed === null && /^not worked out: this page's asking price could not be verified/.test(unv.lines[2].v) && unv.value === "MIDDLE $57,999", unv.lines[2].v);
+  const fc = marketCompareLine({ ...A, quotedPrice: 59900, financeContingent: { contingent: true }, marketValue: mv6 });
+  check("a finance-contingent price is shown but never measured", fc.light === null && fc.askUsed === null && /depends on financing with the dealer/.test(fc.lines[2].v), fc.lines[2].v);
+  // /verify builds its argument with this exact expression (src/App.jsx, pinned by check:parity).
+  const verifyArg = (o) => ({ price: o.price, marketValue: o.marketValue, fcx: o.fcx, vehicle: (o.marketValue.yf && o.marketValue.yt) ? String(o.vehicle || "").replace(/^\s*(?:19|20)\d{2}\s+/, "") : o.vehicle });
+  const V4 = { avg: 59990, below: 55000, above: 65000, lo: 49251, hi: 77988, mileage: 12270, source: "LotCheck market · all trims · 11 comparable listings", n: 11, as: "2026-08-18" };
+  const v4 = marketCompareLine(verifyArg({ price: { asking: 69898, verified: true }, marketValue: V4, vehicle: "2026 Lexus RX 350 Luxury AWD", fcx: null }));
+  check("a link sealed before the basis rode along (the real v4 keys, fed as /verify feeds them): never named, never dated, never lit", v4.state === "confirmed" && v4.light === null && !/Lexus|2026|Aug 18|dealers/.test(v4.lines[1].v) && /^middle \$59,990 across 11 listings; what those listings were \(model year, trim, mileage\) was not sealed with this report/.test(v4.lines[1].v) && v4.value === "$9,908 ABOVE THE MIDDLE" && !/\$0\b/.test(JSON.stringify(v4)), JSON.stringify(v4.lines));
+  const legacy = marketCompareLine({ price: { asking: 59900, verified: true }, vehicle: "Lexus RX 350 Luxury AWD", marketValue: { avg: 57999, below: 55000, above: 60000, l: 50000, h: 65000, s: "LotCheck market", n: "note" } });
+  check("... and a v3 seal (no range at all): the middle alone, no $0, no light", legacy.state === "confirmed" && legacy.light === null && !/\$0\b/.test(JSON.stringify(legacy)) && /^middle \$57,999; what those listings were/.test(legacy.lines[1].v), JSON.stringify(legacy.lines));
+  const compact = marketCompareLine(verifyArg({ price: { asking: 59900, verified: true }, vehicle: "2024 Lexus RX 350 Luxury AWD", fcx: null, marketValue: { avg: 57999, lo: 53489, hi: 72995, n: 6, as: "2026-08-18", from: "2026-08-03", to: "2026-08-18", yf: 2024, yt: 2025, ts: "model", tl: "Luxury", kl: 0, kh: 62000, cd: "used", d: 2, mk: "Lexus", md: "RX", pv: "AB" } }));
+  check("sealed compact form (the /verify shape: no make/model on the analysis) renders the SAME lines as the full form", JSON.stringify(compact.lines) === JSON.stringify(am.lines) && compact.light === am.light && compact.title === am.title, JSON.stringify(compact.lines));
+  const hybC = marketCompareLine({ price: { asking: 40000, verified: true }, vehicle: "Toyota RAV4 Hybrid XSE", marketValue: { avg: 41000, lo: 38000, hi: 45000, n: 5, as: "2026-08-18", yf: 2025, yt: 2025, ts: "model", pt: "Hybrid", cd: "used", mk: "Toyota", md: "RAV4", pv: "AB" } });
+  const phevC = marketCompareLine({ price: { asking: 50000, verified: true }, vehicle: "Toyota RAV4 Plug-in Hybrid XSE", marketValue: { avg: 51000, lo: 48000, hi: 55000, n: 5, as: "2026-08-18", yf: 2025, yt: 2025, ts: "model", pt: "Plug-in Hybrid", cd: "used", mk: "Toyota", md: "RAV4", pv: "AB" } });
+  check("a hybrid or plug-in subject's set is named make + model + powertrain, never a bare 'Hybrid'", /^5 used 2025 Toyota RAV4 Hybrid \(all trims, same powertrain\)/.test(hybC.lines[1].v) && /^5 used 2025 Toyota RAV4 Plug-in Hybrid \(all trims/.test(phevC.lines[1].v), hybC.lines[1].v + " | " + phevC.lines[1].v);
+  const hybNoMk = marketCompareLine({ price: { asking: 40000, verified: true }, vehicle: "Toyota RAV4 Hybrid XSE", marketValue: { avg: 41000, lo: 38000, hi: 45000, n: 5, as: "2026-08-18", yf: 2025, yt: 2025, ts: "model", pt: "Hybrid", cd: "used" } });
+  check("... and without a sealed make/model the set is not named at all (never the subject's trim, never 'Hybrid' alone)", hybNoMk.light === null && !/Hybrid|XSE|2025/.test(hybNoMk.lines[1].v) && /was not sealed with this report/.test(hybNoMk.lines[1].v), hybNoMk.lines[1].v);
+  const basisMissing = marketCompareLine({ ...A, quotedPrice: 59900, marketValue: { average: null, insufficient: true, reason: "basis_missing" } });
+  check("a set whose basis was not recorded says exactly that -- never '0 were read', never 'not enough'", basisMissing.state === "insufficient" && basisMissing.value === "NOT COMPARED" && basisMissing.headline === "Comparison set not recorded" && /what it was made of was not recorded/.test(basisMissing.body) && !/\b0\b/.test(basisMissing.body), basisMissing.body);
+  check("no marketValue at all -> not compared, never a number", marketCompareLine({ ...A }).value === "NOT COMPARED");
+  // Round trip through the SERVER canonical: the sealed projection, fed to the
+  // builder the way /verify feeds it, words the same three lines as the report.
+  const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
+  const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
+  const c = canonicalReport(full);
+  check("the canonical is v7 and seals the basis keys", c.v === 7 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  const viaVerify = marketCompareLine(verifyArg(c));
+  check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
+  const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
+  check("... and the not-enough state round-trips too", marketCompareLine(verifyArg(cNone)).body === none.body, marketCompareLine(verifyArg(cNone)).body);
+  const cFcx = canonicalReport({ ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, financeContingent: { contingent: true, reasons: ["payment shown depends on dealer financing"] }, marketValue: mv6 });
+  const vFcx = marketCompareLine(verifyArg(cFcx));
+  check("/verify (the app's own call shape) refuses a finance-contingent price exactly as the report does", vFcx.light === null && vFcx.askUsed === null && /depends on financing/.test(vFcx.lines[2].v), JSON.stringify(vFcx.lines[2]));
+  const cOdo = canonicalReport({ ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: { average: null, insufficient: true, nRead: 0, reason: "odometer_missing", yearFrom: 2024, yearTo: 2024, condition: "used", make: "Lexus", model: "RX", province: "AB" } });
+  check("... and the odometer-not-read reason round-trips (rs sealed)", marketCompareLine(verifyArg(cOdo)).headline === "Not compared: odometer not read");
+  const old = ["local middle value", "middle value", "band", "comparable used", "every similar listing read", "half asked"];
+  const texts = [g, am, r, none, zero, outl, noAsk, unv, fc, legacy, compact, hybC, one, trimS, famS, newS, outC, noOdoLine, v4].flatMap((l) => [l.body, l.headline, l.value, l.lightLabel || "", ...l.lines.map((x) => x.v)]);
+  check("the retired phrasing is gone", !texts.some((t) => old.some((w) => t.toLowerCase().includes(w))), texts.filter((t) => old.some((w) => t.toLowerCase().includes(w))).join(" | "));
+}
+
 // ── 4. every emitted sentence passes the copy gate's own rules ───────────────
 console.log("\n-- copy sweep (every state x both lines) --");
 {
@@ -309,10 +420,13 @@ console.log("\n-- copy sweep (every state x both lines) --");
   const texts = [];
   for (const m of mcStates) { const l = marketCountLine({ year: 2027, make: "Honda", model: "HR-V", marketCount: m }); texts.push(l.value, l.headline, l.body, l.title, l.meta); }
   for (const p of pdStates) { const l = pageDefaultLine({ pageDefault: p }); texts.push(l.value, l.headline, l.body, l.title, l.meta); }
+  const mv6 = { average: 57999, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18", seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025, trimScope: "model", trimLabel: "Luxury", kmLow: 0, kmHigh: 62000, condition: "used", dealers: 2, make: "Lexus", model: "RX", province: "AB" };
+  for (const extra of [{ quotedPrice: 56000 }, { quotedPrice: 59900 }, { quotedPrice: 76000 }, { quotedPrice: null }, { quotedPrice: 59900, priceVerified: false }, { quotedPrice: 59900, financeContingent: { contingent: true } }]) { const l = marketCompareLine({ year: 2024, make: "Lexus", model: "RX", ...extra, marketValue: mv6 }); texts.push(l.value, l.headline, l.body, l.title, l.meta, ...(l.lightLabel ? [l.lightLabel] : []), ...(l.note ? [l.note] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
+  for (const mv of [{ average: null, insufficient: true, nRead: 2, need: 5, yearFrom: 2025, yearTo: 2025, kmLow: 0, kmHigh: 37178, condition: "used", dealers: 2, asOf: "2026-08-18", make: "Lexus", model: "RX", province: "AB" }, { average: null, insufficient: true, nRead: 0, need: 5, yearFrom: 2025, yearTo: 2026, kmLow: 0, kmHigh: 37178, condition: "used" }, { average: null, insufficient: true, nRead: 6, nKept: 4, need: 5, trimScope: "model", yearFrom: 2024, yearTo: 2025, condition: "used", asOf: "2026-08-18" }, { average: null, insufficient: true, reason: "basis_missing" }, { average: null, insufficient: true, reason: "odometer_missing", yearFrom: 2026, yearTo: 2026, condition: "used" }, { avg: 57999, below: 55000, above: 60000 }, { avg: 59990, lo: 49251, hi: 77988, n: 11, as: "2026-08-18" }, undefined]) { const l = marketCompareLine({ year: 2026, make: "Lexus", model: "RX", quotedPrice: 69898, marketValue: mv }); texts.push(l.value, l.headline, l.body, l.title, l.meta, ...(l.lightLabel ? [l.lightLabel] : []), ...l.lines.map((x) => `${x.k}: ${x.v}`)); }
   let hits = 0;
   for (const t of texts) for (const re of FORBIDDEN) if (re.test(t)) { hits++; console.log(`    banned: ${re} in "${t}"`); }
   check(`${texts.length} strings, 0 banned-word hits`, hits === 0, `${hits} hit(s)`);
-  check("every state renders a non-empty string", texts.every((t) => typeof t === "string" && t.length > 0));
+  check("every state renders a non-empty string", texts.every((t) => typeof t === "string" && t.length > 0), texts.filter((t) => typeof t !== "string" || !t.length).length + " empty");
 }
 
 console.log(`\n${pass} passed, ${fail} failed${fail ? `\n  ${failures.join("\n  ")}` : ""}`);

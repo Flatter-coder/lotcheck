@@ -247,6 +247,26 @@ const CASES: Case[] = [
     repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
   },
   {
+    name: "a market comparison with a middle but no basis (count, range, years, dates, province) is demoted to not-enough -- never '$9,908 above the local middle value' again",
+    analysis: { marketValue: { average: 69898, below: 60000, above: 75000, low: null, high: null, comps: 11, asOf: "2026-08-18" } },
+    repaired: ["MARKET_VALUE_HAS_BASIS"],
+  },
+  {
+    name: "a market comparison that names its basis is fine",
+    analysis: { marketValue: { average: 57999, below: 55000, above: 65000, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18", seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025, trimScope: "model", trimLabel: "Luxury", powertrain: null, kmLow: 0, kmHigh: 62000, condition: "used", dealers: 2, make: "Lexus", model: "RX", province: "AB" } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a market comparison whose dealer count exceeds its listing count cannot stand (2 listings at 3 dealers)",
+    analysis: { marketValue: { average: 57999, low: 53489, high: 72995, comps: 2, asOf: "2026-08-18", seenMax: "2026-08-18", yearFrom: 2025, yearTo: 2025, trimScope: "model", condition: "used", dealers: 3, make: "Lexus", model: "RX", province: "AB" } },
+    repaired: ["MARKET_VALUE_HAS_BASIS"],
+  },
+  {
+    name: "a not-enough comparison is never flagged (no number is being shown)",
+    analysis: { marketValue: { average: null, insufficient: true, nRead: 2, need: 5 } },
+    flagged: [],
+  },
+  {
     name: "an absent or unchecked market count is never flagged (no claim is being made)",
     analysis: { marketCount: { state: "absent", n: 0 } },
     flagged: [],

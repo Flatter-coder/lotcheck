@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, fmtDateEn } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -7810,7 +7810,10 @@ function encodeReport(a){
     // fm   -- the financing-math check.
     vin:a.vin||null,
     odo:Number.isFinite(Number(a.odometerKm))?Number(a.odometerKm):null,
-    mv:a.marketValue?{l:a.marketValue.low??null,h:a.marketValue.high??null,n:a.marketValue.note||null,s:a.marketValue.source||null}:null,
+    // mv rides in the same compact form the signed canonical seals (avg/lo/hi/
+    // n/as plus the like-for-like basis), so a forwarded report's comparison is
+    // worded by the same builder from the same fields as the original.
+    mv:a.marketValue?{avg:a.marketValue.average??null,below:a.marketValue.below??null,above:a.marketValue.above??null,lo:a.marketValue.low??null,hi:a.marketValue.high??null,mileage:a.marketValue.mileage??null,source:a.marketValue.source||null,n:a.marketValue.comps??null,as:a.marketValue.asOf||null,ins:!!a.marketValue.insufficient,nr:a.marketValue.nRead??null,nd:a.marketValue.need??null,yf:a.marketValue.yearFrom??null,yt:a.marketValue.yearTo??null,ts:a.marketValue.trimScope||null,tl:a.marketValue.trimLabel||null,pt:a.marketValue.powertrain||null,kl:a.marketValue.kmLow??null,kh:a.marketValue.kmHigh??null,cd:a.marketValue.condition||null,d:a.marketValue.dealers??null,nk:a.marketValue.nKept??null,mk:a.marketValue.make||null,md:a.marketValue.model||null,pv:a.marketValue.province||null,from:a.marketValue.seenMin||null,to:a.marketValue.seenMax||null,rs:a.marketValue.reason||null}:null,
     src:(a.sourceUrl||a.capturedAt)?{u:a.sourceUrl||null,c:a.capturedAt||null}:null,
     fm:a.financingCheck?{r:!!a.financingCheck.reconciles,n:a.financingCheck.note||null}:null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
@@ -7826,6 +7829,12 @@ function decodeReport(s){
     // legacy link keeps its ceiling and never has it misread as a count.
     const isCount=(x)=>!!x&&typeof x==="object"&&("st" in x);
     const ceil=c.ceil||(c.mc&&!isCount(c.mc)?c.mc:null);
+    // The comparison rode as {l,h,n,s} (low/high/note/source) until 2026-09-02;
+    // it now rides in the compact form the signed canonical seals (avg/lo/hi/
+    // n/as plus the like-for-like basis). The two shapes never share a key
+    // (`avg` is always present in the new form, `l` only in the old), so a
+    // legacy link keeps its band and its note and nothing is misread as a count.
+    const legacyMv=!!c.mv&&typeof c.mv==="object"&&c.mv.avg===undefined&&c.mv.l!==undefined;
     return {vehicle:c.v,year:c.y,make:c.mk,model:c.md,trim:c.tr,dealerName:c.dn,dealerCity:c.dc,vehicleCondition:c.cond,
       quotedPrice:c.qp,msrp:c.ms,
       financing:c.fin?{paymentAmount:c.fin.p,paymentFrequency:c.fin.f,rate:c.fin.r,termMonths:c.fin.t}:null,
@@ -7869,7 +7878,9 @@ function decodeReport(s){
         insideAdvertisedPrice:c.dli.i===1?true:(c.dli.i===0?false:null),source:c.dli.s||"the dealer's own price breakdown on the listing"}:null,
       vin:c.vin||null,
       odometerKm:Number.isFinite(Number(c.odo))?Number(c.odo):null,
-      marketValue:c.mv?{low:c.mv.l??null,high:c.mv.h??null,note:c.mv.n||null,source:c.mv.s||null}:null,
+      // Analysis-shaped again, so report-lines.js marketCompareLine words the
+      // forwarded comparison exactly as it worded the original.
+      marketValue:c.mv?{average:c.mv.avg??null,below:c.mv.below??null,above:c.mv.above??null,low:(legacyMv?c.mv.l:c.mv.lo)??null,high:(legacyMv?c.mv.h:c.mv.hi)??null,mileage:c.mv.mileage??null,source:(legacyMv?c.mv.s:c.mv.source)||null,note:legacyMv?(c.mv.n||null):null,comps:legacyMv?null:(c.mv.n??null),asOf:c.mv.as||null,insufficient:!!c.mv.ins,nRead:c.mv.nr??null,need:c.mv.nd??null,yearFrom:c.mv.yf??null,yearTo:c.mv.yt??null,trimScope:c.mv.ts||null,trimLabel:c.mv.tl||null,powertrain:c.mv.pt||null,kmLow:c.mv.kl??null,kmHigh:c.mv.kh??null,condition:c.mv.cd||null,dealers:c.mv.d??null,nKept:c.mv.nk??null,make:c.mv.mk||null,model:c.mv.md||null,province:c.mv.pv||null,seenMin:c.mv.from||null,seenMax:c.mv.to||null,reason:c.mv.rs||null}:null,
       sourceUrl:c.src?(c.src.u||null):null,
       capturedAt:c.src?(c.src.c||null):null,
       financingCheck:c.fm?{reconciles:!!c.fm.r,note:c.fm.n||null}:null,
@@ -8823,6 +8834,34 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "How this vehicle compares with the Alberta market": this vehicle /
+  // similar listings in Alberta / difference, under a traffic light. Worded
+  // ONCE in report-lines.js (marketCompareLine) from the like-for-like band the
+  // server sealed, so the three lines here are the three lines in the emailed
+  // HTML, the PDF and on /verify. Built whenever a comparison set was read,
+  // including the not-enough state -- the sidebar never goes quiet where the
+  // scroll view speaks. [[report-never-empty]] [[report-features-all-views]]
+  let marketCompareItem = null;
+  if (hasMarketCompare(a.marketValue)) {
+    const line = marketCompareLine(a);
+    const lightC = line.light === "green" ? TEAL : line.light === "amber" ? AMBER : line.light === "red" ? ROSE : null;
+    marketCompareItem = { key: "marketcompare", title: line.title, tone: line.tone, glow: line.light === "red", v: line.value, body: (
+      <div>
+        {lightC && line.lightLabel
+          ? <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 8 }}><span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: "50%", background: lightC, boxShadow: `0 0 8px ${lightC}`, flex: "0 0 auto" }} /><span style={{ fontSize: 13.5, fontWeight: 800, color: lightC, lineHeight: 1.3 }}>{line.lightLabel}</span></div>
+          : <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} />}
+        {line.lines.map((l, i) => (
+          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
+            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
+            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
+          </div>
+        ))}
+        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
+        <ExplainBox txt={`How this asking price sits against similar listings LotCheck read from ${provinceName(a.marketValue?.province)} dealers' own pages: same powertrain, same model year or one either side, similar mileage when used. Green is at or below their middle, amber is above the middle but inside their range, red is above all of the listings compared. Ask the dealer how this price compares with those listings.`} />
+      </div>
+    )};
+  }
+
   // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
   //
   // We advertise a 10-point verification and we over-deliver on it (Vic,
@@ -8862,6 +8901,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(trimRangeItem ? [trimRangeItem] : []),
     ...(comparableItem ? [comparableItem] : []),
     ...(marketCountItem ? [marketCountItem] : []),
+    ...(marketCompareItem ? [marketCompareItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
@@ -9162,7 +9202,13 @@ function useComparableListings(a){
 // sees exactly where it sits with nothing to explain (design-must-not-create-
 // questions). Reads only signed fields (avg/lo/hi/below/above/n/as) + the signed
 // asking price, so it renders identically wherever marketValue travels.
-function MarketBandGauge({mv, asking, C, cardStyle}){
+// `caption` (optional) replaces the "Used market value · <source>" header; the
+// report card passes its own so the gauge reads as part of the comparison, and
+// an empty string drops the header. The /value page passes nothing and keeps
+// the old header unchanged.
+function MarketBandGauge({mv, asking, C, cardStyle, caption, bare}){
+  // bare: only the arc and the Low / Middle / High figures -- the words come
+  // from the three lines above it (marketCompareLine), never from here.
   const money=n=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
   const AMBER="#f2a84b", TEAL=C.tealInk||"#4fd0c9", VIOLET="#8b6cf0";
   const hexA=(h,a)=>{ const m=/^#?([0-9a-f]{6})$/i.exec(String(h||"")); if(!m) return h; const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; };
@@ -9207,9 +9253,10 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
   // Shrink the big figure for absurdly long values so it never spills the gauge.
   const shownStr=Math.round(hasAsk?ask:median).toLocaleString("en-CA");
   const bigFont=shownStr.length>12?22:shownStr.length>9?28:shownStr.length>7?33:37;
+  const cap=caption===undefined?`Used market value · ${mv.source||"LotCheck market"}`:caption;
   return (
     <div style={{...cardStyle}}>
-      <div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>Used market value · {mv.source||"LotCheck market"}</div>
+      {cap&&<div style={{fontSize:11,color:C.inkFaint,marginBottom:2,fontFamily:mono,letterSpacing:".04em"}}>{cap}</div>}
       <div style={{position:"relative",maxWidth:330,margin:"2px auto 0"}}>
         <svg viewBox="0 0 340 270" style={{display:"block",width:"100%",height:"auto",overflow:"visible"}} role="img" aria-label={hasAsk?`Dealer asking ${money(ask)}, ${pos} and ${rangeWord}. Range ${money(low)} to ${money(high)}, middle value ${money(median)}.`:`Market middle value ${money(median)}. Range ${money(low)} to ${money(high)}. Enter an asking price to compare.`}>
           <defs>
@@ -9243,20 +9290,20 @@ function MarketBandGauge({mv, asking, C, cardStyle}){
         <div style={{position:"absolute",left:"50%",top:"56%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none",width:"84%"}}>
           <div style={{fontSize:9.5,letterSpacing:".2em",color:pillColor,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:6,justifyContent:"center"}}><span style={{width:6,height:6,borderRadius:"50%",background:pillColor,boxShadow:`0 0 9px ${pillColor}`,display:"inline-block"}}/>{askLabel}</div>
           <div style={{fontSize:bigFont,fontWeight:800,color:C.ink,lineHeight:1,letterSpacing:"-.02em",fontVariantNumeric:"tabular-nums",marginTop:4,whiteSpace:"nowrap"}}><small style={{fontSize:Math.round(bigFont*0.54),fontWeight:700,opacity:.7,marginRight:1}}>$</small>{shownStr}</div>
-          <div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{hasAsk?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"type a price to compare"}</div>
+          {!bare&&<div style={{marginTop:6,fontFamily:mono,fontSize:10.5,letterSpacing:".03em",color:C.inkSoft||C.inkFaint}}>{hasAsk?<>{pos} · <b style={{color:aboveRange?AMBER:TEAL,fontWeight:600}}>{rangeWord}</b></>:"type a price to compare"}</div>}
         </div>
       </div>
       <div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:8}}>
-        {[["Low",low,false],["Middle value",median,true],["High",high,false]].map(([l,v,mid],i)=>(
+        {[["Low",low,false],[bare?"Middle":"Middle value",median,true],["High",high,false]].map(([l,v,mid],i)=>(
           <div key={i} style={{flex:1,textAlign:"center",padding:"9px 8px 8px",borderRadius:12,background:mid?`linear-gradient(180deg, ${hexA(TEAL,.12)}, ${hexA(TEAL,.03)})`:`linear-gradient(180deg, ${hexA(TEAL,.06)}, ${hexA(TEAL,.02)})`,border:`1px solid ${mid?hexA(TEAL,.32):C.line}`}}>
             <div style={{fontSize:8.5,letterSpacing:".16em",color:C.inkFaint,textTransform:"uppercase",fontFamily:mono,display:"inline-flex",alignItems:"center",gap:5,justifyContent:"center"}}><span style={{width:5,height:5,borderRadius:"50%",background:TEAL,opacity:.55,display:"inline-block"}}/>{l}</div>
             <div style={{fontSize:15,fontWeight:700,color:mid?TEAL:C.ink,marginTop:4,letterSpacing:"-.01em",fontVariantNumeric:"tabular-nums"}}>{money(v)}</div>
           </div>
         ))}
       </div>
-      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>
+      {!bare&&<div style={{fontSize:11.5,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>
         {comps?`${Number(comps).toLocaleString()} comparable used listings`:"Comparable used listings"}{mv.mileage?` near ${Number(mv.mileage).toLocaleString()} km`:""}{asOf?` · captured ${asOf}`:""}. Asking prices read from dealers' own listings, not confirmed sales — this is the market, not the dealer's trade-in number.
-      </div>
+      </div>}
     </div>
   );
 }
@@ -9467,6 +9514,61 @@ function MarketCountCard({analysis,C,cardStyle}){
     </div>
   );
 }
+// LINE -- "How this vehicle compares with the Alberta market": three plain
+// lines -- this vehicle / similar listings in Alberta / difference -- under a
+// traffic light (green at or below the middle, amber above the middle but
+// inside the range, red above every similar listing read). Worded once in
+// report-lines.js marketCompareLine from the like-for-like band, so the card
+// on screen is the card in the emailed HTML, the PDF and on /verify.
+// Vic, 2026-09-02, on LC-0F75-A93's "$9,908 above the local middle value":
+// "not easy to understand ... just provide 3 examples green, amber, red".
+// The radial gauge stays, underneath the lines, only when there is a band to
+// draw. A set too small to compare renders the three lines and says so.
+//
+// A band with no comparison behind it -- a share link minted before the basis
+// rode along carries low/high and nothing else -- renders no card at all: the
+// builder would have to print "0 were read", which nothing established.
+// Missing beats wrong. Shared by the scroll card and the sidebar pool so both
+// surfaces make the same call. [[report-never-empty]] [[dealers-are-adversaries]]
+function hasMarketCompare(mv){
+  return !!mv&&(mv.average!=null||mv.insufficient===true||mv.nRead!=null);
+}
+function MarketCompareCard({analysis,C,cardStyle}){
+  const mv=analysis?.marketValue;
+  if(!hasMarketCompare(mv)) return null;
+  const line=marketCompareLine(analysis);
+  // The gauge marks the asking price only when the builder measured it -- an
+  // unverified or finance-contingent price is shown in the lines, not placed.
+  const ask=Number(line.askUsed)||0;
+  const lightInk=line.light==="green"?C.tealInk:line.light==="amber"?C.butterInk:line.light==="red"?C.coralInk:null;
+  const lightBg=line.light==="green"?C.tealBg:line.light==="amber"?C.butterBg:line.light==="red"?C.coralBg:null;
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:6}}>{line.title}</div>
+      {lightInk&&line.lightLabel?(
+        <div style={{display:"inline-flex",alignItems:"center",gap:9,padding:"7px 12px 7px 10px",borderRadius:999,background:lightBg,border:`1px solid ${lightInk}55`,marginBottom:10,maxWidth:"100%"}}>
+          <span aria-hidden="true" style={{width:11,height:11,borderRadius:"50%",background:lightInk,boxShadow:`0 0 8px ${lightInk}`,flex:"0 0 auto"}}/>
+          <span style={{fontSize:13,fontWeight:800,color:lightInk,lineHeight:1.3}}>{line.lightLabel}</span>
+        </div>
+      ):(
+        <div style={{fontSize:22,fontWeight:1000,color:line.state==="confirmed"?C.ink:C.inkSoft,lineHeight:1.2,marginBottom:8}}>{line.headline}</div>
+      )}
+      <div>
+        {line.lines.map((l,i)=>(
+          <div key={i} style={{display:"flex",flexWrap:"wrap",gap:"2px 14px",alignItems:"baseline",padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+            <div style={{flex:"0 0 auto",minWidth:120,fontSize:11.5,fontWeight:700,color:C.inkFaint}}>{l.k}</div>
+            <div style={{flex:"1 1 220px",fontSize:13,color:C.ink,lineHeight:1.5,fontWeight:i===line.lines.length-1?800:500}}>{l.v}</div>
+          </div>
+        ))}
+      </div>
+      {line.state==="confirmed"&&line.light&&ask>=1&&(
+        <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.line}`}}>
+          <MarketBandGauge mv={mv} asking={ask} C={C} bare cardStyle={{background:"transparent",border:"none",padding:0}} caption="Where this asking price sits"/>
+        </div>
+      )}
+    </div>
+  );
+}
 // LINE -- "Payment default: this page's payment default is N months, <frequency>
 // payments at X%." The page's own pre-selected calculator scenario
 // (page-default.js), worded once in report-lines.js pageDefaultLine. Same
@@ -9503,7 +9605,10 @@ function canonicalReport(a){
     // signed canonical because it is a material claim about the listing, and
     // /verify must be able to show it as sealed rather than as a re-assertion.
     // v6: mc (other listings read) + dflt (page's pre-selected payment scenario); mirrors report-sign.ts
-    v:6,
+    // v7 (2026-09-02): the comparison's basis rides with marketValue, and its
+    // projection is NOT additive (mileage null was 0; a not-enough set is an
+    // object, was null). Mirrors report-sign.ts.
+    v:7,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -9513,7 +9618,7 @@ function canonicalReport(a){
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null,reason:x.reason||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
     reputation:a.dealerSentiment&&a.dealerSentiment.rating?{rating:Number(a.dealerSentiment.rating),reviews:Number(a.dealerSentiment.reviewCount||0)}:null,
-    marketValue:a.marketValue&&a.marketValue.average!=null?{avg:num(a.marketValue.average),below:num(a.marketValue.below),above:num(a.marketValue.above),lo:num(a.marketValue.low),hi:num(a.marketValue.high),mileage:num(a.marketValue.mileage),source:a.marketValue.source||null,n:num(a.marketValue.comps),as:a.marketValue.asOf||null}:null,
+    marketValue:a.marketValue?{avg:nn(a.marketValue.average),below:nn(a.marketValue.below),above:nn(a.marketValue.above),lo:nn(a.marketValue.low),hi:nn(a.marketValue.high),mileage:nn(a.marketValue.mileage),source:a.marketValue.source||null,n:nn(a.marketValue.comps),as:a.marketValue.asOf||null,ins:!!a.marketValue.insufficient,nr:nn(a.marketValue.nRead),nd:nn(a.marketValue.need),yf:nn(a.marketValue.yearFrom),yt:nn(a.marketValue.yearTo),ts:a.marketValue.trimScope||null,tl:a.marketValue.trimLabel||null,pt:a.marketValue.powertrain||null,kl:nn(a.marketValue.kmLow),kh:nn(a.marketValue.kmHigh),cd:a.marketValue.condition||null,d:nn(a.marketValue.dealers),nk:nn(a.marketValue.nKept),mk:a.marketValue.make||null,md:a.marketValue.model||null,pv:a.marketValue.province||null,from:a.marketValue.seenMin||null,to:a.marketValue.seenMax||null,rs:a.marketValue.reason||null}:null,
     summary:a.summary||null,
     shot:a.listingShotSha256||null,
     vin:a.vin||null,
@@ -9874,6 +9979,15 @@ function VerifyPage(){
                 msrpBasis:o.basis?.b,msrpTrim:o.basis?.t,msrpYear:o.basis?.y,
                 year:o.year,priceVerified:o.price?.verified});
               const delta=vclaim.delta??0;
+              // The like-for-like comparison, worded by the same builder as every
+              // other surface from the fields sealed in the canonical (v4 band,
+              // 2026-09-02 basis), so /verify shows the sealed comparison rather
+              // than a re-assertion. The canonical carries `vehicle` as one
+              // string, not year/make/model; the builder falls back to it. When
+              // the sealed basis carries its own model-year window the string's
+              // leading year is dropped, or the line reads "2024 to 2025 2026
+              // Lexus RX"; a legacy canonical with no window keeps its year.
+              const mcl=o.marketValue?marketCompareLine({price:o.price,marketValue:o.marketValue,fcx:o.fcx,vehicle:(o.marketValue.yf&&o.marketValue.yt)?String(o.vehicle||"").replace(/^\s*(?:19|20)\d{2}\s+/,""):o.vehicle}):null;
               const title=P==="signed"?"Genuine — nothing changed":P==="ok"?"Nothing was changed":P==="altered"?"This doesn't check out":"Check the report number";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
@@ -9934,13 +10048,11 @@ function VerifyPage(){
                   {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {o.reputation&&<Row t="Dealer reputation" v={`${Number(o.reputation.rating).toFixed(1)}★ · ${Number(o.reputation.reviews||0).toLocaleString()} reviews`}/>}
-                  {o.marketValue&&o.marketValue.avg!=null&&(()=>{
-                    const m=o.marketValue, ask=Number(o.price&&o.price.asking)||0, med=Number(m.avg)||0, hasAsk=Number.isFinite(ask)&&ask>=1, d=hasAsk?Math.round(ask-med):0;
-                    const lo=Number(m.lo!=null?m.lo:m.below)||0, hi=Number(m.hi!=null?m.hi:m.above)||0;
-                    const band=hasAsk?(hi>0&&ask>hi?" · above the range":lo>0&&ask<lo?" · below the range":" · inside band"):"";
-                    return <Row t={`Used market value · ${m.source||"LotCheck"}`} v={hasAsk?`${money(ask)} · ${d===0?"at the middle value":`${money(Math.abs(d))} ${d>0?"above":"below"} the middle value`}${band}`:money(med)}/>;
-                  })()}
-                  {o.marketValue&&o.marketValue.avg!=null&&(o.marketValue.lo!=null||o.marketValue.below!=null)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>Range {money(o.marketValue.lo!=null?o.marketValue.lo:o.marketValue.below)}–{money(o.marketValue.hi!=null?o.marketValue.hi:o.marketValue.above)} · middle value {money(o.marketValue.avg)}{o.marketValue.n?` · ${o.marketValue.n} comps`:""}{o.marketValue.as?` · captured ${o.marketValue.as}`:""} · asking prices, not sold</div>}
+                  {o.marketValue&&<Row t="How this vehicle compares" v={mcl.value} c={mcl.light==="green"?"#34d399":mcl.light==="amber"?"#eab308":mcl.light==="red"?"#f0997b":undefined}/>}
+                  {o.marketValue&&mcl.lines.length>0&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
+                    {(mcl.lightLabel||mcl.meta)&&<div style={{fontWeight:700,color:T.text}}>{[mcl.lightLabel,mcl.meta].filter(Boolean).join(" · ")}</div>}
+                    {mcl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>)}
+                  </div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
                   {/* Green "Sealed" ONLY behind a valid signature — in ok/altered/
@@ -11972,12 +12084,14 @@ function QuoteCheckPage(){
                   appears when its check ran, and reuses the same teal=good /
                   coral=concern language as the price cards above. ── */}
 
-              {/* Independent used-market value (provider-agnostic, auto when a
-                  VIN is present + a market-value provider is live). Buyer-side
-                  value anchor — NOT the dealer's trade-in number. Source label
-                  comes from the data so it stays accurate as providers change. */}
-              {analysis.marketValue&&analysis.marketValue.average!=null&&(
-                <MarketBandGauge mv={analysis.marketValue} asking={Number(analysis.quotedPrice)||0} C={C} cardStyle={cardStyle}/>
+              {/* How this vehicle compares with the Alberta market: the
+                  like-for-like band as three plain lines under a traffic
+                  light, with the radial gauge beneath when there is a band to
+                  draw. Mounted whenever a comparison set was read, so "not
+                  enough to compare" renders as a card, not a gap. Buyer-side
+                  anchor — NOT the dealer's trade-in number. [[report-never-empty]] */}
+              {analysis.marketValue&&(
+                <MarketCompareCard analysis={analysis} C={C} cardStyle={cardStyle}/>
               )}
 
               {analysis.leverageScore?.computed&&(
