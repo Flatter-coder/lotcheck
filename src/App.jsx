@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -7810,13 +7810,26 @@ function encodeReport(a){
     // src  -- the dated capture provenance [[make-it-dispute-proof]] rests on.
     // fm   -- the financing-math check.
     vin:a.vin||null,
-    odo:Number.isFinite(Number(a.odometerKm))?Number(a.odometerKm):null,
+    // `Number.isFinite(Number(a.odometerKm))` is TRUE for a null odometer,
+    // because Number(null) is 0 -- so a listing that published no reading was
+    // encoded as 0 km and every forwarded copy of the report read
+    // "Odometer 0 km". The same coercion as the scan path, one surface further
+    // on, which is why the fix has to be a gate and not a patch. [[read-num]]
+    odo:a.odometerKm!=null&&Number.isFinite(Number(a.odometerKm))?Number(a.odometerKm):null,
     // mv rides in the same compact form the signed canonical seals (avg/lo/hi/
     // n/as plus the like-for-like basis), so a forwarded report's comparison is
     // worded by the same builder from the same fields as the original.
     mv:a.marketValue?{avg:a.marketValue.average??null,below:a.marketValue.below??null,above:a.marketValue.above??null,lo:a.marketValue.low??null,hi:a.marketValue.high??null,mileage:a.marketValue.mileage??null,source:a.marketValue.source||null,n:a.marketValue.comps??null,as:a.marketValue.asOf||null,ins:!!a.marketValue.insufficient,nr:a.marketValue.nRead??null,nd:a.marketValue.need??null,yf:a.marketValue.yearFrom??null,yt:a.marketValue.yearTo??null,ts:a.marketValue.trimScope||null,tl:a.marketValue.trimLabel||null,pt:a.marketValue.powertrain||null,kl:a.marketValue.kmLow??null,kh:a.marketValue.kmHigh??null,cd:a.marketValue.condition||null,d:a.marketValue.dealers??null,nk:a.marketValue.nKept??null,mk:a.marketValue.make||null,md:a.marketValue.model||null,pv:a.marketValue.province||null,from:a.marketValue.seenMin||null,to:a.marketValue.seenMax||null,rs:a.marketValue.reason||null}:null,
     src:(a.sourceUrl||a.capturedAt)?{u:a.sourceUrl||null,c:a.capturedAt||null}:null,
-    fm:a.financingCheck?{r:!!a.financingCheck.reconciles,n:a.financingCheck.note||null}:null};
+    // `r` used to be read from `a.financingCheck.reconciles` -- a field no
+    // writer in this repo has ever set (computeFinancingCheck records
+    // `consistent`). So every share link carried r:false, the rebuild below
+    // produced an object with no `checked`, and a forwarded report showed no
+    // financing-math line at all. `ck` marks a link written by an encoder that
+    // knows the real field name; without it we rebuild note-only, exactly as
+    // before, rather than turning an old link's meaningless false into a
+    // verdict against the dealer. [[missing-beats-wrong]]
+    fm:a.financingCheck?{r:!!a.financingCheck.consistent,n:a.financingCheck.note||null,ck:a.financingCheck.checked===true?1:0}:null};
   try{ return btoa(unescape(encodeURIComponent(JSON.stringify(c)))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
   catch{ return ""; }
 }
@@ -7885,7 +7898,7 @@ function decodeReport(s){
       marketValue:c.mv?{average:c.mv.avg??null,below:c.mv.below??null,above:c.mv.above??null,low:(legacyMv?c.mv.l:c.mv.lo)??null,high:(legacyMv?c.mv.h:c.mv.hi)??null,mileage:c.mv.mileage??null,source:(legacyMv?c.mv.s:c.mv.source)||null,note:legacyMv?(c.mv.n||null):null,comps:legacyMv?null:(c.mv.n??null),asOf:c.mv.as||null,insufficient:!!c.mv.ins,nRead:c.mv.nr??null,need:c.mv.nd??null,yearFrom:c.mv.yf??null,yearTo:c.mv.yt??null,trimScope:c.mv.ts||null,trimLabel:c.mv.tl||null,powertrain:c.mv.pt||null,kmLow:c.mv.kl??null,kmHigh:c.mv.kh??null,condition:c.mv.cd||null,dealers:c.mv.d??null,nKept:c.mv.nk??null,make:c.mv.mk||null,model:c.mv.md||null,province:c.mv.pv||null,seenMin:c.mv.from||null,seenMax:c.mv.to||null,reason:c.mv.rs||null}:null,
       sourceUrl:c.src?(c.src.u||null):null,
       capturedAt:c.src?(c.src.c||null):null,
-      financingCheck:c.fm?{reconciles:!!c.fm.r,note:c.fm.n||null}:null,
+      financingCheck:c.fm?(c.fm.ck===undefined?{note:c.fm.n||null}:{checked:c.fm.ck===1,consistent:!!c.fm.r,note:c.fm.n||null}):null,
       __shared:true};
   }catch{ return null; }
 }
@@ -8462,11 +8475,10 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     // Worded once in report-lines.js so this sentence can never contradict the
     // Payment starting point card on the same report. [[report-features-all-views]]
     "Financing APR": financingAprNote(a, (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null),
-    "Financing math": a.financingCheck?.checked
-      ? (a.financingCheck.consistent
-        ? "We recomputed the advertised payment from the price, rate and term — the numbers line up. No hidden amount is baked into the payment."
-        : "We recomputed the advertised payment from the price, rate and term — and they DON'T line up. Something extra is baked into the payment. Ask them to show the calculation line by line.")
-      : "The listing doesn't show enough financing detail (payment, term and total) for us to re-check the math. Ask for all three in writing — then the payment can be verified.",
+    // Worded once in report-lines.js from the fields computeFinancingCheck
+    // records, so this sentence cannot describe a check the code does not run.
+    // [[report-features-all-views]]
+    "Financing math": financingMathNote(a),
     "Odometer": a.odometerCheck?.checked
       // Branches on the BAND the server put this reading in, not on
       // vehicleCondition alone. The old sentence told every new car that

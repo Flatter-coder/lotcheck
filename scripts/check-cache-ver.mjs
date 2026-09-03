@@ -76,6 +76,12 @@ const OUTPUT_SHAPING = [
   // report AT ALL, and which vehicle that report is about -- the most
   // output-shaping decision in the whole scan.
   /^supabase\/functions\/_shared\/multi-vehicle\./,
+  // read-num joined on 2026-09-03. It is the single reader that decides
+  // whether a missing odometer, rate or review count arrives as a number or as
+  // an absence -- and an absence is the difference between "Odometer 0 km --
+  // consistent with a new vehicle" and printing nothing at all. Nothing in
+  // this repo shapes more sentences per line of code.
+  /^supabase\/functions\/_shared\/read-num\./,
   // dealer-catalog joined on 2026-08-30. It decides HOW a page is fetched --
   // and on a bot-walled host that is the difference between a report and a
   // 502, so it shapes the output as directly as anything in this list.

@@ -327,6 +327,26 @@ const SURFACES = [
     },
   },
   {
+    // TWO AUTHORS PER FACT is this repo's most common defect shape, and the
+    // financing-math sentence was the plainest example: computeFinancingCheck
+    // multiplies the advertised payment by the number of payments and compares
+    // that with the disclosed total obligation -- it reads neither the price
+    // nor the rate -- while the sentence on screen and in the email said "We
+    // recomputed the advertised payment from the price, rate and term". Both
+    // surfaces now call ONE builder that words the sentence from the check's
+    // own recorded fields, so a change to what the check reads cannot leave a
+    // stale description standing on four surfaces. [[report-features-all-views]]
+    field: "financing math sentence (financingMathNote)",
+    app: {
+      "shared line builder import": "financingMathNote",
+      "scroll + sidebar explainer": '"Financing math": financingMathNote(a)',
+    },
+    email: {
+      "shared line builder import": "financingMathNote",
+      "emailed deck + PDF explainer": "return financingMathNote(a);",
+    },
+  },
+  {
     field: "daysOnLot parked-time care-asks",
     app: {
       "shared care-ask helper":      "function dolCareAsk",

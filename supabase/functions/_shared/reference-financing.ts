@@ -67,7 +67,10 @@ const n = (v: unknown): number | null => {
  */
 export function computeReferenceFinancing(analysis: any): ReferenceFinancing | null {
   const mf = analysis?.financeRates?.manufacturer;
-  const apr = mf && Number.isFinite(Number(mf.apr)) ? Number(mf.apr) : null;
+  // `Number.isFinite(Number(mf.apr))` passes for apr null, because Number(null)
+  // is 0 -- and the sentence below then tells the buyer to demand a "published
+  // 0% over 60 months" the manufacturer never published. [[read-num]]
+  const apr = mf?.apr == null || !Number.isFinite(Number(mf.apr)) ? null : Number(mf.apr);
   const termMonths = n(mf?.termMonths);
   if (apr === null || !termMonths) return null;
 

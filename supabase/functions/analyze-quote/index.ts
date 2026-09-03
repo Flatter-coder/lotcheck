@@ -49,6 +49,7 @@
 // Supabase injects both automatically into every Edge Function at runtime.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { readNum, odometerReading } from "../_shared/read-num.js";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
@@ -738,7 +739,7 @@ Deno.serve(async (req: Request) => {
           .slice(0, 40)
           .map((v: any) => ({
             label: typeof v.label === "string" ? v.label.slice(0, 160) : null,
-            year: Number.isFinite(Number(v.year)) ? Number(v.year) : null,
+            year: readNum(v.year),   // Number(null) is 0, and 0 is not a model year [[read-num]]
             make: typeof v.make === "string" ? v.make : null,
             model: typeof v.model === "string" ? v.model : null,
             trim: typeof v.trim === "string" ? v.trim : null,
@@ -1253,9 +1254,17 @@ function computeFinancingCheck(analysis: any): void {
 }
 
 function computeOdometerCheck(analysis: any): void {
-  const km = Number(analysis.odometerKm);
+  // A LISTING THAT PUBLISHES NO ODOMETER HAS NOT PUBLISHED ZERO. `Number(null)`
+  // is 0, which is finite and not negative, so an unread field walked through
+  // this guard and was written as a real reading: report LC-FE77-C58 printed
+  // "Odometer 0 km -- consistent with a new vehicle (delivery distance)" for a
+  // page that published none, and on a used vehicle the same path prints
+  // "unusually low for a 7-year-old vehicle" and raises a flag that feeds the
+  // leverage score. One reader, shared with the other scan path and the
+  // checkpoint, so this cannot be fixed here and missed there. [[read-num]]
+  const km = odometerReading(analysis);
   const year = Number(analysis.year);
-  if (!year || !Number.isFinite(km) || km < 0) return;
+  if (!year || km == null) return;
   const nowYear = new Date().getUTCFullYear();
   const age = Math.max(0, nowYear - year);
   const isNew = analysis.vehicleCondition === "new";

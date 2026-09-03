@@ -46,6 +46,8 @@ export function dealerReputationPoint(sentiment: any | null | undefined): {
   value: string; tone: "pass" | "flag" | "muted"; explain: string; state: PointState;
 } {
   const rating = Number(sentiment?.rating);
+  const rc = Number(sentiment?.reviewCount);
+  const reviewCount = sentiment?.reviewCount == null || !Number.isFinite(rc) || rc < 0 ? null : rc;
   const hasRating = Number.isFinite(rating) && rating > 0;
   // A sentiment object that came back with no rating IS a completed check.
   const checked = sentiment?.checked === true || hasRating;
@@ -54,7 +56,11 @@ export function dealerReputationPoint(sentiment: any | null | undefined): {
   if (state === "confirmed") {
     return {
       state, tone: rating >= 4 ? "pass" : "muted",
-      value: `${rating.toFixed(1)}* / ${Number(sentiment.reviewCount || 0).toLocaleString()}`,
+      // `reviewCount || 0` printed "4.9* / 0" -- a rating attributed to zero
+      // reviews, which is a figure naming nothing. The deck card in the same
+      // email already guards this correctly; one email cannot give two answers
+      // about one number. No count, no count. [[read-num]]
+      value: reviewCount == null ? `${rating.toFixed(1)}*` : `${rating.toFixed(1)}* / ${reviewCount.toLocaleString()}`,
       explain: "The dealer's public Google rating from real customers - how they treat people after the handshake.",
     };
   }

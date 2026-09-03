@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03c";
+const PDF_BUILDER_VER = "2026-09-03d";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -835,7 +835,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1144,12 +1144,10 @@ function pointExplain(t: string, a: any): string | null {
       // the Payment starting point card in the same email or PDF.
       return financingAprNote(a, (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null);
     case "Financing math":
-      if (!a.financingCheck?.checked && a.referenceFinancing?.note) return a.referenceFinancing.note;
-
-      if (a.financingCheck?.checked) return a.financingCheck.consistent
-        ? "We recomputed the advertised payment from the price, rate and term - the numbers line up."
-        : "We recomputed the payment from the price, rate and term - and they don't line up. Ask them to show the calculation line by line.";
-      return "Not enough financing detail (payment, term, total) was shown to re-check the math. Ask for all three in writing.";
+      // Worded once in report-lines.js from the fields computeFinancingCheck
+      // records. The old sentence here and on screen named the price and the
+      // rate; the check reads neither. [[report-features-all-views]]
+      return financingMathNote(a);
     case "Odometer":
       // Branches on the BAND the reading was actually put in, not on
       // vehicleCondition alone. The old string told every new car -- including

@@ -1,3 +1,4 @@
+import { readNumOrValue } from "./read-num.js";
 // schema.org Vehicle/Offer extraction, shared so it can be regression-tested in
 // Node (same pattern as trim-match.js / amvic-match.js / tradein-detect.js).
 //
@@ -136,9 +137,14 @@ export function extractJsonLdVehicle(html) {
 
   let odometerKm = null;
   const odo = node.mileageFromOdometer;
-  if (odo != null) {
-    const v = Number(typeof odo === "object" ? odo.value : odo);
-    if (Number.isFinite(v) && v >= 0) {
+  // The guard used to test the CONTAINER and then coerce the null INSIDE it,
+  // so `mileageFromOdometer: { value: null }` -- which dealer templates emit
+  // whenever the field is blank -- became 0 km, and 0 km became "new" three
+  // lines down, and "new" licensed a present-tense MSRP claim on a used car.
+  // [[read-num]]
+  {
+    const v = readNumOrValue(odo);
+    if (v != null && v >= 0) {
       const unit = String(typeof odo === "object" ? (odo.unitCode || odo.unitText || "") : "").toUpperCase();
       odometerKm = /SMI|MILE/.test(unit) ? Math.round(v * 1.60934) : Math.round(v);
     }
@@ -207,7 +213,16 @@ export function extractJsonLdVehicle(html) {
 // price. Mutates and returns `parsed`; a null jsonLd is a no-op.
 export function fillFromJsonLd(parsed, jsonLd) {
   if (!parsed || !jsonLd) return parsed;
-  if ((parsed.quotedPrice == null || Number(parsed.quotedPrice) <= 0) && Number(jsonLd.price) > 0) parsed.quotedPrice = jsonLd.price;
+  // STAMP THE SOURCE, the way convertus-vms.js and d2c-vdp.js both do at this
+  // exact point. Without it a price read straight out of the dealer's own
+  // schema.org markup arrives unlabelled, isVerifiedPriceSource says no, and
+  // priceVerified is false -- which on report LC-FE77-C58 degraded five
+  // separate statements about a price the page published four times.
+  // schema.org is on far more Alberta dealer sites than either sibling format.
+  if ((parsed.quotedPrice == null || Number(parsed.quotedPrice) <= 0) && Number(jsonLd.price) > 0) {
+    parsed.quotedPrice = jsonLd.price;
+    if (!parsed.quotedPriceSource) parsed.quotedPriceSource = "structured_data";
+  }
   if (!parsed.vin && jsonLd.vin) parsed.vin = jsonLd.vin;
   if (!parsed.year && jsonLd.year) parsed.year = jsonLd.year;
   if (!parsed.make && jsonLd.make) parsed.make = jsonLd.make;

@@ -50,6 +50,7 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { readNum, odometerReading } from "../_shared/read-num.js";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
 // so did analyze-listing-url and search-recalls, four in all, and they had
@@ -115,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03d";  // 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
+const CACHE_VER = "2026-09-03e";  // 03e: a missing odometer/rate/review count is no longer read as 0, the fee ladder is read without schema.org, and a price two readers agree on counts as verified. Cached reports must not replay the fabricated readings.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -739,9 +740,17 @@ function computeFinancingCheck(analysis: any): void {
 // implausibly LOW for the age -- and flagging a "new" listing that shows more
 // than delivery distance. No external data. Sets analysis.odometerCheck.
 function computeOdometerCheck(analysis: any): void {
-  const km = Number(analysis.odometerKm);
+  // A LISTING THAT PUBLISHES NO ODOMETER HAS NOT PUBLISHED ZERO. `Number(null)`
+  // is 0, which is finite and not negative, so an unread field walked through
+  // this guard and was written as a real reading: report LC-FE77-C58 printed
+  // "Odometer 0 km -- consistent with a new vehicle (delivery distance)" for a
+  // page that published none, and on a used vehicle the same path prints
+  // "unusually low for a 7-year-old vehicle" and raises a flag that feeds the
+  // leverage score. One reader, shared with the other scan path and the
+  // checkpoint, so this cannot be fixed here and missed there. [[read-num]]
+  const km = odometerReading(analysis);
   const year = Number(analysis.year);
-  if (!year || !Number.isFinite(km) || km < 0) return;
+  if (!year || km == null) return;
   const nowYear = new Date().getUTCFullYear();
   const age = Math.max(0, nowYear - year);
   const isNew = analysis.vehicleCondition === "new";
@@ -2273,8 +2282,8 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
     const vinRaw = typeof match?.serialNo === "string" ? match.serialNo.trim().toUpperCase() : "";
     const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : null;
 
-    const odoNum = Number(match?.odometer);
-    const odometerKm = Number.isFinite(odoNum) && odoNum >= 0 ? odoNum : null;
+    const odoNum = readNum(match?.odometer);   // blank is not 0 km [[read-num]]
+    const odometerKm = odoNum != null && odoNum >= 0 ? odoNum : null;
 
     const condition = match?.newVehicle === true
       ? "new"
@@ -4773,6 +4782,17 @@ Deno.serve(async (req: Request) => {
         if (structuredGapFilledPrice && early.quotedPriceSource) {
           analysis.quotedPriceSource = early.quotedPriceSource;
           console.log(`Gap-filled quotedPriceSource=${early.quotedPriceSource} from structured data.`);
+        } else if (!analysis.quotedPriceSource && early.quotedPriceSource
+          && Number(early.quotedPrice) > 0 && Number(early.quotedPrice) === Number(analysis.quotedPrice)) {
+          // AGREEMENT IS VERIFICATION. The rule above only stamps provenance
+          // when the gap-fill SUPPLIED the price, so a text read that got there
+          // first with the same number threw away the structured-data
+          // confirmation and the report called its own price unverified. Two
+          // independent readers landing on the same dollar figure is the
+          // strongest evidence this pipeline can produce; it is not a reason to
+          // distrust it.
+          analysis.quotedPriceSource = early.quotedPriceSource;
+          console.log(`quotedPriceSource=${early.quotedPriceSource}: structured data agrees with the read price to the dollar.`);
         }
         // THE DEALER'S OWN ITEMISATION. Attached here, with the rest of the
         // structured gap-fill, so it lands before anything derived from it.
@@ -4798,37 +4818,6 @@ Deno.serve(async (req: Request) => {
           const t = early.dealerFees.reduce((sum: number, f: any) => sum + (Number(f?.amount) || 0), 0);
           console.log(`Dealer line items read: ${early.dealerFees.length} fee(s) totalling ${t}, inside the advertised price = ${early.feesInsideAdvertised}.`);
         }
-        // BACKFILL FROM THE PAGE ITSELF. The branch above uses fees the
-        // extractor found; this reads the dealer's printed ladder straight out
-        // of the html when it did not. Only when nothing was found already --
-        // an extractor that DID read the fees knows more than a regex does.
-        //
-        // The ladder is only returned when base + additions - deductions equals
-        // the advertised total exactly, so this cannot invent a fee: a
-        // misread line makes the sum miss and the whole ladder is discarded.
-        if (!analysis.dealerLineItems) {
-          try {
-            // pageContent is the reader's own view of the page -- markdown when
-            // it produced markdown, raw html otherwise. Both flatten to the same
-            // "label $amount" pairs the ladder matches on, and it is already
-            // resolved here, so this costs no fetch and no await.
-            const ladder = readFeeLadder(pageContent);
-            const fees = ladderFees(ladder);
-            if (fees.length) {
-              analysis.dealerLineItems = {
-                fees: fees.map((f) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
-                incentives: (ladder?.lines || []).filter((l) => l.kind === "deduct").map((l) => ({ name: l.label, amount: l.amount })),
-                insideAdvertisedPrice: true,
-                source: "the dealer's own price breakdown on the listing",
-              };
-              console.log(`Fee ladder backfill: ${fees.length} dealer charge(s) from the page's own breakdown.`);
-            }
-          } catch (e) { console.warn("fee ladder backfill skipped:", (e as Error)?.message); }
-        }
-        // WHETHER WE COULD LOOK AT ALL is a separate fact from what we found,
-        // and the report needs both: "no itemised fees on this page" and "we
-        // never saw the price area" are different answers to a buyer.
-        if (typeof pageContent === "string" && pageContent.length > 500) analysis.feesRead = true;
 
         if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
         // Carry the D2C "page says Call for pricing, blob says $X" tell
@@ -4843,6 +4832,41 @@ Deno.serve(async (req: Request) => {
         gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
       }
     } catch { /* the safety net must never sink the scan */ }
+
+    // THE PRINTED FEE LADDER IS RENDERED HTML, NOT SCHEMA.ORG. Both of these
+    // sat inside `if (early)`, the structured-data branch, so on a page with no
+    // JSON-LD, no Convertus blob and no D2C blob we never looked at the fee box
+    // we were already holding -- and then told the buyer "we could not read this
+    // page's pricing section". That is the class 0a744dd closed, coming back
+    // through a different door. The ladder refuses to publish unless base +
+    // additions - deductions closes to the dollar, so it cannot invent a fee.
+    if (typeof pageContent === "string" && pageContent.length > 500) {
+      if (!analysis.dealerLineItems) {
+        try {
+          const ladder = readFeeLadder(pageContent);
+          const fees = ladderFees(ladder);
+          if (fees.length) {
+            analysis.dealerLineItems = {
+              fees: fees.map((f: any) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
+              incentives: (ladder?.lines || []).filter((l: any) => l.kind === "deduct").map((l: any) => ({ name: l.label, amount: l.amount })),
+              insideAdvertisedPrice: true,
+              source: "the dealer's own price breakdown on the listing",
+            };
+            console.log(`Fee ladder: ${fees.length} dealer charge(s) from the page's own breakdown.`);
+          }
+        } catch (e) { console.warn("fee ladder read skipped:", (e as Error)?.message); }
+      }
+      // "No itemised fees on this page" and "we never saw the price area" are
+      // different answers to a buyer, so whether we could LOOK is its own fact.
+      //
+      // Length alone is not evidence that we looked. A bot wall, a cookie
+      // interstitial or a 404 all clear 500 characters, and feesRead === true
+      // is what turns the add-ons point into "NONE LISTED" -- a clean bill on
+      // a page we never actually read. So the claim requires a price area:
+      // at least one four-figure dollar amount, which no interstitial carries
+      // and every priced listing does. [[report-never-empty]] means backed.
+      if (/\$\s?\d{1,3}(?:[,\s]\d{3})+|\$\s?\d{4,}/.test(pageContent)) analysis.feesRead = true;
+    }
 
     // A price that arrived only just now (above) was not available when
     // enrichAnalysis ran computeLeverageScore, so every price-dependent
