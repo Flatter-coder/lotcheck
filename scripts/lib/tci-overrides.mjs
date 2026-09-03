@@ -39,6 +39,38 @@ export const TCI_OVERRIDES = [
       { trim: "F SPORT Performance 3 + Towing Hitch",  msrp: 92546, fuel_type: "Hybrid" },
     ],
   },
+  {
+    // 2026-09-02, lexusofroyaloak.com, a gasoline 2026 RX 350 Luxury AWD demo.
+    // The report showed the buyer the RX HYBRID and PLUG-IN ladder as "the
+    // factory range the quote should be read against", because the catalog
+    // held no gas RX at all: the TCI feed lists the RX 350 packages under
+    // series "RX" tagged "Hybrid Available", inferFuel() flattens that to
+    // "Hybrid", and the refresh guard then refuses a whole gas line tagged
+    // Hybrid (the "RX Hybrid" sibling proves the mis-tag). Correct refusal,
+    // wrong outcome -- the same shape as the TX above.
+    //
+    // Figures: the feed's own six ex-freight package prices (dry run
+    // 2026-09-02 09:40Z), plus the Premium base, which the feed refused
+    // because its grade is the internal code "STD". Premium is pinned by
+    // arithmetic, not guessed: each of the six feed rows minus Lexus.ca's
+    // published package delta (Luxury +7,414 / F SPORT 2 +9,914 / Ultra
+    // Luxury +10,919 / Executive +15,419 / F SPORT 3 +15,419 / F SPORT Black
+    // Line +18,279) lands on 60,885 to the dollar, and 64,236.18 (Lexus.ca
+    // "From") - 60,885 = 3,351.18, the identical Alberta fee stack that closes
+    // the TX 350. Hybrid and plug-in RX rows are NOT touched: they come from
+    // their own series and are already correct.
+    make: "Lexus", model: "RX", year: 2026,
+    reason: "series-level fuel tag stored the gas RX 350 packages as Hybrid, so the refresh guard withheld the whole gas line; Premium base refused as internal grade STD",
+    rows: [
+      { trim: "Premium",            msrp: 60885, fuel_type: "Gas" },
+      { trim: "Luxury",             msrp: 68299, fuel_type: "Gas" },
+      { trim: "F SPORT 2",          msrp: 70799, fuel_type: "Gas" },
+      { trim: "Ultra Luxury",       msrp: 71804, fuel_type: "Gas" },
+      { trim: "Executive",          msrp: 76304, fuel_type: "Gas" },
+      { trim: "F SPORT 3",          msrp: 76304, fuel_type: "Gas" },
+      { trim: "F SPORT Black Line", msrp: 79164, fuel_type: "Gas" },
+    ],
+  },
 ];
 
 const key = (make, model, year) => `${String(make).toLowerCase()}|${String(model).toLowerCase()}|${year}`;
@@ -85,12 +117,34 @@ export function flagAllOnePowertrain(rows, { minTrims = 4 } = {}) {
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
+  // A SIBLING NAMEPLATE IS THE PROOF. "all rows one non-gas fuel" alone is a
+  // false positive on genuinely single-powertrain lines (Sienna is hybrid-only
+  // and its nameplate carries no marker), and dropping those would cost real
+  // coverage. But when the SAME make/year also lists a sibling model whose
+  // name extends this one with a powertrain marker -- Lexus shipping "NX",
+  // "NX Hybrid" AND "NX Plug-in Hybrid" -- then the bare nameplate is the GAS
+  // line by construction, and tagging all of its trims "Hybrid" is provably a
+  // series-level mis-tag. Confirmed live 2026-08-27: every gasoline Lexus 'NX'
+  // row was stored fuel_type 'Hybrid', which is what let a gas ladder be
+  // offered to a hybrid buyer. Same defect a migration hand-fixed for the
+  // Lexus TX on 2026-08-26 and left unfixed for the NX.
+  const nameplates = new Set((rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`));
+  const hasPowertrainSibling = (make, year, model) => {
+    const base = String(model || "").toLowerCase();
+    return ["hybrid", "plug-in hybrid", "plug in hybrid", "phev", "ev", "prime", "recharge"]
+      .some((sfx) => nameplates.has(`${make}|${year}|${base} ${sfx}`));
+  };
   const flagged = [];
   for (const [k, rs] of groups) {
     if (rs.length < minTrims) continue;
     const fuels = new Set(rs.map((r) => r.fuel_type));
     if (fuels.size === 1 && !fuels.has("Gas") && !fuels.has(null)) {
-      flagged.push({ key: k, trims: rs.length, fuel: [...fuels][0] });
+      const r0 = rs[0];
+      flagged.push({
+        key: k, trims: rs.length, fuel: [...fuels][0],
+        // Only a proven mis-tag may be refused; the rest stay a warning.
+        proven: hasPowertrainSibling(r0.make, r0.year, r0.model),
+      });
     }
   }
   return flagged;

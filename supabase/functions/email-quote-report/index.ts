@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-08-14a";
+const PDF_BUILDER_VER = "2026-09-03c";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -136,7 +136,7 @@ const EMAIL_MAKE_SITE: Record<string, string> = {
 function trimRangeOk(tr: any): boolean {
   return !!tr && typeof tr === "object" && Number(tr.y) > 0 &&
     typeof tr.mk === "string" && typeof tr.md === "string" &&
-    Array.isArray(tr.t) && tr.t.length > 0 && tr.t.length <= 14 &&
+    Array.isArray(tr.t) && tr.t.length > 0 && tr.t.length <= 40 &&   // the FULL ladder rides here; the PDF renders a capped view of it
     tr.t.every((x: any) => x && typeof x.n === "string" && Number(x.m) > 0);
 }
 
@@ -245,8 +245,8 @@ function coverCard(a: any): string {
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
   const rc = a.recalls;
   const chips: string[] = [];
-  if (flaggedN) chips.push(coverChip(`⚠ ${flaggedN} watch-out${flaggedN > 1 ? "s" : ""}`, "flag"));
-  if (rc?.checked && rc.count > 0) chips.push(coverChip(`⚠ ${rc.count} recall${rc.count > 1 ? "s" : ""}`, "flag"));
+  if (flaggedN) chips.push(coverChip(`✗ ${flaggedN} watch-out${flaggedN > 1 ? "s" : ""}`, "flag"));
+  if (rc?.checked && rc.count > 0) chips.push(coverChip(`✗ ${rc.count} recall${rc.count > 1 ? "s" : ""}`, "flag"));
   else if (rc?.checked && rc.count === 0 && rc.confirmed !== false) chips.push(coverChip("✓ No recalls", "ok"));
   if (a.vinCheck?.present && a.vinCheck.valid) chips.push(coverChip("✓ VIN valid", "ok"));
   if (a.financingCheck?.checked && a.financingCheck.consistent) chips.push(coverChip("✓ Math checks", "ok"));
@@ -287,8 +287,8 @@ function deckCard(idx: number, total: number, label: string, tone: string, bodyH
   const n = (v: number) => String(v).padStart(2, "0");
   return `<div style="background:${bg};border:1px solid ${bd};border-radius:14px;padding:14px 16px;margin-bottom:11px;${glowCss}">
     <table style="width:100%;margin-bottom:6px;"><tr>
-      <td style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;">${label}</td>
-      <td style="text-align:right;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:#b9b3a4;font-weight:700;white-space:nowrap;">${n(idx)} / ${n(total)}</td>
+      <td style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;">${escapeHtml(label)}</td>
+      <td style="text-align:right;font-size:10px;font-family:ui-monospace,Consolas,monospace;color:#b9b3a4;font-weight:700;white-space:nowrap;">CARD ${n(idx)} OF ${n(total)}</td>
     </tr></table>
     ${bodyHtml}</div>`;
 }
@@ -307,6 +307,19 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
   const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
+  // The emailed HTML body is its own render surface. e80122c put the
+  // gated-price disclosure in the attached PDF but not here, so the email a
+  // buyer actually opens showed the recovered price with no indication the
+  // dealer's page refuses to display it -- while the PDF stapled to that same
+  // email said so plainly. One signed report, two stories.
+  const gatedPriceNoteHtml = (an: any): string => {
+    if (!an || !(Number(an.quotedPrice) > 0) || !an.priceGatedButRecovered) return "";
+    const msg = String(an.priceGateMessage || "Call for pricing");
+    const txt = an.priceGateGoogleAdsBacked
+      ? `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way.`
+      : `This dealer's page displays "${msg}" instead of a number — but the page's own data carries the real asking price shown here.`;
+    return `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(txt)}</div>`;
+  };
   const deck: Array<{ label: string; tone: string; glow: boolean; body: string }> = [];
 
   // 1 -- Price vs MSRP (compact; the cover headlines the delta, this is the detail)
@@ -316,6 +329,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     glow: false,
     body: `<div style="font-size:18px;font-weight:900;color:${!pv || over ? "#A63C25" : "#17756B"};">${hasCmp ? (diff === 0 ? "At MSRP" : over ? money(diff) + " over" : money(diff) + " under") : (a.quotedPrice ? money(a.quotedPrice) : "Price not shown")}</div>
       <div style="font-size:12px;color:#706D96;margin-top:2px;">${a.quotedPrice ? money(a.quotedPrice) : "—"}${hasCmp ? " vs " + money(a.msrp) + " MSRP" : (claim.msrp ? ` · ${escapeHtml(claim.label)} ${money(claim.msrp)}` : "")} · ${pv ? "price verified" : "price not verified"}</div>
+      ${gatedPriceNoteHtml(a)}
       ${!hasCmp && claim.refusal ? `<div style="font-size:11.5px;color:#706D96;margin-top:6px;line-height:1.5;">${escapeHtml(claim.refusal)}</div>` : ""}
       ${a.msrpSourceUrl ? `<div style="font-size:11.5px;margin-top:7px;"><a href="${escapeHtml(a.msrpSourceUrl)}" style="color:#17756B;">See ${escapeHtml(a.make || "the manufacturer")}'s own page for this MSRP →</a></div>` : ""}`,
   });
@@ -323,10 +337,10 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   // 2 -- Add-ons & fees (glow if anything flagged)
   if ((a.addOns || []).length) {
     const rows = a.addOns.map((x: any) => `<tr>
-      <td style="padding:7px 0;border-top:1px solid #eee;font-size:13px;color:#33305A;">${x.verdict === "flagged" ? "🔻 " : ""}${escapeHtml(x.name)}${x.reason ? `<div style="font-size:11.5px;color:#706D96;line-height:1.4;">${escapeHtml(x.reason)}</div>` : ""}</td>
+      <td style="padding:7px 0;border-top:1px solid #eee;font-size:13px;color:#33305A;">${x.verdict === "flagged" ? "✗ " : ""}${escapeHtml(x.name)}${x.reason ? `<div style="font-size:11.5px;color:#706D96;line-height:1.4;">${escapeHtml(x.reason)}</div>` : ""}</td>
       <td style="padding:7px 0;border-top:1px solid #eee;text-align:right;font-weight:700;color:${x.verdict === "flagged" ? "#A63C25" : "#33305A"};white-space:nowrap;">${money(x.price)}</td></tr>`).join("");
     deck.push({
-      label: flaggedN ? "⚠ Flagged add-ons" : "Add-ons & fees",
+      label: flaggedN ? "Flagged add-ons" : "Add-ons & fees",
       tone: flaggedN ? "flag" : "muted",
       glow: !!flaggedN,
       body: `${flaggedN ? `<div style="font-size:18px;font-weight:900;color:#A63C25;margin-bottom:4px;">${money(a.totalFlaggedCost || 0)} · ${flaggedN} item${flaggedN > 1 ? "s" : ""} to question</div>` : ""}<table style="width:100%;border-collapse:collapse;">${rows}</table>`,
@@ -356,6 +370,21 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     deck.push({ label: "Financing APR", tone: high ? "flag" : "muted", glow: high, body });
   }
 
+  // 3a -- Payment default: the page's own pre-selected payment scenario
+  // (pageDefault), read by code, sealed in the canonical (dflt), worded by the
+  // shared builder. ALWAYS RENDERS -- "not published" and "not read" are
+  // answers the buyer can act on; a missing card is not. Same rule as
+  // days-on-lot below. [[report-never-empty]]
+  {
+    const line = pageDefaultLine(a);
+    const confirmed = line.state === "confirmed";
+    const meta = line.meta || (PD_STATE_WORD[line.state] || PD_STATE_WORD.unchecked);
+    deck.push({ label: "Payment starting point", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${confirmed ? "#33305A" : "#706D96"};">${escapeHtml(line.headline)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${escapeHtml(meta)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(line.body)}</div>` });
+  }
+
   // 4 -- Recalls (every branch; glow only when there are open recalls)
   const rc = a.recalls;
   if (rc) {
@@ -367,21 +396,68 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
         const yr = it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? " · " + new Date(it.date).getFullYear() : "";
         return `<div style="font-size:12px;color:#33305A;margin-top:6px;padding-top:6px;border-top:1px solid #F2836B33;"><b>${escapeHtml(it.system || "Recall")}${yr}</b>${it.summary ? `<div style="color:#5B5885;margin-top:2px;line-height:1.45;">${escapeHtml(it.summary)}</div>` : ""}</div>`;
       }).join("");
-      deck.push({ label: "⚠ Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
+      deck.push({ label: "Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
     }
   }
 
-  // 5 -- Quick checks roll-up (VIN, odometer, financing math, warranty, EVAP, protection plan)
-  const checks: string[] = [];
-  if (a.vinCheck?.present) checks.push(`${a.vinCheck.valid ? "✓" : "⚠"} VIN ${a.vinCheck.valid ? "pattern valid" : "doesn't validate"}${a.vinCheck.vin ? " · " + escapeHtml(a.vinCheck.vin) : ""}`);
-  if (a.odometerCheck?.checked) checks.push(`${a.odometerCheck.flag ? "⚠" : "✓"} Odometer ${Number(a.odometerCheck.km).toLocaleString()} km`);
-  if (a.financingCheck?.checked) checks.push(`${a.financingCheck.consistent ? "✓" : "⚠"} Financing math ${a.financingCheck.consistent ? "reconciles" : "doesn't add up"}`);
-  if (a.standardWarranty?.coverage) checks.push(`✓ Included warranty: ${escapeHtml(a.standardWarranty.coverage)}`);
-  if (a.evapRebate?.eligible) checks.push(`✓ EV rebate ${money(a.evapRebate.total)} eligible`);
-  else if (a.evapRebate?.ineligibleReason) checks.push(`• EV rebate: ${escapeHtml(a.evapRebate.ineligibleReason)}`);
-  if (a.warranty?.offered) checks.push(`• Protection plan offered: ${escapeHtml(a.warranty.offered)}${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}`);
-  const anyFlag = (a.odometerCheck?.checked && a.odometerCheck.flag) || (a.vinCheck?.present && !a.vinCheck.valid) || (a.financingCheck?.checked && !a.financingCheck.consistent);
-  if (checks.length) deck.push({ label: "Quick checks", tone: anyFlag ? "flag" : "pass", glow: !!anyFlag, body: checks.map((c) => `<div style="font-size:13px;color:#33305A;padding:4px 0;line-height:1.5;">${c}</div>`).join("") });
+  // 5 -- THE TEN, ALWAYS TEN.
+  //
+  // This was a "Quick checks" roll-up whose EVERY row was conditional --
+  // `if (a.vinCheck?.present) checks.push(...)` with no else -- so an
+  // unresolved point emitted nothing at all. The PDF stapled to this very
+  // email is documented to "ALWAYS return exactly 10 rows ... a point with no
+  // data reads NOT ON QUOTE, never omitted", and it does. So one signed report
+  // showed a different number of checks depending on which half of the same
+  // email you opened. If a check did not resolve, the buyer paid for it and was
+  // never told it had been asked.
+  //
+  // Built from tenPoints() -- the same builder the PDF uses -- so the two
+  // cannot diverge again. The cards above still give price, recalls, fees and
+  // reputation their own richer treatment; this is the checklist, and it is
+  // complete by construction. [[report-never-empty]] [[claims-must-stay-backed]]
+  {
+    const pts = tenPoints(a);
+    const core = pts.slice(0, POINT_TITLES.length);
+    const extras = pts.slice(POINT_TITLES.length);
+    const anyFlag = core.some((p) => p.tone === "flag");
+    const row = (p: { t: string; v: string; tone: string }) => {
+      const c = p.tone === "flag" ? "#A63C25" : p.tone === "pass" ? "#17756B" : "#706D96";
+      // ✗ / ✓ / · only: U+26A0 renders as an emoji in most mail clients, and
+      // display:flex is dropped by Gmail and Outlook, which ran the label and the
+      // value together ("Price vs MSRPPRICE UNVERIFIED", LC-0F75-A93, 2026-09-02).
+      // A two-cell table is what every client lays out.
+      const mark = p.tone === "flag" ? "\u2717" : p.tone === "pass" ? "\u2713" : "\u00b7";
+      return `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"><tr>`
+        + `<td style="padding:5px 8px 5px 0;font-size:13px;color:#33305A;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">${mark} ${escapeHtml(p.t)}</td>`
+        + `<td style="padding:5px 0;font-size:13px;color:${c};font-weight:700;white-space:nowrap;text-align:right;line-height:1.5;border-bottom:1px solid rgba(51,48,90,.07);">${escapeHtml(p.v)}</td>`
+        + `</tr></table>`;
+    };
+    deck.push({
+      label: `The ${core.length}-point verification`,
+      tone: anyFlag ? "flag" : "pass",
+      glow: !!anyFlag,
+      body: core.map(row).join(""),
+    });
+    if (extras.length) {
+      deck.push({
+        label: `Also checked on this listing (${extras.length})`,
+        tone: extras.some((p) => p.tone === "flag") ? "flag" : "muted",
+        glow: false,
+        body: extras.map(row).join(""),
+      });
+    }
+    // Not a verification point -- it is something the DEALER offered -- so it
+    // is stated separately rather than counted.
+    if (a.warranty?.offered) {
+      deck.push({
+        label: "Protection plan offered",
+        tone: "muted",
+        glow: false,
+        body: `<div style="font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(a.warranty.offered)}`
+          + `${a.warranty.price ? " (" + money(a.warranty.price) + ")" : ""}</div>`,
+      });
+    }
+  }
 
   // 5a2 -- MSRP per trim: the factory range (client-derived from the verified
   // catalog, evapRebate pattern; source link is server-built, never client's).
@@ -391,11 +467,15 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     const aboveN = qpT > 0 ? tr.t.filter((x: any) => qpT > Number(x.m)).length : 0;
     const allExcl = tr.t.every((x: any) => Number(x.b) === 1);
     const site = EMAIL_MAKE_SITE[tr.mk] || null;
-    const rows = tr.t.map((x: any) =>
-      `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;color:#33305A;padding:3px 0;border-bottom:1px solid rgba(51,48,90,.08);"><span>${escapeHtml(x.n)}</span><b style="white-space:nowrap;">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</b></div>`).join("");
+    // Same capped view as the PDF and the on-screen card -- one number, so a
+    // buyer comparing the email against the app is not reading two counts.
+    const HTML_ROWS_SHOWN = 12;
+    const rows = tr.t.slice(0, HTML_ROWS_SHOWN).map((x: any) =>
+      `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;"><tr><td style="padding:3px 8px 3px 0;font-size:12px;color:#33305A;border-bottom:1px solid rgba(51,48,90,.08);">${x.p ? escapeHtml(String(x.p)) + " · " : ""}${escapeHtml(x.n)}</td><td style="padding:3px 0;font-size:12px;color:#33305A;font-weight:700;white-space:nowrap;text-align:right;border-bottom:1px solid rgba(51,48,90,.08);">$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " <span style='color:#706D96;font-weight:600'>+ freight</span>" : ""}</td></tr></table>`).join("");
     deck.push({ label: "MSRP per trim", tone: "muted", body:
       `<div style="font-size:13px;font-weight:900;color:#33305A;">${tr.y} ${escapeHtml(tr.mk)} ${escapeHtml(tr.md)} — the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}</div>` +
       `<div style="margin-top:6px;">${rows}</div>` +
+      (tr.t.length > HTML_ROWS_SHOWN ? `<div style="font-size:11px;color:#706D96;margin-top:4px;">Showing ${HTML_ROWS_SHOWN} of ${tr.t.length} published trims.</div>` : "") +
       (qpT > 0 ? `<div style="font-size:12px;color:#5B5885;margin-top:6px;">The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>` : "") +
       (site ? `<div style="font-size:12px;margin-top:6px;"><a href="${site}" style="color:#17756B;font-weight:700;">Confirm the range on ${escapeHtml(tr.mk)}'s own site</a></div>` : "") });
   }
@@ -433,39 +513,196 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">Worth asking outright: <b>&ldquo;How long has this exact car been on your lot?&rdquo;</b> A car that has sat 90+ days is carrying real cost for them, and the answer is easy for them to give and awkward to dodge. We could not read it here, so we are not guessing at it.</div>` });
   }
 
-  // 5b1 -- Used market value: the median-anchored band from our OWN comps
-  // (design 10 in dollars, never a score -- design-must-not-create-questions).
-  // Arcs don't survive email clients, so the same information rides on a linear
-  // low->median->high band with a "you are here" marker.
-  if (a.marketValue && a.marketValue.average != null) {
-    const mv = a.marketValue;
-    const median = Number(mv.average) || 0;
-    const low = Number(mv.low != null ? mv.low : mv.below) || 0;
-    const high = Number(mv.high != null ? mv.high : mv.above) || 0;
-    const ask = Number(a.quotedPrice) || 0;
-    const comps = mv.comps != null ? Number(mv.comps) : null;
-    const delta = (ask && median) ? ask - median : 0;
-    // Caution ONLY when asking above the whole local range (a watch-out), never
-    // for a below-range good deal or a missing price -- matches the 10-point line.
-    const aboveRange = ask > 0 && ask > high;
-    const pos = delta === 0 ? "at the local middle value" : `${money(Math.abs(delta))} ${delta > 0 ? "above" : "below"} the local middle value`;
-    if (median && low && high) {
-      const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
-      const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
-      const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
-      const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
-      const band =
-        `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
-          `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
-          `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
-          `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` +
-        `</div>` +
-        `<div style="display:flex;justify-content:space-between;font-size:11px;color:#706D96;font-weight:700;"><span>Low ${money(low)}</span><span>Middle value ${money(median)}</span><span>High ${money(high)}</span></div>`;
-      deck.push({ label: "Used market value", tone: aboveRange ? "flag" : "muted", glow: false, body:
-        `<div style="font-size:18px;font-weight:900;color:${aboveRange ? "#A63C25" : "#17756B"};">${ask ? `${money(ask)} &mdash; ${pos}` : `Market middle value ${money(median)}`}</div>` +
-        band +
-        `<div style="font-size:12.5px;color:#33305A;margin-top:8px;line-height:1.5;">${comps ? comps.toLocaleString() + " comparable used listings" : "Comparable used listings"}${mv.mileage ? " near " + Number(mv.mileage).toLocaleString() + " km" : ""}${mv.asOf ? " &middot; captured " + escapeHtml(String(mv.asOf)) : ""}. Asking prices read from dealers' own listings, not confirmed sales &mdash; the market, not the dealer's trade-in number.</div>` });
+  // 5b1 -- How this vehicle compares with the Alberta market: three plain
+  // lines (this vehicle / similar listings in Alberta / difference) worded by
+  // ONE shared builder (report-lines.js marketCompareLine) and carrying a
+  // traffic light -- green at or below the middle, amber above the middle but
+  // inside the range, red above every similar listing read. Vic, 2026-09-02,
+  // after LC-0F75-A93 printed "$9,908 above the local middle value" against
+  // 2024 hybrids: "not easy to understand". Renders whenever a comparison set
+  // exists, INCLUDING the not-enough state -- an unmade comparison still gets
+  // its card and its reason. [[report-never-empty]]
+  if (a.marketValue) {
+    const line = marketCompareLine(a);
+    const lines: Array<{ k: string; v: string }> = Array.isArray(line.lines) ? line.lines : [];
+    const LIGHT: Record<string, { dot: string; bg: string; fg: string }> = {
+      green: { dot: "#17756B", bg: "#E3F4F1", fg: "#17756B" },
+      amber: { dot: "#8A6414", bg: "#FDF4DF", fg: "#8A6414" },
+      red:   { dot: "#A63C25", bg: "#FDEAE5", fg: "#A63C25" },
+    };
+    const lt = line.light && LIGHT[line.light] ? LIGHT[line.light] : null;
+    // Tables throughout: Gmail and Outlook drop display:flex, so the dot and
+    // its label are two cells, and each of the three lines is a two-cell row.
+    const lightRow = lt && line.lightLabel
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 10px;"><tr>` +
+          `<td style="padding:6px 12px 6px 10px;background:${lt.bg};border-radius:999px;">` +
+            `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>` +
+              `<td style="width:12px;height:12px;border-radius:50%;background:${lt.dot};font-size:0;line-height:0;">&nbsp;</td>` +
+              `<td style="padding-left:8px;font-size:12px;font-weight:800;color:${lt.fg};line-height:1.2;">${escapeHtml(line.lightLabel)}</td>` +
+            `</tr></table>` +
+          `</td>` +
+        `</tr></table>`
+      : "";
+    const rows = lines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    const linesTable = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">${rows}</table>`;
+    // The linear low -> middle -> high band with a "you are here" marker stays
+    // under the three lines, and only once a comparison was actually made.
+    let band = "";
+    if (line.state === "confirmed") {
+      const mv = a.marketValue;
+      const median = Number(mv.average) || 0;
+      const low = Number(mv.low != null ? mv.low : mv.below) || 0;
+      const high = Number(mv.high != null ? mv.high : mv.above) || 0;
+      // The marker sits only where the builder measured the asking price: an
+      // unverified or finance-contingent price is in the lines, not on the band.
+      const ask = Number(line.askUsed) || 0;
+      if (median && low && high) {
+        const lo0 = Math.min(low, ask > 0 ? ask : low), hi0 = Math.max(high, ask > 0 ? ask : high);
+        const pad = Math.max(1, (hi0 - lo0) * 0.10), d0 = lo0 - pad, d1 = hi0 + pad;
+        const pct = (v: number) => Math.max(0, Math.min(100, ((v - d0) / ((d1 - d0) || 1)) * 100));
+        const bandL = pct(low), bandR = pct(high), medPct = pct(median), askPct = pct(ask || median);
+        band =
+          `<div style="position:relative;height:12px;border-radius:999px;background:#EDEAF3;margin:14px 0 6px;">` +
+            `<div style="position:absolute;top:0;bottom:0;left:${bandL.toFixed(1)}%;width:${(bandR - bandL).toFixed(1)}%;background:#CDE8E5;border-radius:999px;"></div>` +
+            `<div style="position:absolute;top:-4px;bottom:-4px;left:${medPct.toFixed(1)}%;width:2px;background:#17756B;"></div>` +
+            (ask >= 1 ? `<div style="position:absolute;top:50%;left:${askPct.toFixed(1)}%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:#C6820E;border:2px solid #FFFDF7;"></div>` : "") +
+          `</div>` +
+          `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;font-size:11px;color:#706D96;font-weight:700;"><tr>` +
+            `<td style="text-align:left;">Low ${money(low)}</td><td style="text-align:center;">Middle ${money(median)}</td><td style="text-align:right;">High ${money(high)}</td>` +
+          `</tr></table>`;
+      }
     }
+    deck.push({ label: line.title, tone: line.tone, glow: line.light === "red", body:
+      lightRow + linesTable + band +
+      (line.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(line.note)}</div>` : "") });
+  }
+
+  // 5b1a -- What older model years ask today: the market page's model-year
+  // ladder as ONE report line (this vehicle / one, two, three years older),
+  // worded by the shared builder (report-lines.js olderYearsLine) from the
+  // sealed ladder (canonical v8 `oy`), with the comparison card's own
+  // like-for-like rules. Renders whenever the ladder exists, INCLUDING the
+  // not-read and not-enough states -- an unmade read still gets its card and
+  // its reason. Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (a.olderYears) {
+    const oyLine = olderYearsLine(a);
+    const oyConfirmed = oyLine.state === "confirmed";
+    const oyLines: Array<{ k: string; v: string }> = Array.isArray(oyLine.lines) ? oyLine.lines : [];
+    const oyRows = oyLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The not-read state carries its reason in the builder's body and no
+    // lines, so the body is what prints when there is no table to print.
+    const oyDetail = oyLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${oyRows}</table>`
+      : (oyLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(oyLine.body)}</div>` : "");
+    deck.push({ label: oyLine.title, tone: oyLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${oyConfirmed ? "#33305A" : "#706D96"};">${escapeHtml(oyLine.headline)}</div>` +
+      oyDetail +
+      (oyLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(oyLine.meta)}</div>` : "") +
+      (oyLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(oyLine.note)}</div>` : "") });
+  }
+
+  // 5b1a2 -- Insurance before you sign: a SEQUENCING warning, worded by the
+  // shared builder (report-lines.js financeCoverageLine). Not a figure and not
+  // a check -- a lender or lessor requires collision and comprehensive, and
+  // Alberta's Take All Comers rule (Insurance Act s. 555) obliges insurers to
+  // write only the MANDATORY coverages. The finance contract is signed at the
+  // dealership; the insurance is arranged afterwards, so a buyer can commit to
+  // a payment before knowing they can bind the cover the contract requires.
+  //
+  // Alberta only. It cites Alberta statute and an Alberta regulator, so this
+  // card renders ONLY where financeCoverageApplies() is true -- same gate on
+  // every surface, so no reader outside Alberta is told an Alberta rule.
+  //
+  // BOTH states render the same five lines: "confirmed" when the listing
+  // itself shows financing and "general" when it does not. The warning holds
+  // either way (a cash buyer has no lender, which is exactly the point), so
+  // there is no greyed-out variant here -- the headline keeps the ink colour
+  // in both states, and only the builder's meta says which one it is.
+  // Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (financeCoverageApplies(a)) {
+    const fcLine = financeCoverageLine(a);
+    const fcLines: Array<{ k: string; v: string }> = Array.isArray(fcLine.lines) ? fcLine.lines : [];
+    const fcRows = fcLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The builder always returns five lines, but if it ever returned none the
+    // body sentence is what prints -- this card is never empty.
+    const fcDetail = fcLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${fcRows}</table>`
+      : (fcLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(fcLine.body)}</div>` : "");
+    deck.push({ label: fcLine.title, tone: fcLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(fcLine.headline)}</div>` +
+      fcDetail +
+      (fcLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(fcLine.meta)}</div>` : "") +
+      (fcLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(fcLine.note)}</div>` : "") });
+  }
+
+  // 5b1a3 -- Your premium after this purchase: the COST sibling of the card
+  // above, worded by the shared builder (report-lines.js insurancePremiumLine).
+  // The one above asks whether a buyer can GET the cover a lender requires;
+  // this one is what it costs -- buying this vehicle is a change of vehicle on
+  // the buyer's own policy, and the two-million-dollar liability limit is a
+  // choice made at the same desk.
+  //
+  // Alberta only, on the SAME gate as its sibling: it cites Alberta statute and
+  // an Alberta regulator, so financeCoverageApplies() decides it here exactly
+  // as it does on every other surface, and no reader outside Alberta is told an
+  // Alberta rule.
+  //
+  // The builder reads NOTHING from the listing -- it is regulator copy,
+  // identical for every Alberta report -- so there is ONE state, no confirmed/
+  // general split to grey out, and no conditional beyond the province gate.
+  // No figure, no traffic light, no band: four labelled lines and a citation.
+  // Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (financeCoverageApplies(a)) {
+    const ipLine = insurancePremiumLine(a);
+    const ipLines: Array<{ k: string; v: string }> = Array.isArray(ipLine.lines) ? ipLine.lines : [];
+    const ipRows = ipLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The builder always returns four lines, but if it ever returned none the
+    // body sentence is what prints -- this card is never empty.
+    const ipDetail = ipLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${ipRows}</table>`
+      : (ipLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(ipLine.body)}</div>` : "");
+    deck.push({ label: ipLine.title, tone: ipLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(ipLine.headline)}</div>` +
+      ipDetail +
+      (ipLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(ipLine.meta)}</div>` : "") +
+      (ipLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(ipLine.note)}</div>` : "") });
+  }
+
+  // 5b1b -- Other listings read: "Of N other listings read, M advertise below
+  // this one." Computed once on the server (marketCount), sealed in the
+  // canonical (mc), worded by the shared builder. Sits outside the market-value
+  // conditional above so it ALWAYS RENDERS -- an unread or empty set still gets
+  // its card, its headline and the reason, same rule as days-on-lot.
+  // [[report-never-empty]]
+  {
+    const line = marketCountLine(a);
+    const confirmed = line.state === "confirmed";
+    // The builder's own meta line (vehicle · province · read <dates>), so the
+    // date range here is the same one the sentence names.
+    const meta = line.meta || (MC_STATE_WORD[line.state] || MC_STATE_WORD.unchecked);
+    deck.push({ label: "Other listings read", tone: "muted", glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:${confirmed ? "#33305A" : "#706D96"};">${escapeHtml(line.headline)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${escapeHtml(meta)}</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(line.body)}</div>` });
   }
 
   // 5b0 -- basis note: all-in asking price vs freight-excluding MSRP
@@ -560,7 +797,7 @@ function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string, s
       ${coverCard(a)}
       ${reportUrl ? `<div style="margin-bottom:14px;"><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#17756B;color:#fff;font-weight:800;font-size:14px;text-decoration:none;padding:12px 22px;border-radius:10px;">View your interactive report</a><div style="font-size:11px;color:#706D96;margin-top:6px;">Swipe through the deck in your browser, or open the attached PDF.</div></div>` : ""}
       ${verifyUrl ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">${a.reportId ? escapeHtml(a.reportId) : "Your report"} — tamper-evident</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">If a dealer questions this report, <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">verify it here</a> — the ID is a fingerprint of its contents, so any altered figure changes it. We store nothing.</div></div>` : ""}
-      ${hasShot ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">Attached: the listing, as it looked at report time</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">The full-page capture rides along as its own photo file. Its fingerprint is sealed in the signed report — if the page ever changes, ${verifyUrl ? `drop the photo on <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">the verify page</a>` : "drop the photo on lotcheck.ca/verify"} to prove yours is the untouched original. Keep this email — nothing is stored on our end.</div></div>` : ""}
+      ${hasShot ? `<div style="margin-bottom:14px;padding:12px 14px;background:#fff;border:1px solid #eee;border-radius:12px;"><div style="font-size:12px;color:#33305A;font-weight:800;">Attached: the listing, as it looked at report time</div><div style="font-size:12px;color:#5B5885;line-height:1.5;margin:4px 0 0;">The capture rides along as its own photo file. Its fingerprint is sealed in the signed report — if the page ever changes, ${verifyUrl ? `drop the photo on <a href="${escapeHtml(verifyUrl)}" style="color:#17756B;font-weight:700;">the verify page</a>` : "drop the photo on lotcheck.ca/verify"} to prove yours is the untouched original. Keep this email — nothing is stored on our end.</div></div>` : ""}
       <div style="font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#706D96;margin:6px 2px 8px;">The audit · ${total} card${total > 1 ? "s" : ""} · flagged cards glow</div>
       ${deckHtml}
       ${sayHtml}
@@ -582,7 +819,7 @@ function pdfSafe(s: unknown): string {
   return String(s ?? "")
     .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-").replace(/•/g, "-").replace(/…/g, "...")
-    .replace(/[★☆⭐]/g, "*").replace(/▲/g, "^").replace(/▼/g, "v")
+    .replace(/[★☆\u2B50]/g, "*").replace(/▲/g, "^").replace(/▼/g, "v")
     .replace(/[✓✔⚑⚐]/g, "").replace(/[^\x20-\x7E -ÿ]/g, "");
 }
 // Chunked base64 for the PDF bytes (Deno's btoa needs a binary string).
@@ -597,6 +834,25 @@ import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXE
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
+import { POINT_TITLES } from "../_shared/report-points.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+
+// The count, default, comparison and older-model-year lines (marketCount,
+// pageDefault, marketValue, olderYears) come from ONE shared builder, so the
+// sentence in this email is the sentence on screen. Nothing in this file
+// writes a new sentence for them:
+// value / headline / lines / body are used as returned on every surface below
+// (HTML deck, audit rows, PDF narrative). The PDF fonts encode WinAnsi only,
+// so the em dash becomes a hyphen there.
+const noEmDash = (s: unknown): string => String(s ?? "").replace(/—/g, "-");
+// Province code -> name, mirroring report-lines.js so the meta line under the
+// headline and the body sentence never name the same place two ways.
+const provinceNameEn = (code: unknown): string => (String(code || "").toUpperCase() === "AB" ? "Alberta" : String(code || "Alberta"));
+// The meta line under each card's headline when there is no confirmed read to
+// date: the state, in words. Keyed per line because "absent" means "no other
+// listings" for the count and "nothing pre-selected" for the page default.
+const MC_STATE_WORD: Record<string, string> = { confirmed: "Confirmed", not_counted: "Not counted", absent: "None read", unchecked: "Not read" };
+const PD_STATE_WORD: Record<string, string> = { confirmed: "Read", absent: "None found", unchecked: "Not read" };
 
 // A capture the server has PROVEN is the sealed original: its SHA-256 was
 // recomputed here over the actual bytes AND that hash sits inside the report's
@@ -704,6 +960,16 @@ function reportNo(a: any): string {
 // with its own result -- a point with no data reads "NOT ON QUOTE"/"N/A", never
 // omitted, so the "10-POINT" label is always backed (claims must stay backed)
 // and a dealer can see every point and its outcome (dispute-proof).
+// Total of the fees the DEALER itemised on their own listing. These sit
+// separately from addOns because, where the page's arithmetic proves it, they
+// are already INSIDE the advertised price rather than added on top -- see
+// _shared/d2c-vdp.js and the analyze-listing-url attach site.
+function dealerFeeTotal(a: any): number {
+  const fees = a?.dealerLineItems?.fees;
+  if (!Array.isArray(fees)) return 0;
+  return fees.reduce((t: number, f: any) => t + (Number(f?.amount) || 0), 0);
+}
+
 function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
@@ -724,16 +990,31 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     tone: "muted" });
   else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
   else P.push({ t: "Price vs MSRP", v: "PRICE UNVERIFIED", tone: "flag" });
-  // NOTE: used market value is NOT one of the fixed 10 audit points -- it is a
-  // context module (like days-on-lot) and renders as its own deck card + a PDF
-  // narrative section. Pushing it here would overflow P.slice(0,10) and silently
-  // drop the last real point (Dealer reputation). Kept out on purpose.
+  // NOTE: the market comparison ("How this vehicle compares with the Alberta
+  // market", report-lines.js marketCompareLine) is NOT one of the fixed 10
+  // audit points -- it is a context module (like days-on-lot) and renders as
+  // its own deck card + a PDF narrative section. Pushing it here would overflow
+  // P.slice(0,10) and silently drop the last real point (Dealer reputation).
+  // Kept out on purpose.
   if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
   else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
   else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
   else P.push({ t: "Transport Canada recalls", v: "COULDN'T VERIFY", tone: "muted" });
   if ((a.addOns || []).length) { const fl = a.addOns.filter((x: any) => x.verdict === "flagged").length; P.push({ t: "Add-ons & fee audit", v: fl ? fl + " FLAGGED" : "TRANSPARENT", tone: fl ? "flag" : "pass" }); }
-  else P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
+  // A dealer who publishes their own breakdown is TRANSPARENT, not "none
+  // listed". This keyed only on addOns, which never carried the listing's own
+  // itemisation, so the 2025 Mazda CX-90's openly-stated $795 Admin. Fee
+  // reported as nothing at all.
+  else if (dealerFeeTotal(a) > 0) P.push({ t: "Add-ons & fee audit", v: "ITEMIZED", tone: "muted" });
+  // AND "WE LOOKED" IS NOT "WE COULD NOT LOOK". The Advantage Ford Acadia was
+  // reported to a buyer as "NONE LISTED -- no dealer extras were itemized" on a
+  // page printing Doc Fee +$899 and an AMVIC levy, because that report came off
+  // the JSON-LD path and a fee box is rendered html, not schema.org markup. The
+  // report knew it was incomplete -- its own bottom line said so -- and still
+  // published the gap as a finding. Now the absence is only claimed when the
+  // page was actually read. [[report-never-empty]] means backed, not filled in.
+  else if (a.feesRead === true) P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
+  else P.push({ t: "Add-ons & fee audit", v: "NOT READ", tone: "muted" });
   const fr = a.financeRates;
   // See the fuller comment at the deck-card version above: an untrusted
   // (LLM-only) dealer APR falls through to the same states as if none were
@@ -741,7 +1022,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   const frDealerVerified = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
   if (frDealerVerified != null) { const high = fr.manufacturer && frDealerVerified - fr.manufacturer.apr > 0.1; P.push({ t: "Financing APR (this dealer)", v: frDealerVerified + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
   else if (fr?.manufacturer) P.push({ t: "Financing APR", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
-  else P.push({ t: "Financing APR", v: "NONE ADVERTISED", tone: "muted" });
+  // A page whose calculator opens at a rate has not "advertised none".
+  else P.push({ t: "Financing APR", v: financingAprValue(a, null, null, false), tone: "muted" });
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
   // No dealer terms is not "nothing to say": we hold the manufacturer's own
   // published rate and price, so the payment is arithmetic we can do ourselves.
@@ -761,7 +1043,45 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // which printed "No public reviews were found" about Charlesglen Toyota --
   // a dealer with 4.7 stars from 5,930 Google reviews.
   { const dr = dealerReputationPoint(a.dealerSentiment); P.push({ t: "Dealer reputation", v: dr.value, tone: dr.tone }); }
-  return P.slice(0, 10);
+
+  // ---- BEYOND THE ADVERTISED FLOOR ----------------------------------------
+  // Vic, 2026-08-27: "always good to over deliver ... minimum 10 points we
+  // will keep increasing ... add them to pdf file all 14". Ten is a FLOOR we
+  // advertise, not a cap we enforce. This used to `return P.slice(0, 10)`,
+  // so the emailed PDF -- the artifact a buyer actually forwards to a dealer
+  // -- was the THINNEST surface, printing 10 while the app rendered 14. That
+  // inverts the priority: the forwarded document should carry everything.
+  //
+  // The first ten above ALWAYS render (including explicit "not published"
+  // states), which is what makes the advertised floor safe. These additional
+  // points are conditional on having something real to say -- a point with no
+  // data is omitted rather than padded with a dead "-", so the count can rise
+  // above ten but never fall below it.
+  if (Number(a.msrpCeiling?.trimsConsidered) >= 2 && Number(a.msrpCeiling?.allIn) > 0) {
+    P.push({ t: "MSRP per trim", v: `${a.msrpCeiling.trimsConsidered} TRIMS`, tone: "muted" });
+  }
+  // "Other listings read" ALWAYS prints: the shared builder returns a value for
+  // every state, including unchecked, so the row is never blank. The
+  // comparableListings branch that stood here read a field no code ever set,
+  // so it never printed at all.
+  P.push({ t: "Other listings read", v: marketCountLine(a).value, tone: "muted" });
+  if (Number(a.daysOnLot?.days) > 0) {
+    const d = Math.round(Number(a.daysOnLot.days));
+    P.push({ t: "Days on lot", v: `${d} DAY${d === 1 ? "" : "S"}${a.daysOnLot.atLeast ? "+" : ""}`, tone: d >= 90 ? "flag" : "muted" });
+  }
+  if (a.dealerLicence?.status) {
+    P.push({ t: "Dealer licence · AMVIC", v: String(a.dealerLicence.status).toUpperCase(), tone: a.dealerLicence.state === "ok" ? "pass" : "muted" });
+  }
+  if (a.tradeInWidget?.detected) {
+    P.push({ t: "Trade-in tool on this listing", v: String(a.tradeInWidget.vendor || "DETECTED").toUpperCase(), tone: "muted" });
+  }
+  if (a.financeContingent?.contingent) {
+    P.push({ t: "Price depends on financing", v: "FLAGGED", tone: "flag" });
+  }
+  // "Payment default" ALWAYS prints, same builder rule as the count above:
+  // NOT PUBLISHED and NOT READ are results, not gaps.
+  P.push({ t: "Payment starting point", v: pageDefaultLine(a).value, tone: "muted" });
+  return P;
 }
 
 // "What this means" — the plain-language translation printed under each audit
@@ -785,8 +1105,15 @@ function pointExplain(t: string, a: any): string | null {
       // shows "Call for pricing" while window.__vdpJSON's own price field
       // held $85,995 the whole time -- also published to Google Vehicle Ads,
       // so this is public information, not a private number LotCheck leaked.
+      // The Google Vehicle Ads corroboration is only assertable on NEW units --
+      // Google mandates a real (all-in, in Canada) price on those, which is
+      // what makes "public either way" a backed statement. On used/CPO the
+      // premise does not hold, so the sentence narrows to what we actually
+      // verified: the page's own data. (claims-must-stay-backed)
       const gatedNote = (qp && a.priceGatedButRecovered)
-        ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+        ? (a.priceGateGoogleAdsBacked
+            ? `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price, and it's independently published to Google's vehicle ads too, so it's public either way. `
+            : `This dealer's page displays "${a.priceGateMessage || "Call for pricing"}" instead of a number -- but the page's own data carries the real asking price shown here. `)
         : "";
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
@@ -806,13 +1133,16 @@ function pointExplain(t: string, a: any): string | null {
       if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
       return "This exact model couldn't be confirmed in the registry - not an all-clear. Check by VIN at Transport Canada (free) before signing.";
     case "Add-ons & fee audit":
+      if (!(a.addOns || []).length && dealerFeeTotal(a) <= 0 && a.feesRead !== true) {
+        return "We could not read this page's pricing section, so we cannot say whether extras are itemized - this is a gap in our read, not a clean bill. Ask for the full out-the-door breakdown in writing.";
+      }
       return (a.addOns || []).length
         ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
         : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";
     case "Financing APR": case "Financing APR (this dealer)":
-      return (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source))
-        ? "APR is the yearly interest rate on the loan. Compare it against your own bank or credit union before accepting - dealer rates often carry hidden markup."
-        : "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
+      // Worded once in report-lines.js so this sentence can never contradict
+      // the Payment starting point card in the same email or PDF.
+      return financingAprNote(a, (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null);
     case "Financing math":
       if (!a.financingCheck?.checked && a.referenceFinancing?.note) return a.referenceFinancing.note;
 
@@ -821,9 +1151,24 @@ function pointExplain(t: string, a: any): string | null {
         : "We recomputed the payment from the price, rate and term - and they don't line up. Ask them to show the calculation line by line.";
       return "Not enough financing detail (payment, term, total) was shown to re-check the math. Ask for all three in writing.";
     case "Odometer":
-      if (a.odometerCheck?.checked) return a.vehicleCondition === "new"
-        ? "A truly new car should read near zero km - thousands on the clock means it's been driven (demo/loaner) and should be priced below new."
-        : "Compare the reading against the car's age - roughly 15,000-20,000 km per year is typical.";
+      // Branches on the BAND the reading was actually put in, not on
+      // vehicleCondition alone. The old string told every new car -- including
+      // one reading 12 km -- that "thousands on the clock" meant demo use,
+      // directly under our own note saying 12 km is delivery distance.
+      if (a.odometerCheck?.checked) {
+        const km = Number(a.odometerCheck.km);
+        const kmTxt = Number.isFinite(km) ? km.toLocaleString() + " km" : "this reading";
+        switch (a.odometerCheck.band) {
+          case "new_delivery":
+            return `New vehicles do not arrive on zero. Coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. ${kmTxt} is delivery distance, not use. Read the dash yourself when you see the car and confirm it still matches.`;
+          case "new_beyond_delivery":
+            return `A new vehicle normally shows only delivery distance. This one reads ${kmTxt}, which is further than a car gets being delivered - most often that means it was a demonstrator or a service loaner. That is a normal part of the business, not a fault. What matters to you is that the factory warranty clock starts when a vehicle goes into service, not when you buy it: ask for the in-service date in writing, and ask how the price reflects it.`;
+          case "used_nearly_new":
+            return `On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return rather than anything unusual. Ask for the in-service date - the factory warranty started then, not on the day you buy.`;
+          default:
+            return "Compare the reading against the car's age - roughly 15,000-20,000 km per year is typical.";
+        }
+      }
       return "No odometer reading was shown. Read it off the dash yourself before signing - never off the paperwork alone.";
     case "VIN check":
       return a.vinCheck?.present
@@ -839,6 +1184,15 @@ function pointExplain(t: string, a: any): string | null {
         : "Factory warranty terms couldn't be confirmed from this listing. Ask exactly what's covered and for how long, in writing, before considering paid coverage.";
     case "Dealer reputation":
       return dealerReputationPoint(a.dealerSentiment).explain;
+    // Both lines gloss themselves: the builder's body IS the plain-language
+    // explanation, and it is the same sentence the HTML deck and PDF narrative
+    // print. Em dash -> hyphen for the WinAnsi fonts.
+    // Both lines carry their full sentence in their own narrative section
+    // (OTHER LISTINGS READ / PAYMENT DEFAULT), so the audit row prints the
+    // value alone -- one place per sentence, same as Days on lot.
+    case "Other listings read":
+    case "Payment starting point":
+      return null;
     default: return null;
   }
 }
@@ -986,10 +1340,21 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  drawSeal(M + W - 116, y - 9, 15); // small stamp left of the header text
-  right("QUOTE CHECK REPORT", { size: 8.5, font: sansB, color: SOFT });
+  // SEAL POSITION IS MEASURED, NOT GUESSED. This was drawSeal(M + W - 116, ...)
+  // with S=15, whose outer ring reaches cx + S*1.46 = cx + 21.9 -> its right
+  // edge landed at M+W-94, while `right()` starts "QUOTE CHECK REPORT" at
+  // M+W-(text width ~118) = M+W-118. The seal was therefore drawn UNDER both
+  // header lines, and a 420-segment guilloché behind 8.5pt type reads as
+  // shimmering, illegible text -- reported from a real emailed report as
+  // "letters are shining", on the artifact a buyer forwards to a dealer.
+  // Measure the widest header line and seat the seal clear to its left.
+  const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
+  const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
+  const SEAL_S = 15, SEAL_GAP = 12;
+  drawSeal(M + W - hdrW - SEAL_GAP - SEAL_S * 1.46, y - 9, SEAL_S);
+  right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
   y -= 20;
-  right("No. " + RID, { size: 8.5, font: mono, color: FAINT });
+  right(HDR_NO, { size: 8.5, font: mono, color: FAINT });
   y -= 2;
   page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.4, color: INK });
   y -= 22;
@@ -1077,10 +1442,25 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- 10-POINT AUDIT (always exactly 10, each with its plain-language gloss) ----
-  kicker("10-POINT AUDIT");
+  // ---- THE AUDIT: at least 10, more when the report has more to say ----
+  // The heading states the REAL count rather than a hardcoded "10", because
+  // ten is the advertised FLOOR, not the delivered number (see tenPoints()).
+  // A hardcoded 10 over a longer list is the same self-contradiction the app
+  // shipped: "The 10-point verification" printed above 14 tiles.
+  const POINTS = tenPoints(a);
+  // TEN, THEN THE EXTRAS -- under their own heading.
+  //
+  // This printed `${POINTS.length}-POINT AUDIT`, which is derived and honest
+  // about the count but calls an "MSRP per trim" card a verification point and
+  // disagrees with the ten we advertise. The ten are a defined core; everything
+  // a particular listing additionally supported is real, is printed in full
+  // (Vic: "yes add them to pdf file all 14"), and is named for what it is.
+  // Same split as the on-screen heatmap, from the same canonical list.
+  const CORE = POINTS.slice(0, POINT_TITLES.length);
+  const EXTRA = POINTS.slice(POINT_TITLES.length);
+  kicker(`${CORE.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  for (const p of tenPoints(a)) {
+  const renderPoint = (p: { t: string; v: string; tone: string }) => {
     // THE LABEL IS ALWAYS LEGIBLE. It used to render in SOFT whenever the tone
     // was muted, so a muted row arrived as faded title + faint value + soft
     // body -- the whole row receding at once. Vic caught it on a PDF where
@@ -1095,8 +1475,47 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // indented under its point in small italic so the audit stays scannable.
     const ex = pointExplain(p.t, a);
     if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, x: M + 10, maxW: W - 10 }); advance(4); }
+  };
+  for (const p of CORE) renderPoint(p);
+  if (EXTRA.length) {
+    kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
+    for (const p of EXTRA) renderPoint(p);
   }
   rule();
+
+  // ---- THE DEALER'S OWN PRICE BREAKDOWN ----
+  // Printed because the dealer published it. Where the page's arithmetic
+  // proves the fees are already inside the advertised price, the copy says so
+  // and never implies they were added on top. The buyer's useful takeaway is
+  // which line is the dealer's own -- that is the one they can ask about.
+  if (dealerFeeTotal(a) > 0) {
+    const dli = a.dealerLineItems;
+    kicker("THE DEALER'S OWN PRICE BREAKDOWN");
+    const inside = dli.insideAdvertisedPrice;
+    para(inside === true
+        ? "The dealer itemised their price on the listing. These charges are already included in the advertised price - they are not added on top."
+      : inside === false
+        ? "The dealer itemised their price on the listing. These charges sit on top of the advertised price."
+        : "The dealer itemised their price on the listing. It does not say whether these are inside the advertised price or on top of it - ask.",
+      { size: 9, font: sans, color: SOFT, lead: 3 });
+    advance(4);
+    for (const f of dli.fees) {
+      need(15);
+      T(pdfSafe(String(f.name)), { size: 9.5, font: sans, color: INK });
+      right("$" + Number(f.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: INK });
+      y -= 14;
+    }
+    for (const d of (dli.incentives || [])) {
+      need(15);
+      T(pdfSafe(String(d.name)), { size: 9.5, font: sans, color: SOFT });
+      right("-$" + Number(d.amount).toLocaleString("en-CA"), { size: 9.5, font: monoB, color: TEAL });
+      y -= 14;
+    }
+    advance(3);
+    para(`The $${dealerFeeTotal(a).toLocaleString("en-CA")} ${dli.fees.length === 1 ? "fee is" : "fees are"} the dealer's own - not the manufacturer's and not a government charge - so ${dli.fees.length === 1 ? "it is" : "they are"} the line to ask about.`,
+      { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
 
   // ---- MSRP PER TRIM — the factory range (client-derived, shape-validated;
   // standing requirement 2026-08-19: the buyer sees the manufacturer's range
@@ -1109,11 +1528,21 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     need(64 + tr.t.length * 13);
     kicker("MSRP PER TRIM");
     T(`${tr.y} ${pdfSafe(tr.mk)} ${pdfSafe(tr.md)} - the manufacturer's price per trim${allExcl ? " (before freight & fees)" : ""}`, { size: 10.5, font: sansB }); y -= 18;
-    for (const x of tr.t) {
+    // Capped VIEW, honest COUNT. The on-screen card, the flipbook and this PDF
+    // used to truncate at three different numbers (all, 10, 12) and none said
+    // so, giving one signed report several answers to "how many trims does the
+    // manufacturer publish".
+    const TRIM_ROWS_SHOWN = 12;
+    for (const x of tr.t.slice(0, TRIM_ROWS_SHOWN)) {
       need(13);
-      T(pdfSafe(x.n), { size: 9, font: sans, color: SOFT });
+      T(pdfSafe(x.p ? `${x.p} · ${x.n}` : x.n), { size: 9, font: sans, color: SOFT });
       right(`$${Number(x.m).toLocaleString("en-CA")}${Number(x.b) === 1 ? " + freight" : ""}`, { size: 9, font: sansB });
       y -= 13;
+    }
+    if (tr.t.length > TRIM_ROWS_SHOWN) {
+      advance(2);
+      T(`Showing ${TRIM_ROWS_SHOWN} of ${tr.t.length} published trims.`, { size: 7.5, font: mono, color: FAINT });
+      y -= 11;
     }
     if (qpT > 0) { advance(3); para(`The asking price $${qpT.toLocaleString("en-CA")} sits above ${aboveN} of ${tr.t.length} published trim prices.${allExcl ? " Catalog prices exclude freight & fees - compare like-for-like." : ""}`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
     const site = EMAIL_MAKE_SITE[tr.mk];
@@ -1209,29 +1638,151 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- USED MARKET VALUE — our own comp band, in dollars (never a score) ----
-  // A context module like days-on-lot: it renders here as its own narrative
-  // section, NOT as one of the fixed 10 audit points.
-  if (a.marketValue && a.marketValue.average != null) {
-    const mv = a.marketValue;
-    const med = Number(mv.average) || 0;
-    const lo = Number(mv.low != null ? mv.low : mv.below) || 0;
-    const hi = Number(mv.high != null ? mv.high : mv.above) || 0;
-    const ask = Number(a.quotedPrice) || 0;
-    const comps = mv.comps != null ? Number(mv.comps) : null;
-    const d = (ask && med) ? ask - med : 0;
-    const aboveRange = ask > 0 && ask > hi;
-    const m = (n: number) => "$" + Math.round(n).toLocaleString("en-CA");
-    if (med && lo && hi) {
-      need(72);
-      kicker("USED MARKET VALUE");
-      T(ask ? `${m(ask)} - ${d === 0 ? "at the local middle value" : m(Math.abs(d)) + (d > 0 ? " above" : " below") + " the local middle value"}` : `Market middle value ${m(med)}`,
-        { size: 14, font: serifB, color: aboveRange ? CORAL : INK }); y -= 19;
-      para(`Comparable used ${a.model || "listings"} in this market ask between ${m(lo)} and ${m(hi)}, middle value ${m(med)}${comps ? `, across ${comps.toLocaleString("en-CA")} listings` : ""}${mv.asOf ? ` captured ${mv.asOf}` : ""}.`, { size: 9, color: SOFT, lead: 4 });
-      advance(2);
-      para("Asking prices read from dealers' own listings, not confirmed sales - this is the market, not the dealer's trade-in number.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
-      rule();
+  // ---- HOW THIS VEHICLE COMPARES WITH THE ALBERTA MARKET ----
+  // Three plain lines (this vehicle / similar listings in Alberta / difference)
+  // from the shared builder (report-lines.js marketCompareLine): the words in
+  // this PDF are the words in the HTML deck and on screen. A context section
+  // like DAYS ON LOT, not one of the fixed audit points, and it renders
+  // whenever a comparison set exists -- the not-enough state still gets its
+  // heading and its reason. T/para run every string through pdfSafe, so the
+  // builder's em dashes print as hyphens (the PDF fonts encode WinAnsi only).
+  if (a.marketValue) {
+    const line = marketCompareLine(a);
+    const lines: Array<{ k: string; v: string }> = Array.isArray(line.lines) ? line.lines : [];
+    const headColor = line.light === "red" ? CORAL : line.light === "green" ? TEAL : INK;
+    need(96);
+    kicker(line.title.toUpperCase());
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: headColor }); y -= 18;
+    if (line.lightLabel) { T(noEmDash(line.lightLabel), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of lines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
     }
+    if (line.note) para(noEmDash(line.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- WHAT OLDER MODEL YEARS ASK TODAY ----
+  // The model-year ladder as one line (this vehicle / one, two, three years
+  // older) from the shared builder (report-lines.js olderYearsLine): the words
+  // in this PDF are the words in the HTML deck and on screen. A context section
+  // like the comparison above, and it renders whenever the ladder exists -- the
+  // not-read and not-enough states still get their heading and their reason.
+  // T/para run every string through pdfSafe; the builder's em dashes print as
+  // hyphens (the PDF fonts encode WinAnsi only).
+  if (a.olderYears) {
+    const oyLine = olderYearsLine(a);
+    const oyLines: Array<{ k: string; v: string }> = Array.isArray(oyLine.lines) ? oyLine.lines : [];
+    need(96);
+    kicker(oyLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline can be a
+    // full sentence -- it would run off the right edge of the page.
+    para(noEmDash(oyLine.headline), { size: 13, font: serifB, color: oyLine.state === "confirmed" ? INK : SOFT, lead: 4 });
+    advance(4);
+    if (oyLine.meta) { T(noEmDash(oyLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of oyLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // The not-read state carries its reason in the body and no lines, so the
+    // body is what prints when there is no line to print.
+    if (!oyLines.length && oyLine.body) para(noEmDash(oyLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (oyLine.note) para(noEmDash(oyLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- INSURANCE BEFORE YOU SIGN ----
+  // A sequencing warning from Alberta's insurance regulator, from the shared
+  // builder (report-lines.js financeCoverageLine): the words in this PDF are
+  // the words in the HTML deck and on screen. A context section like the two
+  // above, not one of the fixed audit points, and it carries no figure, no
+  // traffic light and no band -- five labelled lines and a citation.
+  //
+  // Alberta only: financeCoverageApplies() gates every surface identically,
+  // because the line cites Alberta statute and an Alberta regulator.
+  //
+  // BOTH states print the same five lines ("confirmed" when the listing itself
+  // shows financing, "general" when it does not), so the headline keeps INK in
+  // both -- there is no unread half here to grey out. T/para run every string
+  // through pdfSafe; the builder's em dashes print as hyphens (the PDF fonts
+  // encode WinAnsi only).
+  if (financeCoverageApplies(a)) {
+    const fcLine = financeCoverageLine(a);
+    const fcLines: Array<{ k: string; v: string }> = Array.isArray(fcLine.lines) ? fcLine.lines : [];
+    need(96);
+    kicker(fcLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline is a full
+    // sentence -- it would run off the right edge of the page.
+    para(noEmDash(fcLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
+    advance(4);
+    if (fcLine.meta) { T(noEmDash(fcLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of fcLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // Same never-empty rule as the sections above: if the builder ever returned
+    // no lines, its body sentence is what prints.
+    if (!fcLines.length && fcLine.body) para(noEmDash(fcLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (fcLine.note) para(noEmDash(fcLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- YOUR PREMIUM AFTER THIS PURCHASE ----
+  // The COST sibling of the section above, from the shared builder
+  // (report-lines.js insurancePremiumLine): the words in this PDF are the words
+  // in the HTML deck and on screen. A context section like the ones above, not
+  // one of the fixed audit points, and it carries no figure, no traffic light
+  // and no band -- four labelled lines and a citation.
+  //
+  // Alberta only: financeCoverageApplies() gates every surface identically,
+  // because the line cites Alberta statute and an Alberta regulator.
+  //
+  // The builder reads NOTHING from the listing -- it is regulator copy,
+  // identical for every Alberta report -- so there is ONE state and the
+  // headline keeps INK; there is no unread half to grey out. T/para run every
+  // string through pdfSafe, which folds the builder's curly quotes around the
+  // regulator's quoted sentence to straight quotes and its em dashes to
+  // hyphens (the PDF fonts encode WinAnsi only).
+  if (financeCoverageApplies(a)) {
+    const ipLine = insurancePremiumLine(a);
+    const ipLines: Array<{ k: string; v: string }> = Array.isArray(ipLine.lines) ? ipLine.lines : [];
+    need(96);
+    kicker(ipLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline is a full
+    // sentence -- it would run off the right edge of the page.
+    para(noEmDash(ipLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
+    advance(4);
+    if (ipLine.meta) { T(noEmDash(ipLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of ipLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // Same never-empty rule as the sections above: if the builder ever returned
+    // no lines, its body sentence is what prints.
+    if (!ipLines.length && ipLine.body) para(noEmDash(ipLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (ipLine.note) para(noEmDash(ipLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- OTHER LISTINGS READ -- the count, from the shared builder ----
+  // Outside the market-value conditional above so it ALWAYS RENDERS: an unread
+  // or empty set still gets its heading, its headline and the reason -- the
+  // same never-empty rule as the DAYS ON LOT else-branch.
+  {
+    const line = marketCountLine(a);
+    need(60);
+    kicker("OTHER LISTINGS READ");
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
+    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
+    rule();
   }
 
   // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
@@ -1258,6 +1809,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     if (a.financeContingent.evidence) { advance(2); para(`"...${String(a.financeContingent.evidence).replace(/[^ -~]/g, " ")}..."`, { size: 8.5, font: serifI, color: SOFT, lead: 3 }); }
     advance(2);
     para('Ask before you go in: "What is the price if I pay cash or use my own bank - and if it changes, by exactly how much?" In writing.', { size: 9, color: INK, lead: 4 });
+    rule();
+  }
+
+  // ---- PAYMENT DEFAULT -- the page's own pre-selected payment scenario ----
+  // ALWAYS RENDERS, same rule: "not published" and "not read" are answers.
+  {
+    const line = pageDefaultLine(a);
+    need(60);
+    kicker("PAYMENT STARTING POINT");
+    T(noEmDash(line.headline), { size: 13, font: serifB, color: line.state === "confirmed" ? INK : SOFT }); y -= 18;
+    para(noEmDash(line.body), { size: 9, color: SOFT, lead: 4 });
     rule();
   }
 
@@ -1395,12 +1957,53 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // Page geometry hoisted ABOVE the footer text: a capture can embed fine yet
   // slice to zero pages (extreme wide-thin aspect), and the footer may only
   // promise pages that will actually render.
-  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 6;
+  // 13 PAGES, AND DERIVED AT THE NARROWEST CAPTURE, NOT THE WIDEST.
+  //
+  // Raising what we CAPTURE without raising what we PRINT is half a two-step:
+  // the bigger captures would simply be truncated on paper instead. But the
+  // page count cannot be derived at 1920, because capScaledH above scales by
+  // the CAPTURE's own width -- so a NARROWER source image prints TALLER, and
+  // the narrow ones are exactly what the refit ladder produces on the tall
+  // pages that need the pages most. Deriving at 1920 would repeat, one
+  // constant over, the mistake this whole change is about.
+  //
+  // So derive at CAPTURE_MIN_WIDTH = 1024, the narrowest the ladder can emit.
+  // The tallest capture on record here is a 17,729 px capitalchev.ca page:
+  // scaledH = 17,729 * (483.28 / 1024) = 8,367 pt, and 1 + ceil((8367 -
+  // 629.89) / 695.89) = 13 pages. At 1920 the same page needs 7. Thirteen is
+  // the ceiling, not the typical count -- an ordinary 5,900 px listing prints
+  // in 4 -- and the image is embedded ONCE and drawn per page, so extra pages
+  // cost drawing instructions, not megabytes. capture.test.ts hand-copies
+  // these constants and test:capture-whole-page fails if the copy drifts.
+  const CAP_HEAD_FIRST = 100, CAP_HEAD_REST = 34, CAP_MAXP = 13;
   const capScaledH = capImg ? capImg.height * (W / capImg.width) : 0;
   const capU0 = PH - M * 2 - CAP_HEAD_FIRST, capUR = PH - M * 2 - CAP_HEAD_REST;
   const capPages = capImg ? capturePageCount(capScaledH, capU0, capUR, CAP_MAXP) : 0;
-  para("Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.", { size: 8, color: FAINT, font: sans, lead: 3 });
-  need(40);
+  // THE COLOPHON RESERVES ITS SPACE BEFORE IT WRITES, not after.
+  //
+  // This block used to run para(...) and THEN need(40) for the logo + ID line.
+  // para() reserves per LINE, so it can legally leave y as low as M+30 (86);
+  // need(40) then fires for any y under 126 and opens a brand-new page whose
+  // only ink is the logo and the ID. That is exactly what Vic saw on the 2025
+  // Mazda CX-90 report (LC-436A-B5C): page 4 of 5 blank but for the logo and
+  // "LOTCHECK - LC-436A-B5C - lotcheck.ca/verify".
+  //
+  // No section rendered empty -- every optional section is if-guarded and an
+  // untaken branch draws nothing. It is a PHASE bug, and it only shows on a
+  // SHORT report, because only then does the paragraph's last line land in the
+  // orphan band. That is why it survived: the reports we look at most are the
+  // long ones.
+  //
+  // Reserving the whole trailer up front means the paragraph and the mark it
+  // belongs to either share a page or move to the next one together. A block
+  // must not be able to open a page it cannot fill.
+  const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
+  const COLOPHON_H = 40 + 30;                      // logo + ID line, per the draws below
+  {
+    const lines = Math.max(1, Math.ceil(String(colophonText).length / 110));
+    need(COLOPHON_H + lines * 11);
+  }
+  para(colophonText, { size: 8, color: FAINT, font: sans, lead: 3 });
   { const w = 34; drawLogo(PW / 2 - w / 2, y - 2, w); }
   y -= 30;
   center("LOTCHECK  -  " + RID + "  -  lotcheck.ca/verify", y - 8, { size: 7.5, font: sansB, color: FAINT });
@@ -1440,7 +2043,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
         T("SEALED LISTING CAPTURE" + (totalPages > 1 ? "  -  PAGE " + (k + 1) + " OF " + totalPages : ""), { size: 8.5, font: sansB, color: TEAL });
         y -= 15;
         if (k === 0) {
-          para("Full-page photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+          para("Photo of the listing, captured for report " + pdfSafe(sealedShot.rid) + (sealedShot.issuedAt ? " issued " + new Date(sealedShot.issuedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + ". Its SHA-256 fingerprint below was computed by LotCheck's server over this exact image and is sealed inside the signed report - alter one pixel and it stops matching. Check any copy at lotcheck.ca/verify.", { size: 8.5, font: serifI, color: SOFT, lead: 3 });
           // wrap(), not a single T() -- a long dealer URL (Okotoks Toyota,
           // 2026-08-21: "...2026-Toyota-RAV4_Plug_In_Hybri" cut off mid-word,
           // no "...", nothing wrong with the 80-char slice below it) simply
@@ -1458,7 +2061,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       }
       // No silent caps: if the capture outruns the page budget, say so — the
       // attached image file always carries the complete page.
-      if (off < scaledH - 2) center("Capture truncated for print - the attached photo file contains the complete page.", 34, { size: 7.5, font: sans, color: FAINT });
+      // "contains the complete page" was a claim this endpoint cannot make.
+      // The attachment carries the whole CAPTURE; whether the capture is the
+      // whole PAGE is carried by listingShotKind, which is not signed
+      // (report-sign.ts seals only the hash) on an endpoint with no
+      // authentication -- reading it would put client-supplied text into a
+      // DKIM-signed LotCheck email.
+      //
+      // So state the one thing these pages themselves prove, as a number the
+      // render loop just computed: how much of the sealed photo got printed.
+      // True at any capture width, needs no canonical change, and does not
+      // require knowing what the photo is a photo OF.
+      // [[claims-must-stay-backed]]
+      if (off < scaledH - 2) center("These pages print the top " + Math.max(1, Math.round((off / scaledH) * 100)) + "% of the sealed photo - the attached photo file is the complete capture.", 34, { size: 7.5, font: sans, color: FAINT });
     } catch (e) { console.warn("Capture pages skipped:", (e as Error)?.message); }
   }
 

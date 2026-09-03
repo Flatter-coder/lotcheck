@@ -1,0 +1,1252 @@
+{
+ "Lexus|AB": {
+  "NXH": {
+   "2026": {
+    "BKCEZC": [
+     {
+      "name": "MSRP",
+      "label": {
+       "en": "MSRP",
+       "fr": "PDSF"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 55870
+      },
+      "finance": {
+       "type": "price",
+       "amount": 55870
+      },
+      "cash": {
+       "type": "price",
+       "amount": 55870
+      }
+     },
+     {
+      "name": "PACKAGE",
+      "label": {
+       "en": "Base_Package",
+       "fr": "Base_Package"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 2155
+      },
+      "finance": {
+       "type": "price",
+       "amount": 2155
+      },
+      "cash": {
+       "type": "price",
+       "amount": 2155
+      }
+     },
+     {
+      "name": "DRF",
+      "label": {
+       "en": "Dealer Fees",
+       "fr": "Frais du concessionnaire"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 995
+      },
+      "finance": {
+       "type": "price",
+       "amount": 995
+      },
+      "cash": {
+       "type": "price",
+       "amount": 995
+      }
+     },
+     {
+      "name": "FPD",
+      "label": {
+       "en": "Delivery and Destination Charge",
+       "fr": "Frais de livraison et de destination"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 2205
+      },
+      "finance": {
+       "type": "price",
+       "amount": 2205
+      },
+      "cash": {
+       "type": "price",
+       "amount": 2205
+      }
+     },
+     {
+      "name": "AC",
+      "label": {
+       "en": "Air Conditioning Charge",
+       "fr": "Frais de climatisation"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 100
+      },
+      "finance": {
+       "type": "price",
+       "amount": 100
+      },
+      "cash": {
+       "type": "price",
+       "amount": 100
+      }
+     },
+     {
+      "name": "AMVIC",
+      "label": {
+       "en": "AMVIC",
+       "fr": "AMVIC"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 10
+      },
+      "cash": {
+       "type": "price",
+       "amount": 10
+      }
+     },
+     {
+      "name": "TIR",
+      "label": {
+       "en": "Tire Levy",
+       "fr": "Droits sur les pneus"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 20
+      },
+      "finance": {
+       "type": "price",
+       "amount": 20
+      },
+      "cash": {
+       "type": "price",
+       "amount": 20
+      }
+     },
+     {
+      "name": "EOF",
+      "label": {
+       "en": "Environmental Handling Fee - Filters",
+       "fr": "Frais de gestion environnementale - filtres"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1.1
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1.1
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1.1
+      }
+     },
+     {
+      "name": "EOL",
+      "label": {
+       "en": "Environmental Handling Fee - Lube Oil",
+       "fr": "Frais de gestion environnementale - huile lubrifiante"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1.08
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1.08
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1.08
+      }
+     },
+     {
+      "name": "PPSA",
+      "label": {
+       "en": "PPSA Fee",
+       "fr": "Droits aux termes de la LSM"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 14
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "PPSASF",
+      "label": {
+       "en": "PPSA Service Fee",
+       "fr": "Frais de service"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 4
+      },
+      "finance": {
+       "type": "price",
+       "amount": 4
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "SUBTOTAL",
+      "label": {
+       "en": "SUBTOTAL",
+       "fr": "SOUS-TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 61371.18
+      },
+      "finance": {
+       "type": "price",
+       "amount": 61375.18
+      },
+      "cash": {
+       "type": "price",
+       "amount": 61357.18
+      }
+     },
+     {
+      "name": "GST",
+      "label": {
+       "en": "GST (5.0%)",
+       "fr": "TPS (5.0%)"
+      },
+      "lease": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      },
+      "finance": {
+       "type": "price",
+       "amount": 3068.06
+      },
+      "cash": {
+       "type": "price",
+       "amount": 3067.86
+      }
+     },
+     {
+      "name": "DOWN_PAYMENT",
+      "label": {
+       "en": "Down Payment",
+       "fr": "Acompte"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "TOTAL",
+      "label": {
+       "en": "TOTAL",
+       "fr": "TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 61371.18
+      },
+      "finance": {
+       "type": "price",
+       "amount": 64443.24
+      },
+      "cash": {
+       "type": "price",
+       "amount": 64425.04
+      }
+     }
+    ]
+   }
+  },
+  "NX": {
+   "2026": {
+    "HGCEZT": [
+     {
+      "name": "MSRP",
+      "label": {
+       "en": "MSRP",
+       "fr": "PDSF"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 54225
+      },
+      "finance": {
+       "type": "price",
+       "amount": 54225
+      },
+      "cash": {
+       "type": "price",
+       "amount": 54225
+      }
+     },
+     {
+      "name": "PACKAGE",
+      "label": {
+       "en": "Base_Package",
+       "fr": "Base_Package"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 855
+      },
+      "finance": {
+       "type": "price",
+       "amount": 855
+      },
+      "cash": {
+       "type": "price",
+       "amount": 855
+      }
+     },
+     {
+      "name": "DRF",
+      "label": {
+       "en": "Dealer Fees",
+       "fr": "Frais du concessionnaire"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 995
+      },
+      "finance": {
+       "type": "price",
+       "amount": 995
+      },
+      "cash": {
+       "type": "price",
+       "amount": 995
+      }
+     },
+     {
+      "name": "FPD",
+      "label": {
+       "en": "Delivery and Destination Charge",
+       "fr": "Frais de livraison et de destination"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 2205
+      },
+      "finance": {
+       "type": "price",
+       "amount": 2205
+      },
+      "cash": {
+       "type": "price",
+       "amount": 2205
+      }
+     },
+     {
+      "name": "AC",
+      "label": {
+       "en": "Air Conditioning Charge",
+       "fr": "Frais de climatisation"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 100
+      },
+      "finance": {
+       "type": "price",
+       "amount": 100
+      },
+      "cash": {
+       "type": "price",
+       "amount": 100
+      }
+     },
+     {
+      "name": "AMVIC",
+      "label": {
+       "en": "AMVIC",
+       "fr": "AMVIC"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 10
+      },
+      "cash": {
+       "type": "price",
+       "amount": 10
+      }
+     },
+     {
+      "name": "TIR",
+      "label": {
+       "en": "Tire Levy",
+       "fr": "Droits sur les pneus"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 20
+      },
+      "finance": {
+       "type": "price",
+       "amount": 20
+      },
+      "cash": {
+       "type": "price",
+       "amount": 20
+      }
+     },
+     {
+      "name": "EOF",
+      "label": {
+       "en": "Environmental Handling Fee - Filters",
+       "fr": "Frais de gestion environnementale - filtres"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1.1
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1.1
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1.1
+      }
+     },
+     {
+      "name": "EOL",
+      "label": {
+       "en": "Environmental Handling Fee - Lube Oil",
+       "fr": "Frais de gestion environnementale - huile lubrifiante"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1.08
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1.08
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1.08
+      }
+     },
+     {
+      "name": "PPSA",
+      "label": {
+       "en": "PPSA Fee",
+       "fr": "Droits aux termes de la LSM"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 14
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "PPSASF",
+      "label": {
+       "en": "PPSA Service Fee",
+       "fr": "Frais de service"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 4
+      },
+      "finance": {
+       "type": "price",
+       "amount": 4
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "SUBTOTAL",
+      "label": {
+       "en": "SUBTOTAL",
+       "fr": "SOUS-TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 58426.18
+      },
+      "finance": {
+       "type": "price",
+       "amount": 58430.18
+      },
+      "cash": {
+       "type": "price",
+       "amount": 58412.18
+      }
+     },
+     {
+      "name": "GST",
+      "label": {
+       "en": "GST (5.0%)",
+       "fr": "TPS (5.0%)"
+      },
+      "lease": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      },
+      "finance": {
+       "type": "price",
+       "amount": 2920.81
+      },
+      "cash": {
+       "type": "price",
+       "amount": 2920.61
+      }
+     },
+     {
+      "name": "DOWN_PAYMENT",
+      "label": {
+       "en": "Down Payment",
+       "fr": "Acompte"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "INCENTIVES",
+      "label": {
+       "en": "INCENTIVES & REBATES",
+       "fr": "INCITATIFS ET RABAIS"
+      },
+      "items": [
+       {
+        "name": "Customer Incentive",
+        "type": "NATIONAL_PROMOTION",
+        "label": {
+         "en": "Customer Incentive",
+         "fr": "Incitatif pour le client"
+        },
+        "lease": {
+         "type": "price",
+         "amount": -1000
+        },
+        "finance": {
+         "type": "price",
+         "amount": -1000
+        },
+        "cash": {
+         "type": "price",
+         "amount": -1000
+        }
+       }
+      ]
+     },
+     {
+      "name": "TOTAL",
+      "label": {
+       "en": "TOTAL",
+       "fr": "TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 57426.18
+      },
+      "finance": {
+       "type": "price",
+       "amount": 60350.99
+      },
+      "cash": {
+       "type": "price",
+       "amount": 60332.79
+      }
+     }
+    ]
+   }
+  }
+ },
+ "Toyota|AB": {
+  "PRD": {
+   "2027": {
+    "BLCAJA": [
+     {
+      "name": "MSRP",
+      "label": {
+       "en": "MSRP",
+       "fr": "PDSF"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 71670
+      },
+      "finance": {
+       "type": "price",
+       "amount": 71670
+      },
+      "cash": {
+       "type": "price",
+       "amount": 71670
+      }
+     },
+     {
+      "name": "PACKAGE",
+      "label": {
+       "en": "Base_Package",
+       "fr": "Base_Package"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "type": "price",
+       "amount": 0
+      }
+     },
+     {
+      "name": "ACCESSORIES",
+      "label": {
+       "en": "ACCESSORIES",
+       "fr": "ACCESSORIES"
+      },
+      "items": [
+       {
+        "name": "Premium Plug-In Block Heater",
+        "label": {
+         "en": "Premium Plug-In Block Heater",
+         "fr": "Chauffe-moteur premium"
+        },
+        "lease": {
+         "type": "price",
+         "amount": 702
+        },
+        "finance": {
+         "type": "price",
+         "amount": 702
+        },
+        "cash": {
+         "type": "price",
+         "amount": 702
+        }
+       }
+      ]
+     },
+     {
+      "name": "DRF",
+      "label": {
+       "en": "Dealer Fees",
+       "fr": "Frais du concessionnaire"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 999
+      },
+      "finance": {
+       "type": "price",
+       "amount": 999
+      },
+      "cash": {
+       "type": "price",
+       "amount": 999
+      }
+     },
+     {
+      "name": "FPD",
+      "label": {
+       "en": "Delivery and Destination Charge",
+       "fr": "Frais de livraison et de destination"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1930
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1930
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1930
+      }
+     },
+     {
+      "name": "AC",
+      "label": {
+       "en": "Air Conditioning Charge",
+       "fr": "Frais de climatisation"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 100
+      },
+      "finance": {
+       "type": "price",
+       "amount": 100
+      },
+      "cash": {
+       "type": "price",
+       "amount": 100
+      }
+     },
+     {
+      "name": "AMVIC",
+      "label": {
+       "en": "AMVIC",
+       "fr": "AMVIC"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 10
+      },
+      "cash": {
+       "type": "price",
+       "amount": 10
+      }
+     },
+     {
+      "name": "TIR",
+      "label": {
+       "en": "Tire Levy",
+       "fr": "Droits sur les pneus"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 25
+      },
+      "finance": {
+       "type": "price",
+       "amount": 25
+      },
+      "cash": {
+       "type": "price",
+       "amount": 25
+      }
+     },
+     {
+      "name": "PPSA",
+      "label": {
+       "en": "PPSA Fee",
+       "fr": "Droits aux termes de la LSM"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 10
+      },
+      "finance": {
+       "type": "price",
+       "amount": 14
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "PPSASF",
+      "label": {
+       "en": "PPSA Service Fee",
+       "fr": "Frais de service"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 4
+      },
+      "finance": {
+       "type": "price",
+       "amount": 4
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "SUBTOTAL",
+      "label": {
+       "en": "SUBTOTAL",
+       "fr": "SOUS-TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 75450
+      },
+      "finance": {
+       "type": "price",
+       "amount": 75454
+      },
+      "cash": {
+       "type": "price",
+       "amount": 75436
+      }
+     },
+     {
+      "name": "GST",
+      "label": {
+       "en": "GST (5.0%)",
+       "fr": "TPS (5.0%)"
+      },
+      "lease": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      },
+      "finance": {
+       "type": "price",
+       "amount": 3772
+      },
+      "cash": {
+       "type": "price",
+       "amount": 3771.8
+      }
+     },
+     {
+      "name": "DOWN_PAYMENT",
+      "label": {
+       "en": "Down Payment",
+       "fr": "Acompte"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "TOTAL",
+      "label": {
+       "en": "TOTAL",
+       "fr": "TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 75450
+      },
+      "finance": {
+       "type": "price",
+       "amount": 79226
+      },
+      "cash": {
+       "type": "price",
+       "amount": 79207.8
+      }
+     }
+    ]
+   }
+  }
+ },
+ "Toyota|ON": {
+  "RAP": {
+   "2026": {
+    "SERAPC": [
+     {
+      "name": "MSRP",
+      "label": {
+       "en": "MSRP",
+       "fr": "PDSF"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 48750
+      },
+      "finance": {
+       "type": "price",
+       "amount": 48750
+      },
+      "cash": {
+       "type": "price",
+       "amount": 48750
+      }
+     },
+     {
+      "name": "PACKAGE",
+      "label": {
+       "en": "Base_Package",
+       "fr": "Base_Package"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "type": "price",
+       "amount": 0
+      }
+     },
+     {
+      "name": "DRF",
+      "label": {
+       "en": "Dealer Fees",
+       "fr": "Frais du concessionnaire"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 999
+      },
+      "finance": {
+       "type": "price",
+       "amount": 999
+      },
+      "cash": {
+       "type": "price",
+       "amount": 999
+      }
+     },
+     {
+      "name": "FPD",
+      "label": {
+       "en": "Delivery and Destination Charge",
+       "fr": "Frais de livraison et de destination"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1930
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1930
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1930
+      }
+     },
+     {
+      "name": "AC",
+      "label": {
+       "en": "Air Conditioning Charge",
+       "fr": "Frais de climatisation"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 100
+      },
+      "finance": {
+       "type": "price",
+       "amount": 100
+      },
+      "cash": {
+       "type": "price",
+       "amount": 100
+      }
+     },
+     {
+      "name": "OMVIC",
+      "label": {
+       "en": "OMVIC",
+       "fr": "OMVIC"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 22
+      },
+      "finance": {
+       "type": "price",
+       "amount": 22
+      },
+      "cash": {
+       "type": "price",
+       "amount": 22
+      }
+     },
+     {
+      "name": "TIR",
+      "label": {
+       "en": "Tire Levy",
+       "fr": "Droits sur les pneus"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 30
+      },
+      "finance": {
+       "type": "price",
+       "amount": 30
+      },
+      "cash": {
+       "type": "price",
+       "amount": 30
+      }
+     },
+     {
+      "name": "EOF",
+      "label": {
+       "en": "Environmental Handling Fee - Filters",
+       "fr": "Frais de gestion environnementale - filtres"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 1.22
+      },
+      "finance": {
+       "type": "price",
+       "amount": 1.22
+      },
+      "cash": {
+       "type": "price",
+       "amount": 1.22
+      }
+     },
+     {
+      "name": "EOC",
+      "label": {
+       "en": "Environmental Handling Fee - Coolant/AF",
+       "fr": "Frais de gestion environnementale - liquide de refroidissement/antigel"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0.7
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0.7
+      },
+      "cash": {
+       "type": "price",
+       "amount": 0.7
+      }
+     },
+     {
+      "name": "PPSA",
+      "label": {
+       "en": "PPSA Fee",
+       "fr": "Droits aux termes de la LSM"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 40
+      },
+      "finance": {
+       "type": "price",
+       "amount": 56
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "PPSASF",
+      "label": {
+       "en": "PPSA Service Fee",
+       "fr": "Frais de service"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 4
+      },
+      "finance": {
+       "type": "price",
+       "amount": 4
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "SUBTOTAL",
+      "label": {
+       "en": "SUBTOTAL",
+       "fr": "SOUS-TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 51876.92
+      },
+      "finance": {
+       "type": "price",
+       "amount": 51892.92
+      },
+      "cash": {
+       "type": "price",
+       "amount": 51832.92
+      }
+     },
+     {
+      "name": "HST",
+      "label": {
+       "en": "HST (13.0%)",
+       "fr": "TVH (13.0%)"
+      },
+      "lease": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      },
+      "finance": {
+       "type": "price",
+       "amount": 6746.08
+      },
+      "cash": {
+       "type": "price",
+       "amount": 6738.28
+      }
+     },
+     {
+      "name": "DOWN_PAYMENT",
+      "label": {
+       "en": "Down Payment",
+       "fr": "Acompte"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 0
+      },
+      "finance": {
+       "type": "price",
+       "amount": 0
+      },
+      "cash": {
+       "label": {
+        "en": "N/A",
+        "fr": "S/O"
+       }
+      }
+     },
+     {
+      "name": "INCENTIVES",
+      "label": {
+       "en": "INCENTIVES & REBATES",
+       "fr": "INCITATIFS ET RABAIS"
+      },
+      "items": [
+       {
+        "name": "Electric Vehicle Affordability Program",
+        "type": "GOVERNMENT_REBATE",
+        "label": {
+         "en": "Electric Vehicle Affordability Program",
+         "fr": "Programme pour l’abordabilité des véhicules électriques "
+        },
+        "lease": {
+         "type": "price",
+         "amount": -2500
+        },
+        "finance": {
+         "type": "price",
+         "amount": -2500
+        },
+        "cash": {
+         "type": "price",
+         "amount": -2500
+        }
+       }
+      ]
+     },
+     {
+      "name": "TOTAL",
+      "label": {
+       "en": "TOTAL",
+       "fr": "TOTAL"
+      },
+      "lease": {
+       "type": "price",
+       "amount": 49376.92
+      },
+      "finance": {
+       "type": "price",
+       "amount": 56139
+      },
+      "cash": {
+       "type": "price",
+       "amount": 56071.2
+      }
+     }
+    ]
+   }
+  }
+ }
+}

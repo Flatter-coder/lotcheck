@@ -84,6 +84,69 @@ jobs:
       # 2026-08-19): scraper fetches retry bounded on 5xx/429/network only.
       - name: Scraper fetch retry (5xx/429 bounded backoff)
         run: npm run test:fetch-retry
+      # A blocked direct GET must not empty the report. Every structured reader
+      # used to hang off ONE fetch, so a Cloudflare challenge took price, MSRP,
+      # VIN, trim, APR and days-on-lot out together while the page's own vmsData
+      # held all six (LC-46A4-66F, a real paid report, 2026-08-27). Also refuses
+      # any NEW un-shared fetch of the listing URL -- request volume is what
+      # provokes the rate limiting in the first place.
+      - name: Page read (one shared source per scan, render as second source)
+        run: npm run test:page-read
+      # We advertise a 10-point verification, so the ten advertised and the ten
+      # delivered must be ONE list. They were not: the landing page promised a
+      # "leverage score" (the verdict computed FROM the points, never one of
+      # them) and never mentioned "Financing APR", which the report delivers.
+      # check:copy pins how often the phrase appears; a regex cannot see an
+      # array's length, so this reads the arrays.
+      - name: Ten points (advertised == delivered, extras never counted as points)
+        run: npm run check:points
+      # A dealer platform bundles freight, government levies and its own fee into
+      # ONE row captioned "Fees & Accessories". We were attributing the whole row
+      # to the dealer and handing the buyer "take off the $3,330 in dealer
+      # add-ons" to read aloud -- when 70% of it was the manufacturer's freight
+      # and the province's levies. That is a false statement about a named
+      # business, so this gate blocks like a correctness defect.
+      - name: Bundled fee line (a mixture is never the dealer's money)
+        run: npm run test:bundled-fee
+      # An explanation printed beside a number must fit that number. A 2025
+      # Mazda CX-90 reading 12 km was told "a truly new car should read near
+      # zero km - thousands on the clock means it's been driven (demo/loaner)"
+      # directly under our own note calling 12 km delivery distance. One band,
+      # written where the reading is judged, read by every surface.
+      - name: Odometer copy (the explanation fits the reading)
+        run: npm run test:odometer-copy
+      # A dealer who itemises their own price is being transparent, and we
+      # reported "Add-ons & fee audit: NONE LISTED" over an openly-published
+      # $795 Admin. Fee. The fee is INSIDE the advertised price -- the page's
+      # arithmetic proves it -- so it is read into its own field, never into
+      # addOns, which computeReconciliation adds ON TOP.
+      - name: Dealer line items (read the fee; never call it money added on top)
+        run: npm run test:dealer-line-items
+      # The dealer's RATING must not wait on the review HIGHLIGHTS. Three serial
+      # hops behind a cold start blew the caller's 12s abort, and an established
+      # Edmonton dealer's report read "Dealer reputation: NOT CHECKED". The
+      # rating is in hand after hop two; only the highlights need Claude. This
+      # pins the budget arithmetic so the worst case keeps real headroom.
+      - name: Reputation budget (an optional hop cannot take down the rating)
+        run: npm run test:reputation-budget
+      # The manufacturer publishes what sits on top of MSRP -- freight, the A/C
+      # excise, the regulator fee, the tire levy, factory accessories and its own
+      # dealer fee. We fetch that payload three times per brand for MSRP and used
+      # to discard every fee line. Without it a dealer's bundled "Fees &
+      # Accessories" row is unattributable; with it, it decomposes to the cent.
+      # A stack that does not reconcile against the manufacturer's own SUBTOTAL
+      # is REFUSED, because an unproven decomposition is what becomes a false
+      # accusation.
+      - name: Manufacturer fee stack (reconciles to the cent, or is refused)
+        run: npm run test:fee-stack
+      # A forwarded report must not say something different from the original.
+      # The share link renders from a compact projection, not from the signed
+      # payload its own banner verifies, and that projection had drifted: VIN,
+      # odometer, market value and capture provenance were dropped outright,
+      # and two omissions INVERTED a safety rule -- an unconfirmed recall match
+      # forwarded as confirmed, and a 9-recall report forwarded showing 6.
+      - name: Share round trip (a forwarded report never says something else)
+        run: npm run test:share-round-trip
       # The report-email endpoint is unauthenticated: its ONLY proof that a real
       # scan happened is the ECDSA signature gate. A regression there reopens an
       # open mail relay on our own DKIM-signed domain, so it blocks like a
@@ -102,6 +165,13 @@ jobs:
         run: npm run test:flywheel
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
+
+      # Every regulator citation a report line prints must be backed by a dated
+      # capture in docs/, never by our memory of the source. Added with the
+      # "Insurance before you sign" line, which names an Alberta statute
+      # section, a regulation and a bulletin inside a signed report.
+      - name: Source citations are backed by a dated capture
+        run: npm run check:citations
       # The powertrain panel reports COVERAGE of a skewed 36% subset, so any
       # part-to-whole geometry lets a reader turn it into a market share. It also
       # pins the class prefix: the bar was once <span class="track">, which
@@ -160,6 +230,19 @@ jobs:
       # gets swallowed as plain used; a certified badge never upgrades a new car.
       - name: Sale-condition granularity (new/demo/certified/used)
         run: npm run test:condition
+      # What that granularity is FOR. An MSRP is only this car's sticker if the
+      # car is still new, and analyze-listing-url had three branches writing
+      # msrpBasis with the used-vehicle guard hand-copied into two of them and
+      # missing from the third -- the branch that runs whenever the dealer's own
+      # page states an MSRP. A used listing came back basis "exact" and the
+      # report told the buyer a years-old vehicle was thousands "under MSRP":
+      # a bargain we invented, in the dealer's favour (Advantage Ford, a used
+      # GMC Acadia, 2026-08-31). No gate tied report content to sale condition,
+      # and the one test of the rule re-implemented it as a local copy, so it
+      # asserted against its own stale duplicate and reported green on any code.
+      # This one imports _shared/msrp-basis.ts itself.
+      - name: MSRP basis vs sale condition (a used car has no present-tense sticker)
+        run: npm run test:msrp-basis
       - name: Catalog carry-forward (a refresh must not wipe enrichment)
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
@@ -191,6 +274,22 @@ jobs:
       # order correctly, and thin/no-signal comps fabricate nothing.
       - name: Value-report mileage + tiers math
         run: npm run test:value-math
+      # test:value-math is NOT on main yet: its script and the marketvalue helpers
+      # it imports (mileageAdjustedValue, valueTiers, pickNamedComps) live on
+      # feat/value-report-collette. The step reached main inside ad477ed without
+      # them and turned every main run red from 2026-09-01. It returns with that
+      # branch -- see check-scheduled-jobs for the rule that a step must name a
+      # script that exists.
+      # The band the value report is built ON. computeBand decides whether a
+      # comparable set is dense and clean enough to produce a number at all --
+      # the comp floor, the salvage-cheap/typo-high trim, the mileage and trim
+      # windows. It had a package.json script from the day it was written and
+      # was never named in ANY workflow, so the used-car band math has been
+      # shipping unguarded while 60+ gates around it ran on every push. Exactly
+      # the shape of the update-statcan-zev job that sat invisible for 46 days:
+      # a check nothing runs cannot go red, so it always looks fine.
+      - name: Used-value band math (comp floor, outlier trim, km/trim windows)
+        run: npm run test:market-value
       # Standing-crawl robots.txt guardrail: locks the parser + longest-match
       # Allow/Disallow + crawl-delay so a future edit can't start ignoring a
       # dealer that asked not to be crawled (legal brief Q17 guardrail).
@@ -214,6 +313,8 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      - name: Report lines (other listings read; if you do nothing) + page-default reader
+        run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
         run: npm run test:jsonld-vehicle
       # Go Auto is 70+ dealerships across AB and BC behind ONE endpoint, and
@@ -243,6 +344,37 @@ jobs:
       # keeps a tall page both readable and inside the limit.
       - name: Vision tiling geometry (uploaded screenshots stay readable and in-budget)
         run: npm run test:vision-tiling
+      # "scrapfly only took screnshoot half the page" (Vic, 2026-08-27). The
+      # sealed capture is asked for as a FULL page and then thrown away when it
+      # ran past a cap nobody had measured against a real downstream limit --
+      # the report shipped a photo of the TOP of the listing instead. The rule
+      # is that the capture is always the whole page, so this pins the derived
+      # cap, the narrower-and-still-whole retry that replaces the crop, and the
+      # fact that no surface claims "full-page" from a field it cannot back.
+      - name: Whole-page capture (a too-large page is re-shot whole, never cropped)
+        run: npm run test:capture-whole-page
+      # A real Advantage Ford VDP was refused as an inventory grid because it
+      # states six VINs: the GMC Acadia it is about, plus five neighbours in a
+      # similar-vehicles rail. How many vehicles a page MENTIONS is not how
+      # many it is ABOUT, so the page's own declaration decides -- and the
+      # report is pinned to the vehicle it declares.
+      - name: Single-vehicle page (a VDP with a similar-vehicles rail is not a grid)
+        run: npm run test:multi-vehicle
+      # subject_mismatch shipped server-side with no client branch, and the
+      # 422 handler would have thrown on the already-read body rather than
+      # showing the buyer the message written for them. Mechanical from now on.
+      - name: Error codes reach the buyer (every server refusal has a client branch)
+        run: npm run check:error-codes
+      - name: Key-health probes hit the endpoints the product calls
+        run: npm run check:key-health-endpoints
+      # 28% of Alberta's 1,639 dealer hosts refuse a datacenter IP. The
+      # catalogue remembers which, so a scan stops paying to rediscover it --
+      # advisory only, so a wrong or stale verdict costs one attempt, never
+      # the scan.
+      - name: Dealer catalogue (which way to fetch a host, learned not guessed)
+        run: npm run test:dealer-catalog
+      - name: Fee ladder (a ladder is only claimed when the arithmetic closes)
+        run: npm run test:fee-ladder
       # The IONIQ 9 defamation, second occurrence. The 2026-08-13 fix landed on
       # the LISTING path only; a dealer red-team found the identical accusation
       # still live on the UPLOAD path, which carried its own unguarded copy and

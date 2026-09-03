@@ -21,6 +21,11 @@ function num(x: unknown): number | null {
   const v = Number(x);
   return Number.isFinite(v) ? v : null;
 }
+// Null-preserving: num(null) is 0, which would seal a figure the page never
+// showed. Used for every nullable number in the v6 fields.
+function nn(x: unknown): number | null {
+  return x == null ? null : num(x);
+}
 
 // Canonical, fixed-order projection of ONLY what the report shows. Mirrors the
 // client's canonicalReport(). This exact string is hashed AND signed.
@@ -39,7 +44,25 @@ export function canonicalReport(a: any): any {
     // "Call for pricing" -> priceWithoutCustomFees). It belongs INSIDE the
     // signed canonical because it is a material claim about the listing, and
     // /verify must be able to show it as sealed rather than as a re-assertion.
-    v: 5,
+    // v6: `mc` (other listings read: how many, how many advertise below this
+    // one, from how many dealers, read when) and `dflt` (the page's own
+    // pre-selected payment scenario: term, frequency, rate, down payment, and
+    // the page data it was read from). Both are claims about the listing that
+    // the server computed from its own reads, so they are sealed like fcx/gate.
+    // v7 (2026-09-02): the market comparison's BASIS rides with it (nr/nd/yf/yt/
+    // ts/tl/pt/kl/kh/cd/d/nk/mk/md/pv/from/to/rs) and, unlike every bump before
+    // it, the marketValue projection is NOT additive: a missing mileage now
+    // seals as null (was 0) and a not-enough set seals as an object (was null).
+    // A report sealed under v6 and re-verified from its body after this deploy
+    // will not hash the same -- fail-closed by design; the cache moved with it.
+    // v8 (2026-09-02): `oy` added (what older model years ask today). Additive.
+    // v9 (2026-09-03): no shape change; marks reports issued with the
+    // "Insurance before you sign" line so /verify can withhold it from older
+    // reports whose PDF does not carry that section. Mirrors src/App.jsx.
+    // v10 (2026-09-03): no shape change; marks reports issued with the
+    // "Your premium after this purchase" line, so /verify withholds it from a
+    // report whose own PDF predates it. Mirrors src/App.jsx.
+    v: 10,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -49,7 +72,10 @@ export function canonicalReport(a: any): any {
     addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,
     reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
-    marketValue: a.marketValue && a.marketValue.average != null ? { avg: num(a.marketValue.average), below: num(a.marketValue.below), above: num(a.marketValue.above), lo: num(a.marketValue.low), hi: num(a.marketValue.high), mileage: num(a.marketValue.mileage), source: a.marketValue.source || null, n: num(a.marketValue.comps), as: a.marketValue.asOf || null } : null,
+    // v6 (2026-09-02): the comparison's BASIS rides with it (year window, trim
+    // scope, powertrain, mileage window, condition, dealers) and an insufficient
+    // set is sealed as such (ins/nr/nd) so /verify says "not enough" too.
+    marketValue: a.marketValue ? { avg: nn(a.marketValue.average), below: nn(a.marketValue.below), above: nn(a.marketValue.above), lo: nn(a.marketValue.low), hi: nn(a.marketValue.high), mileage: nn(a.marketValue.mileage), source: a.marketValue.source || null, n: nn(a.marketValue.comps), as: a.marketValue.asOf || null, ins: !!a.marketValue.insufficient, nr: nn(a.marketValue.nRead), nd: nn(a.marketValue.need), yf: nn(a.marketValue.yearFrom), yt: nn(a.marketValue.yearTo), ts: a.marketValue.trimScope || null, tl: a.marketValue.trimLabel || null, pt: a.marketValue.powertrain || null, kl: nn(a.marketValue.kmLow), kh: nn(a.marketValue.kmHigh), cd: a.marketValue.condition || null, d: nn(a.marketValue.dealers), nk: nn(a.marketValue.nKept), mk: a.marketValue.make || null, md: a.marketValue.model || null, pv: a.marketValue.province || null, from: a.marketValue.seenMin || null, to: a.marketValue.seenMax || null, rs: a.marketValue.reason || null } : null,
     summary: a.summary || null,
     // #14 photo proof lock: the listing screenshot's SHA-256 rides INSIDE the
     // signed canonical -- alter the image and the seal breaks.
@@ -72,6 +98,14 @@ export function canonicalReport(a: any): any {
     // /verify for any signed report. Same defect the v2 bump was fixing, two
     // fields further down. Copied verbatim from the client so the shapes match.
     fcx: a.financeContingent?.contingent ? { r: a.financeContingent.reasons || [] } : null,
+    // nn(): a missing figure stays null (num(null) would seal a $0 down payment
+    // or a 0% rate the page never showed). Every field the sentence depends on
+    // rides here, so /verify renders the same sentence as the report.
+    mc: a.marketCount ? { st: a.marketCount.state || null, sc: a.marketCount.scope || null, n: nn(a.marketCount.n), b: nn(a.marketCount.below), s: nn(a.marketCount.same), d: nn(a.marketCount.dealers), from: a.marketCount.seenMin || null, to: a.marketCount.seenMax || null, pv: a.marketCount.province || null, x: !!a.marketCount.subjectExcluded, p: nn(a.marketCount.price), tl: a.marketCount.trimLabel || null, pt: a.marketCount.powertrain || null, mn: nn(a.marketCount.modelN), mb: nn(a.marketCount.modelBelow), rs: a.marketCount.reason || null, w: nn(a.marketCount.windowDays), as: a.marketCount.asOf || null, tr: !!a.marketCount.truncated, up: nn(a.marketCount.unpriced) } : null,
+    dflt: a.pageDefault ? { st: a.pageDefault.state || null, t: nn(a.pageDefault.termMonths), f: a.pageDefault.paymentFrequency || null, a: nn(a.pageDefault.apr), d: nn(a.pageDefault.downPayment), p: nn(a.pageDefault.paymentAmount), src: a.pageDefault.source || null, at: a.pageDefault.readAt || null, pm: a.pageDefault.purchaseMethod || null, rs: a.pageDefault.reason || null, q: a.pageDefault.qualifier || null, cob: nn(a.pageDefault.costOfBorrowing) } : null,
+    // v8 (2026-09-02): `oy` -- what older model years ask today (the ladder's
+    // basis and every rung), sealed like mc/dflt/marketValue. Additive.
+    oy: a.olderYears ? { st: a.olderYears.state || null, rs: a.olderYears.reason || null, sy: nn(a.olderYears.subjectYear), mk: a.olderYears.make || null, md: a.olderYears.model || null, pv: a.olderYears.province || null, cd: a.olderYears.condition || null, sc: a.olderYears.scope || null, tl: a.olderYears.trimLabel || null, pt: a.olderYears.powertrain || null, nr: nn(a.olderYears.nRead), nd: nn(a.olderYears.need), as: a.olderYears.asOf || null, from: a.olderYears.seenMin || null, to: a.olderYears.seenMax || null, r: (a.olderYears.rungs || []).map((x: any) => ({ y: nn(x.year), n: nn(x.n), rd: nn(x.nRead), m: nn(x.median), lo: nn(x.low), hi: nn(x.high), kn: nn(x.kmKnown), kl: nn(x.kmLow), kh: nn(x.kmHigh), d: nn(x.dealers), from: x.seenMin || null, to: x.seenMax || null })), ms: (a.olderYears.missing || []).map((x: any) => ({ y: nn(x.year), rd: nn(x.nRead), k: nn(x.nKept) })) } : null,
     source: (a.sourceUrl || a.capturedAt) ? { url: a.sourceUrl || null, capturedAt: a.capturedAt || null } : null,
     issuedAt: a.issuedAt || null,
   };

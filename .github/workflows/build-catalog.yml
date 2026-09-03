@@ -1,0 +1,52 @@
+# Build the Alberta dealer-website CATALOGUE from AMVIC's licensee roster.
+#
+# Runs from the Actions tab so the service-role key stays a repo secret and
+# never lands on a laptop — the same reason discover-feeds.yml exists.
+#
+# THIS TOUCHES NO DEALER'S SERVER. Every host comes out of amvic_licensees, a
+# table we already hold, and rows land with platform 'unknown' and active
+# FALSE. crawl-alberta-inventory selects only active rows on a crawlable
+# platform, so nothing here becomes a crawl target. Cataloguing a host is not
+# crawling it, and the standing-crawl question stays where it is.
+#
+# Default is write=false, which reads, reconciles and prints the plan without
+# writing a row — always safe to press.
+#
+# Cadence: manual. AMVIC's roster moves slowly, and the catalogue's live half
+# (which hosts refuse a plain fetch, which platform answered) is filled in by
+# real scans rather than by this job.
+name: Build dealer catalogue
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: "Insert the missing hosts (leave off to just see the plan)"
+        type: boolean
+        default: false
+      limit:
+        description: "Insert only the first N new hosts (blank = all)"
+        type: string
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Build catalogue
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.limit }}" ]; then ARGS="$ARGS --limit ${{ inputs.limit }}"; fi
+          if [ "${{ inputs.write }}" = "true" ]; then ARGS="$ARGS --write"; fi
+          echo "Running: node --experimental-strip-types scripts/build-dealer-catalog.mjs $ARGS"
+          node --experimental-strip-types scripts/build-dealer-catalog.mjs $ARGS

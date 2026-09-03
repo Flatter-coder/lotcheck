@@ -1,0 +1,30 @@
+# What share of AMVIC's roster actually SELLS vehicles?
+#
+# Reads amvic_licensees.activities -- a column we have held since 20260810 and
+# never once used -- and reports how many of the catalogued Alberta hosts belong
+# to a business a buyer could paste a listing from, versus repair shops, tire
+# shops, parts suppliers and rental operators that happen to hold a licence.
+#
+# READ ONLY. It writes nothing, touches no dealer's server, and runs from the
+# Actions tab only so the service-role key stays a repo secret.
+name: AMVIC activities breakdown
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/amvic-activities.mjs

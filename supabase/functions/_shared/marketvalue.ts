@@ -22,6 +22,11 @@
 // (price-verification-gate / make-it-dispute-proof).
 // ============================================================================
 
+// The like-for-like pool chooser and the powertrain wall are shared with the
+// count line (market-count.js), so the two cards never disagree on one report.
+import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP } from "./market-count.js";
+import { powertrainCompatible } from "./model-identity.js";
+
 export interface MarketValue {
   average: number | null;     // the median asking price — the headline number
   below: number | null;       // 25th percentile (band, lower)
@@ -34,6 +39,28 @@ export interface MarketValue {
   asOf?: string | null;       // capture date of the freshest comp (dated proof)
   confidence?: "high" | "low" | null;
   cpoPremium?: CpoPremium | null;  // set only for a CERTIFIED subject with enough non-certified comps
+  // BASIS of the comparison set (2026-09-02). A number with no basis is what
+  // "$9,908 above the local middle value" was: the reader could not tell what
+  // was compared to what. Every field here is printed by marketCompareLine.
+  insufficient?: boolean;         // true = fewer than `need` like-for-like rows; average is null
+  nRead?: number | null;          // like-for-like rows found (printed when insufficient)
+  need?: number | null;           // the floor
+  yearFrom?: number | null;       // model-year window actually used
+  yearTo?: number | null;
+  trimScope?: "trim" | "trim_family" | "model" | null;
+  trimLabel?: string | null;      // the subject's trim as written, when scope is trim/trim_family
+  powertrain?: string | null;     // "Hybrid" / "Plug-in Hybrid" / "EV" when the trim carries it
+  kmLow?: number | null;          // mileage window applied (used subjects with a known odometer)
+  kmHigh?: number | null;
+  condition?: string | null;      // "used" | "new"
+  dealers?: number | null;        // distinct dealers behind the set (null when rows carry none)
+  nKept?: number | null;          // rows left after the price-outlier trim (printed when it thinned the set)
+  seenMin?: string | null;        // read dates of the rows behind the figures (last_seen_on, oldest / newest)
+  seenMax?: string | null;
+  make?: string | null;           // the subject's make and model, sealed so /verify can name the set
+  model?: string | null;
+  province?: string | null;       // the province the rows were read in
+  reason?: string | null;         // why no comparison is made (e.g. "basis_missing", set by invariants)
 }
 
 // The CPO "fee" is a market PREMIUM, not a line item: what a certified car costs
@@ -55,6 +82,8 @@ export interface MarketCtx {
   trim?: string | null;
   condition?: string | null;     // 'used' | 'new' — the lotcheck provider needs it
   province?: string | null;      // crawl coverage is per-province; 'AB' today
+  today?: string | null;         // the caller's local date (Alberta), so both market cards share one 30-day window
+  fuelType?: string | null;      // the page's own fuel-type declaration, read by the powertrain wall
   postalOrZip?: string | null;
   country?: "CA" | "US" | null;
   saleCondition?: string | null; // finer: 'certified' triggers the CPO premium
@@ -106,6 +135,13 @@ export function median(xs: number[]): number { const s = [...xs].sort((a, b) => 
 export function percentile(xs: number[], p: number): number { const s = [...xs].sort((a, b) => a - b); const i = Math.min(s.length - 1, Math.max(0, Math.round((p / 100) * (s.length - 1)))); return s[i]; }
 
 async function marketcheckValue(vin: string, mileage: number | null, ctx: MarketCtx): Promise<MarketValue | null> {
+  // Inert (2026-09-02): a vendor whose customers are dealers is not allowed as
+  // a data backbone (vendor policy), and this adapter cannot say what its
+  // figure is of -- no model-year window, trim scope, mileage window, read
+  // dates or province -- so MARKET_VALUE_HAS_BASIS would demote every result.
+  // Kept as a name only; it returns nothing.
+  void vin; void mileage; void ctx;
+  if (true) return null;
   const key = env("MARKETCHECK_API_KEY");
   if (!key || !vin) return null;
   if (!ctx.make || !ctx.model) return null; // need ymm to build comps
@@ -170,6 +206,7 @@ export interface Band {
   trimMatches: number;    // how many of the kept comps share the subject's trim
   asOf: string | null;    // most recent last_seen_on across the kept comps
   insufficient?: boolean; // true = below the comp floor, DO NOT show a number
+  rows?: CompRow[];       // the kept comps themselves: dealers, years and read dates are taken from THESE
 }
 
 export interface BandOpts { odometerKm?: number | null; trim?: string | null; condition?: string | null; kmBandPct?: number; minComps?: number; lowerMult?: number; upperMult?: number; }
@@ -180,7 +217,7 @@ export function computeBand(rows: CompRow[], opts: BandOpts = {}): Band {
   const kmBandPct = opts.kmBandPct ?? 0.30;   // used cars: comps within +/-30% mileage
   const lowerMult = opts.lowerMult ?? 0.4;    // drop listings below 0.4x the raw median
   const upperMult = opts.upperMult ?? 2.0;    // and above 2.0x — junk/bundle/typo guard
-  const empty: Band = { n: 0, median: 0, p25: 0, p75: 0, low: 0, high: 0, kmBasis: false, trimBasis: false, trimMatches: 0, asOf: null, insufficient: true };
+  const empty: Band = { n: 0, median: 0, p25: 0, p75: 0, low: 0, high: 0, kmBasis: false, trimBasis: false, trimMatches: 0, asOf: null, insufficient: true, rows: [] };
 
   const priced = (rows || []).filter((r) => r && Number.isFinite(Number(r.price)) && Number(r.price) > 0);
   if (!priced.length) return empty;
@@ -219,10 +256,13 @@ export function computeBand(rows: CompRow[], opts: BandOpts = {}): Band {
 
   // Median-relative outlier trim, then recompute the band on what survives.
   const m0 = median(prices0);
-  const kept = prices0.filter((p) => p >= m0 * lowerMult && p <= m0 * upperMult);
-  if (kept.length < minComps) return { ...empty, n: kept.length, kmBasis, trimBasis, trimMatches, asOf };
+  const inRange = (p: number) => p >= m0 * lowerMult && p <= m0 * upperMult;
+  const kept = prices0.filter(inRange);
+  const keptRows = selected.filter((r) => inRange(Number(r.price)));
+  if (kept.length < minComps) return { ...empty, n: kept.length, kmBasis, trimBasis, trimMatches, asOf, rows: keptRows };
 
   return {
+    rows: keptRows,
     n: kept.length,
     median: median(kept),
     p25: percentile(kept, 25),
@@ -307,24 +347,78 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
         p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
         p_condition: String(ctx.condition), p_exclude_vin: vin || null,
         p_province: prov,
-        // +/-2 model years, not +/-1. A 2020-2024 window for a 2022 car is still
-        // honest comparables (usually the same generation), and it roughly
-        // doubles how many used cars clear the comp floor -- measured live against
-        // the crawl: CX-5 4->7, Corolla 2->5, Rogue 8->31. The mileage band,
-        // outlier trim and median still guard quality within the wider pool.
-        p_year_span: 2,
+        // +/-1 model year: likeForLikePool tries the subject's year, then one
+        // either side, and nothing wider is like-for-like -- rows two years out
+        // were fetched and discarded.
+        p_year_span: 1,
       }),
     });
     if (!res.ok) { console.warn("lotcheck market_comps: HTTP", res.status); return null; }
     const rows = await res.json();
-    const band = computeBand(Array.isArray(rows) ? (rows as CompRow[]) : [], {
-      odometerKm: mileage, trim: ctx.trim ?? null, condition: String(ctx.condition),
+    const all = Array.isArray(rows) ? (rows as any[]) : [];
+    // LIKE-FOR-LIKE FIRST (market-count.js likeForLikePool): same powertrain,
+    // same model year (then +/-1), a mileage window for a used subject, then the
+    // same trim / trim family / all trims -- each labelled. The RPC's +/-2-year
+    // pool stays the candidate set; this decides what is honest to compare.
+    // The same clock as the count line (Alberta), passed in by the caller so
+    // the two cards on one report share one 30-day window.
+    const today = ctx.today || todayLocal();
+    const pool = likeForLikePool(all, {
+      model: ctx.model, trim: ctx.trim ?? null, year: ctx.year, condition: String(ctx.condition),
+      odometerKm: mileage, minRows: COMP_FLOOR, today, powertrainHint: fuelPowertrainHint(ctx.fuelType),
     });
-    // Coverage gate: too few real comps -> null, never a fabricated value.
-    if (band.insufficient || band.n < COMP_FLOOR) {
-      console.warn(`lotcheck: thin coverage (${band.n} < ${COMP_FLOOR}) — suppressing value`);
-      return null;
+    const dealersOf = (set: any[]): number | null => {
+      const named = set.filter((r) => r.dealerName || r.city);
+      return named.length ? new Set(named.map((r) => String(r.dealerName || r.city).trim().toLowerCase().replace(/\s+/g, " "))).size : null;
+    };
+    const asOfOf = (set: any[]): string | null => set.reduce<string | null>((mx, r) => (r.asOf && (!mx || r.asOf > mx) ? r.asOf : mx), null);
+    const seenMinOf = (set: any[]): string | null => set.reduce<string | null>((mn, r) => (r.asOf && (!mn || r.asOf < mn) ? r.asOf : mn), null);
+    const yearsOf = (set: any[]): [number | null, number | null] => {
+      const ys = set.map((r) => Number(r.year)).filter((v) => v > 0);
+      return ys.length ? [Math.min(...ys), Math.max(...ys)] : [null, null];
+    };
+    // Every basis figure comes from the rows that stand behind the sentence --
+    // the like-for-like rows read, or the rows kept after the outlier trim --
+    // never from the wider RPC pool. Reading the pool printed "2 listings at 3
+    // dealers", dated by a hybrid that was never one of the two. An empty set
+    // gets no dealer count and no date.
+    const basisOf = (set: any[]) => ({
+      yearFrom: set.length ? yearsOf(set)[0] : pool.yearFrom, yearTo: set.length ? yearsOf(set)[1] : pool.yearTo,
+      trimScope: pool.scope, trimLabel: pool.trimLabel, powertrain: pool.powertrain,
+      kmLow: pool.kmLow, kmHigh: pool.kmHigh, condition: pool.condition, need: COMP_FLOOR,
+      dealers: set.length ? dealersOf(set) : null, asOf: set.length ? asOfOf(set) : null,
+      seenMin: set.length ? seenMinOf(set) : null, seenMax: set.length ? asOfOf(set) : null,
+      make: String(ctx.make), model: String(ctx.model), province: prov,
+    });
+    const read: any[] = Array.isArray((pool as any).read) ? (pool as any).read : [];
+    if ((pool as any).reason) {
+      // The pool refused before reading anything (no odometer for a used
+      // subject, no model year): sealed with its reason, never as "0 read".
+      return { average: null, below: null, above: null, low: null, high: null, mileage: mileage ?? null,
+        source: "LotCheck market", comps: 0, confidence: "low",
+        insufficient: true, nRead: 0, nKept: null, reason: String((pool as any).reason), ...basisOf([]) } as MarketValue;
     }
+    if (pool.insufficient) {
+      // Not enough like-for-like rows: say so, never a number. The object is
+      // returned (not null) so the card can print how many WERE read.
+      console.warn(`lotcheck: like-for-like too thin (${pool.nRead} < ${COMP_FLOOR}) — no comparison`);
+      return { average: null, below: null, above: null, low: null, high: null, mileage: mileage ?? null,
+        source: "LotCheck market", comps: pool.nRead, confidence: "low",
+        insufficient: true, nRead: pool.nRead, nKept: null, ...basisOf(read) } as MarketValue;
+    }
+    // Trim and mileage are already decided above; computeBand now only trims
+    // price outliers (0.4x-2.0x of the median) and computes the figures.
+    const band = computeBand(pool.rows as CompRow[], { odometerKm: null, trim: null, condition: String(ctx.condition), minComps: COMP_FLOOR });
+    const kept: any[] = Array.isArray(band.rows) ? band.rows : [];
+    if (band.insufficient || band.n < COMP_FLOOR) {
+      // nRead is what was read; nKept is what the price-outlier trim left. The
+      // card prints both, so "6 read, 5 needed, none made" can never appear.
+      console.warn(`lotcheck: thin after outlier trim (${band.n} < ${COMP_FLOOR}) — no comparison`);
+      return { average: null, below: null, above: null, low: null, high: null, mileage: mileage ?? null,
+        source: "LotCheck market", comps: band.n, confidence: "low",
+        insufficient: true, nRead: pool.rows.length, nKept: band.n, ...basisOf(pool.rows) } as MarketValue;
+    }
+    const scopeWord = pool.scope === "trim" ? "same trim" : pool.scope === "trim_family" ? "same trim family" : "all trims";
     const mv: MarketValue = {
       average: band.median,
       below: band.p25,
@@ -332,22 +426,119 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
       low: band.low,
       high: band.high,
       mileage: mileage ?? null,
-      source: `LotCheck market · ${band.trimBasis && band.kmBasis ? "same trim, similar mileage" : band.trimBasis ? "same trim" : band.kmBasis ? "similar mileage" : "all trims"} · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`,
+      source: `LotCheck market · ${scopeWord}${pool.kmLow != null ? ", similar mileage" : ""} · ${band.n} comparable listing${band.n === 1 ? "" : "s"}`,
       comps: band.n,
-      asOf: band.asOf,
       confidence: band.n >= COMP_FLOOR ? "high" : "low",
+      // nRead is the set that was read; comps is what the price-outlier trim
+      // kept. The card names the difference, so the count line's N and this
+      // card's N never disagree without a reason on the page.
+      nRead: pool.rows.length,
+      nKept: band.n,
+      ...basisOf(kept),
     };
     // CPO premium: only for a certified subject, against the NON-certified comps
     // in the same pool. computeCpoPremium is min-comps gated and returns a
     // positive premium only, so this stays null unless it's genuinely backed.
+    // The baseline is the SAME like-for-like set the card describes (powertrain
+    // wall, year window, mileage window, chosen trim scope) -- never the raw
+    // RPC pool, which put hybrids under a gas car's premium.
     if (String(ctx.saleCondition) === "certified" && Number(ctx.asking) > 0) {
-      const prem = computeCpoPremium(Array.isArray(rows) ? (rows as CompRow[]) : [], Number(ctx.asking), { odometerKm: mileage, trim: ctx.trim ?? null, minComps: COMP_FLOOR });
-      if (prem) mv.cpoPremium = prem;
+      const prem = computeCpoPremium(pool.rows as CompRow[], Number(ctx.asking), { odometerKm: null, trim: null, minComps: COMP_FLOOR });
+      if (prem) mv.cpoPremium = { ...prem, basis: `${scopeWord}${pool.kmLow != null ? ", similar mileage" : ""}, same powertrain, ${pool.yearFrom === pool.yearTo ? `model year ${pool.yearFrom}` : `model years ${pool.yearFrom} to ${pool.yearTo}`}` };
     }
     return mv;
   } catch (e) {
     console.warn("lotcheck market value error (suppressing):", (e as Error)?.message);
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OLDER MODEL YEARS -- "What older model years ask today". One RPC for the
+// used listings one to three model years older than the subject, then the
+// pure ladder (market-count.js olderYearsLadder) with the comparison card's
+// own rules. Never null: an unread or thin set comes back with its reason so
+// the card prints why, not a gap. [[report-never-empty]]
+// ---------------------------------------------------------------------------
+export interface OlderYearRung {
+  year: number; n: number; nRead?: number | null; median: number; low: number; high: number;
+  kmKnown?: number | null; kmLow: number | null; kmHigh: number | null; dealers: number | null;
+  seenMin?: string | null; seenMax?: string | null;
+}
+export interface OlderYearMiss { year: number; nRead: number; nKept: number; }
+export interface OlderYears {
+  state: "confirmed" | "insufficient" | "unchecked";
+  reason?: string | null;
+  subjectYear: number | null;
+  make: string | null; model: string | null; province: string | null;
+  condition: "used";
+  scope: "trim" | "trim_family" | "model" | null;
+  trimLabel: string | null; powertrain: string | null;
+  nRead: number; need: number;
+  asOf: string | null; seenMin: string | null; seenMax: string | null;
+  rungs: OlderYearRung[];
+  missing: OlderYearMiss[];   // model years read but not stated, with how many
+  truncated?: boolean;
+}
+const OLDER_YEARS_MAX_RUNGS = 3;
+export async function fetchOlderYears(ctx: MarketCtx & { vin?: string | null }): Promise<OlderYears> {
+  const y = Number(ctx.year);
+  const prov = String(ctx.province || "").toUpperCase();
+  const base: OlderYears = {
+    state: "unchecked", reason: null, subjectYear: y > 0 ? y : null,
+    make: ctx.make ? String(ctx.make) : null, model: ctx.model ? String(ctx.model) : null, province: prov || null,
+    condition: "used", scope: null, trimLabel: null, powertrain: null, nRead: 0, need: COMP_FLOOR,
+    asOf: null, seenMin: null, seenMax: null, rungs: [], missing: [], truncated: false,
+  };
+  if (!(y > 0) || !ctx.make || !ctx.model) return { ...base, reason: "identity_missing" };
+  const cond = String(ctx.condition || "").toLowerCase();
+  if (cond !== "new" && cond !== "used") return { ...base, reason: "condition_unknown" };
+  if (!prov) return { ...base, reason: "province_unknown" };
+  if (!servesComps(prov)) return { ...base, reason: "outside_province" };
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
+  if (!url || !key) return { ...base, reason: "rpc_unavailable" };
+  try {
+    const vin = String(ctx.vin || "").toUpperCase();
+    // Bounded like the count line's own call: an optional card must not spend
+    // the request budget the MSRP point needs.
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 4_000);
+    let res: Response;
+    try {
+      res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
+        method: "POST",
+        headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+        signal: ac.signal,
+        body: JSON.stringify({
+          // Years y-3 .. y-1: centre on y-2 with a span of 1. Condition "used":
+          // an older model year on a lot is a used car.
+          p_year: y - 2, p_make: String(ctx.make), p_model: String(ctx.model),
+          p_condition: "used", p_exclude_vin: /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null,
+          p_province: prov, p_year_span: 1, p_limit: POOL_CAP,
+        }),
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      const timedOut = (e as Error)?.name === "AbortError";
+      console.warn("older years: fn_market_comps", timedOut ? "timed out" : (e as Error)?.message);
+      return { ...base, reason: timedOut ? "timeout" : "rpc_error" };
+    }
+    clearTimeout(timer);
+    if (!res.ok) { console.warn("older years: fn_market_comps HTTP", res.status); return { ...base, reason: "rpc_error" }; }
+    const rows = await res.json();
+    const all = Array.isArray(rows) ? (rows as any[]) : [];
+    const lad = olderYearsLadder(all, {
+      model: ctx.model, trim: ctx.trim ?? null, year: y, minRows: COMP_FLOOR, maxRungs: OLDER_YEARS_MAX_RUNGS,
+      today: ctx.today || todayLocal(), powertrainHint: fuelPowertrainHint(ctx.fuelType),
+      truncated: all.length >= POOL_CAP,
+    });
+    const out: OlderYears = { ...base, ...lad, state: lad.state as OlderYears["state"], reason: lad.reason || null };
+    console.log(`older years: ${out.state}${out.scope ? ` (${out.scope})` : ""} rungs=${out.rungs.map((r) => `${r.year}:${r.n}`).join(",") || "none"} read=${out.nRead}${out.reason ? ` -- ${out.reason}` : ""}`);
+    return out;
+  } catch (e) {
+    console.warn("older years error (suppressing):", (e as Error)?.message);
+    return { ...base, reason: "rpc_error" };
   }
 }
 
@@ -384,8 +575,10 @@ export async function lotcheckValueBand(
       }),
     });
     if (!res.ok) { console.warn("lotcheckValueBand market_comps: HTTP", res.status); return null; }
-    const rows = await res.json();
-    const band = computeBand(Array.isArray(rows) ? (rows as CompRow[]) : [], {
+    const rowsRaw = await res.json();
+    // Powertrain wall (2026-09-02): a hybrid never sits in a gas car's set.
+    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).filter((r: any) => powertrainCompatible(`${ctx.model || ""} ${ctx.trim || ""}`, `${ctx.model || ""} ${r?.trim || ""}`));
+    const band = computeBand(rows as CompRow[], {
       odometerKm: mileage ?? null, trim: ctx.trim ?? null, condition: String(ctx.condition),
     });
     if (band.insufficient || band.n < COMP_FLOOR) {

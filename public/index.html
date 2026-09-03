@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LotCheck — Every quote, verified. | Isometric Lot</title>
-<meta name="description" content="LotCheck protects Canadian used-car buyers. Upload a dealer quote and watch it roll through a 10-point verification lane — verified MSRP, open recalls, hidden fees — then get a verified report.">
+<meta name="description" content="LotCheck protects Canadian used-car buyers. Upload a dealer quote and watch it roll through a 10+ point verification lane — verified MSRP, open recalls, hidden fees — then get a verified report.">
 <meta name="theme-color" content="#FBF5EC" id="themeColorMeta">
 <script>
 (function(){
@@ -570,7 +570,6 @@ footer{padding:34px 0 44px}
       <a class="live" href="/live-price-index"><span class="live-dot" aria-hidden="true"></span>MSRP Price Index</a>
       <a href="/alberta">Alberta Dealers Map</a>
       <a href="/crawl">Used-car market</a>
-      <a href="/live-price-index?view=alerts">MSRP Notifier</a>
       <a href="/verify">Verify</a>
       <details class="nav-more"><summary>More</summary><div class="nav-more-panel">
         <a href="#how">How it works</a>
@@ -596,7 +595,7 @@ footer{padding:34px 0 44px}
     <div class="hero-copy">
       <span class="kicker rv" style="--i:0">LotCheck · quote verification</span>
       <h1 class="rv" style="--i:1">Know the <span class="hl">real story</span> before you buy the car.</h1>
-      <p class="lede rv" style="--i:2">Upload any dealer quote. LotCheck rolls it through a 10-point verification lane — verified MSRP, open recalls, hidden fees, financing math — and hands you a verified report. No guessing, no fabricated scores.</p>
+      <p class="lede rv" style="--i:2">Upload any dealer quote. LotCheck rolls it through a 10+ point verification lane — verified MSRP, open recalls, hidden fees, financing math — and hands you a verified report. No guessing, no fabricated scores.</p>
       <div class="hero-ctas rv" style="--i:3">
         <a class="btn btn-primary" href="/quote-check">
           Analyze my quote
@@ -645,7 +644,7 @@ footer{padding:34px 0 44px}
       <article class="how-card rv" style="--i:1">
         <span class="step" aria-hidden="true">2</span>
         <div class="how-scene" data-vign="1" aria-hidden="true"></div>
-        <h3>10-point verification</h3>
+        <h3>10+ point verification</h3>
         <p>The quote drives the verification lane: MSRP verification, odometer consistency, open recalls, fee audit, rebate eligibility and more — all against real, sourced data.</p>
       </article>
       <article class="how-card rv" style="--i:2">
@@ -678,17 +677,23 @@ footer{padding:34px 0 44px}
       </div>
     </div>
   </div>
+  <!-- These ten must be the ten the report actually delivers, in the same
+       order. They are asserted against _shared/report-points.js by
+       `npm run check:points`. This list used to advertise "Negotiation
+       leverage score" -- the verdict computed FROM the points, never one
+       of them -- while "Financing APR", a point we do deliver, was
+       advertised nowhere. -->
   <ol class="pipe-fallback">
     <li>MSRP verification against manufacturer data</li>
-    <li>Odometer consistency check</li>
     <li>Open-recall lookup (Transport Canada)</li>
     <li>Fee itemization audit</li>
-    <li>EV rebate eligibility</li>
-    <li>VIN pattern validity check</li>
-    <li>Warranty validity</li>
+    <li>Financing APR against the published rate</li>
     <li>Financing math check</li>
+    <li>Odometer consistency check</li>
+    <li>VIN pattern validity check</li>
+    <li>EV rebate eligibility</li>
+    <li>Warranty validity</li>
     <li>Dealer reputation from real reviews</li>
-    <li>Negotiation leverage score</li>
   </ol>
 </section>
 <section class="report" id="report">
@@ -1112,8 +1117,9 @@ document.querySelectorAll("[data-vign]").forEach(function(el){
   el.innerHTML = vignette(parseInt(el.getAttribute("data-vign"),10));
 });
 
-var STN = ["MSRP verified","Odometer check","Open recalls","Fee audit","EV rebate check",
-           "VIN pattern","Warranty validity","Financing math","Dealer reputation","Leverage score"];
+// Same ten, same order, short form. Asserted by `npm run check:points`.
+var STN = ["MSRP verified","Open recalls","Fee audit","Financing APR","Financing math",
+           "Odometer check","VIN pattern","EV rebate check","Warranty validity","Dealer reputation"];
 var GATE0 = 260, GATESTEP = 250;
 function buildPipe(){
   var host = document.getElementById("pipeScene");

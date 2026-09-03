@@ -41,7 +41,6 @@ const SURFACES = [
   "public/statcan-zev-map.html",
   "src/App.jsx",
   "src/DealOrrery.jsx",
-  "src/PlanetAlerts.jsx",
   // SERVER-SIDE COPY IS STILL COPY. The counter-script the buyer reads ALOUD at
   // the dealership is generated in deal.ts, and this gate scanned only the
   // frontend -- which is how "(the FTC CARS Rule in the US; AMVIC/OMVIC in
@@ -52,6 +51,19 @@ const SURFACES = [
   "supabase/functions/_shared/point-state.ts",
   "supabase/functions/_shared/settled-claims.ts",
   "supabase/functions/_shared/reference-financing.ts",
+  // The two count/default lines ("Of N other listings read..." and "If you do
+  // nothing, this page gives you...") are built ONCE here and rendered by every
+  // surface, so this is where their copy lives -- scan it or the sentences the
+  // buyer reads on screen, in the email and in the PDF are all ungated.
+  "supabase/functions/_shared/report-lines.js",
+  // The emailed HTML body and the PDF deck are the artifacts the buyer
+  // FORWARDS TO THE DEALER -- the most adversarially-read copy LotCheck
+  // produces -- and this gate never scanned them. Every rule below (no
+  // accusation language, no "scraping", jurisdiction correctness) applies at
+  // least as hard here as on screen. Added 2026-08-22 after an audit found
+  // tonight's new gated-price sentence landed in this file completely
+  // ungated.
+  "supabase/functions/email-quote-report/index.ts",
 ];
 
 const RULES = [
@@ -125,7 +137,48 @@ const RULES = [
     // computes + returns, no DB writes, so the promise holds there too). Was 3
     // before the 2026-08-26 /value page (Phase 4) added the fourth occurrence;
     // flywheel_capture_enabled is still false, so the promise remains literally true.
-    expected: 4,
+    // 2026-08-27: 5 -> 4. The Book view was retired (Vic: "remove Book tab,
+    // Heatmap, 3D") and it carried one of the five. The CLAIM is unchanged and
+    // is not weakened -- one surface that made it no longer exists.
+    // RE-CONFIRMED before moving the number, as this rule requires:
+    // 20260806_flywheel_capture.sql:22 seeds admin_config
+    // flywheel_capture_enabled = 'false', and no migration anywhere sets it
+    // true (grep across supabase/migrations). The live row is not anon-readable,
+    // which is itself correct -- a buyer-facing key must not be able to read the
+    // switch that governs whether their quote is captured.
+    expected: 4, // was 5 before the Book view was retired. +1 2026-08-22: the emailed PDF's own 'never stored' line, newly in scope when email-quote-report joined SURFACES. Re-confirmed: admin_config.flywheel_capture_enabled is seeded 'false' and NO migration ever sets it true.
+  },
+  {
+    // TWICE NOW a top-of-page photo has shipped described as the whole page --
+    // PR #274 argued about WHICH half we got, PR #342 found we were labelling a
+    // half "Full-page capture of the listing", and #342's own sweep then missed
+    // two more sites (the /verify drop-zone and the email body). A third manual
+    // sweep is not a fix; pinning the count is, because it forces whoever adds
+    // one to re-confirm the claim is gated on evidence rather than assumed.
+    //
+    // THE CONDITION, precisely: this phrase may appear only where
+    // listingShotKind is known to be "fullpage". It is NOT signed
+    // (report-sign.ts seals only the capture's hash) and it does NOT ride in a
+    // share link (encodeReport omits it), so surfaces that cannot read it --
+    // /verify, the emailed HTML, the PDF caption -- must stay neutral and are
+    // deliberately at zero here.
+    id: "full-page-capture-claim-must-be-gated",
+    ruleKey: "ab-no-unfair-practice-in-our-own-claims",
+    kind: "guarded",
+    condition: "true only while every occurrence sits inside a listingShotKind === \"fullpage\" branch",
+    why: "The capture ladder can degrade to a photo of the top of the listing. Calling that the full page is an unbacked claim about our own evidence, printed on the one artifact a buyer hands to a dealer. [[capture-always-whole-page]] [[claims-must-stay-backed]]",
+    patterns: [/full[-\s]page (capture|photo|screenshot)/i],
+    // ── THE INVENTORY, enumerated 2026-08-27 (comments are stripped first) ──
+    //   src/App.jsx:8202   the report card's fullpage arm, guarded on
+    //                      a.listingShotKind === "fullpage". THE claim.
+    //   src/App.jsx:11524  "A full-page screenshot works better than a cropped
+    //                      one" -- upload guidance to the USER about their own
+    //                      photo, not a claim about our capture. In scope on
+    //                      purpose: if the wording ever migrates to describing
+    //                      what WE produce, the count moves and someone looks.
+    //   email-quote-report/index.ts  0  the emailed body and the PDF caption
+    //                      are both neutral, because neither can read the kind.
+    expected: 2,
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a
@@ -137,12 +190,35 @@ const RULES = [
     condition: "true only while tenPoints renders all 10 with backed results and no dead placeholders",
     why: "We advertise a 10-point verification, so ten must run and ten must deliver.",
     patterns: [/\b10[-\s]point\b/i],
-    // 9 in public/index.html (incl. the meta description), 1 each in
-    // alberta.html and live-price-index.html, 5 in App.jsx (4 report surfaces —
-    // scroll, heatmap, sidebar, flipbook, PDF, email — plus the "10-point lane"
-    // link now living in the quote-check nav's "More" menu). The 10-point
-    // verification itself is unchanged: ten run, ten deliver.
-    expected: 16,
+    // ── THE ACTUAL INVENTORY, enumerated 2026-08-27 ──────────────────────────
+    // The note that stood here was WRONG about what it counted, which is worse
+    // than no note: it said the App.jsx hits were "4 report surfaces — scroll,
+    // heatmap, sidebar, flipbook, PDF, email". Not one of them is. All four are
+    // navigation links to /#pipeline. Whoever re-confirmed this rule on the next
+    // count change would have believed four report surfaces had been checked
+    // when none was ever in the count.
+    //
+    //   public/index.html          6  nav link ×2, "10-point pipeline",
+    //                                 the section aria-label, the <h2>, the lede
+    //   public/alberta.html        1  nav link
+    //   public/live-price-index.html 1  nav link
+    //   src/App.jsx                4  nav links only (comments are not counted)
+    //                              ─
+    //                             12
+    //
+    // So this rule polices the ADVERTISEMENT, and only the advertisement.
+    //
+    // ── WHAT THIS RULE CANNOT DO ────────────────────────────────────────────
+    // A regex occurrence count cannot observe an array's length. This rule
+    // therefore stayed green across every commit that grew the on-screen grid
+    // from 10 tiles to 16 — it was counting the CLAIM, never the thing claimed.
+    // The structural assertion lives in `npm run check:points`, which reads the
+    // arrays: App.jsx's ten pushes, tenPoints()'s ten, and the ten named in
+    // public/index.html must be the same ten in the same order, with any extras
+    // rendered under their own heading and never numbered as points.
+    // Keep BOTH: this one catches a NEW use of the claim, that one catches the
+    // claim drifting from the product. See [[ten-point-claim-policy]].
+    expected: 12,
   },
 ];
 
@@ -176,11 +252,21 @@ function lineOf(text, index) {
 let failed = 0;
 const report = [];
 const counts = new Map(RULES.map((r) => [r.id, []]));
+const missing = [];
 
 for (const file of SURFACES) {
   let raw;
   try { raw = readFileSync(file, "utf8"); }
-  catch { report.push(`  ! ${file} — not found, skipped`); continue; }
+  catch {
+    // A surface that cannot be read is NOT a surface that passed. This used to
+    // note-and-continue, so deleting or renaming a file silently dropped it out
+    // of copy-compliance scope while the gate still printed "all rules clean" --
+    // the warn-instead-of-refuse shape. If a surface is genuinely gone, delete
+    // its entry above; that is a deliberate edit, which is the point.
+    report.push(`  ✗ ${file} — listed as a surface but could not be read`);
+    missing.push(file);
+    continue;
+  }
   const text = userFacingText(raw, file);
 
   for (const rule of RULES) {
@@ -222,5 +308,16 @@ for (const rule of RULES.filter((r) => r.kind === "guarded")) {
 
 if (report.length) { console.log("\n── notes ──"); for (const l of report) console.log(l); }
 
-console.log(`\n${failed === 0 ? "✅" : "❌"} copy compliance: ${RULES.length - failed} of ${RULES.length} rules clean`);
-process.exit(failed > 0 ? 1 : 0);
+// A surface this gate could not open is a surface it did not check. Skipping one
+// with a note while still exiting 0 is how a renamed or deleted file silently
+// drops out of copy-compliance scope under a green result. If a surface is
+// genuinely gone, delete its SURFACES entry -- that is a deliberate edit.
+if (missing.length) {
+  console.error(`\n❌ ${missing.length} listed surface(s) could not be read: ${missing.join(", ")}`);
+  console.error("   Delete the SURFACES entry if the file is gone. Do not let it pass unexamined.");
+}
+
+const clean = failed === 0 && missing.length === 0;
+console.log(`\n${clean ? "✅" : "❌"} copy compliance: ${RULES.length - failed} of ${RULES.length} rules clean` +
+  (missing.length ? `, ${missing.length} surface(s) unreadable` : ""));
+process.exit(clean ? 0 : 1);

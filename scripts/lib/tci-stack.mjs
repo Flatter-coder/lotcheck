@@ -17,12 +17,17 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
-import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp } from "./tci-msrp.mjs";
+import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp, baseModelCode } from "./tci-msrp.mjs";
+import { parseFeeStack, feeStackTotal, allInBreakdown } from "./tci-fees.mjs";
 import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const PROVINCE = "ON"; // MSRP is national; ON is canonical for rate lookups
+// The fee stack is PROVINCE-scoped, so one has to be chosen to store. Alberta,
+// because that is the market these reports serve; every row stamps it in
+// attrs.province so a consumer can never read it as a national figure.
+const ALL_IN_PROVINCE = "AB";
 
 const FUEL_MAP = {
   "Gas": "Gas", "Hybrid": "Hybrid", "Hybrid Available": "Hybrid",
@@ -206,6 +211,39 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
       if (!Object.keys(pricesByProv).length) continue;
       hitYear = year;
 
+      // ── THE MANUFACTURER'S OWN FEE STACK ────────────────────────────────
+      //
+      // from_prices itemises what sits on top of MSRP -- freight, the A/C
+      // excise, the regulator fee, the tire levy, factory accessories, and the
+      // brand's own published dealer fee. We have been fetching this payload
+      // three times per brand for the MSRP derivation and throwing every one of
+      // those lines away.
+      //
+      // Without them a dealer's bundled "Fees & Accessories $3,330" row is
+      // unattributable, and LotCheck was attributing it to the DEALER -- see
+      // _shared/fee-caption.ts. With them it decomposes to the cent: on the
+      // 2026 Lexus NX 350h, $2,335 of that row is freight and government
+      // charges and $995 is Lexus's own published fee, at Lexus's own ceiling.
+      //
+      // Captured per PROVINCE because DRF and the regulator lines differ by
+      // province (Lexus AB 995 / ON 999 / QC 795), and the base model code
+      // itself differs by province on at least two Toyota series -- so it is
+      // resolved per province rather than from provinces[0].
+      const feeByProv = {};
+      for (const p of Object.keys(fromPricesByProv)) {
+        const baseCode = baseModelCode(fromPricesByProv[p], s.seriesCode, year);
+        if (!baseCode) continue;
+        const st = parseFeeStack(fromPricesByProv[p], s.seriesCode, year, baseCode);
+        if (st.ok) feeByProv[p] = st;
+        else if (st.refusal) {
+          // A stack that does not reconcile against the manufacturer's own
+          // SUBTOTAL is not stored. An unproven decomposition is exactly the
+          // input that becomes a false accusation.
+          skipped.refused++;
+          refusals.push(`${s.name} ${p} fee stack: ${st.refusal}`);
+        }
+      }
+
       // MSRP comes from the published from_prices line for the base trim, and
       // from a self-verifying difference for every other trim. See tci-msrp.mjs.
       const { msrp: derived, refused } = deriveSeriesMsrp({
@@ -228,13 +266,35 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           const msrp = derived.get(`${modelCode}/${pk.packageCode}`);
           if (!Number.isFinite(msrp)) continue;   // already counted in refusals
           const info = model.packages.get(pk.packageCode);
-          // Base package -> the grade alone. Non-base -> its published name; a
-          // missing name is refused rather than invented, because a wrong trim
-          // name is a wrong MSRP for whoever matches a listing against it.
-          let trim = String(model.grade).trim();
-          if (info && !info.isBase) {
-            if (!info.name) { skipped.refused++; refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no published name`); continue; }
-            trim = String(info.name).trim();
+          // EVERY package is named by its PUBLISHED name. The base package used
+          // to be named by `model.grade` instead -- the manufacturer's internal
+          // series grade, which is not what the car is called on the lot.
+          //
+          // Caught live 2026-08-27 on the 2026 Lexus NX 350h (NXH/2026-bkcezc):
+          // grade = "LUXURY", while the BASE package P is `isBase: true, name:
+          // "Premium"`. So the NX 350h **Premium** (55,870 + 2,155 = $58,025)
+          // was stored under the trim name "LUXURY", and the genuinely
+          // different Luxury package L (+6,295, $62,165) sat beside it. A
+          // listing that says "Premium" could therefore never match its own
+          // row -- and worse, "premium" is a KEY_TOKEN, so every correctly
+          // named row took the -5 grade-conflict penalty and the one row with
+          // no recognised grade word won by default. Measured: the real
+          // listing resolved to trim "Executive" at $70,878 against a car
+          // asking $62,005 -- $12,853 above its true $58,025 MSRP.
+          //
+          // `grade` remains the fallback for a package with no published name,
+          // which is the only case it was ever right for. A non-base package
+          // with no name is still refused rather than invented.
+          let trim = "";
+          const published = info && info.name ? String(info.name).trim() : "";
+          if (published && !looksLikeInternalCode(published)) {
+            trim = published;
+          } else if (info && !info.isBase) {
+            skipped.refused++;
+            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no usable published name`);
+            continue;
+          } else {
+            trim = String(model.grade).trim();
           }
           trim = trim.trim();
           if (looksLikeInternalCode(trim)) {
@@ -242,7 +302,36 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
             refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: grade "${trim}" is an internal code, not a Canadian trim name`);
             continue;
           }
-          msrpRows.push({ year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+          // The all-in figure a dealer's advertised price is actually
+          // comparable to. AMVIC (and ON/BC/QC) require the advertised price to
+          // be all-in, so an ex-freight MSRP is the wrong thing to compare a
+          // sticker against -- that mismatch is what produced the $11,173
+          // phantom markup. [[amvic-all-in-pricing]]
+          //
+          // Alberta is the stack we store, because that is the market these
+          // reports serve; the province is stamped in attrs so a consumer can
+          // never mistake it for a national figure.
+          //
+          // HONEST ABOUT THE BASIS: from_prices publishes ONE model code per
+          // series -- the base configuration -- so the stack is per NAMEPLATE.
+          // Freight and the regulator lines do not vary by trim, but the tire
+          // levy can, so `all_in_basis` records that this is the series' base
+          // stack applied to this trim's MSRP rather than a per-trim figure.
+          const feeStack = feeByProv[ALL_IN_PROVINCE] || null;
+          const feeTotal = feeStack ? feeStackTotal(feeStack) : null;
+          const breakdown = feeStack ? allInBreakdown(feeStack) : null;
+          msrpRows.push({
+            year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel,
+            fetched_at: new Date().toISOString(),
+            ...(feeTotal != null ? { all_in_price: Math.round((msrp + feeTotal) * 100) / 100 } : {}),
+            ...(breakdown ? { attrs: {
+              province: ALL_IN_PROVINCE,
+              all_in_breakdown: breakdown,
+              all_in_basis: "series base configuration; freight and levies do not vary by trim",
+              captured_from: `${host}/bin/api/price_calculation/from_prices.${brand}.${ALL_IN_PROVINCE}.json (${s.seriesCode}/${year}/${feeStack.modelCode})`,
+              captured_on: today,
+            } } : {}),
+          });
         }
       }
 
@@ -269,7 +358,13 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   // A grade can appear under two modelCodes (same year/model/trim) — collapse to
   // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
   return {
-    msrpRows: dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp"),
+    // lower(trim): the key was CASE-SENSITIVE, so Lexus's AEM fragment
+    // returning "LUXURY" for one package and "Luxury" for another created TWO
+    // catalog rows for one trim at two different prices. Confirmed live
+    // 2026-08-27: a 2026 Lexus NX card printed six rows of "Luxury" at six
+    // prices. The database UNIQUE constraint is case-sensitive too, so it
+    // could not stop it either -- this is the write-side half of the fix.
+    msrpRows: dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${String(r.trim ?? "").trim().toLowerCase()}`, "msrp"),
     financeRows: dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr"),
     leaseRows,
   };
@@ -296,7 +391,30 @@ export async function run(config) {
   // comes back all one non-gas fuel, so the next mis-tag is loud, not silent.
   const { rows: msrpRows, replaced } = applyTciOverrides(rawMsrp, config.makeName);
   for (const r of replaced) console.log(`  override: ${r.key} — dropped ${r.dropped} scraped row(s), inserted ${r.inserted} verified`);
-  for (const s of flagAllOnePowertrain(msrpRows)) console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
+  // A PROVEN MIS-TAG IS NOW REFUSED, NOT JUST LOGGED. This was a console.warn,
+  // so a whole gasoline line tagged "Hybrid" shipped to msrp_catalog anyway --
+  // and every downstream consumer then offered a hybrid buyer the GAS ladder
+  // (or vice versa), which is the exact false anchor [[powertrain-identity-rule]]
+  // forbids. Confirmed live 2026-08-27: all six gasoline Lexus 'NX' rows carried
+  // fuel_type 'Hybrid'.
+  //
+  // "Proven" is deliberately strict: the same make/year must ALSO list a sibling
+  // nameplate extending this one with a powertrain marker ("NX" alongside "NX
+  // Hybrid"), which makes the bare nameplate the gas line by construction. A
+  // genuinely single-powertrain line (Sienna is hybrid-only) is never refused --
+  // it still warns, so a real new mis-tag stays loud. Missing beats wrong: a
+  // dropped model shows as "no catalog figure", which every surface already
+  // handles honestly; a mis-tagged one produces a confident wrong number.
+  const powertrainFlags = flagAllOnePowertrain(msrpRows);
+  const refusedKeys = new Set(powertrainFlags.filter((s) => s.proven).map((s) => s.key));
+  for (const s of powertrainFlags) {
+    if (s.proven) console.error(`  REFUSED: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel} while a powertrain-marked sibling nameplate exists; this is a series-level fuel mis-tag. Rows dropped. Add a tci-override or fix inferFuel.`);
+    else console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
+  }
+  const keptMsrpRows = refusedKeys.size
+    ? msrpRows.filter((r) => !refusedKeys.has(`${r.make}|${r.model}|${r.year}`))
+    : msrpRows;
+  if (refusedKeys.size) console.error(`  ${msrpRows.length - keptMsrpRows.length} MSRP row(s) withheld across ${refusedKeys.size} mis-tagged model(s).`);
 
   // WRITE THROUGH writeCatalogs, NOT THREE BARE AWAITS.
   // 5f4259d fixed exactly this defect -- an MSRP write that throws must not take
@@ -327,7 +445,7 @@ export async function run(config) {
   // SUBTOTAL = MSRP + PACKAGE + DRF + FPD + AC + levies, so the MSRP line sits
   // below freight. That matches the hand-seeded Build & Price rows, which this
   // derivation reproduces exactly for all four 2026 RAV4 PHEV trims.
-  await writeCatalogs(config.makeName, { msrpRows, financeRows, leaseRows }, {
+  await writeCatalogs(config.makeName, { msrpRows: keptMsrpRows, financeRows, leaseRows }, {
     priceBasis: "excl_freight",
   });
 }

@@ -40,8 +40,13 @@ begin
   if not found then return jsonb_build_object('ok', false); end if;
   return jsonb_build_object('ok', true, 'make', r.make, 'model', r.model, 'city', r.city);
 end; $$;
-revoke all on function public.fn_alert_confirm(uuid) from public;
-grant execute on function public.fn_alert_confirm(uuid) to anon, authenticated;
+-- RETIRED 2026-09-01. MSRP Alerts was removed (commit ecc7f85). This file has
+-- never been applied to the live project, so the grant below is neutralised HERE
+-- rather than only being undone downstream: apply-migrations.mjs replays in
+-- filename order with no ledger, so a grant left in an unapplied file is a door
+-- that reopens the next time history is replayed.
+-- See 20260901_retire_msrp_alerts_grants.sql.
+revoke all on function public.fn_alert_confirm(uuid) from public, anon, authenticated;
 
 -- ---- 2) fn_alert_subscribe: also return confirm_token ------------------------
 -- Same signature + behaviour as Phase A, but the returned jsonb now carries the
@@ -80,8 +85,13 @@ begin
   returning id, confirm_token into v_id, v_token;
   return jsonb_build_object('ok', true, 'id', v_id, 'confirm_token', v_token);
 end; $$;
-revoke all on function public.fn_alert_subscribe(text,text,text,int,text,text,text,int,boolean) from public;
-grant execute on function public.fn_alert_subscribe(text,text,text,int,text,text,text,int,boolean) to anon, authenticated;
+-- RETIRED 2026-09-01. MSRP Alerts was removed (commit ecc7f85). This file has
+-- never been applied to the live project, so the grant below is neutralised HERE
+-- rather than only being undone downstream: apply-migrations.mjs replays in
+-- filename order with no ledger, so a grant left in an unapplied file is a door
+-- that reopens the next time history is replayed.
+-- See 20260901_retire_msrp_alerts_grants.sql.
+revoke all on function public.fn_alert_subscribe(text,text,text,int,text,text,text,int,boolean) from public, anon, authenticated;
 
 -- ---- 3) dealer-push candidate + dispatch log --------------------------------
 create table if not exists public.alert_candidate (

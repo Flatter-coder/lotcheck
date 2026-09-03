@@ -1,0 +1,144 @@
+
+===== HUNK 1 @ line 7713 | ours(branch) 0 lines | theirs(main) 5 lines =====
+--- OURS (feat/value-report-collette) ---
+
+--- THEIRS (origin/main) ---
+// Generous, but bounded: a share link is a URL fragment. If a report ever has
+// more recalls than this, the encoder says so (`tc`) rather than quietly
+// shipping a count its own list cannot support.
+const RECALL_SHARE_MAX = 24;
+
+
+===== HUNK 2 @ line 7768 | ours(branch) 3 lines | theirs(main) 7 lines =====
+--- OURS (feat/value-report-collette) ---
+    pv:a.priceVerified===true?1:(a.priceVerified===false?0:null),
+    pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:a.priceGateGoogleAdsBacked?1:0}:null,
+    mc:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
+--- THEIRS (origin/main) ---
+    // (`mc` here meant msrpCeiling until 2026-09-02; it is `ceil` now, because
+    // the signed canonical took `mc` for marketCount and one abbreviation must
+    // mean one thing across the payload the banner verifies and the projection
+    // the page renders. decodeReport still reads a legacy `mc` by shape.)
+    pv:a.priceVerified===true?1:(a.priceVerified===false?0:null),
+    pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null,g:a.priceGateGoogleAdsBacked?1:0}:null,
+    ceil:a.msrpCeiling?{a:a.msrpCeiling.allIn??null,f:a.msrpCeiling.floorAllIn??null,t:a.msrpCeiling.trim||null,n:a.msrpCeiling.trimsConsidered??null}:null,
+
+===== HUNK 3 @ line 7869 | ours(branch) 1 lines | theirs(main) 1 lines =====
+--- OURS (feat/value-report-collette) ---
+      msrpCeiling:c.mc?{allIn:c.mc.a??null,floorAllIn:c.mc.f??null,trim:c.mc.t||null,trimsConsidered:c.mc.n??0}:null,
+--- THEIRS (origin/main) ---
+      msrpCeiling:ceil?{allIn:ceil.a??null,floorAllIn:ceil.f??null,trim:ceil.t||null,trimsConsidered:ceil.n??0}:null,
+
+===== HUNK 4 @ line 9120 | ours(branch) 12 lines | theirs(main) 0 lines =====
+--- OURS (feat/value-report-collette) ---
+      {view === "heatmap" && (<>
+        {/* The count is DERIVED, never hardcoded. This read "The 10-point
+            verification" above a grid that renders heatItems (14 on a full
+            report, and never fewer than 11) -- the report contradicting its
+            own heading. Ten is the advertised FLOOR; say what this report
+            actually delivered. [[ten-point-claim-policy]] */}
+        <div style={{ fontSize: 11, color: MUT, fontFamily: mono, margin: "6px 0 10px" }}>{heatItems.length}-point verification — hot squares are flagged</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }}>
+          {heatItems.map((c, i) => (<button key={c.key} onClick={() => setSelP(i)} title={c.title} style={{ minHeight: 84, borderRadius: 10, border: `1px solid 
+        </div>
+        <div style={{ marginTop: 14 }}><div style={cardBox(heatItems[Math.min(selP, heatItems.length - 1)])}><Head c={heatItems[Math.min(selP, heatItems.length 
+      </>)}
+--- THEIRS (origin/main) ---
+
+
+===== HUNK 5 @ line 9142 | ours(branch) 239 lines | theirs(main) 3 lines =====
+--- OURS (feat/value-report-collette) ---
+function ReportFlipbook({analysis:a, onExit, onShare, copied, shared, ink}){
+  const [cur,setCur]=useState(0);
+  const money=(n)=>`$${Math.round(Number(n)||0).toLocaleString("en-CA")}`;
+  const qp=Number(a.quotedPrice)||0, ms=Number(a.msrp)||0, delta=qp&&ms?qp-ms:0;
+  const trimRange=useTrimRange(a);   // MSRP-per-trim page (standing req 2026-08-19)
+  const comparables=useComparableListings(a);   // comparable listings page (Vic, 2026-08-20)
+  const feeItems=(a.addOns||[]).filter(x=>x.price!=null);
+  const flaggedTotal=feeItems.filter(x=>x.verdict==="flagged").reduce((s,x)=>s+(x.price||0),0);
+  const feesTotal=feeItems.reduce((s,x)=>s+(x.price||0),0);
+  const vehName=a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||"Vehicle";
+  const fLbl={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"}, fSuf={weekly:"/wk",biweekly:"/2wk",monthly:"/mo"};
+
+  // Build the page list — only pages backed by real data.
+  const P=[];
+   ... [225 more]
+--- THEIRS (origin/main) ---
+// SHA-256 as lowercase hex. Used by the sealed-capture proof and the verify
+// page; it sat below the Book view and was carried out with it when that view
+// was retired -- check:undef caught it, the build did not.
+
+===== HUNK 6 @ line 9456 | ours(branch) 1 lines | theirs(main) 1 lines =====
+--- OURS (feat/value-report-collette) ---
+          .select("trim,msrp,year,price_basis,fuel_type")
+--- THEIRS (origin/main) ---
+          .select("trim,msrp,year,price_basis,fuel_type,model")
+
+===== HUNK 7 @ line 9491 | ours(branch) 3 lines | theirs(main) 18 lines =====
+--- OURS (feat/value-report-collette) ---
+        // Only narrow when it leaves a usable ladder; otherwise show all and
+        // LABEL each row's powertrain rather than silently mixing them.
+        const mixed=!(wantFuel&&matched.length>=2);
+--- THEIRS (origin/main) ---
+        // FAIL CLOSED when we know the powertrain and the catalog has no rows
+        // for it. This used to fall back to "show all, labelled" -- and on a
+        // gasoline 2026 Lexus RX 350 (lexusofroyaloak.com, 2026-09-02) that
+        // meant the buyer was shown the RX HYBRID and PLUG-IN ladder as "the
+        // factory range the quote should be read against", with "asking sits
+        // above 2 of 10" computed across the wrong car's prices. The catalog
+        // held no gas RX at all (a series-level fuel mis-tag upstream). No
+        // ladder is honest; another powertrain's ladder is a false anchor.
+        // [[powertrain-identity-rule]]
+        if(wantFuel&&matched.length===0&&sameYear.length>0){
+          const v={status:"none_for_powertrain",readAt:Date.now(),year,make,model,wantFuel,src:MAKE_BP_SITE[make]||null,otherRows:sameYear.length};
+          trimRangeCache[key]=v; if(alive)setSt(v); return;
+        }
+        // Unknown powertrain: show all and LABEL each row's powertrain rather
+   ... [4 more]
+
+===== HUNK 8 @ line 9524 | ours(branch) 2 lines | theirs(main) 12 lines =====
+--- OURS (feat/value-report-collette) ---
+        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null}));
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed};
+--- THEIRS (origin/main) ---
+        }).map(r=>({...r,powertrain:mixed?fuelKind(r.fuel_type):null,nameplate:r.model||null}));
+        // WHICH NAMEPLATE EACH ROW IS. The query is a substring match by
+        // design (dealers write "NX 350h" while the catalog stores "NX
+        // Hybrid"), so the pool can legitimately span several separately-priced
+        // vehicles. Until now nothing carried that distinction into the row, so
+        // a 2026 Lexus NX printed SIX rows named "Luxury" at six different
+        // prices with nothing on screen saying what differed between them --
+        // Vic: "have look trims its crazy". `model` was not even SELECTED, so
+        // the card structurally could not have said. [[present-without-creating-questions]]
+        const nameplates=[...new Set(trims.map(r=>r.nameplate).filter(Boolean))];
+        const multiNameplate=nameplates.length>1;
+        const v={status:"ready",readAt:Date.now(),year,make,model,src:MAKE_BP_SITE[make]||null,trims,mixed,nameplates,multiNameplate};
+
+===== HUNK 9 @ line 9770 | ours(branch) 1 lines | theirs(main) 1 lines =====
+--- OURS (feat/value-report-collette) ---
+        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. This model name covers more tha
+--- THEIRS (origin/main) ---
+        ? <>Manufacturer prices for {a.model} trims in LotCheck's verified catalog{allExcl?" — shown before freight & fees":""}. {tr.multiNameplate?<>This name 
+
+===== HUNK 10 @ line 9779 | ours(branch) 1 lines | theirs(main) 1 lines =====
+--- OURS (feat/value-report-collette) ---
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.trim}{t.powertrain?<sp
+--- THEIRS (origin/main) ---
+            <span style={{fontSize:12.5,fontWeight:700,color:C.inkSoft,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tr.multiNameplate&&t.nam
+
+===== HUNK 11 @ line 10114 | ours(branch) 1 lines | theirs(main) 12 lines =====
+--- OURS (feat/value-report-collette) ---
+    v:5,
+--- THEIRS (origin/main) ---
+    // v6: mc (other listings read) + dflt (page's pre-selected payment scenario); mirrors report-sign.ts
+    // v7 (2026-09-02): the comparison's basis rides with marketValue, and its
+    // projection is NOT additive (mileage null was 0; a not-enough set is an
+    // object, was null). Mirrors report-sign.ts.
+    // v8: `oy` added (what older model years ask today). Additive.
+    // v9 (2026-09-03): no shape change. It marks the reports issued WITH the
+    // "Insurance before you sign" line, so /verify can withhold that section
+    // from a report whose own PDF predates it -- the one page whose job is to
+    // prove the paper and the page agree.
+    // v10 (2026-09-03): marks reports issued with "Your premium after this
+    // purchase". Mirrors report-sign.ts.
+    v:10,

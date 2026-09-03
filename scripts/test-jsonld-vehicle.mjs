@@ -66,6 +66,37 @@ const CASES = [
   ["no json-ld at all -> null", "<html><body>nothing here</body></html>", null],
 ];
 
+// ── Fuel type is identity ────────────────────────────────────────────────────
+// A gasoline 2026 Lexus RX 350 (lexusofroyaloak.com, 2026-09-02) declared
+// "Gasoline" in its JSON-LD while the report showed the buyer the RX Hybrid /
+// Plug-in ladder: nothing was reading the field. The ladder and the trim matcher
+// both partition on fuel, so the page's own declaration must come through, in
+// the pipeline's vocabulary (Gas | Hybrid | PHEV | BEV | Diesel).
+const rxGas = (fuel, shape) => wrap({
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "AutomotiveBusiness", name: "Lexus of Royal Oak" },
+    {
+      "@type": ["Product", "Car"],
+      brand: { "@type": "Brand", name: "Lexus" },
+      itemCondition: "https://schema.org/UsedCondition",
+      model: "RX 350",
+      offers: { "@type": "Offer", priceCurrency: "CAD", price: 69898, seller: { "@type": "Organization", name: "Lexus of Royal Oak" } },
+      vehicleIdentificationNumber: "2T2BAMCA0TC124633",
+      vehicleModelDate: 2026,
+      mileageFromOdometer: { "@type": "QuantitativeValue", unitCode: "KMT", value: 12270 },
+      ...(shape === "node" ? { fuelType: fuel } : { vehicleEngine: { "@type": "EngineSpecification", name: "2.4L 4Cyl", fuelType: fuel } }),
+    },
+  ],
+});
+CASES.push(
+  ["EDealer RX 350: fuelType on the Car node, 'Gasoline' -> Gas", rxGas("Gasoline", "node"), { make: "Lexus", model: "RX 350", price: 69898, fuelType: "Gas" }],
+  ["EDealer RX 350: fuelType inside vehicleEngine (EngineSpecification) -> Gas", rxGas("Gasoline", "engine"), { fuelType: "Gas" }],
+  ["Hybrid declared on the page -> Hybrid", rxGas("Hybrid", "node"), { fuelType: "Hybrid" }],
+  ["Plug-in declared on the page -> PHEV, never Hybrid", rxGas("Plug-in Hybrid", "node"), { fuelType: "PHEV" }],
+  ["Electric declared on the page -> BEV", rxGas("Electric", "node"), { fuelType: "BEV" }],
+);
+
 let pass = 0, fail = 0;
 for (const [label, html, want] of CASES) {
   let got;
@@ -115,6 +146,69 @@ for (const [label, parsed, jsonLd, want] of FILL_CASES) {
     detail = ok ? "" : ` mismatched: ${bad.map(([k, v]) => `${k} want ${v} got ${got[k]}`).join("; ")}`;
   }
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail}`);
+  ok ? pass++ : fail++;
+}
+
+// ---------------------------------------------------------------------------
+// DAYS ON LOT, from the listing's own inventory date.
+//
+// The Advantage Ford Acadia was reported to a buyer as "Days on lot: Not
+// published - ask the dealer" while its JSON-LD carried
+// "purchaseDate":"2026-07-30T11:27:42.000". schema.org purchaseDate is the date
+// the CURRENT OWNER acquired the item, and on a dealer's listing that owner is
+// the dealer -- so it is the inventory date, in a blob the scan already parsed.
+//
+// Dates are computed from now, never hardcoded: a fixture date would quietly
+// drift past the 3650-day guard and start passing for the wrong reason.
+const daysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString();
+const isoDay = (n) => daysAgo(n).slice(0, 10);
+
+const DOL_CASES = [
+  ["purchaseDate 32 days ago -> 32 days on lot", { purchaseDate: daysAgo(32) }, 32, isoDay(32)],
+  ["availabilityStarts is accepted as a fallback", { offers: { "@type": "Offer", price: 1, availabilityStarts: daysAgo(9) } }, 9, isoDay(9)],
+  // 0 days is TRUE but gives a buyer nothing, and is what a mis-stamped date
+  // looks like. Report from one full day.
+  // The DATE is legitimately known here -- it is the CLAIM that is withheld.
+  // Extracting listedSince and declining to publish "0 days" are different
+  // decisions, and conflating them in the expectation would have hidden which
+  // one was under test.
+  ["listed today -> date known, but no days-on-lot claim", { purchaseDate: daysAgo(0) }, null, isoDay(0)],
+  ["a future date is a data error, not a prediction", { purchaseDate: new Date(Date.now() + 86400000).toISOString() }, null, null],
+  ["older than ten years is a data error too", { purchaseDate: daysAgo(4000) }, null, null],
+  ["no date at all -> no claim, and no invented one", {}, null, null],
+  ["unparseable date -> no claim", { purchaseDate: "not a date" }, null, null],
+];
+
+for (const [label, extra, wantDays, wantSince] of DOL_CASES) {
+  const node = { ...SIMPLE, ...extra };
+  const got = extractJsonLdVehicle(wrap(node));
+  const parsed = fillFromJsonLd({}, got);
+  const gotDays = parsed?.daysOnLot?.days ?? null;
+  const gotSince = got?.listedSince ?? null;
+  const ok = gotDays === wantDays && gotSince === wantSince;
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : ` want ${wantDays}/${wantSince} got ${gotDays}/${gotSince}`}`);
+  ok ? pass++ : fail++;
+}
+
+{
+  // The platform feeds are the dealer's operational record and outrank a
+  // schema.org field. A scan that already has an answer must keep it.
+  const got = extractJsonLdVehicle(wrap({ ...SIMPLE, purchaseDate: daysAgo(32) }));
+  const already = { daysOnLot: { days: 7, since: isoDay(7), source: "dealer_platform_page" } };
+  fillFromJsonLd(already, got);
+  const ok = already.daysOnLot.days === 7 && already.daysOnLot.source === "dealer_platform_page";
+  console.log(`${ok ? "PASS" : "FAIL"}  a platform feed's days-on-lot is not overwritten${ok ? "" : ` got ${JSON.stringify(already.daysOnLot)}`}`);
+  ok ? pass++ : fail++;
+}
+
+{
+  // And it says where it came from, because a figure with no stated source is
+  // the thing this report exists to replace.
+  const got = extractJsonLdVehicle(wrap({ ...SIMPLE, purchaseDate: daysAgo(32) }));
+  const parsed = fillFromJsonLd({}, got);
+  const ok = parsed.daysOnLot.source === "listing_structured_data"
+    && /inventory date/i.test(parsed.daysOnLot.sourceLabel || "");
+  console.log(`${ok ? "PASS" : "FAIL"}  the claim names its own source${ok ? "" : ` got ${JSON.stringify(parsed.daysOnLot)}`}`);
   ok ? pass++ : fail++;
 }
 

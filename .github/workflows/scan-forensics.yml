@@ -1,0 +1,51 @@
+# Why did that scan fail? — read the breadcrumb, do not guess at it.
+#
+# analyze-listing-url has written a diagnostic trace on every failed scan for
+# weeks, naming exactly which layer died (the plain GET, the anti-bot render,
+# Nimble). Nobody could read it: it lives in api_usage_log, that needs the
+# service key, and the service key is a repo secret with no way to run a query.
+#
+# So every failure has been diagnosed by inference from a screenshot instead,
+# which is how one Advantage Ford link collected three different theories in a
+# single day. This is the button that ends that.
+#
+# READ-ONLY. It selects from api_usage_log and writes nothing, anywhere.
+name: Scan forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "How far back to look"
+        type: string
+        default: "24"
+      grep:
+        description: "Only rows whose message contains this (e.g. a hostname)"
+        type: string
+        default: ""
+      all:
+        description: "Include successful scans too"
+        type: boolean
+        default: false
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Read the breadcrumbs
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS="--hours ${{ inputs.hours }}"
+          if [ -n "${{ inputs.grep }}" ]; then ARGS="$ARGS --grep ${{ inputs.grep }}"; fi
+          if [ "${{ inputs.all }}" = "true" ]; then ARGS="$ARGS --all"; fi
+          echo "Running: node scripts/scan-forensics.mjs $ARGS"
+          node scripts/scan-forensics.mjs $ARGS

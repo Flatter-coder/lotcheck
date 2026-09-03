@@ -56,14 +56,24 @@ import { canonicalMake } from "../_shared/makes.ts";
 // already drifted apart. See _shared/recalls.ts for what the drift cost.
 import { lookupRecalls } from "../_shared/recalls.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
-import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { fetchMarketValue, fetchOlderYears } from "../_shared/marketvalue.ts";
+import { todayLocal } from "../_shared/market-count.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript } from "../_shared/deal.ts";
+import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
 import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
+// Whether a manufacturer MSRP may be read as THIS car's sticker today. The rule
+// used to be a copy-pasted expression -- twice in analyze-listing-url, once
+// here, and missing from the branch that reads a page-stated MSRP, which is how
+// a used listing came back "exact". One definition now (_shared/msrp-basis.ts).
+import { applyConditionToMsrp } from "../_shared/msrp-basis.ts";
+// The SAME trim scorer the listing path uses -- powertrain filter, drivetrain
+// confirmation and the implausible-gap ceiling. See lookupVerifiedMsrp.
+import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
@@ -373,6 +383,7 @@ const EXTRACTION_PROMPT_BASE = `You are reading a car dealership quote, listing,
   "vin": string|null,
   "odometerKm": number|null,
   "vehicleCondition": "new"|"used"|null,
+  "saleCondition": "new"|"demo"|"certified"|"used"|null,
   "fuelType": "BEV"|"PHEV"|"hybrid"|"gas"|null,
   "dealerName": string|null,
   "dealerCity": string|null,
@@ -413,6 +424,8 @@ Field notes:
 - "statedMsrpOnDocument": the MSRP AS WRITTEN on the quote itself, if any is shown. Do not calculate or estimate this from your own knowledge -- only report what's literally printed. Use null if no MSRP appears on the document.
 - "vin": the full 17-character VIN if it appears anywhere on the quote. Copy it EXACTLY as printed, no spaces. null if not shown.
 - "odometerKm": the odometer reading / mileage in kilometres if shown (e.g. "41,220 km" -> 41220). Numbers only, no units or commas. null if not shown.
+- "vehicleCondition": "used" if the document shows meaningful mileage, a model year clearly older than the current one, or explicitly says used/pre-owned/certified pre-owned. A "new" vehicle showing only delivery mileage (under ~100 km) is still new. Use null only when the document genuinely gives you nothing to go on -- do NOT leave it null on a document that plainly sells a new vehicle: an unset condition is read downstream as "not new", and the report then withholds the MSRP comparison the buyer came for.
+- "saleCondition": finer than vehicleCondition. "certified" only if the document shows a manufacturer/OEM certified pre-owned badge (e.g. "Toyota Certified", "H-Promise", "Certified Pre-Owned"); "demo" if it says demo/demonstrator/dealer-demo; else mirror vehicleCondition (new->"new", used->"used").
 - "financing": the lease/finance terms if the quote discloses a payment plan (often in a dense fine-print paragraph). "paymentAmount" is the periodic payment BEFORE tax if both are shown; "totalObligation" is the total of all payments as literally disclosed, with "totalObligationTaxIncluded" true if that total includes tax. Use null for the whole object if no financing is disclosed.
 - "standardWarranty": the vehicle's INCLUDED manufacturer warranty (what already comes free) -- separate from any extended plan being sold.
 - "warranty": an extended warranty or protection plan being OFFERED/SOLD on this quote, if any. Use nulls throughout if none is being sold.
@@ -804,10 +817,15 @@ Deno.serve(async (req: Request) => {
         analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
         { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
           saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
-          province: resolveJurisdiction(analysis).code },
+          province: resolveJurisdiction(analysis).code,
+          today: todayLocal(), fuelType: analysis.fuelType ?? null },
       );
       if (mv) analysis.marketValue = mv;
     }
+    analysis.olderYears = await fetchOlderYears({
+      year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+      province: resolveJurisdiction(analysis).code, today: todayLocal(), fuelType: analysis.fuelType ?? null, vin: analysis.vin ?? null,
+    });
     analysis.vinCheck = validateVin(analysis.vin);
     if (analysis.year && analysis.make && analysis.model) {
       analysis.recalls = await lookupRecalls(analysis.year, analysis.make, analysis.model, baseModel);
@@ -818,6 +836,20 @@ Deno.serve(async (req: Request) => {
     await resolveLeaseRates(analysis);
     // S3 — deal reconciliation: split fees vs negotiable dealer add-ons so the
     // report shows the real out-the-door + how much markup is removable.
+    // A BUNDLED price line is not the dealer's money. Normalised HERE -- once,
+    // before computeReconciliation, before the counter-script, and before
+    // anything reads totalFlaggedCost -- so every consumer inherits the same
+    // correction instead of each needing its own fix. Ordering matters: this repo
+    // has shipped an ordering-vs-derived-value defect twice (63fa164, fe57ad4),
+    // where the value arrived after the thing that consumed it.
+    {
+      const b = normaliseBundledAddOns(analysis);
+      if (b.changed) {
+        console.log(`Bundled fee line(s) not attributed to the dealer: ` +
+          `${b.lines.map((l) => `${l.name} ${l.price ?? "?"}`).join("; ")}` +
+          `${b.flaggedRemoved ? ` (removed $${b.flaggedRemoved} from totalFlaggedCost)` : ""}.`);
+      }
+    }
     { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }
     // S11 — financing-contingent-discount trap (runs after reconciliation + finance rates).
     { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }
@@ -851,6 +883,15 @@ Deno.serve(async (req: Request) => {
     // No render check happens here (there's no page to render), so the
     // price-gating accusation gate stays out of scope. See invariants.ts.
     assertInvariants(analysis);
+
+    // The two count/default lines are read from a LISTING PAGE. An uploaded
+    // quote has no page, so both land "unchecked" with a reason that says so --
+    // the cards then read "not from an uploaded quote", never "could not be
+    // read", which would describe an attempt that never happened. (Follow-up:
+    // year/make/model/condition/price are known here, so the count itself
+    // could run on this path once captureMarketCount moves to _shared.)
+    if (!analysis.marketCount) analysis.marketCount = { state: "unchecked", reason: "no_page", n: 0, below: 0, same: 0, dealers: null };
+    if (!analysis.pageDefault) analysis.pageDefault = { checked: false, state: "unchecked", reason: "no_page" };
 
     // Server-authoritative identity: stamps issuedAt from the trusted server
     // clock (so a device-clock change can't alter the date), computes the
@@ -1016,34 +1057,52 @@ async function lookupVerifiedMsrp(extracted: any, baseModel?: string | null) {
 
   try {
     if (trim) {
-      const { data: exact } = await supabase
+      // ONE MATCHER, SHARED WITH THE LISTING PATH. This used to be a raw
+      // `ilike("trim", trim)` -> matchType "exact", which is what authorises an
+      // over/under-MSRP accusation downstream. It filtered on year/make/model
+      // and NOTHING else -- no fuel_type, no drivetrain, `limit(1)` with no
+      // ordering. So an uploaded "RAV4 XSE" quote could bind to whichever of
+      // the hybrid ($50,900) or plug-in ($56,400) row the database happened to
+      // return first and then state an accusation off a $5,500 powertrain
+      // mix-up ([[powertrain-identity-rule]], and trap #3 in the 2026 RAV4
+      // pricing notes). pickTrimMsrp is the scorer the URL path has always
+      // used: it filters by powertrain, scores drivetrain, refuses "exact"
+      // unless the winning row actually pins the configuration the quote
+      // claims (rowConfirmsConfig), and downgrades an implausible gap to
+      // "starting_at" (priceImplausible) -- the three guards this path never
+      // had. Same defect class as the IONIQ 9 fix that landed on the listing
+      // path only; this closes the matching half.
+      const { data: rows } = await supabase
         .from("msrp_catalog")
-        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
+        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis, fuel_type, drivetrain, attrs")
         .eq("year", year)
         .ilike("make", make)
         .ilike("model", model)
-        .ilike("trim", trim)
-        .not("msrp", "is", null)
-        .limit(1)
-        .maybeSingle();
+        .not("msrp", "is", null);
 
-      if (exact?.msrp) {
-        return { value: exact.msrp, matchType: "exact", trim: exact.trim, fetchedAt: exact.fetched_at, sourceUrl: exact.source_url ?? null, allInPrice: exact.all_in_price ?? null, priceBasis: exact.price_basis ?? null };
-      }
-
-      const { data: fuzzy } = await supabase
-        .from("msrp_catalog")
-        .select("msrp, trim, fetched_at, source_url, all_in_price, price_basis")
-        .eq("year", year)
-        .ilike("make", make)
-        .ilike("model", model)
-        .ilike("trim", `%${trim}%`)
-        .not("msrp", "is", null)
-        .limit(1)
-        .maybeSingle();
-
-      if (fuzzy?.msrp) {
-        return { value: fuzzy.msrp, matchType: "fuzzy_trim", trim: fuzzy.trim, fetchedAt: fuzzy.fetched_at, sourceUrl: fuzzy.source_url ?? null, allInPrice: fuzzy.all_in_price ?? null, priceBasis: fuzzy.price_basis ?? null };
+      const candidates = (rows ?? []).filter((r: any) => r.msrp != null && !isNaN(Number(r.msrp)));
+      if (candidates.length) {
+        const picked = pickTrimMsrp(candidates, {
+          trim,
+          fuelType: extracted?.fuelType ?? null,
+          drivetrain: extracted?.drivetrain ?? null,
+          vinDrive: extracted?.vinDrive ?? null,
+          quotedPrice: Number(extracted?.quotedPrice) > 0 ? Number(extracted.quotedPrice) : null,
+        });
+        if (picked && Number(picked.msrp) > 0) {
+          const row = candidates.find((r: any) => String(r.trim) === String(picked.trim) && Number(r.msrp) === Number(picked.msrp)) ?? {};
+          return {
+            value: picked.msrp,
+            // pickTrimMsrp returns "exact" only when the row genuinely pins
+            // this configuration; everything else is an honest reference.
+            matchType: picked.basis === "exact" ? "exact" : "fuzzy_trim",
+            trim: picked.trim ?? row.trim ?? null,
+            fetchedAt: row.fetched_at ?? null,
+            sourceUrl: row.source_url ?? null,
+            allInPrice: row.all_in_price ?? null,
+            priceBasis: row.price_basis ?? null,
+          };
+        }
       }
     }
 
@@ -1465,16 +1524,48 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
   });
   const msrp = decided.msrp || null;
   const msrpSource = decided.source;
-  const msrpBasis = decided.basis;
+  // A USED car's catalog match is the price when it was NEW. Useful context
+  // ("this cost $X new"), but NOT a sticker to measure today's asking price
+  // against -- a 2014 truck is not "$35,000 under MSRP". The listing path has
+  // marked this since 2026-08 and every surface keys off it to switch the
+  // over/under claim off; this path never set it, so an uploaded quote for a
+  // used vehicle ran the full new-car comparison, and the leverage line added
+  // in 63fa164 printed an MSRP-gap finding against a car whose MSRP stopped
+  // being the relevant number years ago. The guard itself now lives in
+  // _shared/msrp-basis.ts -- this was its third hand-written copy, and the
+  // fourth site (the listing path's stated-MSRP branch) never got one at all,
+  // which is how a used listing came back "exact". One rule, and it fails
+  // CLOSED: an unflagged 3,800 km unit is no longer treated as new because
+  // 3,800 is not greater than 5,000.
+  //
+  // It also gates the inflated-sticker accusation, which was NOT gated here:
+  // the basis was downgraded on this line and `msrpInflation` was still written
+  // into the summary prose and the signed field below, so the accusation
+  // outlived the downgrade. On a used quote the MSRP printed on the document is
+  // the ORIGINAL as-optioned sticker and our catalog row is a base trim, so the
+  // gap is a data gap -- naming it accuses the dealer of padding a number they
+  // did not invent (no-accusation-language).
+  const conditioned = applyConditionToMsrp(
+    { msrp, basis: decided.basis, trim: msrpLookup.trim ?? null, sourceUrl: msrpLookup.sourceUrl ?? null, inflation: decided.inflation ?? null },
+    {
+      vehicleCondition: vehicleCondition ?? null,
+      saleCondition: extracted.saleCondition ?? null,
+      odometerKm: extracted.odometerKm ?? null,
+      year: year ?? null,
+    },
+  );
+  const msrpBasis = conditioned.basis;
+  const originalMsrp = conditioned.originalMsrp;
+  const inflation: any = conditioned.inflation;
 
   // The accusation now comes only from the resolver, which requires an EXACT
   // trim match AND its own materiality floor (>3% and >$800) -- not the bare
   // 2%-off-a-possibly-wrong-number test this used to run.
   let summary = extracted.summary || "";
-  if (decided.inflation) {
+  if (inflation) {
     summary +=
       (summary ? " " : "") +
-      `Also worth flagging: this quote lists MSRP as $${Number(decided.inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(decided.inflation.manufacturer).toLocaleString()} -- $${Number(decided.inflation.overBy).toLocaleString()} higher than the published figure.`;
+      `Also worth flagging: this quote lists MSRP as $${Number(inflation.dealerStated).toLocaleString()}, but ${make || "the manufacturer"}'s published MSRP for this exact trim is $${Number(inflation.manufacturer).toLocaleString()} -- $${Number(inflation.overBy).toLocaleString()} higher than the published figure.`;
   } else if (decided.reference && Number(decided.reference.msrp) > 0) {
     // A floor is context, not a claim: state it as the model's starting price
     // and never call it "the verified MSRP for this trim".
@@ -1496,6 +1587,11 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     fuelType: fuelType ?? null,
     fuelTypeVerified: fuelTypeVerified ?? false,
     vehicleCondition: vehicleCondition ?? null,
+    // The finer new | demo | certified | used read, carried forward so the
+    // normalizer that runs next (deriveSaleCondition) and the CPO-premium
+    // checks see a demo or a certified unit as itself. Dropped here, a value
+    // the extractor just supplied would collapse back to the binary condition.
+    saleCondition: extracted.saleCondition ?? null,
     dealerName: dealerName ?? null,
     dealerCity: dealerCity ?? null,
     msrp,
@@ -1506,9 +1602,12 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     // why MSRP_HAS_PROVENANCE could fail on every quote report and still ship.
     msrpSource,
     msrpBasis,
+    // Surfaces read this to render "what it cost when new" instead of an
+    // over/under-MSRP comparison. Null on new vehicles.
+    originalMsrp,
     ...(decided.trim ? { msrpTrim: decided.trim } : {}),
     ...(decided.dealerStatedMsrp ? { dealerStatedMsrp: decided.dealerStatedMsrp } : {}),
-    ...(decided.inflation ? { msrpInflation: decided.inflation } : {}),
+    ...(inflation ? { msrpInflation: inflation } : {}),
     ...(decided.reference ? { msrpReference: decided.reference } : {}),
     quotedPrice: quotedPrice ?? null,
     vin: extracted.vin ?? null,
@@ -1527,7 +1626,7 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
       catalogMatchType: msrpLookup.matchType ?? null,
       verifiedValue: verifiedMsrp,
       statedOnDocument: statedMsrpOnDocument ?? null,
-      mismatch: !!decided.inflation,
+      mismatch: !!inflation,
       matchedTrim: msrpLookup.trim ?? null,
       verifiedAsOf: msrpLookup.fetchedAt ?? null,
     },

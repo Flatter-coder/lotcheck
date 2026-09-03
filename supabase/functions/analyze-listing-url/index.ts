@@ -56,12 +56,18 @@ import { finalizeServerSide } from "../_shared/report-sign.ts";
 // already drifted apart. See _shared/recalls.ts for what the drift cost.
 import { lookupRecalls } from "../_shared/recalls.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
+import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
-import { extractJsonLdVehicle } from "../_shared/jsonld-vehicle.js";
+import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
+import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
+import { readFeeLadder, ladderFees } from "../_shared/fee-ladder.ts";
+import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
 import { extractD2cVdpVehicle } from "../_shared/d2c-vdp.js";
 import { extractAdvertisedApr } from "../_shared/apr-extract.js";
+import { readPageDefault, readSm360PageDefault } from "../_shared/page-default.js";
+import { computeMarketCount, emptyMarketCount, POOL_CAP, fuelPowertrainHint } from "../_shared/market-count.js";
 import { detectFinanceContingent } from "../_shared/finance-contingent.js";
 import { extractCashIncentives, incentivesToAddOns } from "../_shared/incentive-extract.js";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
@@ -69,10 +75,12 @@ import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts"
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
 import { computeRemainingWarranty } from "../_shared/warranty.ts";
-import { fetchMarketValue } from "../_shared/marketvalue.ts";
+import { fetchMarketValue, servesComps, fetchOlderYears } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
+import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
+import { msrpIsPresentTense, applyConditionToMsrp } from "../_shared/msrp-basis.ts";
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { resolveCity, resolveJurisdiction } from "../_shared/jurisdiction.ts";
@@ -107,7 +115,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-08-28a";  // marketvalue.ts gained the value-report entry points (mileageAdjustedValue/valueTiers/lotcheckValueReport, additive) — analyze output unchanged (lotcheckValue untouched), but the cache-ver gate watches marketvalue.ts, so bump to satisfy it and refresh the cache once
+const CACHE_VER = "2026-09-03d";  // 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -156,27 +164,16 @@ async function resolveCreditUser(req: Request): Promise<{ id: string } | null> {
 // ── Multi-vehicle-page detection (URL path) ─────────────────────────────────
 // analyze-quote (uploads) already rejects a multi-vehicle image without
 // charging. This is the URL-scan equivalent -- a pasted link to an inventory
-// or search-results page, not one vehicle's own page, had NO detection at
-// all until now (Vic, 2026-08-20: "reject with kind message ... some
-// professional"). Deterministic and cheap on purpose, run BEFORE the
-// expensive Claude extraction call: a single-vehicle detail page states
-// exactly one VIN; an inventory grid states several. Counting VINs rather
-// than re-running a vision classifier avoids a second paid model call just
-// to detect the same thing apr-extract.js's regex backstop already proves
-// works well for this class of signal -- deterministic, evidence-carrying,
-// never guesses. Checksum-VALID VINs only (validateVin), so a stray
-// 17-character stock/tracking number can't false-positive a real single-
-// vehicle page into a rejection.
-function countDistinctValidVins(text: string): string[] {
-  const seen = new Set<string>();
-  const re = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const check = validateVin(m[0]);
-    if (check.valid) seen.add(check.vin!);
-  }
-  return [...seen];
-}
+// or search-results page, not one vehicle's own page (Vic, 2026-08-20:
+// "reject with kind message ... some professional").
+//
+// THE RULE MOVED, because counting was answering the wrong question. It used
+// to be "more than one checksum-valid VIN means a grid", and a real Advantage
+// Ford VDP was refused for stating six: the GMC Acadia it is about, plus five
+// neighbours in a similar-vehicles rail. How many vehicles a page MENTIONS is
+// not how many it is ABOUT. See _shared/multi-vehicle.ts, which now owns both
+// the counter and the decision and has the test coverage the inline version
+// never had.
 
 // ── Repeat multi-vehicle attempt throttle (shared with analyze-quote) ──────
 // Same table/RPCs as analyze-quote's (20260820_scan_attempt_throttle.sql) --
@@ -434,6 +431,71 @@ async function logProviderCall(f: {
   }
 }
 
+// THE SINGLE DELIVERY BOUNDARY. Every branch that hands a buyer a report and
+// captures their credit must pass through here.
+//
+// It did not used to. This function has SIX return points that deliver an
+// `analysis` and call captureCredit -- the 6-hour cache fast-path, the SM360
+// feed fallback, the JSON-LD fallback, the Convertus vmsData fallback, the
+// Scrapfly render-only rescue, and the main success path -- and only the LAST
+// one wrote telemetry. The other five charged the buyer and wrote no
+// api_usage_log row and no verification_check rows at all, so:
+//   - a cached delivery was invisible to the admin ledger entirely, making
+//     "URL scans" a count of cache MISSES rather than of reports delivered;
+//   - the four page-load fallbacks each put their own text in error_message
+//     ("page-load failed, served SM360 feed fallback"), overwriting the
+//     `degraded: missing …` token the ledger matches on, so a hollow delivery
+//     could never register as hollow;
+//   - five of six delivered reports contributed zero of their 13 checkpoints,
+//     which is a code-level reason the per-check failure rate this panel is
+//     built to measure ([[failure-rate-under-one-percent]]) reads low.
+//
+// Adding five more call sites would have left the same trap for the next
+// fallback branch, so the fix is this one helper: a new delivery path is
+// instrumented by construction, or it does not compile past review.
+//
+// `note` is the branch's own trace text. The degraded token is PREPENDED so it
+// stays the leading token the ledger matches, and the branch's provenance is
+// preserved after it rather than replaced.
+async function instrumentDelivery(
+  analysis: any,
+  note: string | null,
+  usage?: { input_tokens?: number; output_tokens?: number } | null,
+): Promise<void> {
+  try {
+    const gaps: string[] = [];
+    if (!(Number(analysis?.quotedPrice) > 0)) gaps.push("price");
+    if (!(Number(analysis?.msrp) > 0)) gaps.push("msrp");
+    if (!analysis?.vin) gaps.push("vin");
+    if (!analysis?.recalls) gaps.push("recalls");
+    if (!(Number(analysis?.financing?.rate) > 0)) gaps.push("apr");
+    const parts = [
+      gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
+      note,
+    ].filter(Boolean);
+    await logUsage({
+      success: true,
+      inputTokens: usage?.input_tokens ?? null,
+      outputTokens: usage?.output_tokens ?? null,
+      errorMessage: parts.length ? parts.join(" | ") : null,
+    });
+    // One row per checkpoint, so the ledger can report a real per-check
+    // failure rate instead of a single boolean that calls 12-of-13 a success.
+    // Host only, never the full URL. Fail-open.
+    let host: string | null = null;
+    try { host = new URL(String(analysis?.sourceUrl || "")).hostname.replace(/^www\./, ""); } catch { /* not parseable */ }
+    await recordCheckpoints(supabase, {
+      reportId: analysis?.reportId ?? null,
+      feature: "listing_url",
+      analysis,
+      listingHost: host,
+    });
+  } catch (e) {
+    // Telemetry must never take down a delivery the buyer already paid for.
+    console.warn("instrumentDelivery failed (ignored):", (e as Error)?.message);
+  }
+}
+
 async function logUsage(fields: {
   success: boolean;
   inputTokens?: number | null;
@@ -537,28 +599,45 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
 // Falls back to whatever the page extraction said when there's no
 // catalog match, so a make whose fuel_type column hasn't been backfilled
 // yet degrades quietly. Never throws, never blocks the report either way.
+// "Verify" a fuel type only from catalog rows that are THE SAME CAR. This used
+// to take the first fuel_type of the first row whose model ilike-matched --
+// which is exactly how a gasoline nameplate inherits a hybrid sibling's fuel
+// (and then its ladder, and then its sticker). A bare model match is not
+// identity: powertrainCompatible() decides whether a catalog row may stand in
+// for the listing at all, and rows that disagree with each other verify
+// nothing. Missing beats wrong. [[powertrain-identity-rule]]
 async function applyVerifiedFuelType(analysis: any): Promise<void> {
   if (!analysis || !analysis.year || !analysis.make || !analysis.model) return;
   try {
     const { data, error } = await supabase
       .from("msrp_catalog")
-      .select("fuel_type")
+      .select("model,fuel_type")
       .eq("year", analysis.year)
       .ilike("make", analysis.make)
-      .ilike("model", analysis.model)
+      .ilike("model", `%${stripPowertrain(String(analysis.model)).split(/\s+/)[0]}%`)
       .not("fuel_type", "is", null)
-      .limit(1)
-      .maybeSingle();
+      .limit(50);
     if (error) {
       console.warn("⚠️ msrp_catalog fuel_type lookup failed:", error.message);
       analysis.fuelTypeVerified = false;
       return;
     }
-    if (!data?.fuel_type) {
+    const same = (data || []).filter((r: any) => powertrainCompatible(String(analysis.model), String(r.model)));
+    const fuels = new Set(same.map((r: any) => String(r.fuel_type)));
+    if (fuels.size !== 1) {
+      // No compatible row, or compatible rows that disagree: nothing here can
+      // vouch for this car's powertrain. Leave whatever the page said.
       analysis.fuelTypeVerified = false;
       return;
     }
-    analysis.fuelType = data.fuel_type;
+    const [fuel] = [...fuels];
+    // A page that declared a DIFFERENT fuel wins over the catalog: the catalog
+    // is a price list, the page is the car in front of the buyer.
+    if (analysis.fuelType && String(analysis.fuelType).toLowerCase() !== fuel.toLowerCase()) {
+      analysis.fuelTypeVerified = false;
+      return;
+    }
+    analysis.fuelType = fuel;
     analysis.fuelTypeVerified = true;
   } catch (err) {
     console.warn("⚠️ applyVerifiedFuelType threw:", err);
@@ -668,20 +747,35 @@ function computeOdometerCheck(analysis: any): void {
   const isNew = analysis.vehicleCondition === "new";
   let flag = false;
   let note: string;
+  // The BAND, recorded so the explanation cannot contradict the reading.
+  // computeOdometerCheck already gets this right and writes a km-aware note --
+  // but the "what this means" explainers were SECOND, hand-written sentences
+  // that branched only on vehicleCondition and never looked at km. So a 2025
+  // Mazda CX-90 reading 12 km printed our own correct note ("12 km —
+  // consistent with a new vehicle") directly above our own contradiction
+  // ("A truly new car should read near zero km - thousands on the clock means
+  // it's been driven (demo/loaner)"). Vic, 2026-08-27: "that needs to change".
+  // One band, read by every surface, so a fixed sentence can never sit beside
+  // a variable number again.
+  let band: string;
   if (isNew) {
     if (km <= 500) {
+      band = "new_delivery";
       note = `${km.toLocaleString()} km — consistent with a new vehicle (delivery distance).`;
     } else {
+      band = "new_beyond_delivery";
       flag = true;
       note = `Listed as new but shows ${km.toLocaleString()} km — more than typical delivery distance. Ask whether it was a demo or loaner, which can affect the warranty start date and the price.`;
     }
   } else if (age <= 1) {
     // Used, current or near-current model year -- effectively a demo, loaner,
     // or short lease return. Low mileage here is normal, NOT a rollback signal.
+    band = "used_nearly_new";
     note = `${km.toLocaleString()} km on a nearly-new used vehicle — low mileage is normal here (often a demo, loaner, or short lease return). Confirm the in-service date, since the manufacturer warranty usually starts then, not when you buy it.`;
   } else {
     const typical = age * 20000;
     const low = age * 10000;
+    band = "used";
     if (km < low * 0.6) {
       flag = true;
       note = `${km.toLocaleString()} km is unusually low for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km). Low mileage is usually a genuine selling point — a VIN history report will confirm it, which is worth doing for any low-mileage used vehicle regardless.`;
@@ -691,7 +785,7 @@ function computeOdometerCheck(analysis: any): void {
       note = `${km.toLocaleString()} km is in the normal range for a ${age}-year-old vehicle (typical is around ${typical.toLocaleString()} km).`;
     }
   }
-  analysis.odometerCheck = { checked: true, km, flag, note };
+  analysis.odometerCheck = { checked: true, km, flag, note, band };
 }
 
 // Negotiation leverage score (0-10): a transparent, DETERMINISTIC function of
@@ -723,14 +817,22 @@ function computeLeverageScore(analysis: any): void {
   // "starting_at" floor (base trim / adjacent MY) says nothing about THIS
   // unit's sticker — an option-loaded car above the base floor isn't "over
   // MSRP", so it must not add leverage or a basis line.
+  // NAME THE BASIS THE FIGURE IS ON. 63fa164 correctly switched this function
+  // to compare against claim.reference (the all-in figure when the asking
+  // price is an AMVIC all-in advertised price), but kept calling it "MSRP" --
+  // while every on-screen card still prints its own delta against the
+  // ex-freight MSRP. One report, two different "over MSRP" dollar figures,
+  // neither labelled with which basis it used. The number here is right; the
+  // word for it was not.
+  const refLabel = claim.comparedAgainst === "all_in" ? "all-in MSRP" : "MSRP";
   if (msrp && quoted && analysis.msrpBasis === "exact") {
     const deltaPct = (quoted - msrp) / msrp;
     if (deltaPct > 0.005) {
       score += Math.min(2.5, deltaPct * 100 * 0.3);
-      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} MSRP`);
+      basis.push(`priced $${Math.round(quoted - msrp).toLocaleString()} above the $${Math.round(msrp).toLocaleString()} ${refLabel}`);
     } else if (deltaPct < -0.02) {
       score -= 1.0;
-      basis.push(`already priced below MSRP`);
+      basis.push(`already priced below ${refLabel}`);
     }
   } else if (msrp && quoted && analysis.msrpBasis === "starting_at") {
     // trim-match.js's priceImplausible() already downgraded this from "exact"
@@ -1829,12 +1931,18 @@ async function checkDealerLicence(analysis: any): Promise<void> {
   } catch (e) { console.warn("checkDealerLicence threw (ignored):", (e as Error)?.message); }
 }
 
-async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null): Promise<void> {
+// `sharedHtml` is the scan's ONE page read. Passing it is not an optimisation:
+// a scan used to fire up to five separate un-shared GETs at the same dealer URL
+// (three from the retry loop, one here, one from captureConvertusDaysOnLot) on
+// top of Nimble and Scrapfly, and on a Cloudflare-protected origin that volume
+// is what PROVOKES the rate limiting that then empties the whole report.
+// Falls back to its own fetch only when no shared read was supplied.
+async function detectTradeInWidget(url: string, analysis: any, textHint?: string | null, sharedHtml?: Promise<string | null>): Promise<void> {
   try {
     if (!analysis || analysis.tradeInWidget) return;
     let hit = matchTradeInWidget(textHint || "");
     if (!hit) {
-      const html = await fetchDirectHtml(url, 8_000);
+      const html = sharedHtml ? await sharedHtml.catch(() => null) : await fetchDirectHtml(url, 8_000);
       if (html) hit = matchTradeInWidget(html);
     }
     if (hit) { analysis.tradeInWidget = hit; console.log(`Trade-in widget detected (${hit.vendor || "generic"}).`); }
@@ -1903,12 +2011,17 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
   }
 }
 
-async function captureConvertusDaysOnLot(url: string, analysis: any): Promise<void> {
+// Reads date_on_lot out of the Convertus vmsData blob. It used to re-download
+// the ENTIRE page (a 1.1 MB fetch on the Lexus listing that exposed this) to
+// regex one field out of the very blob the main reader had already parsed --
+// a wholly redundant origin request on the hosts most likely to rate-limit us.
+// Now it uses the scan's shared read.
+async function captureConvertusDaysOnLot(url: string, analysis: any, sharedHtml?: Promise<string | null>): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;
     let u: URL; try { u = new URL(url); } catch { return; }
     if (!/\/vehicles\/\d{4}\//i.test(u.pathname)) return;
-    const html = await fetchDirectHtml(url, 12_000);
+    const html = sharedHtml ? await sharedHtml.catch(() => null) : await fetchDirectHtml(url, 12_000);
     if (!html) return;
     const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
     const since = m ? m[1] : null;
@@ -1951,11 +2064,42 @@ function captureSm360Financing(v: any, analysis: any): void {
     rate: apr,
     termMonths: Number.isFinite(term) && term > 0 ? Math.round(term) : null,
     paymentAmount: Number.isFinite(payment) && payment > 0 ? Math.round(payment * 100) / 100 : null,
-    paymentFrequency: "monthly",
+    // The feed states payments per year (52/26/12). This used to be hardcoded
+    // "monthly", so a WEEKLY feed payment ($186 x 84 on a live VW feed,
+    // 2026-09-02) was reconciled against the total obligation as if it were
+    // monthly (ratio ~4.5) and the report printed "Numbers don't add up" -- a
+    // false flag against the dealer. Unmapped -> null, and computeFinancingCheck
+    // then declines to run rather than guess.
+    paymentFrequency: sm360Frequency(v?.paymentOptions?.finance?.paymentFrequency),
     totalObligation: Number.isFinite(totalObl) && totalObl > 0 ? Math.round(totalObl * 100) / 100 : null,
     source: "sm360_feed",
   };
-  console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"}/mo (dealer feed).`);
+  console.log(`SM360 financing: ${apr}% APR / ${term ?? "?"}mo / $${payment ?? "?"} per ${analysis.financing.paymentFrequency ?? "?"} (dealer feed).`);
+}
+
+function sm360Frequency(perYear: unknown): "weekly" | "biweekly" | "monthly" | null {
+  const n = Number(perYear);
+  return n === 52 ? "weekly" : n === 26 ? "biweekly" : n === 12 ? "monthly" : null;
+}
+
+// The day in Alberta, not UTC: a 6 pm Mountain read on Sep 2 must not print
+// "read Sep 3" or shift the 30-day window by a day. en-CA formats as YYYY-MM-DD.
+function todayIso(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Edmonton", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  } catch { return new Date().toISOString().slice(0, 10); }
+}
+
+// The page's DEFAULT payment scenario off the same feed object: which tab the
+// page opens on, and the finance term/frequency/rate/down it pre-selects.
+// Read unconditionally -- unlike the financing fill above it does not defer to
+// a page-stated rate, because it describes the page's pre-selected state, not
+// the best rate on the page. See _shared/page-default.js.
+function captureSm360PageDefault(v: any, analysis: any): void {
+  try {
+    const r = readSm360PageDefault(v, todayIso());
+    if (r && r.checked) analysis.pageDefault = r;
+  } catch (e) { console.warn("SM360 page default skipped:", (e as Error)?.message); }
 }
 
 // Identity + add-ons from the feed the page scrape misses: VIN (serialNo),
@@ -2016,6 +2160,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
         if (Number(v?.vehicleId) === vehicleId) {
           captureSm360DaysOnLot(v, analysis);
           captureSm360Financing(v, analysis);
+          captureSm360PageDefault(v, analysis);
           captureSm360Extras(v, analysis);
           const price = sm360PriceOf(v);
           if (price != null) {
@@ -2043,6 +2188,7 @@ async function resolveSm360QuotedPrice(url: string, analysis: any): Promise<void
       const price = sm360PriceOf(priced[0])!;
       captureSm360DaysOnLot(priced[0], analysis);
       captureSm360Financing(priced[0], analysis);
+      captureSm360PageDefault(priced[0], analysis);
       captureSm360Extras(priced[0], analysis);
       analysis.quotedPrice = price;
       analysis.quotedPriceSource = "sm360_feed_fallback";
@@ -2187,6 +2333,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 
     captureSm360DaysOnLot(match, analysis);
     captureSm360Financing(match, analysis);
+    captureSm360PageDefault(match, analysis);
     captureSm360Extras(match, analysis);
     console.log(`SM360 fallback: built analysis for vehicleId ${vehicleId} (${vehicleStr ?? "unknown vehicle"}), price=${price ?? "none"}, vin=${vin ? "present" : "none"}, odometer=${odometerKm ?? "none"}, condition=${condition ?? "unknown"}, fuelType=${analysis.fuelType ?? "none"}.`);
     return analysis;
@@ -2211,7 +2358,19 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
 // MSRP/recalls/warranty/leverage. Page fees/financing are NOT read (that needs
 // the rendered page), so the sourceNote says so and points to the screenshot
 // path. Never throws; returns null when there's no usable priced vehicle node.
-async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string | null> {
+// Why a direct read failed, so the retry loop can tell "this origin is pushing
+// back" apart from "there is nothing here". They need opposite responses: a
+// 404/parse miss will never succeed on a retry, while a 429 or a Cloudflare
+// challenge is a TIMING signal -- and hammering it converts a transient block
+// into a sustained one.
+// `finalUrl` is the URL that actually ANSWERED. fetch follows redirects, so a
+// dealer's legacy or vanity domain can 301 to a group site — and filing the
+// group site's wall verdict and platform under the vanity domain's key writes
+// one host's facts onto another host's row.
+type DirectOutcome = { status: "ok" | "rate_limited" | "challenged" | "http_error" | "empty" | "network"; code?: number; finalUrl?: string };
+
+async function fetchDirectHtml(url: string, timeoutMs: number, outcome?: DirectOutcome): Promise<string | null> {
+  const note = (status: DirectOutcome["status"], code?: number) => { if (outcome) { outcome.status = status; outcome.code = code; } };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -2237,14 +2396,17 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
       redirect: "follow",
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (outcome) outcome.finalUrl = res.url || undefined;
+    if (!res.ok) { note(res.status === 429 || res.status === 503 ? "rate_limited" : "http_error", res.status); return null; }
     const html = await res.text();
-    if (!html || html.length < 500) return null;
+    if (!html || html.length < 500) { note("empty", res.status); return null; }
     // A Cloudflare/queue interstitial returns 200 with a small challenge shell
     // (no real content) -- treat it as a failed load so we never parse it.
-    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) return null;
+    if (html.length < 60000 && /Just a moment\.\.\.|cf-challenge|Attention Required!|Checking your browser|__cf_chl/i.test(html)) { note("challenged", res.status); return null; }
+    note("ok", res.status);
     return html;
   } catch {
+    note("network");
     return null;
   } finally {
     clearTimeout(timer);
@@ -2261,15 +2423,59 @@ async function fetchDirectHtml(url: string, timeoutMs: number): Promise<string |
 // directHtml -- and the whole scan then leaned on the late, time-starved
 // Scrapfly rescue. These retries run in PARALLEL with Nimble's own 30-100s
 // extraction, so the added attempts cost zero wall-clock in practice.
-async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3): Promise<string | null> {
+//
+// THE SPACING WAS THE BUG. The old loop retried at 1.5s and 3s, described
+// in-comment as "a fresh connection, not a hammer". Against a per-IP rate
+// limiter three requests inside 4.5 seconds IS a hammer: measured live
+// 2026-08-27 against lexussouthpointe.com, 57 of 67 requests came back as a
+// 5,927-byte "Just a moment..." challenge shell and every request after that
+// returned HTTP 429. Real backoff with jitter gives the limiter's window time
+// to roll over, and costs no wall-clock in practice because these attempts run
+// in parallel with Nimble's own 30-100s extraction. A retry that cannot help
+// (404, unparseable) is not retried at all.
+// `sink` receives THIS scan's outcome. lastDirectOutcome below is module-level
+// and an edge isolate serves several requests at once, so reading it to decide
+// what to record about a host would attribute one scan's verdict to another
+// scan's dealer. The log line can live with that; the catalogue cannot.
+async function fetchDirectHtmlRetry(url: string, timeoutMs: number, attempts = 3, sink?: DirectOutcome): Promise<string | null> {
+  // 2s, 8s -- plus up to 1s of jitter, so concurrent scans of the same host do
+  // not line their retries up on the same tick.
+  //
+  // NOT SHORTENED FOR A KNOWN-WALLED HOST, though an earlier draft did. The
+  // spacing is the point: Cloudflare's bot scoring rejects a first request and
+  // passes a retry MOMENTS LATER, so a retry that lands too soon is the same
+  // moment and buys nothing but a second refusal -- and test-page-read pins
+  // these values for exactly that reason. The count is not shortened either:
+  // the challenge is intermittent (lexussouthpointe, measured: 57 of 67
+  // requests challenged, so ~15% of attempts pass), three tries clear it 39% of
+  // the time against one try's 15%, and a successful direct read is the ONLY
+  // thing that lifts a wall verdict. Fewer free reads would mean fewer
+  // liftings, which would mean more scans down the paid path -- a loop that
+  // closes on itself. What the catalogue shortens instead is the per-attempt
+  // TIMEOUT; see the call site.
+  const BACKOFF_MS = [2_000, 8_000];
+  const outcome: DirectOutcome = sink ?? { status: "network" };
   for (let i = 1; i <= attempts; i++) {
-    const html = await fetchDirectHtml(url, timeoutMs);
+    const html = await fetchDirectHtml(url, timeoutMs, outcome);
     if (html) { if (i > 1) console.log(`Direct fetch succeeded on attempt ${i}/${attempts}.`); return html; }
-    if (i < attempts) await sleep(1_500 * i); // 1.5s, 3s -- a fresh connection, not a hammer
+    // A hard HTTP error or an unparseably small body is a fact about the page,
+    // not about timing: retrying spends requests on an origin for no gain.
+    if (outcome.status === "http_error" && outcome.code !== 429 && outcome.code !== 503) {
+      console.warn(`Direct fetch: HTTP ${outcome.code} for ${url} -- not retrying.`);
+      lastDirectOutcome = outcome.status;
+      return null;
+    }
+    if (i < attempts) await sleep(BACKOFF_MS[i - 1] + Math.floor(Math.random() * 1_000));
   }
-  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url}.`);
+  lastDirectOutcome = outcome.status;
+  console.warn(`Direct fetch failed after ${attempts} attempt(s) for ${url} (last outcome: ${outcome.status}${outcome.code ? " " + outcome.code : ""}).`);
   return null;
 }
+
+// The last direct-read outcome for this isolate, read only for logging and for
+// the "page not read" disclosure. Deliberately not used for any buyer-facing
+// claim about the DEALER -- an origin blocking our IP says nothing about them.
+let lastDirectOutcome: DirectOutcome["status"] = "ok";
 
 // Pull the first schema.org Vehicle/Car/Product node that carries an Offer with
 // a price out of a page's <script type="application/ld+json"> blocks. Handles
@@ -2325,10 +2531,44 @@ async function buildJsonLdFallbackAnalysis(url: string, sharedHtml?: Promise<str
       financeContingent: detectFinanceContingent(html),
       standardWarranty: null,
       addOns: [], totalFlaggedCost: 0, warranty: null, financing: null,
+      // WE READ THE PAGE FOR FEES. Recorded whether or not any were found,
+      // because "we looked and there were none" and "we never looked" are
+      // different answers and the report used to print the first when it
+      // meant the second. [[report-never-empty]] means backed, not filled in.
+      feesRead: true,
       source: "structured_data_fallback",
       sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own structured product data (schema.org). Core vehicle details and the advertised price come straight from that data. Itemized fees and the page's financing terms couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
       summary: `${vehicleStr ?? "This vehicle"}${v.price != null ? ` is listed at $${v.price.toLocaleString()}${v.currency && v.currency !== "CAD" ? " " + v.currency : ""}` : ""}. This report was built from the page's structured data rather than the full page, so itemized fees and financing terms aren't included -- confirm the out-the-door price, any add-on fees, and financing details directly with the dealer.`,
     };
+    // The page's own DEFAULT payment scenario, off the same html (page-default.js).
+    try {
+      analysis.pageDefault = readPageDefault({ html, price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null, readAt: todayIso() });
+    } catch (e) { console.warn("page default (JSON-LD path) skipped:", (e as Error)?.message); }
+    // THE DEALER'S OWN PRICE LADDER, off the same html this function already
+    // holds. A fee box is rendered HTML, not schema.org markup, so the JSON-LD
+    // read alone could never see it -- which is exactly how a page printing
+    // "Doc Fee +$899" was reported to a buyer as "no dealer extras were
+    // itemized". readFeeLadder only returns when the arithmetic closes, so a
+    // ladder here is the dealer's own breakdown and not a guess.
+    try {
+      const ladder = readFeeLadder(html);
+      if (ladder) {
+        const fees = ladderFees(ladder);
+        if (fees.length) {
+          analysis.dealerLineItems = {
+            fees: fees.map((f) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
+            incentives: ladder.lines.filter((l) => l.kind === "deduct").map((l) => ({ name: l.label, amount: l.amount })),
+            // The ladder RECONCILED to the advertised total, which is the
+            // strongest possible evidence that these fees sit inside the price
+            // rather than on top of it. [[fee-decomposition-and-capture]]
+            insideAdvertisedPrice: true,
+            source: "the dealer's own price breakdown on the listing",
+          };
+        }
+        console.log(`Fee ladder read: base ${ladder.base}, total ${ladder.total}, ${ladder.lines.length} line(s), ${fees.length} dealer charge(s).`);
+      }
+    } catch (e) { console.warn("fee ladder skipped:", (e as Error)?.message); }
+
     console.log(`JSON-LD fallback: built analysis for ${url} (${vehicleStr ?? "unknown"}), price=${v.price ?? "none"}, vin=${v.vin ? "present" : "none"}, condition=${v.condition ?? "unknown"}.`);
     return analysis;
   } catch (err) {
@@ -2385,6 +2625,12 @@ async function buildConvertusVmsFallbackAnalysis(url: string, sharedHtml?: Promi
       sourceNote: "The dealer's listing page couldn't be read the usual way, so this report was built from the page's own vehicle-data platform (not the rendered page). Core vehicle details, the dealer's stated price/MSRP, and the advertised financing rate come straight from that data. Itemized add-on fees couldn't be read this way and aren't included -- upload a screenshot for the full breakdown.",
       summary: `${vehicleStr ?? "This vehicle"}${v.quotedPrice != null ? ` is listed at $${v.quotedPrice.toLocaleString()}` : ""}. This report was built from the dealer platform's own vehicle data rather than the full page, so itemized add-on fees aren't included -- confirm the out-the-door price and any add-on fees directly with the dealer.`,
     };
+    // The page's own DEFAULT payment scenario (page-default.js). vmsData lists
+    // several terms with no default marker, so this usually lands "absent" for
+    // Convertus pages -- which is the honest answer, not the longest term.
+    try {
+      analysis.pageDefault = readPageDefault({ html, price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null, readAt: todayIso() });
+    } catch (e) { console.warn("page default (Convertus path) skipped:", (e as Error)?.message); }
     try {
       const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
       if (m) {
@@ -2481,6 +2727,68 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // Guarding each enricher individually would leave the next one added unguarded
 // by default; guarding the boundary covers every one of them, including the
 // ones nobody has written yet.
+// ONE definition of "the price came from the page's own machine-readable
+// data". priceVerified is stamped from it on the main path; the fallback
+// builders never reach that stamp, so the count reads the same rule here.
+function isVerifiedPriceSource(src: unknown): boolean {
+  const s = String(src || "");
+  return s === "structured_data" || s === "sm360_feed" || s === "sm360_feed_fallback" || s === "convertus_vms" || s === "d2c_vdp";
+}
+
+// "Of N other listings LotCheck read, M advertised below this one when read."
+// Our OWN crawl rows (fn_market_comps: exact model year, same make/model/
+// condition/province, not delisted, subject VIN excluded when known), counted
+// in code by _shared/market-count.js. Sets analysis.marketCount in EVERY case
+// -- the card never goes silent; an unchecked read says so and why. Never
+// sinks a scan.
+//
+// RUNS LAST, after the price is final. It used to run inside enrichAnalysis,
+// BEFORE the structured-data price gap-fill and the priceVerified stamp -- so
+// a JSON-LD-priced page was counted with no price and the card said "this
+// page shows no asking price" beside a price card that showed one. Every path
+// now calls this right before finalizeServerSide, with the url in hand so the
+// hostname counts as a province signal.
+async function captureMarketCount(analysis: any, urlHint?: string | null): Promise<void> {
+  try {
+    const year = Number(analysis?.year);
+    const make = String(analysis?.make || "").trim();
+    const model = String(analysis?.model || "").trim();
+    const condition = String(analysis?.vehicleCondition || "").toLowerCase();
+    const prov = String(resolveJurisdiction({ ...analysis, url: analysis?.sourceUrl || urlHint || null }).code || "").toUpperCase();
+    const price = Number(analysis?.quotedPrice);
+    const priceVerified = analysis?.priceVerified === true
+      || (analysis?.priceVerified == null && price > 0 && isVerifiedPriceSource(analysis?.quotedPriceSource));
+    const today = todayIso();
+    const base = emptyMarketCount({ province: prov || null, year: year > 0 ? year : null, make: make || null, model: model || null, price: price > 0 ? price : null, priceVerified, asOf: today });
+    if (!(year > 0) || !make || !model) { analysis.marketCount = { ...base, reason: "identity_missing" }; return; }
+    if (condition !== "new" && condition !== "used") { analysis.marketCount = { ...base, reason: "condition_unknown" }; return; }
+    if (!prov) { analysis.marketCount = { ...base, reason: "province_unknown" }; return; }
+    if (!servesComps(prov)) { analysis.marketCount = { ...base, reason: "outside_province" }; return; }
+    const vin = String(analysis?.vin || "").toUpperCase();
+    const excludeVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null;
+    // Bounded: an optional card must not spend the request budget.
+    const rpc = supabase.rpc("fn_market_comps", {
+      p_year: year, p_make: make, p_model: model, p_condition: condition,
+      p_exclude_vin: excludeVin, p_province: prov, p_year_span: 0, p_limit: POOL_CAP,
+    });
+    const timeout = new Promise<{ data: null; error: { message: string } }>((resolve) => setTimeout(() => resolve({ data: null, error: { message: "timeout" } }), 4_000));
+    const { data, error } = await Promise.race([rpc, timeout]) as any;
+    if (error) { console.warn("market count: fn_market_comps failed:", error.message); analysis.marketCount = { ...base, reason: error.message === "timeout" ? "timeout" : "rpc_error" }; return; }
+    const rows = Array.isArray(data) ? data : [];
+    analysis.marketCount = computeMarketCount(rows, {
+      year, make, model, trim: analysis?.trim ?? null, price: price > 0 ? price : null,
+      priceVerified, contingent: !!analysis?.financeContingent?.contingent,
+      province: prov, subjectExcluded: !!excludeVin, today, truncated: rows.length >= POOL_CAP,
+      powertrainHint: fuelPowertrainHint(analysis?.fuelType),
+    });
+    const m = analysis.marketCount;
+    console.log(`market count: ${m.state}${m.scope ? ` (${m.scope})` : ""} n=${m.n} below=${m.below} same=${m.same} dealers=${m.dealers} seen ${m.seenMin ?? "?"}..${m.seenMax ?? "?"}${m.reason ? ` -- ${m.reason}` : ""}`);
+  } catch (e) {
+    console.warn("market count skipped:", (e as Error)?.message);
+    analysis.marketCount = emptyMarketCount({ reason: "error" });
+  }
+}
+
 async function enrichAnalysis(a: any, deadline: number): Promise<void> {
   try {
     await enrichAnalysisInner(a, deadline);
@@ -2508,10 +2816,19 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       analysis.odometerKm != null ? Number(analysis.odometerKm) : null,
       { year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
         saleCondition: analysis.saleCondition, asking: analysis.quotedPrice != null ? Number(analysis.quotedPrice) : null,
-        province: resolveJurisdiction(analysis).code },
+        province: resolveJurisdiction(analysis).code,
+        // The count line's clock and the page's own fuel type, so both market
+        // cards read one 30-day window and one powertrain.
+        today: todayIso(), fuelType: analysis.fuelType ?? null },
     );
     if (mv) analysis.marketValue = mv;
   }
+  // What older model years ask today: no VIN needed (the VIN only excludes this
+  // listing from the set when known). Always an object -- unread says why.
+  analysis.olderYears = await fetchOlderYears({
+    year: analysis.year, make: analysis.make, model: analysis.model, trim: analysis.trim, condition: analysis.vehicleCondition,
+    province: resolveJurisdiction(analysis).code, today: todayIso(), fuelType: analysis.fuelType ?? null, vin: analysis.vin ?? null,
+  });
   analysis.vinCheck = validateVin(analysis.vin);
   // Canonical base model resolved once (e.g. "Palisade Ultimate Calligraphy" ->
   // "PALISADE"), feeding BOTH the recall and MSRP lookups so trim in the model
@@ -2562,10 +2879,12 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
       // A USED car's catalog match is the price when it was NEW. That is useful
       // context ("this cost $X new") but it is NOT a sticker to measure today's
       // asking price against -- a 2014 truck is not "$35,000 under MSRP". Mark
-      // it so every over/under claim stays switched off.
-      const isUsed = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-        || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
-      if (isUsed) {
+      // it so every over/under claim stays switched off. The rule itself lives in
+      // _shared/msrp-basis.ts: it was copy-pasted here, again below, again in
+      // analyze-quote, and MISSING from the stated-MSRP branch further down, which
+      // is how a used listing came back "exact". One definition now, and it fails
+      // closed -- an unflagged 3,800 km unit is no longer treated as new.
+      if (!msrpIsPresentTense(analysis)) {
         analysis.originalMsrp = { msrp: catMsrp.msrp, trim: catMsrp.trim || null, year: catMsrp.year || analysis.year, sourceUrl: catMsrp.sourceUrl || null };
         analysis.msrpBasis = "original_when_new";
       }
@@ -2590,9 +2909,10 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
         // it is not proof we matched THIS trim, drivetrain and options, so it
         // must not support an over/under claim. If the lookup ever proves an
         // exact configuration match, it can upgrade this itself.
-        const isUsedUnit = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-          || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
-        analysis.msrpBasis = isUsedUnit ? "original_when_new" : "starting_at";
+        // Same shared used-vehicle gate as the catalog branch above: on anything
+        // that isn't present tense, a manufacturer figure is what the car cost
+        // when it was new, not a sticker to price today's car against.
+        analysis.msrpBasis = msrpIsPresentTense(analysis) ? "starting_at" : "original_when_new";
       }
     }
   }
@@ -2601,8 +2921,10 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   // is that we don't hold original MSRPs that far back, plus the ask that gets
   // the buyer the real number. Never leave the point blank (report-never-empty).
   {
-    const used = String(analysis.vehicleCondition || "").toLowerCase() === "used"
-      || (Number(analysis.odometerKm) > 5000 && String(analysis.vehicleCondition || "").toLowerCase() !== "new");
+    // Was a fourth hand-written copy of the used test, with the same fail-open
+    // shape the shared module replaced -- and it disagreed with the basis the
+    // branches above had just decided. One rule (_shared/msrp-basis.ts).
+    const used = !msrpIsPresentTense(analysis);
     if (used && !(Number(analysis.msrp) > 0)) {
       analysis.msrpUnavailable = {
         reason: "used_original_msrp_not_held",
@@ -2641,14 +2963,27 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
     // dealer inflated, so a dealer-stated figure silently became the report's
     // MSRP in every other case.
     const decided = resolveMsrpAuthority({ statedMsrp: Number(analysis.msrp), ref, make: analysis.make || null });
+    // THIS is where the used-vehicle guard was missing. The two branches above
+    // each carried their own copy; this one re-decided the basis from the catalog
+    // cross-check and stored it raw, so a used listing whose page printed a
+    // sticker came back "exact" and the report told the buyer a years-old car was
+    // thousands "under MSRP" -- a bargain we invented, in the dealer's favour.
+    // The same call also withholds the padded-sticker accusation on a used unit,
+    // where the stated figure is the original as-optioned sticker and our catalog
+    // row is a base trim: that gap is a data gap, not a tactic.
+    const outcome = applyConditionToMsrp(decided, {
+      vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition,
+      saleConditionHint: analysis.saleConditionHint, odometerKm: analysis.odometerKm, year: analysis.year,
+    });
     analysis.msrp = decided.msrp;
-    analysis.msrpBasis = decided.basis;
+    analysis.msrpBasis = outcome.basis;
     analysis.msrpSource = decided.source;
     if (decided.trim) analysis.msrpTrim = decided.trim; else if (decided.basis !== "dealer_stated") delete analysis.msrpTrim;
     if (decided.sourceUrl) analysis.msrpSourceUrl = decided.sourceUrl;
     if (decided.priceBasis) analysis.msrpPriceBasis = decided.priceBasis;
     if (decided.dealerStatedMsrp) analysis.dealerStatedMsrp = decided.dealerStatedMsrp;
-    if (decided.inflation) analysis.msrpInflation = decided.inflation;
+    if (outcome.originalMsrp) analysis.originalMsrp = outcome.originalMsrp;
+    if (outcome.inflation) analysis.msrpInflation = outcome.inflation;
     if (decided.reference) analysis.msrpReference = decided.reference;
 
   }
@@ -2658,6 +2993,20 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   await resolveFinanceRates(analysis);
   await resolveLeaseRates(analysis);
   // Deal Decoder — run AFTER msrp + finance rates are resolved.
+  // A BUNDLED price line is not the dealer's money. Normalised HERE -- once,
+  // before computeReconciliation, before the counter-script, and before
+  // anything reads totalFlaggedCost -- so every consumer inherits the same
+  // correction instead of each needing its own fix. Ordering matters: this repo
+  // has shipped an ordering-vs-derived-value defect twice (63fa164, fe57ad4),
+  // where the value arrived after the thing that consumed it.
+  {
+    const b = normaliseBundledAddOns(analysis);
+    if (b.changed) {
+      console.log(`Bundled fee line(s) not attributed to the dealer: ` +
+        `${b.lines.map((l) => `${l.name} ${l.price ?? "?"}`).join("; ")}` +
+        `${b.flaggedRemoved ? ` (removed $${b.flaggedRemoved} from totalFlaggedCost)` : ""}.`);
+    }
+  }
   { const rec = computeReconciliation(analysis); if (rec) analysis.reconciliation = rec; }   // S3
   { const ft = computeFinancingTrap(analysis); if (ft) analysis.financingTrap = ft; }         // S11
   { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }                   // S12
@@ -2906,6 +3255,18 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // WHAT THIS PAGE IS ABOUT, established before any report is built about it
+    // and carried to the re-anchor check after extraction. Null until the page
+    // has been classified; a page we never classified never re-anchors.
+    let pageSubjectVin: string | null = null;
+    let pageMentionsOthers = false;
+    let pageDeclared: { year?: unknown; make?: unknown } | null = null;
+    // Hoisted out of the classification block: the subject-mismatch refusal
+    // far below is the most expensive exit in this function and needs the same
+    // repeat-spend throttle the multi-vehicle refusal uses.
+    let repeatIdentity = "";
+    let repeatInputHash = "";
+
     // Aggregator ToS gate. Runs before the credit hold and any scrape, so a
     // blocked link costs the user nothing. We do NOT auto-fetch AutoTrader/
     // CarGurus/etc.; instead we tell the buyer how to verify without LotCheck
@@ -2987,6 +3348,14 @@ Deno.serve(async (req: Request) => {
           );
         }
         await finalizeServerSide(cached.analysis); // finalizes entries cached before this change
+        // A cached delivery is a DELIVERED, CHARGED report and must be counted
+        // as one. This branch sits above every logUsage call site in the file
+        // and wrote nothing at all, so "URL scans" in the admin ledger was
+        // really a count of cache MISSES, and a cached report contributed zero
+        // of its 13 checkpoints. Two consequences worth naming: the panel
+        // undercounted real deliveries, and the per-check failure rate was
+        // computed over a biased sample (fresh scans only).
+        await instrumentDelivery(cached.analysis, "cache hit");
         // A cached delivery is still a delivered accurate result -> capture.
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -3006,20 +3375,40 @@ Deno.serve(async (req: Request) => {
     // extraction. Fire-and-forget until the attach point; errors resolve null.
     // Instrumented so Scrapfly's screenshot job is directly comparable with
     // Nimble's extract job on the same listing — same host, same run, both
-    // logged. 60 credits/shot on the Discovery plan (~$0.009).
-    const SCRAPFLY_SHOT_CREDITS = 60, SCRAPFLY_SHOT_USD = 0.009;
+    // logged.
+    //
+    // 80, NOT 60, AND THE TWO NUMBERS ARE BOTH RIGHT. Scrapfly bills a
+    // screenshot at 60 credits base plus 1 credit per 100 KB of page weight
+    // over 4 MB. Vic's dashboard for 2026-08-16 (quoted twice in
+    // _shared/scrapfly.ts) shows what a real dealer VDP actually costs:
+    // "CA 200 cost 80 / US 200 cost 80". So 60 is the documented floor and 80
+    // is the measured price of the pages we photograph; the ledger should
+    // carry what we are charged, not the brochure figure.
+    //
+    // AND IT IS PER SHOT, NOT PER CAPTURE. The ladder can bill up to four
+    // (fullpage, two refits, the top-of-page fallback), and this row used to
+    // record exactly one — and recorded NOTHING at all on the failure path,
+    // where two paid shots were logged as free. The callback counts them.
+    const SCRAPFLY_SHOT_CREDITS = 80, SCRAPFLY_SHOT_USD = 0.012;
+    // A /scrape render with asp=true. Same order as a screenshot on these
+    // pages, and the same caveat: 60 is the documented floor, 80 is what the
+    // dashboard shows for real dealer VDPs. Carry what we are charged.
+    const SCRAPFLY_RENDER_CREDITS = 80, SCRAPFLY_RENDER_USD = 0.012;
+    let scrapflyShots = 0;
     const shotPromise: Promise<{ b64: string; mime: string } | null> = scrapflyEnabled()
       ? (() => {
           const t0 = Date.now();
-          return captureListingScreenshot(url, 90_000)
+          return captureListingScreenshot(url, 90_000, { onBilledShot: () => { scrapflyShots++; } })
             .then((r) => {
               logProviderCall({
                 provider: "scrapfly", operation: "screenshot", ok: !!r,
                 driver: "capture", listingHost: hostOf(url),
                 durationMs: Date.now() - t0,
                 errorCode: r ? null : (lastScrapflyError ?? "empty"),
-                credits: r ? SCRAPFLY_SHOT_CREDITS : null,
-                costUsd: r ? SCRAPFLY_SHOT_USD : null,
+                // On BOTH branches: a capture that ended with no photo still
+                // spent every shot it took getting there.
+                credits: scrapflyShots ? scrapflyShots * SCRAPFLY_SHOT_CREDITS : null,
+                costUsd: scrapflyShots ? Number((scrapflyShots * SCRAPFLY_SHOT_USD).toFixed(3)) : null,
               });
               return r;
             })
@@ -3049,25 +3438,70 @@ Deno.serve(async (req: Request) => {
     // executed even once in production, despite passing 18/18 against a saved
     // copy of the very page it was written for. Anything needing real HTML
     // must come through here.
-    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, 15_000).catch(() => null);
-    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, directHtml).catch(() => null);
-    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
-    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
-    // that Nimble's markdown AND this same direct-fetch text view both miss
-    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
-    // a real, correctly-scraped page still reported "price not shown" while
-    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
-    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
-    const earlyConvertusVms: Promise<any | null> = directHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
-    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
-    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
-    // nothing extra. Specified 2026-08-15, never actually wired in until now
-    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
-    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
-    // pricing" over the real fields it renders, but priceWithoutCustomFees
-    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
-    // [[gated-price-recovery]] memory for the full mechanism.
-    const earlyD2cVdp: Promise<any | null> = directHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
+    // ---- THE CATALOGUE, READ BEFORE WE DECIDE HOW TO FETCH ----------------
+    //
+    // Vic, 2026-08-30: "we should have them all listed on place ... and read
+    // them on as soones lotcheck user makes request". This is that read.
+    //
+    // 28% of Alberta's 1,639 dealer hosts refuse a datacenter IP outright. On
+    // one of those, the ladder below spends three attempts and two backoffs
+    // proving a wall we have already met, and only THEN starts the anti-bot
+    // render that was always going to be the answer. The catalogue remembers,
+    // so the second buyer to scan a walled host does not pay for the first
+    // buyer's discovery.
+    //
+    // ADVISORY ONLY, in three ways that matter: the lookup is bounded so a slow
+    // catalogue cannot delay a scan, an unknown host takes exactly today's
+    // ladder, and a wrong verdict costs one attempt rather than the scan.
+    // [[no-single-point-of-failure]]
+    // SERIAL, AND IT HAS TO BE: the plan decides how directHtml is constructed,
+    // so nothing downstream can start until it is known. That makes its cost a
+    // tax on EVERY scan, including the ~1,609 hosts with no row yet -- so the
+    // budget is one indexed single-row read plus a wide margin for a hiccup,
+    // not a comfortable round number. The duration is logged because a tax on
+    // every scan is exactly the kind of cost that should be visible rather
+    // than assumed. If it ever reads high, this moves behind the render.
+    const catalogHost = catalogKey(url);
+    const catalogT0 = Date.now();
+    const catalogRow = catalogHost
+      ? await Promise.race([
+          supabase.rpc("fn_dealer_catalog_lookup", { p_host: catalogHost })
+            .then(({ data, error }: any) => (error ? null : data))
+            .catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 400)),
+        ])
+      : null;
+    const catalogMs = Date.now() - catalogT0;
+    const fetchPlan = chooseFetchPlan(
+      catalogRow
+        ? {
+            host: catalogRow.host,
+            platform: catalogRow.platform,
+            fetchStrategy: catalogRow.fetch_strategy,
+            lastDirectStatus: catalogRow.last_direct_status,
+            lastDirectOkAt: catalogRow.last_direct_ok_at,
+            lastDirectFailAt: catalogRow.last_direct_fail_at,
+            lastAspOkAt: catalogRow.last_asp_ok_at,
+            observedCount: catalogRow.observed_count,
+          }
+        : null,
+      Date.now(),
+    );
+    console.log(`Catalogue [${catalogHost ?? "unkeyable"}] in ${catalogMs}ms: ${fetchPlan.why}${fetchPlan.aspFirst ? " -> one confirming direct attempt, then render" : ""}.`);
+
+    // This scan's own copy of the direct-read verdict, for the write-back.
+    const directOutcome: DirectOutcome = { status: "network" };
+    // WHAT THE CATALOGUE ACTUALLY SHORTENS: the per-attempt timeout, not the
+    // attempts and not the spacing between them.
+    //
+    // A host that refuses us refuses us FAST -- a 403 or a challenge shell
+    // comes back in well under a second -- so on a host we already know walls
+    // us, an attempt still running at 6s is one that is hanging, and hanging is
+    // not an answer we are waiting for. Left at 15s, three hanging attempts
+    // spend 45s of a 140s budget re-learning something recorded. Every attempt
+    // survives, the spacing survives, and the ceiling drops from ~55s to ~28s
+    // on exactly the hosts that were eating the deadline that strands a credit.
+    const directHtml: Promise<string | null> = fetchDirectHtmlRetry(url, fetchPlan.aspFirst ? 6_000 : 15_000, 3, directOutcome).catch(() => null);
     // Pre-warm the Scrapfly render the MOMENT the direct fetch conclusively
     // fails (all retries exhausted) -- the strongest early signal the rescue
     // will be needed. Started here, ~20-50s into the request, it runs in
@@ -3080,9 +3514,129 @@ Deno.serve(async (req: Request) => {
     // spent ONLY on scans whose direct fetch failed -- exactly the scans that
     // were otherwise losing data outright. Resolves null when the direct
     // fetch succeeded (rescue then renders fresh only if it actually fires).
+    // STILL CHAINED ON THE DIRECT FETCH, and deliberately so.
+    //
+    // The reason the render used to be late is not that it waited for the
+    // direct fetch -- it is that the direct fetch took THREE attempts with 2s
+    // and 8s backoffs between them, so "conclusively failed" arrived ~11s after
+    // a wall that announces itself in under one. Cutting the retries to one on
+    // a known-walled host (above) removes that delay at the source.
+    //
+    // An earlier draft started the render unconditionally when the catalogue
+    // said "walled". That bought about a second and created a way to pay for a
+    // render nobody uses: the verdict is trusted for 7 days, so a host that
+    // quietly stopped walling us would answer the direct fetch, resolvePageSource
+    // would prefer it, and the render would be billed and discarded. Chaining
+    // keeps the latency win and spends nothing on a wall that has lifted.
     const earlyRender: Promise<RenderResult | null> = scrapflyEnabled()
-      ? directHtml.then((html) => (html ? null : (console.log("Direct fetch failed -- pre-warming Scrapfly render for a possible rescue."), scrapflyRender(url, 70_000)))).catch(() => null)
+      ? directHtml.then((html) => {
+          if (html) return null;
+          console.log(`Direct fetch failed -- pre-warming Scrapfly render for a possible rescue${fetchPlan.aspFirst ? " (catalogue expected this)" : ""}.`);
+          // THE ONE SCRAPFLY CALL WITH NO LEDGER ROW, until now. The screenshot
+          // logs its credits (operation "screenshot") and the render never did
+          // -- the `operation: "render"` value has been declared and unused --
+          // so the admin panel's per-scan cost has always been the screenshot
+          // alone. This change is specifically a change to how OFTEN the render
+          // fires, so shipping it without the row would make the panel drift
+          // from the Scrapfly invoice by exactly the amount this change adds,
+          // invisibly. [[always-show-cost-first]]
+          const rt0 = Date.now();
+          return scrapflyRender(url, 70_000).then((r) => {
+            logProviderCall({
+              provider: "scrapfly", operation: "render", ok: !!r,
+              driver: fetchPlan.aspFirst ? "catalogue-asp" : "direct-failed",
+              listingHost: hostOf(url), durationMs: Date.now() - rt0,
+              errorCode: r ? null : (lastScrapflyError ?? "empty"),
+              credits: r ? SCRAPFLY_RENDER_CREDITS : null,
+              costUsd: r ? SCRAPFLY_RENDER_USD : null,
+            });
+            return r;
+          });
+        }).catch(() => null)
       : Promise.resolve(null);
+    // THE PAGE SOURCE EVERY READER USES -- direct fetch first, the render second.
+    //
+    // Until now every structured reader hung off `directHtml` alone, so ONE
+    // blocked GET emptied price, MSRP, VIN, trim, APR and days-on-lot in a
+    // single stroke. Confirmed live 2026-08-27 on a real paid report
+    // (LC-46A4-66F, a 2026 Lexus NX 350h at lexussouthpointe.com): the page's
+    // own vmsData carried asking_price 62005, VIN 2T2GKCEZ8TC072832, msrp
+    // 58675, 8.99% APR and date_on_lot 2026-05-04 the entire time, and the
+    // buyer was shown "ASKING PRICE: Not shown" and "VIN: NOT ON QUOTE".
+    // Nothing was wrong with the extractors -- they were simply never handed
+    // any HTML, because Cloudflare served a challenge shell to the datacenter
+    // IP and fetchDirectHtml correctly returned null.
+    //
+    // The rescue render was ALREADY being paid for on exactly these scans
+    // (earlyRender above fires the moment the direct fetch conclusively
+    // fails), and scrapfly.ts had been running its own private copy of
+    // extractConvertusVmsVehicle on that HTML in a second, later pipeline.
+    // This promotes that same HTML into the ONE reader chain, so a blocked
+    // origin costs coverage of nothing we already hold. [[no-single-point-of-failure]]
+    // The resolution itself lives in _shared/page-source.js so the regression
+    // gate exercises the REAL function rather than a copy of its logic that
+    // can drift away from it.
+    const pageHtml: Promise<string | null> = directHtml.then(async (html) => {
+      const r = await earlyRender.catch(() => null);
+      const picked = resolvePageSource(html, r, (m) => console.log(m));
+      if (picked.source === "none") console.warn(`No page source: direct read ${directOutcome.status}, render produced no usable HTML.`);
+
+      // WHAT THIS SCAN LEARNED ABOUT THE HOST, written back so the next
+      // buyer's scan starts knowing it. This is not a crawl and causes no
+      // request to anyone: the buyer asked us to read this page, we read it,
+      // and how it answered is a fact we already hold.
+      //
+      // WRAPPED, and that is not defensive clutter. This block sits inside
+      // pageHtml's `.then`, and pageHtml ends in a blanket `.catch(() => null)`
+      // -- so a synchronous throw anywhere in here would resolve pageHtml to
+      // null and empty EVERY structured reader in the scan. That is precisely
+      // the single point of failure page-source.js was written to remove, and
+      // an optimisation must never be able to re-create it. The comment used to
+      // claim it could not; now the code makes it so.
+      try {
+        // Key on the host that ANSWERED. A vanity domain that 301s to a group
+        // site must not have the group site's verdict filed under its own name.
+        const answeredHost = directOutcome.finalUrl ? catalogKey(directOutcome.finalUrl) : null;
+        const obs = buildObservation(
+          answeredHost ?? catalogHost,
+          html ? "ok" : directVerdict(directOutcome.status, directOutcome.code),
+          picked.source === "render",
+          detectPlatform(picked.html),
+          new Date().toISOString(),
+        );
+        if (obs) {
+          // Fire and forget: the catalogue is an optimisation and must never be
+          // able to slow, fail or sink a scan.
+          supabase.rpc("fn_dealer_catalog_observe", {
+            p_host: obs.host, p_direct_status: obs.directStatus,
+            p_used_asp: obs.usedAsp, p_platform: obs.platform,
+          }).then(({ error }: any) => { if (error) console.warn("catalogue write skipped:", error.message); })
+            .catch((e: unknown) => console.warn("catalogue write skipped:", (e as Error)?.message));
+        }
+      } catch (e) {
+        console.warn("catalogue write skipped:", (e as Error)?.message);
+      }
+      return picked.html;
+    }).catch(() => null);
+
+    const earlyJsonLd: Promise<any | null> = buildJsonLdFallbackAnalysis(url, pageHtml).catch(() => null);
+    // Convertus platform sites (southtrailkia.com and its "/vehicles/YYYY/"
+    // siblings) embed a `var vmsData = {...}` blob with price/VIN/identity
+    // that Nimble's markdown AND this same direct-fetch text view both miss
+    // entirely (both drop <script> content) -- confirmed live 2026-08-13:
+    // a real, correctly-scraped page still reported "price not shown" while
+    // this exact unit's real msrp/asking_price sat unread in that blob. Reuses
+    // the SAME directHtml fetch above; costs nothing extra. See convertus-vms.js.
+    const earlyConvertusVms: Promise<any | null> = pageHtml.then((html) => (html ? extractConvertusVmsVehicle(html) : null)).catch(() => null);
+    // D2C Media platform sites embed a `window.__vdpJSON = {...}` blob --
+    // D2C's analogue of Convertus's vmsData, same directHtml fetch, costs
+    // nothing extra. Specified 2026-08-15, never actually wired in until now
+    // -- confirmed live TWICE on the identical listing (Okotoks Toyota RAV4
+    // PHEV GR Sport, VIN JTM7ERAV1TD018440): the page templates "Call for
+    // pricing" over the real fields it renders, but priceWithoutCustomFees
+    // keeps the true $85,995 ask the whole time. See d2c-vdp.js and the
+    // [[gated-price-recovery]] memory for the full mechanism.
+    const earlyD2cVdp: Promise<any | null> = pageHtml.then((html) => (html ? extractD2cVdpVehicle(html) : null)).catch(() => null);
     // Combined structured-data view for structuredFactsBlock + the post-Claude
     // gap-fill below: JSON-LD's fields stay authoritative where present (an
     // established, tested source); Convertus fills whatever JSON-LD didn't
@@ -3098,26 +3652,65 @@ Deno.serve(async (req: Request) => {
       if (!jl && !blob) return null;
       const blobFacts = blob ? {
         quotedPrice: blob.quotedPrice, msrp: blob.msrp ?? null, vin: blob.vin,
+        // Carried so the subject guard has something to corroborate a read
+        // against on a page with no schema.org markup at all.
+        year: blob.year ?? null, make: blob.make ?? null,
+        // The dealer's OWN itemisation of the price they advertise. Kept apart
+        // from addOns because these sit INSIDE the advertised figure, not on
+        // top of it -- see _shared/d2c-vdp.js.
+        dealerFees: (blob as any).dealerFees ?? null,
+        dealerIncentives: (blob as any).dealerIncentives ?? null,
+        feesInsideAdvertised: (blob as any).feesInsideAdvertised ?? null,
+        dealerStatedMsrp: (blob as any).dealerStatedMsrp ?? null,
         vehicle: [blob.year, blob.make, blob.model, blob.trim].filter(Boolean).join(" ") || null,
         odometerKm: blob.odometerKm, vehicleCondition: blob.condition,
         dealerName: blob.dealerName, dealerCity: blob.dealerCity ?? null,
+        // WHICH platform's blob this price came from. Without it the gap-fill
+        // below could copy the NUMBER but not its provenance, leaving
+        // quotedPriceSource unset -> priceVerified false -> every surface
+        // printing "PRICE UNVERIFIED" beside a price we read from the dealer's
+        // own machine-readable data. That is exactly the bug the Convertus
+        // fix closed earlier the same day; the D2C wiring reintroduced it by
+        // never calling fillFromD2cVdp on this path at all.
+        quotedPriceSource: Number(blob.quotedPrice) > 0 ? (cv ? "convertus_vms" : "d2c_vdp") : null,
         // Only D2C's extractor sets these (a real "the page says X but the
         // page's own data says Y" tell, not a guess -- see d2c-vdp.js).
         priceGatedButRecovered: blob.priceGated || null, priceGateMessage: blob.priceGateMessage || null,
+        priceGateGoogleAdsBacked: blob.googleAdsCorroborated || null,
       } : null;
-      if (!blobFacts) return jl;
+      if (!blobFacts) return jl ? { ...jl, quotedPriceSource: Number(jl.quotedPrice) > 0 ? "structured_data" : null } : jl;
       if (!jl) return blobFacts;
+      const jlPriceWins = Number(jl.quotedPrice) > 0;
+      // THE ENUMERATED MERGE DROPS ANYTHING NEW. This branch used to start at
+      // `...jl` and then name every field it wanted from blobFacts, so a field
+      // added to the blob reader reached the analysis only on pages with NO
+      // JSON-LD -- silently doing nothing on the pages that have both. That is
+      // how the dealer's $795 Admin. Fee would have been read correctly and
+      // still never shown: sundancemazda.com publishes JSON-LD, so this branch
+      // is the one that runs. blobFacts is spread FIRST so it supplies anything
+      // the named list below does not, and every existing precedence decision
+      // still wins because it is applied after.
       return {
+        ...blobFacts,
         ...jl,
-        quotedPrice: Number(jl.quotedPrice) > 0 ? jl.quotedPrice : blobFacts.quotedPrice,
+        dealerFees: blobFacts.dealerFees ?? (jl as any).dealerFees ?? null,
+        dealerIncentives: blobFacts.dealerIncentives ?? (jl as any).dealerIncentives ?? null,
+        feesInsideAdvertised: blobFacts.feesInsideAdvertised ?? null,
+        dealerStatedMsrp: blobFacts.dealerStatedMsrp ?? null,
+        quotedPrice: jlPriceWins ? jl.quotedPrice : blobFacts.quotedPrice,
+        // The source must follow whichever price actually won above.
+        quotedPriceSource: jlPriceWins ? "structured_data" : blobFacts.quotedPriceSource,
         msrp: Number(jl.msrp) > 0 ? jl.msrp : blobFacts.msrp,
         vin: jl.vin || blobFacts.vin,
         odometerKm: jl.odometerKm ?? blobFacts.odometerKm,
         vehicleCondition: jl.vehicleCondition || blobFacts.vehicleCondition,
         dealerName: jl.dealerName || blobFacts.dealerName,
         dealerCity: jl.dealerCity || blobFacts.dealerCity,
-        priceGatedButRecovered: blobFacts.priceGatedButRecovered,
-        priceGateMessage: blobFacts.priceGateMessage,
+        // Only meaningful when the BLOB's price is the one that won -- a
+        // JSON-LD price was never gated, so the tell would be a false claim.
+        priceGatedButRecovered: jlPriceWins ? null : blobFacts.priceGatedButRecovered,
+        priceGateMessage: jlPriceWins ? null : blobFacts.priceGateMessage,
+        priceGateGoogleAdsBacked: jlPriceWins ? null : blobFacts.priceGateGoogleAdsBacked,
       };
     }).catch(() => null);
 
@@ -3136,6 +3729,7 @@ Deno.serve(async (req: Request) => {
       if (fallback) {
         await enrichAnalysis(fallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, fallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(fallback, url);
         await finalizeServerSide(fallback);
         try {
           await supabase
@@ -3145,7 +3739,7 @@ Deno.serve(async (req: Request) => {
           console.warn("Cache write failed (SM360 fallback):", err);
         }
         // Logged as a success: we returned a usable report, just via the feed.
-        await logUsage({ success: true, errorMessage: `page-load failed, served SM360 feed fallback` });
+        await instrumentDelivery(fallback, "page-load failed, served SM360 feed fallback");
         console.log(`Served SM360 feed fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         // A usable report was delivered (via the feed) -> capture.
         const credits = await captureCredit(holdId);
@@ -3166,8 +3760,28 @@ Deno.serve(async (req: Request) => {
       // feed fallback have already failed, so pages that load are unaffected.
       // Prefer the copy we started at t=0; only re-fetch if it came back empty.
       const jsonLdFallback = (await earlyJsonLd) || (await buildJsonLdFallbackAnalysis(url));
+      // CLASSIFY BEFORE REPORTING, ON THIS PATH TOO. extractJsonLdVehicle takes
+      // the FIRST priced vehicle node and stops -- so on an inventory grid whose
+      // cards each carry structured data, this branch would build a complete,
+      // enriched, sealed and CHARGED report about whichever card happened to be
+      // first in the markup. The page's own declaration answers it for free
+      // from HTML we already hold. [[establish-page-before-report]]
       if (jsonLdFallback) {
-        await detectTradeInWidget(url, jsonLdFallback); // S36 (fetch is cached upstream at the CDN, cheap)
+        const jlHtml = await pageHtml.catch(() => null);
+        const jlDeclared = typeof jlHtml === "string" ? jsonLdVehicles(jlHtml, url) : { count: 0, vins: [], anchoredVin: null };
+        if (jlDeclared.count > 1 && !jlDeclared.anchoredVin) {
+          await releaseCredit(holdId);
+          holdId = null;
+          await logUsage({ success: false, errorMessage: `multi-vehicle page: JSON-LD declares ${jlDeclared.count} vehicles (not charged)` });
+          console.log(`Multi-vehicle page rejected on the JSON-LD fallback path: ${jlDeclared.count} declared vehicles; no credit charged.`);
+          return new Response(JSON.stringify({
+            error: "multi_vehicle_page",
+            message: "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead.",
+          }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+      }
+      if (jsonLdFallback) {
+        await detectTradeInWidget(url, jsonLdFallback, null, pageHtml); // S36 -- shares the scan's one page read
         // The structured data often lacks the price the RENDERED page displays.
         // With Scrapfly armed, run the vision rescue here too (this path used
         // to return early and skip it — the Okotoks $112,995 vanished that way).
@@ -3191,6 +3805,7 @@ Deno.serve(async (req: Request) => {
         assertInvariants(jsonLdFallback, { priceRenderChecked: true, renderConfirmed: jlRenderConfirmedGated });
         await enrichAnalysis(jsonLdFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, jsonLdFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(jsonLdFallback, url);
         await finalizeServerSide(jsonLdFallback);
         try {
           await supabase
@@ -3199,7 +3814,7 @@ Deno.serve(async (req: Request) => {
         } catch (err) {
           console.warn("Cache write failed (JSON-LD fallback):", err);
         }
-        await logUsage({ success: true, errorMessage: `page-load failed, served structured-data (JSON-LD) fallback` });
+        await instrumentDelivery(jsonLdFallback, "page-load failed, served structured-data (JSON-LD) fallback");
         console.log(`Served structured-data (JSON-LD) fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         const credits = await captureCredit(holdId);
         holdId = null;
@@ -3219,7 +3834,7 @@ Deno.serve(async (req: Request) => {
         ? await buildConvertusVmsFallbackAnalysis(url, directHtml)
         : null;
       if (convertusFallback) {
-        await detectTradeInWidget(url, convertusFallback);
+        await detectTradeInWidget(url, convertusFallback, null, pageHtml);
         let cvRenderConfirmedGated = false;
         if (!(Number(convertusFallback.quotedPrice) > 0) && scrapflyEnabled()) {
           try {
@@ -3238,6 +3853,7 @@ Deno.serve(async (req: Request) => {
         assertInvariants(convertusFallback, { priceRenderChecked: true, renderConfirmed: cvRenderConfirmedGated });
         await enrichAnalysis(convertusFallback, REQUEST_DEADLINE);
         await attachSealedScreenshot(url, convertusFallback, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+        await captureMarketCount(convertusFallback, url);
         await finalizeServerSide(convertusFallback);
         try {
           await supabase
@@ -3246,7 +3862,7 @@ Deno.serve(async (req: Request) => {
         } catch (err) {
           console.warn("Cache write failed (Convertus fallback):", err);
         }
-        await logUsage({ success: true, errorMessage: `page-load failed, served Convertus vmsData fallback` });
+        await instrumentDelivery(convertusFallback, "page-load failed, served Convertus vmsData fallback");
         console.log(`Served Convertus vmsData fallback for ${url} after page-load failure (${nimbleResult.errBody}).`);
         const cvCredits = await captureCredit(holdId);
         holdId = null;
@@ -3284,6 +3900,7 @@ Deno.serve(async (req: Request) => {
           if (Number(renderOnly.quotedPrice) > 0 || Number(renderOnly.msrp) > 0 || renderOnly.vehicle || gateCtaDetected) {
             await enrichAnalysis(renderOnly, REQUEST_DEADLINE);
             await attachSealedScreenshot(url, renderOnly, Math.min(25_000, Math.max(2_000, REQUEST_DEADLINE - Date.now())), shotPromise);
+            await captureMarketCount(renderOnly, url);
             await finalizeServerSide(renderOnly);
             try {
               await supabase
@@ -3292,7 +3909,7 @@ Deno.serve(async (req: Request) => {
             } catch (err) {
               console.warn("Cache write failed (render fallback):", err);
             }
-            await logUsage({ success: true, errorMessage: `page-load failed, served Scrapfly render fallback` });
+            await instrumentDelivery(renderOnly, "page-load failed, served Scrapfly render fallback");
             console.log(`Served Scrapfly render fallback for ${url} after full page-load failure (${nimbleResult.errBody}).`);
             const credits = await captureCredit(holdId);
             holdId = null;
@@ -3317,7 +3934,36 @@ Deno.serve(async (req: Request) => {
       // Scrapfly's LAST render call failed (see lastScrapflyError).
       const dHtmlTrace = await directHtml.then((h) => (h ? `ok:${h.length}` : "fail")).catch(() => "fail");
       const preRenderTrace = await earlyRender.then((r) => (r ? `html:${r.html?.length ?? 0},shot:${r.screenshotB64?.length ?? 0}` : "null")).catch(() => "null");
-      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody} | direct=${dHtmlTrace} | preRender=${preRenderTrace} | ${rescueTrace} | sfErr=${lastScrapflyError ?? "none"}` });
+      // WHY THE FALLBACKS DECLINED, and not merely that they did.
+      //
+      // A real failure on advantageford.ca read: direct=fail, preRender=
+      // html:738421, nimble=content too short. So the anti-bot render had
+      // handed us 738 KB of the page and the buyer still got "we couldn't read
+      // that page". Every fallback that could have served it returned a bare
+      // null, and buildJsonLdFallbackAnalysis's own decline reasons go to the
+      // edge console -- which is exactly the place the breadcrumb exists
+      // because nobody can read.
+      //
+      // So the trace now says what the scan was HOLDING when it gave up: how
+      // much page source reached the readers, and what each reader made of it.
+      // Recomputed here from HTML already in memory -- no fetch, no vendor
+      // call, and each one caught separately so a thrown reader reports the
+      // throw instead of vanishing into the same silence.
+      const srcTrace = await (async () => {
+        const src = await pageHtml.catch(() => null);
+        if (!src) return "pageSrc=none";
+        const probe = (name: string, fn: () => unknown) => {
+          try { const v = fn(); return `${name}=${v ? "ok" : "null"}`; }
+          catch (e) { return `${name}=threw:${String((e as Error)?.message).slice(0, 60)}`; }
+        };
+        return [
+          `pageSrc=${src.length}`,
+          probe("jsonLdVeh", () => extractJsonLdVehicle(src)),
+          probe("convertus", () => extractConvertusVmsVehicle(src)),
+          probe("d2c", () => extractD2cVdpVehicle(src)),
+        ].join(" ");
+      })();
+      await logUsage({ success: false, errorMessage: `Nimble failed: ${nimbleResult.errBody} | direct=${dHtmlTrace} | preRender=${preRenderTrace} | ${srcTrace} | url=${hostOf(url) ?? "?"} | ${rescueTrace} | sfErr=${lastScrapflyError ?? "none"}` });
       await releaseCredit(holdId);
       holdId = null;
       return new Response(
@@ -3385,31 +4031,142 @@ Deno.serve(async (req: Request) => {
     // the expensive Claude call below, or the whole point (never pay to read
     // a page we can't build a single-vehicle report from) is lost.
     {
-      const repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
-      const repeatInputHash = await sha256Hex(url);
-      const cooldown = await checkRepeatCooldown(repeatIdentity, repeatInputHash);
-      if (cooldown.blocked) {
+      repeatIdentity = repeatIdentityKey(creditUser?.id ?? null, req);
+      repeatInputHash = await sha256Hex(url);
+      // ESTABLISH WHAT THE PAGE IS BEFORE BUILDING A REPORT ABOUT IT.
+      // (Vic, 2026-08-27: "you need verification process first establish
+      // what's on webpage then create report".) The page's own machine-
+      // readable declaration of its subject is the evidence -- schema.org
+      // vehicle nodes, or the platform's vehicle-data blob -- and both are
+      // already in flight from the SHARED direct fetch started at the top of
+      // this scan, so establishing it costs nothing extra and no extra call.
+      // BOUNDED. Both of these are promises started near the top of the
+      // handler and are, in practice, long resolved by the time the Nimble
+      // fetch above has finished -- but "in practice" is not a budget. A bare
+      // `await` here would put directHtml's 15s retry ladder, and whatever
+      // earlyStructuredFacts is still chained on, IN FRONT of the extraction
+      // on every scan. Supabase kills the function at ~150s with a raw 504
+      // that skips the credit-release path and STRANDS THE HOLD, so a slow
+      // promise must never be able to reach that ceiling from here.
+      // [[never-charge-to-ask-a-question]]
+      const settleMs = Math.max(1_000, Math.min(5_000, REQUEST_DEADLINE - Date.now() - 30_000));
+      const settled = <T,>(p: Promise<T>) => Promise.race([
+        p.catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), settleMs)),
+      ]);
+      // TOGETHER, not one after the other. Both are already in flight and
+      // independent, and settling them in sequence spends the budget TWICE --
+      // which matters more now that pageHtml waits on the render (bounded ~127s)
+      // where directHtml was bounded at ~57s. The margin these eat into is what
+      // stands between the scan and the ~150s kill that strands a credit hold.
+      const [subjectHtml, subjectFacts] = await Promise.all([settled(pageHtml), settled(earlyStructuredFacts)]);
+      const blobVin = ((subjectFacts as any)?.vin as string | undefined) ?? null;
+      // STRIP FORM CHROME BEFORE COUNTING. Every Convertus VDP ships a
+      // hardcoded, checksum-VALID VIN as the trade-in form's input placeholder.
+      // Counted as a vehicle it arms "this page mentions others" on 100% of
+      // that platform family -- telling the reader about a rail that is not
+      // there and arming the subject guard on every one of their listings.
+      const pageMarkup = typeof subjectHtml === "string"
+        ? subjectHtml.replace(/\s(?:placeholder|value)="[^"]*"/gi, " ")
+        : null;
+      const declared = pageMarkup !== null ? jsonLdVehicles(pageMarkup, url) : { count: 0, vins: [], anchoredVin: null };
+
+      // ARM THE GUARD FROM EVERYTHING WE CAN SEE, not from one source. The
+      // count came from Nimble's MARKDOWN, truncated to 100,000 chars, while
+      // the declaration comes from the full HTML -- so a rail whose VINs live
+      // in markup the markdown drops would leave the count at 1, silently
+      // disarming the wrong-vehicle guard on exactly the pages it exists for.
+      // The union is the honest answer to "does this page mention others".
+      const htmlVins = pageMarkup !== null ? distinctValidVins(pageMarkup) : [];
+      const vins = [...new Set([...distinctValidVins(pageContent), ...htmlVins])];
+
+      // "We never read the page" is not "the page declares nothing" -- see
+      // classifyVehiclePage. Both refuse; only the first is the page's fault.
+      const sawPageSource = typeof subjectHtml === "string" || blobVin !== null;
+
+      // DID WE GET THE CAR THE URL ASKED FOR?
+      //
+      // Every other identity check compares the page against itself, so a
+      // response that is wrong but self-consistent passes all of them: the
+      // JSON-LD, the price and the odometer agree with each other, about a
+      // vehicle the buyer never asked about. A CDN serving a stale or
+      // mis-keyed page, a relisted stock number, a silent redirect -- all
+      // produce exactly that shape, and the report reads perfectly.
+      //
+      // A VIN in the URL is the one claim the response cannot forge, and many
+      // dealer platforms put one there. When the URL names a VIN and the page
+      // we read never mentions it, we are looking at a different car and the
+      // only safe move is to refuse. [[ai-defamation-entity-match-lesson]]
+      //
+      // Silent on every page that does not carry a VIN in its path, which is
+      // most of them -- including the Advantage Ford listing that prompted it.
+      // A guard that only sometimes applies is still worth its one comparison.
+      const askedForVin = vinFromUrl(url);
+      if (askedForVin && urlVinMismatch(url, pageContent) && urlVinMismatch(url, pageMarkup ?? "")) {
+        console.error(`URL/page VIN mismatch on ${url}: the URL names ${askedForVin} and the page we read never mentions it. Refusing rather than reporting on the wrong vehicle.`);
         await releaseCredit(holdId);
-        holdId = null;
-        await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
+        // 422 like its siblings, so it lands in the client refusal branch
+        // rather than the generic network-error path.
         return new Response(JSON.stringify({
-          error: "repeat_multivehicle_cooldown",
-          message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
-          cooldownUntil: cooldown.cooldownUntil,
-        }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
-      }
-      const vins = countDistinctValidVins(pageContent);
-      if (vins.length > 1) {
-        await releaseCredit(holdId);
-        holdId = null;
-        await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
-        await logUsage({ success: false, errorMessage: `multi-vehicle page: ${vins.length} distinct VINs found (not charged)` });
-        console.log(`Multi-vehicle page detected via VIN count: ${vins.length} distinct VINs; rejecting, no credit charged.`);
-        return new Response(JSON.stringify({
-          error: "multi_vehicle_page",
-          message: "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead.",
+          error: "wrong_vehicle_served",
+          message: "That link names one vehicle and the page we received describes another. Nothing was charged. Please reload the dealer's page and try again.",
         }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
       }
+
+      const page = classifyVehiclePage(vins, declared, blobVin, sawPageSource);
+      console.log(`Page subject: ${page.kind} -- ${page.why} (found ${vins.length}, declared ${declared.count} node(s)/${declared.vins.length} vin(s)${blobVin ? `, blob ${blobVin}` : ""}, html ${pageMarkup !== null ? "ok" : "unavailable"}).`);
+      if (page.kind === "multi") {
+        // THE THROTTLE IS CONSULTED ONLY ONCE WE STILL MEAN TO REFUSE, and it
+        // moved here from ABOVE the classification for a reason that would
+        // otherwise have shipped this fix broken. It exists to stop repeated
+        // vendor spend on a page we refuse -- so a page we no longer refuse has
+        // nothing to throttle. Left where it was, every URL already recorded
+        // under the OLD count-based rule stayed locked out for 2h/24h, and the
+        // very first person that hit is the owner, whose Advantage Ford link is
+        // already on the counter from the refusal that prompted this change. He
+        // would have installed the fix and still been unable to scan the link.
+        //
+        // It still runs BEFORE the expensive Claude call, which is the property
+        // that mattered: classification costs nothing beyond the page fetch
+        // this branch has already paid for.
+        // Only consult and only record when the PAGE is why we refused. A
+        // refusal caused by our own unreadable fetch must not write a 2h/24h
+        // lockout against a real listing.
+        const cooldown = page.blameThePage
+          ? await checkRepeatCooldown(repeatIdentity, repeatInputHash)
+          : { blocked: false as const };
+        await releaseCredit(holdId);
+        holdId = null;
+        if (cooldown.blocked) {
+          await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
+          return new Response(JSON.stringify({
+            error: "repeat_multivehicle_cooldown",
+            message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
+            cooldownUntil: cooldown.cooldownUntil,
+          }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+        }
+        if (page.blameThePage) await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
+        await logUsage({ success: false, errorMessage: `multi-vehicle page: ${page.why} (not charged)` });
+        console.log(`Multi-vehicle page rejected: ${page.why}; no credit charged.`);
+        return new Response(JSON.stringify({
+          error: "multi_vehicle_page",
+          // SAY WHICH IT WAS. Telling a buyer "this looks like a search-results
+          // page" when the truth is that we could not read their page is the
+          // same unbacked claim the whole change is about, aimed at them.
+          message: page.blameThePage
+            ? "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead."
+            : "We couldn't read enough of that page to tell which vehicle it's for, and it mentions several. You haven't been charged. Try the link again in a moment, or upload a screenshot of the vehicle you want checked.",
+        }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+      // Accepting a page that mentions several vehicles is only safe while the
+      // report is pinned to the one it is ABOUT -- see the subject re-anchor
+      // after extraction.
+      pageSubjectVin = page.subjectVin;
+      pageMentionsOthers = vins.length > 1;
+      // Kept for the identity check after extraction: the VIN is the field a
+      // wrong read is most likely to get RIGHT, so comparing it alone is not
+      // enough. The declaration also carries year and make.
+      pageDeclared = (await settled(earlyStructuredFacts)) as { year?: unknown; make?: unknown } | null;
     }
 
     // Tighter per-attempt timeout than analyze-quote's (~45s) because the Nimble
@@ -3446,7 +4203,7 @@ Deno.serve(async (req: Request) => {
         messages: [
           {
             role: "user",
-            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
+            content: `Here is the extracted content of a dealer listing page (URL: ${url}):\n\n${pageContent}${await structuredFactsBlock(earlyStructuredFacts)}${pageMentionsOthers ? `\n\nIMPORTANT: this page also shows OTHER vehicles below the one it is for -- a \"similar vehicles\" or \"recently viewed\" rail. Report ONLY the vehicle the page is about${pageSubjectVin ? ` (VIN ${pageSubjectVin})` : ""}. Every figure you return -- price, MSRP, odometer, trim, fees, financing -- must come from THAT vehicle, never from one of the others. If a figure is visible only on another vehicle's card, return null rather than borrowing it.` : ""}\n\nAnalyze this listing and return the JSON object described in your instructions.`,
           },
         ],
       }),
@@ -3541,7 +4298,7 @@ Deno.serve(async (req: Request) => {
 
     // Days-on-lot for the Convertus "/vehicles/" platform family (no-op when
     // the SM360 feed already provided it, or the URL isn't that shape).
-    await captureConvertusDaysOnLot(url, analysis);
+    await captureConvertusDaysOnLot(url, analysis, pageHtml);
 
     // Note the VIN BEFORE reading it back, so the very first scan of a car
     // starts its clock even though it can report nothing yet. This is what
@@ -3634,7 +4391,7 @@ Deno.serve(async (req: Request) => {
 
     // S36: flag embedded trade-in instant-offer widgets (checks the scraped
     // text first; falls back to one direct fetch), then refresh the script.
-    await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null);
+    await detectTradeInWidget(url, analysis, typeof pageContent === "string" ? pageContent : null, pageHtml);
     if (analysis.tradeInWidget || analysis.financeContingent) analysis.counterScript = buildCounterScript(analysis);
 
     // Independent evidence: ask the Internet Archive to preserve the listing.
@@ -3736,6 +4493,33 @@ Deno.serve(async (req: Request) => {
       analysis.financeRates.dealer = { apr: Number(analysis.financing.rate), source: analysis.financing.source || "llm" };
     }
 
+    // The page's DEFAULT payment scenario -- "this page's payment default is
+    // gives you N months, <frequency> payments at X% APR". Read by CODE from
+    // the page's own html/text (page-default.js), never from the model's
+    // financing object, which cannot say what was pre-selected. The SM360
+    // resolver may already have set it from the feed; a checked read is never
+    // overwritten. Always lands in SOME state, so the card never goes silent.
+    try {
+      if (analysis.pageDefault?.state !== "confirmed") {
+        // `rawHtml` is a mirage (Nimble only ever returns markdown, see the
+        // stacked-incentive read above); the page's own bytes come from the
+        // SHARED direct fetch, and only genuine markdown goes in as text --
+        // raw html handed in as text would defeat the <script> strip.
+        const pdHtml = await directHtml;
+        const sm360Absent = analysis.pageDefault?.checked && analysis.pageDefault?.state === "absent" ? analysis.pageDefault : null;
+        const read = readPageDefault({
+          html: typeof pdHtml === "string" ? pdHtml : null,
+          text: typeof rawMarkdown === "string" ? rawMarkdown : null,
+          price: Number(analysis.quotedPrice) > 0 ? Number(analysis.quotedPrice) : null,
+          readAt: todayIso(),
+        });
+        // A feed that says "no finance term" is the page's own statement; keep
+        // it unless the page's text or data confirmed a default.
+        analysis.pageDefault = read.state === "confirmed" || !sm360Absent ? read : sm360Absent;
+        console.log(`page default: ${analysis.pageDefault.state}${analysis.pageDefault.source ? ` (${analysis.pageDefault.source})` : ""}${analysis.pageDefault.reason ? ` -- ${analysis.pageDefault.reason}` : ""}`);
+      }
+    } catch (e) { console.warn("page default read skipped:", (e as Error)?.message); }
+
     // Shared downstream enrichment (verified warranty/fuel, VIN check, recalls,
     // catalog->manufacturer MSRP fallback, financing/odometer checks, finance +
     // lease rates, leverage score) -- the SAME sequence the SM360 feed fallback
@@ -3766,6 +4550,37 @@ Deno.serve(async (req: Request) => {
     if (willNeedVisionRescue && enrichDeadline < REQUEST_DEADLINE) {
       console.log(`Reserving ${VISION_RESCUE_RESERVE_MS}ms for vision rescue -- enrichAnalysis gets until ${new Date(enrichDeadline).toISOString()} instead of ${new Date(REQUEST_DEADLINE).toISOString()}.`);
     }
+    // IDENTITY BEFORE PRICE. vehicleCondition and odometerKm decide whether this
+    // car's MSRP may be read as today's sticker (_shared/msrp-basis.ts), and
+    // enrichAnalysis settles that basis. But the structured-data gap-fill that
+    // supplies both of them from JSON-LD / Convertus vmsData / D2C __vdpJSON used
+    // to run ~120 lines BELOW this call, so the basis was decided before the
+    // platform's own authoritative "this is a used unit" flag had arrived. That
+    // is the ordering behind the fabricated-bargain defect, and it cuts both
+    // ways: it also suppressed the comparison on new cars whose condition landed
+    // late. These two are identity facts, not price facts, and the promise is
+    // already resolved by here -- so fill them first and let the price gap-fill
+    // below stay where it is.
+    try {
+      const earlyIdentity = await earlyStructuredFacts;
+      if (earlyIdentity) {
+        // fuelType is identity too: the ladder and the trim matcher both
+        // partition on it, and the page's own declaration ("Gasoline") must
+        // land before the catalog gets a chance to "verify" a sibling's fuel.
+        for (const k of ["vehicleCondition", "odometerKm", "fuelType"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (earlyIdentity as any)[k];
+          const missing = cur == null || cur === "";
+          if (missing && alt != null && alt !== "") {
+            (analysis as any)[k] = alt;
+            console.log(`Gap-filled ${k} from structured data (pre-enrichment).`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("pre-enrichment identity gap-fill skipped:", (e as Error)?.message);
+    }
+
     await enrichAnalysis(analysis, enrichDeadline);
 
     // GUARDRAIL: many dealer sites are JS-rendered and/or bot-protected, so the
@@ -3833,7 +4648,15 @@ Deno.serve(async (req: Request) => {
           // Screenshot showed a dealer MSRP above the manufacturer catalog figure ->
           // inflated-sticker tactic. Anchor stays the TRUE catalog MSRP; record the
           // gap and refresh the counter-script so the "Inflated MSRP" move appears.
+          // msrpIsPresentTense is asserted HERE rather than trusting msrpBasis:
+          // this path builds the accusation itself instead of going through
+          // applyConditionToMsrp, so without its own gate it is protected only
+          // by a side effect of what some other branch happened to store.
+          // On a used car the "padded sticker" is the ORIGINAL as-optioned one
+          // and the catalog row is a base trim -- naming that a tactic is an
+          // accusation manufactured from a data gap.
           if (rescuedMsrp && Number(analysis.msrp) > 0 && analysis.msrpSource === "catalog" && analysis.msrpBasis === "exact"
+              && msrpIsPresentTense(analysis)
               && rescuedMsrp > Number(analysis.msrp) * 1.03 && rescuedMsrp - Number(analysis.msrp) > 800 && !analysis.msrpInflation) {
             analysis.dealerStatedMsrp = rescuedMsrp;
             analysis.msrpInflation = { dealerStated: rescuedMsrp, manufacturer: Number(analysis.msrp), overBy: Math.round(rescuedMsrp - Number(analysis.msrp)) };
@@ -3843,6 +4666,194 @@ Deno.serve(async (req: Request) => {
           console.log(`Scrapfly rescue for ${url}: gotPricing=${gotPricing}, price=${analysis.quotedPrice}, msrp=${analysis.msrp}, dealerMsrp=${analysis.dealerStatedMsrp}`);
         }
       } catch (e) { console.warn("Scrapfly rescue threw (ignored):", (e as Error)?.message); }
+    }
+
+    // Gap-fill from the structured-data read: the scrape sometimes lands the
+    // vehicle but misses the price or VIN that schema.org (or a platform's own
+    // embedded vehicle-data JSON, e.g. Convertus vmsData / D2C __vdpJSON)
+    // states outright. Never overwrites a value the scrape already found.
+    //
+    // MUST RUN BEFORE priceVerified AND before the leverage recompute below.
+    // It used to sit ~40 lines further down, AFTER both -- so a price that
+    // only this gap-fill could recover (the entire point of the D2C work)
+    // arrived too late to be counted: priceVerified had already been computed
+    // off an empty quotedPriceSource and stuck at false, and the leverage
+    // score had already been computed with no price at all, printing "No
+    // pricing red flags" on a report that then displayed a large over-MSRP
+    // gap. Same ordering-vs-derived-value class as the computeLeverageScore /
+    // allInPricing bug fixed in 63fa164 -- moving the producer above its
+    // consumers is the structural fix, not re-deriving after the fact.
+    // THE OTHER HALF OF ACCEPTING A PAGE THAT MENTIONS SEVERAL VEHICLES.
+    // DELIBERATELY OUTSIDE the try/catch below, whose stated policy is that
+    // "the safety net must never sink the scan" -- correct for a gap-fill, and
+    // exactly wrong for the one check standing between a buyer and a signed
+    // report about somebody else's car. Inside it, any future awaited call
+    // added above this return would be swallowed and the scan would carry on
+    // and ship. Safe by structure, not by luck.
+    //
+    // A detail page with a similar-vehicles rail is now processed instead of
+    // refused, which is only safe while the report is about the vehicle the
+    // page DECLARES. If the reader came back with one of the neighbours' VINs
+    // it was reading the wrong card, and its price, odometer and trim are all
+    // about the wrong car -- there is no field-by-field repair for that, only
+    // a refusal. [[ai-defamation-entity-match-lesson]]
+    if (pageMentionsOthers && pageSubjectVin) {
+      const readVin = String(analysis.vin ?? "").trim();
+      const vinRead = readVin.length === 17;
+      const idClash = identityMismatch(analysis, pageDeclared);
+      // THE VIN IS THE FIELD A WRONG READ IS MOST LIKELY TO GET RIGHT. It is
+      // stated once, prominently, at the top of the page, while year and make
+      // come off whichever card was actually being read -- and those are what
+      // drive the recall lookup and the catalogue MSRP denominator. So the pin
+      // is three questions, not one:
+      const reason =
+        subjectMismatch(analysis.vin, pageSubjectVin)
+          ? `the VIN read (${readVin}) is not the ${pageSubjectVin} this page declares`
+        : idClash
+          ? `the vehicle read does not match the one this page declares (${idClash})`
+        // NOTHING READ, NOTHING PINNED. A read that returns no VIN at all used
+        // to sail through here, and the gap-fill sixteen lines below would then
+        // stamp the DECLARED subject's VIN onto whatever was actually read --
+        // manufacturing a report that looks internally consistent (right VIN,
+        // valid check digit) while its price, trim and odometer could belong to
+        // a rail neighbour. Rail cards do not print VINs, so this is the SHAPE
+        // a wrong read takes here. It needs at least one corroborating field.
+        // Fires only when there IS a declared make to corroborate against and
+        // the read produced none. It must never fire because OUR OWN structured
+        // facts happen to omit the field -- a page with no schema.org markup at
+        // all would then be refused after the full spend on every scan, which
+        // is the reported bug wearing a different hat.
+        : (!vinRead && String(pageDeclared?.make ?? "").trim() && !String((analysis as any).make ?? "").trim())
+          ? "nothing in what was read ties it to the vehicle this page declares"
+        : null;
+      if (reason) {
+        console.error(`Subject mismatch on ${url}: ${reason}. Refusing rather than reporting on the wrong vehicle.`);
+        // The same repeat-spend throttle the multi-vehicle refusal uses. This
+        // exit is the most expensive in the function -- it lands after Nimble,
+        // after the sealed screenshot, and after the paid extraction -- and a
+        // VIN mismatch is deterministic for a given page, so it repeats rather
+        // than self-heals. [[cost-exploit-guards]]
+        const cooldown = repeatIdentity ? await checkRepeatCooldown(repeatIdentity, repeatInputHash) : { blocked: false as const };
+        await releaseCredit(holdId);
+        holdId = null;
+        if (!cooldown.blocked && repeatIdentity) await recordMultiVehicleHit(repeatIdentity, repeatInputHash);
+        await logUsage({ success: false, errorMessage: `subject mismatch: ${reason} (not charged)` });
+        return new Response(JSON.stringify({
+          error: "subject_mismatch",
+          message: "This page shows several vehicles alongside the one it's for, and we couldn't be certain which one we read. You haven't been charged. Upload a screenshot of the vehicle you want checked and we'll read that instead.",
+          cooldownUntil: cooldown.blocked ? cooldown.cooldownUntil : undefined,
+        }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
+      }
+      // Pinned, and the pin is recorded rather than thrown away: it rides into
+      // the cached row, so anyone auditing why this report says what it says
+      // can see which vehicle we anchored to and that a rail was present.
+      analysis.pageSubjectVin = pageSubjectVin;
+      analysis.pageMentionsOtherVehicles = true;
+    }
+
+    let structuredGapFilledPrice = false;
+    try {
+      // (the subject guard used to sit here, inside this catch -- see above)
+      const early = await earlyStructuredFacts;
+      if (early) {
+        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition", "fuelType"] as const) {
+          const cur = (analysis as any)[k];
+          const alt = (early as any)[k];
+          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
+          if (missing && alt != null && alt !== "") {
+            (analysis as any)[k] = alt;
+            if (k === "quotedPrice") structuredGapFilledPrice = true;
+            console.log(`Gap-filled ${k} from structured data.`);
+          }
+        }
+        // The price's PROVENANCE rides with the price itself. Only stamped
+        // when this gap-fill is what actually supplied it -- a price the
+        // scrape/Claude already had keeps whatever source it already carried
+        // (usually none, i.e. correctly unverified).
+        if (structuredGapFilledPrice && early.quotedPriceSource) {
+          analysis.quotedPriceSource = early.quotedPriceSource;
+          console.log(`Gap-filled quotedPriceSource=${early.quotedPriceSource} from structured data.`);
+        }
+        // THE DEALER'S OWN ITEMISATION. Attached here, with the rest of the
+        // structured gap-fill, so it lands before anything derived from it.
+        //
+        // Deliberately NOT merged into analysis.addOns. computeReconciliation
+        // treats every addOn as money added ON TOP of the selling price
+        // (realPreTax = selling + addedOnTop), and on this page the fee is
+        // already INSIDE the advertised figure -- the page's own arithmetic
+        // proves it: 58,805 - 795 = 58,010 = priceWithoutCustomFees. Pushing
+        // it into addOns would inflate the buyer's real pre-tax by $795 and
+        // describe a dealer who itemised openly as though they had padded the
+        // quote. That is the class 38274c2 fixed and it must not come back.
+        if (Array.isArray(early.dealerFees) && early.dealerFees.length && !analysis.dealerLineItems) {
+          analysis.dealerLineItems = {
+            fees: early.dealerFees,
+            incentives: Array.isArray(early.dealerIncentives) ? early.dealerIncentives : [],
+            // null when the page did not reconcile -- we then say nothing
+            // about WHERE the fees sit. [[missing-beats-wrong]]
+            insideAdvertisedPrice: early.feesInsideAdvertised === true ? true
+              : early.feesInsideAdvertised === false ? false : null,
+            source: "the dealer's own price breakdown on the listing",
+          };
+          const t = early.dealerFees.reduce((sum: number, f: any) => sum + (Number(f?.amount) || 0), 0);
+          console.log(`Dealer line items read: ${early.dealerFees.length} fee(s) totalling ${t}, inside the advertised price = ${early.feesInsideAdvertised}.`);
+        }
+        // BACKFILL FROM THE PAGE ITSELF. The branch above uses fees the
+        // extractor found; this reads the dealer's printed ladder straight out
+        // of the html when it did not. Only when nothing was found already --
+        // an extractor that DID read the fees knows more than a regex does.
+        //
+        // The ladder is only returned when base + additions - deductions equals
+        // the advertised total exactly, so this cannot invent a fee: a
+        // misread line makes the sum miss and the whole ladder is discarded.
+        if (!analysis.dealerLineItems) {
+          try {
+            // pageContent is the reader's own view of the page -- markdown when
+            // it produced markdown, raw html otherwise. Both flatten to the same
+            // "label $amount" pairs the ladder matches on, and it is already
+            // resolved here, so this costs no fetch and no await.
+            const ladder = readFeeLadder(pageContent);
+            const fees = ladderFees(ladder);
+            if (fees.length) {
+              analysis.dealerLineItems = {
+                fees: fees.map((f) => ({ name: f.name, amount: f.amount, feeLabel: f.feeLabel })),
+                incentives: (ladder?.lines || []).filter((l) => l.kind === "deduct").map((l) => ({ name: l.label, amount: l.amount })),
+                insideAdvertisedPrice: true,
+                source: "the dealer's own price breakdown on the listing",
+              };
+              console.log(`Fee ladder backfill: ${fees.length} dealer charge(s) from the page's own breakdown.`);
+            }
+          } catch (e) { console.warn("fee ladder backfill skipped:", (e as Error)?.message); }
+        }
+        // WHETHER WE COULD LOOK AT ALL is a separate fact from what we found,
+        // and the report needs both: "no itemised fees on this page" and "we
+        // never saw the price area" are different answers to a buyer.
+        if (typeof pageContent === "string" && pageContent.length > 500) analysis.feesRead = true;
+
+        if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
+        // Carry the D2C "page says Call for pricing, blob says $X" tell
+        // through -- only when THIS gap-fill is what actually supplied the
+        // price (never claim a gate was recovered for a price that was on the
+        // page/Claude's own read the whole time).
+        if (early.priceGatedButRecovered && structuredGapFilledPrice) {
+          analysis.priceGatedButRecovered = true;
+          analysis.priceGateMessage = early.priceGateMessage;
+          analysis.priceGateGoogleAdsBacked = !!early.priceGateGoogleAdsBacked;
+        }
+        gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
+      }
+    } catch { /* the safety net must never sink the scan */ }
+
+    // A price that arrived only just now (above) was not available when
+    // enrichAnalysis ran computeLeverageScore, so every price-dependent
+    // finding it produced was computed against no price at all. Recompute
+    // them here rather than shipping a leverage panel that contradicts the
+    // figures printed beside it.
+    if (structuredGapFilledPrice) {
+      computeFinancingCheck(analysis);
+      computeLeverageScore(analysis);
+      analysis.counterScript = buildCounterScript(analysis);
+      console.log("Recomputed leverage/financing/counter-script after a structured-data price gap-fill.");
     }
 
     // WHAT "PRICE VERIFIED" ACTUALLY MEANS. Until 2026-08-15 it meant nothing:
@@ -3861,11 +4872,12 @@ Deno.serve(async (req: Request) => {
     // Anything read out of page text is priceVerified: false. The surfaces
     // already render "price not verified" for that case; it just never fired.
     {
-      const src = String(analysis.quotedPriceSource || "");
-      analysis.priceVerified = Number(analysis.quotedPrice) > 0
-        && (src === "structured_data" || src === "sm360_feed" || src === "sm360_feed_fallback"
-            || src === "convertus_vms" || src === "d2c_vdp");
+      analysis.priceVerified = Number(analysis.quotedPrice) > 0 && isVerifiedPriceSource(analysis.quotedPriceSource);
     }
+
+    // The count runs HERE, with the price final and verified (or not), so the
+    // sealed count and the price card can never disagree. See captureMarketCount.
+    await captureMarketCount(analysis, url);
 
     // ASSERT (render check done). The accusation gate lives in invariants.ts
     // now: "contact for price" may stand ONLY when the rendered page was
@@ -3881,34 +4893,9 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Gap-fill from the structured-data read: the scrape sometimes lands the
-    // vehicle but misses the price or VIN that schema.org (or a platform's own
-    // embedded vehicle-data JSON, e.g. Convertus vmsData) states outright.
-    // Never overwrites a value the scrape already found.
-    try {
-      const early = await earlyStructuredFacts;
-      if (early) {
-        for (const k of ["quotedPrice", "vin", "odometerKm", "dealerName", "dealerCity", "vehicleCondition"] as const) {
-          const cur = (analysis as any)[k];
-          const alt = (early as any)[k];
-          const missing = cur == null || cur === "" || (typeof cur === "number" && !(cur > 0));
-          if (missing && alt != null && alt !== "") {
-            (analysis as any)[k] = alt;
-            console.log(`Gap-filled ${k} from structured data.`);
-          }
-        }
-        if (Number(analysis.quotedPrice) > 0 && analysis.priceDisclosure === "contact_for_price") analysis.priceDisclosure = "advertised";
-        // Carry the D2C "page says Call for pricing, blob says $X" tell
-        // through -- fill-only, only when THIS gap-fill is what actually
-        // supplied the price (never claim a gate was recovered for a price
-        // that was on the page/Claude's own read the whole time).
-        if (early.priceGatedButRecovered && Number(analysis.quotedPrice) === Number(early.quotedPrice)) {
-          analysis.priceGatedButRecovered = true;
-          analysis.priceGateMessage = early.priceGateMessage;
-        }
-        gotPricing = (Number(analysis.quotedPrice) > 0) || (Number(analysis.msrp) > 0);
-      }
-    } catch { /* the safety net must never sink the scan */ }
+    // (The structured-data gap-fill that used to live here now runs ABOVE, so
+    // priceVerified and the leverage score can actually see the price it
+    // recovers -- see the comment on it for why the order matters.)
     // Re-assert AFTER the last gap-fill: a price that arrived here (structured
     // data recovered what the prose pass never saw) can newly contradict the
     // summary written earlier -- verify the text against the final figures
@@ -3957,35 +4944,7 @@ Deno.serve(async (req: Request) => {
       console.warn("Cache write failed:", err);
     }
 
-    // "success" means HTTP 200, not "the buyer got a complete report". Record
-    // which core points are missing so a hollow delivery is visible as hollow
-    // in the admin ledger instead of counting exactly like a full one
-    // (Vic, 2026-08-15). Mirrors the same note format analyze-quote writes.
-    {
-      const gaps: string[] = [];
-      if (!(Number(analysis.quotedPrice) > 0)) gaps.push("price");
-      if (!(Number(analysis.msrp) > 0)) gaps.push("msrp");
-      if (!analysis.vin) gaps.push("vin");
-      if (!analysis.recalls) gaps.push("recalls");
-      if (!(Number(analysis.financing?.rate) > 0)) gaps.push("apr");
-      await logUsage({
-        success: true,
-        inputTokens: usage?.input_tokens,
-        outputTokens: usage?.output_tokens,
-        errorMessage: gaps.length ? `degraded: missing ${gaps.join(",")}` : null,
-      });
-      // One row per checkpoint, so the ledger can report a real per-check
-      // failure rate instead of a single boolean that calls 12-of-13 a
-      // success. Host only, never the full URL. Fail-open.
-      let host: string | null = null;
-      try { host = new URL(url).hostname.replace(/^www\./, ""); } catch { /* not a parseable URL */ }
-      await recordCheckpoints(supabase, {
-        reportId: analysis.reportId ?? null,
-        feature: "listing_url",
-        analysis,
-        listingHost: host,
-      });
-    }
+    await instrumentDelivery(analysis, null, usage);
 
     // Delivered an accurate result -> capture the hold (signed-in only) and
     // include the new balance. Null holdId out first so a later throw can't

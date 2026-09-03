@@ -33,6 +33,9 @@ const PICTO = /\p{Extended_Pictographic}/u;
 
 const targets = [
   "src/App.jsx", "src/icons3d.jsx", "src/main.jsx", "src/scraper.js", "src/verify.js",
+  // The emailed HTML + PDF is the artifact the buyer forwards to the dealer, and
+  // it carried U+26A0 and U+1F53B in card copy until 2026-09-02 (Vic: card 04).
+  "supabase/functions/email-quote-report/index.ts",
   ...readdirSync(join(root, "public")).filter(f => f.endsWith(".html")).map(f => "public/" + f),
 ];
 

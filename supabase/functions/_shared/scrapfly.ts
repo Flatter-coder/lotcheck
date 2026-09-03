@@ -22,7 +22,8 @@
 import { extractJsonLdVehicle, fillFromJsonLd } from "./jsonld-vehicle.js";
 import { extractConvertusVmsVehicle, fillFromConvertusVms } from "./convertus-vms.js";
 import { extractD2cVdpVehicle, fillFromD2cVdp } from "./d2c-vdp.js";
-import { visionImageVerdict } from "./vision-limits.ts";
+import { visionImageVerdict, imageDimensions } from "./vision-limits.ts";
+import { CAPTURE_MAX_B64, CAPTURE_BASE_WIDTH, CAPTURE_MIN_WIDTH, captureFitWidth, captureCoverage } from "./capture.ts";
 
 const SCRAPFLY_API_KEY = Deno.env.get("SCRAPFLY_API_KEY");
 export function scrapflyEnabled(): boolean { return !!SCRAPFLY_API_KEY; }
@@ -74,6 +75,12 @@ function base64FromBytes(bytes: Uint8Array): string {
 // log said "sfErr=none" about a scan whose renders demonstrably died
 // (albertahonda.com, 2026-08-14 05:19). Callers read the accumulated trail.
 export let lastScrapflyError: string | null = null;
+
+/** A challenge page or an empty shell, not a dealer listing. Exported for the test. */
+export function isWalledShell(html: string): boolean {
+  if (html.length < 2_000) return true;
+  return /just a moment|cf-chl|challenge-platform|attention required|access denied|enable javascript and cookies/i.test(html.slice(0, 6_000));
+}
 function noteScrapflyError(msg: string): void {
   lastScrapflyError = lastScrapflyError ? `${lastScrapflyError} ;; ${msg}` : msg;
 }
@@ -117,10 +124,46 @@ async function scrapflyRenderOnce(
     u.searchParams.set("render_js", "true");      // execute JS so dynamic price loads
     u.searchParams.set("country", "ca");          // Canadian residential IP
     u.searchParams.set("rendering_wait", String(waitMs));
+    // Scrapfly keeps rendering -- and billing -- after our AbortSignal fires
+    // unless told otherwise. Their `timeout` (ms) is the server-side cap; keep
+    // it just inside ours so the two fail together instead of us paying for a
+    // render we have already walked away from. (lexusofroyaloak.com, 2026-09-02:
+    // two 70s renders abandoned client-side, both still running on their side.)
+    u.searchParams.set("timeout", String(Math.max(5_000, Math.min(150_000, budgetMs - 2_000))));
     if (autoScroll) u.searchParams.set("auto_scroll", "true"); // trigger lazy-loaded sections
     u.searchParams.set("js", DISMISS_OVERLAYS_JS_B64); // strip consent overlays before render settles
     if (shot !== "none") u.searchParams.set("screenshots[main]", shot);
-    u.searchParams.set("format", "json");
+    // RAW, AND THIS ONE LINE WAS THE BUG.
+    //
+    // On Scrapfly's SCRAPE api, `format` is the format of the PAGE CONTENT --
+    // not of the response envelope, which is always JSON. Their own list:
+    //
+    //     raw         Original HTML as-is        (the default)
+    //     clean_html  Cleaned and sanitized HTML
+    //     json        Attempt to parse as JSON
+    //     markdown / text
+    //
+    // We were sending `json`, believing it described the envelope. It told
+    // Scrapfly to try to parse a dealer's HTML page AS JSON, so result.content
+    // came back as something that is not HTML -- 737,194 characters of it on
+    // the Advantage Ford page.
+    //
+    // AND EVERY STRUCTURED READER WE HAVE LOOKS INSIDE <script> TAGS:
+    // extractJsonLdVehicle wants application/ld+json, extractConvertusVmsVehicle
+    // wants `vmsData =`, extractD2cVdpVehicle wants `__vdpJSON`. All three found
+    // nothing, every time, on every page that reached this path -- which is
+    // every page whose direct fetch is walled. That is ~28% of Alberta's dealer
+    // hosts, and it is why "Scrapfly render fallback produced no usable data"
+    // kept being the last line before a 502.
+    //
+    // The trace that finally showed it, after four wrong theories on one URL:
+    //     pageSrc=737194 jsonLdVeh=null convertus=null d2c=null
+    // Three independent readers returning null on the same 737 KB is not three
+    // bugs. It is one input that is not what they were promised.
+    //
+    // Deliberately explicit rather than omitted: `raw` IS the default, but a
+    // default that silently produced this is worth naming at the call site.
+    u.searchParams.set("format", "raw");
 
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(budgetMs) });
     if (!res.ok) {
@@ -129,7 +172,15 @@ async function scrapflyRenderOnce(
       return null;
     }
     const j: any = await res.json();
-    const html: string | null = j?.result?.content ?? null;
+    let html: string | null = j?.result?.content ?? null;
+    // A Cloudflare interstitial is a 200 with content, and it is NOT the page.
+    // Nimble already refuses a 74-char shell as "content too short"; this path
+    // must too, or an HTML-only first attempt "succeeds" on the wall and the
+    // screenshot retry that could have beaten it never runs.
+    if (html && isWalledShell(html)) {
+      noteScrapflyError(`render 200 but the content is a bot-wall shell (${html.length} chars)`);
+      html = null;
+    }
     if (!html) noteScrapflyError(`render 200 but no content (success=${j?.result?.success}, status=${j?.result?.status_code}, reason=${String(j?.result?.reason ?? "").slice(0, 80)})`);
 
     // Screenshots come back as authenticated URLs; fetch the main one to bytes.
@@ -156,7 +207,13 @@ async function scrapflyRenderOnce(
     // Belt and braces behind the viewport request: if a shot still comes back
     // past the vision ceiling, drop it so the caller takes the text path rather
     // than a guaranteed-failing vision call. See vision-limits.ts.
-    if (screenshotB64 && screenshotB64.length > 1_500_000) {
+    // The same derived ceiling the capture path uses -- this was a second copy
+    // of the same 1_500_000 guess. Deliberately the BYTE cap and not
+    // visionImageVerdict: this screenshot is also the sealed evidence photo
+    // (see the photo-lock re-attach below), so discarding it for a vision-only
+    // reason such as pixel height would lose the picture as well as the vision
+    // input. Vision suitability is judged separately, where the image is sent.
+    if (screenshotB64 && screenshotB64.length > CAPTURE_MAX_B64) {
       console.warn(`scrapflyRender: screenshot too large (${screenshotB64.length} b64 chars) -- dropping, falling back to rendered HTML.`);
       screenshotB64 = null;
     }
@@ -206,22 +263,32 @@ export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { sho
   if (!SCRAPFLY_API_KEY) return null;
   const deadline = Date.now() + budgetMs;
 
-  // Attempt 1: viewport shot. Bounded by construction, so it cannot produce the
-  // oversized capture the vision call refuses, and it renders far faster than a
-  // fullpage stitch of a 17,000px page.
-  const first = await scrapflyRenderOnce(url, budgetMs, opts.shot ?? "viewport", true, 8_000);
-  if (first?.html || first?.screenshotB64) return first;
+  // Attempt 1: HTML ONLY, on a short slice of the budget. No screenshot, no
+  // auto_scroll, a short JS wait. The rendered HTML is the valuable part -- it
+  // carries the JSON-LD, the Convertus vmsData blob and the D2C __vdpJSON that
+  // every fallback reads -- and it is the cheapest thing Scrapfly can return.
+  //
+  // This used to run SECOND, after a viewport-shot attempt with auto_scroll and
+  // an 8s wait. On lexusofroyaloak.com (Cloudflare, 972 KB, 2026-09-02) that
+  // first attempt burned the entire 70s budget, the HTML-only retry never got
+  // to run, the rescue rendered fresh and burned 70s more, and the scan died --
+  // over a page whose static HTML held the whole vehicle. Cheapest first.
+  const htmlSlice = Math.min(25_000, budgetMs);
+  const first = await scrapflyRenderOnce(url, htmlSlice, "none", false, 2_500);
+  if (first?.html) return first;
 
-  // Attempt 2: HTML only. No screenshot, no auto_scroll, a short JS wait. This
-  // is the cheapest thing that still yields JSON-LD and vmsData, and it only
-  // runs after a failure -- the common path remains a single call.
+  // Attempt 2: the viewport shot, with whatever budget remains. Still never
+  // fullpage -- a 17,729px capture is past the vision ceiling by construction
+  // (stampedetoyotacalgary.com, 2026-08-16). It only runs after HTML-only came
+  // back empty or walled, so the common path stays one cheap call.
   const left = deadline - Date.now();
   if (left < 6_000) {
-    console.warn("scrapflyRender: no budget left for the HTML-only retry.");
+    console.warn("scrapflyRender: no budget left for the screenshot retry.");
     return first;
   }
-  console.log(`scrapflyRender: first attempt yielded nothing; retrying HTML-only with ${Math.round(left / 1000)}s left.`);
-  return await scrapflyRenderOnce(url, left, "none", false, 2_500);
+  console.log(`scrapflyRender: HTML-only yielded nothing; retrying with a viewport shot and ${Math.round(left / 1000)}s left.`);
+  const second = await scrapflyRenderOnce(url, left, opts.shot ?? "viewport", true, 8_000);
+  return second ?? first;
 }
 
 // Per-scan sealed screenshot via Scrapfly's dedicated Screenshot API
@@ -229,7 +296,78 @@ export async function scrapflyRender(url: string, budgetMs = 70_000, opts: { sho
 // full ASP scrape, used to put a hash-sealed "what the page looked like"
 // photo on EVERY report (#14 on every scan, Vic-approved 2026-08-09).
 // Returns { b64, mime } or null. Fail-safe: any error -> null, never throws.
-export async function captureListingScreenshot(url: string, budgetMs = 25_000): Promise<{ b64: string; mime: string } | null> {
+// THE CAPTURE IS THE WHOLE PAGE. Vic, 2026-08-27, on a Sundance Mazda CX-90:
+// "scrapfly only took screnshoot half the page". Two separate wrongs sat
+// behind that, fixed in two passes:
+//
+//   PR #342 made the degrade HONEST. The function returned only { b64, mime },
+//   so no consumer could tell a whole-page capture from a top-of-page one and
+//   every surface labelled both "Full-page capture of the listing". It now
+//   reports `kind`, and the copy follows the evidence.
+//
+//   This pass makes the degrade RARE, which is the actual fix. A full-page
+//   shot that came back over the size cap used to be discarded outright and
+//   replaced by a viewport shot -- so the answer to "this photo of the whole
+//   page is too big" was to photograph LESS of the page. It is now re-shot
+//   whole at a narrower width (see the ladder below), and the top-of-page
+//   shot is what is left when even that cannot be had.
+//
+// WHAT IS DELIBERATELY NOT BUILT, and how we will know if it should be.
+// TILING -- capturing the page as several stitched segments -- was designed and
+// rejected on arithmetic, not taste. Splitting a page does not shrink it: the
+// segments sum to at least the monolith once overlap and per-file JPEG headers
+// are counted, and the ceiling that actually binds is a TOTAL (report-auth.ts
+// MAX_BODY_BYTES, enforced on the whole email POST body). So tiling cannot
+// carry one extra byte of page to a buyer's inbox. What it would buy is only
+// the pixel-height class, and it would buy that by turning one sealed hash into
+// many -- a signed-canonical change, which is the one edit in this repo with a
+// recorded history of making every listing-URL report unemailable.
+//
+// The residue that would genuinely need it is measurable rather than
+// guessable: the over-cap warning below prints the byte length and the page
+// dimensions on every capture that misses, and the "no width would bring this
+// page under the cap" warning prints when the ladder gives up entirely. Count
+// those two over a fortnight of real scans. If the second one is ~never, this
+// is finished; if it is not, that count -- not an estimate -- is what justifies
+// the canonical change.
+//
+// [[capture-always-whole-page]] [[claims-must-stay-backed]]
+// What one /screenshot call can come back as. `tooLarge` is not a failure: it
+// is a MEASUREMENT -- the page was photographed whole and the file is too big
+// to carry, and the width and height it reports are what the refit is computed
+// from.
+type Shot = { b64: string; mime: string; kind: "fullpage" | "viewport"; widthPx: number; heightPx: number | null };
+type TooLarge = { tooLarge: { b64Len: number; width: number; pageHeightPx: number | null } };
+const isTooLarge = (r: unknown): r is TooLarge => !!r && typeof r === "object" && "tooLarge" in (r as any);
+const isShot = (r: unknown): r is Shot => !!r && typeof r === "object" && "b64" in (r as any);
+
+export type ListingCapture = Shot & { pageHeightPx?: number | null };
+
+// NO RUNG IS ENTERED THAT CANNOT FINISH. `rendering_wait` is a hard 8s on
+// every /screenshot call below -- fullpage, refit, viewport degrade and the
+// ASP retry alike -- so a rung entered with 3s or 5s left cannot possibly
+// return before its own AbortSignal fires. It would issue the call, hold one
+// of the account's five concurrency slots for the whole timeout, return null,
+// and may still be BILLED because Scrapfly can finish the shot server-side
+// after we abort. Every guard on this ladder used to be a bare 3_000 or
+// 5_000 literal, all of them under that 8s floor.
+const CAPTURE_RUNG_MIN_MS = 12_000;        // 8s render wait + render + transfer
+const CAPTURE_FIRST_ATTEMPT_MS = 45_000;   // half the caller's 90s
+const CAPTURE_REFIT_MS = 30_000;           // the refit is a retry, not the main event
+// RESERVED, NOT SPENT. The refit used to be handed every remaining
+// millisecond, so a refit that hung to the deadline left nothing for the
+// top-of-page degrade: two billed shots and NO photo at all, which is worse
+// than the cropped photo this whole change exists to replace.
+const CAPTURE_VIEWPORT_RESERVE_MS = 20_000;
+// Two, because the SECOND one is computed from a real measurement rather than
+// an extrapolation, and a third would be extrapolating from an extrapolation.
+const CAPTURE_MAX_REFITS = 2;
+
+// onBilledShot fires once per shot Scrapfly actually charges for. It is a
+// CALLBACK and not a module-level counter on purpose: an edge isolate serves
+// several requests at once, so a shared counter would attribute one scan's
+// shots to another scan's ledger row.
+export async function captureListingScreenshot(url: string, budgetMs = 25_000, opts: { viewportOnly?: boolean; onBilledShot?: () => void } = {}): Promise<ListingCapture | null> {
   if (!SCRAPFLY_API_KEY) return null;
   const started = Date.now();
   // `asp` is the difference between the call that works and the one that does
@@ -248,13 +386,22 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
   // unprotected shot is tried first and ASP is only paid for when that fails --
   // i.e. only when the alternative is no evidence photo at all. On the happy
   // path this change costs nothing.
-  const shoot = async (fullpage: boolean, ms: number, asp = false): Promise<{ b64: string; mime: string } | "too_large" | "shield" | null> => {
+  const shoot = async (fullpage: boolean, ms: number, asp = false, width: number | null = null): Promise<Shot | TooLarge | "shield" | null> => {
     try {
       const u = new URL("https://api.scrapfly.io/screenshot");
       u.searchParams.set("key", SCRAPFLY_API_KEY);
       u.searchParams.set("url", url);
       u.searchParams.set("format", "jpg");
       if (fullpage) u.searchParams.set("capture", "fullpage");
+      // WIDTH IS SET ONLY ON THE REFIT. The first shot sends no `resolution`
+      // and inherits Scrapfly's default, exactly as every capture to date has.
+      // Adding a parameter to the rung that takes EVERY capture would risk a
+      // 422 on every listing to buy nothing -- and the arithmetic does not need
+      // it, because the width is READ BACK off the returned image below. On the
+      // refit the parameter is the whole point, and if Scrapfly ever rejected
+      // it there, the fall-through is the top-of-page shot we would have taken
+      // anyway.
+      if (width) u.searchParams.set("resolution", `${width}x1080`);
       // 8s, not 3s: the page's own content paints well inside 3s, but dealer
       // vehicle PHOTOS come off a separate image CDN (autoscout24's picture
       // service on Convertus sites) that hadn't delivered yet -- Vic's
@@ -292,14 +439,32 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
         if (isShieldFailure(res.status, body)) return "shield";
         return null;
       }
+      // BILLED. A 403/shield exit costs 0 credits (Vic's dashboard, quoted
+      // above); a 200 that returns an image is charged whether we keep the
+      // bytes or reject them as too large. Count it here, at the only place
+      // that knows a shot succeeded.
+      opts.onBilledShot?.();
       const ct = res.headers.get("content-type") || "";
       if (!/image\//i.test(ct)) { console.warn("captureListingScreenshot non-image response:", ct); return null; }
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (bytes.length < 5_000) return null; // too small to be a real page shot
       const b64 = base64FromBytes(bytes);
-      if (b64.length > 1_500_000) { console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} too large (${b64.length})`); return "too_large"; }
+      // Dimensions come out of the file's own frame header, so a too-large
+      // capture still TELLS US how tall the page is -- which is what lets the
+      // refit below be arithmetic instead of a guess, and what lets a degraded
+      // capture state its shortfall as a measured fact.
+      const dim = imageDimensions(b64);
+      // MEASURED, not assumed. The refit is computed from the width the image
+      // actually came back at, so it stays correct even if Scrapfly's default
+      // resolution ever moves. CAPTURE_BASE_WIDTH is only the fallback for an
+      // unreadable header.
+      const shotWidth = dim?.width ?? width ?? CAPTURE_BASE_WIDTH;
+      if (b64.length > CAPTURE_MAX_B64) {
+        console.warn(`captureListingScreenshot ${fullpage ? "fullpage" : "viewport"} over the cap at ${shotWidth}px wide (${b64.length} b64 chars > ${CAPTURE_MAX_B64}${dim ? `, page is ${dim.width}x${dim.height}px` : ""})`);
+        return { tooLarge: { b64Len: b64.length, width: shotWidth, pageHeightPx: dim?.height ?? null } };
+      }
       const mime = /png/i.test(ct) ? "image/png" : "image/jpeg";
-      return { b64, mime };
+      return { b64, mime, kind: (fullpage ? "fullpage" : "viewport") as "fullpage" | "viewport", widthPx: shotWidth, heightPx: dim?.height ?? null };
     } catch (e) {
       console.warn("captureListingScreenshot error:", (e as Error)?.message);
       return null;
@@ -313,54 +478,120 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
   // A shield failure is a FREE re-roll of the exit geography (blocked = 0
   // credits), and Scrapfly asks us to retry. Loop while the budget allows
   // rather than giving up on the first Japanese exit.
-  const attempt = async (fullpage: boolean, ms: number, asp = false) => {
-    let r = await shoot(fullpage, ms, asp);
+  const attempt = async (fullpage: boolean, ms: number, asp = false, width: number | null = null) => {
+    let r = await shoot(fullpage, ms, asp, width);
     let tries = 1;
     while (r === "shield" && tries < 3) {
       const left = budgetMs - (Date.now() - started);
-      if (left < 8_000) { console.warn("captureListingScreenshot: shield failure, no budget left to re-roll."); break; }
+      if (left < CAPTURE_RUNG_MIN_MS) { console.warn("captureListingScreenshot: shield failure, no budget left to re-roll."); break; }
       await new Promise((res) => setTimeout(res, 1_500 * tries)); // "retry in few seconds"
       console.log(`captureListingScreenshot: shield failure — re-rolling the exit (attempt ${tries + 1}, ${Math.round(left / 1000)}s left).`);
-      r = await shoot(fullpage, Math.min(ms, left), asp);
+      r = await shoot(fullpage, Math.min(ms, left), asp, width);
       tries++;
     }
     return r;
   };
 
-  const first = await attempt(true, budgetMs);
-  if (first && first !== "too_large" && first !== "shield") return first;
+  // ONE FETCH MUST NOT EAT THE WHOLE BUDGET. The caller hands this 90s and
+  // `attempt` passed all of it straight to a single AbortSignal.timeout -- so a
+  // slow first shot could leave nothing for the refit (needs > 5s), the
+  // viewport fall-through (> 3s), or the shield re-roll (> 8s). Half the budget
+  // is plenty for a shot that normally lands well under 20s, and it guarantees
+  // the rest of the ladder still gets to run.
+  // viewportOnly: the vision rescue needs an image Anthropic will ACCEPT, and
+  // a whole-page capture of a very tall listing is refused on the 8,000px long
+  // edge however small its file is. The sealed evidence and the vision input do
+  // not have to be the same bytes.
+  if (opts.viewportOnly) {
+    const vpOnly = await attempt(false, Math.min(budgetMs, CAPTURE_FIRST_ATTEMPT_MS));
+    return isShot(vpOnly) ? vpOnly : null;
+  }
+
+  const first = await attempt(true, Math.min(budgetMs, CAPTURE_FIRST_ATTEMPT_MS));
+  if (isShot(first)) return first;
+
+  // The measured page height survives every branch below, so even a degraded
+  // capture can say how much of the page it is showing rather than leaving the
+  // report to imply it got everything.
+  let pageHeightPx = isTooLarge(first) ? first.tooLarge.pageHeightPx : null;
+
+  // TOO LARGE IS NOT A REASON TO STOP PHOTOGRAPHING THE PAGE.
+  //
+  // This used to fall straight to a viewport shot -- the top of the listing --
+  // and that is what Vic saw: "scrapfly only took screnshoot half the page".
+  // The rule is that the capture is ALWAYS the whole page, so a file that is
+  // too big is a sizing problem to solve, not a reason to photograph less.
+  //
+  // The page does not reflow shorter when narrowed (measured on the failing
+  // Mazda VDP: 5,873px tall at 1280 AND at 1024), so bytes fall very nearly
+  // linearly with width -- and the baseline is 1920, not the 1280 the earlier
+  // measurement compared against. captureFitWidth turns "how far over the cap
+  // are we" into the width that fits. Still the WHOLE page, still one image,
+  // one extra call, and nothing downstream changes shape.
+  if (isTooLarge(first)) {
+    // The first refit width is an EXTRAPOLATION from one data point. If it
+    // comes back over the cap too, that miss is itself a second real
+    // measurement -- a width we actually shot and the bytes it actually
+    // produced -- so the next width is derived from it rather than from the
+    // same 1920px guess again. Bounded at two: a third would be extrapolating
+    // from an extrapolation, and each rung costs a real shot.
+    let over: { b64Len: number; width: number; pageHeightPx: number | null } | null = first.tooLarge;
+    for (let n = 0; n < CAPTURE_MAX_REFITS && over; n++) {
+      const refitW = captureFitWidth(over.b64Len, over.width);
+      if (!refitW) {
+        console.warn(`captureListingScreenshot: no width at or above ${CAPTURE_MIN_WIDTH}px would bring this page under ${CAPTURE_MAX_B64} b64 chars (last: ${over.b64Len} at ${over.width}px); below that it stops being the desktop page a buyer sees.`);
+        break;
+      }
+      const left = budgetMs - (Date.now() - started);
+      // The degrade's budget is set aside BEFORE the refit is allowed to run.
+      if (left < CAPTURE_RUNG_MIN_MS + CAPTURE_VIEWPORT_RESERVE_MS) {
+        console.warn(`captureListingScreenshot: ${Math.round(left / 1000)}s left — not enough to re-shoot the whole page at ${refitW}px AND still keep the top-of-page shot in reserve.`);
+        break;
+      }
+      console.log(`captureListingScreenshot: full page was ${over.b64Len} b64 chars at ${over.width}px — re-shooting the WHOLE page at ${refitW}px (refit ${n + 1}/${CAPTURE_MAX_REFITS}, ${Math.round(left / 1000)}s left).`);
+      const refit = await attempt(true, Math.min(CAPTURE_REFIT_MS, left - CAPTURE_VIEWPORT_RESERVE_MS), false, refitW);
+      // No pageHeightPx on this return, on purpose: a full-page shot's OWN
+      // height IS the page height, measured at the width actually shot.
+      if (isShot(refit)) return refit;
+      over = isTooLarge(refit) ? refit.tooLarge : null;
+      if (over?.pageHeightPx) pageHeightPx = over.pageHeightPx;
+    }
+    // Last resort, and it is NOT a full-page capture: kind stays "viewport" so
+    // every surface says what it actually is (PR #342), and pageHeightPx rides
+    // along so the shortfall is a measured number rather than a silence.
+    const leftVp = budgetMs - (Date.now() - started);
+    if (leftVp >= CAPTURE_RUNG_MIN_MS) {
+      const vp = await attempt(false, leftVp);
+      if (isShot(vp)) return { ...vp, pageHeightPx };
+    } else {
+      console.warn(`captureListingScreenshot: ${Math.round(leftVp / 1000)}s left — below the ${CAPTURE_RUNG_MIN_MS / 1000}s a shot needs, so no top-of-page fallback either.`);
+    }
+    return null;
+  }
   // DEGRADE ON ANY FAILURE, not only on "too_large". A fullpage 422 used to
   // return null here and never try the viewport, so the report shipped with no
   // evidence photo at all -- which is what Vic kept seeing. A viewport shot of
   // the top of the listing (price + vehicle visible) is worth far more than
   // nothing, and it is the same ladder the render path now uses.
-  if (first === null || first === "shield") {
+  {
     const left = budgetMs - (Date.now() - started);
-    if (left > 3_000) {
+    if (left >= CAPTURE_RUNG_MIN_MS) {
       console.log(`captureListingScreenshot: fullpage failed — trying a viewport shot with ${Math.round(left / 1000)}s left.`);
       const vp = await attempt(false, left);
-      if (vp && vp !== "too_large" && vp !== "shield") return vp;
+      if (isShot(vp)) return vp;
       // Both unprotected attempts failed. NOW pay for ASP -- the alternative at
       // this point is shipping the report with no evidence photo.
       const leftAsp = budgetMs - (Date.now() - started);
-      if (leftAsp > 5_000) {
+      if (leftAsp >= CAPTURE_RUNG_MIN_MS) {
         console.log(`captureListingScreenshot: retrying viewport WITH asp (${Math.round(leftAsp / 1000)}s left) — a 403 from a non-CA proxy is the usual cause.`);
         const withAsp = await attempt(false, leftAsp, true);
-        if (withAsp && withAsp !== "too_large" && withAsp !== "shield") return withAsp;
+        if (isShot(withAsp)) return withAsp;
       }
     } else {
       console.warn("captureListingScreenshot: fullpage failed and no budget left for a viewport shot.");
     }
     return null;
   }
-  if (first === "too_large") {
-    const left = budgetMs - (Date.now() - started);
-    if (left > 4_000) {
-      const second = await shoot(false, left);
-      return second && second !== "too_large" ? second : null;
-    }
-  }
-  return null;
 }
 
 // Attach a sealed screenshot to the analysis when it doesn't already carry one
@@ -383,18 +614,45 @@ export async function captureListingScreenshot(url: string, budgetMs = 25_000): 
 // single listing-URL report was unemailable. Setting real values here BEFORE
 // signing, and only ever filling a gap the client left (`analysis.sourceUrl
 // || url`) client-side, closes the gap instead of racing it.
-export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<{ b64: string; mime: string } | null>): Promise<void> {
+export async function attachSealedScreenshot(url: string, analysis: any, budgetMs = 25_000, pre?: Promise<Partial<ListingCapture> & { b64: string; mime: string } | null>): Promise<void> {
   if (analysis) {
     analysis.sourceUrl = analysis.sourceUrl || url;
     if (!analysis.capturedAt) analysis.capturedAt = new Date().toISOString();
   }
   try {
-    if (!analysis || analysis.listingShot || !SCRAPFLY_API_KEY) return;
+    // A WHOLE-PAGE CAPTURE OUTRANKS A TOP-OF-PAGE ONE. This used to skip
+    // whenever ANY listingShot was already set -- and on every rescue path one
+    // already is: the photo-lock above seals scrapflyRender's screenshot, which
+    // is a VIEWPORT shot. So the dedicated 60-credit full-page capture, already
+    // paid for and running in parallel, was thrown away in favour of a picture
+    // of the top of the page. Raising the size cap would never have reached
+    // those reports at all.
+    //
+    // Skip only when what we hold is already the strong one.
+    if (!analysis || !SCRAPFLY_API_KEY) return;
+    if (analysis.listingShot && analysis.listingShotKind === "fullpage") return;
+    const replacing = !!analysis.listingShot;
     // A pre-started capture (kicked off at the top of the scan, running in
     // parallel with extraction) beats a fresh one started after the scan has
     // burned the request budget -- the late start was why shots kept missing.
-    const shot = await (pre ?? captureListingScreenshot(url, budgetMs));
+    // BOUNDED WAIT. With a pre-started capture this used to `await` the
+    // promise outright, however long the ladder still had to run -- and the
+    // ladder's own budget is 90s while this call site may have seconds left
+    // before the request deadline. Supabase kills the function at ~150s with a
+    // raw 504 that skips the credit-release path and STRANDS THE HOLD, so a
+    // late photo must never be able to cause one. A report without the
+    // evidence photo is recoverable; a stranded paid credit is not.
+    // [[never-charge-to-ask-a-question]]
+    const shot = pre
+      ? await Promise.race([
+          pre,
+          new Promise<null>((res) => setTimeout(() => res(null), Math.max(1_000, budgetMs))),
+        ]).catch(() => null)
+      : await captureListingScreenshot(url, budgetMs);
     if (!shot) return;
+    // Only swap for something genuinely better. Replacing one top-of-page shot
+    // with another is churn, and it would re-stamp listingShotAt for nothing.
+    if (replacing && shot.kind !== "fullpage") return;
     const bin = atob(shot.b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -402,7 +660,39 @@ export async function attachSealedScreenshot(url: string, analysis: any, budgetM
     analysis.listingShot = `data:${shot.mime};base64,${shot.b64}`;
     analysis.listingShotSha256 = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
     analysis.listingShotAt = new Date().toISOString();
-    console.log(`Sealed screenshot attached (${bytes.length} bytes, sha ${analysis.listingShotSha256.slice(0, 12)}).`);
+    // CLEARED, NOT LEFT BEHIND. listingShot is written unconditionally and the
+    // measurements below are conditional -- so when this replaces an earlier
+    // shot (or when the new image's frame header is unreadable), the OLD
+    // height and page height would survive next to the NEW bytes and the card
+    // would print "covers the top N% of the page" about an image those numbers
+    // do not describe. The four fields move together or not at all.
+    delete analysis.listingShotWidthPx;
+    delete analysis.listingShotHeightPx;
+    delete analysis.listingShotPageHeightPx;
+    // WHOLE PAGE, or the top of it? The ladder degrades to a viewport shot
+    // when a fullpage capture is too large or fails, and that is worth far
+    // more than no photo -- but the report must SAY so. Labelling a
+    // top-of-page shot "Full-page capture of the listing" is an unbacked
+    // claim about our own evidence, on the one artifact a buyer puts in
+    // front of a dealer. [[capture-always-whole-page]]
+    // NOT `shot.kind || "fullpage"`. Defaulting an honesty label to the
+    // STRONGEST claim is how a top-of-page photo gets announced as the whole
+    // page in the first place. Absent means unknown, and every surface already
+    // renders unknown as "Photo of the listing" and nothing more.
+    if (shot.kind) analysis.listingShotKind = shot.kind;
+    // HOW MUCH OF THE PAGE, as a measured number. A viewport shot used not to
+    // know what it had missed, so every surface could only speak in
+    // generalities about a capture that fell short. The full-page attempt
+    // reports the page's real height even when its file is too big to carry,
+    // so the shortfall is arithmetic: captured height over page height.
+    // Absent when we genuinely do not know -- never estimated.
+    // [[present-without-creating-questions]]
+    if (shot.heightPx) analysis.listingShotHeightPx = shot.heightPx;
+    if (shot.widthPx) analysis.listingShotWidthPx = shot.widthPx;
+    const pagePx = shot.pageHeightPx ?? (shot.kind === "fullpage" ? shot.heightPx : null);
+    if (pagePx) analysis.listingShotPageHeightPx = pagePx;
+    const cov = captureCoverage(shot.heightPx ?? 0, pagePx ?? 0);
+    console.log(`Sealed screenshot ${replacing ? "REPLACED a top-of-page shot" : "attached"} (${bytes.length} bytes, ${shot.kind || "fullpage"}${shot.widthPx ? ` ${shot.widthPx}x${shot.heightPx ?? "?"}px` : ""}${cov !== null && cov < 1 ? `, ${Math.round(cov * 100)}% of a ${pagePx}px page` : ""}, sha ${analysis.listingShotSha256.slice(0, 12)}).`);
   } catch { /* best-effort -- never sink the scan */ }
 }
 
@@ -493,6 +783,27 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
       if (shot) {
         console.log("Rescue renders failed -- falling back to the sealed screenshot as the vision input (screenshot-first).");
         rendered = { html: null, screenshotB64: shot.b64, screenshotMime: shot.mime };
+        // A WHOLE-PAGE CAPTURE CAN BE TOO TALL TO READ, and on this rung there
+        // is no HTML behind it -- so an image Anthropic refuses used to mean
+        // the entire rescue returned null and the buyer got no analysis at all.
+        //
+        // That became reachable the moment the size cap was raised. Before it,
+        // a 17,729px page always came back over the old cap and degraded to a
+        // 1,080px viewport shot, which passes the long-edge check by accident.
+        // Now the whole page IS carried -- correctly, for evidence -- and
+        // handed to a vision call that rejects it on pixel height.
+        //
+        // The sealed evidence and the vision input do not have to be the same
+        // bytes. Take a viewport shot for the READ and leave the photo alone.
+        // Same one call the old ladder spent on its degrade, so no new cost.
+        if (!visionImageVerdict(shot.b64, shot.mime).ok) {
+          const left = deadline - Date.now() - 20_000;
+          console.warn(`scrapfly-rescue: the sealed capture is unreadable by vision (${visionImageVerdict(shot.b64, shot.mime).reason}) and there is no HTML — taking a viewport shot for the READ only; the evidence photo is untouched.`);
+          const forVision = left > 0 ? await captureListingScreenshot(url, left, { viewportOnly: true }) : null;
+          rendered = forVision
+            ? { html: null, screenshotB64: forVision.b64, screenshotMime: forVision.mime }
+            : null;
+        }
       }
     }
     if (!rendered) return null;
@@ -539,7 +850,7 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     }
     if (rendered.screenshotB64 && shotVerdict.ok) {
       userContent.push({ type: "image", source: { type: "base64", media_type: rendered.screenshotMime || "image/jpeg", data: rendered.screenshotB64 } });
-      userContent.push({ type: "text", text: `Above is a full-page screenshot of a dealer listing page (URL: ${url}). Read every visible figure — asking price, MSRP, fees/add-ons, VIN, odometer, financing/lease terms — and return the JSON object described in your instructions. If a field isn't visible, use null; never invent a number.` });
+      userContent.push({ type: "text", text: `Above is a screenshot of a dealer listing page (URL: ${url}) -- it may show only the top of the page. Read every visible figure — asking price, MSRP, fees/add-ons, VIN, odometer, financing/lease terms — and return the JSON object described in your instructions. If a field isn't visible, use null; never invent a number.` });
     } else if (rendered.html) {
       userContent.push({ type: "text", text: `Here is the rendered content of a dealer listing page (URL: ${url}):\n\n${htmlToText(rendered.html)}\n\nAnalyze this listing and return the JSON object described in your instructions.` });
     } else {
@@ -599,7 +910,10 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
     // giant full-page render never bloats the response/cache; the HASH is
     // computed over exactly the bytes we attach.
     try {
-      if (rendered.screenshotB64 && rendered.screenshotB64.length < 1_500_000) {
+      // <= CAPTURE_MAX_B64, not < 1_500_000. Note this comparison runs the
+      // OPPOSITE way to the two above (this one gates KEEPING, they gate
+      // dropping), so a careless swap of the constant flips the guard.
+      if (rendered.screenshotB64 && rendered.screenshotB64.length <= CAPTURE_MAX_B64) {
         const bin = atob(rendered.screenshotB64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -607,6 +921,16 @@ export async function rescueListingViaScrapfly(url: string, opts: RescueOpts): P
         parsed.listingShot = `data:${rendered.screenshotMime || "image/jpeg"};base64,${rendered.screenshotB64}`;
         parsed.listingShotSha256 = Array.from(new Uint8Array(dig)).map((b) => b.toString(16).padStart(2, "0")).join("");
         parsed.listingShotAt = new Date().toISOString();
+        // SAY WHICH SHOT. scrapflyRender asks for a VIEWPORT screenshot by
+        // default (see its attempt-1 comment), so this photo is the top of the
+        // page -- and it was sealed with no kind at all, which every surface
+        // reads as "we do not know". We do know. [[claims-must-stay-backed]]
+        parsed.listingShotKind = "viewport";
+        // Measure it here as well, or the fields mergeRescued now carries would
+        // never have anything to carry and the coverage sentence would stay
+        // unreachable on every rescue path -- wired, but with nothing on the wire.
+        const rdim = imageDimensions(rendered.screenshotB64);
+        if (rdim) { parsed.listingShotWidthPx = rdim.width; parsed.listingShotHeightPx = rdim.height; }
       }
     } catch { /* photo lock is best-effort -- never sink the rescue */ }
     return parsed;
@@ -642,8 +966,15 @@ export function mergeRescued(analysis: any, rescued: any): void {
   if (hadNoQuotedPrice && Number(analysis.quotedPrice) > 0 && rescued.priceGatedButRecovered) {
     analysis.priceGatedButRecovered = true;
     analysis.priceGateMessage = rescued.priceGateMessage;
+    analysis.priceGateGoogleAdsBacked = !!rescued.priceGateGoogleAdsBacked;
   }
-  const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt"];
+  const fillKeys = ["trim", "vin", "odometerKm", "vehicleCondition", "fuelType", "dealerName", "dealerCity", "vehicle", "year", "make", "model", "financing", "summary", "listingShot", "listingShotSha256", "listingShotAt",
+    // BUILT BUT UNWIRED. The capture describes itself now -- which shot it is,
+    // how tall it came back, how tall the page actually is -- and every one of
+    // those fields was dropped here, so on any rescue path the report fell back
+    // to the neutral "Photo of the listing" and the coverage sentence never
+    // rendered. listingShotKind has been stripped here since PR #342 shipped it.
+    "listingShotKind", "listingShotWidthPx", "listingShotHeightPx", "listingShotPageHeightPx"];
   for (const k of fillKeys) {
     if ((analysis[k] == null || analysis[k] === "") && rescued[k] != null && rescued[k] !== "") analysis[k] = rescued[k];
   }

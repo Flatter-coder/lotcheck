@@ -1,0 +1,42 @@
+# Copy the Scrapfly key from the GitHub repo secret into the Supabase function
+# secret, so ONE paste fixes both stores.
+#
+# THE PROBLEM THIS CLOSES. SCRAPFLY_API_KEY lives in two independent places:
+#
+#   GitHub repo secret    -> discover-feeds, probe-one-url, published-msrp
+#   Supabase function     -> _shared/scrapfly.ts and render-page, which is what
+#     secret                 a REAL BUYER'S SCAN depends on
+#
+# `npm run key:scrapfly` writes the first and prints "Stored and verified".
+# Anyone who runs it reasonably believes the key is fixed. The buyer-facing half
+# is untouched and nothing says so. This job is the missing half: Vic pastes
+# once, presses this, and both stores hold the same verified key.
+#
+# IT WILL NOT PROPAGATE A DEAD KEY. The script verifies against Scrapfly first
+# and refuses to write on anything but a 200 -- copying a rejected key into the
+# second store would turn one broken surface into two.
+#
+# AND IT PROVES THE RESULT. After writing, it calls the deployed render-page
+# function and requires a real render to come back, so "synced" means production
+# actually rendered a page, not that a CLI command exited 0.
+name: Sync Scrapfly key into Supabase
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify, propagate, and prove
+        env:
+          SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/sync-scrapfly-key.mjs

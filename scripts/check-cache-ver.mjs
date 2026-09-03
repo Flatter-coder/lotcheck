@@ -15,7 +15,14 @@
 // Run: node scripts/check-cache-ver.mjs [baseRef]
 import { execSync } from "node:child_process";
 
-const BASE = process.argv[2] || process.env.GITHUB_BASE_REF || "origin/main";
+// GITHUB_BASE_REF is a BARE branch name on a PR ("main"), which often does not
+// exist as a local ref in a CI checkout -- merge-base then throws and the gate
+// skips silently. Qualify it to origin/<ref> unless the caller passed an
+// explicit base.
+const RAW_BASE = process.argv[2] || process.env.GITHUB_BASE_REF || "origin/main";
+const BASE = (process.argv[2] || !process.env.GITHUB_BASE_REF || RAW_BASE.startsWith("origin/"))
+  ? RAW_BASE
+  : `origin/${RAW_BASE}`;
 const CACHE_FILE = "supabase/functions/analyze-listing-url/index.ts";
 
 // Files whose changes alter what a report SAYS. Deliberately not the whole
@@ -34,7 +41,16 @@ const OUTPUT_SHAPING = [
   // from it to shape docFeeCheck, so a change to a ceiling value changes what a
   // report SAYS -- the same blind spot recalls/scrapfly had (logic feeding the
   // analysis object living in a shared module the gate didn't watch).
-  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls)\./,
+  // fee-ladder joined on 2026-09-01. It decides whether the add-ons point
+  // reads ITEMIZED or NONE LISTED and what the buyer is told is negotiable,
+  // which is squarely what a report SAYS -- the same reason recalls, scrapfly
+  // and fee-schedule are on this list.
+  // market-count, page-default, report-lines and report-sign joined on
+  // 2026-09-02: they decide what the "other listings read" and "if you do
+  // nothing" lines SAY and what the v6 canonical seals, so an edit to the
+  // window, the trim grouping, the sentence regex or the projection changes a
+  // signed report and must not replay from cache.
+  /^supabase\/functions\/_shared\/(msrp-claim|msrp-authority|trim-match|model-identity|deal|docfee|fee-schedule|cpo|condition|marketvalue|d2c-vdp|invariants|incentive-extract|apr-extract|jsonld-vehicle|convertus-vms|verification-checkpoints|recalls|fee-ladder|market-count|page-default|report-lines|report-sign)\./,
   // scrapfly joined this list on 2026-08-20, for the same reason recalls did
   // the day before: attachSealedScreenshot() stamps sourceUrl/capturedAt onto
   // `analysis` before it's signed, and a change to what it stamps (or when)
@@ -42,6 +58,28 @@ const OUTPUT_SHAPING = [
   // change this gate exists to catch, just living in a shared module instead
   // of analyze-listing-url/index.ts itself.
   /^supabase\/functions\/_shared\/scrapfly\./,
+  // get-dealer-sentiment joined on 2026-08-27. It is a separate function, so
+  // it sat outside every pattern above -- yet it decides what the Dealer
+  // reputation point SAYS: the rating, the review count, and whether the
+  // point reads NOT CHECKED at all. A change to that shipped with no bump
+  // and every cached report replayed the old answer, which is the same blind
+  // spot the recalls note above describes, one function further out.
+  /^supabase\/functions\/get-dealer-sentiment\//,
+  // capture + vision-limits joined on 2026-08-27, when the whole-page fix moved
+  // the capture cap, the refit width and the coverage arithmetic into them.
+  // Those numbers decide whether a report shows the WHOLE listing or the top of
+  // it, and what the evidence card says about which -- output shaping in the
+  // plainest sense, in shared modules the gate did not watch. Same blind spot
+  // as recalls and scrapfly above, one file further out.
+  /^supabase\/functions\/_shared\/(capture|vision-limits)\./,
+  // multi-vehicle joined on 2026-08-27. It decides whether a URL produces a
+  // report AT ALL, and which vehicle that report is about -- the most
+  // output-shaping decision in the whole scan.
+  /^supabase\/functions\/_shared\/multi-vehicle\./,
+  // dealer-catalog joined on 2026-08-30. It decides HOW a page is fetched --
+  // and on a bot-walled host that is the difference between a report and a
+  // 502, so it shapes the output as directly as anything in this list.
+  /^supabase\/functions\/_shared\/dealer-catalog\./,
 ];
 
 const sh = (c) => execSync(c, { encoding: "utf8" }).trim();
@@ -54,10 +92,45 @@ try {
   process.exit(0);
 }
 
-const changed = sh(`git diff --name-only ${base}..HEAD`).split("\n").filter(Boolean);
+let changed = sh(`git diff --name-only ${base}..HEAD`).split("\n").filter(Boolean);
+// ON A PUSH TO main THIS GATE WAS A GUARANTEED NO-OP. After a merge, HEAD IS
+// origin/main, so merge-base returns HEAD, the diff is empty, and the gate
+// exits 0 having inspected nothing -- on the very event where a missed
+// CACHE_VER bump starts serving stale reports to real buyers. It only ever did
+// real work on PR branches. When the base resolves to HEAD itself, fall back to
+// the commit that was just pushed (HEAD~1) so the push is actually checked.
+// Conservative: only when HEAD~1 exists, so a first or shallow commit still
+// skips rather than failing the build.
+if (!changed.length) {
+  let headSha = null, parent = null;
+  try { headSha = sh("git rev-parse HEAD"); } catch { /* ignore */ }
+  if (headSha && base === headSha) {
+    try { parent = sh("git rev-parse HEAD~1"); } catch { /* no parent to compare */ }
+  }
+  if (parent) {
+    changed = sh(`git diff --name-only ${parent}..HEAD`).split("\n").filter(Boolean);
+    if (changed.length) console.log("cache-ver: base resolved to HEAD (push event) — checking the pushed commit against HEAD~1 instead.");
+    // The BEFORE version must come from the same parent the diff was taken
+    // against. It used to be read from `base` (= HEAD on a push), so before and
+    // after were the same string and every push to main that touched an
+    // output-shaping file failed as "not bumped" -- including bc0ae73
+    // (2026-09-02), which HAD bumped it. A gate that fails on the very fix it
+    // asks for teaches people to ignore it.
+    base = parent;
+  }
+}
 if (!changed.length) { console.log("cache-ver: no changes."); process.exit(0); }
 
-const shaping = changed.filter((f) => OUTPUT_SHAPING.some((re) => re.test(f)));
+// A TEST is not an output. Test files sit next to the modules they pin, so the
+// shaping patterns match them too -- and a cache bump is not free: it discards
+// every cached report and re-scans every host a buyer returns to. Making a
+// test-only edit demand one teaches the next person that this gate cries wolf,
+// and a gate people route around protects nothing. [[repeat-fix-pattern]]
+//
+// Narrow and provable: only *.test.ts / *.test.mjs, which are never imported by
+// an edge function. A module that genuinely shapes output still trips the gate.
+const IS_TEST = /(^|[\/])[^\/]*\.test\.(ts|mts|js|mjs)$/;
+const shaping = changed.filter((f) => !IS_TEST.test(f) && OUTPUT_SHAPING.some((re) => re.test(f)));
 if (!shaping.length) {
   console.log("cache-ver: no analysis-output files changed — no bump needed.");
   process.exit(0);

@@ -50,6 +50,21 @@ const MACHE = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV" },
   { trim: "GT",      msrp: 69990, fuel_type: "BEV" },
 ];
+// The 2026 Lexus NX 350h ladder EXACTLY as the catalog stored it on 2026-08-27:
+// the base "Premium" package filed under the internal grade "LUXURY", sitting
+// beside the genuinely different "Luxury" package.
+const NX350H_AS_STORED = [
+  { trim: "LUXURY",       msrp: 58025, fuel_type: "Hybrid" },
+  { trim: "Luxury",       msrp: 62165, fuel_type: "Hybrid" },
+  { trim: "F SPORT 2",    msrp: 65545, fuel_type: "Hybrid" },
+  { trim: "F SPORT 3",    msrp: 68420, fuel_type: "Hybrid" },
+  { trim: "Executive",    msrp: 70878, fuel_type: "Hybrid" },
+  { trim: "Ultra Luxury", msrp: 72300, fuel_type: "Hybrid" },
+];
+// The same ladder as the scraper writes it now — every package by its published
+// Canadian name.
+const NX350H_PUBLISHED = NX350H_AS_STORED.map((r) => (r.trim === "LUXURY" ? { ...r, trim: "Premium" } : r));
+
 // The same lineup from a catalog that DOES pin drivetrain — exact stays exact.
 const MACHE_AWD = [
   { trim: "Premium", msrp: 49990, fuel_type: "BEV", drivetrain: "RWD" },
@@ -115,6 +130,18 @@ const HRV = [
   { trim: "LX AWD", msrp: 33100, fuel_type: "Gas" },
   { trim: "SPORT", msrp: 36400, fuel_type: "Gas" },
   { trim: "EX-L", msrp: 39200, fuel_type: "Gas" },
+];
+
+// The 2025 Mazda CX-90 MHEV ladder EXACTLY as msrp_catalog stores it, HTML
+// entity and all: the trim names repeat the whole model description on every
+// row, and the hyphen in "GT-P" is an encoded &#8209; (non-breaking hyphen).
+// Both details are load-bearing — see the cases below.
+const CX90 = [
+  { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO GS", msrp: 46250, fuel_type: "Hybrid" },
+  { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO GS&#8209;L", msrp: 51100, fuel_type: "Hybrid" },
+  { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO GT", msrp: 55700, fuel_type: "Hybrid" },
+  { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO GT&#8209;P", msrp: 59650, fuel_type: "Hybrid" },
+  { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO Signature", msrp: 63650, fuel_type: "Hybrid" },
 ];
 
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
@@ -215,6 +242,73 @@ const CASES = [
   // BOTH 20% and $6,000.
   ["IONIQ 9, small plausible gap stays exact", IONIQ9_GAPPED,
     { trim: "Preferred AWD", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 66500 }, 64999, "exact"],
+  // ── 2025 Mazda CX-90 MHEV GT AWD (sundancemazda.com, 2026-08-27) ─────────
+  // Vic ran this listing and the report anchored MSRP to $59,650 — the GT-P
+  // row — for a car the listing plainly calls a GT ($55,700). The cause was
+  // the asking price: the dealer discounted $8,000 to $58,805, which sits
+  // nearer the GT-P row than the GT row, and price proximity was being ADDED
+  // to the score before the sort. So a dealer's own discount decided which
+  // trim the buyer owned, and the harder they discount the higher the trim
+  // appears — with the MSRP their price is then measured against moving too.
+  ["CX-90 GT AWD: the asking price must not upgrade the trim", CX90,
+    { trim: "GT AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 58805 }, 55700, "starting_at"],
+  // ... and every OTHER trim still reaches its own row. Fixing the above by
+  // preferring the less specific row would have been a cure worse than the
+  // disease; a listing that DOES say GT-P must still get GT-P.
+  ["CX-90 GT-P AWD still resolves to GT-P", CX90,
+    { trim: "GT-P AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 58805 }, 59650, "starting_at"],
+  ["CX-90 GS-L AWD still resolves to GS-L", CX90,
+    { trim: "GS-L AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 58805 }, 51100, "starting_at"],
+  ["CX-90 Signature AWD still resolves to Signature", CX90,
+    { trim: "Signature AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 58805 }, 63650, "starting_at"],
+  // The price cannot drag the match at any level of discount.
+  ["CX-90 GT AWD: a deeper discount does not change the trim", CX90,
+    { trim: "GT AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 49900 }, 55700, "starting_at"],
+  ["CX-90 GT AWD: no discount at all, same answer", CX90,
+    { trim: "GT AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 55700, "starting_at"],
+
+  // ── 2026 Lexus NX 350h Premium (report LC-46A4-66F, 2026-08-27) ──────────
+  // A real paid report anchored this car to $70,878 -- the "Executive" row --
+  // against an asking price of $62,005, when its true MSRP is $58,025. Two
+  // independent causes, both locked here.
+  //
+  // 1. The catalog stored the BASE package under the manufacturer's internal
+  //    series grade ("LUXURY") instead of its published name ("Premium"), so
+  //    the listing could never match its own row.
+  // 2. "premium" is a KEY_TOKEN, so every correctly-named row took the -5
+  //    grade-conflict penalty -- and "Executive", a real Lexus grade that was
+  //    simply missing from KEY_TOKENS, escaped the penalty and won at 0.
+  // 2026-08-27, second pass: this used to land on the Luxury row ($62,165).
+  // Once a row may not be MORE SPECIFIC than the listing, the single-word
+  // grades tie and the honest floor rule takes the cheapest of them — which is
+  // the $58,025 row, i.e. the true NX 350h Premium price, reached even though
+  // the catalog still had it filed under the wrong NAME. The assertion's
+  // intent is unchanged and strengthened: the $70,878 Executive row must never
+  // win, and now the FIGURE is right too.
+  ["NX 350h Premium: the Executive row must never win", NX350H_AS_STORED,
+    { trim: "350h Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 62005 },
+    58025, "starting_at"],
+  ["NX 350h Premium: with the published package name, the right row and figure", NX350H_PUBLISHED,
+    { trim: "350h Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid", quotedPrice: 62005 },
+    58025, "starting_at"],
+  // The CLASS, not the instance: any row whose grade name our vocabulary does
+  // not recognise must not beat a row that shares the stated grade.
+  ["an unrecognised grade name does not beat the stated grade", [
+    { trim: "Premium",        msrp: 58025, fuel_type: "Hybrid" },
+    { trim: "Sonderausgabe",  msrp: 70878, fuel_type: "Hybrid" },
+  ], { trim: "Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "starting_at"],
+  // ("starting_at", not "exact", is correct here: neither row pins a
+  // drivetrain, so the ladder cannot confirm this car's configuration. The
+  // claim under test is the FIGURE -- the $70,878 row must not win.)
+  // A row that makes no competing grade claim at all is untouched.
+  ["a bare drivetrain-only row is not penalised as a rival grade", [
+    { trim: "AWD",     msrp: 58025, fuel_type: "Hybrid" },
+  ], { trim: "Premium Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "exact"],
+  // One trim name, two prices, nothing to tell the rows apart -> never "exact".
+  ["a trim name that appears twice at different prices is never exact", [
+    { trim: "LUXURY", msrp: 58025, fuel_type: "Hybrid" },
+    { trim: "Luxury", msrp: 62165, fuel_type: "Hybrid" },
+  ], { trim: "Luxury Hybrid AWD", vinDrive: "AWD", fuelType: "Hybrid" }, 58025, "starting_at"],
   // After backfilling the missing rows, the SAME asking price against the
   // full lineup correctly matches the real top trim (Ultimate Calligraphy,
   // $81,499) on its distinctive tokens + closest price -- a $2,400 gap, well

@@ -22,6 +22,13 @@
 // Nothing here throws and nothing here blocks a report. A gate that can take
 // the whole report down would violate report-never-empty.
 
+// The sale-condition rule is IMPORTED, never restated here. It already existed
+// as a copy-pasted expression in three branches of analyze-listing-url and was
+// missing from a fourth; a gate carrying a fifth copy would be a gate asserting
+// a stale version of the rule it is supposed to enforce. See msrp-basis.ts.
+import { applyConditionToMsrp, msrpIsPresentTense } from "./msrp-basis.ts";
+import { PAGE_DEFAULT_SOURCES } from "./page-default.js";
+
 // ── VIN ──────────────────────────────────────────────────────────────────────
 // Moved here from BOTH analyze-listing-url and analyze-quote, which each carried
 // a byte-identical copy -- so a correction to one silently missed the other.
@@ -138,14 +145,24 @@ export const INVARIANTS: Invariant[] = [
     repair: (a) => { a.vinCheck = validateVin(a.vin); },
   },
   {
-    // A catalog MSRP is either pinned to the exact trim or it's an honest
-    // "starting at" floor -- the UI label flips on msrpBasis. An unlabelled
-    // catalog figure would render a floor as if it were the trim's real MSRP.
+    // A catalog MSRP is either pinned to the exact trim, an honest "starting
+    // at" floor, or -- on a vehicle that is no longer new -- the ORIGINAL
+    // sticker it wore when it was. The UI label flips on msrpBasis, so an
+    // unlabelled catalog figure would render a floor as the trim's real MSRP.
+    //
+    // "original_when_new" was missing from that list, which pointed this rule
+    // backwards at the defect sitting right beneath it: every CORRECTLY handled
+    // used listing raised a violation, while a used listing wrongly carrying
+    // "exact" -- the fabricated "thousands under MSRP" -- raised nothing at
+    // all. A signal that fires on the right answer and stays silent on the
+    // wrong one is worse than no signal, because it trains the reader to skip
+    // it.
     id: "CATALOG_MSRP_BASIS_LABELLED",
     severity: "flag",
     why: "a 'starting at' floor must never be presented as the exact trim MSRP",
     applies: (a) => a?.msrpSource === "catalog" && num(a.msrp) > 0,
-    holds: (a) => a.msrpBasis === "exact" || a.msrpBasis === "starting_at",
+    holds: (a) => a.msrpBasis === "exact" || a.msrpBasis === "starting_at"
+      || a.msrpBasis === "original_when_new",
   },
   {
     // Inflated-sticker tactic. When we name it, the arithmetic has to survive a
@@ -160,6 +177,64 @@ export const INVARIANTS: Invariant[] = [
       return num(i.dealerStated) > num(i.manufacturer)
         && num(i.overBy) === Math.round(num(i.dealerStated) - num(i.manufacturer))
         && num(a.msrp) === num(i.manufacturer);
+    },
+  },
+  {
+    // The half of CATALOG_MSRP_BASIS_LABELLED that was never written. Labelling
+    // the basis is only half the job; the label also has to match the CAR. On a
+    // vehicle that is no longer new the manufacturer figure is what it cost when
+    // new, and carrying "exact" instead makes every surface read it as today's
+    // sticker -- which is how a used listing came back "$28,400 under MSRP"
+    // (Advantage Ford Mach-E, 2026-08-11). That is a bargain we invented, and it
+    // flatters the dealer at the buyer's expense.
+    //
+    // REPAIRS rather than flags. The correct value is derivable and the shipped
+    // code already derives it exactly this way at every write site, which is
+    // this file's stated bar for a repair. A flag would let the false claim ship
+    // while logging that it did -- warn-instead-of-refuse, which is one of the
+    // documented ways a defect gets marked fixed and stays open.
+    //
+    // Repairs the WHOLE state, not just the label. The original-sticker context
+    // the report renders and the padded-sticker accusation are condition-
+    // dependent for the same reason the comparison is: a used car's stated MSRP
+    // is its original as-optioned sticker while our catalog row is a base trim,
+    // so that gap is a data gap, not a tactic (no-accusation-language). Fixing
+    // the label alone would leave the accusation standing beside it -- and the
+    // Scrapfly rescue path builds msrpInflation directly, without going through
+    // applyConditionToMsrp, so this is the only thing standing between that path
+    // and a padded-sticker accusation on a used car.
+    //
+    // Deliberately ordered AFTER MSRP_INFLATION_ANCHORED. Withholding the claim
+    // removes it, and a rule that runs first would take the arithmetic check's
+    // input away with it -- silently retiring a diagnostic about OUR maths that
+    // still matters on every new car. Both signals fire; neither eats the other.
+    //
+    // "dealer_stated" is exempt on purpose: it cannot carry an over/under claim
+    // anyway, and relabelling it would lose the fact that the DEALER said it.
+    id: "MSRP_BASIS_MATCHES_CONDITION",
+    severity: "repair",
+    why: "a manufacturer MSRP on a vehicle that is no longer new is the ORIGINAL sticker, and may never license an over/under claim",
+    applies: (a) => num(a?.msrp) > 0
+      && (a.msrpSource === "catalog" || a.msrpSource === "manufacturer_site")
+      && a.msrpBasis !== "dealer_stated"
+      && !msrpIsPresentTense(a),
+    holds: (a) => a.msrpBasis === "original_when_new",
+    repair: (a) => {
+      const outcome = applyConditionToMsrp(
+        {
+          msrp: a.msrp, basis: a.msrpBasis, trim: a.msrpTrim ?? null,
+          sourceUrl: a.msrpSourceUrl ?? null, inflation: a.msrpInflation ?? null,
+        },
+        {
+          vehicleCondition: a.vehicleCondition, saleCondition: a.saleCondition,
+          saleConditionHint: a.saleConditionHint, odometerKm: a.odometerKm, year: a.year,
+        },
+      );
+      a.msrpBasis = outcome.basis;
+      if (outcome.originalMsrp) a.originalMsrp = outcome.originalMsrp;
+      // Deleted rather than set to null: this object gets canonicalized and
+      // signed, so introducing a key that wasn't there changes the payload.
+      if (a.msrpInflation && !outcome.inflation) delete a.msrpInflation;
     },
   },
   {
@@ -184,6 +259,97 @@ export const INVARIANTS: Invariant[] = [
     holds: (a) => !!a.daysOnLot.source && !!a.daysOnLot.sourceLabel,
   },
   {
+    // "Of N other listings read, M advertise below this one" is a count of
+    // things we read. A confirmed count that cannot say what it is of --
+    // which vehicle, which province, read when, against which price -- is a
+    // bare number, and a bare number is exactly what present-without-
+    // creating-questions forbids. Flag, never guess the missing basis.
+    id: "MARKET_COUNT_HAS_PROVENANCE",
+    severity: "repair",
+    why: "a count of other listings must name what it is of: identity, province, read dates, the price it was counted against, and an arithmetic that closes",
+    applies: (a) => a?.marketCount?.state === "confirmed",
+    holds: (a) => {
+      const m = a.marketCount;
+      const n = num(m.n), below = num(m.below), same = num(m.same);
+      return n > 0 && !!m.province && !!m.seenMax && !!m.year && !!m.make && !!m.model && num(m.price) > 0
+        && below + same <= n
+        && (m.dealers == null || (num(m.dealers) > 0 && num(m.dealers) <= n))
+        && ((m.scope !== "trim" && m.scope !== "trim_family") || !!m.trimLabel)
+        && !m.truncated
+        && (a.quotedPrice == null || Math.abs(num(m.price) - num(a.quotedPrice)) < 1);
+    },
+    // A count that cannot name its basis is demoted to unchecked: the card then
+    // says no listing set was read, which is the only claim still backed.
+    repair: (a) => { a.marketCount = { ...a.marketCount, state: "unchecked", reason: "provenance_missing" }; },
+  },
+  {
+    // "How this vehicle compares with the Alberta market" prints a middle, a
+    // range, how many listings, their model years, mileage window, dealers
+    // and read dates. A middle with none of that behind it is the "$9,908
+    // above the local middle value" the card replaced (LC-0F75-A93,
+    // 2026-09-02). Demote to not-enough with a reason the card words honestly
+    // -- the number is never shown without what it is of.
+    id: "MARKET_VALUE_HAS_BASIS",
+    severity: "repair",
+    why: "a price comparison must name what it is of: how many listings, their range, model years, province, make and model, condition and read dates",
+    applies: (a) => !!a?.marketValue && a.marketValue.average != null && a.marketValue.insufficient !== true,
+    holds: (a) => {
+      const m = a.marketValue;
+      const n = num(m.comps), lo = num(m.low), hi = num(m.high), med = num(m.average);
+      return n > 0 && lo > 0 && hi >= lo && med >= lo && med <= hi && !!m.asOf && !!m.seenMax && !!m.yearFrom && !!m.yearTo
+        && !!m.province && !!m.make && !!m.model && !!m.condition
+        && (m.dealers == null || (num(m.dealers) > 0 && num(m.dealers) <= n))
+        && ((m.trimScope !== "trim" && m.trimScope !== "trim_family") || !!m.trimLabel);
+    },
+    repair: (a) => { a.marketValue = { ...a.marketValue, average: null, below: null, above: null, low: null, high: null, cpoPremium: null, insufficient: true, reason: "basis_missing" }; },
+  },
+  {
+    // "What older model years ask today" prints a middle per model year with
+    // how many listings, their kilometre range, dealers and read dates. A rung
+    // that cannot say what it is of, or an older year that is not older, is
+    // demoted to not-enough with a reason the card words honestly.
+    id: "OLDER_YEARS_HAS_BASIS",
+    severity: "repair",
+    why: "a per-model-year asking figure must name what it is of: at least the floor of listings, a range, a year older than the subject, make, model, province and read dates",
+    applies: (a) => a?.olderYears?.state === "confirmed",
+    holds: (a) => {
+      const o = a.olderYears;
+      const sy = num(o.subjectYear);
+      const floor = num(o.need) || 5;
+      const rungs = Array.isArray(o.rungs) ? o.rungs : [];
+      return sy > 0 && !!o.make && !!o.model && !!o.province && !!o.seenMax && rungs.length > 0 && !o.truncated
+        && ((o.scope !== "trim" && o.scope !== "trim_family") || !!o.trimLabel)
+        && rungs.every((r: any) => {
+          const n = num(r.n), med = num(r.median), lo = num(r.low), hi = num(r.high), y = num(r.year);
+          return n >= floor && med > 0 && lo > 0 && hi >= lo && med >= lo && med <= hi && y > 0 && y < sy && y >= sy - 3
+            && (r.dealers == null || (num(r.dealers) > 0 && num(r.dealers) <= n))
+            && (r.nRead == null || num(r.nRead) >= n)
+            && (r.kmKnown == null || (num(r.kmKnown) <= n && (num(r.kmKnown) > 0 || (r.kmLow == null && r.kmHigh == null))))
+            && (r.kmLow == null || r.kmHigh == null || num(r.kmHigh) >= num(r.kmLow));
+        });
+    },
+    repair: (a) => { a.olderYears = { ...a.olderYears, state: "insufficient", rungs: [], reason: "basis_missing" }; },
+  },
+  {
+    // "This page's payment default is N months..." is a claim about
+    // the page's PRE-SELECTED state. Only the page's own feed, embedded
+    // settings or visible sentence can back that (page-default.js); the
+    // model's financing read cannot say what was pre-selected, and an
+    // injected value (the old hardcoded "monthly") is not a reading. A
+    // confirmed default from anywhere else is demoted to unchecked -- the card
+    // then says "Not read -- ask the dealer" instead of asserting a default.
+    id: "PAGE_DEFAULT_READ_FROM_PAGE",
+    severity: "repair",
+    why: "a 'this page pre-selects' claim may only come from the page's own data or text, never the model",
+    applies: (a) => a?.pageDefault?.state === "confirmed",
+    holds: (a) => a.pageDefault.checked === true && PAGE_DEFAULT_SOURCES.has(String(a.pageDefault.source))
+      && ((a.pageDefault.termMonths != null && num(a.pageDefault.termMonths) > 0)
+        || (a.pageDefault.apr != null && num(a.pageDefault.apr) >= 0)),
+    repair: (a) => {
+      a.pageDefault = { ...a.pageDefault, state: "unchecked", reason: "source_not_page", termMonths: null, paymentFrequency: null, apr: null, downPayment: null, paymentAmount: null };
+    },
+  },
+  {
     // Kramer Mazda family, narrative half. The NUMBERS get gap-filled after
     // whichever pass wrote the prose, so a report could show "$43,481 · price
     // verified" beside a verdict insisting the listing "contains no pricing
@@ -196,8 +362,19 @@ export const INVARIANTS: Invariant[] = [
     id: "SUMMARY_MATCHES_PRICE",
     severity: "repair",
     why: "the narrative may never deny a price the report itself displays",
+    // The three original alternatives cover a summary that says the price is
+    // ABSENT. They miss the shape a price-GATED page produces, which is what
+    // the D2C recovery work newly makes reachable: the rendered page says
+    // "Call for pricing" / "contact the dealer for pricing", the vision pass
+    // faithfully writes that into the summary, and THEN the structured-data
+    // gap-fill recovers a real number -- leaving prose that tells the buyer to
+    // phone for a price the report prints two inches above. Same defect class
+    // as the HR-V case in the comment above, just reached by a different
+    // route, so it belongs in the same guard rather than a parallel one.
     applies: (a) => hasPrice(a) && typeof a.summary === "string"
-      && /\bno (?:pricing|price|advertised(?: selling| asking)? price)\b(?![-–])|\bprice (?:is |was )?not (?:shown|disclosed|advertised|published|present)\b|\b(?:doesn'?t|does not|do not) disclose\b[^.]{0,60}\bpric/i.test(a.summary),
+      && (/\bno (?:pricing|price|advertised(?: selling| asking)? price)\b(?![-–])|\bprice (?:is |was )?not (?:shown|disclosed|advertised|published|present)\b|\b(?:doesn'?t|does not|do not) disclose\b[^.]{0,60}\bpric/i.test(a.summary)
+        || /\b(?:call|contact|ask|inquire|enquire)\b[^.]{0,40}\bfor\b[^.]{0,20}\bpric/i.test(a.summary)
+        || /\bprice\b[^.]{0,30}\b(?:on request|upon request|available on request|hidden|withheld|gated)\b/i.test(a.summary)),
     holds: () => false,
     repair: (a) => {
       const price = Math.round(num(a.quotedPrice)).toLocaleString("en-CA");

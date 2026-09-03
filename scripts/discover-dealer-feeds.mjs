@@ -33,6 +33,10 @@
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
 import { writeFileSync } from "node:fs";
 import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
+// ONE definition of what a dealer website reduces to. The scanner keys the
+// catalogue on this and the probe files hosts by it; two copies would drift,
+// and then a host the probe catalogued would be one the scanner cannot find.
+import { toOrigin, originVariants, aspAnswered } from "../supabase/functions/_shared/dealer-catalog.ts";
 
 const ARG = (name, dflt = null) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : dflt; };
 const WRITE = process.argv.includes("--write");
@@ -92,6 +96,28 @@ const SCRAPFLY_CONCURRENCY = 5;      // the plan's hard ceiling
 const SCRAPFLY_TIMEOUT_MS = 45_000;  // asp negotiation is slow by design
 const RESCUABLE = new Set(["blocked", "unreachable", "timeout", "server-error"]);
 
+// Set when a rescue was ASKED FOR and could not run. The report must say so:
+// silently skipping the pass and printing a readable figure is the same false
+// all-clear as counting the failures as successes.
+let RESCUE_UNAVAILABLE = null;
+
+/** One cheap call, before spending a 50-minute pass on a key that cannot work. */
+async function verifyScrapflyKey() {
+  try {
+    const u = new URL("https://api.scrapfly.io/account");
+    u.searchParams.set("key", SCRAPFLY_KEY);
+    const r = await fetch(u, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(20_000) });
+    if (r.status === 401 || r.status === 403) return { ok: false, why: `Scrapfly rejects it (HTTP ${r.status})` };
+    if (r.status === 402) return { ok: false, why: "HTTP 402 - payment required / quota exhausted" };
+    if (!r.ok) return { ok: false, why: `Scrapfly answered HTTP ${r.status}` };
+    const j = await r.json().catch(() => null);
+    if (j?.account?.suspended) return { ok: false, why: "the Scrapfly account is SUSPENDED" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, why: `could not reach Scrapfly (${String(e?.name || e?.message).slice(0, 40)})` };
+  }
+}
+
 async function scrapflyGet(url, accept = "text/html") {
   const u = new URL("https://api.scrapfly.io/scrape");
   u.searchParams.set("key", SCRAPFLY_KEY);
@@ -105,7 +131,15 @@ async function scrapflyGet(url, accept = "text/html") {
     // identical failures say nothing about which one it was.
     let why = "";
     try { why = (await r.text()).slice(0, 200).replace(/\s+/g, " "); } catch { /* body already gone */ }
-    throw new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
+    // OUR failure, or the HOST's? A 401/402/403 from api.scrapfly.io means
+    // Scrapfly refused US and never contacted the dealer at all -- so nothing
+    // in that response is evidence about the dealer, and recording it as one
+    // writes a fact about our key into a column whose other values are facts
+    // about the site. Tagged so the rescue pass can tell them apart.
+    const e = new Error(`scrapfly HTTP ${r.status}${why ? " :: " + why : ""}`);
+    e.scrapflyRefusedUs = r.status === 401 || r.status === 402 || r.status === 403;
+    e.scrapflyStatus = r.status;
+    throw e;
   }
   const j = await r.json();
   const res = j?.result || {};
@@ -140,19 +174,6 @@ async function fetchOverpass() {
 
 // A tag can be "example.com", "http://example.com/inventory?x=1", or junk.
 // Reduce to a bare https origin, or null if it isn't usable as one.
-function toOrigin(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  let s = raw.trim();
-  if (!s || /^(mailto:|tel:)/i.test(s)) return null;
-  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
-  try {
-    const u = new URL(s);
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(u.hostname)) return null;
-    // Social pages are not dealer sites and will never carry a feed.
-    if (/facebook|instagram|twitter|x\.com|linkedin|youtube|google\./i.test(u.hostname)) return null;
-    return `https://${u.hostname}`;
-  } catch { return null; }
-}
 
 // Why a host produced nothing is the whole diagnostic value of this probe, and
 // until now it was thrown away: every detector returned a bare null, so 1,607
@@ -359,22 +380,61 @@ async function rescueHost(cand) {
     return { ...cand, platform: null, miss: "responded-no-feed", rescued: true, trace };
   } catch (e) {
     note(trace, "rescue", e.message);
+    // `rescued` means SCRAPFLY REACHED THE HOST. On an auth failure it reached
+    // nobody, so the flag stays off and the host keeps the verdict the direct
+    // probe already earned -- otherwise a dead key turns every walled host into
+    // "answered only via anti-bot", and the province-wide READABLE number goes
+    // UP the more completely our key is broken.
+    if (e?.scrapflyRefusedUs) {
+      return { ...cand, platform: null, miss: cand.miss, rescueUnavailable: true, trace };
+    }
     return { ...cand, platform: null, miss: "rescue-failed", rescued: true, trace };
   }
+}
+
+async function probeOrigin(host, trace) {
+  const sm = await trySM360(host, trace);
+  if (sm) return sm;
+  const cv = await tryConvertus(host, trace);
+  if (cv) return cv;
+  const jl = await tryJsonLdItemList(host, trace);
+  if (jl) return jl;
+  const ed = await tryEdealer(host, trace);
+  if (ed) return ed;
+  return null;
 }
 
 async function probe(cand) {
   const trace = [];
   try {
-    const sm = await trySM360(cand.host, trace);
-    if (sm) return { ...cand, ...sm };
-    const cv = await tryConvertus(cand.host, trace);
-    if (cv) return { ...cand, ...cv };
-    const jl = await tryJsonLdItemList(cand.host, trace);
-    if (jl) return { ...cand, ...jl };
-    const ed = await tryEdealer(cand.host, trace);
-    if (ed) return { ...cand, ...ed };
-    return { ...cand, platform: null, miss: classifyMiss(trace), trace };
+    const hit = await probeOrigin(cand.host, trace);
+    if (hit) return { ...cand, ...hit };
+    const miss = classifyMiss(trace);
+
+    // "unreachable" is a verdict about the URL WE CHOSE, not about the
+    // business, until the other forms of that URL have been tried. AMVIC
+    // records a website as it was typed, so the scheme and the www prefix are
+    // both guesses -- and re-probing the silent hosts on 2026-08-31 found 53
+    // of 78 TLS failures answering perfectly well, 47 over plain http://.
+    // Recording those as unreachable is our own request written down as the
+    // world's answer, the same shape as "EDealer: 0 across Alberta".
+    //
+    // Transport failures ONLY. A host that ANSWERED -- 200, 404, even a 403 --
+    // has told us something about itself, and re-asking on another scheme
+    // would spend requests to hear the same thing again.
+    if (miss === "unreachable") {
+      for (const alt of originVariants(cand.host)) {
+        const altTrace = [];
+        const altHit = await probeOrigin(alt, altTrace);
+        trace.push(`ALT ${alt}: ${altTrace.join(" | ") || "no trace"}`);
+        // Carry the origin that WORKED. Keeping the dead one would send every
+        // future probe, and the catalogue row, straight back to it.
+        if (altHit) return { ...cand, ...altHit, host: alt, reachedVia: alt, trace };
+        const altMiss = classifyMiss(altTrace);
+        if (altMiss !== "unreachable") return { ...cand, platform: null, miss: altMiss, host: alt, reachedVia: alt, trace };
+      }
+    }
+    return { ...cand, platform: null, miss, trace };
   } catch (e) {
     return { ...cand, platform: null, miss: "probe-threw", error: e.message, trace };
   }
@@ -495,8 +555,16 @@ async function main() {
 
   if (RESCUE) {
     const stuck = results.filter((r) => !r.platform && RESCUABLE.has(r.miss));
-    if (!SCRAPFLY_KEY) {
-      console.warn(`\n--rescue asked for but SCRAPFLY_API_KEY is not set — ${stuck.length} unreachable host(s) left unrescued.`);
+    // PRESENCE IS NOT VALIDITY. The old guard was `if (!SCRAPFLY_KEY)`, so a
+    // REJECTED key sailed straight through and every host came back 401 --
+    // which, before the two fixes above, was recorded as an anti-bot SUCCESS.
+    // The repo's copy of this key has been answering 401 for days.
+    const keyState = SCRAPFLY_KEY ? await verifyScrapflyKey() : { ok: false, why: "SCRAPFLY_API_KEY is not set" };
+    if (!keyState.ok) {
+      console.warn(`\n--rescue asked for, but the Scrapfly key is unusable: ${keyState.why}`);
+      console.warn(`   ${stuck.length} host(s) left unrescued, and NOT counted as readable.`);
+      console.warn(`   Fix with: npm run key:scrapfly`);
+      RESCUE_UNAVAILABLE = keyState.why;
     } else if (!stuck.length) {
       console.log("\n--rescue: every host answered directly, nothing to retry.");
     } else {
@@ -558,6 +626,12 @@ async function main() {
 
   if (OUT) { flush(); console.log(`\nSaved -> ${OUT}`); }
 
+  // THE ANSWER TO "CAN LOTCHECK RUN ALL OF THEM", printed whether or not this
+  // run writes anything, and the verdicts written back so the LIVE SCAN gets the
+  // same knowledge rather than rediscovering each wall on a buyer's time.
+  reportReadCapability(results);
+  await recordReachability(results);
+
   if (!WRITE) { console.log("\n(no --write: nothing added to dealer_source)"); return; }
 
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -613,6 +687,108 @@ async function main() {
   const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }
   console.log(`\nSeeded ${seed.length} confirmed, AMVIC-Issued dealers into dealer_source (of ${beforeGate} platform-confirmed candidates).`);
+}
+
+// ---------------------------------------------------------------------------
+// CAN LOTCHECK READ ALBERTA? — the answer as a number, and written back.
+//
+// Vic, 2026-08-31: "i need to to know that every single car website all 1639
+// can by ran by lotcheck without issues". That is a measurement, not a promise,
+// and this probe already collects everything it needs — it just threw the
+// reachability half away, keeping only the hosts that turned out to have a
+// crawlable feed.
+//
+// EVERY probed host now writes its verdict into the catalogue, and the run
+// prints the coverage. Two things come of that. Vic gets a number. And the LIVE
+// SCAN gets it too: chooseFetchPlan reads exactly these columns, so a host this
+// probe found refuses a plain GET is one the next buyer's scan sends straight
+// to the anti-bot render instead of rediscovering the wall on their time.
+//
+// "Read" here means the page ANSWERED with real content, by whichever route —
+// which is the question that decides whether a report is possible. Whether the
+// host also has a crawlable inventory feed is the separate, narrower question
+// this probe was originally written for, and it is still reported separately.
+const READ_DIRECT = new Set(["responded-no-feed", "parser-bug"]);   // it answered us
+const NOT_A_WALL  = new Set(["timeout", "unreachable", "server-error", "no-trace"]);
+
+async function recordReachability(results) {
+  if (!WRITE) { console.log("\n(no --write: reachability not written to the catalogue)"); return; }
+  const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  const { createClient } = await import("@supabase/supabase-js");
+  const supabase = createClient(url, key);
+  const now = new Date().toISOString();
+
+  // Only hosts the catalogue already holds. Creating rows here would route
+  // around the AMVIC licence gate that dealer_source's roster rests on -- the
+  // loader and the observe RPC both apply it, and this must not be the third
+  // way in. A host we probed but never catalogued is simply not ours to file.
+  const known = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("dealer_source").select("id,host")
+      .order("id", { ascending: true }).range(from, from + 999);
+    if (error) { console.error("could not read dealer_source:", error.message); return; }
+    for (const r of data || []) known.set(r.host.toLowerCase().replace(/^https:\/\/www\./, "https://"), r.host);
+    if (!data || data.length < 1000) break;
+  }
+
+  let wrote = 0, skipped = 0;
+  for (const r of results) {
+    const host = known.get(String(r.host).toLowerCase().replace(/^https:\/\/www\./, "https://"));
+    if (!host) { skipped++; continue; }
+    const readDirect = !!r.platform && !r.rescued ? true : READ_DIRECT.has(r.miss);
+    const walled = r.miss === "blocked";
+    const patch = {
+      last_direct_status: readDirect ? "ok" : walled ? "refused" : (r.miss || "network"),
+      ...(readDirect ? { last_direct_ok_at: now, fetch_strategy: "direct" } : {}),
+      // A timeout or a DNS failure is a fact about the moment, not about
+      // whether this host takes datacenter traffic -- so it is recorded and
+      // NOT allowed to send every future scan down the paid path.
+      ...(walled ? { last_direct_fail_at: now, fetch_strategy: "asp" } : {}),
+      // Only when the anti-bot pass actually CAME BACK WITH A PAGE. `rescued`
+      // alone is true for blocked-everywhere too -- a host that refused even a
+      // residential IP -- and stamping "asp ok" there records a success that
+      // did not happen, on a row the live scan reads.
+      ...(aspAnswered(r) ? { last_asp_ok_at: now } : {}),
+      ...(r.platform ? { observed_platform: r.platform } : {}),
+    };
+    const { error } = await supabase.from("dealer_source").update(patch).eq("host", host);
+    if (!error) wrote++;
+  }
+  console.log(`\nCatalogue: reachability written for ${wrote} host(s)${skipped ? `, ${skipped} probed host(s) are not catalogued` : ""}.`);
+}
+
+function reportReadCapability(results) {
+  const n = results.length;
+  const direct = results.filter((r) => (r.platform && !r.rescued) || READ_DIRECT.has(r.miss)).length;
+  // Same rule as the write-back: answered means a page came back.
+  const viaAsp = results.filter(aspAnswered).length;
+  const blocked = results.filter((r) => r.miss === "blocked" && !r.rescued).length;
+  const flaky = results.filter((r) => NOT_A_WALL.has(r.miss) && !r.rescued).length;
+  const pct = (x) => n ? `${((x / n) * 100).toFixed(1)}%` : "-";
+  console.log("\n" + "=".repeat(64));
+  console.log("CAN LOTCHECK READ ALBERTA?");
+  console.log("=".repeat(64));
+  console.log(`  hosts probed                 ${String(n).padStart(5)}`);
+  console.log(`  answered a plain GET         ${String(direct).padStart(5)}   ${pct(direct)}`);
+  console.log(`  answered only via anti-bot   ${String(viaAsp).padStart(5)}   ${pct(viaAsp)}`);
+  console.log(`  refused us outright          ${String(blocked).padStart(5)}   ${pct(blocked)}`);
+  console.log(`  timed out / unreachable      ${String(flaky).padStart(5)}   ${pct(flaky)}`);
+  console.log(`  ${"-".repeat(60)}`);
+  console.log(`  READABLE BY LOTCHECK         ${String(direct + viaAsp).padStart(5)}   ${pct(direct + viaAsp)}`);
+  console.log("=".repeat(64));
+  // A number with no caveat is a claim. Say what this run could not settle.
+  if (flaky) console.log(`  ${flaky} host(s) neither answered nor refused -- a timeout is not a verdict, re-probe those before counting them out.`);
+  if (RESCUE_UNAVAILABLE) {
+    // The loudest line in the report. A rescue that was ASKED FOR and could not
+    // run leaves the refusing hosts counted as unreadable, and saying nothing
+    // would present a floor as if it were the measurement.
+    console.log(`  !! THE ANTI-BOT PASS DID NOT RUN: ${RESCUE_UNAVAILABLE}`);
+    console.log("     Every host that refuses a plain fetch is counted UNREADABLE above.");
+    console.log("     This number is a FLOOR, not the answer. Fix the key and re-run.");
+  } else if (!results.some((r) => r.rescued)) {
+    console.log("  (no anti-bot pass in this run -- re-run with --rescue for the true readable figure)");
+  }
 }
 
 await main();

@@ -186,11 +186,140 @@ const CASES: Case[] = [
     analysis: { msrpInflation: "not an object" },
     flagged: ["MSRP_INFLATION_ANCHORED"],
   },
+  // ── Sale condition vs MSRP basis ───────────────────────────────────────────
+  // THE ADVANTAGE FORD SHAPE. A used listing whose page stated an MSRP came back
+  // with basis "exact", and the report told the buyer a years-old vehicle was
+  // thousands "under MSRP" -- a fabricated bargain claim that flatters the
+  // dealer. The guard existed in two of the three MSRP branches and was missing
+  // from the one that runs when the page supplies a figure.
+  {
+    name: "a used car's catalog MSRP may not carry a present-tense basis",
+    analysis: {
+      msrp: 68400, quotedPrice: 49995, msrpSource: "catalog", msrpBasis: "exact",
+      vehicleCondition: "used", odometerKm: 31000,
+    },
+    repaired: ["MSRP_BASIS_MATCHES_CONDITION"],
+    after: { msrpBasis: "original_when_new" },
+  },
+  {
+    name: "a demo IS measured against its own sticker, so 'exact' stands",
+    analysis: {
+      msrp: 61000, quotedPrice: 52000, msrpSource: "catalog", msrpBasis: "exact",
+      vehicleCondition: "new", saleCondition: "demo", odometerKm: 9000,
+    },
+    repaired: [],
+  },
   {
     name: "an empty analysis passes cleanly",
     analysis: {},
     repaired: [],
     flagged: [],
+  },
+  // -- report lines (2026-09-02): counts and defaults must name their basis ----
+  {
+    name: "a confirmed market count without province, dates or identity is demoted to unchecked -- a count must name what it is of",
+    analysis: { marketCount: { state: "confirmed", n: 12, below: 0, price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a confirmed market count with identity, province, dates and price is fine",
+    analysis: { quotedPrice: 39713.7, marketCount: { state: "confirmed", scope: "trim", trimLabel: "Sport", n: 12, below: 0, same: 0, dealers: 3, province: "AB", seenMin: "2026-08-18", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39713.7 } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a market count whose dealer count is 0 or exceeds n cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "model", n: 12, below: 0, same: 0, dealers: 0, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a market count whose below + same exceeds n cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "model", n: 12, below: 10, same: 5, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a trim-scoped count with no trim label cannot be confirmed",
+    analysis: { marketCount: { state: "confirmed", scope: "trim", trimLabel: null, n: 12, below: 0, same: 0, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a count sealed against a price that no longer matches the report's asking price is demoted",
+    analysis: { quotedPrice: 41000, marketCount: { state: "confirmed", scope: "model", n: 12, below: 0, same: 0, dealers: null, province: "AB", seenMax: "2026-08-18", year: 2027, make: "Honda", model: "HR-V", price: 39714 } },
+    repaired: ["MARKET_COUNT_HAS_PROVENANCE"],
+  },
+  {
+    name: "a market comparison with a middle but no basis (count, range, years, dates, province) is demoted to not-enough -- never '$9,908 above the local middle value' again",
+    analysis: { marketValue: { average: 69898, below: 60000, above: 75000, low: null, high: null, comps: 11, asOf: "2026-08-18" } },
+    repaired: ["MARKET_VALUE_HAS_BASIS"],
+  },
+  {
+    name: "a market comparison that names its basis is fine",
+    analysis: { marketValue: { average: 57999, below: 55000, above: 65000, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18", seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025, trimScope: "model", trimLabel: "Luxury", powertrain: null, kmLow: 0, kmHigh: 62000, condition: "used", dealers: 2, make: "Lexus", model: "RX", province: "AB" } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a market comparison whose dealer count exceeds its listing count cannot stand (2 listings at 3 dealers)",
+    analysis: { marketValue: { average: 57999, low: 53489, high: 72995, comps: 2, asOf: "2026-08-18", seenMax: "2026-08-18", yearFrom: 2025, yearTo: 2025, trimScope: "model", condition: "used", dealers: 3, make: "Lexus", model: "RX", province: "AB" } },
+    repaired: ["MARKET_VALUE_HAS_BASIS"],
+  },
+  {
+    name: "an older-model-year ladder that names its basis is fine",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMin: "2026-08-03", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, kmLow: 11223, kmHigh: 23580, dealers: 2 }, { year: 2024, n: 9, median: 57389, low: 49251, high: 62700, kmLow: 11294, kmHigh: 80308, dealers: 3 }] } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a rung with fewer than five listings, or a year not older than the subject, demotes the ladder",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2026, n: 4, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a rung whose mileage range covers fewer listings than it claims, or that read fewer than it kept, cannot stand",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, nRead: 4, median: 58700, low: 53489, high: 72995, kmKnown: 9, kmLow: 11223, kmHigh: 23580, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a truncated pool can never be a confirmed ladder",
+    analysis: { olderYears: { state: "confirmed", truncated: true, subjectYear: 2026, make: "Lexus", model: "RX", province: "AB", condition: "used", scope: "model", seenMax: "2026-08-18", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a ladder with no province or read date cannot stand",
+    analysis: { olderYears: { state: "confirmed", subjectYear: 2026, make: "Lexus", model: "RX", condition: "used", scope: "model", rungs: [{ year: 2025, n: 6, median: 58700, low: 53489, high: 72995, dealers: 2 }] } },
+    repaired: ["OLDER_YEARS_HAS_BASIS"],
+  },
+  {
+    name: "a not-enough older-year ladder is never flagged",
+    analysis: { olderYears: { state: "insufficient", nRead: 3, need: 5, rungs: [] } },
+    flagged: [],
+  },
+  {
+    name: "a not-enough comparison is never flagged (no number is being shown)",
+    analysis: { marketValue: { average: null, insufficient: true, nRead: 2, need: 5 } },
+    flagged: [],
+  },
+  {
+    name: "an absent or unchecked market count is never flagged (no claim is being made)",
+    analysis: { marketCount: { state: "absent", n: 0 } },
+    flagged: [],
+  },
+  {
+    name: "a page default sourced from the model is demoted to unchecked, never shown as read from the page",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: 84, paymentFrequency: "biweekly", apr: 6.99, source: "llm" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
+  },
+  {
+    name: "a page default that was never checked cannot be confirmed",
+    analysis: { pageDefault: { checked: false, state: "confirmed", termMonths: 84, apr: 5.99, source: "page_text" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
+  },
+  {
+    name: "a page default read from the page's own text is fine",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: 84, paymentFrequency: "biweekly", apr: 5.99, downPayment: 0, paymentAmount: 267, source: "page_text", readAt: "2026-09-02" } },
+    repaired: [], flagged: [],
+  },
+  {
+    name: "a confirmed page default with neither a term nor a rate is not a reading",
+    analysis: { pageDefault: { checked: true, state: "confirmed", termMonths: null, apr: null, paymentFrequency: "weekly", source: "sm360_feed", readAt: "2026-09-02" } },
+    repaired: ["PAGE_DEFAULT_READ_FROM_PAGE"],
   },
 ];
 

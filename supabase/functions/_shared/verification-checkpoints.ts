@@ -21,6 +21,12 @@
 // RED. If you are tempted to write `not_applicable` because a value was
 // missing, that is the bug this file exists to expose.
 
+// Imported, not restated: whether a vehicle's MSRP may be read as its sticker
+// TODAY is decided in exactly one place. A panel that scored the condition with
+// its own copy of the test would eventually disagree with the report it is
+// scoring, and the panel would be the one nobody trusts. See msrp-basis.ts.
+import { msrpIsPresentTense } from "./msrp-basis.ts";
+
 export type Outcome =
   | "verified"          // resolved, with a backed value            -> GREEN
   | "checked_no_match"  // looked authoritatively, answer is "none"  -> GREEN
@@ -62,9 +68,32 @@ export function deriveCheckpoints(analysis: any, feature: "quote" | "listing_url
   // full stop -- that is the whole comparison the report is built on. A USED
   // vehicle is different in kind: the report explicitly switches the over/under
   // comparison off, and the function records WHY, so that is a real N/A.
+  //
+  // CONDITION-AWARE. This row scored `verified · catalog/exact` for ANY vehicle
+  // that carried an MSRP at all, which is how the defective Advantage Ford scan
+  // -- a used unit whose page-stated sticker came back "exact", and whose report
+  // told the buyer a years-old car was thousands "under MSRP" -- was recorded
+  // GREEN on the accuracy panel. The signal was inverted against the defect: it
+  // passed the bug, and once the guard shipped it would have started failing the
+  // correct answer instead. A signal pointing the wrong way is worse than a
+  // missing one, because the reader learns to ignore it.
+  //
+  // So the basis is now scored against the CAR. "dealer_stated" keeps whatever
+  // it scored before on both new and used -- it is a separate (and pre-existing)
+  // question whether an unverified dealer figure should count as verified, and
+  // answering it only for used vehicles would just invert the row the other way.
   let msrp: CheckRow;
   if (pos(a.msrp)) {
-    msrp = row("msrp", "verified", `${a.msrpSource ?? "?"}/${a.msrpBasis ?? "?"}`);
+    msrp = (msrpIsPresentTense(a) || a.msrpBasis === "dealer_stated")
+      ? row("msrp", "verified", `${a.msrpSource ?? "?"}/${a.msrpBasis ?? "?"}`)
+      : a.msrpBasis === "original_when_new"
+        // The correct handling of a used unit, and a real pass: we hold the
+        // figure and we publish it. The detail has to say WHICH figure it is,
+        // or the panel reads exactly like the defect it was blind to.
+        ? row("msrp", "verified", `${a.msrpSource ?? "?"}/original_when_new — the ORIGINAL sticker when new, not a current one`)
+        // Tried, and it broke: a figure resolved, but labelled so that every
+        // surface reads a years-old car's original sticker as today's.
+        : row("msrp", "error", `basis "${a.msrpBasis ?? "?"}" on a vehicle that is not new — an original sticker labelled as a current one, which invents an under-MSRP claim`);
   } else if (!isNew(a) && a.msrpUnavailable?.reason === "used_original_msrp_not_held") {
     msrp = row("msrp", "not_applicable", "used — original MSRP not held");
   } else if (!(a.year && a.make && a.model)) {
