@@ -371,7 +371,7 @@ console.log("\n-- likeForLikePool + marketCompareLine --");
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const full = { ...A, vehicle: "2024 Lexus RX 350 Luxury AWD", quotedPrice: 59900, marketValue: mv6 };
   const c = canonicalReport(full);
-  check("the canonical is v10 and seals the basis keys", c.v === 10 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
+  check("the canonical is v11 and seals the basis keys", c.v === 11 && c.marketValue.mk === "Lexus" && c.marketValue.pv === "AB" && c.marketValue.from === "2026-08-03", JSON.stringify(c.marketValue));
   const viaVerify = marketCompareLine(verifyArg(c));
   check("the signed canonical round-trips the FULL sentence (make, model, province, dates, dealers)", JSON.stringify(viaVerify.lines) === JSON.stringify(am.lines) && viaVerify.light === am.light && viaVerify.title === am.title, JSON.stringify(viaVerify.lines));
   const cNone = canonicalReport({ ...A, year: 2026, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, marketValue: MVN });
@@ -464,7 +464,7 @@ console.log("\n-- olderYearsLadder + olderYearsLine --");
   // Sealed round trip through the SERVER canonical, fed as /verify feeds it.
   const { canonicalReport } = await import("../supabase/functions/_shared/report-sign.ts");
   const cc = canonicalReport({ ...A, vehicle: "2026 Lexus RX 350 Luxury AWD", quotedPrice: 69898, olderYears: OY });
-  check("the canonical is v10 and seals every rung with its basis", cc.v === 10 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
+  check("the canonical is v11 and seals every rung with its basis", cc.v === 11 && cc.oy && cc.oy.st === "confirmed" && cc.oy.r.length === 3 && cc.oy.r[0].kl === 11223 && cc.oy.r[0].kn === 5 && cc.oy.r[0].rd === 5 && cc.oy.r[0].to === "2026-08-18" && cc.oy.mk === "Lexus" && cc.oy.from === "2026-08-03", JSON.stringify(cc.oy).slice(0, 300));
   const viaVerify = olderYearsLine({ price: cc.price, oy: cc.oy, fcx: cc.fcx });
   check("the signed canonical round-trips the SAME lines (make, model, province, dates, dealers, ranges)", JSON.stringify(viaVerify.lines) === JSON.stringify(c.lines) && viaVerify.value === c.value && viaVerify.headline === c.headline && viaVerify.meta === c.meta, JSON.stringify(viaVerify.lines));
   const ccOut = canonicalReport({ ...A, quotedPrice: 69898, olderYears: { ...lo, make: "Lexus", model: "RX", province: "AB" } });
@@ -517,7 +517,13 @@ console.log("\n-- financeCoverageLine --");
   check("both halves always ship together: the 2024 restriction and the October 2025 correction", /starting in early 2024/.test(fin.lines[2].v) && /as of October 2025 AR 227\/2025/.test(fin.lines[3].v) && /removing these restrictions/.test(fin.lines[3].v));
   check("it never says a buyer may be unable to insure the vehicle", ![...fin.lines.map((l) => l.v), fin.body, fin.headline, fin.explain].some((t) => /unable to insure|cannot insure|can't insure|uninsurable|refused insurance|no insurer will/i.test(t)));
   check("every clause is attributed to the AIRB, never asserted in our own voice", fin.lines.slice(0, 4).every((l) => /The AIRB reports/.test(l.v)), JSON.stringify(fin.lines.map((l) => l.v.slice(0, 40))));
-  check("it names its source, both pages, and the date it was read", /pages 8 and 22, published 2026\. Read 2026-09-03/.test(fin.note) && /docs\/airb-2026-capture\.md/.test(fin.note), fin.note);
+  // A CITATION THE READER CAN OPEN. This used to require the note to contain
+  // "docs/airb-2026-capture.md" -- a path inside this repository -- so the test
+  // was pinning the leak in place: a customer PDF citing a file only we can
+  // read. The capture is still the gate's evidence (check:citations reads it);
+  // it is not the buyer's. [[make-it-dispute-proof]]
+  check("it names its source, both pages, and the date it was read", /pages 8 and 22, published 2026\. Read 2026-09-03/.test(fin.note) && /airbfordrivers\.ca/.test(fin.note), fin.note);
+  check("it cites no internal repo path", !/docs[/]|[.]md|supabase[/]functions/.test(String(fin.note)), String(fin.note));
   check("the only dollar figure names what it is a deductible OF, and keeps the regulator's 'such as'", (fin.body.match(/\$[\d,]+/g) || []).join(",") === "$2,000" && /forced them to choose a deductible such as \$2,000 or more/.test(fin.lines[2].v), fin.lines[2].v);
   check("the action names the buyer's own insurer, and the sequence is stated as the general case", /Ask your own insurer to confirm/.test(fin.lines[4].v) && /A finance or lease contract is typically signed at the dealership, before the insurance is bound\./.test(fin.lines[4].v));
   check("the one-sentence explain is worded by the builder, carries the hedge and the attribution, and is no stronger than the lines", /^The AIRB reports that collision and comprehensive may be required/.test(fin.explain) && /Take All Comers rule covers only the mandatory coverages/.test(fin.explain) && fin.explain === gen.explain, fin.explain);
@@ -540,7 +546,10 @@ console.log("\n-- insurancePremiumLine --");
   check("the take-up figures keep their own halves and dates", /rose from 45\.6% in the second half of 2024 to 47\.1% twelve months later/.test(l.lines[2].v));
   check("every figure is attributed to the AIRB", l.lines.slice(0, 3).every((x) => /The AIRB reports/.test(x.v)));
   check("the only figures printed are the ones the report carries", [...new Set(l.body.match(/\d+\.\d+%/g) || [])].sort().join(",") === ["0.0%", "3.7%", "45.6%", "47.1%", "7.5%", "9.0%"].sort().join(","), (l.body.match(/\d+\.\d+%/g) || []).join(","));
-  check("it names its source, both pages and the date it was read", /pages 5 and 16, published 2026\. Read 2026-09-03/.test(l.note) && /docs\/airb-2026-capture\.md/.test(l.note));
+  check("it names its source, both pages and the date it was read", /pages 5 and 16, published 2026\. Read 2026-09-03/.test(l.note) && /airbfordrivers\.ca/.test(l.note));
+  // The regression lock: no customer-facing line may ever cite a path inside
+  // this repository again.
+  check("no report line cites an internal repo path", !/docs[/]|[.]md|supabase[/]functions/.test(String(l.note)), String(l.note));
   check("the action names the buyer's own insurer and both questions", /Ask your own insurer what this specific vehicle does to your renewal, and what the two-million-dollar limit costs on your policy\./.test(l.lines[3].v));
   check("the one-sentence explain is worded by the builder, attributed throughout, and no stronger than the lines", /^The AIRB reports that a premium also changed when a driver changed vehicles/.test(l.explain) && /no longer protected by the 7\.5% Good Driver cap/.test(l.explain) && /about 9\.0% to the third-party liability part/.test(l.explain));
   check("the tile value fits a rail tile and a verify row", l.value.length <= 32 && l.headline.length <= 48, `${l.value.length}/${l.headline.length}`);

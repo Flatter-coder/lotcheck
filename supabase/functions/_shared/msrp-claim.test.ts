@@ -84,7 +84,13 @@ function check(ok: boolean, label: string, detail = "") {
   check(!c.comparable && c.delta === null,
     "an exact MSRP against an UNVERIFIED price is not a verified comparison",
     JSON.stringify(c));
-  check(!!c.refusal && /could not be verified/i.test(c.refusal!), "and says the price is the unverified half", String(c.refusal));
+  // Pins the MEANING, not the old phrase: the sentence has to name the asking
+  // price as the half we could not check, and say what the check was, so it
+  // never degrades back to a bare "could not be verified" that leaves the
+  // reader asking "against what?". [[present-through-questions]]
+  check(!!c.refusal && /asking price/i.test(c.refusal!) && /second copy|check against/i.test(c.refusal!)
+    && /not measured against MSRP/i.test(c.refusal!),
+    "and says the price is the unverified half, and what the check was", String(c.refusal));
 }
 {
   // Price gated behind "Call for pricing" — nothing to compare, and no refusal

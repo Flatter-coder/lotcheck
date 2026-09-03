@@ -34,6 +34,12 @@ const ZERO_MEANS_SOMETHING = [
   "odometerKm", "odometer", "mileage", "mileageFromOdometer",
   "apr", "interestRate",
   "reviewCount", "rating",
+  // The COMPACT keys the share link and the signed canonical use. The first
+  // version of this gate watched only the long field names, so the same
+  // coercion crossing the share link as `c.odo` was invisible to it -- and a
+  // forwarded report kept printing "Odometer 0 km" after the scan path was
+  // fixed. A projection is still a producer.
+  "odo", "reviews",
 ];
 const ROOTS = ["supabase/functions", "src", "api"];
 const EXTS = [".ts", ".js", ".jsx", ".mjs"];
@@ -54,13 +60,32 @@ function walk(dir, out = []) {
 }
 
 const FIELDS = ZERO_MEANS_SOMETHING.join("|");
+// A field read is a SHORT, newline-free member path. The first version of this
+// used `[^()]*`, which can span whole functions and made the scan backtrack
+// catastrophically over App.jsx -- a gate that never finishes is a gate nobody
+// keeps. Bounded, and it cannot cross a line.
+const PATH = `[A-Za-z0-9_$.?\\[\\]'"-]{0,60}`;
 const SHAPES = [
   // Number.isFinite(Number(<expr>.<field>))
-  new RegExp("Number[.]isFinite[(]\\s*Number[(]([^()]*[.](?:" + FIELDS + "))\\s*[)]\\s*[)]", "g"),
+  new RegExp("Number[.]isFinite[(]\\s*Number[(](" + PATH + "[.](?:" + FIELDS + "))\\s*[)]\\s*[)]", "g"),
   // Number(<expr>.<field>) >= 0   /   <= 0   /   < 0
-  new RegExp("Number[(]([^()]*[.](?:" + FIELDS + "))\\s*[)]\\s*(?:>=|<=|<)\\s*[-0]", "g"),
+  new RegExp("Number[(](" + PATH + "[.](?:" + FIELDS + "))\\s*[)]\\s*(?:>=|<=|<)\\s*[-0]", "g"),
+  // Number(<expr>.<field> || 0)  and  ?? 0  -- the DEFAULT-TO-ZERO shape. This
+  // is the expression point-state.ts was fixed FROM, and the gate written in
+  // the same commit could not see it, so "4.9 stars / 0 reviews" stayed live on
+  // four other surfaces. A fix whose gate does not recognise the fixed
+  // expression has not closed the class.
+  new RegExp("(" + PATH + "[.](?:" + FIELDS + "))\\s*(?:[|][|]|[?][?])\\s*0\\b", "g"),
+  // num(<expr>.<field>) -- this repo's own coercing helper inside the signed
+  // canonical. The coercion moved one function deeper and the gate lost sight
+  // of it, which is exactly how a null odometer kept getting SEALED as 0 and
+  // printed on /verify. A helper is not an exemption.
+  new RegExp("[^A-Za-z0-9_]num[(](" + PATH + "[.](?:" + FIELDS + "))\\s*[)]", "g"),
 ];
 
+// A local `num` is SAFE when its definition refuses null outright, or when it
+// is aliased to a reader that does (parseAmount, nn, readNum).
+const SAFE_NUM = /const num\s*=\s*(parseAmount|nn|readNum)\b|(?:const|function)\s+num[^\n]{0,80}==\s*null/;
 const violations = [];
 for (const root of ROOTS) {
   for (const file of walk(root)) {
@@ -77,6 +102,11 @@ for (const root of ROOTS) {
         // shape. Only real code counts.
         const self = (lines[lineNo - 1] || "").trim();
         if (self.startsWith("//") || self.startsWith("*")) continue;
+        // A file whose own `num` already keeps the absence (page-default.js
+        // aliases it to parseAmount, which returns null for null and "") is
+        // not doing the thing this gate refuses. Judge the helper, not its
+        // name -- otherwise the gate cries wolf and gets switched off.
+        if (/(^|[^A-Za-z0-9_])num[(]/.test(self) && SAFE_NUM.test(src)) continue;
         // The absence may already be checked -- on this line or the two above
         // it, naming the SAME field. `x.apr != null && Number.isFinite(...)` is
         // the correct shape and has to stay legal.

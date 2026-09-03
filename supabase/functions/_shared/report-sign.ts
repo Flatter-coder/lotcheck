@@ -62,7 +62,10 @@ export function canonicalReport(a: any): any {
     // v10 (2026-09-03): no shape change; marks reports issued with the
     // "Your premium after this purchase" line, so /verify withholds it from a
     // report whose own PDF predates it. Mirrors src/App.jsx.
-    v: 10,
+    // v11 (2026-09-03): a missing odometer now seals as null, where it used to
+    // seal as 0 and print "Odometer 0 km" on /verify. Not additive, so it gets
+    // a version the way the v7 projection change did.
+    v: 11,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
@@ -71,7 +74,7 @@ export function canonicalReport(a: any): any {
     recalls: a.recalls && a.recalls.checked ? { count: a.recalls.count || 0, confirmed: a.recalls.confirmed !== false, items: (a.recalls.items || []).map((it: any) => ({ system: it.system || null, date: it.date || null })) } : null,
     addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,
-    reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: Number(a.dealerSentiment.reviewCount || 0) } : null,
+    reputation: a.dealerSentiment && a.dealerSentiment.rating ? { rating: Number(a.dealerSentiment.rating), reviews: nn(a.dealerSentiment.reviewCount) } : null,
     // v6 (2026-09-02): the comparison's BASIS rides with it (year window, trim
     // scope, powertrain, mileage window, condition, dealers) and an insufficient
     // set is sealed as such (ins/nr/nd) so /verify says "not enough" too.
@@ -83,7 +86,9 @@ export function canonicalReport(a: any): any {
     // Full-report verify: everything the report claims travels in the signed
     // payload so /verify can display it all (compact keys keep the QR small).
     vin: a.vin || null,
-    odo: num(a.odometerKm),
+    // nn, not num: num(null) is 0, which would SEAL a reading the page never
+    // showed and print it on /verify. [[read-num]]
+    odo: nn(a.odometerKm),
     dol: a.daysOnLot && Number(a.daysOnLot.days) > 0 ? { d: Math.round(Number(a.daysOnLot.days)), s: a.daysOnLot.since || null } : null,
     pd: a.priceDisclosure || null,
     gate: a.priceGatedButRecovered ? { m: a.priceGateMessage || null, g: !!a.priceGateGoogleAdsBacked } : null,
@@ -126,7 +131,9 @@ export function canonicalValueReport(a: any): any {
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     trim: a.trim || null,
     year: num(a.year),
-    odo: num(a.odometerKm),
+    // nn, not num: num(null) is 0, which would SEAL a reading the page never
+    // showed and print it on /verify. [[read-num]]
+    odo: nn(a.odometerKm),
     cond: a.saleCondition || a.condition || null,
     prov: a.province ? String(a.province).toUpperCase() : null,
     vin: a.vin || null,

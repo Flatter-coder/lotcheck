@@ -570,7 +570,15 @@ export function olderYearsLine(a) {
 // Alberta only: it cites Alberta statute and an Alberta regulator, so the
 // surfaces gate on financeCoverageApplies() and print nothing elsewhere.
 // Source: AIRB, 2026 Annual Market and Trends Report, page 8, published 2026.
-const AIRB_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 8 and 22, published 2026. Read 2026-09-03; quoted in docs/airb-2026-capture.md.";
+// A SOURCE THE BUYER CAN OPEN. This used to end "quoted in
+// docs/airb-2026-capture.md" -- a path inside this repository, printed in a
+// customer PDF. Naming a file nobody outside the company can reach is worse
+// than naming nothing: it looks like a citation and cannot be followed, and
+// this product's whole claim is that every figure is checkable
+// ([[make-it-dispute-proof]]). The dated capture still exists and the
+// check:citations gate still reads it -- it is our evidence, not the
+// buyer's, so it belongs in the gate and not on the page.
+const AIRB_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 8 and 22, published 2026. Read 2026-09-03. The report is published at airbfordrivers.ca/market-and-trends-reports.";
 // Province comes from the DEALER's page (resolveJurisdiction), never from a
 // user-typed field: it decides whether an Alberta statute is printed at all.
 export function provinceOf(a) {
@@ -657,7 +665,7 @@ export function financeCoverageLine(a) {
 // decide whether they are one; it points at the regulator's own driver site.
 // Alberta only, on the same gate as its sibling.
 // Source: AIRB, 2026 Annual Market and Trends Report, printed pages 5 and 16.
-const AIRB_PREMIUM_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 5 and 16, published 2026. Read 2026-09-03; quoted in docs/airb-2026-capture.md. Current rules for drivers: airbfordrivers.ca.";
+const AIRB_PREMIUM_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 5 and 16, published 2026. Read 2026-09-03. The report is published at airbfordrivers.ca/market-and-trends-reports; current rules for drivers are at airbfordrivers.ca.";
 export function insurancePremiumLine(a) {
   void a;
   const out = {
@@ -767,7 +775,86 @@ export function financingMathNote(a) {
   }
   const n = Number(fc.paymentsCounted);
   const counted = Number.isFinite(n) && n > 0 ? `${n.toLocaleString()} payments` : "the payments";
+  // "THE TWO AGREE" WAS NOT ALWAYS TRUE. computeFinancingCheck has two
+  // consistent=true branches: one where the figures match within 2%, and a
+  // second, deliberate one where they differ by up to 16% because the payment
+  // is quoted before tax and the total obligation includes it. Reading only the
+  // boolean, this sentence told the buyer "the two agree" over a real
+  // $67,704-vs-$75,000 gap -- the same two-authors-per-fact defect this
+  // function was written to end, committed inside the fix for it. The figures
+  // the check records decide which sentence is true.
+  const comp = Number(fc.computedFromPayments);
+  const disc = Number(fc.disclosedTotalObligation);
+  const bothFigures = Number.isFinite(comp) && comp > 0 && Number.isFinite(disc) && disc > 0;
+  const lead = `We multiplied the advertised payment by ${counted} over the term and compared the result with the total obligation the page discloses.`;
+  const rateCaveat = "This checks the page's own arithmetic -- it does not check the interest rate, which the listing does not publish in a form we can recompute.";
+  if (fc.consistent && bothFigures && Math.abs(disc - comp) / comp > 0.02) {
+    // Name both numbers and the reason they differ. A buyer who sees only
+    // "they agree" beside a $7,296 gap has been told something they can
+    // disprove with a calculator.
+    return `${lead} The payments come to ${fmtMoney(comp)} and the page discloses ${fmtMoney(disc)} -- a difference of ${fmtMoney(Math.abs(disc - comp))}, which is the size sales tax would account for on this amount. Ask them to confirm in writing whether the advertised payment is before tax. ${rateCaveat}`;
+  }
+  if (fc.consistent && bothFigures) {
+    return `${lead} The payments come to ${fmtMoney(comp)} against the ${fmtMoney(disc)} disclosed, so the two agree. ${rateCaveat}`;
+  }
   return fc.consistent
     ? `We multiplied the advertised payment by ${counted} over the term and compared the result with the total obligation the page discloses. The two agree. This checks the page's own arithmetic -- it does not check the interest rate, which the listing does not publish in a form we can recompute.`
     : `We multiplied the advertised payment by ${counted} over the term and compared the result with the total obligation the page discloses. The two do not agree. Ask them to show the calculation line by line before signing.`;
+}
+
+/**
+ * "Price unverified" told the buyer nothing. It sat in red under a price we had
+ * just printed in full, so the only question it could raise was the one it did
+ * not answer: unverified against WHAT? A label that creates a question is worse
+ * than no label, and a RED one beside a dealer's number reads as a verdict on
+ * the dealer -- which we never make. [[present-without-creating-questions]]
+ * [[design-must-be-self-explanatory]] [[no-accusation-language]]
+ *
+ * What the flag actually means is narrow and easy to say plainly: we read the
+ * number on the page, and we could not read it a SECOND way from the data the
+ * page publishes underneath itself. That is a statement about our read, not
+ * about the price and not about the seller.
+ *
+ * Returns { label, line, tone } so every surface says one thing:
+ *   tone "ok"      - read twice, agrees
+ *   tone "neutral" - read once (NOT a flag, and never rose/red)
+ *   tone "ask"     - the page withholds the number, or ties it to financing
+ */
+export function priceCheckState(a) {
+  const ask = Number(a?.quotedPrice ?? a?.price?.asking);
+  const hasAsk = Number.isFinite(ask) && ask >= 1;
+  const gated = String(a?.priceDisclosure || "") === "contact_for_price";
+  const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
+  const verified = a?.priceVerified === true || a?.price?.verified === true;
+
+  if (gated || !hasAsk) {
+    return {
+      label: "no price on this page",
+      short: "this listing publishes no price",
+      line: "This listing does not publish a price. Ask the dealer for the all-in price in writing before you go in.",
+      tone: "ask",
+    };
+  }
+  if (contingent) {
+    return {
+      label: "price depends on financing",
+      short: "this price applies only if you finance with them",
+      line: "This price applies only if you finance with the dealer. Ask what the price is WITHOUT their financing, in writing -- that is the number to compare.",
+      tone: "ask",
+    };
+  }
+  if (verified) {
+    return {
+      label: "read twice, matches",
+      short: "read on the page and in the page's own data — they agree",
+      line: "We read this price on the page and again in the page's own underlying data, and the two agree.",
+      tone: "ok",
+    };
+  }
+  return {
+    label: "read once",
+    short: "we read this on the page; the page carries nothing underneath to check it against",
+    line: "We read this price on the page, but this page publishes no second copy of it underneath for us to check against -- so we are showing the dealer's number as we found it, not confirming it. Ask them to put the all-in price in writing.",
+    tone: "neutral",
+  };
 }
