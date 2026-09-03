@@ -677,3 +677,63 @@ export function insurancePremiumLine(a) {
   out.body = out.lines.map((l) => l.v).join(" ");
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// FINANCING APR -- one wording, both surfaces.
+//
+// The page's payment calculator is a SECOND reader of the same page, and on a
+// real report the two readers contradicted each other in print. LC-FE77-C58
+// (2026 Lexus RX 350, Lexus of Royal Oak, 2026-09-03) said on its first page:
+//
+//   Financing APR -- 3.9% OEM REF
+//   "No financing rate is advertised."
+//
+// and three sections later:
+//
+//   Payment starting point -- 72 months, bi-weekly, 3.9% APR
+//   "...5.99% APR and $0 down. Read from the page's own text."
+//
+// One page cannot both advertise a rate and not advertise it. A buyer handing
+// that report to a dealer gets the sentence read back to them.
+//
+// Why the two disagree: the advertised-rate reader (apr-extract.js) only
+// credits a rate whose source is the dealer's own feed, a platform data blob,
+// or literal page text tied to financing -- the guard that exists because an
+// unconfirmed read once stated 25% for a page that disclosed none. The page's
+// pre-selected scenario (page-default.js) reads the calculator itself, and its
+// only sources are sm360_feed / edealer_js / page_text; a model-sourced read is
+// demoted to unchecked by PAGE_DEFAULT_READ_FROM_PAGE before it can ship.
+//
+// So a confirmed scenario IS evidence the page shows a rate. It is not the
+// dealer's advertised APR in the sense the first reader means, so it still may
+// not power the dealer-versus-manufacturer comparison -- that stays gated on
+// the trusted sources. It only stops the report saying something the rest of
+// the same report disproves. [[no-single-point-of-failure]]
+export function pageDefaultApr(a) {
+  const pd = normDflt(a?.pageDefault ?? a?.dflt);
+  if (!pd || pd.state !== "confirmed") return null;
+  // A missing rate is NOT 0%: Number(null) is 0, and a 0 that came from an
+  // absent field would print "opens at 0%" over a page that shows no rate at
+  // all -- the same trap that once put a 0 km car in a mileage window.
+  const apr = pd.apr == null ? NaN : Number(pd.apr);
+  return Number.isFinite(apr) && apr >= 0 ? apr : null;
+}
+// The short value for the point tile. `dealerApr` is the trusted advertised
+// rate (null when there is none), `manufacturerApr` the maker's promo rate.
+export function financingAprValue(a, dealerApr, manufacturerApr, high) {
+  if (dealerApr != null) return `${dealerApr}%${high ? " HIGH" : ""}`;
+  if (manufacturerApr != null) return `${manufacturerApr}% OEM REF`;
+  const p = pageDefaultApr(a);
+  if (p != null) return `${p}% ON THIS PAGE`;
+  return "NONE ADVERTISED";
+}
+export function financingAprNote(a, dealerApr) {
+  if (dealerApr != null) {
+    return `APR is the yearly interest rate on the loan. This dealer advertises ${dealerApr}% — compare it against your own bank or credit union before accepting, because dealer rates often carry a markup.`;
+  }
+  const p = pageDefaultApr(a);
+  if (p != null) {
+    return `APR is the yearly interest rate on the loan. This page's payment calculator opens at ${p}%, the scenario the page pre-selects. That is not the same as a rate confirmed from the page's own listing data, so get the APR in writing and compare it with your own bank before signing anything in the finance office.`;
+  }
+  return "No financing rate is advertised. Get the APR in writing and compare it with your own bank before signing anything in the finance office.";
+}
