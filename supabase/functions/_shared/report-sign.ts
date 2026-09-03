@@ -56,7 +56,10 @@ export function canonicalReport(a: any): any {
     // A report sealed under v6 and re-verified from its body after this deploy
     // will not hash the same -- fail-closed by design; the cache moved with it.
     // v8 (2026-09-02): `oy` added (what older model years ask today). Additive.
-    v: 8,
+    // v9 (2026-09-03): no shape change; marks reports issued with the
+    // "Insurance before you sign" line so /verify can withhold it from older
+    // reports whose PDF does not carry that section. Mirrors src/App.jsx.
+    v: 9,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },

@@ -165,6 +165,13 @@ jobs:
         run: npm run test:flywheel
       - name: Copy compliance (shipped claims)
         run: npm run check:copy
+
+      # Every regulator citation a report line prints must be backed by a dated
+      # capture in docs/, never by our memory of the source. Added with the
+      # "Insurance before you sign" line, which names an Alberta statute
+      # section, a regulation and a bulletin inside a signed report.
+      - name: Source citations are backed by a dated capture
+        run: npm run check:citations
       # The powertrain panel reports COVERAGE of a skewed 36% subset, so any
       # part-to-whole geometry lets a reader turn it into a market share. It also
       # pins the class prefix: the bar was once <span class="track">, which

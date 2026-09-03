@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-02d";
+const PDF_BUILDER_VER = "2026-09-03a";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -610,6 +610,45 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       (oyLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(oyLine.note)}</div>` : "") });
   }
 
+  // 5b1a2 -- Insurance before you sign: a SEQUENCING warning, worded by the
+  // shared builder (report-lines.js financeCoverageLine). Not a figure and not
+  // a check -- a lender or lessor requires collision and comprehensive, and
+  // Alberta's Take All Comers rule (Insurance Act s. 555) obliges insurers to
+  // write only the MANDATORY coverages. The finance contract is signed at the
+  // dealership; the insurance is arranged afterwards, so a buyer can commit to
+  // a payment before knowing they can bind the cover the contract requires.
+  //
+  // Alberta only. It cites Alberta statute and an Alberta regulator, so this
+  // card renders ONLY where financeCoverageApplies() is true -- same gate on
+  // every surface, so no reader outside Alberta is told an Alberta rule.
+  //
+  // BOTH states render the same five lines: "confirmed" when the listing
+  // itself shows financing and "general" when it does not. The warning holds
+  // either way (a cash buyer has no lender, which is exactly the point), so
+  // there is no greyed-out variant here -- the headline keeps the ink colour
+  // in both states, and only the builder's meta says which one it is.
+  // Only the builder's strings reach the page. [[report-never-empty]]
+  // Tables only (Gmail and Outlook drop display:flex): each line is a two-cell row.
+  if (financeCoverageApplies(a)) {
+    const fcLine = financeCoverageLine(a);
+    const fcLines: Array<{ k: string; v: string }> = Array.isArray(fcLine.lines) ? fcLine.lines : [];
+    const fcRows = fcLines.map((l) =>
+      `<tr>` +
+        `<td style="padding:5px 12px 5px 0;vertical-align:top;white-space:nowrap;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#706D96;">${escapeHtml(l.k)}</td>` +
+        `<td style="padding:5px 0;vertical-align:top;font-size:13px;color:#33305A;line-height:1.5;">${escapeHtml(l.v)}</td>` +
+      `</tr>`).join("");
+    // The builder always returns five lines, but if it ever returned none the
+    // body sentence is what prints -- this card is never empty.
+    const fcDetail = fcLines.length
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;margin-top:6px;">${fcRows}</table>`
+      : (fcLine.body ? `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(fcLine.body)}</div>` : "");
+    deck.push({ label: fcLine.title, tone: fcLine.tone, glow: false, body:
+      `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(fcLine.headline)}</div>` +
+      fcDetail +
+      (fcLine.meta ? `<div style="font-size:12px;color:#706D96;margin-top:6px;">${escapeHtml(fcLine.meta)}</div>` : "") +
+      (fcLine.note ? `<div style="font-size:12px;color:#706D96;margin-top:8px;line-height:1.5;">${escapeHtml(fcLine.note)}</div>` : "") });
+  }
+
   // 5b1b -- Other listings read: "Of N other listings read, M advertise below
   // this one." Computed once on the server (marketCount), sealed in the
   // canonical (mc), worded by the shared builder. Sits outside the market-value
@@ -758,7 +797,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, fmtDateEn } from "../_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1614,6 +1653,44 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // body is what prints when there is no line to print.
     if (!oyLines.length && oyLine.body) para(noEmDash(oyLine.body), { size: 9, color: SOFT, lead: 4 });
     if (oyLine.note) para(noEmDash(oyLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
+    rule();
+  }
+
+  // ---- INSURANCE BEFORE YOU SIGN ----
+  // A sequencing warning from Alberta's insurance regulator, from the shared
+  // builder (report-lines.js financeCoverageLine): the words in this PDF are
+  // the words in the HTML deck and on screen. A context section like the two
+  // above, not one of the fixed audit points, and it carries no figure, no
+  // traffic light and no band -- five labelled lines and a citation.
+  //
+  // Alberta only: financeCoverageApplies() gates every surface identically,
+  // because the line cites Alberta statute and an Alberta regulator.
+  //
+  // BOTH states print the same five lines ("confirmed" when the listing itself
+  // shows financing, "general" when it does not), so the headline keeps INK in
+  // both -- there is no unread half here to grey out. T/para run every string
+  // through pdfSafe; the builder's em dashes print as hyphens (the PDF fonts
+  // encode WinAnsi only).
+  if (financeCoverageApplies(a)) {
+    const fcLine = financeCoverageLine(a);
+    const fcLines: Array<{ k: string; v: string }> = Array.isArray(fcLine.lines) ? fcLine.lines : [];
+    need(96);
+    kicker(fcLine.title.toUpperCase());
+    // para(), not T(): T draws one unwrapped line, and this headline is a full
+    // sentence -- it would run off the right edge of the page.
+    para(noEmDash(fcLine.headline), { size: 13, font: serifB, color: INK, lead: 4 });
+    advance(4);
+    if (fcLine.meta) { T(noEmDash(fcLine.meta), { size: 9, font: sans, color: SOFT }); y -= 14; }
+    for (const l of fcLines) {
+      need(28);
+      T(noEmDash(l.k).toUpperCase(), { size: 8, font: sansB, color: FAINT }); y -= 11;
+      para(noEmDash(l.v), { size: 9.5, color: INK, lead: 3 });
+      advance(3);
+    }
+    // Same never-empty rule as the sections above: if the builder ever returned
+    // no lines, its body sentence is what prints.
+    if (!fcLines.length && fcLine.body) para(noEmDash(fcLine.body), { size: 9, color: SOFT, lead: 4 });
+    if (fcLine.note) para(noEmDash(fcLine.note), { size: 8.5, font: serifI, color: SOFT, lead: 3 });
     rule();
   }
 
