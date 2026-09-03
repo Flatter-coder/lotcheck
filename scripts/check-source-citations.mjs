@@ -40,6 +40,34 @@ const SOURCES = [
       "may be required for a leased or financed vehicle",
       "only applies to mandatory coverages",
       "removing these restrictions",
+      // "Your premium after this purchase" (printed pages 5 and 16)
+      "Good Driver Rate Cap",
+      "greater than 3.7% in 2024 and 7.5% in 2025",
+      "changed vehicles, or changed their home address",
+      "did not mean Alberta drivers did not see increases",
+      "typically increases third-party liability premiums by approximately 9.0%",
+      "45.6% in the second half of 2024",
+    ],
+  },
+  {
+    // The second AIRB card gets its OWN window. It previously fell inside the
+    // first entry's slice only because that slice overran to end-of-file, which
+    // would have stopped silently the moment the file was reordered.
+    label: "AIRB 2026 report — your premium after this purchase",
+    capture: "docs/airb-2026-capture.md",
+    surface: "supabase/functions/_shared/report-lines.js",
+    from: "const AIRB_PREMIUM_CITE",
+    to: null,
+    claims: [
+      "PPV rating program",
+      "greater than 3.7% in 2024 and 7.5% in 2025",
+      "no longer protected by the 7.5% cap",
+      "an increase greater than 0.0% for any individual policyholder",
+      "did not mean Alberta drivers did not see increases in their auto insurance premiums in 2023",
+      "changed vehicles, or changed their home address",
+      "typically increases third-party liability premiums by approximately 9.0%",
+      "45.6% in the second half of 2024",
+      "to 47.1%",
     ],
   },
 ];

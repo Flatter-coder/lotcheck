@@ -578,9 +578,12 @@ export function provinceOf(a) {
     || a?.marketValue?.province || a?.marketValue?.pv || null;
 }
 // Alberta statute and an Alberta regulator: printed only where they apply.
-export function financeCoverageApplies(a) {
+// Both AIRB-sourced cards gate on this; financeCoverageApplies is the name the
+// first of them shipped under and the surfaces still call it.
+export function albertaRulesApply(a) {
   return String(provinceOf(a) || "").toUpperCase() === "AB";
 }
+export const financeCoverageApplies = albertaRulesApply;
 // True when the LISTING ITSELF shows financing: the page's own pre-selected
 // payment scenario (read from the page by page-default.js) or a price that
 // depends on financing. A dealer APR is deliberately NOT a trigger -- that
@@ -620,6 +623,57 @@ export function financeCoverageLine(a) {
   // One sentence for surfaces that show a short "what this means" panel. Worded
   // HERE so it sweeps with the rest and says the same thing everywhere.
   out.explain = "The AIRB reports that collision and comprehensive may be required for a leased or financed vehicle, and that Alberta's Take All Comers rule covers only the mandatory coverages. Confirm your own insurer will write them, at the deductible your contract requires, before you sign.";
+  out.body = out.lines.map((l) => l.v).join(" ");
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// LINE -- "Your premium after this purchase".
+//
+// The sibling above is about whether a buyer can GET the coverage a lender
+// requires. This one is about what it COSTS: buying a car is a change of
+// vehicle on the buyer's own policy, and the liability limit is a choice made
+// at the same desk.
+//
+// Three things the source will not support, and which this line therefore
+// never says:
+//   1. That a change of vehicle removed anyone's cap protection. The report
+//      says only that "Premiums also changed if, since the last renewal, a
+//      driver had a new at-fault claim, conviction, changed vehicles, or
+//      changed their home address." That is the sentence printed.
+//   2. A cap figure for 2026. The report gives 3.7% (2024) and 7.5% (2025) and
+//      none for 2026, so the line says that too -- a 2025 number presented as
+//      current would be the same defect as a stale MSRP. What it does NOT say
+//      is that a cap limits only what the AIRB approves and never what one
+//      person pays: the report contradicts that ("moving to a new insurer
+//      means drivers are no longer protected by the 7.5% cap"), so the line
+//      prints the regulator's own two sentences instead of a generalisation.
+//   3. That 9.0% is the effect on a whole premium. The report is explicit that
+//      it raises THIRD-PARTY LIABILITY premiums; the share TPL takes of a total
+//      premium is a separate figure and multiplying them out would be our
+//      arithmetic wearing the regulator's name.
+//
+// The report never defines "Good Driver", so no sentence invites a buyer to
+// decide whether they are one; it points at the regulator's own driver site.
+// Alberta only, on the same gate as its sibling.
+// Source: AIRB, 2026 Annual Market and Trends Report, printed pages 5 and 16.
+const AIRB_PREMIUM_CITE = "Alberta Automobile Insurance Rate Board, 2026 Annual Market and Trends Report, pages 5 and 16, published 2026. Read 2026-09-03; quoted in docs/airb-2026-capture.md. Current rules for drivers: airbfordrivers.ca.";
+export function insurancePremiumLine(a) {
+  void a;
+  const out = {
+    key: "insurancepremium", title: "Your premium after this purchase", tone: "muted",
+    state: "confirmed", value: "CHANGING VEHICLES CAN CHANGE IT",
+    headline: "Changing vehicles can change a premium",
+    body: "", lines: [], meta: "Alberta · from the regulator, not from this listing",
+    note: AIRB_PREMIUM_CITE, explain: "",
+  };
+  out.lines = [
+    { k: "Changing vehicles", v: "If this vehicle replaces one on your own policy, that is a change of vehicle. The AIRB reports that premiums also changed if, since the last renewal, a driver had a new at-fault claim, conviction, changed vehicles, or changed their home address." },
+    { k: "What a cap covers", v: "The AIRB reports that under the Good Driver Rate Cap it could not approve changes to an insurer's PPV (private passenger vehicle) rating program resulting in increases for Good Drivers greater than 3.7% in 2024 and 7.5% in 2025, and it gives no figure for 2026. It also reports that moving to a new insurer means drivers are no longer protected by the 7.5% cap, and that of the 2023 order allowing no increase greater than 0.0% for any individual policyholder, this \u201cdid not mean Alberta drivers did not see increases in their auto insurance premiums in 2023\u201d." },
+    { k: "Liability limit", v: "The AIRB reports that increasing liability limits from one million to two million dollars typically increases third-party liability premiums by approximately 9.0%, and that the proportion of drivers selecting the two-million-dollar limit rose from 45.6% in the second half of 2024 to 47.1% twelve months later. That is the third-party liability part of a premium, across Alberta, not a quote for this vehicle." },
+    { k: "Before you sign", v: "Ask your own insurer what this specific vehicle does to your renewal, and what the two-million-dollar limit costs on your policy." },
+  ];
+  out.explain = "The AIRB reports that a premium also changed when a driver changed vehicles, that moving to a new insurer means a driver is no longer protected by the 7.5% Good Driver cap, and that raising the liability limit from one million to two million dollars typically adds about 9.0% to the third-party liability part of a premium. Ask your own insurer what this vehicle does to your renewal before you sign.";
   out.body = out.lines.map((l) => l.v).join(" ");
   return out;
 }

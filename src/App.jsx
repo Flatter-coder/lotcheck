@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8929,6 +8929,41 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     )};
   }
 
+  // LINE -- "Your premium after this purchase": what buying this vehicle does
+  // to the buyer's OWN policy. The sibling above is about whether the coverage
+  // a lender requires can be had at all; this one is about what it costs. Two
+  // things are decided at the same desk: the change of vehicle on the policy,
+  // and the liability limit. Worded ONCE in report-lines.js
+  // (insurancePremiumLine), so the lines here are the lines in the scroll card,
+  // the emailed HTML, the PDF and on /verify.
+  //
+  // It reads NOTHING from the listing -- it is regulator copy, identical for
+  // every Alberta report -- so there is ONE state and no conditional: either
+  // the whole card prints or none of it does. Alberta only, on the same gate as
+  // its sibling, because it cites an Alberta regulator.
+  // No gauge and no traffic light: percentages the AIRB published, not a quote.
+  // [[report-never-empty]] [[report-features-all-views]]
+  let insurancePremiumItem = null;
+  if (financeCoverageApplies(a)) {
+    const line = insurancePremiumLine(a);
+    insurancePremiumItem = { key: "insurancepremium", title: line.title, tone: "muted", glow: false, v: line.value, body: (
+      <div>
+        <Simple big={line.headline} c="#e2e8f0" />
+        {line.lines.map((l, i) => (
+          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
+            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
+            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
+          </div>
+        ))}
+        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
+        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
+        {/* The builder words the panel too -- a sentence written here would be
+            a second author for a card whose whole point is one wording. */}
+        <ExplainBox txt={line.explain} />
+      </div>
+    )};
+  }
+
   // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
   //
   // We advertise a 10-point verification and we over-deliver on it (Vic,
@@ -8971,6 +9006,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
     ...(marketCompareItem ? [marketCompareItem] : []),
     ...(olderYearsItem ? [olderYearsItem] : []),
     ...(financeCoverItem ? [financeCoverItem] : []),
+    ...(insurancePremiumItem ? [insurancePremiumItem] : []),
     ...(daysLotItem ? [{ ...daysLotItem, v: Number(a.daysOnLot?.days) > 0 ? Number(a.daysOnLot.days).toLocaleString() + " days" : (daysLotItem.v || "Not published") }] : []),
     ...(tradeInItem ? [tradeInItem] : []),
     ...(financeContingentItem ? [financeContingentItem] : []),
@@ -9709,6 +9745,44 @@ function FinanceCoverCard({analysis,C,cardStyle}){
     </div>
   );
 }
+// LINE -- "Your premium after this purchase": the COST half of the pair above.
+// Its sibling asks whether a buyer can GET the coverage a lender requires;
+// this one asks what the buyer's own policy does afterwards. Buying this
+// vehicle is a change of vehicle on that policy, and the two-million-dollar
+// liability limit is a choice made at the same desk as the purchase. Worded
+// once in report-lines.js insurancePremiumLine, so the card on screen is the
+// card in the emailed HTML, the PDF and on /verify.
+//
+// ONE state, no conditional: the builder reads NOTHING from the listing -- it
+// is the regulator's own published copy, identical for every Alberta report --
+// so there is nothing here to word two ways.
+//
+// No gauge, no traffic light, no band: the percentages are the AIRB's, they
+// describe Alberta's book rather than this buyer, and dressing them as a
+// measurement of this vehicle would be our arithmetic wearing the regulator's
+// name. Alberta only -- it cites an Alberta regulator, so the card is gated on
+// financeCoverageApplies() and prints nothing anywhere else. Missing beats
+// wrong. [[report-never-empty]] [[report-features-all-views]]
+function InsurancePremiumCard({analysis,C,cardStyle}){
+  if(!financeCoverageApplies(analysis)) return null;
+  const line=insurancePremiumLine(analysis);
+  return (
+    <div style={cardStyle}>
+      <div style={{fontSize:11,color:C.inkFaint,marginBottom:6}}>{line.title}</div>
+      <div style={{fontSize:20,fontWeight:1000,color:C.ink,lineHeight:1.25,marginBottom:8}}>{line.headline}</div>
+      <div>
+        {line.lines.map((l,i)=>(
+          <div key={i} style={{display:"flex",flexWrap:"wrap",gap:"2px 14px",alignItems:"baseline",padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
+            <div style={{flex:"0 0 auto",minWidth:120,fontSize:11.5,fontWeight:700,color:C.inkFaint}}>{l.k}</div>
+            <div style={{flex:"1 1 220px",fontSize:13,color:C.ink,lineHeight:1.5,fontWeight:i===line.lines.length-1?700:500}}>{l.v}</div>
+          </div>
+        ))}
+      </div>
+      {line.meta&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{line.meta}</div>}
+      {line.note&&<div style={{fontSize:11.5,color:C.inkFaint,marginTop:6,lineHeight:1.5}}>{line.note}</div>}
+    </div>
+  );
+}
 // LINE -- "Payment default: this page's payment default is N months, <frequency>
 // payments at X%." The page's own pre-selected calculator scenario
 // (page-default.js), worded once in report-lines.js pageDefaultLine. Same
@@ -9753,7 +9827,9 @@ function canonicalReport(a){
     // "Insurance before you sign" line, so /verify can withhold that section
     // from a report whose own PDF predates it -- the one page whose job is to
     // prove the paper and the page agree.
-    v:9,
+    // v10 (2026-09-03): marks reports issued with "Your premium after this
+    // purchase". Mirrors report-sign.ts.
+    v:10,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
@@ -10147,6 +10223,15 @@ function VerifyPage(){
               // Alberta only -- it cites Alberta statute and an Alberta
               // regulator, and /verify prints nothing elsewhere.
               const fcl=(financeCoverageApplies(o)&&Number(o.v)>=9)?financeCoverageLine(o):null;
+              // "Your premium after this purchase", worded by the same builder
+              // as the scroll card and the email. This one is derived from NO
+              // listing field at all -- it is regulator copy -- so nothing in
+              // the sealed payload can tell us whether the report being checked
+              // ever contained it. /verify therefore gates on the CANONICAL
+              // VERSION: a report minted before v10 does not grow a section its
+              // own PDF never had, which would make /verify disagree with the
+              // paper in the buyer's hand. Alberta only, like its sibling.
+              const ipl=(financeCoverageApplies(o)&&Number(o.v)>=10)?insurancePremiumLine(o):null;
               const title=P==="signed"?"Genuine — nothing changed":P==="ok"?"Nothing was changed":P==="altered"?"This doesn't check out":"Check the report number";
               const accent=authentic?"#34d399":isBad?"#f0997b":"#7f77dd";
               return (<div>
@@ -10219,10 +10304,22 @@ function VerifyPage(){
                     {oyl.note&&<div>{oyl.note}</div>}
                   </div>}
                   {financeCoverageApplies(o)&&Number(o.v)>=9&&<Row t="Insurance before you sign" v={fcl.value}/>}
-                  {financeCoverageApplies(o)&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
+                  {/* Both halves, here as well as on the row: fcl is null below
+                      v9, and this block read .meta off it -- blanking /verify for
+                      every Alberta report issued before 2026-09-03. */}
+                  {financeCoverageApplies(o)&&Number(o.v)>=9&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
                     {fcl.meta&&<div style={{fontWeight:700,color:T.text}}>{fcl.meta}</div>}
                     {fcl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>)}
                     {fcl.note&&<div>{fcl.note}</div>}
+                  </div>}
+                  {financeCoverageApplies(o)&&Number(o.v)>=10&&<Row t="Your premium after this purchase" v={ipl.value}/>}
+                  {/* Both halves of the gate, on the detail block as well as on
+                      the row: ipl is null below v10, so a version check dropped
+                      here would read .lines off nothing. */}
+                  {financeCoverageApplies(o)&&Number(o.v)>=10&&<div style={{fontSize:11,color:T.soft,lineHeight:1.55,margin:"-2px 0 6px"}}>
+                    {ipl.meta&&<div style={{fontWeight:700,color:T.text}}>{ipl.meta}</div>}
+                    {ipl.lines.map((x,i)=><div key={i}><span style={{fontWeight:700}}>{x.k}:</span> {x.v}</div>)}
+                    {ipl.note&&<div>{ipl.note}</div>}
                   </div>}
                   {o.allIn&&<Row t="Price basis" v={`All-in (${o.allIn})`} c="#34d399"/>}
                   {o.disc&&(o.disc.e||o.disc.x)&&<Row t="Dealer fine print" v={o.disc.x?"Self-contradictory":"Hedges the price"} c="#f0997b"/>}
@@ -12284,6 +12381,16 @@ function QuoteCheckPage(){
                   Alberta statute and an Alberta regulator. */}
               {financeCoverageApplies(analysis)&&(
                 <FinanceCoverCard analysis={analysis} C={C} cardStyle={cardStyle}/>
+              )}
+
+              {/* Your premium after this purchase: the cost half of the pair.
+                  Buying this vehicle is a change of vehicle on the buyer's own
+                  policy, and the two-million-dollar liability limit is a choice
+                  made at the same desk. One state and no conditional -- the
+                  builder reads nothing from the listing -- and Alberta only,
+                  on the same gate as its sibling above. */}
+              {financeCoverageApplies(analysis)&&(
+                <InsurancePremiumCard analysis={analysis} C={C} cardStyle={cardStyle}/>
               )}
 
               {analysis.leverageScore?.computed&&(

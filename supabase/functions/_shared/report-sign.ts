@@ -59,7 +59,10 @@ export function canonicalReport(a: any): any {
     // v9 (2026-09-03): no shape change; marks reports issued with the
     // "Insurance before you sign" line so /verify can withhold it from older
     // reports whose PDF does not carry that section. Mirrors src/App.jsx.
-    v: 9,
+    // v10 (2026-09-03): no shape change; marks reports issued with the
+    // "Your premium after this purchase" line, so /verify withholds it from a
+    // report whose own PDF predates it. Mirrors src/App.jsx.
+    v: 10,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
