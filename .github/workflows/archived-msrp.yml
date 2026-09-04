@@ -1,0 +1,65 @@
+# ── Archived MSRP: what a used car cost when it was new ─────────────────────
+#
+# 73% of the Alberta used listings we hold are MY2024 or older, and msrp_catalog
+# held exactly three rows older than MY2025. The daily scrapers cannot fix that:
+# a manufacturer stops publishing a model year the moment it is superseded, so
+# the price a used car carried when new is only ever found in an ARCHIVE.
+#
+# THIS FILE EXISTS BECAUSE THE SCRAPER DID NOT HAVE ONE. scrape-archived-toyota
+# merged on 2026-09-03, passed its tests, and could never run: no workflow, no
+# schedule, no dispatch. Built-but-unwired is its own defect shape --
+# [[repeat-fix-pattern]] -- and from the outside it looks exactly like done.
+#
+# Monthly rather than daily: a launch price is a historical fact and does not
+# move. What DOES change is the set of releases the newsroom has published, so
+# re-reading occasionally picks up model years that have since been archived.
+# The write is an upsert keyed (year, make, model, trim), so a re-run merges
+# BESIDE the live catalogue and never replaces a current-year row.
+name: Archived MSRP capture
+
+on:
+  schedule:
+    - cron: "17 9 1 * *"      # 1st of the month, after the nightly catalog work
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "Earliest model year to capture"
+        required: false
+        default: "2018"
+      to:
+        description: "Latest model year to capture (stays below 2025 -- the daily scrapers own those)"
+        required: false
+        default: "2024"
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The parser gate runs FIRST and offline. A release page that has been
+      # restyled must fail here, on fixtures, rather than write a catalogue of
+      # prose fragments priced like cars.
+      - run: npm run test:archived-msrp
+      - name: Capture archived Toyota MSRP
+        run: node scripts/scrape-archived-toyota.mjs --from=${{ inputs.from || '2018' }} --to=${{ inputs.to || '2024' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Lets the job resolve the CURRENT service key at run time, so a key
+          # rotation doesn't silently break this a month later.
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      # Reports are cached by listing. A used car whose MSRP we could not name
+      # yesterday can be named today, so the cached "unknown" has to go.
+      - name: Invalidate cached reports
+        if: success()
+        run: |
+          curl -sf -X POST \
+            "https://api.supabase.com/v1/projects/debigtyjhjamipooajhk/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"delete from listing_analysis_cache;"}'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
