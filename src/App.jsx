@@ -12102,9 +12102,16 @@ function QuoteCheckPage(){
           })()}
 
           {status==="error"&&(
-            <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`,padding:"32px 24px",textAlign:"center"}}>
+            /* AMBER, NOT CORAL. Coral is this product's alarm colour -- it is
+               what an over-MSRP price and an open recall wear. A page we could
+               not read is a gap in OUR read, not a fault in the car and not a
+               mark against the dealer, and dressing it in the same red as a
+               real finding both overstates it and spends the alarm colour on
+               something that is nobody's fault. Same reasoning as the price
+               "read once" chip. [[design-must-be-self-explanatory]] */
+            <div style={{...cardStyle,background:C.butterBg,border:`1px solid ${C.butter}55`,padding:"32px 24px",textAlign:"center"}}>
               <div style={{marginBottom:12}}><Icon3D name="warning" size={32}/></div>
-              <div style={{color:C.coralInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
+              <div style={{color:C.butterInk,fontWeight:800,marginBottom:8}}>{errorMsg}</div>
               {cooldownUntil&&<CountdownTimer until={cooldownUntil} C={C} onExpire={()=>setCooldownUntil(null)}/>}
               {lastAttemptType==="url"?(
                 <>
@@ -12112,6 +12119,35 @@ function QuoteCheckPage(){
                     Dealer sites occasionally can't be read automatically. Take a screenshot of the <b>whole page</b> (price, VIN and fine print all visible) and upload it instead — that works even when the link doesn't, since it never depends on the dealer's site cooperating. Accepts PDF, JPG, PNG, WEBP or HEIC, up to {MAX_FILE_SIZE_MB}MB.
                   </div>
                   <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
+                  {/* THE THIRD DOOR. A screenshot works, but it puts the work on
+                      the buyer at the exact moment we have just failed them —
+                      and some pages (a bot wall, a login) cannot be screenshotted
+                      usefully either. So: hand it to a human.
+
+                      Deliberately a mailto, not a form posting to an endpoint.
+                      It opens the buyer's own mail client with the listing
+                      already filled in, so they can see exactly what is sent and
+                      they send it themselves. Nothing is transmitted on their
+                      behalf, no new relay exists to be abused
+                      ([[email-relay-abuse-guard]]), and we never claim to have
+                      received a request the buyer has not actually sent
+                      ([[never-send-without-approval]]). */}
+                  <div style={{margin:"14px 0 4px",paddingTop:14,borderTop:`1px solid ${C.line}`}}>
+                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+                      Or hand it to us. We'll read this listing ourselves and email you the report <b>within 24 hours</b> — no screenshot needed, and it costs you nothing extra.
+                    </div>
+                    <a
+                      href={`mailto:support@lotcheck.ca?subject=${encodeURIComponent("Manual check request")}&body=${encodeURIComponent(
+                        `Please check this listing by hand — the automatic read didn't work.\n\nListing: ${urlInput.trim() || "(paste the dealer's link here)"}\n\nWhat went wrong on my end: ${errorMsg || "the scan failed"}\n\nAnything else worth knowing (optional):\n\n\nSend the report to this email address.`
+                      )}`}
+                      style={{display:"inline-block",background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"10px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,textDecoration:"none",cursor:"pointer"}}
+                    >
+                      Ask us to check it by hand →
+                    </a>
+                    <div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>
+                      Opens your email with the link already filled in, addressed to support@lotcheck.ca.
+                    </div>
+                  </div>
                   <div>
                     <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
                   </div>
