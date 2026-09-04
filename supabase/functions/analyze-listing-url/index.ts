@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03j";  // 03j: used cars now show REMAINING factory warranty; every recall reaches the PDF; the market-count chip names what was read; a short promo term says so.
+const CACHE_VER = "2026-09-03k";  // 03k: days-on-lot is scoped to the real dealer (the URL is passed in; a null host now REFUSES instead of matching every dealer), and the deck cards render a body instead of the word "undefined".
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -568,7 +568,11 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
     const make = canonicalMake(analysis.make);
     const { data, error } = await supabase
       .from("manufacturer_warranties")
-      .select("basic_coverage, powertrain_coverage, source_url")
+      // corrosion too: it is usually the one TIME-ONLY term (unlimited km), so
+      // on a high-km car it is the cover most likely still live -- and without
+      // it the report said "all of it looks to have run out" about a term it
+      // had never fetched.
+      .select("basic_coverage, powertrain_coverage, corrosion_coverage, source_url")
       .ilike("make", make)
       .maybeSingle();
     if (error || !data) return;
@@ -1972,7 +1976,7 @@ async function detectTradeInWidget(url: string, analysis: any, textHint?: string
 // the crawl covered that dealer. So this reports "at least N days" and says so
 // on the card. Claiming a hard 90 days off a lower bound is exactly the kind of
 // number a dealer would take apart, and they would be right.
-async function captureOwnDaysOnLot(analysis: any): Promise<void> {
+async function captureOwnDaysOnLot(analysis: any, urlHint?: string | null): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;                    // platform data wins: it is exact
     const vin = String(analysis?.vin || "").toUpperCase();
@@ -1986,11 +1990,20 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
     // still printed "16 days on THE DEALER'S lot" with sitting-time leverage
     // beside it. Say that at the desk and they answer "we got it last week".
     // [[make-it-dispute-proof]] [[days-on-lot-needs-real-observations]]
+    // THE URL COMES IN AS AN ARGUMENT. Reading analysis.sourceUrl here was
+    // reading a field nothing had assigned yet: the only writer is
+    // attachSealedScreenshot, 621 lines further down the handler. So
+    // new URL("") threw on every scan, host stayed null, and the RPC was called
+    // with p_host null -- which the SQL then read as "any dealer". That put
+    // another dealership's first-seen date under this one's name and returned
+    // the subject's own listing as an "other dealer". Both halves are fixed:
+    // the caller passes the URL it was given, and a null host now REFUSES
+    // rather than matching everything.
     let host: string | null = null;
     try {
-      const u = new URL(String(analysis?.sourceUrl || ""));
+      const u = new URL(String(urlHint || analysis?.sourceUrl || ""));
       host = u.origin;                                  // dealer_source.host is an origin
-    } catch { /* not parseable -- fall through, scoped to nothing */ }
+    } catch { /* not parseable -- the RPC refuses on a null host */ }
 
     const { data: onLot, error } = await supabase.rpc("fn_listing_on_lot", { p_vin: vin, p_host: host });
     if (error) { console.warn("fn_listing_on_lot failed:", error.message); return; }
@@ -4374,7 +4387,7 @@ Deno.serve(async (req: Request) => {
     // Last resort, and the only one that works on ANY dealer platform: our own
     // first-seen date for this VIN. No-op when either path above already
     // produced an exact figure.
-    await captureOwnDaysOnLot(analysis);
+    await captureOwnDaysOnLot(analysis, url);
 
     // Advertised-APR backstop. The dealer's own rate was missing from 4 of 10
     // reports in the benchmark even where the page printed it, because only the

@@ -106,7 +106,7 @@ export function computeReferenceFinancing(analysis: any): ReferenceFinancing | n
   // answering one. The comparable thing is the RATE. Say that where the term
   // is short. [[present-without-creating-questions]]
   const shortTerm = termMonths <= 36
-    ? ` That is a ${termMonths}-month promotional term, which is short, so the monthly figure is large -- the number to take to the dealer is the RATE, not this payment.`
+    ? ` That is a ${termMonths}-month term${mf?.promo ? " promotion" : ""}, which is short, so the monthly figure is large -- the number to take to the dealer is the RATE, not this payment.`
     : "";
   let note: string;
   if (monthlyDelta !== null && atAsking && atManufacturerPrice) {
