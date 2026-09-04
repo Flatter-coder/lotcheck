@@ -46,7 +46,14 @@ jobs:
     runs-on: ubuntu-latest
     # Raised with PAGE_CAP: a 60-page lot at an 800ms inter-page delay is ~2
     # minutes on its own, and the cap now allows far larger ones.
-    timeout-minutes: 60
+    # Raised from 60 with headroom. The two runs before 2026-09-03 were both
+    # killed at exactly 60 minutes — the crawl had quietly outgrown its own
+    # timeout as the dealer catalogue passed a thousand hosts, and there had
+    # been no successful crawl since 08-18 as a result. The real fix is the
+    # bounded per-run slice in crawl-alberta-inventory.mjs (--max-dealers,
+    # least-recently-crawled first); this is only the margin so a slow batch
+    # finishes rather than dying at the wire and writing no second observation.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
