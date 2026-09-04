@@ -41,6 +41,25 @@ import { pathToFileURL } from "node:url";
 
 const DRY = process.argv.includes("--dry-run");
 const HOST_ARG = (() => { const i = process.argv.indexOf("--host"); return i > -1 ? process.argv[i + 1] : null; })();
+// A RUN THAT CANNOT FINISH NEVER WRITES A SECOND OBSERVATION.
+//
+// This walked EVERY active dealer with no bound. On 2026-08-18 that took six
+// minutes; as the catalogue grew past a thousand hosts it went over the job
+// timeout, and the last two runs (08-27 and 09-03) were both killed at exactly
+// 60 minutes with no successful crawl in between. Every instrument built on
+// repeat observation -- days-on-lot, price moves -- was therefore waiting on a
+// job that could no longer complete.
+//
+// So each run takes a BOUNDED slice, oldest-crawled first. Coverage rotates
+// through the whole catalogue over successive runs, delisting stays correct
+// because it is decided per dealer for dealers we actually finished, and the
+// run says out loud how many it left for next time -- a bound nobody can see
+// is the silent cap this repo keeps re-learning.
+const MAX_DEALERS = (() => {
+  const i = process.argv.indexOf("--max-dealers");
+  const n = i > -1 ? Number(process.argv[i + 1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 250;
+})();
 
 // An honest User-Agent. A standing crawler that pretends to be a person is
 // harder to defend than one that says who it is and where to complain — and if
@@ -471,8 +490,12 @@ async function main() {
     const { createClient } = await import("@supabase/supabase-js");
     supabase = createClient(url, key);
     let q = supabase
-      .from("dealer_source").select("id,host,name,sections,platform,platform_id")
-      .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer"]);
+      .from("dealer_source").select("id,host,name,sections,platform,platform_id,last_ok_at")
+      .eq("active", true).in("platform", ["sm360", "convertus", "jsonld_itemlist", "edealer"])
+      // Never crawled first, then longest since a successful crawl. That is
+      // what makes a bounded run fair instead of always re-reading the same
+      // head of the list.
+      .order("last_ok_at", { ascending: true, nullsFirst: true });
     // --host re-crawls ONE dealer. Useful after raising a limit or fixing an
     // adapter: no reason to re-walk seven healthy lots to re-read the eighth.
     if (HOST_ARG) q = q.eq("host", HOST_ARG);
@@ -480,6 +503,14 @@ async function main() {
     if (error) { console.error("could not read dealer_source:", error.message); process.exit(1); }
     dealers = data || [];
     if (HOST_ARG && !dealers.length) { console.error(`no active dealer matches --host ${HOST_ARG}`); process.exit(1); }
+    // The bound, applied here so --host still re-crawls exactly one dealer.
+    if (!HOST_ARG && dealers.length > MAX_DEALERS) {
+      const skipped = dealers.length - MAX_DEALERS;
+      const oldest = dealers[0]?.last_ok_at ? new Date(dealers[0].last_ok_at).toISOString().slice(0, 10) : "never";
+      dealers = dealers.slice(0, MAX_DEALERS);
+      console.log(`${dealers.length} of ${dealers.length + skipped} active dealers this run, least-recently-crawled first (oldest: ${oldest}).`);
+      console.log(`${skipped} left for the next run — raise --max-dealers only if the job still finishes inside its timeout.`);
+    }
   }
 
   let totals = { dealers: 0, rows: 0, new: 0, priced: 0, delisted: 0, failed: 0, robotsSkipped: 0 };
