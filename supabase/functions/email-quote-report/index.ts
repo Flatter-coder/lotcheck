@@ -38,7 +38,7 @@ const FROM_ADDRESS = "LotCheck <reports@lotcheck.ca>";
 // analysis (pdf-lib version, font subset, layout). A customer holding an older
 // copy will then hash differently, and the row explains why instead of the
 // mismatch reading as tampering.
-const PDF_BUILDER_VER = "2026-09-03f";
+const PDF_BUILDER_VER = "2026-09-03g";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -397,11 +397,18 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     else if (rc.count === 0 && rc.confirmed === false) deck.push({ label: "Recalls · Transport Canada", tone: "muted", glow: false, body: `<div style="font-size:14px;font-weight:800;color:#9A6B00;">Couldn't confirm for this exact model</div><div style="font-size:12px;color:#5B5885;margin-top:3px;line-height:1.5;">Not an all-clear — check open recalls by VIN at Transport Canada.</div>` });
     else if (rc.count === 0) deck.push({ label: "Recalls · Transport Canada", tone: "pass", glow: false, body: `<div style="font-size:15px;font-weight:800;color:#17756B;">✓ None open</div>` });
     else {
-      const items = (rc.items || []).slice(0, 3).map((it: any) => {
+      // The PDF in this same email prints EVERY recall. This deck printed the
+      // first three under a headline count that could say seven -- the two
+      // halves of one email disagreeing about how many safety recalls a car
+      // has. A cap is defensible; a silent one is not, so the note below says
+      // it. [[recalls-detail-list-must-match-count]]
+      const DECK_RECALL_CAP = 3;
+      const shownDeck = Math.min((rc.items || []).length, DECK_RECALL_CAP);
+      const items = (rc.items || []).slice(0, DECK_RECALL_CAP).map((it: any) => {
         const yr = it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? " · " + new Date(it.date).getFullYear() : "";
         return `<div style="font-size:12px;color:#33305A;margin-top:6px;padding-top:6px;border-top:1px solid #F2836B33;"><b>${escapeHtml(it.system || "Recall")}${yr}</b>${it.summary ? `<div style="color:#5B5885;margin-top:2px;line-height:1.45;">${escapeHtml(it.summary)}</div>` : ""}</div>`;
       }).join("");
-      deck.push({ label: "Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
+      deck.push({ label: "Recalls · Transport Canada", tone: "flag", glow: true, body: `<div style="font-size:18px;font-weight:900;color:#A63C25;">${rc.count} open recall${rc.count > 1 ? "s" : ""}</div>${items}${recallsShownNote(rc.count, shownDeck) ? `<div style="font-size:11px;color:#706D96;margin-top:8px;">${escapeHtml(recallsShownNote(rc.count, shownDeck))}</div>` : ""}<div style="font-size:11px;color:#706D96;margin-top:8px;">Repaired free of charge — confirm the fix status before you sign.</div>` });
     }
   }
 
@@ -498,12 +505,21 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   {
     const dl = daysOnLotLine(a);
     if (a.daysOnLot && dl && !(Number(a.daysOnLot.days) > 0)) {
-      deck.push({ label: "Days on lot", value: dl.value, note: dl.line, tone: "muted" });
+      deck.push({ label: "Days on lot", tone: "muted", glow: false,
+        body:
+        `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(dl.value)}</div>` +
+        `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(dl.line)}</div>` });
     }
     const sv = sameVinElsewhereLine(a);
-    if (sv) deck.push({ label: "Also advertised elsewhere", value: sv.value, note: sv.line, tone: "muted" });
+    if (sv) deck.push({ label: "Also advertised elsewhere", tone: "muted", glow: false,
+      body:
+        `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(sv.value)}</div>` +
+        `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(sv.line)}</div>` });
     const pm = priceMovesLine(a);
-    if (pm) deck.push({ label: "Advertised price moves", value: pm.value, note: pm.line, tone: pm.tone });
+    if (pm) deck.push({ label: "Advertised price moves", tone: pm.tone, glow: false,
+      body:
+        `<div style="font-size:18px;font-weight:900;color:#33305A;">${escapeHtml(pm.value)}</div>` +
+        `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(pm.line)}</div>` });
   }
   if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
     const d = Math.round(Number(a.daysOnLot.days));

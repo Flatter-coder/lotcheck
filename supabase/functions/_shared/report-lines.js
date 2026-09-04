@@ -798,7 +798,7 @@ export function financingMathNote(a) {
     // Name both numbers and the reason they differ. A buyer who sees only
     // "they agree" beside a $7,296 gap has been told something they can
     // disprove with a calculator.
-    return `${lead} The payments come to ${fmtMoney(comp)} and the page discloses ${fmtMoney(disc)} -- a difference of ${fmtMoney(Math.abs(disc - comp))}, which is the size sales tax would account for on this amount. Ask them to confirm in writing whether the advertised payment is before tax. ${rateCaveat}`;
+    return `${lead} The payments come to ${fmtMoney(comp)} and the page discloses ${fmtMoney(disc)} -- a difference of ${fmtMoney(Math.abs(disc - comp))}, consistent with sales tax having been added to the total but not to the advertised payment. We cannot see which it is from this page, so ask them to confirm in writing whether the advertised payment is before tax. ${rateCaveat}`;
   }
   if (fc.consistent && bothFigures) {
     return `${lead} The payments come to ${fmtMoney(comp)} against the ${fmtMoney(disc)} disclosed, so the two agree. ${rateCaveat}`;
@@ -922,7 +922,11 @@ export function daysOnLotLine(a) {
 export function sameVinElsewhereLine(a) {
   const rows = Array.isArray(a?.sameVinElsewhere) ? a.sameVinElsewhere.filter(Boolean) : [];
   if (!rows.length) return null;
-  const parts = rows.slice(0, 2).map((r) => {
+  // The value used to count rows.length while the sentence listed the first
+  // two -- "ALSO SEEN AT 4 OTHER DEALERS" above two names. That is the
+  // recalls count-versus-list defect in a new place, so the cap says itself.
+  const SHOW = 2;
+  const parts = rows.slice(0, SHOW).map((r) => {
     const who = [r.dealerName, r.city].filter(Boolean).join(", ") || "another Alberta dealer";
     const px = Number(r.listPrice) > 0 ? ` at ${fmtMoney(Number(r.listPrice))}` : "";
     const when = r.lastSeenOn ? ` (last read ${fmtDateEn(r.lastSeenOn)})` : "";
@@ -930,7 +934,7 @@ export function sameVinElsewhereLine(a) {
   });
   return {
     value: rows.length === 1 ? "ALSO SEEN AT 1 OTHER DEALER" : `ALSO SEEN AT ${rows.length} OTHER DEALERS`,
-    line: `We have read this exact VIN on another Alberta dealer's own pages: ${parts.join("; ")}. Cars move between lots for ordinary reasons, so this is not a mark against anyone — but it is worth asking how long they have had it and what it was advertised at before.`,
+    line: `We have read this exact VIN on another Alberta dealer's own pages: ${parts.join("; ")}${rows.length > SHOW ? `, and at ${(rows.length - SHOW).toLocaleString()} more we have not listed here` : ""}. Cars move between lots for ordinary reasons, so this is not a mark against anyone — but it is worth asking how long they have had it and what it was advertised at before.`,
     tone: "muted",
   };
 }
@@ -959,10 +963,25 @@ export function priceMovesLine(a) {
   // claim about two points in time, so it needs two of them.
   if (rows.length < 2) return null;
 
+  // The rows are PRICES we recorded, oldest first -- not "price changes": a
+  // ladder of three prices is two changes, so counting rows overstated by one
+  // every time. And a car that went 52,000 -> 49,000 -> 52,000 has moved twice
+  // while its first and last are equal, so comparing only the ends called that
+  // "no change seen" over rows that prove otherwise.
   const first = rows[0], last = rows[rows.length - 1];
   const from = Number(first.price), to = Number(last.price);
   const delta = to - from;
+  const distinct = [...new Set(rows.map((r) => Number(r.price)))];
+  const changes = Math.max(0, rows.length - 1);
   if (!Number.isFinite(delta) || delta === 0) {
+    if (distinct.length > 1) {
+      const lo = Math.min(...distinct), hi = Math.max(...distinct);
+      return {
+        value: "BACK TO " + fmtMoney(to),
+        line: `This dealer's advertised price has moved ${changes.toLocaleString()} time${changes === 1 ? "" : "s"} in our records since ${fmtDateEn(first.observedOn)} — between ${fmtMoney(lo)} and ${fmtMoney(hi)} — and is back at ${fmtMoney(to)} today. We do not read every dealer every day, so this is the movement we observed, not a complete history.`,
+        tone: "muted",
+      };
+    }
     return {
       value: "NO CHANGE SEEN",
       line: `We have read this dealer's advertised price ${rows.length.toLocaleString()} times since ${fmtDateEn(first.observedOn)} and it has not moved from ${fmtMoney(to)}. We do not see every day, so this is the moves we observed, not a complete history.`,
@@ -976,7 +995,12 @@ export function priceMovesLine(a) {
   // [[present-without-creating-questions]]
   return {
     value: `${down ? "DOWN " : "UP "}${size}`,
-    line: `This dealer advertised this car at ${fmtMoney(from)} on ${fmtDateEn(first.observedOn)} and ${fmtMoney(to)} on ${fmtDateEn(last.observedOn)} — ${down ? "down" : "up"} ${size}${rows.length > 2 ? `, across ${rows.length.toLocaleString()} price changes we recorded` : ""}. We do not read every dealer every day, so treat this as the moves we saw rather than a complete history.${down ? " A price that has already moved once has room in it that the seller has shown you." : ""}`,
+    // "the seller has SHOWN you there is room" told the buyer what the dealer
+    // had revealed about their own position -- an inference about intent from a
+    // price change, which can just as easily be a market move, a model-year
+    // changeover or a corrected error. We report the movement and let the buyer
+    // draw the conclusion. [[no-accusation-language]]
+    line: `This dealer advertised this car at ${fmtMoney(from)} on ${fmtDateEn(first.observedOn)} and ${fmtMoney(to)} on ${fmtDateEn(last.observedOn)} — ${down ? "down" : "up"} ${size}${changes > 1 ? `, across ${changes.toLocaleString()} changes we recorded` : ""}. We do not read every dealer every day, so treat this as the moves we saw rather than a complete history.`,
     tone: down ? "flag" : "muted",
   };
 }
@@ -1042,10 +1066,18 @@ export function warrantyLine(a) {
         tone: "muted",
       };
     }
+    // NAME WHAT HAS RUN OUT, not just what is left. Listing only the live terms
+    // under a green "COVER REMAINING" let a car whose comprehensive cover had
+    // expired read as fully covered, because the expired line simply was not
+    // mentioned. The expensive half is usually the one that goes first.
+    const dead = terms.filter(([, t]) => !t.active);
+    const expiredClause = dead.length
+      ? ` The ${dead.map(([n]) => n).join(" and ")} cover looks to have run out already.`
+      : "";
     const parts = live.map(([name, t]) => `${name}: ${say(t)}`);
     return {
       value: "COVER REMAINING",
-      line: `This is a used vehicle, so what matters is what is LEFT of the factory warranty, and ${rw.make || "the manufacturer"} publishes ${live.map(([n, t]) => `${t.term} ${n}`).join(", ")}. On this car's model year and odometer that leaves — ${parts.join("; ")}. Estimated from the ${rw.modelYear} model year, not the in-service date, so ask for the in-service date in writing; it can move these by up to a year. Check what is still covered before you pay for an extended warranty that overlaps it.`,
+      line: `This is a used vehicle, so what matters is what is LEFT of the factory warranty, and ${rw.make || "the manufacturer"} publishes ${live.map(([n, t]) => `${t.term} ${n}`).join(", ")}. On this car's model year and odometer that leaves — ${parts.join("; ")}.${expiredClause} Estimated from the ${rw.modelYear} model year, not the in-service date, so ask for the in-service date in writing; it can move these by up to a year. Check what is still covered before you pay for an extended warranty that overlaps it.`,
       tone: "pass",
     };
   }
