@@ -10672,6 +10672,10 @@ function QuoteCheckPage(){
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
+  // Manual-review request: the buyer's way out when a listing will not read.
+  const [mrEmail,setMrEmail]=useState("");
+  const [mrState,setMrState]=useState("idle");   // idle | sending | sent
+  const [mrMsg,setMrMsg]=useState("");
   const [payFreq,setPayFreq]=useState("weekly"); // weekly | biweekly | monthly -- for the payment breakdown card
 
   // Fire-and-forget dealer-sentiment lookup, called after EITHER analysis
@@ -11378,6 +11382,26 @@ function QuoteCheckPage(){
       return "This link looks like it might be cut off partway through — try copying it again, making sure you grab the whole address.";
     }
     return null;
+  }
+
+  // Posts to the ledger endpoint. The buyer is told it is in only after the row
+  // exists -- the 24-hour promise on the card rests on the row, not on email.
+  async function requestManualReview(){
+    const url=urlInput.trim(), email=mrEmail.trim();
+    if(!url||!email){ setMrMsg("A listing link and an email address are both needed."); return; }
+    setMrState("sending"); setMrMsg("");
+    try{
+      const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/manual-review-request",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A"},
+        body:JSON.stringify({url,email,error:errorMsg||null}),
+      });
+      const data=await res.json().catch(()=>({}));
+      if(data&&data.ok){ setMrState("sent"); setMrMsg(data.message||"In the queue. We'll email you within 24 hours."); }
+      else { setMrState("idle"); setMrMsg(data&&data.reason?data.reason:"That didn't go through — try again in a minute."); }
+    }catch{
+      setMrState("idle"); setMrMsg("That didn't go through — check your connection and try again.");
+    }
   }
 
   const handleUrlAnalyze=async()=>{
@@ -12120,33 +12144,42 @@ function QuoteCheckPage(){
                   </div>
                   <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
                   {/* THE THIRD DOOR. A screenshot works, but it puts the work on
-                      the buyer at the exact moment we have just failed them —
-                      and some pages (a bot wall, a login) cannot be screenshotted
-                      usefully either. So: hand it to a human.
+                      the buyer at the exact moment we have just failed them, and
+                      some pages (a bot wall, a login) cannot be usefully
+                      screenshotted either. So: hand it to a human.
 
-                      Deliberately a mailto, not a form posting to an endpoint.
-                      It opens the buyer's own mail client with the listing
-                      already filled in, so they can see exactly what is sent and
-                      they send it themselves. Nothing is transmitted on their
-                      behalf, no new relay exists to be abused
-                      ([[email-relay-abuse-guard]]), and we never claim to have
-                      received a request the buyer has not actually sent
-                      ([[never-send-without-approval]]). */}
+                      This posts to a LEDGER, not a mailbox. The request becomes a
+                      row before anything is emailed, so "we never heard from you"
+                      and "we lost it" can never look the same. Rate limiting
+                      lives in SQL where it cannot be skipped, and the endpoint
+                      can only ever email our own support inbox -- it is not a
+                      relay. [[email-relay-abuse-guard]] */}
                   <div style={{margin:"14px 0 4px",paddingTop:14,borderTop:`1px solid ${C.line}`}}>
-                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
-                      Or hand it to us. We'll read this listing ourselves and email you the report <b>within 24 hours</b> — no screenshot needed, and it costs you nothing extra.
-                    </div>
-                    <a
-                      href={`mailto:support@lotcheck.ca?subject=${encodeURIComponent("Manual check request")}&body=${encodeURIComponent(
-                        `Please check this listing by hand — the automatic read didn't work.\n\nListing: ${urlInput.trim() || "(paste the dealer's link here)"}\n\nWhat went wrong on my end: ${errorMsg || "the scan failed"}\n\nAnything else worth knowing (optional):\n\n\nSend the report to this email address.`
-                      )}`}
-                      style={{display:"inline-block",background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"10px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,textDecoration:"none",cursor:"pointer"}}
-                    >
-                      Ask us to check it by hand →
-                    </a>
-                    <div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>
-                      Opens your email with the link already filled in, addressed to support@lotcheck.ca.
-                    </div>
+                    {mrState==="sent"?(
+                      <div style={{fontSize:13,color:C.tealInk,fontWeight:800,lineHeight:1.5}}>
+                        {mrMsg}
+                      </div>
+                    ):(
+                      <>
+                        <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+                          Or hand it to us. We'll read this listing ourselves and email you the report <b>within 24 hours</b> — no screenshot needed, and it costs you nothing extra.
+                        </div>
+                        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                          <input
+                            type="email" value={mrEmail} onChange={e=>setMrEmail(e.target.value)}
+                            placeholder="your email, so we can send it back"
+                            style={{margin:0,maxWidth:280,width:"100%",fontSize:13,padding:"9px 14px",borderRadius:999,border:`1px solid ${C.line}`,background:C.paper,color:C.ink,outline:"none"}}
+                          />
+                          <button
+                            onClick={requestManualReview}
+                            disabled={mrState==="sending"||!mrEmail.trim()}
+                            style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:mrState==="sending"||!mrEmail.trim()?"not-allowed":"pointer",opacity:mrState==="sending"||!mrEmail.trim()?.55:1}}>
+                            {mrState==="sending"?"Sending…":"Ask us to check it by hand →"}
+                          </button>
+                        </div>
+                        {mrMsg&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{mrMsg}</div>}
+                      </>
+                    )}
                   </div>
                   <div>
                     <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
