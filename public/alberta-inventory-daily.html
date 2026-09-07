@@ -170,11 +170,17 @@
 
     document.getElementById("deltas").textContent = fmt(today.arrived) + " · " + fmt(today.priceEvents) + " · " + fmt(today.delisted);
 
+    // Shown whenever there is ANYTHING to say about today's count -- a
+    // source excluded by the plausibility cap, a dealer that went silent,
+    // or (someday) something else. `notes` carries all of it; the heading
+    // only claims "excluded" when the cap actually fired today.
     var flagBox = document.getElementById("flagCallout");
-    if (today.dealersFlagged > 0 && today.notes){
+    if (today.notes){
       flagBox.style.display = "flex";
-      flagBox.innerHTML = "<div><b>" + today.dealersFlagged + " source" + (today.dealersFlagged===1?"":"s") +
-        " excluded from the verified count today.</b> " + today.notes + "</div>";
+      var heading = today.dealersFlagged > 0
+        ? "<b>" + today.dealersFlagged + " source" + (today.dealersFlagged===1?"":"s") + " excluded from the verified count today.</b> "
+        : "<b>Note on today's count.</b> ";
+      flagBox.innerHTML = "<div>" + heading + today.notes + "</div>";
     } else {
       flagBox.style.display = "none";
     }
