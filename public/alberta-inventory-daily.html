@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Alberta Inventory Daily</title>
+<meta name="description" content="New and used vehicles for sale in Alberta, read from dealers' own listings by LotCheck — verified and raw, with the source and the day named."/>
+<script>
+/* Site-wide theme sync (lc-theme, same key as index.html/App.jsx/live-price-index.html):
+   the saved choice wins, else the OS preference. Runs before first paint. */
+(function(){
+  try{
+    var saved=localStorage.getItem("lc-theme");
+    var light = saved ? (saved==="light"||saved==="outdoor") : window.matchMedia("(prefers-color-scheme: light)").matches;
+    if(light) document.documentElement.setAttribute("data-theme","light");
+  }catch(e){}
+})();
+</script>
+<style>
+  :root{
+    --bg:#0a0d11; --panel:#12161d; --panel-2:#171c25;
+    --ink:#eef2f6; --dim:#9aa7b7; --dimmer:#5b6674;
+    --line:rgba(238,242,246,.12); --line-soft:rgba(238,242,246,.07);
+    --held:#4c8dff; --fresh:#34d399; --gone:#f5455c; --flag:#ff8a3d; --accent:#ffb02e;
+    --mono:"SF Mono",Consolas,"IBM Plex Mono",monospace;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#f1f3f6;
+    --ink:#161b22; --dim:#5b6674; --dimmer:#8a94a3;
+    --line:rgba(22,27,34,.12); --line-soft:rgba(22,27,34,.06);
+    --held:#2f66d6; --fresh:#0a8f56; --gone:#c62b46; --flag:#c05a10; --accent:#a86200;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{margin:0;color:var(--ink);font-family:-apple-system,"Segoe UI",Inter,sans-serif;-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  a{color:var(--held)}
+  .wrap{max-width:980px;margin:0 auto;padding:26px 20px 70px}
+  .backbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;font-size:13px;color:var(--dim)}
+  .backbar a{color:var(--dim);text-decoration:none}
+  .backbar a:hover{color:var(--ink)}
+  header{margin-bottom:20px}
+  .eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer);font-family:var(--mono)}
+  h1{font-size:clamp(24px,3.4vw,32px);margin:6px 0 8px;letter-spacing:-.01em}
+  .lede{color:var(--dim);font-size:14.5px;line-height:1.55;max-width:62ch}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:20px 0}
+  .card{background:var(--panel);padding:16px 18px}
+  .card .k{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--dimmer);margin-bottom:8px}
+  .card .v{font-family:var(--mono);font-size:24px;font-weight:600;line-height:1}
+  .card .v .raw{font-size:14px;color:var(--dimmer);font-weight:500;margin-left:6px}
+  .card .s{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.4}
+
+  .callout{display:flex;gap:10px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--flag);
+    border-radius:8px;padding:13px 15px;margin:18px 0;font-size:13px;color:var(--dim);line-height:1.5}
+  .callout b{color:var(--ink)}
+  .callout.note{border-left-color:var(--held)}
+
+  h2{font-size:16px;margin:30px 0 10px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line-soft)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--dimmer);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+  td{font-family:var(--mono)}
+  tbody tr:hover{background:var(--panel-2)}
+  .flag-row{color:var(--flag)}
+
+  .empty,.loading{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
+  footer{margin-top:34px;padding-top:16px;border-top:1px solid var(--line);font-size:11.5px;color:var(--dimmer)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="backbar">
+    <a href="/">&larr; LotCheck</a>
+    <a href="/live-price-index">MSRP live index &rarr;</a>
+  </div>
+  <header>
+    <div class="eyebrow">Updated on crawl days</div>
+    <h1>Alberta inventory, daily</h1>
+    <p class="lede">New and used vehicles for sale at Alberta dealers, read from
+      their own public listings. Every figure below is shown two ways —
+      <b>verified</b> and <b>raw</b> — because a single unusually large source
+      can otherwise make the raw count look cleaner than it is. See
+      "About this report" below for what that means today.</p>
+  </header>
+
+  <div id="loading" class="loading">Reading today's count&hellip;</div>
+  <div id="empty" class="empty" style="display:none">No report has been recorded yet.</div>
+
+  <div id="content" style="display:none">
+    <div class="cards">
+      <div class="card">
+        <div class="k">New for sale — verified</div>
+        <div class="v mono" id="newVerified">—</div>
+        <div class="s" id="newRawNote"></div>
+      </div>
+      <div class="card">
+        <div class="k">Used for sale — verified</div>
+        <div class="v mono" id="usedVerified">—</div>
+        <div class="s" id="usedRawNote"></div>
+      </div>
+      <div class="card">
+        <div class="k">Dealers read</div>
+        <div class="v mono" id="dealersSeen">—</div>
+        <div class="s" id="coverageNote"></div>
+      </div>
+      <div class="card">
+        <div class="k">Since the day before</div>
+        <div class="v mono" id="deltas">—</div>
+        <div class="s">new listings · price moves · delisted</div>
+      </div>
+    </div>
+
+    <div class="callout" id="flagCallout" style="display:none"></div>
+
+    <div class="callout note">
+      <div><b>About this report.</b> "Verified" excludes any single dealer
+        pass that returned more used or new units than one Alberta rooftop
+        plausibly carries — a signal that the source is a group or platform
+        feed, not one dealer's lot. "Raw" is the count before that check.
+        This is what LotCheck has read, on the days it read it — never a
+        claim about the whole Alberta market, and it updates only on the days
+        a crawl actually ran (the crawl runs on demand today, pending a
+        legal review of a standing daily schedule).</div>
+    </div>
+
+    <h2>Last 14 days</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Day</th><th>New (verified)</th><th>New (raw)</th><th>Used (verified)</th><th>Used (raw)</th><th>Dealers</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    Source: LotCheck's own crawl of Alberta dealers' public listings. Not affiliated with AMVIC, any manufacturer, or any dealer.
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var SUPA = "https://debigtyjhjamipooajhk.supabase.co/rest/v1";
+  var ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
+  var fmt = function(n){ return (n||0).toLocaleString("en-CA"); };
+
+  function render(rows){
+    var loading = document.getElementById("loading");
+    var empty = document.getElementById("empty");
+    var content = document.getElementById("content");
+    if (!rows || !rows.length){ loading.style.display="none"; empty.style.display="block"; return; }
+    loading.style.display="none"; content.style.display="block";
+
+    var today = rows[0], prev = rows[1];
+
+    document.getElementById("newVerified").innerHTML = fmt(today.newUnitsVerified) +
+      (today.newUnitsRaw !== today.newUnitsVerified ? '<span class="raw">/ ' + fmt(today.newUnitsRaw) + ' raw</span>' : "");
+    document.getElementById("usedVerified").innerHTML = fmt(today.usedUnitsVerified) +
+      (today.usedUnitsRaw !== today.usedUnitsVerified ? '<span class="raw">/ ' + fmt(today.usedUnitsRaw) + ' raw</span>' : "");
+    document.getElementById("newRawNote").textContent = today.newUnitsRaw === today.newUnitsVerified ? "no exclusions today" : "raw total shown when it differs";
+    document.getElementById("usedRawNote").textContent = today.usedUnitsRaw === today.usedUnitsVerified ? "no exclusions today" : "raw total shown when it differs";
+
+    document.getElementById("dealersSeen").textContent = fmt(today.dealersSeen);
+    document.getElementById("coverageNote").textContent = today.amvicIssuedHosts
+      ? "of " + fmt(today.amvicIssuedHosts) + " AMVIC-issued hosts (" + ((today.dealersSeen/today.amvicIssuedHosts)*100).toFixed(1) + "%) — not a market total"
+      : (today.dealersActive ? fmt(today.dealersActive) + " active in our catalogue" : "");
+
+    document.getElementById("deltas").textContent = fmt(today.arrived) + " · " + fmt(today.priceEvents) + " · " + fmt(today.delisted);
+
+    var flagBox = document.getElementById("flagCallout");
+    if (today.dealersFlagged > 0 && today.notes){
+      flagBox.style.display = "flex";
+      flagBox.innerHTML = "<div><b>" + today.dealersFlagged + " source" + (today.dealersFlagged===1?"":"s") +
+        " excluded from the verified count today.</b> " + today.notes + "</div>";
+    } else {
+      flagBox.style.display = "none";
+    }
+
+    var tbody = document.getElementById("historyBody");
+    tbody.innerHTML = "";
+    rows.slice(0, 14).forEach(function(r){
+      var tr = document.createElement("tr");
+      if (r.dealersFlagged > 0) tr.className = "flag-row";
+      tr.innerHTML = "<td>" + r.day + "</td>" +
+        "<td>" + fmt(r.newUnitsVerified) + "</td><td>" + fmt(r.newUnitsRaw) + "</td>" +
+        "<td>" + fmt(r.usedUnitsVerified) + "</td><td>" + fmt(r.usedUnitsRaw) + "</td>" +
+        "<td>" + fmt(r.dealersSeen) + "</td>";
+      tbody.appendChild(tr);
+    });
+  }
+
+  fetch(SUPA + "/rpc/fn_alberta_inventory_daily", {
+    method: "POST",
+    headers: { apikey: ANON, Authorization: "Bearer " + ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ p_days: 30 }),
+  })
+    .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(render)
+    .catch(function(e){
+      document.getElementById("loading").textContent = "Could not load today's report — try again shortly.";
+      console.error(e);
+    });
+})();
+</script>
+</body>
+</html>

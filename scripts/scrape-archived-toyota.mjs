@@ -233,6 +233,18 @@ async function main() {
   console.log(`[${MAKE}] ${hits} release(s) yielded prices, ${misses} did not. ${rows.length} archived MSRP row(s) across MY${years[0] ?? "-"}-${years[years.length - 1] ?? "-"}.`);
   for (const y of years) console.log(`   MY${y}: ${rows.filter((r) => r.year === y).length} rows`);
 
+  // A SCRAPE THAT READ NOTHING IS A FAILURE, NOT AN EMPTY RESULT.
+  //
+  // Without this the job exits 0 on a newsroom that has been restyled, moved,
+  // or has started refusing the runner's IP -- and a green monthly run reads as
+  // "the archive is up to date" when it means "we wrote nothing". That is the
+  // catalog-guard rule applied to this source: refresh green must mean rows.
+  if (!rows.length) {
+    console.error(`[${MAKE}] ${urls.length} release(s) read and ZERO archived rows parsed. Refusing to report success.`);
+    process.exitCode = 1;
+    return;
+  }
+
   // upsert: archived years merge BESIDE the current catalogue, never replacing
   // it. replaceRows is keyed (year, make, model, trim).
   await writeCatalogs(MAKE, { msrpRows: rows }, { upsert: true, label: "archived MSRP" });
