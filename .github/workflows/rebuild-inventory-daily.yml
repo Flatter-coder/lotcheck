@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: "22"
       - run: npm run test:inventory-daily
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
       - name: Rebuild the day
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
