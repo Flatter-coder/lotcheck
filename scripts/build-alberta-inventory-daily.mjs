@@ -105,7 +105,26 @@ async function main() {
   });
 
   const agg = aggregateDailyCounts(counts);
-  const dealersSeen = new Set(counts.map((c) => c.dealerId)).size;
+  const seenIds = new Set(counts.map((c) => c.dealerId));
+  const dealersSeen = seenIds.size;
+
+  // NAME THE DEALERS WITH ZERO OBSERVATIONS TODAY, don't just subtract them
+  // silently into "8 dealers not seen". An active dealer with no observation
+  // row is either a real zero-inventory day, a crawl failure the "2 failed"
+  // count already covers, OR -- as found 2026-09-07 -- a dealer whose
+  // fn_upsert_listings calls report success while never writing the
+  // heartbeat, which no amount of correct pagination on THIS side will catch.
+  // [[no-silent-caps]] this is the log line that would have surfaced Shaw
+  // immediately instead of a multi-hour investigation.
+  const silentDealers = dealers.filter((d) => !seenIds.has(d.id));
+  if (silentDealers.length) {
+    console.log(`  ${silentDealers.length} active dealer(s) contributed ZERO observations today:`);
+    for (const d of silentDealers) console.log(`    id=${d.id}  ${d.name ?? "(unnamed)"}`);
+  }
+  const silentNote = silentDealers.length
+    ? `${silentDealers.length} active dealer(s) recorded no observation today and are excluded from every count above: ` +
+      silentDealers.map((d) => d.name ?? `dealer ${d.id}`).join(", ") + "."
+    : null;
 
   const [arrivedRes, delistedRes, pricedRes] = await Promise.all([
     supabase.from("vehicle_listing").select("id", { count: "exact", head: true }).eq("first_seen_on", day),
@@ -134,7 +153,7 @@ async function main() {
     arrived: arrivedRes.count ?? 0,
     delisted: delistedRes.count ?? 0,
     price_events: pricedRes.count ?? 0,
-    notes: agg.notes,
+    notes: [agg.notes, silentNote].filter(Boolean).join(" ") || null,
   };
 
   console.log(`[${day}] ${dealersSeen} dealers seen (${agg.dealersFlagged} flagged).`);
