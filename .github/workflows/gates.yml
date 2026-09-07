@@ -480,6 +480,13 @@ jobs:
       # wrong by ~$2,000 in the dealer's favour on every comparison.
       - name: Archived MSRP parser and its refusals
         run: npm run test:archived-msrp
+      # The public daily new/used count has to survive a single contaminated
+      # dealer pass (one rooftop returning thousands of units, e.g. a group or
+      # platform feed misread as one dealer) without that number reaching the
+      # verified total — this pins the cap and the exact Shaw-shaped case that
+      # first exposed the need for it.
+      - name: Alberta daily inventory aggregation and its plausibility cap
+        run: npm run test:inventory-daily
       - name: The shared reader keeps absences (read-num)
         run: npm run test:read-num
       # Two promises to the buyer that are control flow, not data: a report

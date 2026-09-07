@@ -37,6 +37,7 @@ const SURFACES = [
   "public/alberta.html",
   "public/dealer-portal.html",
   "public/live-price-index.html",
+  "public/alberta-inventory-daily.html",
   "public/canada-map.html",
   "public/statcan-zev-map.html",
   "src/App.jsx",
