@@ -27,11 +27,19 @@ function parseArgs() {
   return out;
 }
 
-async function pageAll(supabase, table, cols, filterFn) {
+// UNORDERED .range() PAGINATION IS HOW A COUNT STOPS BEING REPRODUCIBLE.
+// scripts/amvic-activities.mjs hit this once already at 21,866 rows: without
+// an ORDER BY, Postgres is free to return a different slice on each request,
+// so paging can silently skip or duplicate rows between pages. This is the
+// exact shape of the 2026-09-07 defect that undercounted this report by
+// Shaw's entire ~10,000-unit block — orderCol is now REQUIRED, not optional,
+// so a future caller cannot reintroduce the same bug by omission.
+async function pageAll(supabase, table, cols, orderCol, filterFn) {
+  if (!orderCol) throw new Error(`pageAll(${table}): orderCol is required — unordered pagination silently drops rows`);
   const out = [];
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
-    let q = supabase.from(table).select(cols).range(from, from + PAGE - 1);
+    let q = supabase.from(table).select(cols).order(orderCol, { ascending: true }).range(from, from + PAGE - 1);
     if (filterFn) q = filterFn(q);
     const { data, error } = await q;
     if (error) throw new Error(`could not read ${table}: ${error.message}`);
@@ -48,17 +56,35 @@ async function main() {
   if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"); process.exit(1); }
   const supabase = createClient(url, key);
 
-  const dealers = await pageAll(supabase, "dealer_source", "id,name,active", (q) => q.eq("active", true));
+  const dealers = await pageAll(supabase, "dealer_source", "id,name,active", "id", (q) => q.eq("active", true));
   const dealerName = new Map(dealers.map((d) => [d.id, d.name]));
 
   // listing_observation.observed_on = day, joined to vehicle_listing for
   // dealer and condition. Supabase's embedded-resource select does the join
-  // in one round trip.
+  // in one round trip. Ordered by listing_id -- the table's own PK has no
+  // surrogate id column, and observed_on is already pinned by the filter, so
+  // listing_id alone gives a stable, gap-free page boundary.
   const observations = await pageAll(
     supabase, "listing_observation",
     "listing_id,vehicle_listing!inner(dealer_id,condition)",
+    "listing_id",
     (q) => q.eq("observed_on", day)
   );
+
+  // A STANDING CROSS-CHECK, not a one-time fix. Compares the paged, joined
+  // read above against a plain HEAD count of the same filter with no join and
+  // no pagination involved. If a future change to the join, the embed syntax,
+  // or the pagination reintroduces a gap, THIS throws instead of silently
+  // writing a low number as if it were the truth. [[no-single-point-of-failure]]
+  const rawCount = await supabase.from("listing_observation").select("*", { count: "exact", head: true }).eq("observed_on", day);
+  if (rawCount.error) throw new Error(`could not count listing_observation: ${rawCount.error.message}`);
+  if (rawCount.count !== observations.length) {
+    throw new Error(
+      `listing_observation read mismatch for ${day}: paged+joined query returned ${observations.length} rows, ` +
+      `a plain count says ${rawCount.count}. Refusing to write a report that may be undercounting. ` +
+      `(This is the exact defect class that undercounted 2026-09-07 by Shaw's entire block.)`
+    );
+  }
 
   if (!observations.length) {
     console.error(`No listing_observation rows for ${day} — no crawl ran (or it was --dry-run). Writing nothing.`);
