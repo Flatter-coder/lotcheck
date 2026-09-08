@@ -199,13 +199,19 @@ const RULES = [
     // count change would have believed four report surfaces had been checked
     // when none was ever in the count.
     //
-    //   public/index.html          6  nav link ×2, "10-point pipeline",
-    //                                 the section aria-label, the <h2>, the lede
+    //   public/index.html          7  nav link ×2, "10-point pipeline",
+    //                                 the section aria-label, the <h2>, the lede,
+    //                                 and the #scan-cta caption ("...10-point
+    //                                 verification lane"), added 2026-09-08 when
+    //                                 the anecdotal story + fake terminal CTA were
+    //                                 replaced with a real scan video whose
+    //                                 caption stack reuses only already-approved
+    //                                 copy from elsewhere on the page.
     //   public/alberta.html        1  nav link
     //   public/live-price-index.html 1  nav link
     //   src/App.jsx                4  nav links only (comments are not counted)
     //                              ─
-    //                             12
+    //                             13
     //
     // So this rule polices the ADVERTISEMENT, and only the advertisement.
     //
@@ -219,7 +225,7 @@ const RULES = [
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].
-    expected: 12,
+    expected: 13,
   },
 ];
 
