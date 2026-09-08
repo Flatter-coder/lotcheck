@@ -11857,6 +11857,14 @@ function QuoteCheckPage(){
                 <span style={{fontSize:11.5,color:C.inkFaint,fontWeight:700}}>— dealer listings and written quotes</span>
               </div>
             )}
+            {/* Says the constraint up front, not just reactively after a marketplace
+                URL is pasted (isAggregatorUrl below still catches that case with a
+                fuller explanation) -- so a first-time visitor doesn't waste a paste
+                on AutoTrader/Kijiji/etc. before finding out it won't work. Kept to
+                one quiet line, not the old permanent-red-text treatment. */}
+            {status==="idle"&&(
+              <div style={{fontSize:11,color:C.inkFaint,marginTop:4}}>Dealer websites only — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
+            )}
           </div>
 
           {/* Gift-link claim banner: someone arrived via …/quote-check?gift=CODE */}

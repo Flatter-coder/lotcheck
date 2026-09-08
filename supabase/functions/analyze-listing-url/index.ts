@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03k";  // 03k: days-on-lot is scoped to the real dealer (the URL is passed in; a null host now REFUSES instead of matching every dealer), and the deck cards render a body instead of the word "undefined".
+const CACHE_VER = "2026-09-08a";  // 08a: AGGREGATOR_HOSTS synced with the client -- ebay.ca/ebay.com/facebook.com/fb.com are enforced server-side again (autotrader.co.uk dropped from both, Canada-only).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3249,11 +3249,14 @@ const AGGREGATOR_HOSTS = [
   "cargurus.com",
   "kijijiautos.ca",
   "kijiji.ca",
+  "ebay.ca",
+  "ebay.com",
+  "facebook.com",
+  "fb.com",
   "carfax.ca",
   "carfax.com",
   "clutch.ca",
   "carpages.ca",
-  "autotrader.co.uk",
   "cars.com",
   "truecar.com",
   "carvana.com",
