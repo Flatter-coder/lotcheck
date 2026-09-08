@@ -229,6 +229,25 @@ html[data-theme="dark"] .theme-toggle .moon{display:none}
 .hero-scene{position:relative}
 .hero-scene svg{width:100%;height:auto;display:block}
 #heroScene svg{transition:transform .6s var(--ease-out);will-change:transform}
+.hero-video{display:none;width:100%;height:auto;border-radius:var(--r-lg);box-shadow:var(--shadow-soft)}
+html[data-theme="dark"] #heroScene{display:none}
+html[data-theme="dark"] .hero-video{display:block}
+html[data-theme="dark"] .float-chip{display:none}
+.sound-toggle{
+  position:absolute;bottom:14px;right:14px;z-index:2;
+  width:38px;height:38px;border-radius:999px;border:none;
+  background:rgba(21,18,31,.6);backdrop-filter:blur(6px);
+  display:none;align-items:center;justify-content:center;cursor:pointer;color:#fff;
+  transition:background .2s,transform .2s var(--ease-pop);
+}
+.sound-toggle:hover{background:rgba(21,18,31,.8);transform:scale(1.06)}
+.sound-toggle:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+html[data-theme="dark"] .sound-toggle{display:flex}
+.sound-toggle svg{width:16px;height:16px}
+.sound-toggle .icon-off{display:block}
+.sound-toggle .icon-on{display:none}
+.sound-toggle[aria-pressed="true"] .icon-off{display:none}
+.sound-toggle[aria-pressed="true"] .icon-on{display:block}
 .float-chip{
   position:absolute;display:inline-flex;align-items:center;gap:8px;
   background:var(--card);border:2px solid var(--line);border-radius:999px;
@@ -621,6 +640,13 @@ footer{padding:34px 0 44px}
     </div>
     <div class="hero-scene rv" style="--i:2">
       <div id="heroScene"></div>
+      <video class="hero-video" id="heroVideo" muted loop playsinline preload="none" poster="/hero-rain-poster.jpg" aria-label="LotCheck verification lane in the rain, a cinematic loop">
+        <source src="/hero-rain.mp4" type="video/mp4">
+      </video>
+      <button class="sound-toggle" id="soundToggle" type="button" aria-pressed="false" aria-label="Turn on rain sound">
+        <svg class="icon-off" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M17 8.5c1 1 1.5 2.2 1.5 3.5s-.5 2.5-1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M2 2l20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <svg class="icon-on" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16.5 8.5c1 1 1.5 2.2 1.5 3.5s-.5 2.5-1.5 3.5M19 6c1.8 1.6 2.8 3.7 2.8 6s-1 4.4-2.8 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
       <div class="float-chip fc1" aria-hidden="true"><i style="background:var(--coral)"></i>2 open recalls found</div>
       <div class="float-chip fc2" aria-hidden="true"><i style="background:var(--teal)"></i>$899 fee flagged</div>
     </div>
@@ -1396,13 +1422,31 @@ buildPortal();
 (function themeToggle(){
   var btn = document.getElementById("themeToggle");
   var metaColor = document.getElementById("themeColorMeta");
+  var heroVideo = document.getElementById("heroVideo");
+  var soundBtn = document.getElementById("soundToggle");
   if(!btn) return;
   function isDark(){ return document.documentElement.getAttribute("data-theme") === "dark"; }
+  function syncVideo(dark){
+    if(!heroVideo) return;
+    if(dark){
+      if(heroVideo.preload === "none") heroVideo.preload = "auto";
+      var p = heroVideo.play();
+      if(p && p.catch) p.catch(function(){});
+    } else {
+      heroVideo.pause();
+      if(soundBtn){
+        heroVideo.muted = true;
+        soundBtn.setAttribute("aria-pressed","false");
+        soundBtn.setAttribute("aria-label","Turn on rain sound");
+      }
+    }
+  }
   function sync(){
     var dark = isDark();
     btn.setAttribute("aria-pressed", dark ? "true" : "false");
     btn.setAttribute("aria-label", dark ? "Switch to bright mode" : "Switch to dark mode");
     if(metaColor) metaColor.setAttribute("content", dark ? "#15121F" : "#FBF5EC");
+    syncVideo(dark);
   }
   sync();
   btn.addEventListener("click", function(){
@@ -1412,6 +1456,15 @@ buildPortal();
     try{ localStorage.setItem("lc-theme", next); }catch(e){}
     sync();
   });
+  if(soundBtn && heroVideo){
+    soundBtn.addEventListener("click", function(){
+      var wasMuted = heroVideo.muted;
+      heroVideo.muted = !wasMuted;
+      var soundNowOn = wasMuted; // was muted, now unmuted -> sound is on
+      soundBtn.setAttribute("aria-pressed", soundNowOn ? "true" : "false");
+      soundBtn.setAttribute("aria-label", soundNowOn ? "Turn off rain sound" : "Turn on rain sound");
+    });
+  }
 })();
 })();
 </script>
