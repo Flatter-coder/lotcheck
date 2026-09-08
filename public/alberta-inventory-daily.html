@@ -287,12 +287,16 @@
     }).join("");
   }
 
-  function timeAgo(iso){
-    var mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-    if (mins < 60) return mins + "m ago";
-    var hrs = Math.round(mins / 60);
-    if (hrs < 48) return hrs + "h ago";
-    return Math.round(hrs / 24) + "d ago";
+  // eventAt is always midnight UTC of the day it was recorded -- the crawl
+  // gives us a DAY, not a time of day. An hours/minutes figure here would be
+  // false precision the data doesn't have; say the day plainly instead.
+  function dayLabel(iso){
+    var d = new Date(iso), today = new Date();
+    var startOfDay = function(x){ return Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()); };
+    var diffDays = Math.round((startOfDay(today) - startOfDay(d)) / 86400000);
+    if (diffDays <= 0) return "today";
+    if (diffDays === 1) return "yesterday";
+    return d.toLocaleDateString("en-CA", { month: "short", day: "numeric" });
   }
 
   var KIND_LABEL = { new: "NEW", price_move: "PRICE", delisted: "GONE" };
@@ -319,7 +323,7 @@
         '<div class="ticker-top"><span class="badge ' + e.kind + '">' + KIND_LABEL[e.kind] + '</span>' +
         '<span class="ticker-title">' + (title.trim() || (e.condition || "vehicle")) + '</span></div>' +
         '<div class="ticker-meta"><span>' + (e.city || "Alberta") + ' &middot; ' + (e.dealerName || "a dealer") + '</span>' +
-        '<span class="mono">' + priceHtml + ' &middot; ' + timeAgo(e.eventAt) + '</span></div>' +
+        '<span class="mono">' + priceHtml + ' &middot; ' + dayLabel(e.eventAt) + '</span></div>' +
         '</div>';
     }).join("");
   }
