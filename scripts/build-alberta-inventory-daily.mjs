@@ -16,7 +16,14 @@
 // Alberta today". [[report-never-empty]] [[catalog-refresh-can-empty-catalog]]
 import { createClient } from "@supabase/supabase-js";
 import { issuedAmvicHosts } from "./lib/amvic-hosts.mjs";
-import { aggregateDailyCounts } from "./lib/inventory-daily.mjs";
+import { aggregateDailyCounts, aggregateByCity } from "./lib/inventory-daily.mjs";
+// Reused, not reimplemented: dealer_source.city is free text off two rosters
+// (AMVIC + OSM), so "St. Albert" / "ST. ALBERT" / "Saint Albert" are the same
+// place under three spellings. build-city-price-index.mjs already solved
+// this for the price-index feature; a second, independent city-grouping
+// function here would be the exact two-authors-per-fact shape that has
+// caused a real defect before (the RAV4 / RAV4 Hybrid split).
+import { cityKey, prettyCity, MIN_DEALERS } from "./build-city-price-index.mjs";
 
 function parseArgs() {
   const out = {};
@@ -56,8 +63,20 @@ async function main() {
   if (!url || !key) { console.error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required"); process.exit(1); }
   const supabase = createClient(url, key);
 
-  const dealers = await pageAll(supabase, "dealer_source", "id,name,active", "id", (q) => q.eq("active", true));
+  const dealers = await pageAll(supabase, "dealer_source", "id,name,active,city", "id", (q) => q.eq("active", true));
   const dealerName = new Map(dealers.map((d) => [d.id, d.name]));
+
+  // dealerId -> normalized cityKey (or null for dealers with no city --
+  // excluded from every per-city row, same as city_dealer_index). A separate
+  // map keeps each key's ORIGINAL spelling variants so prettyCity() can pick
+  // a real one instead of reconstructing a title-cased guess.
+  const dealerCityKey = new Map();
+  const cityVariants = new Map();
+  for (const d of dealers) {
+    const ck = cityKey(d.city);
+    dealerCityKey.set(d.id, ck);
+    if (ck) { if (!cityVariants.has(ck)) cityVariants.set(ck, []); cityVariants.get(ck).push(d.city); }
+  }
 
   // listing_observation.observed_on = day, joined to vehicle_listing for
   // dealer and condition. Supabase's embedded-resource select does the join
@@ -173,6 +192,35 @@ async function main() {
   });
   if (!res.ok) throw new Error(`write alberta_inventory_daily -> HTTP ${res.status}: ${await res.text()}`);
   console.log(`\nWrote alberta_inventory_daily for ${day}.`);
+
+  // ---- per-city rows: the SAME cap, run again inside each city ------------
+  const cityAgg = aggregateByCity(counts, dealerCityKey);
+  const cityRows = cityAgg.map((c) => ({
+    day, city: prettyCity(cityVariants.get(c.cityKey)) || c.cityKey, province: "AB",
+    computed_at: new Date().toISOString(),
+    dealers_seen: c.dealersSeen, dealers_flagged: c.dealersFlagged,
+    new_units_verified: c.newVerified, new_units_raw: c.newRaw,
+    used_units_verified: c.usedVerified, used_units_raw: c.usedRaw,
+    notes: c.notes,
+  }));
+
+  console.log(`\n${cityRows.length} cit${cityRows.length === 1 ? "y" : "ies"} with at least one dealer seen (${cityRows.filter((r) => r.dealers_seen >= MIN_DEALERS).length} clear the ${MIN_DEALERS}-dealer publish gate):`);
+  for (const c of cityRows.sort((a, b) => b.used_units_verified - a.used_units_verified)) {
+    console.log(`  ${c.city.padEnd(20)} ${String(c.dealers_seen).padStart(2)} dealer(s)  new ${c.new_units_verified}  used ${c.used_units_verified}${c.dealers_seen < MIN_DEALERS ? "  (below publish gate)" : ""}`);
+  }
+
+  if (cityRows.length) {
+    const cityRes = await fetch(`${url}/rest/v1/city_inventory_daily?on_conflict=day,city,province`, {
+      method: "POST",
+      headers: {
+        apikey: key, Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify(cityRows),
+    });
+    if (!cityRes.ok) throw new Error(`write city_inventory_daily -> HTTP ${cityRes.status}: ${await cityRes.text()}`);
+    console.log(`Wrote ${cityRows.length} city_inventory_daily row(s) for ${day}.`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

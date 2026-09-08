@@ -44,3 +44,33 @@ export function aggregateDailyCounts(counts) {
     : null;
   return { newRaw, newVerified, usedRaw, usedVerified, dealersFlagged, notes };
 }
+
+/**
+ * Splits the same per-(dealer,condition) counts by city and runs the SAME
+ * plausibility cap within each city, so a single oversized dealer can't
+ * distort one city's total any more than it can distort the province's.
+ *
+ * dealerCityKey: Map<dealerId, cityKey|null> -- a dealer with no known city
+ * (null) is excluded here exactly as it is from city_dealer_index, rather
+ * than inventing a location for it.
+ *
+ * Returns one row per city that had at least one observation, unsorted and
+ * ungated -- the caller decides the publish threshold (city_inventory_daily
+ * writes every city; fn_city_inventory_daily applies the read-time gate).
+ */
+export function aggregateByCity(counts, dealerCityKey) {
+  const byCity = new Map();
+  for (const c of counts) {
+    const ck = dealerCityKey.get(c.dealerId);
+    if (!ck) continue;
+    if (!byCity.has(ck)) byCity.set(ck, []);
+    byCity.get(ck).push(c);
+  }
+  const out = [];
+  for (const [ck, cityCounts] of byCity) {
+    const agg = aggregateDailyCounts(cityCounts);
+    const dealersSeen = new Set(cityCounts.map((c) => c.dealerId)).size;
+    out.push({ cityKey: ck, dealersSeen, ...agg });
+  }
+  return out;
+}

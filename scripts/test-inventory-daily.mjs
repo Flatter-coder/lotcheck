@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline assertions for aggregateDailyCounts — no database in the loop.
 // Run: npm run test:inventory-daily
-import { aggregateDailyCounts, PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION } from "./lib/inventory-daily.mjs";
+import { aggregateDailyCounts, aggregateByCity, PLAUSIBLE_MAX_PER_DEALER_PER_CONDITION } from "./lib/inventory-daily.mjs";
 
 let pass = 0, fail = 0;
 function ok(label, cond) {
@@ -53,6 +53,28 @@ function ok(label, cond) {
 {
   const r = aggregateDailyCounts([]);
   ok("empty input returns all zeros", r.newRaw === 0 && r.usedRaw === 0 && r.dealersFlagged === 0 && r.notes === null);
+}
+
+// 6) aggregateByCity: splits by city, caps INDEPENDENTLY per city, drops no-city dealers.
+{
+  const dealerCityKey = new Map([[1, "calgary"], [2, "calgary"], [9, "edmonton"], [99, null]]);
+  const rows = aggregateByCity([
+    { dealerId: 1, dealerName: "Calgary A", condition: "used", n: 40 },
+    { dealerId: 2, dealerName: "Calgary B", condition: "used", n: 60 },
+    { dealerId: 9, dealerName: "Shaw-like", condition: "used", n: 5163 },
+    { dealerId: 99, dealerName: "No City Motors", condition: "used", n: 500 },
+  ], dealerCityKey);
+  const calgary = rows.find((r) => r.cityKey === "calgary");
+  const edmonton = rows.find((r) => r.cityKey === "edmonton");
+  ok("no-city dealer produces no city row", rows.length === 2);
+  ok("calgary sums its own dealers only", calgary.usedVerified === 100 && calgary.dealersSeen === 2);
+  ok("a cap-exceeding dealer is flagged within ITS city, not the other one", edmonton.dealersFlagged === 1 && edmonton.usedVerified === 0 && calgary.dealersFlagged === 0);
+}
+
+// 7) aggregateByCity: empty input is zero cities, not a crash.
+{
+  const rows = aggregateByCity([], new Map());
+  ok("no counts means no city rows", rows.length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

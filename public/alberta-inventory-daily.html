@@ -81,6 +81,18 @@
   .row .val .u{font-size:10.5px;color:var(--dimmer);font-weight:500;margin-left:3px}
   .pct-under{color:var(--good)} .pct-over{color:var(--bad)}
   .empty-row{padding:14px 0;color:var(--dimmer);font-size:12px}
+  .badge{font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);
+    color:var(--dimmer);white-space:nowrap}
+  .badge.new{color:var(--good);border-color:color-mix(in srgb, var(--good) 40%, transparent)}
+  .badge.price_move{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
+  .badge.delisted{color:var(--bad);border-color:color-mix(in srgb, var(--bad) 40%, transparent)}
+  .ticker{max-height:340px;overflow-y:auto}
+  .ticker-row{display:flex;flex-direction:column;gap:2px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:12px}
+  .ticker-row:last-child{border-bottom:none}
+  .ticker-top{display:flex;align-items:center;gap:6px}
+  .ticker-title{font-weight:600;color:var(--ink)}
+  .ticker-meta{font-size:11px;color:var(--dimmer);display:flex;justify-content:space-between}
+  .price-up{color:var(--bad)} .price-down{color:var(--good)}
 
   h2.section{font-size:14px;margin:26px 0 8px}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -141,15 +153,15 @@
 
     <div class="cols">
       <div class="panel">
-        <h2>MSRP price-index coverage, by city</h2>
-        <div class="sub" id="citySub">Cities with enough dealers and listings for a published median — a different measure from the counts above: how far live asking prices sit from catalog MSRP, not how many units are on lots.</div>
+        <h2>By city</h2>
+        <div class="sub">New/used for-sale counts, verified the same way as the totals above. Only shown once a city has 3+ dealers seen — fewer than that and a count is close enough to naming one dealer's lot size to withhold it. The small badge is a different measure, carried over from the MSRP price index: how far live asking prices sit from catalog sticker, where that also clears its own gate.</div>
         <div class="rows" id="cityRows"><div class="empty-row">Loading&hellip;</div></div>
       </div>
 
       <div class="panel">
-        <h2>Today, by category</h2>
-        <div class="sub">Aggregate counts only — LotCheck does not publish a per-listing feed.</div>
-        <div class="rows" id="activityRows"></div>
+        <h2>Recent activity</h2>
+        <div class="sub">Real listings, most recent first — a new arrival, a price change, or a delisting. Named plainly; no motive implied either way a price moves.</div>
+        <div class="rows ticker" id="tickerRows"><div class="empty-row">Loading&hellip;</div></div>
       </div>
     </div>
 
@@ -229,17 +241,6 @@
       flagBox.style.display = "none";
     }
 
-    var activity = document.getElementById("activityRows");
-    var items = [
-      { name: "Newly read", meta: "first seen today", val: fmt(today.arrived) },
-      { name: "Price moves", meta: "list or sale price changed", val: fmt(today.priceEvents) },
-      { name: "Delisted", meta: "no longer advertised", val: fmt(today.delisted) },
-    ];
-    activity.innerHTML = items.map(function(it){
-      return '<div class="row"><span><span class="name">' + it.name + '</span><span class="meta">' + it.meta + '</span></span>' +
-        '<span class="val">' + it.val + '</span></div>';
-    }).join("");
-
     var tbody = document.getElementById("historyBody");
     tbody.innerHTML = "";
     rows.slice(0, 14).forEach(function(r){
@@ -254,33 +255,89 @@
     return today;
   }
 
-  function renderCities(cities){
+  // fn_city_inventory_daily is the real for-sale count, gated at 3+ dealers.
+  // fn_city_price_index is a DIFFERENT measure (listings matched to a catalog
+  // MSRP row, for the price-index feature) with its own gate -- merged here
+  // by city name only when both happen to clear their own gate for the day;
+  // never invented for a city that has only one of the two.
+  function renderCities(inventory, priceIndex){
     var box = document.getElementById("cityRows");
-    if (!cities || !cities.length){
-      box.innerHTML = '<div class="empty-row">No city has cleared the publish gate yet (needs 3+ dealers and 12+ matched listings).</div>';
+    var latestDay = null;
+    (inventory || []).forEach(function(r){ if (!latestDay || r.day > latestDay) latestDay = r.day; });
+    var today = (inventory || []).filter(function(r){ return r.day === latestDay; });
+    var priceByCity = {};
+    (priceIndex || []).forEach(function(p){ priceByCity[p.city] = p; });
+
+    if (!today.length){
+      box.innerHTML = '<div class="empty-row">No city has 3+ dealers seen yet today.</div>';
       return;
     }
-    box.innerHTML = cities.map(function(c){
-      var pct = c.index_pct;
-      var cls = pct < 0 ? "pct-under" : "pct-over";
-      var sign = pct > 0 ? "+" : "";
+    today.sort(function(a,b){ return b.usedUnitsVerified - a.usedUnitsVerified; });
+    box.innerHTML = today.map(function(c){
+      var p = priceByCity[c.city];
+      var badge = "";
+      if (p){
+        var cls = p.index_pct < 0 ? "pct-under" : "pct-over";
+        var sign = p.index_pct > 0 ? "+" : "";
+        badge = '<span class="badge ' + cls + '">' + sign + fmt1(p.index_pct) + '% vs sticker</span>';
+      }
       return '<div class="row"><span><span class="name">' + c.city + '</span>' +
-        '<span class="meta">' + fmt(c.n_dealers) + ' dealer' + (c.n_dealers===1?"":"s") + ' · ' + fmt(c.n_listings) + ' matched</span></span>' +
-        '<span class="val ' + cls + '">' + sign + fmt1(pct) + '<span class="u">% vs sticker</span></span></div>';
+        '<span class="meta">' + fmt(c.dealersSeen) + ' dealer' + (c.dealersSeen===1?"":"s") + '</span></span>' +
+        '<span class="val">' + fmt(c.newUnitsVerified) + '<span class="u">new</span> &middot; ' + fmt(c.usedUnitsVerified) + '<span class="u">used</span> ' + badge + '</span></div>';
+    }).join("");
+  }
+
+  function timeAgo(iso){
+    var mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 60) return mins + "m ago";
+    var hrs = Math.round(mins / 60);
+    if (hrs < 48) return hrs + "h ago";
+    return Math.round(hrs / 24) + "d ago";
+  }
+
+  var KIND_LABEL = { new: "NEW", price_move: "PRICE", delisted: "GONE" };
+
+  function renderTicker(events){
+    var box = document.getElementById("tickerRows");
+    if (!events || !events.length){
+      box.innerHTML = '<div class="empty-row">No listing activity in the last few days.</div>';
+      return;
+    }
+    box.innerHTML = events.map(function(e){
+      var title = [e.year, e.make, e.model].filter(Boolean).join(" ") + (e.trim ? " " + e.trim : "");
+      var priceHtml;
+      if (e.kind === "price_move" && e.prevPrice != null){
+        var up = e.price > e.prevPrice;
+        priceHtml = '<span class="' + (up ? "price-up" : "price-down") + '">' + (up ? "&uarr;" : "&darr;") + ' $' + fmt(e.price) +
+          '</span> <span style="color:var(--dimmer)">from $' + fmt(e.prevPrice) + '</span>';
+      } else if (e.price != null) {
+        priceHtml = '$' + fmt(e.price);
+      } else {
+        priceHtml = "price not stated";
+      }
+      return '<div class="ticker-row">' +
+        '<div class="ticker-top"><span class="badge ' + e.kind + '">' + KIND_LABEL[e.kind] + '</span>' +
+        '<span class="ticker-title">' + (title.trim() || (e.condition || "vehicle")) + '</span></div>' +
+        '<div class="ticker-meta"><span>' + (e.city || "Alberta") + ' &middot; ' + (e.dealerName || "a dealer") + '</span>' +
+        '<span class="mono">' + priceHtml + ' &middot; ' + timeAgo(e.eventAt) + '</span></div>' +
+        '</div>';
     }).join("");
   }
 
   Promise.all([
     rpc("fn_alberta_inventory_daily", { p_days: 30 }).catch(function(e){ console.error(e); return null; }),
+    rpc("fn_city_inventory_daily", { p_days: 3 }).catch(function(e){ console.error(e); return []; }),
     rpc("fn_city_price_index", {}).catch(function(e){ console.error(e); return []; }),
+    rpc("fn_recent_listing_events", { p_limit: 60 }).catch(function(e){ console.error(e); return []; }),
   ]).then(function(results){
-    var daily = results[0], cities = results[1];
+    var daily = results[0], cityInventory = results[1], priceIndex = results[2], events = results[3];
     if (daily === null){
       document.getElementById("loading").textContent = "Could not load today's report — try again shortly.";
       return;
     }
     renderDaily(daily);
-    renderCities(cities);
+    renderCities(cityInventory, priceIndex);
+    renderTicker(events);
   });
 })();
 </script>
