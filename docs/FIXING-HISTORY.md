@@ -17,6 +17,15 @@ the next instance.
 
 ---
 
+## 2026-09-08
+
+| fix | live | what broke | class | guard now in place |
+|---|---|---|---|---|
+| `00316f1` | ✓ verified | **Every dealer's new/used count landed in one province-wide number, so Calgary and Edmonton were indistinguishable, and nothing showed which listings had actually just moved.** The compact-dashboard redesign (`ba9b47e`, same day) got the layout right but the data underneath was still the 09-07 total — the per-city split and the per-listing feed the new layout implied did not exist as queries yet, only as a page shaped to hold them. | data collected and never surfaced, same shape as `45c5884` above — the per-dealer city and the day's price/new/delisted events were already sitting in `dealer_source` / `vehicle_listing` / `listing_price_history`, just never split or read back | `city_inventory_daily` (day+city+province) + `fn_city_inventory_daily`, gated at `MIN_DEALERS=3` so no row traces back to a single dealer's lot, reusing `cityKey`/`prettyCity` from `build-city-price-index.mjs` rather than writing a second city normalizer. `aggregateByCity()` runs the SAME 1,500-unit plausibility cap independently per city — `test-inventory-daily.mjs` pins that a cap-exceeding dealer in one city can't zero out another city's total. `fn_recent_listing_events` (first version) unions new/price-move/delisted straight from those tables, no VIN or stock number exposed. Verified live: Calgary/Edmonton/Wetaskiwin rendering with real counts, cities under the 3-dealer gate absent rather than shown thin. |
+| `e94fb1f` | ✓ verified | **The ticker shipped the same day and immediately failed the one thing it existed to do.** First live check: 60 of 60 rows were `kind=new`, zero `price_move`, zero `delisted` — despite 455 real price moves and 305 real delistings that same day. `first_seen_on` / `observed_on` / `delisted_on` are `date` columns with no time-of-day, so every event from one calendar day ties at exactly midnight once cast to `timestamptz`; `order by event_at desc limit 60` had no real tiebreak within a day, and Postgres was free to let one kind win every tie — which it did, completely. | a count read as a classification — a `LIMIT` that silently favours whichever rows happen to sort first is a count masquerading as "the recent ones" | `fn_recent_listing_events` now ranks each kind independently (`row_number() over (partition by kind order by event_at desc, listing_id desc)`) and takes a fair `ceil(limit/3)` share of EACH kind before merging, so a busy "new" day can never crowd price moves and delistings out again. Client-side `timeAgo()` ("29h ago") replaced with `dayLabel()` ("today" / "yesterday" / date) in the same commit — the underlying timestamps are always midnight, so hour-precision was false precision sitting on top of the real bug. Verified live at `lotcheck.ca/inventory-daily` post-fix: exactly 20/20/20 across NEW/PRICE/GONE, real dealer names and prices, arrow direction and colour matching the actual sign of each price move. |
+
+---
+
 ## 2026-09-07
 
 | fix | live | what broke | class | guard now in place |
