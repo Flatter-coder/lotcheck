@@ -1,11 +1,11 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-09-08",
-  "totalDealers": 406,
+  "generatedAt": "2026-09-09",
+  "totalDealers": 405,
   "cities": [
     {
       "name": "Calgary",
-      "count": 142,
+      "count": 141,
       "sample": [
         "Royal Oak Audi",
         "Stadium Nissan",
@@ -20,13 +20,13 @@
         "Heninger Toyota",
         "Calgary Honda",
         "Advantage Ford",
-        "CMP Classic",
         "T&T Honda",
         "Eastside Kia",
         "South Pointe Toyota",
         "Woodridge Ford",
         "Renfrew Chrysler Dodge Jeep Ram",
-        "Royal Oak Nissan"
+        "Royal Oak Nissan",
+        "Charlesglen Toyota"
       ]
     },
     {
