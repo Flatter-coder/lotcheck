@@ -24,7 +24,7 @@ export const REPORT_POINTS = [
   { key: "price_vs_msrp", title: "Price vs MSRP",             marketing: "MSRP verification against manufacturer data" },
   { key: "recalls",       title: "Transport Canada recalls",  marketing: "Open-recall lookup (Transport Canada)" },
   { key: "fees",          title: "Add-ons & fee audit",       marketing: "Fee itemization audit" },
-  { key: "apr",           title: "Financing APR",             marketing: "Financing APR against the published rate" },
+  { key: "apr",           title: "AMVIC",                     marketing: "AMVIC against the published rate" },
   { key: "finance_math",  title: "Financing math",            marketing: "Financing math check" },
   { key: "odometer",      title: "Odometer",                  marketing: "Odometer consistency check" },
   { key: "vin",           title: "VIN check",                 marketing: "VIN pattern validity check" },
@@ -37,7 +37,7 @@ export const REPORT_POINTS = [
 // order. Kept beside the list they label so one cannot be edited without the
 // other being visibly stale.
 export const REPORT_POINT_SHORT = [
-  "MSRP verified", "Open recalls", "Fee audit", "Financing APR", "Financing math",
+  "MSRP verified", "Open recalls", "Fee audit", "AMVIC", "Financing math",
   "Odometer check", "VIN pattern", "EV rebate check", "Warranty validity", "Dealer reputation",
 ];
 
