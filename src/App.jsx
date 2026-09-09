@@ -11942,12 +11942,16 @@ function QuoteCheckPage(){
                   </button>
                 </div>
                 <div style={{fontSize:13,fontWeight:700,color:C.inkFaint,marginBottom:24}}>Free to try <span style={{color:C.teal,margin:"0 6px"}}>·</span> no sign-up needed for your first check</div>
-                <div style={{display:"flex",alignItems:"center",gap:16,background:C.card,border:`1px solid ${C.line}`,borderRadius:18,padding:12,textAlign:"left",maxWidth:520,marginLeft:"auto",marginRight:"auto"}}>
+                {/* The video is the actual proof, not decoration -- a 140x80
+                    thumbnail left its own report card (doc fee, recalls,
+                    score) illegible. Full card width, video on top, so the
+                    thing being pointed at is big enough to read. */}
+                <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:18,overflow:"hidden",textAlign:"left",maxWidth:600,marginLeft:"auto",marginRight:"auto"}}>
                   <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
-                    style={{width:140,height:80,borderRadius:12,objectFit:"cover",flex:"none",background:"#0a0c22",display:"block"}}/>
-                  <div>
-                    <div style={{fontSize:10.5,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:C.tealInk,marginBottom:3}}>Sample report</div>
-                    <div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.4}}>A documentation fee flagged, two recalls found, a leverage score — from a real scan.</div>
+                    style={{width:"100%",height:"auto",display:"block",background:"#0a0c22"}}/>
+                  <div style={{padding:"14px 20px 18px"}}>
+                    <div style={{fontSize:10.5,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:C.tealInk,marginBottom:4}}>Sample report</div>
+                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.45}}>A documentation fee flagged, two recalls found, a leverage score — from a real scan.</div>
                   </div>
                 </div>
               </div>
