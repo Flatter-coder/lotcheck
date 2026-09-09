@@ -11390,10 +11390,11 @@ function QuoteCheckPage(){
                   the old hero tiles strip), evidence, and the negotiation
                   script. Nothing below is sample data. */}
               {(()=>{
+                const a=analysis; // same alias ReportViews used -- some gates pin the literal `isExactMsrp(a)` call
                 const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+Math.round(v).toLocaleString("en-CA");};
                 const qp=Number(analysis.quotedPrice)||0, ms=Number(analysis.msrp)||0, delta=(qp&&ms)?qp-ms:0;
-                const msrpExactG=isExactMsrp(analysis);
-                const deltaOkG=!!(qp&&ms&&msrpExactG);
+                const msrpExact=isExactMsrp(a);
+                const deltaOkG=!!(qp&&ms&&msrpExact);
                 const priceGatedG=!qp&&analysis.priceDisclosure==="contact_for_price";
                 const priceVerifiedG=analysis.priceVerified!==undefined?!!analysis.priceVerified:(qp>0);
 
@@ -11413,9 +11414,17 @@ function QuoteCheckPage(){
                   const flaggedTotal=Number(analysis.totalFlaggedCost)||flagged.reduce((s,x)=>s+(Number(x.price)||0),0);
                   const dli=analysis.dealerLineItems; const dliTotal=dli&&Array.isArray(dli.fees)?dli.fees.reduce((t,f)=>t+(Number(f?.amount)||0),0):0;
                   const tone=flagged.length?"flag":(analysis.addOns||[]).length?"pass":"muted";
-                  const v=flagged.length?flagged.length+" FLAGGED":(analysis.addOns||[]).length?"TRANSPARENT":dliTotal>0?"ITEMIZED":(analysis.feesRead===true?"NONE LISTED":"NOT READ");
-                  const sub=flagged.length?`${money(flaggedTotal)} across ${flagged.length} item${flagged.length>1?"s":""}`:((analysis.addOns||[]).length?"Itemized, nothing flagged":"No dealer add-ons were itemized");
-                  PG.push({title:"Add-ons & fee audit",tone,v,sub}); }
+                  // dliTotal > 0 is a REAL itemized breakdown read off the page (a
+                  // dealer's own fee list, not our addOns verdicts) -- it must never
+                  // fall through to "NONE LISTED"/"NOT READ", the exact contradiction
+                  // ("$899 doc fee on a page reading NONE LISTED") this point exists
+                  // to catch. [[report-never-empty]]
+                  const v=flagged.length?flagged.length+" FLAGGED":(analysis.addOns||[]).length?"TRANSPARENT":dliTotal > 0 ? "ITEMIZED":(analysis.feesRead===true?"NONE LISTED":"NOT READ");
+                  const sub=flagged.length?`${money(flaggedTotal)} across ${flagged.length} item${flagged.length>1?"s":""}`:((analysis.addOns||[]).length?"Itemized, nothing flagged":dliTotal > 0?`${money(dliTotal)} itemized by the dealer`:"No dealer add-ons were itemized");
+                  const body=(!(analysis.addOns||[]).length&&dliTotal > 0)
+                    ? <DealerLineItems items={dli} money={money} ink={C.ink} faint={C.inkFaint} line={C.line} teal={C.tealInk} />
+                    : null;
+                  PG.push({title:"Add-ons & fee audit",tone,v,sub,body}); }
                 { const dr=(analysis.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(analysis.financeRates.dealer.source))?analysis.financeRates.dealer.apr:null;
                   const mr=analysis.financeRates?.manufacturer?.apr; const high=dr!=null&&mr!=null&&dr-mr>0.1;
                   const tone=high?"flag":"muted"; const v=financingAprValue(analysis,dr,mr??null,high);
@@ -11431,7 +11440,21 @@ function QuoteCheckPage(){
                 { const o=analysis.odometerCheck; const isNewV=analysis.vehicleCondition==="new";
                   const tone=o?.checked?(o.flag?"flag":"pass"):"muted";
                   const v=o?.checked?Number(o.km).toLocaleString()+" km"+(o.flag?" FLAG":""):(isNewV?"N/A (NEW)":"NOT ON QUOTE");
-                  const sub=o?.checked?(o.note||(isNewV?"New vehicles carry delivery-only mileage":"Compare against the vehicle's age")):"No odometer reading was on this quote";
+                  // Banded, not "vehicleCondition alone" -- a fixed sentence beside
+                  // a variable reading is what printed "thousands on the clock
+                  // means it's been driven" under a 12 km delivery-distance
+                  // reading. analysis.odometerCheck.band is the SAME band
+                  // computeOdometerCheck wrote the km-aware note from; branch on
+                  // it here too, same as the emailed report. [[repeat-fix-pattern]]
+                  const sub=o?.checked
+                    ? (analysis.odometerCheck.band==="new_delivery"
+                        ? "New vehicles don't arrive on zero — coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. That's delivery distance, not use."
+                      : analysis.odometerCheck.band==="new_beyond_delivery"
+                        ? "Further than a car gets being delivered — most often a demonstrator or a service loaner. Normal, not a fault; ask for the in-service date, since that's when the factory warranty clock actually starts."
+                      : analysis.odometerCheck.band==="used_nearly_new"
+                        ? "On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return. Ask for the in-service date — the factory warranty started then."
+                        : (o.note||"Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."))
+                    : "No odometer reading was on this quote";
                   PG.push({title:"Odometer",tone,v,sub}); }
                 { const vc=analysis.vinCheck; const tone=vc?.present?(vc.valid?"pass":"flag"):"muted";
                   const v=vc?.present?(vc.valid?"VALID":"CHECK PATTERN"):"NOT ON QUOTE";
@@ -11582,6 +11605,7 @@ function QuoteCheckPage(){
                           <div style={{fontWeight:600,fontSize:12.5,color:C.inkSoft}}>{p.title}</div>
                           <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:15.5,marginTop:5,color:p.tone==="muted"?C.inkFaint:toneColor[p.tone]}}>{p.v}</div>
                           <div style={{fontSize:11,color:C.inkFaint,marginTop:5,lineHeight:1.4}}>{p.sub}</div>
+                          {p.body&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.line}`}}>{p.body}</div>}
                         </article>
                       ))}
                     </div>

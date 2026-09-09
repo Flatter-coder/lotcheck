@@ -470,23 +470,6 @@ const I = {
     </g>
   </>),
 
-  megaphone:()=>(<>
-    <defs>
-      <Lit id="i3-meg-a" from="#FFD9A6" mid="#F08A3C" to="#9C4A07"/>
-      <Lit id="i3-meg-b" from="#D6DEF0" to="#77839F"/>
-    </defs>
-    <Ground cy={20.8} rx={6.4}/>
-    <g className="i3-wave">
-      <path d="M4.2 9.6l11.4-5.2v15.2L4.2 14.4z" fill="url(#i3-meg-a)"/>
-      <path d="M4.2 9.6l3.1-1.4v7.6l-3.1-1.4z" fill="#FFF0D8" opacity=".34"/>
-      <rect x="15.6" y="3.4" width="2.8" height="17.2" rx="1.4" fill="url(#i3-meg-b)"/>
-      <path d="M6.4 14.9l3 1.3v3.1a1.5 1.5 0 01-3 0z" fill="url(#i3-meg-a)" opacity=".9"/>
-    </g>
-    <g className="i3-glow" fill="none" stroke="#FFC06B" strokeWidth="1.5" strokeLinecap="round">
-      <path d="M19.9 8.8a5 5 0 010 6.4"/>
-    </g>
-  </>),
-
   link:()=>(<>
     <defs><Lit id="i3-lnk-a" from="#B7E6FF" mid="#3FA9DE" to="#155A82"/></defs>
     <Ground cy={20.8} rx={6.4}/>
