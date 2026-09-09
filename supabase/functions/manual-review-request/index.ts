@@ -54,6 +54,14 @@ Deno.serve(async (req: Request) => {
   // Coarse and non-identifying: enough to spot a flood, not enough to track one
   // person. The real limit is per email address, enforced in SQL.
   const hint = (req.headers.get("user-agent") ?? "").slice(0, 200);
+  // A failed FILE upload has no listing to read -- the ledger's listing_url
+  // is NOT NULL with a CHECK requiring an http(s) shape (fn_request_manual_
+  // review), so the client submits a self-describing lotcheck.ca URL instead
+  // of a fake dealer link. `source`/`fileName` are request-only (never
+  // stored, never sent to fn_request_manual_review) -- they only steer which
+  // support email gets written below, since there's no listing to point at.
+  const isFileUpload = body?.source === "file";
+  const fileName = String(body?.fileName ?? "").slice(0, 200);
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -74,7 +82,9 @@ Deno.serve(async (req: Request) => {
     duplicate: data.duplicate === true,
     message: data.duplicate
       ? "That one is already in the queue — we are on it."
-      : "In the queue. We will read this listing ourselves and email you the report within 24 hours.",
+      : isFileUpload
+        ? "In the queue. We will email you to get the file, then send you the report within 24 hours."
+        : "In the queue. We will read this listing ourselves and email you the report within 24 hours.",
   };
 
   // 3. Notify support. Best effort, and its failure is logged, never surfaced
@@ -88,14 +98,22 @@ Deno.serve(async (req: Request) => {
           from: FROM_ADDRESS,
           to: [SUPPORT_INBOX],
           reply_to: email,
-          subject: `Manual check request — ${listingUrl.slice(0, 80)}`,
-          html:
-            `<p><b>A buyer asked for a manual read.</b> The automatic scan did not work on this listing.</p>` +
-            `<p><b>Listing:</b> <a href="${esc(listingUrl)}">${esc(listingUrl)}</a></p>` +
-            `<p><b>Write back to:</b> ${esc(email)}</p>` +
-            (errorMessage ? `<p><b>What the scan said:</b> ${esc(errorMessage)}</p>` : "") +
-            `<p>${data.ahead ? `${data.ahead} request(s) ahead of this one.` : "Nothing ahead of it."} ` +
-            `We told them: a report within 24 hours.</p>`,
+          subject: isFileUpload
+            ? `Manual check request — uploaded file failed to read${fileName ? ` (${fileName})` : ""}`
+            : `Manual check request — ${listingUrl.slice(0, 80)}`,
+          html: isFileUpload
+            ? `<p><b>A buyer asked for a manual read.</b> Their uploaded file did not parse -- there is no listing link for us to visit.</p>` +
+              `<p><b>File name they uploaded:</b> ${esc(fileName || "(not given)")}</p>` +
+              `<p><b>Write back to:</b> ${esc(email)} and ask them to reply with the quote (photo or PDF) attached.</p>` +
+              (errorMessage ? `<p><b>What the scan said:</b> ${esc(errorMessage)}</p>` : "") +
+              `<p>${data.ahead ? `${data.ahead} request(s) ahead of this one.` : "Nothing ahead of it."} ` +
+              `We told them: a report within 24 hours of sending the file.</p>`
+            : `<p><b>A buyer asked for a manual read.</b> The automatic scan did not work on this listing.</p>` +
+              `<p><b>Listing:</b> <a href="${esc(listingUrl)}">${esc(listingUrl)}</a></p>` +
+              `<p><b>Write back to:</b> ${esc(email)}</p>` +
+              (errorMessage ? `<p><b>What the scan said:</b> ${esc(errorMessage)}</p>` : "") +
+              `<p>${data.ahead ? `${data.ahead} request(s) ahead of this one.` : "Nothing ahead of it."} ` +
+              `We told them: a report within 24 hours.</p>`,
         }),
       });
       if (!r.ok) console.warn("support notification failed:", r.status, (await r.text()).slice(0, 200));

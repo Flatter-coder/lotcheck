@@ -11169,11 +11169,16 @@ function QuoteCheckPage(){
     setCooldownUntil(null); // clear any stale countdown from a prior attempt
     const heic=isHeic(file);
     if(!heic&&!ACCEPTED_TYPES.includes(file.type)){
+      // Set BEFORE the early return -- the manual-review option (gated on
+      // lastAttemptType==="file") needs to know this was a file attempt even
+      // when it fails before reaching the try block below.
+      setFileName(file.name); setLastAttemptType("file");
       setStatus("error");
       setErrorMsg("Please upload a PDF, or a clear photo (JPG, PNG, WEBP, or HEIC) of the quote.");
       return;
     }
     if(file.size>MAX_FILE_SIZE_MB*1024*1024){
+      setFileName(file.name); setLastAttemptType("file");
       setStatus("error");
       setErrorMsg(`That file is a bit large (${(file.size/1024/1024).toFixed(1)}MB) — please try a photo under ${MAX_FILE_SIZE_MB}MB. A single clear photo of the quote works better than a scan of every page.`);
       return;
@@ -11403,15 +11408,36 @@ function QuoteCheckPage(){
 
   // Posts to the ledger endpoint. The buyer is told it is in only after the row
   // exists -- the 24-hour promise on the card rests on the row, not on email.
+  //
+  // Covers BOTH failure paths now, not just a bad URL. The ledger's
+  // listing_url column is NOT NULL with a CHECK requiring an http(s) shape
+  // (see 20260903e_manual_review_request.sql) -- there is no schema-level way
+  // to submit "no URL" for a failed upload. Rather than a migration to loosen
+  // that (which would mean either storing the buyer's file, contradicting the
+  // "nothing is stored" promise made elsewhere on this page, or adding a
+  // second nullable-URL code path to a table designed around one), a failed
+  // upload submits a self-describing lotcheck.ca URL as the ledger's
+  // listing_url -- honest (it names this exact request, not a fake dealer
+  // link) and satisfies the existing constraint with no schema change. The
+  // separate `source`/`fileName` fields tell the edge function to write a
+  // different support email: there's no listing to visit, so support follows
+  // up with the buyer directly to get the file resent.
   async function requestManualReview(){
-    const url=urlInput.trim(), email=mrEmail.trim();
-    if(!url||!email){ setMrMsg("A listing link and an email address are both needed."); return; }
+    const email=mrEmail.trim();
+    const isFile=lastAttemptType==="file";
+    const url=isFile
+      ? `https://lotcheck.ca/manual-review/upload-failed?file=${encodeURIComponent(fileName||"unnamed")}`
+      : urlInput.trim();
+    if(!email||(!isFile&&!url)){
+      setMrMsg(isFile?"An email address is needed so we can send it back.":"A listing link and an email address are both needed.");
+      return;
+    }
     setMrState("sending"); setMrMsg("");
     try{
       const res=await fetch("https://debigtyjhjamipooajhk.supabase.co/functions/v1/manual-review-request",{
         method:"POST",
         headers:{"Content-Type":"application/json","apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A"},
-        body:JSON.stringify({url,email,error:errorMsg||null}),
+        body:JSON.stringify({url,email,error:errorMsg||null,source:isFile?"file":"url",fileName:isFile?(fileName||null):null}),
       });
       const data=await res.json().catch(()=>({}));
       if(data&&data.ok){ setMrState("sent"); setMrMsg(data.message||"In the queue. We'll email you within 24 hours."); }
@@ -11970,7 +11996,7 @@ function QuoteCheckPage(){
               <div style={{maxWidth:640,margin:"0 auto",background:C.card,border:`1px solid ${C.line}`,borderRadius:26,padding:"clamp(26px,4vw,42px)"}}>
                 <button type="button" onClick={()=>goToWizardStep("choose")}
                   style={{display:"inline-flex",alignItems:"center",gap:6,background:"none",border:"none",color:C.inkFaint,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"6px 4px",marginBottom:16,marginLeft:-4,borderRadius:8}}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   Back
                 </button>
                 <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".14em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Step 2 of 2</span>
@@ -12035,7 +12061,7 @@ function QuoteCheckPage(){
               <div style={{maxWidth:640,margin:"0 auto",background:C.card,border:`1px solid ${C.line}`,borderRadius:26,padding:"clamp(26px,4vw,42px)"}}>
                 <button type="button" onClick={()=>goToWizardStep("choose")}
                   style={{display:"inline-flex",alignItems:"center",gap:6,background:"none",border:"none",color:C.inkFaint,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"6px 4px",marginBottom:16,marginLeft:-4,borderRadius:8}}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   Back
                 </button>
                 <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".14em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Step 2 of 2</span>
@@ -12179,7 +12205,7 @@ function QuoteCheckPage(){
                   <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
                     Dealer sites occasionally can't be read automatically. Take a screenshot of the <b>whole page</b> (price, VIN and fine print all visible) and upload it instead — that works even when the link doesn't, since it never depends on the dealer's site cooperating. Accepts PDF, JPG, PNG, WEBP or HEIC, up to {MAX_FILE_SIZE_MB}MB.
                   </div>
-                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
+                  <button onClick={()=>{reset(); setWizardStep("upload");}} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
                   {/* THE THIRD DOOR. A screenshot works, but it puts the work on
                       the buyer at the exact moment we have just failed them, and
                       some pages (a bot wall, a login) cannot be usefully
@@ -12220,6 +12246,43 @@ function QuoteCheckPage(){
                   </div>
                   <div>
                     <button onClick={()=>handleUrlAnalyze()} style={{background:"transparent",border:"none",color:C.inkFaint,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>Or try this link again</button>
+                  </div>
+                </>
+              ):lastAttemptType==="file"?(
+                <>
+                  {/* Same third door as the URL path, adapted: there's no
+                      "upload a screenshot instead" offer here (that's what
+                      just failed), and no listing for us to go read ourselves
+                      -- so the ledger row and the support email both name this
+                      as a failed UPLOAD, and support follows up with the buyer
+                      directly to get the file. See requestManualReview(). */}
+                  <button onClick={()=>{reset(); setWizardStep("upload");}} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10,marginTop:8}}>Try a different file →</button>
+                  <div style={{margin:"14px 0 4px",paddingTop:14,borderTop:`1px solid ${C.line}`}}>
+                    {mrState==="sent"?(
+                      <div style={{fontSize:13,color:C.tealInk,fontWeight:800,lineHeight:1.5}}>
+                        {mrMsg}
+                      </div>
+                    ):(
+                      <>
+                        <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
+                          Or hand it to us. Leave your email and we'll follow up to get the file, read it ourselves, and send you the report <b>within 24 hours</b> — costs you nothing extra.
+                        </div>
+                        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+                          <input
+                            type="email" value={mrEmail} onChange={e=>setMrEmail(e.target.value)}
+                            placeholder="your email, so we can send it back"
+                            style={{margin:0,maxWidth:280,width:"100%",fontSize:13,padding:"9px 14px",borderRadius:999,border:`1px solid ${C.line}`,background:C.paper,color:C.ink,outline:"none"}}
+                          />
+                          <button
+                            onClick={requestManualReview}
+                            disabled={mrState==="sending"||!mrEmail.trim()}
+                            style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:mrState==="sending"||!mrEmail.trim()?"not-allowed":"pointer",opacity:mrState==="sending"||!mrEmail.trim()?.55:1}}>
+                            {mrState==="sending"?"Sending…":"Ask us to check it by hand →"}
+                          </button>
+                        </div>
+                        {mrMsg&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{mrMsg}</div>}
+                      </>
+                    )}
                   </div>
                 </>
               ):(
