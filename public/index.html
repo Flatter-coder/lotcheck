@@ -678,7 +678,7 @@ footer{padding:34px 0 44px}
     <li>MSRP verification against manufacturer data</li>
     <li>Open-recall lookup (Transport Canada)</li>
     <li>Fee itemization audit</li>
-    <li>Financing APR against the published rate</li>
+    <li>AMVIC against the published rate</li>
     <li>Financing math check</li>
     <li>Odometer consistency check</li>
     <li>VIN pattern validity check</li>
@@ -1075,7 +1075,7 @@ document.querySelectorAll("[data-vign]").forEach(function(el){
 });
 
 // Same ten, same order, short form. Asserted by `npm run check:points`.
-var STN = ["MSRP verified","Open recalls","Fee audit","Financing APR","Financing math",
+var STN = ["MSRP verified","Open recalls","Fee audit","AMVIC","Financing math",
            "Odometer check","VIN pattern","EV rebate check","Warranty validity","Dealer reputation"];
 var GATE0 = 260, GATESTEP = 250;
 function buildPipe(){

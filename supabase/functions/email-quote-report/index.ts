@@ -372,7 +372,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     } else if (fr.manufacturer) {
       body += `<div style="font-size:12px;color:#706D96;margin-top:4px;">${escapeHtml(a.make || "Manufacturer")} advertises ${fr.manufacturer.apr}% on new.</div>`;
     }
-    deck.push({ label: "Financing APR", tone: high ? "flag" : "muted", glow: high, body });
+    deck.push({ label: "AMVIC", tone: high ? "flag" : "muted", glow: high, body });
   }
 
   // 3a -- Payment default: the page's own pre-selected payment scenario
@@ -1056,10 +1056,10 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // (LLM-only) dealer APR falls through to the same states as if none were
   // disclosed at all, same as every other surface.
   const frDealerVerified = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
-  if (frDealerVerified != null) { const high = fr.manufacturer && frDealerVerified - fr.manufacturer.apr > 0.1; P.push({ t: "Financing APR (this dealer)", v: frDealerVerified + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
-  else if (fr?.manufacturer) P.push({ t: "Financing APR", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
+  if (frDealerVerified != null) { const high = fr.manufacturer && frDealerVerified - fr.manufacturer.apr > 0.1; P.push({ t: "AMVIC (this dealer)", v: frDealerVerified + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
+  else if (fr?.manufacturer) P.push({ t: "AMVIC", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
   // A page whose calculator opens at a rate has not "advertised none".
-  else P.push({ t: "Financing APR", v: financingAprValue(a, null, null, false), tone: "muted" });
+  else P.push({ t: "AMVIC", v: financingAprValue(a, null, null, false), tone: "muted" });
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
   // No dealer terms is not "nothing to say": we hold the manufacturer's own
   // published rate and price, so the payment is arithmetic we can do ourselves.
@@ -1179,7 +1179,7 @@ function pointExplain(t: string, a: any): string | null {
       return (a.addOns || []).length
         ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
         : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";
-    case "Financing APR": case "Financing APR (this dealer)":
+    case "AMVIC": case "AMVIC (this dealer)":
       // Worded once in report-lines.js so this sentence can never contradict
       // the Payment starting point card in the same email or PDF.
       return financingAprNote(a, (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null);

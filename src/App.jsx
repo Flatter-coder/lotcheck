@@ -9327,7 +9327,7 @@ function VerifyPage(){
                   {o.leverage!=null&&<Row t="Leverage score" v={`${Number(o.leverage).toFixed(1)} / 10`}/>}
                   {o.leverage!=null&&o.lvn&&<div style={{fontSize:11,color:T.soft,lineHeight:1.5,margin:"-2px 0 6px"}}>{o.lvn}</div>}
                   {o.recalls&&<Row t="Recalls · Transport Canada" v={o.recalls.count>0?`${o.recalls.count} open`:(o.recalls.confirmed===false?"Not confirmed":"None open")} c={o.recalls.count>0?"#f0997b":"#34d399"}/>}
-                  {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="Financing APR" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
+                  {o.finance&&(o.finance.dealer!=null||o.finance.manufacturer!=null)&&<Row t="AMVIC" v={`${o.finance.dealer!=null?o.finance.dealer+"% dealer":""}${o.finance.dealer!=null&&o.finance.manufacturer!=null?" · ":""}${o.finance.manufacturer!=null?o.finance.manufacturer+"% advertised":""}`}/>}
                   {o.finance&&o.finance.math!=null&&<Row t="Financing math" v={o.finance.math?"Reconciles":"Doesn't add up"} c={o.finance.math?"#34d399":"#f0997b"}/>}
                   {/* A rating "over 0 reviews" names nothing that was read, and
                       /verify is the page whose whole job is that every figure on
@@ -11029,7 +11029,7 @@ function QuoteCheckPage(){
               <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
                 {[
                   "Price vs MSRP","Add-ons & fee audit",
-                  "Financing APR","Financing math",
+                  "AMVIC","Financing math",
                   "Transport Canada recalls","Included warranty",
                   "VIN check","Odometer",
                   "EV / PHEV rebate","Dealer reputation",
@@ -11431,7 +11431,7 @@ function QuoteCheckPage(){
                   const price=qp||ms||0; let extra=null;
                   if(high&&price){const rd=dr/1200,rm=mr/1200;extra=Math.round((price*rd/(1-Math.pow(1+rd,-60))-price*rm/(1-Math.pow(1+rm,-60)))*60);}
                   const sub=dr!=null?(high?`${mr}% advertised${extra?` — ~${money(extra)} more over 60mo`:""}`:(mr!=null?`${mr}% advertised on new`:"This dealer's quoted rate")):"No financing rate was quoted";
-                  PG.push({title:"Financing APR",tone,v,sub}); }
+                  PG.push({title:"AMVIC",tone,v,sub}); }
                 { const fc=analysis.financingCheck; const rf=!fc?.checked?analysis.referenceFinancing:null;
                   const tone=fc?.checked?(fc.consistent?"pass":"flag"):"muted";
                   const v=fc?.checked?(fc.consistent?"RECONCILES":"DOESN'T ADD UP"):(rf?.atAsking?"$"+Math.round(rf.atAsking.monthly).toLocaleString()+"/MO REF":"NOT CHECKED");
