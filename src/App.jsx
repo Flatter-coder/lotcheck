@@ -11942,17 +11942,26 @@ function QuoteCheckPage(){
                   </button>
                 </div>
                 <div style={{fontSize:13,fontWeight:700,color:C.inkFaint,marginBottom:24}}>Free to try <span style={{color:C.teal,margin:"0 6px"}}>·</span> no sign-up needed for your first check</div>
-                {/* The video is the actual proof, not decoration -- a 140x80
-                    thumbnail left its own report card (doc fee, recalls,
-                    score) illegible. Full card width, video on top, so the
-                    thing being pointed at is big enough to read. */}
-                <div style={{background:C.card,border:`1px solid ${C.line}`,borderRadius:18,overflow:"hidden",textAlign:"left",maxWidth:600,marginLeft:"auto",marginRight:"auto"}}>
-                  <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
-                    style={{width:"100%",height:"auto",display:"block",background:"#0a0c22"}}/>
-                  <div style={{padding:"14px 20px 18px"}}>
+                {/* Video on the right, caption on the left -- big enough for the
+                    report card (doc fee, recalls, score) to read, without being
+                    the dominant element on the step. Re-cropped tighter than the
+                    first cut: the wide crop included the source scene's own
+                    glass-panel edge (a thin vertical seam past the card, visible
+                    once stretched large) -- this crop stays inside the card's
+                    own bounds, so nothing but the card and its immediate
+                    surroundings shows. */}
+                <div style={{display:"flex",alignItems:"center",gap:18,background:C.card,border:`1px solid ${C.line}`,borderRadius:18,padding:14,textAlign:"left"}}>
+                  <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:10.5,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:C.tealInk,marginBottom:4}}>Sample report</div>
                     <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.45}}>A documentation fee flagged, two recalls found, a leverage score — from a real scan.</div>
                   </div>
+                  {/* Chrome shows its own fullscreen/picture-in-picture buttons
+                      on hover over ANY <video>, even without the controls
+                      attribute -- disablePictureInPicture + controlsList hide
+                      both, since this is ambient proof footage, not a player. */}
+                  <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
+                    disablePictureInPicture controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
+                    style={{width:260,height:"auto",borderRadius:12,flex:"none",background:"#0a0c22",display:"block"}}/>
                 </div>
               </div>
             )}
