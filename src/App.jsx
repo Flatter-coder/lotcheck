@@ -8148,1022 +8148,6 @@ function DealerLineItems({ items, money, ink, faint, line, teal }) {
   );
 }
 
-function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, shared, ink, emailInput, setEmailInput, emailStatus, emailErr, setEmailErr, onSend }){
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setMounted(true), 80); return () => clearTimeout(t); }, []);
-  // Recalls used to stack all N as one long scroll -- unreadable past 3-4 on
-  // a 9-recall vehicle. One recall per page instead, with next/back at the
-  // TOP so paging never requires a scroll first. Resets whenever a genuinely
-  // different report loads, so page 6 of the last car never carries over.
-  const [recallPage, setRecallPage] = useState(0);
-  useEffect(() => { setRecallPage(0); }, [a.reportId]);
-
-  // Read-aloud. Browser-native (Web Speech API) -- no vendor, no per-character
-  // cost, works today. Prefers Vic's chosen voice ("Susan" -- Microsoft's
-  // en-GB voice, confirmed installed and working during testing), then any
-  // other installed British English voice, then still speaks with lang=en-GB
-  // alone (changes pronunciation in most engines even with no exact voice
-  // match) rather than refusing outright. Voice lists load asynchronously in
-  // some browsers (Chrome fires "voiceschanged" after the first empty
-  // getVoices() call), so one retry is given before falling back to default.
-  const [voiceState, setVoiceState] = useState("idle"); // idle | speaking
-  // Which entry in `items` is being read RIGHT NOW (-1 = not reading). Drives
-  // both the sidebar highlight and which card is on screen, so Read Aloud
-  // stays in sync with what the listener sees instead of narrating one page
-  // while a different one sits on screen.
-  const [speakingIdx, setSpeakingIdx] = useState(-1);
-  const [scriptCopied, setScriptCopied] = useState(false);
-  // Numbered, one per line, so it pastes into Notes or a text message and still
-  // reads in order. Same shape the Scroll view copies.
-  function copyCounterScript() {
-    const moves = a?.counterScript?.moves;
-    if (!Array.isArray(moves) || !moves.length) return;
-    const text = moves.map((m, i) => `${i + 1}. ${m.say}`).join("\n");
-    try {
-      navigator.clipboard.writeText(text)
-        .then(() => { setScriptCopied(true); setTimeout(() => setScriptCopied(false), 2200); })
-        .catch(() => {});
-    } catch (e) {}
-  }
-  const pickBritishVoice = () => {
-    try {
-      const voices = window.speechSynthesis.getVoices() || [];
-      return voices.find(v => /susan/i.test(v.name) && /^en-GB/i.test(v.lang))
-        || voices.find(v => /susan/i.test(v.name))
-        || voices.find(v => /^en-GB/i.test(v.lang))
-        || voices.find(v => /en[-_]gb/i.test(v.lang))
-        || voices.find(v => /british/i.test(v.name))
-        || null;
-    } catch { return null; }
-  };
-  // Reads `items` (the SAME array the sidebar/heatmap nav lists and selects
-  // from -- verdict, the 10 points, plus whichever optional cards apply) --
-  // not a separate hand-built list -- so "what's highlighted" and "what's
-  // spoken" can never drift apart. Starts from whatever point is CURRENTLY
-  // on screen (sidebar view's `sel`) and wraps through the rest from there,
-  // rather than always restarting at the verdict: the bug Vic hit was
-  // opening the recalls point, pressing Read Aloud, and hearing the verdict
-  // instead of the page actually in front of him.
-  const speakWith = (voice) => {
-    try {
-      window.speechSynthesis.cancel();
-      const n = items.length;
-      const startAt = view === "sidebar" ? sel : 0;
-      const order = Array.from({ length: n }, (_, k) => (startAt + k) % n);
-      const queued = order
-        .map((idx) => {
-          const item = items[idx];
-          if (!item) return null;
-          const text = idx === 0
-            ? `${a.vehicle || "This vehicle"} report. ${a.summary || ""}`
-            : `${item.title}. ${item.v || ""}. ${explainFor[item.title] || ""}`;
-          return text.trim() ? { idx, text } : null;
-        })
-        .filter(Boolean);
-      if (!queued.length) return;
-      queued.forEach(({ idx, text }, seq) => {
-        const u = new SpeechSynthesisUtterance(text);
-        u.lang = voice ? voice.lang : "en-GB";
-        if (voice) u.voice = voice;
-        u.rate = 0.98;
-        u.onstart = () => { setSpeakingIdx(idx); setSel(idx); };
-        if (seq === queued.length - 1) u.onend = () => { setVoiceState("idle"); setSpeakingIdx(-1); };
-        window.speechSynthesis.speak(u);
-      });
-      setVoiceState("speaking");
-    } catch { setVoiceState("idle"); setSpeakingIdx(-1); }
-  };
-  const speakReport = () => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    const existing = pickBritishVoice();
-    if (existing || (window.speechSynthesis.getVoices() || []).length) { speakWith(existing); return; }
-    // Voices not loaded yet -- wait for the one-time event, then go either way.
-    const onReady = () => { window.speechSynthesis.removeEventListener("voiceschanged", onReady); speakWith(pickBritishVoice()); };
-    window.speechSynthesis.addEventListener("voiceschanged", onReady);
-    setTimeout(onReady, 400); // some browsers never fire the event at all
-  };
-  const stopSpeaking = () => { try { window.speechSynthesis?.cancel(); } catch {} setVoiceState("idle"); setSpeakingIdx(-1); };
-  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
-
-  const money = (n) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "—" : "$" + Math.round(v).toLocaleString("en-CA"); };
-  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
-  // Only an EXACT trim MSRP supports an over/under claim. A "starting_at" floor
-  // (base trim / adjacent model year) is a reference, not this unit's sticker —
-  // an option-loaded car above the base floor is NOT "over MSRP".
-  const msrpExact = isExactMsrp(a);
-  const deltaOk = !!(qp && ms && msrpExact);
-  // Derived once here and read by BOTH the rebate card and its plain-language
-  // explainer below — the two used to read a server field that is never set.
-  const evap = resolveEvap(a);
-  // "Contact Us For Price" — the page deliberately withholds the number
-  // (detected from the page's own call-to-action text). A tactic, not a miss.
-  const priceGated = !qp && a.priceDisclosure === "contact_for_price";
-  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
-  // The page ITSELF gated the price ("Call for pricing" or similar) but its
-  // own machine-readable data (D2C's window.__vdpJSON, see d2c-vdp.js)
-  // carried the real ask -- a verifiable claim about what the page's source
-  // contains, not an inference about intent. Only meaningful once qp is
-  // actually populated (priceGated above already covers the case where
-  // nothing was recoverable at all). Confirmed live 2026-08-22, Okotoks
-  // Toyota RAV4 PHEV GR Sport AWD: rendered page shows "Call for pricing",
-  // window.__vdpJSON's price field holds $85,995 -- also published to
-  // Google Vehicle Ads, so this is public information either way.
-  const gatedRecoveredNote = gatedPriceNote(a);
-  const score = (a.leverageScore && a.leverageScore.score != null) ? Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0)) : null;
-  const fr = score != null ? score / 10 : 0;
-  const CIRC = 314.159, fillOffset = CIRC * (1 - fr), needleDeg = -90 + fr * 180;
-  const rno = a.reportId || "LC-—";
-  const issued = a.issuedAt ? new Date(a.issuedAt) : null;
-  const verifyHref = (typeof verifyLinkFor === "function") ? verifyLinkFor(a) : null;
-
-  const CY = "#22d3ee", TEAL = "#10b981", ROSE = "#f43f5e", AMBER = "#fbbf24", TX = "#e2e8f0", MUT = "#64748b", MUT2 = "#94a3b8", BORD = "#1e293b";
-  const mono = 'ui-monospace,"SF Mono",Menlo,Consolas,monospace';
-  const flagged = (a.addOns || []).filter((x) => x.verdict === "flagged");
-  const flaggedTotal = Number(a.totalFlaggedCost) || flagged.reduce((s, x) => s + (Number(x.price) || 0), 0);
-  const klabel = { fontSize: 12, color: MUT2, textTransform: "uppercase", letterSpacing: ".08em", fontFamily: mono };
-  const scoreColor = score == null ? CY : score >= 7 ? TEAL : score >= 4 ? AMBER : ROSE;
-
-  const sourceUrl = a.sourceUrl || a.listingUrl || null;
-  const listingShot = a.listingShot || null;
-  // The photo-proof SHA-256 re-check moved into <EvidenceCard>, which owns it
-  // now — leaving it here would recompute the digest of a full-page capture on
-  // every render of a view that no longer reads the result.
-
-  useEffect(() => { if (!sourceUrl) return; try { fetch("https://web.archive.org/save/" + sourceUrl, { mode: "no-cors" }).catch(() => {}); } catch (e) {} }, [sourceUrl]);
-
-  const Chip = ({ txt, tone }) => { const c = tone === "flag" ? ROSE : tone === "pass" ? TEAL : MUT2; const bg = tone === "flag" ? "rgba(244,63,94,.14)" : tone === "pass" ? "rgba(16,185,129,.14)" : "rgba(148,163,184,.12)"; return <span style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, color: c, background: bg, border: `1px solid ${c}55`, borderRadius: 8, padding: "4px 10px", margin: "0 6px 6px 0", fontFamily: mono }}>{txt}</span>; };
-  const KV = ({ k, v, c }) => (<div><div style={{ color: MUT, fontSize: 11, fontFamily: mono }}>{k}</div><div style={{ fontSize: 24, fontWeight: 700, color: c || "#fff", fontFamily: mono, marginTop: 4 }}>{v}</div></div>);
-  const Simple = ({ big, c, note }) => (<div><div style={{ fontSize: 20, fontWeight: 800, fontFamily: mono, color: c || "#fff" }}>{big}</div>{note && <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>{note}</div>}</div>);
-
-  const verdictBody = (
-    <div style={{ textAlign: "center" }}>
-      {score != null ? (<>
-        <div style={{ position: "relative", width: 200, maxWidth: "100%", margin: "0 auto" }}>
-          <svg viewBox="0 0 220 132" style={{ display: "block", width: "100%", height: "auto", overflow: "visible" }}>
-            <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={BORD} strokeWidth="14" strokeLinecap="round" />
-            <path d="M 10 120 A 100 100 0 0 1 210 120" fill="none" stroke={scoreColor} strokeWidth="14" strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={mounted ? fillOffset : CIRC} style={{ transition: "stroke-dashoffset 1.3s cubic-bezier(.4,0,.2,1)", filter: `drop-shadow(0 0 6px ${scoreColor}88)` }} />
-            <g style={{ transformOrigin: "110px 120px", transform: mounted ? `rotate(${needleDeg}deg)` : "rotate(-90deg)", transition: "transform 1.3s cubic-bezier(.34,1.4,.5,1)" }}><line x1="110" y1="120" x2="110" y2="34" stroke="#f8fafc" strokeWidth="3" strokeLinecap="round" /></g>
-            <circle cx="110" cy="120" r="6" fill="#e2e8f0" /><circle cx="110" cy="120" r="2.5" fill="#0b1220" />
-          </svg>
-        </div>
-        <div style={{ fontSize: 40, fontWeight: 800, color: "#fff", lineHeight: 1, fontFamily: mono, marginTop: -6 }}>{score.toFixed(1)}<span style={{ fontSize: 16, color: MUT }}>/10</span></div>
-        <div style={{ fontSize: 11, color: MUT, letterSpacing: ".12em", textTransform: "uppercase", marginTop: 6, fontFamily: mono }}>Negotiation leverage</div>
-      </>) : <div style={{ padding: "24px 0", color: MUT, fontSize: 13 }}>Leverage score isn't available.</div>}
-      {(qp || ms) > 0 && <div style={{ marginTop: 16, fontFamily: mono, fontSize: 14, fontWeight: 700, color: deltaOk && delta > 0 ? ROSE : TEAL }}>{qp ? money(qp) + " asking" : ""}{deltaOk ? (delta === 0 ? " · at MSRP" : delta > 0 ? ` · ▲ ${money(delta)} over MSRP` : ` · ▼ ${money(-delta)} under MSRP`) : (ms ? ` · base MSRP from ${money(ms)}` : "")}</div>}
-      <div style={{ marginTop: 14 }}>
-        {flagged.length > 0 && <Chip txt={<><Icon3D name="warning" size={12}/> {flagged.length} watch-out{flagged.length > 1 ? "s" : ""}</>} tone="flag" />}
-        {a.recalls?.checked && a.recalls.count > 0 && <Chip txt={<><Icon3D name="warning" size={12}/> {a.recalls.count} recall{a.recalls.count > 1 ? "s" : ""}</>} tone="flag" />}
-        {a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false && <Chip txt="✓ No recalls" tone="pass" />}
-        {a.vinCheck?.present && a.vinCheck.valid && <Chip txt="✓ VIN valid" tone="pass" />}
-      </div>
-      {a.summary && <div style={{ marginTop: 14, fontSize: 13.5, lineHeight: 1.6, color: "#e2e8f0", fontStyle: "italic", borderTop: `1px solid ${BORD}`, paddingTop: 14, textAlign: "left" }}>{a.summary}</div>}
-    </div>
-  );
-
-  // ── the canonical 10-point audit — always 10, each with its result + body ──
-  const P = [];
-  // 1 Price vs MSRP
-  P.push({ title: "Price vs MSRP", tone: priceGated ? "flag" : !priceVerified ? "muted" : (!ms ? "muted" : (deltaOk ? (delta > 0 ? "flag" : "pass") : "muted")), v: priceGated ? "HIDDEN BY DEALER" : (!priceVerified && !ms) ? "PRICE READ ONCE" : deltaOk ? (delta === 0 ? "AT MSRP" : delta > 0 ? money(delta) + " OVER" : money(-delta) + " UNDER") : (ms ? "FROM " + money(ms) : (priceVerified ? "—" : "UNVERIFIED")),
-    body: <div><div style={{ fontSize: 26, fontWeight: 800, fontFamily: mono, color: priceGated ? ROSE : !priceVerified ? MUT2 : (deltaOk && delta > 0 ? ROSE : TEAL) }}>{priceGated ? "Hidden by the dealer" : deltaOk ? (delta === 0 ? "At MSRP" : delta > 0 ? money(delta) + " over" : money(-delta) + " under") : (qp ? money(qp) : "Not shown")}</div><div style={{ fontSize: 13, color: MUT2, marginTop: 6 }}>{qp ? money(qp) : "—"}{deltaOk ? ` vs ${money(ms)} MSRP` : (()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling) return ` · ${money(cc.floor)}–${money(cc.ceiling)} all-in across the ${cc.trimsConsidered} ${a.make || ""} trims we hold`;return ms ? ` · base MSRP from ${money(ms)} — this unit's options are extra, so no over/under-MSRP claim is made` : "";})()} · {priceVerified ? "price verified" : "price not verified"}</div><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18 }}><KV k={a.allInPricing ? "ASKING PRICE · ALL-IN" : "ASKING PRICE"} v={qp ? money(qp) : "—"} />{(()=>{const cc=qualifyCeilingClaim(a);if(a.allInPricing && cc.floor && cc.ceiling && !msrpExact) return <KV k={`${a.make || "MSRP"} ALL-IN RANGE`.toUpperCase()} v={cc.floor===cc.ceiling?money(cc.ceiling):`${money(cc.floor)}–${money(cc.ceiling)}`} c={MUT2} />;return <KV k={a.msrpBasis === "original_when_new" ? "MSRP WHEN NEW" : a.msrpBasis === "dealer_stated" ? "MSRP · AS STATED BY DEALER" : a.msrpBasis === "starting_at" ? `MSRP · STARTING AT${a.msrpYear && a.msrpYear !== a.year ? ` (${a.msrpYear} MY)` : ""}` : (a.msrpTrim ? `MSRP · ${String(a.msrpTrim).toUpperCase()}` : (msrpExact ? "MSRP" : "CATALOG MSRP"))} v={ms ? money(ms) : "—"} c={msrpExact ? "#fff" : MUT2} />;})()}</div>{a.msrpBasis === "original_when_new" && a.originalMsrp && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>That MSRP is what this {a.originalMsrp.year || a.year} {a.model || "vehicle"}{a.originalMsrp.trim ? ` (${a.originalMsrp.trim})` : ""} cost <strong style={{ color: "#fff" }}>when new</strong> — useful context, but it is not a sticker to measure a used price against, so no over/under-MSRP claim is made.</div>}{(()=>{const cc=qualifyCeilingClaim(a); if(!cc.exceeds) return null; return <div style={{ fontSize: 12.5, color: ROSE, marginTop: 12, lineHeight: 1.6, padding: "10px 12px", background: "rgba(242,131,107,.10)", borderRadius: 9, border: "1px solid rgba(242,131,107,.35)" }}><strong style={{ color: "#fff" }}>Above every trim {a.make || "the manufacturer"} sells.</strong> The most expensive {a.year} {a.model}{cc.trim ? ` (${cc.trim})` : ""} is <strong style={{ color: "#fff" }}>{money(cc.ceiling)}</strong> all-in, including the maximum dealer fee. This listing is <strong style={{ color: "#fff" }}>{money(cc.over)}</strong> above that ceiling — a figure that holds whichever trim this turns out to be, because there is no higher grade to compare it to.</div>;})()}{a.msrpUnavailable && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>{a.msrpUnavailable.note}</div>}{a.msrpBasis === "dealer_stated" && <div style={{ fontSize: 12, color: "#f0997b", marginTop: 10, lineHeight: 1.55 }}>This MSRP is the figure <strong>this dealer states on their own page</strong> — we could not verify it against {a.make || "the manufacturer"}'s published price, so no over/under-MSRP claim is made from it. Ask for the factory build sheet showing how it is made up.</div>}{a.msrpReference && a.msrpReference.msrp > 0 && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>For reference, {a.msrpReference.make || "the manufacturer"} publishes this model{a.msrpReference.trim ? ` (${a.msrpReference.trim})` : ""} from <strong style={{ color: "#fff" }}>{money(a.msrpReference.msrp)}</strong>. Options, drivetrain and packages sit above that — ask which ones account for the difference.{a.msrpReference.sourceUrl ? <> <a href={a.msrpReference.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color: CY }}>See their page ↗</a></> : null}</div>}{msrpExact && a.allInPricing && a.allInPricing.body && a.msrpPriceBasis !== "incl_freight" && <div style={{ fontSize: 12, color: MUT2, marginTop: 10, lineHeight: 1.55 }}>Basis note: the asking price is <strong style={{ color: "#fff" }}>all-in</strong> ({a.allInPricing.body}), while a published MSRP normally <strong style={{ color: "#fff" }}>excludes freight &amp; PDI</strong> (typically $2,000–$2,600). Part of the gap above is that freight — ask the dealer to show freight and PDI as their own line.</div>}{a.msrpSourceUrl && <div style={{ marginTop: 10 }}><a href={a.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: CY, textDecoration: "underline" }}>See the manufacturer's own page for this MSRP ↗</a></div>}{a.allInPricing && a.allInPricing.body && <div style={{ fontSize: 12, color: MUT2, marginTop: 14, lineHeight: 1.55 }}>Asking price is the <strong style={{ color: "#fff" }}>all-in total</strong> — {a.allInPricing.body} all-in advertising folds every mandatory fee into the posted price. The only things that can be added at signing are GST, licensing &amp; insurance.</div>}{a.msrpInflation && a.msrpInflation.dealerStated && <div style={{ fontSize: 12, color: ROSE, marginTop: 12, lineHeight: 1.55 }}><Icon3D name="warning" size={14}/> Dealer advertises MSRP at <strong>{money(a.msrpInflation.dealerStated)}</strong>, but {a.make || "the manufacturer"}&rsquo;s MSRP for this trim is <strong style={{ color: "#fff" }}>{money(a.msrpInflation.manufacturer)}</strong> — the sticker is inflated {money(a.msrpInflation.overBy)}, so any advertised &ldquo;saving&rdquo; is measured against a padded number. Price vs MSRP above uses the true manufacturer figure.</div>}</div> });
-  // 2 Recalls
-  { const r = a.recalls; const tone = !r?.checked ? "muted" : r.count > 0 ? "flag" : (r.confirmed === false ? "muted" : "pass"); const v = !r?.checked ? "COULDN'T VERIFY" : r.count > 0 ? r.count + " OPEN" : (r.confirmed === false ? "UNCONFIRMED" : "NONE OPEN");
-    let body; if (!r?.checked) body = <Simple big="Couldn't reach the registry" c={MUT2} note="Check open recalls by VIN at Transport Canada before you sign." />;
-    else if (r.count > 0) {
-      const items = r.items || [];
-      // items can run shorter than r.count (a lookup gap, not a display cap --
-      // see [[recalls-detail-list-must-match-count]]): never index past what's
-      // really there.
-      const pageIdx = items.length ? Math.min(recallPage, items.length - 1) : 0;
-      const it = items[pageIdx];
-      body = <div>
-        <div style={{ fontSize: 24, fontWeight: 800, color: ROSE, fontFamily: mono }}>{r.count} open recall{r.count > 1 ? "s" : ""}</div>
-        {items.length > 1 && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 14 }}>
-            <button onClick={() => setRecallPage(p => Math.max(0, p - 1))} disabled={pageIdx === 0}
-              style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: pageIdx === 0 ? MUT : "#e2e8f0", fontSize: 12.5, fontWeight: 700, cursor: pageIdx === 0 ? "default" : "pointer", opacity: pageIdx === 0 ? .5 : 1 }}>
-              ← Back
-            </button>
-            <div style={{ fontSize: 12, color: MUT2, fontFamily: mono, fontWeight: 700 }}>Recall {pageIdx + 1} of {items.length}</div>
-            <button onClick={() => setRecallPage(p => Math.min(items.length - 1, p + 1))} disabled={pageIdx === items.length - 1}
-              style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 999, padding: "6px 14px", color: pageIdx === items.length - 1 ? MUT : "#e2e8f0", fontSize: 12.5, fontWeight: 700, cursor: pageIdx === items.length - 1 ? "default" : "pointer", opacity: pageIdx === items.length - 1 ? .5 : 1 }}>
-              Next →
-            </button>
-          </div>
-        )}
-        {it ? (
-          <div style={{ padding: "14px 0 0" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: ROSE }}>{it.system || "Recall"}{it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? ` · ${new Date(it.date).getFullYear()}` : ""}</div>
-            {it.summary && <div style={{ fontSize: 13, color: MUT2, marginTop: 6, lineHeight: 1.6 }}>{it.summary}</div>}
-          </div>
-        ) : <div style={{ padding: "14px 0 0", fontSize: 13, color: MUT2 }}>Transport Canada confirms {r.count} open recall{r.count > 1 ? "s" : ""} for this model; the per-recall detail didn't come back with this scan — check by VIN at Transport Canada for the individual bulletins.</div>}
-        <div style={{ fontSize: 11, color: MUT, marginTop: 12, borderTop: `1px solid ${BORD}`, paddingTop: 10 }}>Repaired free of charge — confirm the fix status by VIN before you sign.</div>
-      </div>;
-    }
-    else if (r.confirmed === false) body = <Simple big="Couldn't confirm this exact model" c={AMBER} note="Not an all-clear — check open recalls by VIN at Transport Canada before you sign." />;
-    else body = <Simple big="✓ No open recalls found" c={TEAL} note="Transport Canada's registry shows none for this year/make/model." />;
-    P.push({ title: "Transport Canada recalls", tone, v, body }); }
-  // 3 Add-ons & fees
-  { const tone = flagged.length ? "flag" : (a.addOns || []).length ? "pass" : "muted"; const dli = a.dealerLineItems; const dliTotal = dli && Array.isArray(dli.fees) ? dli.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0) : 0;
-    // A dealer who itemises is TRANSPARENT, not "none listed". The old value
-    // keyed only on addOns, which never carried the listing's own breakdown.
-    // AND "we looked" is not "we could not look". A report built from the
-    // page's structured data alone never sees a rendered fee box, and used to
-    // publish that gap as "NONE LISTED" -- a clean bill on a page printing an
-    // $899 doc fee. [[report-never-empty]] means backed, not filled in.
-    const v = flagged.length ? flagged.length + " FLAGGED" : (a.addOns || []).length ? "TRANSPARENT" : dliTotal > 0 ? "ITEMIZED" : (a.feesRead === true ? "NONE LISTED" : "NOT READ");
-    const body = (!(a.addOns || []).length && dliTotal > 0)
-      ? <DealerLineItems items={dli} money={money} ink="#e2e8f0" faint={MUT2} line={BORD} teal={TEAL} />
-      : (a.addOns || []).length ? <div>{flagged.length > 0 && <div style={{ fontSize: 22, fontWeight: 800, color: ROSE, fontFamily: mono, marginBottom: 10 }}>{money(flaggedTotal)} · {flagged.length} to question</div>}{(a.addOns || []).map((x, i) => (<div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none" }}><div><div style={{ fontSize: 14, color: "#e2e8f0" }}>{x.verdict === "flagged" ? <><Icon3D name="chartDown" size={13}/> </> : null}{x.name}</div>{x.reason && <div style={{ fontSize: 12, color: MUT2, marginTop: 2, lineHeight: 1.5 }}>{x.reason}</div>}</div><div style={{ fontSize: 14, fontWeight: 700, fontFamily: mono, whiteSpace: "nowrap", color: x.verdict === "flagged" ? ROSE : "#e2e8f0" }}>{money(x.price)}</div></div>))}</div> : <Simple big="None listed" c={MUT2} note="No dealer add-ons or fees were itemized on this quote." />;
-    P.push({ title: "Add-ons & fee audit", tone, v, body }); }
-  // 4 Financing APR
-  { const dr = (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null, mr = a.financeRates?.manufacturer?.apr, high = dr != null && mr != null && dr - mr > 0.1; const price = qp || ms || 0; let extra = null; if (high && price) { const rd = dr / 1200, rm = mr / 1200; extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60); }
-    const fSuf = { weekly: "/wk", biweekly: "/2wk", monthly: "/mo" }; const tone = high ? "flag" : "muted"; const v = financingAprValue(a, dr, mr ?? null, high);
-    const body = (dr != null || a.financing?.paymentAmount) ? <div>{a.financing?.paymentAmount && <div style={{ fontSize: 24, fontWeight: 800, fontFamily: mono, color: "#fff" }}>{money(a.financing.paymentAmount)}<span style={{ fontSize: 14, color: MUT2 }}>{fSuf[a.financing.paymentFrequency] || ""}</span></div>}{dr != null && <div style={{ fontSize: a.financing?.paymentAmount ? 16 : 24, fontWeight: 800, fontFamily: mono, color: high ? ROSE : "#fff", marginTop: a.financing?.paymentAmount ? 6 : 0 }}>{dr}%<span style={{ fontSize: 13, color: high ? ROSE : MUT2, fontWeight: 700 }}> {high ? "· high" : "· this dealer"}</span></div>}{high ? <div style={{ fontSize: 13.5, color: "#e2e8f0", marginTop: 10, lineHeight: 1.6 }}>{(dr - mr).toFixed(2)}% above {a.make || "the manufacturer"}'s advertised {mr}%{extra ? <> — about <b style={{ color: ROSE }}>{money(extra)}</b> more over 60 months</> : null}. Ask them to match it.</div> : (mr != null ? <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8 }}>{a.make || "Manufacturer"} advertises {mr}% on new.</div> : null)}</div> : <Simple big="Not shown" c={MUT2} note="No financing rate was quoted." />;
-    P.push({ title: "Financing APR", tone, v, body }); }
-  // 5 Financing math
-  /* No dealer terms is not "nothing to say": we hold the manufacturer's own published
-     rate AND price, so the payment is arithmetic we can do ourselves. Vic, 2026-08-16. */
-  { const fc = a.financingCheck; const rf = !fc?.checked ? a.referenceFinancing : null;
-    const tone = fc?.checked ? (fc.consistent ? "pass" : "flag") : "muted";
-    const v = fc?.checked ? (fc.consistent ? "RECONCILES" : "DOESN'T ADD UP") : (rf?.atAsking ? "$" + Math.round(rf.atAsking.monthly).toLocaleString() + "/MO REF" : "NOT CHECKED");
-    if (rf?.atAsking) { P.push({ title: "Financing math", tone, v, body: <Simple big={"~$" + Math.round(rf.atAsking.monthly).toLocaleString() + "/mo at " + rf.apr + "% × " + rf.termMonths + "mo"} c={MUT2} note={rf.note} /> }); } else {
-    P.push({ title: "Financing math", tone, v, body: <Simple big={fc?.checked ? (fc.consistent ? "✓ Payments reconcile" : <><Icon3D name="warning" size={13}/> Numbers don't add up</>) : "Not checked"} c={fc?.checked ? (fc.consistent ? TEAL : ROSE) : MUT2} note={fc?.note || (fc?.checked ? "The advertised payment, price, rate and term were cross-checked." : "Not enough financing detail was published to re-check the math.")} /> }); } }
-  // 6 Odometer
-  { const o = a.odometerCheck; const isNew = a.vehicleCondition === "new"; const tone = o?.checked ? (o.flag ? "flag" : "pass") : "muted"; const v = o?.checked ? Number(o.km).toLocaleString() + " km" + (o.flag ? " FLAG" : "") : (isNew ? "N/A (NEW)" : "NOT ON QUOTE");
-    P.push({ title: "Odometer", tone, v, body: <Simple big={o?.checked ? Number(o.km).toLocaleString() + " km" : (isNew ? "N/A — new vehicle" : "Not on quote")} c={o?.flag ? ROSE : "#fff"} note={o?.note || (isNew ? "New vehicles carry delivery-only mileage." : "No odometer reading was on this quote.")} /> }); }
-  // 7 VIN
-  { const vc = a.vinCheck; const tone = vc?.present ? (vc.valid ? "pass" : "flag") : "muted"; const v = vc?.present ? (vc.valid ? "VALID" : "CHECK PATTERN") : "NOT ON QUOTE";
-    P.push({ title: "VIN check", tone, v, body: <Simple big={vc?.present ? (vc.valid ? "✓ Valid VIN pattern" : <><Icon3D name="warning" size={13}/> VIN doesn't validate</>) : "Not on quote"} c={vc?.present ? (vc.valid ? TEAL : ROSE) : MUT2} note={vc?.vin ? "VIN " + vc.vin : "No VIN was listed to check."} /> }); }
-  // 8 EV / PHEV rebate — via resolveEvap so this panel can never disagree with
-  // the scroll view or the emailed report (it used to read a server field that
-  // was never populated, rendering a dead "—" on every EV).
-  { const ev = evap.rebate, eft = evap.effectiveFuelType;
-    const notEv = !!eft && eft !== "BEV" && eft !== "PHEV";
-    const tone = ev?.eligible ? "pass" : "muted";
-    const v = ev?.eligible ? money(ev.total) + " ELIGIBLE" : (ev?.ineligibleReason ? "NOT ELIGIBLE" : notEv ? `N/A (${String(eft).toUpperCase()})` : "NOT DETERMINED");
-    P.push({ title: "EV / PHEV rebate", tone, v, body: <Simple big={ev?.eligible ? money(ev.total) + " available" : (ev?.ineligibleReason ? "Not eligible" : notEv ? `N/A — ${String(eft).toLowerCase()} vehicle` : "Not determined")} c={ev?.eligible ? TEAL : MUT2} note={ev?.ineligibleReason || (ev?.eligible ? `${money(ev.federal)} federal${ev.provincial > 0 ? " + " + money(ev.provincial) + " provincial" : ""}` : notEv ? "Federal and provincial EV incentives don't apply to this drivetrain." : "We couldn't confirm this vehicle's drivetrain from the listing, so no rebate claim is made — ask the dealer to confirm it in writing.")} /> }); }
-  // 9 Included warranty
-  // Worded once in report-lines.js. On a USED car this reads what is LEFT of
-  // the factory warranty from our own manufacturer_warranties catalogue -- the
-  // answer applyRemainingWarranty already computed and only this file ever
-  // rendered. [[report-features-all-views]]
-  { const wl = warrantyLine(a); const w = a.standardWarranty; const tone = wl.tone; const v = wl.value;
-    P.push({ title: "Included warranty", tone, v, body: <Simple big={wl.value} c={wl.tone === "pass" ? TEAL : MUT2} note={wl.line} /> }); }
-  // 10 Dealer reputation
-  { const d = a.dealerSentiment; const rated = Number(d?.rating) > 0; const ran = d?.checked === true || rated; const tone = rated ? (Number(d.rating) >= 4 ? "pass" : "muted") : "muted"; /* three states: a lookup that never ran must NOT read as "no reviews exist" -- Charlesglen has 5,930 */ const rc = d && d.reviewCount != null && Number.isFinite(Number(d.reviewCount)) ? Number(d.reviewCount) : null;
-    const v = rated ? Number(d.rating).toFixed(1) + "★" + (rc == null ? "" : " / " + rc.toLocaleString()) : (ran ? "NONE FOUND" : "NOT CHECKED");
-    const body = d?.rating ? <div><div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>★ {Number(d.rating).toFixed(1)}<span style={{ fontSize: 12, color: MUT2, fontWeight: 600 }}>{d.reviewCount ? ` · ${Number(d.reviewCount).toLocaleString()} Google reviews` : ""}</span></div>{(d.highlights || []).slice(0, 3).map((h, i) => (<div key={i} style={{ padding: "7px 0", borderTop: `1px solid ${BORD}`, fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5 }}><span style={{ color: TEAL, fontWeight: 700 }}>★{h.rating}</span> {h.text}</div>))}</div> : (() => {
-      // THREE STATES, NOT TWO. This was `d?.rating ? reviews : "Not found"`, so
-      // the moment the lookup did not COMPLETE the card asserted "No public
-      // Google reviews were located for this dealer" -- about Sundance Mazda, an
-      // established Edmonton dealer with plenty of them. The check timed out; we
-      // never looked. The point beside it already said "NOT CHECKED", so one
-      // card contradicted the other and the card was the one making the false
-      // claim. A lookup miss must never render as a finding.
-      // [[make-recalls-fail-safe]] [[no-accusation-language]]
-      const rep = dealerReputationPoint(a.dealerSentiment);
-      return rep.state === "absent"
-        ? <Simple big="None found" c={MUT2} note="We searched and found no public reviews for this dealer — not a red flag by itself, but there's no track record to lean on." />
-        : <Simple big="Not checked" c={MUT2} note="We didn't complete this lookup, so nothing here is a statement about this dealer. Search their name on Google to see their rating and review count yourself." />;
-    })();
-    P.push({ title: "Dealer reputation", tone, v, body }); }
-
-  // ── "What this means" — every card carries a plain-language translation of
-  // its data, written for a first-time buyer (no jargon). Deterministic: built
-  // from the same verified fields the card shows, never free-styled, so the
-  // explanation can't drift from the evidence (claims-must-stay-backed).
-  const explainFor = {
-    // Worded once in report-lines.js (priceCheckState), so the screen, the
-    // emailed deck and the PDF answer "unverified against what?" the same way.
-    // This builder reached the email and the PDF and NOT this file, which is
-    // the all-views defect it was written to fix. [[report-features-all-views]]
-    "Price vs MSRP": (!priceGated && qp && !priceVerified)
-      ? priceCheckState(a).line
-      : priceGated
-      ? `The dealer chose not to publish a price — the page says "contact us" instead. That's a lead-capture tactic: they want you on the phone, where their salespeople control the conversation.${ms && isManufacturerFigure(a.msrpBasis) ? ` Your anchor is ${a.make || "the manufacturer"}'s MSRP, starting at ${money(ms)}.` : ""} Don't negotiate blind — get their full all-in price in writing before you visit.`
-      : !qp
-      ? "We couldn't read an asking price off this listing, so there's nothing to compare yet. Get the full price in writing from the dealer before anything else."
-      : deltaOk
-        ? gatedRecoveredNote + (delta > 0
-          ? `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(delta)} MORE than that sticker. Anything over sticker is pure negotiation room.`
-          : delta === 0
-            ? "MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking exactly the sticker — not a markup, but not a deal either."
-            : `MSRP is the manufacturer's own sticker price for this exact version of the car. This dealer is asking ${money(-delta)} BELOW that sticker — a real discount, worth confirming nothing was added back in fees.`)
-        /* WHY NO COMPARISON WAS MADE, from the SAME basis the panel above states.
-           This used to be one catch-all that always told the "starts at, base
-           version" story regardless of the reason. On a USED 2026 RAV4 the panel
-           said "$52,000 is what this Limited cost WHEN NEW" and this line said
-           "the manufacturer's price STARTS at $52,000 for the base version" —
-           two false claims (it is the Limited, not the base; a used car has no
-           options "on top") contradicting the panel two inches above. Same class
-           as the rebate contradiction: one surface telling two stories. */
-        /* WHY NO COMPARISON WAS MADE — from the GATE, which already decided it.
-           This was a catch-all that always told the "starts at, base version"
-           story regardless of the reason. On a USED 2026 RAV4 the panel said
-           "$52,000 is what this Limited cost WHEN NEW" and this line said
-           "the manufacturer's price STARTS at $52,000 for the base version":
-           two false claims (it is the Limited, not the base; a used car has no
-           options "on top") contradicting the panel two inches above, and a
-           third number again against the $47,660 floor shown beside it.
-           qualifyMsrpClaim owns the reason and the emailed report already
-           deferred to it — the screen simply did not, so the two surfaces
-           disagreed. One source now. */
-        : (() => {
-            const refusal = qualifyMsrpClaim(a).refusal;
-            if (refusal) return gatedRecoveredNote + refusal;
-            const cc = qualifyCeilingClaim(a);
-            const floor = a.allInPricing && cc.floor ? cc.floor : null;
-            if (floor)
-              /* SCOPED TO WHAT WE HOLD. "Toyota sells this model from $47,660"
-                 was stated as the manufacturer's floor while Toyota's own LE
-                 trim card reads $41,375.40 all-in — our catalogue simply has no
-                 LE row, so the floor was the bottom of OUR ladder, $6,285 high.
-                 A floor from a partial ladder is not the manufacturer's floor,
-                 and trimsConsidered >= 2 never established completeness. */
-              return gatedRecoveredNote + `Across the ${cc.trimsConsidered} ${a.make || ""} trims in our catalogue this model runs ${money(floor)}${cc.ceiling && cc.ceiling !== floor ? `–${money(cc.ceiling)}` : ""} all-in — cheaper trims may exist that we don't hold. This car's exact trim was not pinned down, so we don't call it "over" or "under"; use that range as a reference and make the dealer say which trim this is.`;
-            if (ms)
-              return gatedRecoveredNote + `${a.make || "The manufacturer"}'s price for this model starts at ${money(ms)} for the base version. This car's exact trim and options were not pinned down, so we don't call it "over" or "under" — use the base figure as your reference and make the dealer justify everything above it.`;
-            return gatedRecoveredNote + "We couldn't verify the manufacturer's sticker price for this exact car, so no over/under comparison is made — never trust a 'savings' claim you can't check.";
-          })(),
-    "Transport Canada recalls": a.recalls?.checked && a.recalls.count > 0
-      ? `A recall means the manufacturer found a safety defect and must fix it FREE of charge. This vehicle's model has ${a.recalls.count} unfixed recall${a.recalls.count > 1 ? "s" : ""} on record — tell the dealer to complete the repair before you take delivery. It costs you nothing.`
-      : a.recalls?.checked && a.recalls.confirmed !== false
-        ? "A recall means the manufacturer found a safety defect they must fix for free. Canada's government registry shows none outstanding for this model — a clean bill on this point."
-        : "We couldn't confirm this exact model in the government recall registry, so don't treat this as an all-clear — check by VIN at Transport Canada (free) before signing.",
-    "Add-ons & fee audit": (a.addOns || []).length
-      ? "These are things the DEALER added on top of the car's price — packages, accessories, protection products. They're where dealers make extra margin, and you can say no to most of them. Every line here is one you're allowed to question."
-      : "The listing doesn't itemize any dealer extras. That doesn't mean there are none — ask for the full out-the-door breakdown in writing before you agree to anything.",
-    // Worded once in report-lines.js so this sentence can never contradict the
-    // Payment starting point card on the same report. [[report-features-all-views]]
-    "Financing APR": financingAprNote(a, (a.financeRates?.dealer?.apr != null && TRUSTED_APR_SOURCES.has(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null),
-    // Worded once in report-lines.js from the fields computeFinancingCheck
-    // records, so this sentence cannot describe a check the code does not run.
-    // [[report-features-all-views]]
-    "Financing math": financingMathNote(a),
-    "Odometer": a.odometerCheck?.checked
-      // Branches on the BAND the server put this reading in, not on
-      // vehicleCondition alone. The old sentence told every new car that
-      // "anything in the thousands" meant demo use -- printed on a 2025 Mazda
-      // CX-90 reading 12 km, directly under our own note calling that delivery
-      // distance. A fixed sentence beside a variable number will always
-      // eventually contradict it. [[present-without-creating-questions]]
-      ? `This is how far the car has actually been driven: ${Number(a.odometerCheck.km).toLocaleString()} km. ${
-          a.odometerCheck.band === "new_delivery"
-            ? "New vehicles don't arrive on zero — coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. That's delivery distance, not use. Read the dash yourself when you see the car and confirm it still matches."
-          : a.odometerCheck.band === "new_beyond_delivery"
-            ? "That's further than a car gets being delivered — most often it means the vehicle was a demonstrator or a service loaner. That's a normal part of the business, not a fault. What matters to you is that the factory warranty clock starts when a vehicle goes into service, not when you buy it: ask for the in-service date in writing, and ask how the price reflects it."
-          : a.odometerCheck.band === "used_nearly_new"
-            ? "On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return rather than anything unusual. Ask for the in-service date — the factory warranty started then, not on the day you buy."
-            : "Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."}`
-      : "No odometer reading was shown. Always read it off the dash yourself before signing — never off the paperwork alone.",
-    "VIN check": a.vinCheck?.present
-      ? "The VIN is the car's unique fingerprint. This one has a valid format — before you sign, match it against the plate at the base of the windshield so the paperwork is for THIS exact car."
-      : "The listing doesn't show the VIN (the car's unique fingerprint). Ask for it — it lets you verify recalls, history and that the paperwork matches the actual car.",
-    "EV / PHEV rebate": evap.rebate?.eligible
-      ? `Government money you may qualify for on this vehicle: ${money(evap.rebate.total)}. The dealer doesn't control this — it's a federal/provincial program. Make sure it's applied on top of your negotiated price, not instead of a discount.`
-      : evap.show
-        ? "This electric/plug-in vehicle doesn't qualify for the federal rebate (usually the price cap or the model list). Don't let anyone imply a government discount that isn't there."
-        : evap.effectiveFuelType
-          ? `Rebates only apply to electric and plug-in vehicles — this one is ${String(evap.effectiveFuelType).toLowerCase()}, so there's no government money in play.`
-          : "We couldn't confirm this vehicle's drivetrain from the listing, so we make no rebate claim either way — ask the dealer to state it in writing.",
-    // Worded once in report-lines.js (warrantyLine). The old text here only
-    // knew about a NEW car's included warranty, so every used report read
-    // "we couldn't confirm the factory warranty terms" while the used path had
-    // already worked out exactly how much cover was left.
-    "Included warranty": warrantyLine(a).line,
-    "Dealer reputation": a.dealerSentiment?.rating
-      ? `This is the dealer's public Google rating from real customers — ${Number(a.dealerSentiment.rating).toFixed(1)} stars${Number(a.dealerSentiment.reviewCount) > 0 ? ` over ${Number(a.dealerSentiment.reviewCount).toLocaleString()} reviews` : ""}. It tells you how they treat people after the handshake.`
-      : "We couldn't find public reviews for this dealer. That's not a red flag by itself — but walk in knowing you have no track record to lean on.",
-  };
-  const ExplainBox = ({ txt }) => txt ? (
-    <div style={{ marginTop: 16, background: "rgba(251,191,36,.12)", border: `2px solid ${AMBER}`, borderRadius: 12, padding: "14px 16px", boxShadow: "0 0 20px rgba(251,191,36,.28)" }}>
-      <div style={{ fontSize: 11.5, letterSpacing: ".14em", textTransform: "uppercase", color: AMBER, fontWeight: 800, marginBottom: 8 }}>What this means</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", lineHeight: 1.6 }}>{txt}</div>
-    </div>
-  ) : null;
-
-  const pointItems = P.slice(0, 10).map((p, i) => ({ key: "p" + i, title: p.title, tone: p.tone, v: p.v, glow: p.tone === "flag", point: true, body: (<>{p.body}<ExplainBox txt={explainFor[p.title]} /></>) }));
-
-  const evidenceItem = { key: "evidence", title: "Evidence · dispute-proof", tone: "muted", glow: false, body: (
-    <EvidenceCard a={a} palette={{ CY, MUT, MUT2, BORD, TEAL, ROSE, AMBER, mono, ink: "#e2e8f0" }} />
-  )};
-
-  const cs = a.counterScript;
-  // COPY THE SCRIPT — the whole point of the counter-script is that the buyer
-  // has it on their phone at the desk, and the Scroll view has had a copy
-  // button since it shipped while this card, showing the identical lines, had
-  // none (Vic, 2026-08-27). Reading nine moves off a screen and retyping them
-  // is not a thing anyone does. Lives on the ITEM, so it travels with the card
-  // to any surface that renders it. [[report-features-all-views]]
-  const sayItem = (cs && Array.isArray(cs.moves) && cs.moves.length) ? { key: "say", title: cs.clean ? "★ Say this to confirm" : "★ Say this at the table", tone: "pass", glow: true, body: (
-    <div>
-      {cs.moves.map((mv, i) => (<div key={i} style={{ fontSize: 14, color: "#e2e8f0", padding: "9px 0", borderTop: i > 0 ? `1px solid ${BORD}` : "none", lineHeight: 1.55 }}><b style={{ color: TEAL }}>{i + 1}.</b> {String(mv?.say || "")}</div>))}
-      <button onClick={copyCounterScript} style={{ marginTop: 12, width: "100%", background: scriptCopied ? TEAL : "transparent", border: `1px solid ${scriptCopied ? TEAL : CY}`, borderRadius: 10, padding: "10px 12px", color: scriptCopied ? "#04222b" : CY, fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
-        {scriptCopied ? "Copied — it's on your clipboard ✓" : "Copy the script"}
-      </button>
-    </div>
-  ) } : null;
-
-  // Days on lot — motivated-seller leverage from the dealer's OWN inventory
-  // data (SM360 daysInInventory/dateEntry; later our observation network).
-  // Uiverse-style 3D striped card (imtausef) with the traffic-light system:
-  // ≤30 green · 31–89 amber · 90–119 red · 120+ blinking red. The NUMBER is
-  // never estimated — but the POINT always renders.
-  //
-  // It used to live entirely inside `if (a.daysOnLot)`, so on any platform we
-  // cannot read a lot date from, it vanished from the Sidebar, Scroll AND
-  // Heatmap and the buyer never learned the question had been asked. The
-  // emailed report was fixed for exactly this on 2026-08-16 and the on-screen
-  // views were not, so the surfaces disagreed — report-features-all-views is a
-  // hard rule precisely because a one-surface fix reads as done.
-  //
-  // A missing answer is information: "ask the dealer" is a usable instruction,
-  // an absent card is not. Same rule as VIN (vin-every-scan).
-  let daysLotItem = null;
-  // Worded once in report-lines.js (daysOnLotLine). One sighting is a DATE,
-  // not a duration, and this card must not dress it as a span.
-  // [[days-on-lot-needs-real-observations]] [[report-features-all-views]]
-  const dolLine = daysOnLotLine(a);
-  // The dealer's own advertised price, every time we saw it move. Its own
-  // also-checked item, never folded into days-on-lot: how long a car has sat
-  // and what it has cost are two different facts. [[report-features-all-views]]
-  const pmLine = priceMovesLine(a);
-  let priceMovesItem = pmLine ? { key: "pricemoves", title: "Advertised price moves", tone: pmLine.tone, v: pmLine.value,
-    body: <Simple big={pmLine.value} c={pmLine.tone === "flag" ? TEAL : MUT2} note={pmLine.line} /> } : null;
-  // NOT a P.push: days-on-lot is an ALSO-CHECKED item, not one of the ten
-  // points. Pushing it into P made the audit eleven, and check:parity and
-  // check:points both caught it — the "10-point" claim is a promise about
-  // exactly which ten. [[ten-point-claim-policy]] [[claims-must-stay-backed]]
-  if (a.daysOnLot && dolLine && !(Number(a.daysOnLot.days) > 0)) {
-    daysLotItem = { key: "dayslot", title: "Days on lot", tone: "muted", v: dolLine.value,
-      body: <Simple big="First sighting" c={MUT2} note={dolLine.line} /> };
-  } else if (a.daysOnLot && Number(a.daysOnLot.days) > 0) {
-    const d = Number(a.daysOnLot.days);
-    const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
-    // FOUR tiers. The comment promised "120+ blinking red" and the code had
-    // three, so a 200-day car rendered identically to a 90-day one — the two
-    // are not the same conversation, and the older it is the more it is worth
-    // saying so. lc-blink already existed in the stylesheet, wired only to the
-    // live-ticker dot.
-    const dolState = d >= 120 ? "critical" : d >= 90 ? "red" : d >= 31 ? "amber" : "green";
-    const ACC = dolState === "green" ? "#8ed500" : dolState === "amber" ? "#ffb020" : "#ff3b5c";
-    const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
-    const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    const bulb = (on, color) => (
-      <span key={color} style={{ display: "block", width: 14, height: 14, borderRadius: 999, margin: "4px auto", background: on ? color : "#2a2a2a", boxShadow: on ? `0 0 10px 2px ${color}` : "none" }} />
-    );
-    daysLotItem = { key: "dayslot", title: "Days on lot", tone: d >= 90 ? "flag" : (d >= 31 ? "muted" : "pass"), glow: d >= 90, critical: d >= 120, body: (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <style>{`
-          .lc-dol-parent { width: min(320px, 100%); perspective: 1000px; }
-          .lc-dol-card { padding-top: 50px; border: 3px solid #141414; transform-style: preserve-3d;
-            background: #ffffff;
-            width: 100%; position: relative;
-            box-shadow: rgba(0, 0, 0, 0.45) 0px 30px 30px -10px; transition: all 0.5s ease-in-out; }
-          .lc-dol-card:hover { transform: rotate3d(0.5, 1, 0, 22deg); }
-          ${dolState === "critical" ? `
-          .lc-dol-card { animation: lc-dol-pulse 1.6s ease-in-out infinite; }
-          @keyframes lc-dol-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,92,.55); } 50% { box-shadow: 0 0 0 14px rgba(255,59,92,0); } }
-          /* Motion is an emphasis, never the only carrier of the meaning: the
-             colour and the "FOUR MONTHS+" wording say it without animation. */
-          @media (prefers-reduced-motion: reduce) { .lc-dol-card { animation: none; box-shadow: 0 0 0 3px rgba(255,59,92,.5); } }
-          ` : ""}
-          .lc-dol-content { background: ${ACC}; transition: all 0.5s ease-in-out; padding: 56px 22px 22px 22px; transform-style: preserve-3d; }
-          .lc-dol-title { display: inline-block; color: #141414; font-size: 24px; font-weight: 900; transform: translate3d(0,0,50px); transition: all .5s; }
-          .lc-dol-text { margin-top: 10px; font-size: 12px; font-weight: 700; color: #141414; line-height: 1.55; transform: translate3d(0,0,30px); transition: all .5s; padding-right: 34px; }
-          .lc-dol-chip { cursor: default; margin-top: 1rem; display: inline-block; font-weight: 900; font-size: 9px;
-            text-transform: uppercase; color: ${ACC}; background: #141414; padding: 0.5rem 0.7rem; transform: translate3d(0,0,20px); }
-          .lc-dol-datebox { position: absolute; top: 26px; right: 26px; height: 62px; width: 62px; background: #141414;
-            border: 1px solid ${ACC}; padding: 8px 6px; transform: translate3d(0,0,80px); box-shadow: rgba(0,0,0,.35) 0 17px 10px -10px; z-index: 2; }
-          .lc-dol-logo { position: absolute; top: 8px; left: 10px; transform: translate3d(0,0,80px); z-index: 2; }
-          .lc-dol-light { position: absolute; top: 96px; right: 34px; background: #141414; border: 1px solid #2a2a2a;
-            border-radius: 999px; padding: 5px 4px; transform: translate3d(0,0,70px); z-index: 2; }
-        `}</style>
-        <div className="lc-dol-parent">
-          <div className="lc-dol-card">
-            <div className="lc-dol-logo"><LogoMark size={34} /></div>
-            <div className="lc-dol-datebox">
-              {sinceD ? (<>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 9, fontWeight: 700 }}>{M3[sinceD.getMonth()]} {sinceD.getFullYear()}</span>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 20, fontWeight: 900 }}>{sinceD.getDate()}</span>
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 7, fontWeight: 700, letterSpacing: ".08em" }}>FIRST SEEN</span>
-              </>) : (
-                <span style={{ display: "block", textAlign: "center", color: ACC, fontSize: 18, fontWeight: 900, marginTop: 10 }}>{d}d</span>
-              )}
-            </div>
-            <div className="lc-dol-light">
-              {bulb(dolState === "red", "#ff3b5c")}
-              {bulb(dolState === "amber", "#ffb020")}
-              {bulb(dolState === "green", "#8ed500")}
-            </div>
-            <div className="lc-dol-content">
-              <span className="lc-dol-title">{a.daysOnLot.atLeast?"AT LEAST ":""}{d.toLocaleString()} DAYS ON LOT</span>
-              <div className="lc-dol-text">
-                {a.daysOnLot.atLeast?"At least ":""}{dolMonths ? `about ${dolMonths} months` : `${d.toLocaleString()} days`} on the dealer's lot{a.daysOnLot.since ? ` — first seen ${a.daysOnLot.since}` : ""}. Source: {a.daysOnLot.sourceLabel || "dealer inventory data"}.
-                {a.daysOnLot.atLeast ? " It may have been sitting longer before we first saw it, so this is a floor, not a total." : ""}
-                {d >= 90
-                  ? " Well past the typical turn window — every extra week costs the dealer real money. Concrete discount leverage."
-                  : d >= 31
-                    ? " A month-plus on the lot — worth asking what they'll do on price to move it."
-                    : " Recently listed — limited sitting-time leverage on this unit."}
-                {dolCareAsk(d)}
-              </div>
-              <span className="lc-dol-chip">{d >= 120 ? "Four months+ — name your price" : d >= 31 ? "Ask for a discount" : "Fresh on the lot"}</span>
-            </div>
-          </div>
-        </div>
-        <div style={{ width: "min(320px, 100%)" }}>
-          <ExplainBox txt={`This is how long this exact car has been sitting unsold — ${d.toLocaleString()} days, counted by the dealer's own inventory system (not our guess). Dealers pay interest on unsold cars every single week, so the longer one sits, the more motivated they are to move it. ${d >= 90 ? "At this age, you're doing them a favour by buying it — negotiate like it." : d >= 31 ? "A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price." : "This one is fresh, so sitting-time won't move the price much yet."}${d >= 31 ? " A car that sits also sits mechanically — the oil clock, the 12-volt battery and the tires all run on time, which is why the card suggests asking what lot care was done." : ""}`} />
-        </div>
-      </div>
-    )};
-  } else {
-    daysLotItem = { key: "dayslot", title: "Days on lot", tone: "muted", v: "Not published", body: (
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ flex: "1 1 320px", minWidth: 260 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: MUT2 }}>Not published — ask the dealer</div>
-          <div style={{ fontSize: 12.5, color: MUT2, marginTop: 6, lineHeight: 1.6 }}>
-            This dealer's platform doesn't expose an inventory date, and we haven't seen this VIN
-            in our own daily tracking yet. That is a gap in what we can read — not a sign the car is fresh.
-          </div>
-        </div>
-        <div style={{ width: "min(320px, 100%)" }}>
-          <ExplainBox txt={`Ask outright: "How long has this exact car been on your lot?" A car sitting 90+ days is costing the dealer money every week, and that is the single biggest source of discount leverage you have. If they won't answer, the listing's own photos and the price history usually will.`} />
-        </div>
-      </div>
-    )};
-  }
-
-  // S36 — trade-in instant-offer widget on the listing. Factual detection
-  // (AccuTrade/TradePending/KBB ICO/CBB/generic) + the decoupling coach; the
-  // counter-script "Trade-in" move ships from the server alongside it.
-  let tradeInItem = null;
-  if (a.tradeInWidget && a.tradeInWidget.detected) {
-    const tv = a.tradeInWidget.vendor;
-    tradeInItem = { key: "tradein", title: "Trade-in tool on this listing", tone: "muted", v: tv || "detected", body: (
-      <div>
-        <div style={{ fontSize: 13.5, color: "#e2e8f0", lineHeight: 1.6 }}>
-          This listing embeds {tv ? <b>{tv}</b> : <b>a “value your trade” tool</b>} — an instant trade-in appraisal widget.
-          The number it shows is anchored to the <b>wholesale</b> side of the market (what dealers pay each other),
-          it is non-binding, and it appears in exchange for your contact and vehicle details.
-        </div>
-        <div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 10, lineHeight: 1.65 }}>
-          <div><b style={{ color: TEAL }}>1.</b> Settle this vehicle's price first — the trade comes after, never blended into one payment.</div>
-          <div><b style={{ color: TEAL }}>2.</b> Get the trade offer in writing, on its own line of the bill of sale.</div>
-          <div><b style={{ color: TEAL }}>3.</b> Know your own number first — check retail listings for your car before disclosing anything.</div>
-        </div>
-        <ExplainBox txt={`The "value your trade" button on this dealer's site runs an appraisal tool${tv ? ` (${tv})` : ""} that quotes what dealers pay at wholesale — usually thousands below what your car sells for at retail. It also isn't a promise: the number routinely drops at the in-person inspection. Treat it as the dealer's opening bid, keep it separate from the price of the car you're buying, and come armed with your own retail comparison.`} />
-      </div>
-    )};
-  }
-
-  // S37 — the advertised price is conditional on financing with the dealer.
-  // This is a flag, not a muted note: the buyer paying cash or arriving with
-  // their own bank approval believes they hold the strongest hand, and this is
-  // the clause that quietly takes the discount back at signing. Evidence is the
-  // page's own words, so it is the dealer's statement we are repeating.
-  let financeContingentItem = null;
-  if (a.financeContingent && a.financeContingent.contingent) {
-    const F = a.financeContingent;
-    financeContingentItem = { key: "fincontingent", title: "Price depends on financing with the dealer", tone: "flag", glow: true, v: "Conditional", body: (
-      <div>
-        <div style={{ fontSize: 13.5, color: "#e2e8f0", lineHeight: 1.6 }}>
-          This listing's own wording ties the advertised price to taking <b>the dealer's financing</b>.
-          Pay cash or use your own bank and the price can legitimately change — the discount is often funded by
-          the dealer's commission on the loan, so it goes away with the loan.
-        </div>
-        <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>
-          Detected: {F.reasons.join(" · ")}
-        </div>
-        {F.evidence && <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 8, padding: "8px 10px", borderLeft: `2px solid ${ROSE}`, background: "rgba(255,255,255,.03)", lineHeight: 1.5, fontStyle: "italic" }}>“…{F.evidence}…”</div>}
-        <div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 10, lineHeight: 1.65 }}>
-          <div><b style={{ color: TEAL }}>Ask before you go in:</b> “What is the price if I pay cash or use my own bank — and if it changes, by exactly how much?” Get the answer in writing.</div>
-        </div>
-        <ExplainBox txt={`Dealers earn a commission when you finance through them, and they often fund part of the advertised discount out of it. So the headline price can be a financed price. That is not necessarily improper — but it has to be disclosed, and it means a cash buyer may not get the number they came for. Settle this in writing before you're at the desk, because that is where the price gets "corrected".`} />
-      </div>
-    )};
-  }
-
-  // LINE -- "Payment default: this page's payment default is N months, <frequency>
-  // payments at X%." The page's OWN pre-selected calculator scenario, read by
-  // code (page-default.js), sealed in the canonical (`dflt`), and worded once
-  // in report-lines.js (pageDefaultLine). ALWAYS built: "Not published" and
-  // "Not read" are answers too, each ending in the one sanctioned instruction.
-  // [[report-never-empty]] [[report-features-all-views]]
-  let pageDefaultItem = null;
-  {
-    const line = pageDefaultLine(a);
-    const meta = pageDefaultMeta(a.pageDefault);
-    pageDefaultItem = { key: "pagedefault", title: line.title, tone: "muted", glow: false, v: line.value, body: (
-      <div>
-        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} note={line.body} />
-        {meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{meta}</div>}
-        <ExplainBox txt="Where this page's payment calculator starts. A longer term and more frequent payments make each payment smaller, so the total cost of borrowing is the number to compare across offers. The dealer can give term, frequency, rate and total cost in writing." />
-      </div>
-    )};
-  }
-
-  // #11 — AMVIC dealer licence. Only rendered on a confident registry match;
-  // the status is the regulator's own wording, verbatim. A valid licence is
-  // quiet reassurance; expired/closed/suspended is a real flag with the ask.
-  let licItem = null;
-  if (a.dealerLicence && a.dealerLicence.status) {
-    const L = a.dealerLicence, st = L.state;
-    const good = st === "valid";
-    const label = good ? "Dealer licence · AMVIC verified" : "Dealer licence · AMVIC";
-    licItem = { key: "licence", title: label, tone: good ? "pass" : "flag", glow: !good, v: good ? "Valid" : (L.status || "Check"), body: (
-      <div>
-        <div style={{ fontSize: 22, fontWeight: 1000, color: good ? TEAL : ROSE, lineHeight: 1.15 }}>{L.status}</div>
-        <div style={{ fontSize: 12, color: MUT2, marginTop: 6, lineHeight: 1.55 }}>
-          {L.legalName ? <>Registry record: <b style={{ color: "#e2e8f0" }}>{L.legalName}</b>. </> : null}
-          {L.licenceNumber ? <>Licence {L.licenceNumber}. </> : null}
-          {L.expiryDate ? <>Expiry {L.expiryDate}. </> : null}
-          Source: AMVIC's public licensee registry.
-        </div>
-        {!good && <div style={{ fontSize: 12.5, color: "#e2e8f0", marginTop: 8, lineHeight: 1.55 }}>Ask them to confirm their current AMVIC licence number and status <b>in writing before any deposit</b>.</div>}
-        <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Check it yourself on AMVIC's registry ↗</a>
-        <ExplainBox txt={good
-          ? `AMVIC is Alberta's regulator — every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads "${L.status}", which is what you want to see. Nothing to do.`
-          : `AMVIC is Alberta's regulator, and its public registry currently lists this business as "${L.status}". That does not always mean they can't sell you a car — records lag and businesses reapply — but it is the regulator's own wording, and it is worth clearing up before money changes hands. Ask for their current licence number in writing, then check it yourself on AMVIC's site.`} />
-      </div>
-    )};
-  }
-
-  // MSRP per trim — the factory range card (standing requirement 2026-08-19:
-  // the buyer sees the manufacturer's per-trim range with a source link even
-  // when the dealer hides the trim or prints their own sticker).
-  const trimRange = useTrimRange(a);
-  let trimRangeItem = null;
-  // The catalog holds this model, but not THIS car's powertrain. Say so; do not
-  // show another powertrain's ladder as if it were the factory range (a gas
-  // RX 350 was shown the RX Hybrid / Plug-in ladder, 2026-09-02).
-  if (trimRange.status === "none_for_powertrain") {
-    const pt = { gas: "gasoline", hybrid: "hybrid", phev: "plug-in hybrid", bev: "electric", diesel: "diesel" }[trimRange.wantFuel] || trimRange.wantFuel;
-    trimRangeItem = { key: "trimrange", title: "MSRP per trim", tone: "muted", v: "not held", body: (
-      <div>
-        <div style={{ fontSize: 12, color: MUT, lineHeight: 1.5 }}>Our catalog holds {trimRange.year} {a.make} {a.model} prices for {trimRange.otherRows} trims of a <b>different powertrain</b>, and none for the {pt} version this listing is. Showing those would compare this price to cars it is not, so no range is shown.</div>
-        {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Check the {pt} trims on the manufacturer's site ↗</a>}
-      </div>
-    )};
-  }
-  if (trimRange.status === "ready" && trimRange.trims?.length) {
-    const trs = trimRange.trims, aboveN = qp > 0 ? trs.filter(t => qp > Number(t.msrp)).length : 0;
-    const allExcl = trs.every(t => t.price_basis === "excl_freight");
-    trimRangeItem = { key: "trimrange", title: "MSRP per trim", tone: "muted", v: `${trs.length} trims`, body: (
-      <div>
-        <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>{trimRange.year} {a.make} {a.model} — the manufacturer's price per trim{allExcl ? " (before freight & fees)" : ""}. The factory range the quote should be read against.</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          {trs.slice(0, TRIM_ROWS_SHOWN).map((t, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "5px 9px", borderRadius: 8, background: "rgba(15,23,42,.6)", border: `1px solid ${BORD}` }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{trimRange.multiNameplate && t.nameplate ? <span style={{ color: MUT, fontWeight: 600 }}>{t.nameplate} · </span> : null}{t.trim}</span>
-              <span style={{ fontSize: 12, fontFamily: mono, color: "#e2e8f0", whiteSpace: "nowrap" }}>{money(t.msrp)}{t.price_basis === "excl_freight" ? <span style={{ color: MUT }}> +frt</span> : null}</span>
-            </div>
-          ))}
-        </div>
-          {trs.length > TRIM_ROWS_SHOWN && (<div style={{ fontSize: 11, color: MUT, marginTop: 6 }}>Showing {TRIM_ROWS_SHOWN} of {trs.length} published trims — the full ladder is on the manufacturer's own page.</div>)}
-        {qp > 0 && !trimRange.mixed && <div style={{ fontSize: 12, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>Asking {money(qp)} sits above {aboveN} of {trs.length} published trim prices.{allExcl ? " Catalog prices exclude freight & fees — compare like-for-like." : ""}</div>}
-        {trimRange.src && <a href={trimRange.src} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11.5, color: CY, fontWeight: 800, marginTop: 8, display: "inline-block" }}>Source: confirm on the manufacturer's site ↗</a>}
-      </div>
-    )};
-  }
-
-  // Comparable listings — other live listings of the same model, read from
-  // LotCheck's own crawled inventory, not a third-party estimate.
-  const comparables = useComparableListings(a);
-  let comparableItem = null;
-  if (comparables.status === "ready" && comparables.rows?.length) {
-    const isUsed = comparables.condition === "used";
-    // Same traffic-light convention as Days on lot: green = cheapest of
-    // these comparables, red = priciest, amber = anything in between.
-    const cPrices = [...new Set(comparables.rows.map(r => Number(r.price)))].sort((x, y) => x - y);
-    const cRankColor = (price) => {
-      if (cPrices.length < 2) return { bg: "rgba(15,23,42,.6)", bd: BORD, ink: "#e2e8f0" };
-      const rank = cPrices.indexOf(Number(price));
-      if (rank === 0) return { bg: "rgba(16,185,129,.12)", bd: TEAL, ink: TEAL };
-      if (rank === cPrices.length - 1) return { bg: "rgba(244,63,94,.12)", bd: ROSE, ink: ROSE };
-      return { bg: "rgba(15,23,42,.6)", bd: AMBER, ink: "#e2e8f0" };
-    };
-    comparableItem = { key: "comparables", title: isUsed ? "Comparable used listings" : "Other listings of this model", tone: "muted", v: `${comparables.rows.length} nearby`, body: (
-      <div>
-        <div style={{ fontSize: 12, color: MUT, marginBottom: 8 }}>
-          {isUsed
-            ? `Other ${comparables.year} ${comparables.make} ${comparables.model} listings we've read from Alberta dealers, closest in mileage to this one.`
-            : `Other ${comparables.year} ${comparables.make} ${comparables.model} listings we've read from Alberta dealers.`}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {comparables.rows.map((r, i) => { const rc = cRankColor(r.price); return (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, padding: "8px 10px", borderRadius: 8, background: rc.bg, border: `1px solid ${rc.bd}55` }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#e2e8f0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.trim || comparables.model}{r.city ? ` · ${r.city}` : ""}</div>
-                {isUsed && r.odometerKm != null && <div style={{ fontSize: 11, color: MUT2, marginTop: 2 }}>{Number(r.odometerKm).toLocaleString()} km</div>}
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 800, fontFamily: mono, color: rc.ink, whiteSpace: "nowrap" }}>{money(r.price)}</span>
-            </div>
-          ); })}
-        </div>
-        <div style={{ fontSize: 11, color: MUT, marginTop: 6 }}>Green = cheapest of these, red = priciest.</div>
-        <div style={{ fontSize: 11, color: MUT, marginTop: 6, lineHeight: 1.5 }}>Read from each dealer's own public listing page, same as this report — not a third-party valuation. Prices and availability move; confirm directly with the dealer.</div>
-      </div>
-    )};
-  }
-
-  // LINE -- "Of N other listings read, M advertise below this one."
-  //
-  // The sentence is built ONCE, in report-lines.js (marketCountLine), from the
-  // fields the server computed and sealed in the canonical (`mc`), and this
-  // card renders it verbatim -- so the words here are the words in the emailed
-  // HTML, the PDF and on /verify. ALWAYS built: a listing set that could not be
-  // read still says so, the same never-empty rule as daysLotItem's "Not
-  // published" branch. [[report-never-empty]] [[report-features-all-views]]
-  let marketCountItem = null;
-  {
-    const line = marketCountLine(a);
-    const meta = marketCountMeta(a.marketCount);
-    marketCountItem = { key: "marketcount", title: line.title, tone: "muted", glow: false, v: line.value, body: (
-      <div>
-        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} note={line.body} />
-        {meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{meta}</div>}
-        <ExplainBox txt="A count of other listings LotCheck read from Alberta dealers' own pages, on the dates shown. A tie is not below. Ask the dealer how this price compares with other units advertised in Alberta." />
-      </div>
-    )};
-  }
-
-  // LINE -- "How this vehicle compares with the Alberta market": this vehicle /
-  // similar listings in Alberta / difference, under a traffic light. Worded
-  // ONCE in report-lines.js (marketCompareLine) from the like-for-like band the
-  // server sealed, so the three lines here are the three lines in the emailed
-  // HTML, the PDF and on /verify. Built whenever a comparison set was read,
-  // including the not-enough state -- the sidebar never goes quiet where the
-  // scroll view speaks. [[report-never-empty]] [[report-features-all-views]]
-  let marketCompareItem = null;
-  if (hasMarketCompare(a.marketValue)) {
-    const line = marketCompareLine(a);
-    const lightC = line.light === "green" ? TEAL : line.light === "amber" ? AMBER : line.light === "red" ? ROSE : null;
-    marketCompareItem = { key: "marketcompare", title: line.title, tone: line.tone, glow: line.light === "red", v: line.value, body: (
-      <div>
-        {lightC && line.lightLabel
-          ? <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 8 }}><span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: "50%", background: lightC, boxShadow: `0 0 8px ${lightC}`, flex: "0 0 auto" }} /><span style={{ fontSize: 13.5, fontWeight: 800, color: lightC, lineHeight: 1.3 }}>{line.lightLabel}</span></div>
-          : <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} />}
-        {line.lines.map((l, i) => (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
-            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
-            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
-          </div>
-        ))}
-        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
-        <ExplainBox txt={`How this asking price sits against similar listings LotCheck read from ${provinceName(a.marketValue?.province)} dealers' own pages: same powertrain, same model year or one either side, similar mileage when used. Green is at or below their middle, amber is above the middle but inside their range, red is above all of the listings compared. Ask the dealer how this price compares with those listings.`} />
-      </div>
-    )};
-  }
-
-  // LINE -- "What older model years ask today": the model-year ladder as one
-  // report line. This vehicle's asking price, then one line per older model
-  // year: what used ones with the same powertrain ask on Alberta dealers' own
-  // pages today, and how far from this asking price that middle sits. Worded
-  // ONCE in report-lines.js (olderYearsLine) from the sealed ladder, so the
-  // lines here are the lines in the emailed HTML, the PDF and on /verify.
-  // Built whenever the ladder rode along, including the not-read and
-  // not-enough states -- the sidebar never goes quiet where the scroll view
-  // speaks. No gauge: asking prices today, not a forecast.
-  // [[report-never-empty]] [[report-features-all-views]]
-  let olderYearsItem = null;
-  if (a.olderYears) {
-    const line = olderYearsLine(a);
-    olderYearsItem = { key: "olderyears", title: line.title, tone: "muted", glow: false, v: line.value, body: (
-      <div>
-        <Simple big={line.headline} c={line.state === "confirmed" ? "#e2e8f0" : MUT2} />
-        {line.lines.length === 0 && line.body && <div style={{ fontSize: 12.5, color: MUT2, marginTop: 8, lineHeight: 1.55 }}>{line.body}</div>}
-        {line.lines.map((l, i) => (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
-            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
-            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === 0 ? 400 : 700 }}>{l.v}</span>
-          </div>
-        ))}
-        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
-        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
-        <ExplainBox txt={line.state === "confirmed"
-          ? `What used ones of this model, one to three model years older with the same powertrain, are asking on Alberta dealers' own pages on the dates shown. Asking prices, not sale prices. Ask the dealer how this price compares with those listings.`
-          : line.body} />
-      </div>
-    )};
-  }
-
-  // LINE -- "Insurance before you sign": the order the two commitments happen
-  // in. A lender or lessor requires collision and comprehensive -- the coverage
-  // that repairs or replaces THIS vehicle -- and Alberta's Take All Comers rule
-  // (Insurance Act s. 555) obliges an insurer to write only the MANDATORY
-  // coverages. The finance contract is signed at the dealership; the insurance
-  // is arranged afterwards. Worded ONCE in report-lines.js
-  // (financeCoverageLine), so the lines here are the lines in the scroll card,
-  // the emailed HTML, the PDF and on /verify. BOTH states are built -- a page
-  // with no financing signal still gets it, worded conditionally -- and only in
-  // Alberta, because it cites Alberta statute and an Alberta regulator.
-  // No gauge and no traffic light: this is a sequence, not a measurement.
-  // [[report-never-empty]] [[report-features-all-views]]
-  let financeCoverItem = null;
-  if (financeCoverageApplies(a)) {
-    const line = financeCoverageLine(a);
-    financeCoverItem = { key: "financecover", title: line.title, tone: "muted", glow: false, v: line.value, body: (
-      <div>
-        {/* Full ink in BOTH states: "general" is not a degraded reading, it is
-            the same warning worded for a page that shows no financing. */}
-        <Simple big={line.headline} c="#e2e8f0" />
-        {line.lines.map((l, i) => (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
-            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
-            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
-          </div>
-        ))}
-        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
-        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
-        <ExplainBox txt={line.explain} />
-      </div>
-    )};
-  }
-
-  // LINE -- "Your premium after this purchase": what buying this vehicle does
-  // to the buyer's OWN policy. The sibling above is about whether the coverage
-  // a lender requires can be had at all; this one is about what it costs. Two
-  // things are decided at the same desk: the change of vehicle on the policy,
-  // and the liability limit. Worded ONCE in report-lines.js
-  // (insurancePremiumLine), so the lines here are the lines in the scroll card,
-  // the emailed HTML, the PDF and on /verify.
-  //
-  // It reads NOTHING from the listing -- it is regulator copy, identical for
-  // every Alberta report -- so there is ONE state and no conditional: either
-  // the whole card prints or none of it does. Alberta only, on the same gate as
-  // its sibling, because it cites an Alberta regulator.
-  // No gauge and no traffic light: percentages the AIRB published, not a quote.
-  // [[report-never-empty]] [[report-features-all-views]]
-  let insurancePremiumItem = null;
-  if (financeCoverageApplies(a)) {
-    const line = insurancePremiumLine(a);
-    insurancePremiumItem = { key: "insurancepremium", title: line.title, tone: "muted", glow: false, v: line.value, body: (
-      <div>
-        <Simple big={line.headline} c="#e2e8f0" />
-        {line.lines.map((l, i) => (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", alignItems: "baseline", padding: "7px 0", borderTop: `1px solid ${BORD}` }}>
-            <span style={{ flex: "0 0 auto", minWidth: 120, fontSize: 11, color: MUT, fontFamily: mono }}>{l.k}</span>
-            <span style={{ flex: "1 1 200px", fontSize: 12.5, color: "#e2e8f0", lineHeight: 1.5, fontWeight: i === line.lines.length - 1 ? 700 : 400 }}>{l.v}</span>
-          </div>
-        ))}
-        {line.meta && <div style={{ fontSize: 11, color: MUT, marginTop: 8, fontFamily: mono }}>{line.meta}</div>}
-        {line.note && <div style={{ fontSize: 11.5, color: MUT2, marginTop: 8, lineHeight: 1.5 }}>{line.note}</div>}
-        {/* The builder words the panel too -- a sentence written here would be
-            a second author for a card whose whole point is one wording. */}
-        <ExplainBox txt={line.explain} />
-      </div>
-    )};
-  }
-
-  // TEN POINTS, PLUS WHATEVER ELSE THIS LISTING SUPPORTED.
-  //
-  // We advertise a 10-point verification and we over-deliver on it (Vic,
-  // 2026-08-27: "its always good thing to over deliver ... minimum 10 points we
-  // will keep increasing ... yes we advertising 10 points"). Ten is the FLOOR.
-  //
-  // But an "MSRP per trim" card is not a verification point, and the heatmap
-  // used to number it as one: a buyer reading the detail pane saw "point 12 /
-  // 14" over a card that checks nothing. That forecloses the only honest
-  // reading of the product -- that ten is a defined core and the rest are
-  // additions -- because the surface asserts they are all the same kind of
-  // thing. So the pool carries `point`, the two bands are rendered and
-  // numbered separately, and neither can drift from the other because both
-  // read the same flag. [[claims-must-stay-backed]]
-  // THE WORKED FINANCING EXAMPLE, ON MORE THAN ONE VIEW.
-  //
-  // FinancingBreakdown -- the editable-APR hero, the term x down-payment
-  // payment grid shaded by total interest, the interest-saved bullets and the
-  // price-verification gate that relabels everything "from MSRP" in estimate
-  // mode -- had exactly ONE call site in the entire app, inside the scroll
-  // body. Every other surface got two flat point cards ("Financing APR",
-  // "Financing math") and no worked example at all. Vic, 2026-08-27: "on
-  // scroll its showing example of financing APR, but on heatmap and side bar
-  // doesn't".
-  //
-  // It reads only LC_THEMES tokens, every one of which exists in both
-  // palettes, so the dark surfaces mount the SAME component with the dark
-  // theme rather than a second copy being written for them.
-  // [[report-features-all-views]]
-  const finExampleItem = (a.financing || a.financeRates || Number(a.quotedPrice) > 0) ? {
-    key: "finex", title: "Financing · worked example", tone: "muted", glow: false,
-    body: (<FinancingBreakdown analysis={a} C={LC_THEMES.dark}
-      cardStyle={{ background: "rgba(15,23,42,.5)", border: `1px solid ${BORD}`, borderRadius: 12, padding: 16 }} />),
-  } : null;
-
-  const extraItems = [
-    ...(trimRangeItem ? [trimRangeItem] : []),
-    ...(comparableItem ? [comparableItem] : []),
-    ...(marketCountItem ? [marketCountItem] : []),
-    ...(marketCompareItem ? [marketCompareItem] : []),
-    ...(olderYearsItem ? [olderYearsItem] : []),
-    ...(financeCoverItem ? [financeCoverItem] : []),
-    ...(insurancePremiumItem ? [insurancePremiumItem] : []),
-    ...(daysLotItem ? [{ ...daysLotItem, v: dolLine ? dolLine.value : (daysLotItem.v || "Not published") }] : []),
-    ...(priceMovesItem ? [priceMovesItem] : []),
-    ...(tradeInItem ? [tradeInItem] : []),
-    ...(financeContingentItem ? [financeContingentItem] : []),
-    ...(pageDefaultItem ? [pageDefaultItem] : []),
-    ...(finExampleItem ? [finExampleItem] : []),
-    ...(licItem ? [licItem] : []),
-    // MEMBERSHIP MUST NOT DIFFER BY VIEW. The Heatmap built its own pool and
-    // simply never spread evidenceItem or sayItem, so the Sidebar carried the
-    // dispute-proof evidence and the negotiating lines and the Heatmap did not
-    // -- from the SAME component, off the SAME data. Vic, 2026-08-27: "there is
-    // 'No evidence on heatmap' vs sidebar, put on heatmap as well". A surface
-    // may differ in LAYOUT; it may not differ in what the report contains.
-    // [[report-features-all-views]]
-    evidenceItem,
-    ...(sayItem ? [sayItem] : []),
-  ].map((c) => ({ ...c, point: false }));
-  const heatItems = [...pointItems, ...extraItems];
-  // Every view that surfaces "things to watch" draws from this one pool, so a
-  // new flag cannot reach one view and miss another (report-features-all-views).
-  const flagPool = [...pointItems, ...(financeContingentItem ? [financeContingentItem] : []), ...(daysLotItem ? [daysLotItem] : [])];
-  const verdictItem = { key: "verdict", title: "The verdict", cosmic: true, body: verdictBody };
-  // DERIVED, not rebuilt. The Sidebar used to assemble its own membership list
-  // from the same ingredients in a different order -- which is precisely how it
-  // ended up carrying the Evidence card while the Heatmap did not. One pool,
-  // two layouts. The verdict gauge leads the Sidebar because it is a rail, and
-  // is not a tile.
-  const items = [verdictItem, ...heatItems];
-
-  const [idx, setIdx] = useState(0);
-  const [sel, setSel] = useState(0);
-  const [btab, setBtab] = useState("deal"); // bento view's active tab
-  const N = items.length;
-  const go = (d) => setIdx((i) => Math.max(0, Math.min(N - 1, i + d)));
-  const touchX = useRef(null);
-
-  const toneColor = (c) => c.cosmic ? CY : c.tone === "flag" ? ROSE : c.tone === "pass" ? TEAL : MUT2;
-  const cardBox = (c) => ({ borderRadius: 16, padding: 22, boxSizing: "border-box", display: "flex", flexDirection: "column", border: `1px solid ${c.glow ? CY : BORD}`, background: c.cosmic ? "linear-gradient(160deg,#101a30,#080808)" : (c.tone === "flag" ? "rgba(76,5,25,.12)" : "rgba(15,23,42,.45)"), boxShadow: c.glow ? `0 0 0 1px ${CY}, 0 0 24px 2px rgba(34,211,238,.25)` : "none" });
-  const navBtn = (side) => ({ position: "absolute", [side]: -6, top: 90, zIndex: 3, width: 38, height: 38, borderRadius: 999, border: `1px solid ${BORD}`, background: "rgba(2,6,23,.85)", color: TX, fontSize: 20, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" });
-  const Head = ({ c, n }) => (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, gap: 8 }}><span style={{ ...klabel, color: c.glow ? CY : MUT2 }}>{c.title}</span>{n && <span style={{ fontSize: 11, fontFamily: mono, color: MUT }}>{n}</span>}</div>);
-
-  return (
-    <div style={{ background: "#050505", borderRadius: 20, padding: 20, fontFamily: "inherit", color: TX, maxWidth: 1120, margin: "0 auto" }}>
-      <style>{`@keyframes rvIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}`}</style>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-        <button onClick={onExit} style={{ background: "transparent", border: `1px solid ${BORD}`, borderRadius: 10, padding: "8px 12px", color: TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>‹ Scroll</button>
-        {typeof window !== "undefined" && !!window.speechSynthesis && (
-          <button onClick={voiceState === "speaking" ? stopSpeaking : speakReport}
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, background: voiceState === "speaking" ? ROSE : "transparent", border: `1px solid ${voiceState === "speaking" ? ROSE : BORD}`, borderRadius: 10, padding: "8px 12px", color: voiceState === "speaking" ? "#fff" : TX, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-            <Icon3D name="megaphone" size={13}/> {voiceState === "speaking" ? "Stop reading" : "Read aloud"}
-          </button>
-        )}
-        <div style={{ fontSize: 11, fontFamily: mono, color: MUT }}><span style={{ color: CY }}>{rno}</span></div>
-        {emailStatus === "sent"
-          ? <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, color: TEAL, fontWeight: 700, fontSize: 12.5 }}><DroneSentBeat compact body="#3b3f7a" accent={TEAL}/><span className="lcSentFade" style={{ animation: "lcSentFade .5s ease .9s both" }}>Emailed</span></span>
-          : <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="email" placeholder="you@email.com — email the PDF" value={emailInput || ""} onChange={(e) => { setEmailInput && setEmailInput(e.target.value); if (emailErr && setEmailErr) setEmailErr(""); }} disabled={emailStatus === "sending"} style={{ width: 210, maxWidth: "48vw", background: "#020617", border: `1px solid ${emailErr ? ROSE : BORD}`, borderRadius: 9, padding: "8px 11px", color: TX, fontSize: 12.5, outline: "none", boxSizing: "border-box" }} />
-              <button onClick={onSend} disabled={emailStatus === "sending"} style={{ background: CY, border: "none", borderRadius: 9, padding: "8px 15px", color: "#04222b", fontWeight: 800, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap" }}>{emailStatus === "sending" ? "Sending…" : "Send email"}</button>
-            </div>}
-      </div>
-      {emailErr && <div style={{ fontSize: 11.5, color: ROSE, textAlign: "right", marginBottom: 6 }}>{emailErr}</div>}
-
-
-      {view === "sidebar" && (
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 6 }}>
-          <div style={{ flex: "0 0 190px", minWidth: 150, display: "flex", flexDirection: "column", gap: 5 }}>
-            {/* THE TWO BANDS, carried over when the Heatmap view was retired
-                (Vic, 2026-08-27). The 10-point framing is the product's central
-                claim and it lived only in that grid; the Sidebar is now the one
-                non-scroll view, so it carries it here. A band label is emitted
-                before the first POINT and before the first EXTRA, so the rail
-                says which kind each row is instead of running them together --
-                which is exactly what let a trim-price card read as
-                "point 12 / 14". `items` is [verdict, ...pointItems, ...extraItems]. */}
-            {items.map((c, i) => { const speaking = speakingIdx === i;
-              const band = i === 1 ? `The ${pointItems.length}-point verification`
-                : (i === pointItems.length + 1 && extraItems.length
-                    ? `Also checked on this listing (${extraItems.length})`
-                    : null);
-              return (<Fragment key={c.key}>
-                {band && <div style={{ fontSize: 10, color: MUT, fontFamily: mono, letterSpacing: ".06em", textTransform: "uppercase", margin: i === 1 ? "2px 0 4px" : "12px 0 4px" }}>{band}</div>}
-                <button onClick={() => setSel(i)} style={{ textAlign: "left", display: "flex", alignItems: "center", gap: 8, background: speaking ? "rgba(251,191,36,.14)" : (sel === i ? "rgba(15,23,42,.85)" : "transparent"), border: `1px solid ${speaking ? AMBER : (sel === i ? (c.glow ? CY : BORD) : "transparent")}`, borderRadius: 10, padding: "9px 11px", color: speaking ? "#fff" : (sel === i ? "#fff" : MUT2), fontSize: 12.5, fontWeight: 700, cursor: "pointer", boxShadow: speaking ? `0 0 10px rgba(251,191,36,.35)` : "none" }}><span style={{ width: 7, height: 7, borderRadius: 99, background: speaking ? AMBER : toneColor(c), boxShadow: c.glow ? `0 0 6px ${CY}` : "none", flexShrink: 0 }} /><span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span></button>
-              </Fragment>); })}
-          </div>
-          <div style={{ flex: "1 1 260px", minWidth: 0 }}>{(() => {
-            const c = items[sel] || items[0];
-            // The ordinal reads off the ITEM's own kind, never its position in
-            // the concatenated array, so a context card cannot be announced as
-            // a verification point whatever order the pool is built in. The
-            // verdict leads the rail and is not numbered at all.
-            const n = sel === 0 ? null
-              : c.point ? `point ${sel} / ${pointItems.length}`
-              : `also checked ${sel - pointItems.length} / ${extraItems.length}`;
-            return (<div style={{ ...cardBox(c), ...(speakingIdx === sel ? { border: `2px solid ${AMBER}`, boxShadow: `0 0 24px rgba(251,191,36,.3)` } : {}) }}><Head c={c} n={n} /><div>{c.body}</div></div>);
-          })()}</div>
-        </div>
-      )}
-
-
-
-      {shared && <div style={{ textAlign: "center", fontSize: 11, color: MUT, marginTop: 12 }}>Shared LotCheck report · reconstructed from the link — nothing was stored.</div>}
-    </div>
-  );
-}
-
 // SHA-256 as lowercase hex. Used by the sealed-capture proof and the verify
 // page; it sat below the Book view and was carried out with it when that view
 // was retired -- check:undef caught it, the build did not.
@@ -12323,14 +11307,11 @@ function QuoteCheckPage(){
                 </div>
               </div>
             ) : null;
-            if(reportView==="sidebar") return <div>{sharedBanner}<ReportViews analysis={analysis} view={reportView} onView={setReportView} onExit={()=>setReportView("scroll")} onShare={copyShareLink} copied={linkCopied} shared={sharedReport} ink={C.ink} emailInput={emailInput} setEmailInput={setEmailInput} emailStatus={emailStatus} emailErr={emailErr} setEmailErr={setEmailErr} onSend={sendReportEmail}/></div>;
-            // 3-way view toggle (scroll / report / orrery), active state highlighted.
-            const vBtn=(v,label)=>(<button key={v} onClick={()=>setReportView(v)} style={{background:reportView===v?C.teal:"transparent",color:reportView===v?"#fff":C.inkSoft,border:"none",borderRadius:8,padding:"7px 13px",fontSize:12.5,fontWeight:800,cursor:"pointer"}}>{label}</button>);
+            // Sidebar/Heatmap removed 2026-09-09 (Vic: "lets go with #02, you
+            // can remove Sidebar/Heatmap") -- the glass-console report below
+            // is now the only view, so there is no more view to switch to.
             const viewToggle=(
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:14}}>
-                <div style={{display:"flex",gap:3,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:10,padding:3}}>
-                  {vBtn("scroll","Scroll")}{vBtn("sidebar","Sidebar")}
-                </div>
                 {/* The delivery confirmation belongs on EVERY view, not just the
                     two that happen to route through ReportViews. It lived only
                     in that component's header, so Scroll, Book and 3D showed
@@ -12399,862 +11380,303 @@ function QuoteCheckPage(){
                 </div>
               )}
 
-              {/* TL;DR -- the "Bottom line", promoted from the very bottom of the
-                  report to the top as its summary. Same analysis.summary text as
-                  before, unchanged. */}
-              {analysis.summary&&(
-                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`,borderLeft:`3px solid ${C.teal}`}}>
-                  <div style={{fontSize:12,fontWeight:800,color:C.tealInk,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>Bottom line</div>
-                  <div style={{color:C.ink,fontSize:14,lineHeight:1.6}}>{analysis.summary}</div>
-                </div>
-              )}
-
-              {/* Financing breakdown -- payment matrix (down payment x term x
-                  frequency) computed purely from the quoted price, plus the
-                  real rate anchors (quote / manufacturer finance & lease
-                  catalog / live Bank of Canada) and the payment-reconciliation
-                  (financingCheck) note. This is the single financing UI --
-                  replaces the earlier "Financing examples" card. Renders itself
-                  null when there's no quoted price. Now condensed: a summary
-                  with the full matrix behind an expander. */}
-              <TrimMsrpRange analysis={analysis} C={C} cardStyle={cardStyle}/>
-              <ComparableListingsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-              <MarketCountCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-
-              <FinancingBreakdown analysis={analysis} C={C} cardStyle={cardStyle}/>
-              <PageDefaultCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-
-              {/* ── Detail cards in a 2-column grid on desktop, collapsing to a
-                     single column on mobile. auto-fit + minmax does the collapse
-                     with no media query; rowGap:0 defers vertical rhythm to each
-                     card's own marginBottom (from cardStyle). ── */}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",columnGap:16,rowGap:0,alignItems:"start"}}>
-
-              {/* MSRP on its own -- just the manufacturer's number, nothing
-                  else mixed into this card. The comparison against what the
-                  buyer is actually being asked to pay lives in the Quoted
-                  price card right below, colored against this figure. */}
-              <div style={cardStyle}>
-                <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>{analysis.msrpBasis==="dealer_stated"?"MSRP · as stated by dealer":analysis.msrpBasis==="starting_at"?`MSRP · starting at${analysis.msrpYear&&analysis.msrpYear!==analysis.year?` (${analysis.msrpYear} MY)`:""}`:analysis.msrpTrim?`MSRP · ${String(analysis.msrpTrim).toUpperCase()}`:"MSRP"}</div>
-                <div style={{fontSize:22,fontWeight:1000,color:C.ink}}>{analysis.msrp?`$${analysis.msrp.toLocaleString()}`:"Not shown on quote"}</div>
-                {isExactMsrp(analysis)&&analysis.allInPricing&&analysis.allInPricing.body&&analysis.msrpPriceBasis!=="incl_freight"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>Basis note: the asking price is all-in ({analysis.allInPricing.body}), while a published MSRP normally excludes freight &amp; PDI (typically $2,000–$2,600) — part of the gap is that freight. Ask for freight and PDI as their own line.</div>}
-                {analysis.msrpBasis==="original_when_new"&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>This is what the vehicle cost <b>when new</b> — context, not a sticker to measure a used price against, so no over/under-MSRP claim is made.</div>}
-                {analysis.msrpUnavailable&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.msrpUnavailable.note}</div>}
-                {analysis.msrpBasis==="dealer_stated"&&<div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This is the figure the dealer states on their own page — not verified against {analysis.make||"the manufacturer"}'s published price, so no over/under-MSRP claim is made from it.</div>}
-                {analysis.msrpReference&&analysis.msrpReference.msrp>0&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>For reference, {analysis.msrpReference.make||"the manufacturer"} publishes this model{analysis.msrpReference.trim?` (${analysis.msrpReference.trim})`:""} from <b>{money(analysis.msrpReference.msrp)}</b> — options and drivetrain sit above that. Ask which ones make up the difference.</div>}
-                {/* Same shared logic as qualifyMsrpClaim's refusal (msrp-claim.ts)
-                    -- this card had its own separate hardcoded copy of the SAME
-                    "no over/under-MSRP claim is made" text, so it kept saying
-                    that even after the leverage panel below started surfacing a
-                    real ceiling-exceeded gap for the identical report (confirmed
-                    live 2026-08-21, Okotoks RAV4 PHEV GR Sport AWD -- $23,581
-                    over the top of the 4-trim lineup). Two cards, one report,
-                    disagreeing about the same car -- the exact class of bug this
-                    whole product exists to prevent dealers from getting away
-                    with, now happening to us. */}
-                {analysis.msrpBasis==="starting_at"&&(()=>{
-                  const cc=qualifyCeilingClaim(analysis);
-                  if(cc.exceeds&&Number(cc.over)>0) return <div style={{fontSize:12,color:C.coralInk,marginTop:4,lineHeight:1.5}}>This exact trim isn't pinned down, but the asking price is <b>{money(cc.over)}</b> above {money(cc.ceiling)} — the all-in price of {cc.trim||"the most expensive trim"}, the priciest of the {cc.trimsConsidered} real {analysis.make||"manufacturer"} trims in our catalog. No combination of options on any of them reaches this price.</div>;
-                  return <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>The manufacturer's base price for this model — this exact unit's options are extra, so no over/under-MSRP claim is made from it.</div>;
-                })()}
-                {analysis.msrpSourceUrl&&<a href={analysis.msrpSourceUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:6,fontSize:12,color:C.tealInk,textDecoration:"underline"}}>See the manufacturer's own page for this MSRP ↗</a>}
-                {/* Same fix as the PDF: that linked page shows the ALL-IN "from"
-                    price (freight/PDI/A-C/levies already added), not this
-                    ex-freight trim MSRP -- confirmed live 2026-08-21, a RAV4
-                    PHEV GR SPORT AWD where the linked Toyota page reads $60,578
-                    against this card's correct $57,500. Without this note a
-                    reader who clicks through reasonably reads the bigger number
-                    as this report being wrong. msrpAllIn is the same
-                    hand-verified catalog row, never re-derived here. */}
-                {analysis.msrpSourceUrl&&Number(analysis.msrpAllIn)>(Number(analysis.msrp)||0)&&<div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>That page shows the all-in total, {money(analysis.msrpAllIn)} — about {money(Math.round(analysis.msrpAllIn-(analysis.msrp||0)))} more, covering freight/PDI, the A/C charge and other levies on top of the MSRP above. Same trim, different basis, not a mismatch.</div>}
-              </div>
-
-              {/* Quoted price colored against MSRP: teal/green at-or-under
-                  MSRP, coral/red over it. hasMsrpCompare guards against
-                  coloring when either number is missing (e.g. MSRP wasn't
-                  on the quote) -- no color claim without both values. */}
+              {/* ══════════ THE REPORT — Glass Console (concept #02) ══════════
+                  Full replacement of the old per-card layout, 2026-09-09 (Vic:
+                  "lets go with #02, you can remove Sidebar/Heatmap"). One
+                  tilted glass panel: verdict + leverage gauge, the canonical
+                  ten points (same tone/value logic ReportViews used to
+                  compute -- just formatted compactly instead of as a rich
+                  drill-down body), "also checked" extras (same real fields as
+                  the old hero tiles strip), evidence, and the negotiation
+                  script. Nothing below is sample data. */}
               {(()=>{
-                // Over/under-MSRP claims require an EXACT trim MSRP. A
-                // "starting_at" floor (base trim / adjacent MY) is a reference,
-                // not this unit's sticker — an option-loaded car above the base
-                // floor is NOT "over MSRP", so the compare stays neutral.
-                const msrpExactScroll=isExactMsrp(analysis);
-                const hasMsrpCompare=!!(msrpExactScroll&&analysis.quotedPrice);
-                const overMsrp=hasMsrpCompare&&analysis.quotedPrice>analysis.msrp;
-                const diff=hasMsrpCompare?Math.abs(analysis.quotedPrice-analysis.msrp):0;
-                const priceColor=hasMsrpCompare?(overMsrp?C.coralInk:C.tealInk):C.ink;
-                const gated=!analysis.quotedPrice&&analysis.priceDisclosure==="contact_for_price";
-                // This view was the ONLY one printing a bare "over/under MSRP"
-                // without saying whether the listing price was actually
-                // verified -- the emailed cover, the PDF deck and /verify all
-                // qualify it. Same signed report, two different confidence
-                // levels depending on which view you opened. Mirrors the PDF's
-                // wording rather than hiding the delta, so no finding is lost.
-                const priceVerifiedScroll=analysis.priceVerified!==undefined?!!analysis.priceVerified:(Number(analysis.quotedPrice)>0);
-                // The dealer's page refuses to show this number; the page's own
-                // data carries it. Shared helper so every surface agrees.
-                const gatedNoteScroll=gatedPriceNote(analysis);
+                const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+Math.round(v).toLocaleString("en-CA");};
+                const qp=Number(analysis.quotedPrice)||0, ms=Number(analysis.msrp)||0, delta=(qp&&ms)?qp-ms:0;
+                const msrpExactG=isExactMsrp(analysis);
+                const deltaOkG=!!(qp&&ms&&msrpExactG);
+                const priceGatedG=!qp&&analysis.priceDisclosure==="contact_for_price";
+                const priceVerifiedG=analysis.priceVerified!==undefined?!!analysis.priceVerified:(qp>0);
+
+                // ── the canonical ten -- tone/value verbatim from the same
+                //    logic ReportViews used, plus one short real "sub" line
+                //    each drawn from the same fields. [[report-features-all-views]]
+                const PG=[];
+                PG.push({title:"Price vs MSRP",tone:priceGatedG?"flag":!priceVerifiedG?"muted":(!ms?"muted":(deltaOkG?(delta>0?"flag":"pass"):"muted")),
+                  v:priceGatedG?"HIDDEN BY DEALER":(!priceVerifiedG&&!ms)?"PRICE READ ONCE":deltaOkG?(delta===0?"AT MSRP":delta>0?money(delta)+" OVER":money(-delta)+" UNDER"):(ms?"FROM "+money(ms):(priceVerifiedG?"—":"UNVERIFIED")),
+                  sub:priceGatedG?"Dealer withheld the price — page says \"contact us\"":deltaOkG?`${money(qp)} vs ${money(ms)} MSRP`:(qp?`${money(qp)} asking`:(ms?`MSRP ${money(ms)}`:"Price not shown on this listing"))});
+                { const r=analysis.recalls; const tone=!r?.checked?"muted":r.count>0?"flag":(r.confirmed===false?"muted":"pass");
+                  const v=!r?.checked?"COULDN'T VERIFY":r.count>0?r.count+" OPEN":(r.confirmed===false?"UNCONFIRMED":"NONE OPEN");
+                  const first=(r?.items||[])[0];
+                  const sub=!r?.checked?"Couldn't reach the registry":r.count>0?(first?.system?`${first.system}${first.date&&!Number.isNaN(new Date(first.date).getFullYear())?" · "+new Date(first.date).getFullYear():""}`:"Repaired free of charge — confirm before signing"):(r.confirmed===false?"Couldn't confirm this exact model":"Transport Canada registry, this year/make/model");
+                  PG.push({title:"Transport Canada recalls",tone,v,sub}); }
+                { const flagged=(analysis.addOns||[]).filter(x=>x.verdict==="flagged");
+                  const flaggedTotal=Number(analysis.totalFlaggedCost)||flagged.reduce((s,x)=>s+(Number(x.price)||0),0);
+                  const dli=analysis.dealerLineItems; const dliTotal=dli&&Array.isArray(dli.fees)?dli.fees.reduce((t,f)=>t+(Number(f?.amount)||0),0):0;
+                  const tone=flagged.length?"flag":(analysis.addOns||[]).length?"pass":"muted";
+                  const v=flagged.length?flagged.length+" FLAGGED":(analysis.addOns||[]).length?"TRANSPARENT":dliTotal>0?"ITEMIZED":(analysis.feesRead===true?"NONE LISTED":"NOT READ");
+                  const sub=flagged.length?`${money(flaggedTotal)} across ${flagged.length} item${flagged.length>1?"s":""}`:((analysis.addOns||[]).length?"Itemized, nothing flagged":"No dealer add-ons were itemized");
+                  PG.push({title:"Add-ons & fee audit",tone,v,sub}); }
+                { const dr=(analysis.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(analysis.financeRates.dealer.source))?analysis.financeRates.dealer.apr:null;
+                  const mr=analysis.financeRates?.manufacturer?.apr; const high=dr!=null&&mr!=null&&dr-mr>0.1;
+                  const tone=high?"flag":"muted"; const v=financingAprValue(analysis,dr,mr??null,high);
+                  const price=qp||ms||0; let extra=null;
+                  if(high&&price){const rd=dr/1200,rm=mr/1200;extra=Math.round((price*rd/(1-Math.pow(1+rd,-60))-price*rm/(1-Math.pow(1+rm,-60)))*60);}
+                  const sub=dr!=null?(high?`${mr}% advertised${extra?` — ~${money(extra)} more over 60mo`:""}`:(mr!=null?`${mr}% advertised on new`:"This dealer's quoted rate")):"No financing rate was quoted";
+                  PG.push({title:"Financing APR",tone,v,sub}); }
+                { const fc=analysis.financingCheck; const rf=!fc?.checked?analysis.referenceFinancing:null;
+                  const tone=fc?.checked?(fc.consistent?"pass":"flag"):"muted";
+                  const v=fc?.checked?(fc.consistent?"RECONCILES":"DOESN'T ADD UP"):(rf?.atAsking?"$"+Math.round(rf.atAsking.monthly).toLocaleString()+"/MO REF":"NOT CHECKED");
+                  const sub=rf?.atAsking?rf.note:(fc?.note||(fc?.checked?"Payment, price, rate and term cross-checked":"Not enough financing detail to re-check"));
+                  PG.push({title:"Financing math",tone,v,sub}); }
+                { const o=analysis.odometerCheck; const isNewV=analysis.vehicleCondition==="new";
+                  const tone=o?.checked?(o.flag?"flag":"pass"):"muted";
+                  const v=o?.checked?Number(o.km).toLocaleString()+" km"+(o.flag?" FLAG":""):(isNewV?"N/A (NEW)":"NOT ON QUOTE");
+                  const sub=o?.checked?(o.note||(isNewV?"New vehicles carry delivery-only mileage":"Compare against the vehicle's age")):"No odometer reading was on this quote";
+                  PG.push({title:"Odometer",tone,v,sub}); }
+                { const vc=analysis.vinCheck; const tone=vc?.present?(vc.valid?"pass":"flag"):"muted";
+                  const v=vc?.present?(vc.valid?"VALID":"CHECK PATTERN"):"NOT ON QUOTE";
+                  const sub=vc?.present?(vc.vin?`VIN ${vc.vin}`:(vc.valid?"Decodes cleanly":"Check the pattern")):"No VIN was listed to check";
+                  PG.push({title:"VIN check",tone,v,sub}); }
+                { const ev=rebate, eft=effectiveFuelType; const notEv=!!eft&&eft!=="BEV"&&eft!=="PHEV";
+                  const tone=ev?.eligible?"pass":"muted";
+                  const v=ev?.eligible?money(ev.total)+" ELIGIBLE":(ev?.ineligibleReason?"NOT ELIGIBLE":notEv?`N/A (${String(eft).toUpperCase()})`:"NOT DETERMINED");
+                  const sub=ev?.eligible?`${money(ev.federal)} federal${ev.provincial>0?` + ${money(ev.provincial)} provincial`:""}`:(ev?.ineligibleReason||(notEv?"Rebates apply to electric/plug-in only":"Drivetrain not confirmed from the listing"));
+                  PG.push({title:"EV / PHEV rebate",tone,v,sub}); }
+                { const wl=warrantyLine(analysis);
+                  PG.push({title:"Included warranty",tone:wl.tone,v:wl.value,sub:wl.line}); }
+                { const d=analysis.dealerSentiment; const rated=Number(d?.rating)>0;
+                  const tone=rated?(Number(d.rating)>=4?"pass":"muted"):"muted";
+                  const rc=d&&d.reviewCount!=null&&Number.isFinite(Number(d.reviewCount))?Number(d.reviewCount):null;
+                  const v=rated?Number(d.rating).toFixed(1)+"★"+(rc==null?"":" / "+rc.toLocaleString()):(d?.checked===true?"NONE FOUND":"NOT CHECKED");
+                  const rep=dealerReputationPoint(analysis.dealerSentiment);
+                  const sub=rated?(d.highlights?.[0]?.text||(rc?`${rc.toLocaleString()} Google reviews`:"Google rating for this dealer")):(rep.state==="absent"?"We searched and found no public reviews":"This lookup wasn't completed");
+                  PG.push({title:"Dealer reputation",tone,v,sub}); }
+
+                const toneColor={flag:C.coralInk,pass:C.tealInk,muted:C.inkFaint};
+                const toneBg={flag:C.coralBg,pass:C.tealBg,muted:"transparent"};
+                const flagPoints=PG.filter(p=>p.tone==="flag").slice(0,4);
+
+                // "Also checked" -- the same real fields the old hero tiles
+                // strip used, filtered to what isn't already one of the ten.
+                const extraDefs=[
+                  analysis.dealerLicence&&analysis.dealerLicence.status&&{label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,warm:analysis.dealerLicence.state!=="valid"},
+                  analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0&&{label:"Days on lot",value:`${Number(analysis.daysOnLot.days).toLocaleString()} days`,warm:Number(analysis.daysOnLot.days)>=90},
+                  {label:"Other listings read",value:marketCountLine(analysis).value,warm:false},
+                  {label:"Payment starting point",value:pageDefaultLine(analysis).value,warm:false},
+                  analysis.tradeInWidget&&analysis.tradeInWidget.detected&&{label:"Trade-in tool",value:analysis.tradeInWidget.vendor||"On this listing",warm:false},
+                  analysis.financeContingent&&analysis.financeContingent.contingent&&{label:"Price conditions",value:"Financing-tied",warm:true},
+                ].filter(Boolean);
+
+                const score=(analysis.leverageScore&&analysis.leverageScore.score!=null)?Math.max(0,Math.min(10,Number(analysis.leverageScore.score)||0)):null;
+                const gaugeDash=score!=null?(score*10).toFixed(1):0;
+                const moves=Array.isArray(analysis.counterScript?.moves)?analysis.counterScript.moves:[];
+
                 return (
-                  <div style={{...cardStyle,...(hasMsrpCompare?{background:overMsrp?C.coralBg:C.tealBg,border:`1px solid ${overMsrp?C.coral:C.teal}55`}:gated?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Quoted price{analysis.allInPricing?" · all-in":""}</div>
-                    <div style={{fontSize:22,fontWeight:1000,color:gated?C.coralInk:priceColor}}>{analysis.quotedPrice?`$${analysis.quotedPrice.toLocaleString()}`:gated?"Hidden by the dealer":"Not found"}</div>
-                    {gated&&(
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
-                        The page says <b style={{color:C.ink}}>"Contact us for price"</b> — the dealer chose not to publish the number. That's a lead-capture tactic: they want you on the phone, where their salespeople run the conversation.{analysis.msrp&&isManufacturerFigure(analysis.msrpBasis)?<> Your anchor: <b style={{color:C.ink}}>{`${analysis.make||"the manufacturer"}'s MSRP starts at $${Number(analysis.msrp).toLocaleString()}`}</b>.</>:null} Don't negotiate blind — ask for their full all-in price <b style={{color:C.ink}}>in writing</b> before you visit.
-                      </div>
-                    )}
-                    {gatedNoteScroll&&(
-                      <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>{gatedNoteScroll}</div>
-                    )}
-                    {hasMsrpCompare&&(
-                      <div style={{fontSize:12,fontWeight:700,color:priceColor,marginTop:4}}>
-                        {diff===0?"= Exactly at MSRP":overMsrp?`▲ $${diff.toLocaleString()} over MSRP`:`▼ $${diff.toLocaleString()} under MSRP`}
-                        {!priceVerifiedScroll&&<span style={{fontWeight:600,color:C.inkFaint}}> (vs catalog MSRP — listing price not yet verified)</span>}
-                      </div>
-                    )}
-                    {!hasMsrpCompare&&analysis.msrp&&analysis.quotedPrice&&(
-                      <div style={{fontSize:12,fontWeight:700,color:C.inkSoft,marginTop:4}}>base MSRP from ${Number(analysis.msrp).toLocaleString()} — options extra, no over/under claim</div>
-                    )}
-                  </div>
-                );
-              })()}
+                <div>
+                  <style>{`
+                    @keyframes lcgcReveal{0%{opacity:0;transform:perspective(2200px) rotateX(20deg) rotateY(-18deg) translateY(36px) scale(.96);}100%{opacity:1;transform:perspective(2200px) rotateX(6deg) rotateY(-9deg) translateY(0) scale(1);}}
+                    @keyframes lcgcDraw{from{stroke-dasharray:0 100;}to{stroke-dasharray:${gaugeDash} 100;}}
+                    @keyframes lcgcPulse{0%{box-shadow:0 0 0 0 ${C.teal}88;}70%{box-shadow:0 0 0 7px ${C.teal}00;}100%{box-shadow:0 0 0 0 ${C.teal}00;}}
+                    .lcgc-panel{animation:lcgcReveal 1s cubic-bezier(.16,.9,.24,1) both;}
+                    .lcgc-panel.lcgc-replay{animation-name:lcgcReveal;}
+                    .lcgc-arc-fg{stroke-dasharray:0 100;animation:lcgcDraw 1.2s cubic-bezier(.3,.8,.2,1) .4s forwards;}
+                    .lcgc-panel.lcgc-replay .lcgc-arc-fg{animation-name:lcgcDraw;}
+                    .lcgc-dot{animation:lcgcPulse 2.2s ease-in-out infinite;}
+                    .lcgc-tile:hover,.lcgc-point:hover,.lcgc-pill:hover{transform:translateY(-2px);}
+                    .lcgc-tile,.lcgc-point,.lcgc-pill{transition:transform .18s ease,border-color .18s ease;}
+                    @media (prefers-reduced-motion: reduce){.lcgc-panel,.lcgc-arc-fg,.lcgc-dot{animation:none!important;}.lcgc-panel{opacity:1!important;transform:none!important;}}
+                  `}</style>
 
-              {/* ── Verification checks (the real 10-point results) rendered
-                  from the edge function's structured output: leverage,
-                  recalls, odometer, VIN, financing math. Each card only
-                  appears when its check ran, and reuses the same teal=good /
-                  coral=concern language as the price cards above. ── */}
+                  <div className="lcgc-panel" style={{...cardStyle,position:"relative",padding:"clamp(18px,3vw,32px)",overflow:"hidden"}}>
 
-              {/* How this vehicle compares with the Alberta market: the
-                  like-for-like band as three plain lines under a traffic
-                  light, with the radial gauge beneath when there is a band to
-                  draw. Mounted whenever a comparison set was read, so "not
-                  enough to compare" renders as a card, not a gap. Buyer-side
-                  anchor — NOT the dealer's trade-in number. [[report-never-empty]] */}
-              {analysis.marketValue&&(
-                <MarketCompareCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-              )}
-
-              {/* What older model years ask today: the model-year ladder as
-                  one line -- this vehicle, then each older model year's middle
-                  asking price on Alberta dealers' own pages and how far from
-                  this asking price it sits. Mounted whenever the ladder rode
-                  along, so "not read" / "not enough to state" render as cards
-                  that say why, not as gaps. [[report-never-empty]] */}
-              {analysis.olderYears&&(
-                <OlderYearsCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-              )}
-
-              {/* Insurance before you sign: the order the two commitments
-                  happen in. A lender requires collision and comprehensive, no
-                  insurer is obliged to sell those, and the finance contract is
-                  signed before the insurance is arranged. Mounted for BOTH
-                  states -- a page with no financing signal still gets it,
-                  worded conditionally -- and only in Alberta, because it cites
-                  Alberta statute and an Alberta regulator. */}
-              {financeCoverageApplies(analysis)&&(
-                <FinanceCoverCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-              )}
-
-              {/* Your premium after this purchase: the cost half of the pair.
-                  Buying this vehicle is a change of vehicle on the buyer's own
-                  policy, and the two-million-dollar liability limit is a choice
-                  made at the same desk. One state and no conditional -- the
-                  builder reads nothing from the listing -- and Alberta only,
-                  on the same gate as its sibling above. */}
-              {financeCoverageApplies(analysis)&&(
-                <InsurancePremiumCard analysis={analysis} C={C} cardStyle={cardStyle}/>
-              )}
-
-              {analysis.leverageScore?.computed&&(
-                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Negotiation leverage</div>
-                  <div style={{fontSize:28,fontWeight:1000,color:C.ink,lineHeight:1}}>{analysis.leverageScore.score}<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> /10</span></div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>{analysis.leverageScore.note}</div>
-                </div>
-              )}
-
-              {/* Fine print — the dealer's own disclaimer, captured as evidence.
-                  AMVIC has ruled disclaimers don't exempt all-in pricing, so the
-                  hatch language is the dealer's posture on record. */}
-              {analysis.disclaimerCheck&&(
-                <div style={{...cardStyle,background:C.butterBg,border:`1px solid ${C.butter}66`}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>The dealer's own fine print · captured at scan time</div>
-                  <div style={{fontSize:12,color:C.inkSoft,fontStyle:"italic",lineHeight:1.5}}>"{String(analysis.disclaimerCheck.text).slice(0,380)}{String(analysis.disclaimerCheck.text).length>380?"…":""}"</div>
-                  <div style={{fontSize:12.5,color:C.ink,lineHeight:1.55,marginTop:8}}>{analysis.disclaimerCheck.note}</div>
-                </div>
-              )}
-
-              {/* Days on lot — the motivated-seller clock, from the dealer's OWN
-                  inventory data (never estimated). Traffic-light: ≤30 green ·
-                  31–89 amber · 90+ red. Same data as the deck's First Seen card. */}
-              {analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0&&(()=>{
-                const d=Number(analysis.daysOnLot.days);
-                const hot=d>=90, warm=d>=31&&d<90;
-                const bg=hot?C.coralBg:warm?undefined:C.tealBg;
-                const bd=hot?C.coral:warm?"#ffb020":C.teal;
-                const inkC=hot?C.coralInk:warm?C.ink:C.tealInk;
-                const months=d>=60?(d/30.4).toFixed(1).replace(/\.0$/,""):null;
-                return (
-                  <div style={{...cardStyle,...(bg?{background:bg}:{}),border:`1px solid ${bd}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Days on lot · {analysis.daysOnLot.sourceLabel||"dealer inventory data"}</div>
-                    <div style={{fontSize:28,fontWeight:1000,color:inkC,lineHeight:1}}>{d.toLocaleString()} days{months?<span style={{fontSize:15,color:C.inkFaint,fontWeight:800}}> · ~{months} months</span>:null}</div>
-                    {analysis.daysOnLot.since&&<div style={{fontSize:12,fontWeight:700,color:C.inkSoft,marginTop:4}}>First seen {analysis.daysOnLot.since}</div>}
-                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.5}}>
-                      This is how long this exact car has sat unsold — counted by the dealer's own inventory system, not our guess. Dealers pay interest on unsold stock every week, so the longer it sits, the more motivated they are.{" "}
-                      {hot?"At this age, you're doing them a favour by buying it — negotiate like it.":warm?"A month-plus of sitting is real carrying cost — reasonable grounds to ask for a better price.":"This one is fresh, so sitting-time won't move the price much yet."}
-                      {dolCareAsk(d)}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* #11 — AMVIC dealer licence, verbatim from the regulator's registry. */}
-              {analysis.dealerLicence&&analysis.dealerLicence.status&&(()=>{
-                const L=analysis.dealerLicence, good=L.state==="valid";
-                return (
-                  <div style={{...cardStyle,...(good?{}:{background:C.coralBg}),border:`1px solid ${(good?C.teal:C.coral)}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Dealer licence · AMVIC public registry</div>
-                    <div style={{fontSize:20,fontWeight:1000,color:good?C.tealInk:C.coralInk,lineHeight:1.2}}>{L.status}</div>
-                    <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
-                      {L.legalName?`Registry record: ${L.legalName}. `:""}{L.licenceNumber?`Licence ${L.licenceNumber}. `:""}{L.expiryDate?`Expiry ${L.expiryDate}. `:""}
-                      {good?"That's the status you want to see.":"Ask them to confirm their current AMVIC licence number and status in writing before any deposit."}
-                    </div>
-                    <a href="https://amvic.ca.thentiacloud.net/webs/amvic/register/" target="_blank" rel="noopener noreferrer" style={{fontSize:11.5,color:C.tealInk,fontWeight:800,marginTop:8,display:"inline-block"}}>Check it yourself on AMVIC's registry ↗</a>
-                  </div>
-                );
-              })()}
-
-              {/* S37 — advertised price conditional on dealer financing. Same
-                  data and same ask as the deck's card; a cash buyer never learns
-                  this from the page's own headline. */}
-              {analysis.financeContingent&&analysis.financeContingent.contingent&&(
-                <div style={{...cardStyle,borderLeft:`3px solid ${C.coral}`}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Price conditions · {(analysis.financeContingent.reasons||[]).join(" · ")}</div>
-                  <div style={{fontSize:15,fontWeight:900,color:C.ink,lineHeight:1.35}}>This price depends on financing with the dealer</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
-                    The listing's own wording ties the advertised price to taking the dealer's financing. Pay cash, or use your own bank, and the price can legitimately change — the discount is often funded by the dealer's commission on the loan, so it leaves with the loan.
-                  </div>
-                  {analysis.financeContingent.evidence&&(
-                    <div style={{fontSize:12,color:C.inkSoft,marginTop:8,fontStyle:"italic",lineHeight:1.5}}>“…{analysis.financeContingent.evidence}…”</div>
-                  )}
-                  <div style={{fontSize:12,color:C.ink,marginTop:8,lineHeight:1.55}}>
-                    <b>Ask before you go in:</b> “What is the price if I pay cash or use my own bank — and if it changes, by exactly how much?” In writing.
-                  </div>
-                </div>
-              )}
-
-              {/* S36 — trade-in instant-offer widget: name the mechanism, coach the
-                  decoupling play. Same data as the deck's Trade-in card. */}
-              {analysis.tradeInWidget&&analysis.tradeInWidget.detected&&(
-                <div style={cardStyle}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Trade-in tool on this listing{analysis.tradeInWidget.vendor?` · ${analysis.tradeInWidget.vendor}`:""}</div>
-                  <div style={{fontSize:15,fontWeight:900,color:C.ink,lineHeight:1.35}}>This dealer runs an instant trade-in appraisal widget</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:6,lineHeight:1.55}}>
-                    Its number is anchored to the wholesale side of the market (what dealers pay each other), it's non-binding, and it appears in exchange for your contact and vehicle details.
-                    If you have a trade: settle this vehicle's price first; get the trade offer in writing on its own line — never one blended payment; and check retail listings for your own car before disclosing anything.
-                  </div>
-                </div>
-              )}
-
-              {analysis.recalls&&(()=>{
-                const r=analysis.recalls;
-                if(!r.checked) return (
-                  <div style={cardStyle}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
-                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.5}}>Couldn't reach the recall registry just now — you can check directly at Transport Canada before you sign.</div>
-                  </div>
-                );
-                if(r.count===0) return (
-                  <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
-                    <div style={{fontSize:15,fontWeight:800,color:C.tealInk}}>✓ No open recalls found</div>
-                  </div>
-                );
-                const yr=(dt)=>{const y=new Date(dt).getFullYear();return isNaN(y)?"":` · ${y}`;};
-                return (
-                  <div style={{...cardStyle,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                    <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Open recalls · Transport Canada</div>
-                    <div style={{fontSize:20,fontWeight:1000,color:C.coralInk}}>{r.count} open recall{r.count>1?"s":""}</div>
-                    {/* Why-this-shows explainer -- pre-empts a dealer's "that's not
-                        true" dispute by grounding the recalls in public government
-                        data and pointing to VIN confirmation. Deliberately bold and
-                        high-contrast so it isn't missed. */}
-                    <div style={{marginTop:10,background:C.paper2,border:`1.5px solid ${C.coral}66`,borderRadius:12,padding:"12px 14px"}}>
-                      <div style={{fontSize:13,fontWeight:1000,color:C.coralInk,marginBottom:6,letterSpacing:0.2}}>Why you're seeing this</div>
-                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,fontWeight:700}}>
-                        These are open safety-recall campaigns <b>Transport Canada</b> has published for this vehicle's <b>year, make and model</b> — read live from the official federal <b>Vehicle Recall Database</b>. This is public government data, not LotCheck's opinion. Recalls are issued per model, so the dealer can confirm by <b>VIN</b> whether this exact vehicle is affected or has already had the free remedy done — ask them to show the VIN's recall status in writing before you sign.
-                      </div>
-                    </div>
-                    <DetailToggle C={C} moreLabel={`Show ${r.count} recall detail${r.count>1?"s":""}`} lessLabel="Hide recall details">
-                      {/* Was slice(0,4): the button promises r.count details
-                          ("Show 9 recall details") and silently delivered 4 --
-                          confirmed live 2026-08-20. Show every item the server
-                          actually fetched; the server's own cap (20, generous
-                          headroom) is the only limit now. */}
-                      {(r.items||[]).map((it,i)=>(
-                        <div key={i} style={{fontSize:12,color:C.ink,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.line}`}}>
-                          <div style={{fontWeight:800}}>{it.system||"Recall"}{it.date?yr(it.date):""}</div>
-                          {it.summary&&<div style={{color:C.inkSoft,marginTop:2,lineHeight:1.5}}>{it.summary}</div>}
+                    {/* header */}
+                    <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap",paddingBottom:16,borderBottom:`1px solid ${C.line}`,marginBottom:20}}>
+                      <div style={{display:"flex",alignItems:"center",gap:9}}>
+                        <svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M6 4 L2 13 L6 22" stroke={C.teal} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M20 4 L24 13 L20 22" stroke={C.teal} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/><circle cx="13" cy="13" r="3.2" fill={C.teal}/></svg>
+                        <div>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:13,letterSpacing:".14em",color:C.ink}}>LOTCHECK</div>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,marginTop:1}}>QUOTE CHECK · REPORT</div>
                         </div>
-                      ))}
-                    </DetailToggle>
-                    <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>Recalls are repaired free of charge — {r.sourceUrl?<a href={r.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>confirm the fix status</a>:"confirm the fix status"} with the dealer before you sign.</div>
-                  </div>
-                );
-              })()}
-
-              {analysis.odometerCheck?.checked&&(
-                <div style={{...cardStyle,...(analysis.odometerCheck.flag?{background:C.coralBg,border:`1px solid ${C.coral}55`}:{})}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>Odometer</div>
-                  <div style={{fontSize:18,fontWeight:1000,color:analysis.odometerCheck.flag?C.coralInk:C.ink}}>{analysis.odometerCheck.km.toLocaleString()} km{analysis.odometerCheck.flag?<> <Icon3D name="warning" size={14}/></>:null}</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.odometerCheck.note}</div>
-                </div>
-              )}
-
-              {analysis.vinCheck?.present&&(
-                <div style={{...cardStyle,...(analysis.vinCheck.valid?{}:{background:C.coralBg,border:`1px solid ${C.coral}55`})}}>
-                  <div style={{fontSize:11,color:C.inkFaint,marginBottom:4}}>VIN check{analysis.vinCheck.vin?` · ${analysis.vinCheck.vin}`:""}</div>
-                  <div style={{fontSize:14,fontWeight:800,color:analysis.vinCheck.valid?C.tealInk:C.coralInk}}>{analysis.vinCheck.valid?"✓ Valid VIN pattern":<><Icon3D name="warning" size={13}/> VIN doesn't validate</>}</div>
-                  <div style={{fontSize:12,color:C.inkSoft,marginTop:4,lineHeight:1.5}}>{analysis.vinCheck.reason}</div>
-                </div>
-              )}
-
-              {/* Dealer sentiment: what public Google reviews say about
-                  THIS dealer, read for the patterns that actually predict
-                  a good/bad buying experience (financing transparency,
-                  communication, service honesty) -- the same signals
-                  real industry review analysis finds drive buyer
-                  satisfaction more than star rating alone. Always free
-                  and buyer-facing per Vic's call -- this is deliberately
-                  NOT a paid dealer product, since a dealer paying LotCheck
-                  for their own reputation summary would undercut the
-                  buyer-first positioning the whole platform is built on.
-                  Requires analysis.dealerSentiment from the edge function
-                  -- {dealerName, rating, reviewCount,
-                  highlights:[{rating,text}], sourceUrl}. Shows a random
-                  sample of up to 4 from the backend's pool of 6-8 (see
-                  sampledHighlights above) so the card varies across
-                  checks instead of showing identical content every time
-                  someone checks a different vehicle at the same dealer. */}
-              {analysis.dealerSentiment&&(
-                <div style={cardStyle}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10,flexWrap:"wrap",gap:6}}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What customers say about {analysis.dealerSentiment.dealerName}</div>
-                    {!!analysis.dealerSentiment.rating&&(
-                      <div style={{fontSize:12,color:C.inkFaint,whiteSpace:"nowrap"}}>
-                        ★ {analysis.dealerSentiment.rating.toFixed(1)}{analysis.dealerSentiment.reviewCount?` · ${analysis.dealerSentiment.reviewCount.toLocaleString()} reviews`:""}
                       </div>
-                    )}
-                  </div>
-                  <DetailToggle C={C} moreLabel={`Show ${sampledHighlights.length} review highlight${sampledHighlights.length>1?"s":""}`} lessLabel="Hide highlights">
-                    {sampledHighlights.map((h,i)=>(
-                      <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"6px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                        <span style={{color:ratingColor(h.rating),fontWeight:800,fontSize:12,lineHeight:"20px",whiteSpace:"nowrap"}}>★{h.rating}</span>
-                        <span style={{fontSize:13,color:C.ink,lineHeight:1.5}}>{h.text}</span>
+                      <div style={{width:1,alignSelf:"stretch",background:C.line,minHeight:30}}/>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:16,color:C.ink}}>{vehName}</div>
+                        {metaBits.length>0&&<div style={{fontSize:12,color:C.inkFaint,marginTop:2}}>{metaBits.join(" · ")}</div>}
                       </div>
-                    ))}
-                  </DetailToggle>
-                  <div style={{fontSize:11,color:C.inkFaint,marginTop:10}}>
-                    Based on public Google reviews{analysis.dealerSentiment.sourceUrl&&(<> — <a href={analysis.dealerSentiment.sourceUrl} target="_blank" rel="noopener noreferrer" style={{color:C.inkFaint}}>see all reviews</a></>)}
-                  </div>
-                </div>
-              )}
-
-              {/* Standard/included manufacturer warranty -- NOT an upsell
-                  product (that's the separate "warranty" section further
-                  down for a PURCHASED extended plan). This is what already
-                  comes free with the vehicle, framed positively so buyers
-                  know it's already covered before anyone tries to sell them
-                  something that overlaps with it. */}
-              {analysis.standardWarranty?.coverage&&(
-                <div style={{...cardStyle,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.tealInk,marginBottom:6}}>✓ Included manufacturer warranty</div>
-                  <div style={{color:C.ink,fontSize:14,marginBottom:4}}>{analysis.standardWarranty.coverage}</div>
-                  {analysis.standardWarranty.note&&<div style={{fontSize:12,color:C.inkFaint}}>{analysis.standardWarranty.note}</div>}
-                </div>
-              )}
-
-              {/* Used vehicles: how much of the ORIGINAL manufacturer warranty is
-                  left, estimated from the verified catalog terms + model year +
-                  odometer. Labelled ESTIMATED (the clock starts at the in-service
-                  date, which we approximate with the model year). */}
-              {analysis.remainingWarranty&&(analysis.remainingWarranty.basic||analysis.remainingWarranty.powertrain)&&(()=>{
-                const rw=analysis.remainingWarranty;
-                const anyActive=(rw.basic&&rw.basic.active)||(rw.powertrain&&rw.powertrain.active);
-                const Term=({label,t})=>{
-                  if(!t) return null;
-                  const parts=[];
-                  if(t.active){
-                    parts.push(`~${t.yearsLeft} yr`);
-                    if(t.kmUnlimited) parts.push("unlimited km");
-                    else if(t.odometerKnown&&t.kmLeft!=null) parts.push(`${Number(t.kmLeft).toLocaleString()} km`);
-                  }
-                  return (
-                    <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"7px 0",borderTop:`1px solid ${C.line}`}}>
-                      <span style={{fontSize:13,color:C.ink}}>{label} <span style={{color:C.inkFaint}}>({t.term})</span></span>
-                      <span style={{fontSize:13,fontWeight:800,color:t.active?C.tealInk:C.coralInk,whiteSpace:"nowrap"}}>{t.active?`${parts.join(" / ")} left`:"Expired"}</span>
-                    </div>
-                  );
-                };
-                return (
-                  <div style={{...cardStyle,border:`1px solid ${anyActive?C.teal+"55":C.line}`}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Factory warranty remaining</div>
-                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>ESTIMATED</span>
-                    </div>
-                    <div style={{fontSize:12,color:C.inkFaint,marginBottom:2}}>Based on the {rw.modelYear} model year{rw.odometerKm!=null?` and ${Number(rw.odometerKm).toLocaleString()} km`:""}{rw.make?` · ${rw.make}`:""}.</div>
-                    <Term label="Basic / comprehensive" t={rw.basic}/>
-                    <Term label="Powertrain" t={rw.powertrain}/>
-                    <div style={{fontSize:11.5,color:C.inkFaint,lineHeight:1.55,marginTop:8}}>
-                      Coverage ends at whichever comes first — years or kilometres. Estimated from the model year; the clock actually starts on the in-service date, so confirm it on the VIN/CARFAX report{rw.odometerKm==null?" (the odometer wasn't listed, so this is time-based only)":""}.
-                    </div>
-                    {rw.sourceUrl&&<a href={rw.sourceUrl} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:6}}>Manufacturer's official terms ↗</a>}
-                  </div>
-                );
-              })()}
-
-              {/* Native VIN history removed (VinAudit cancelled). The CARFAX
-                  hand-off above is the history path; a new provider can slot in
-                  behind the same card later. */}
-
-              {/* ── Rebates & conditions ─────────────────────────────────────
-                  Groups the EVAP rebate check, any advertised conditional
-                  savings, and the itemized discounts/add-ons into ONE card per
-                  the approved layout. Each inner block keeps its own
-                  conditional, colour semantics, and honesty copy -- nothing is
-                  dropped or restated.
-
-                  EVAP note (unchanged rationale): the rebate status is shown for
-                  ANY BEV/PHEV, new or used, since for a real EV that status is
-                  information a buyer wants; only gas/diesel are hidden.
-                  effectiveFuelType/evapShow/rebate/fuelMismatch are computed once
-                  at the top of this report from the curated EVAP_LIST (a source
-                  of truth the page's own fuelType label isn't -- a stale
-                  inventory "Gas" read must not hide a real EV rebate) and reused
-                  by both the hero tile and this card so they always agree. ── */}
-              {/* S3 — "What you'll really pay": reconcile the selling price up to
-                  the real out-the-door, splitting unavoidable fees from removable
-                  dealer add-ons so the buyer sees exactly how much markup they
-                  can decline. See dealer-tactics-safeguards.md (S3). */}
-              {analysis.reconciliation&&(()=>{
-                const r=analysis.reconciliation;
-                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
-                const removable=Number(r.addonsTotal)||0, feesT=Number(r.feesTotal)||0, added=Number(r.addedOnTop)||0;
-                if(!added&&r.sellingPrice==null) return null;
-                const names=(r.addons||[]).map(a=>a.name).filter(Boolean);
-                const Row=({label,val,sub,tone,strong})=>(
-                  <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"8px 0",borderTop:`1px solid ${C.line}`}}>
-                    <div><div style={{fontSize:13,fontWeight:strong?800:600,color:C.ink}}>{label}</div>{sub&&<div style={{fontSize:11,color:C.inkFaint,marginTop:1}}>{sub}</div>}</div>
-                    <div style={{fontSize:strong?16:14,fontWeight:strong?1000:800,color:tone==="coral"?C.coralInk:C.ink,whiteSpace:"nowrap"}}>{val}</div>
-                  </div>
-                );
-                return (
-                  <div style={cardStyle}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>What you'll really pay</div>
-                      <span style={{fontSize:10.5,fontWeight:800,color:C.inkFaint,background:C.paper2,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>OUT-THE-DOOR</span>
-                    </div>
-                    {r.sellingPrice!=null&&<Row label="Selling price" val={m(r.sellingPrice)}/>}
-                    {feesT>0&&<Row label="Unavoidable fees" sub="doc, registration, freight, tax" val={`+ ${m(feesT)}`}/>}
-                    {removable>0&&<Row label="Dealer add-ons — removable" sub="negotiable · you can decline these" val={`+ ${m(removable)}`} tone="coral"/>}
-                    {r.realPreTax!=null&&<Row label="Real price, before tax" val={m(r.realPreTax)} strong/>}
-                    {removable>0&&(
-                      <div style={{marginTop:10,background:C.coralBg,border:`1px solid ${C.coral}55`,borderRadius:11,padding:"11px 13px",fontSize:12.5,color:C.ink,lineHeight:1.55}}>
-                        <b style={{color:C.coralInk}}>${removable.toLocaleString()}</b> of this quote is <b>removable dealer add-ons</b>{names.length?` (${names.slice(0,3).join(", ")}${names.length>3?"…":""})`:""}. They're negotiable — ask to have them taken off before you sign.
+                      <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        {emailStatus==="sent"&&(
+                          <span style={{display:"inline-flex",alignItems:"center",gap:6,color:C.tealInk,fontWeight:700,fontSize:12}}>
+                            <DroneSentBeat compact body={C.inkFaint} accent={C.teal}/> Emailed
+                          </span>
+                        )}
+                        <button onClick={copyShareLink} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"7px 12px",color:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>{linkCopied?"LINK COPIED":"COPY LINK"}</button>
+                        <button onClick={()=>{const el=document.querySelector(".lcgc-panel");if(!el)return;el.classList.remove("lcgc-replay");void el.offsetWidth;el.classList.add("lcgc-replay");setTimeout(()=>el.classList.remove("lcgc-replay"),2200);}}
+                          style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"7px 12px",color:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>REPLAY</button>
+                        {analysis.sig&&(
+                          <div style={{display:"flex",alignItems:"center",gap:7,padding:"7px 11px 7px 9px",borderRadius:999,background:C.tealBg,border:`1px solid ${C.teal}55`}}>
+                            <span className="lcgc-dot" style={{width:7,height:7,borderRadius:"50%",background:C.teal,display:"inline-block"}}/>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".06em",color:C.inkSoft}}>ECDSA-SIGNED</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })()}
+                    </div>
 
-              {/* S11 — financing-contingent-discount trap. Frames the counter-
-                  question and quantifies the trade-off when rate data is present.
-                  See dealer-tactics-safeguards.md (S11). */}
-              {analysis.financingTrap&&(()=>{
-                const t=analysis.financingTrap;
-                const m=(n)=>n==null?"—":`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
-                const trap=t.mode==="quantified"&&t.isTrap;
-                const bg=trap?C.coralBg:C.butterBg, br=trap?C.coral:C.butter, ink=trap?C.coralInk:C.butterInk;
-                return (
-                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
-                    <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:8}}>
-                      <FlagWaveIcon size={15}/>
-                      <div style={{fontSize:13,fontWeight:800,color:ink}}>{trap?"Financing trap — the discount may cost you":"Discount vs. financing — ask before you sign"}</div>
-                    </div>
-                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:8}}>
-                      {t.mode==="quantified"?(trap
-                        ? <>This <b>{m(t.discount)} discount</b> may be tied to dealer financing. If so, financing at <b>{t.dealerApr}%</b> instead of the <b>{t.promoApr}%</b> promo adds about <b style={{color:C.coralInk}}>{m(t.extraInterest)}</b> in interest over {t.term} months — <b>more than the discount</b>. You'd net <b style={{color:C.coralInk}}>lose {m(Math.abs(t.net))}</b>.</>
-                        : <>This <b>{m(t.discount)} discount</b> beats the higher rate here: financing at {t.dealerApr}% vs the {t.promoApr}% promo adds about {m(t.extraInterest)}, so the discount still nets you about <b style={{color:C.tealInk}}>{m(t.net)}</b> — but confirm you can keep the promo rate.</>)
-                      : <>This discount may be offered <b>"in lieu of special financing"</b> — meaning you might not also get the low promo APR. A higher rate can quietly erase a discount over the life of the loan.</>}
-                    </div>
-                    <div style={{fontSize:12.5,color:ink,fontWeight:800,background:"#fff8",borderRadius:9,padding:"9px 12px"}}>
-                      Ask: "Is this price in lieu of special financing? Can I get the discount <i>and</i> the promo APR?"
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* S12 — doc-fee vs jurisdiction benchmark. Fail-safe: only renders
-                  when the server had a backed benchmark. See dealer-tactics-
-                  safeguards.md (S12). */}
-              {analysis.docFeeCheck&&(()=>{
-                const d=analysis.docFeeCheck;
-                const m=(n)=>`$${Number(n).toLocaleString(undefined,{maximumFractionDigits:0})}`;
-                const clean=d.kind==="within_cap";
-                const bg=clean?C.tealBg:C.butterBg, br=clean?C.teal:C.butter, ink=clean?C.tealInk:C.butterInk;
-                return (
-                  <div style={{...cardStyle,background:bg,border:`1px solid ${br}55`}}>
-                    <div style={{fontSize:13,fontWeight:800,color:ink,marginBottom:6}}>
-                      {clean?"✓ Doc fee in line":"Doc fee — worth questioning"}
-                    </div>
-                    <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6}}>
-                      {d.kind==="allin"&&<>Your <b>{m(d.docFee)} doc/admin fee</b> — {d.jurisdiction} requires <b>all-in advertised pricing</b> ({d.body}), so this should already be <b>inside the advertised price</b>. Ask why it's separate.</>}
-                      {d.kind==="over_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is about <b style={{color:C.coralInk}}>{m(d.overBy)} above</b> {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). It's negotiable — push back.</>}
-                      {d.kind==="over_norm"&&<>{d.jurisdiction} doesn't cap doc fees, and your <b>{m(d.docFee)}</b> is at the high end ({d.note}). Negotiable — ask them to reduce it.</>}
-                      {d.kind==="within_cap"&&<>Your <b>{m(d.docFee)} doc fee</b> is within {d.jurisdiction}'s ~{m(d.benchmark)} cap ({d.note}). Nothing to flag here.</>}
-                      {d.mfrCeiling&&d.mfrCeilingOverBy>0&&<div style={{marginTop:6}}>It's also <b style={{color:C.coralInk}}>{m(d.mfrCeilingOverBy)} above</b> {d.mfrCeilingMake}'s own published maximum dealer fee of <b>{m(d.mfrCeiling)}</b> — ask them to match it.</div>}
-                    </div>
-                    <a href={d.source} target="_blank" rel="noopener noreferrer" style={{fontSize:11,color:C.tealInk,textDecoration:"none",fontWeight:700,display:"inline-block",marginTop:7}}>Source ↗</a>
-                  </div>
-                );
-              })()}
-
-              {/* Counter-script — the actionable capstone: exactly what to say to
-                  get a better deal, aggregated from every safeguard above.
-                  Green-when-clean if there's nothing to push on. */}
-              {analysis.counterScript?.moves?.length>0&&(()=>{
-                const cs=analysis.counterScript;
-                return (
-                  <div style={{...cardStyle,border:`1px solid ${(cs.clean?C.teal:C.tealInk)}55`}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>{cs.clean?"Say this to confirm":"What to say — your counter-script"}</div>
-                      <span style={{fontSize:10.5,fontWeight:800,color:C.tealInk,background:C.tealBg,borderRadius:5,padding:"2px 7px",letterSpacing:.3}}>USE ON THE CALL</span>
-                    </div>
-                    <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5,marginBottom:10}}>
-                      {cs.clean
-                        ?"This deal looks straight — no add-ons or traps flagged. Just lock in the number:"
-                        :"Read these to the dealer, in order. Every line comes from a finding above — say them and hold."}
-                    </div>
-                    <div>
-                      {cs.moves.map((mv,i)=>(
-                        <div key={i} style={{display:"flex",gap:10,padding:"9px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                          <span style={{flexShrink:0,width:20,height:20,borderRadius:999,background:C.tealBg,color:C.tealInk,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{i+1}</span>
-                          <div style={{fontSize:13.5,color:C.ink,lineHeight:1.5}}>{mv.say}</div>
+                    {/* hero: gauge + verdict */}
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(180px,220px) 1fr",gap:24,alignItems:"center",padding:"clamp(16px,2.4vw,26px)",borderRadius:20,background:C.tealBg,border:`1px solid ${C.line}`,marginBottom:20}}>
+                      <div style={{position:"relative",width:"100%",maxWidth:220,margin:"0 auto"}}>
+                        <svg viewBox="0 0 220 132" style={{width:"100%",display:"block",overflow:"visible"}}>
+                          <defs><linearGradient id="lcgcGaugeGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor={C.teal}/><stop offset="100%" stopColor={C.tealInk}/></linearGradient></defs>
+                          <path d="M30,112 A80,80 0 0 1 190,112" stroke={C.line} strokeWidth="13" fill="none" strokeLinecap="round" pathLength="100"/>
+                          {score!=null&&<path className="lcgc-arc-fg" d="M30,112 A80,80 0 0 1 190,112" stroke="url(#lcgcGaugeGrad)" strokeWidth="13" fill="none" strokeLinecap="round" pathLength="100"/>}
+                          <text x="30" y="126" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>0</text>
+                          <text x="110" y="20" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>5</text>
+                          <text x="190" y="126" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>10</text>
+                        </svg>
+                        <div style={{position:"absolute",left:"50%",top:"58%",transform:"translate(-50%,-38%)",textAlign:"center"}}>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:"clamp(30px,4vw,40px)",color:C.tealInk,lineHeight:1}}>{score!=null?score.toFixed(1):"—"}{score!=null&&<small style={{fontSize:".42em",color:C.inkFaint,fontWeight:600,marginLeft:2}}>/10</small>}</div>
+                          <div style={{marginTop:5,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".12em",color:C.inkFaint,textTransform:"uppercase"}}>Negotiation Leverage</div>
+                          <div style={{marginTop:4,fontSize:10,color:C.inkFaint,opacity:.8}}>{score!=null?"Higher = more room to negotiate":"Score isn't available"}</div>
                         </div>
+                      </div>
+                      <div style={{minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                          <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,letterSpacing:".12em",color:C.inkFaint,textTransform:"uppercase"}}>Verdict</span>
+                          {watchOuts>0?(
+                            <span style={{display:"inline-flex",alignItems:"center",gap:6,background:C.coralBg,border:`1px solid ${C.coral}55`,color:C.coralInk,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,padding:"4px 10px 4px 8px",borderRadius:999}}><Icon3D name="warning" size={11}/>{watchOuts} flagged item{watchOuts>1?"s":""}</span>
+                          ):(
+                            <span style={{display:"inline-flex",alignItems:"center",gap:6,background:C.tealBg,border:`1px solid ${C.teal}55`,color:C.tealInk,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,padding:"4px 10px",borderRadius:999}}>No flags found</span>
+                          )}
+                        </div>
+                        <div style={{fontSize:"clamp(15px,1.9vw,18px)",lineHeight:1.5,color:C.inkSoft}}>{analysis.summary||"Full ten-point check below — read every figure before you sign."}</div>
+                      </div>
+                    </div>
+
+                    {/* stat strip — the worst of the ten, at a glance */}
+                    {flagPoints.length>0&&(
+                      <div style={{display:"grid",gridTemplateColumns:`repeat(${flagPoints.length},1fr)`,gap:12,marginBottom:20}}>
+                        {flagPoints.map((p,i)=>(
+                          <div key={i} className="lcgc-tile" style={{padding:"14px 15px",borderRadius:15,background:C.card,border:`1px solid ${C.line}`}}>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,textTransform:"uppercase"}}>{p.title}</div>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:19,marginTop:6,color:C.coralInk}}>{p.v}</div>
+                            <div style={{fontSize:11,color:C.inkFaint,marginTop:4,lineHeight:1.4}}>{p.sub}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* the ten points */}
+                    <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:12}}>
+                      <div style={{fontWeight:700,fontSize:15,color:C.ink}}>The ten-point check</div>
+                      <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>{PG.length} / 10 backed</span>
+                      <div style={{flex:1,height:1,background:C.line}}/>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12,marginBottom:22}}>
+                      {PG.map((p,i)=>(
+                        <article key={i} className="lcgc-point" style={{position:"relative",padding:"14px 15px",borderRadius:15,background:C.card,border:`1px solid ${C.line}`,borderLeft:`3px solid ${toneColor[p.tone]}`}}>
+                          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:8}}>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>{String(i+1).padStart(2,"0")}</span>
+                            <span style={{width:22,height:22,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",background:toneBg[p.tone],color:toneColor[p.tone]}}>
+                              {p.tone==="flag"?<Icon3D name="warning" size={12}/>:p.tone==="pass"?<Icon3D name="check" size={12}/>:<span style={{width:8,height:1.6,background:"currentColor",display:"block"}}/>}
+                            </span>
+                          </div>
+                          <div style={{fontWeight:600,fontSize:12.5,color:C.inkSoft}}>{p.title}</div>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:15.5,marginTop:5,color:p.tone==="muted"?C.inkFaint:toneColor[p.tone]}}>{p.v}</div>
+                          <div style={{fontSize:11,color:C.inkFaint,marginTop:5,lineHeight:1.4}}>{p.sub}</div>
+                        </article>
                       ))}
                     </div>
-                    <button onClick={copyCounterScript} style={{marginTop:12,width:"100%",background:scriptCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"11px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{scriptCopied?"✓ Copied — paste it into your notes":"Copy script"}</button>
-                  </div>
-                );
-              })()}
 
-              {(evapShow||analysis.totalFlaggedCost>0||analysis.addOns?.length>0)&&(
-                <div style={cardStyle}>
-                  <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>Rebates &amp; conditions</div>
-
-                  {evapShow&&(
-                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:rebate.eligible?C.tealBg:C.butterBg,border:`1px solid ${rebate.eligible?C.teal:C.butter}55`}}>
-                      <div style={{fontSize:13,fontWeight:800,color:rebate.eligible?C.tealInk:C.butterInk,marginBottom:8}}>
-                        {rebate.eligible?<><Icon3D name="celebrate" size={13}/> EVAP rebate eligible</>:<><Icon3D name="bolt" size={13}/> EV/PHEV rebate check</>}
-                      </div>
-                      {fuelMismatch&&(
-                        <div style={{fontSize:11,color:C.inkFaint,marginBottom:8,fontStyle:"italic"}}>
-                          This page's own fuel-type label said "{analysis.fuelType}", but our verified records for this exact year/make/model show it's actually a {evapListMatch.fuel} -- using the verified value here.
-                        </div>
-                      )}
-                      {rebate.eligible?(
-                        <>
-                          <div style={{color:C.ink,fontSize:18,fontWeight:1000,marginBottom:4}}>${rebate.total.toLocaleString()} available</div>
-                          <div style={{fontSize:12,color:C.inkSoft}}>
-                            ${rebate.federal.toLocaleString()} federal
-                            {rebate.provincial>0&&` + $${rebate.provincial.toLocaleString()} ${rebate.prov_name}`}
-                            {rebate.note&&` — ${rebate.note}`}
-                          </div>
-                        </>
-                      ):(
-                        <div style={{fontSize:13,color:C.inkSoft}}>{rebate.ineligibleReason}</div>
-                      )}
-                    </div>
-                  )}
-
-                  {analysis.totalFlaggedCost>0&&(
-                    <div style={{borderRadius:14,padding:"13px 15px",marginBottom:12,background:C.coralBg,border:`1px solid ${C.coral}55`}}>
-                      {!addOnsAreFees?(
-                        <>
-                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                            <FlagWaveIcon size={15}/>
-                            <span>${analysis.totalFlaggedCost.toLocaleString()} in conditional savings</span>
-                          </div>
-                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are advertised discounts or rebates with restrictions or hedged language -- confirm they actually apply to you before counting on them.</div>
-                        </>
-                      ):(
-                        <>
-                          <div style={{fontSize:13,color:C.coralInk,fontWeight:800,display:"flex",alignItems:"center",gap:7}}>
-                            <FlagWaveIcon size={15}/>
-                            <span>${analysis.totalFlaggedCost.toLocaleString()} in flagged add-ons</span>
-                          </div>
-                          <div style={{fontSize:12,color:C.inkSoft,marginTop:4}}>These are commonly overpriced items worth questioning or negotiating down.</div>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {analysis.addOns?.length>0&&(
-                    <div>
-                      <div style={{fontSize:12.5,fontWeight:800,color:C.inkSoft,marginBottom:2}}>{!addOnsAreFees?"Discounts & conditions":"Add-ons & fees"}</div>
-                      <DetailToggle C={C} moreLabel={`Show all ${analysis.addOns.length} line item${analysis.addOns.length>1?"s":""}`} lessLabel="Hide line items">
-                      {analysis.addOns.map((a,i)=>{
-                        // verdict: "good" (genuine buyer benefit), "flagged"
-                        // (worth questioning), or "standard" (a mandatory,
-                        // unremarkable pass-through shown plainly).
-                        const v=a.verdict||(a.flagged?"flagged":"standard"); // fallback for any stale cached response shape
-                        const priceColor=v==="good"?C.tealInk:v==="flagged"?C.coralInk:C.inkSoft;
-                        return (
-                          <div key={i} style={{padding:"10px 0",borderTop:i>0?`1px solid ${C.line}`:"none"}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                              <div style={{display:"flex",alignItems:"center",gap:6,color:C.ink,fontWeight:700,fontSize:14}}>
-                                {v==="good"&&<span>✓</span>}
-                                {v==="flagged"&&<FlagPyramidIcon size={13}/>}
-                                <span>{a.name}</span>
-                              </div>
-                              <div style={{color:priceColor,fontWeight:800}}>${a.price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                            </div>
-                            <div style={{fontSize:12,color:v==="good"?C.tealInk:C.inkFaint,marginTop:2}}>{a.reason}</div>
-                          </div>
-                        );
-                      })}
-                      </DetailToggle>
-                      {/* Subtotal -- only for genuine fees, never discounts/
-                          conditions. When kind data exists, sums only the
-                          fee-kind items so a mixed report doesn't fold a
-                          discount into a pure cost total. */}
-                      {addOnsAreFees&&(()=>{
-                        const feeItems=addOnsHaveKind?analysis.addOns.filter(a=>a.kind==="fee"):analysis.addOns;
-                        if(!feeItems.length) return null;
-                        return (
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0 0",marginTop:4,borderTop:`1px solid ${C.line}`}}>
-                            <div style={{color:C.inkSoft,fontWeight:800,fontSize:13}}>Added on top of the price</div>
-                            {/* A line whose caption names a MIXTURE ("Fees & Accessories")
-                                cannot be attributed to one party. On the real 2026 Lexus NX,
-                                70% of that row was manufacturer freight and government levies.
-                                Say what it is instead of implying whose it is. */}
-                            <div style={{color:C.ink,fontWeight:1000,fontSize:15}}>${feeItems.reduce((sum,a)=>sum+(a.price||0),0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Payment breakdown: weekly / bi-weekly / monthly equivalents,
-                  plus how much of each payment is interest (finance) or
-                  lease charge (lease) vs principal/depreciation.
-                  Requires analysis.financing from the edge function --
-                  {type, termMonths, totalObligation, totalCostOfCredit} --
-                  which doesn't exist in the schema yet as of this write, so
-                  this renders nothing until that's added. All three
-                  frequencies are derived from the SAME disclosed
-                  totalObligation (re-sliced across a different number of
-                  equal installments), not a re-derived amortization
-                  schedule -- so it always ties back to a real number the
-                  dealer already put on the page, e.g. the 260 weekly
-                  payments in the Calgary Honda Civic example checks out
-                  exactly: $27,952.60 / 260 = $107.51. IMPORTANT for whoever
-                  wires up the edge function: totalObligation and
-                  totalCostOfCredit must be on the SAME tax basis (both
-                  pre-tax, ideally) or this percentage split is comparing
-                  apples to oranges -- capture that explicitly rather than
-                  assuming.
-
-                  2026-07-22 fix: confirmed live on a real listing (Toyota
-                  bZ, Macleod Trail Toyota) that this card was rendering
-                  NOTHING even though the dealer's page disclosed a real
-                  payment amount, frequency, and rate -- because that page
-                  uses an interactive finance calculator with no committed
-                  term shown, so termMonths/totalObligation both come back
-                  null while paymentAmount/paymentFrequency/rate are known.
-                  That's a common, legitimate real-world shape (not a
-                  parsing failure), so this now has two paths: full data
-                  gets the original weekly/biweekly/monthly toggle with the
-                  principal/interest bar; partial data (payment+frequency
-                  only) gets a simpler, honest card showing just what's
-                  disclosed, with a clear note about what the dealer hasn't
-                  committed to yet -- never silently hides the card just
-                  because the page only gives a partial picture. */}
-              {analysis.financing?.paymentAmount&&analysis.financing?.paymentFrequency&&(()=>{
-                const f=analysis.financing;
-                const hasFullData=!!(f.termMonths&&f.totalObligation);
-                const freqLabel={weekly:"Weekly",biweekly:"Bi-weekly",monthly:"Monthly"};
-                const freqSuffix={weekly:"week",biweekly:"2 weeks",monthly:"month"};
-                const chargeWord=f.type==="lease"?"lease charge":"interest";
-
-                if(!hasFullData){
-                  // Partial data: show exactly what the dealer disclosed,
-                  // in the frequency THEY stated it in -- no conversion,
-                  // since converting to a different frequency requires
-                  // termMonths, which isn't known here. Styled to feel as
-                  // deliberate and complete as the full card -- a confirmed-
-                  // data badge on what IS real, and the disclosure as a
-                  // proper amber callout (same pattern as the EV rebate
-                  // check card) instead of thin gray afterthought text --
-                  // without inventing the missing term/total to fill space.
-                  return (
-                    <div style={cardStyle}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                        <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>
-                          Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
-                        </div>
-                        <div style={{fontSize:11,fontWeight:800,color:C.tealInk,background:C.tealBg,padding:"3px 10px",borderRadius:999}}>rate confirmed</div>
-                      </div>
-                      <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:4}}>
-                        <div style={{fontSize:32,fontWeight:1000,color:C.ink}}>${f.paymentAmount.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                        <div style={{fontSize:13,color:C.inkFaint}}>/{freqSuffix[f.paymentFrequency]||f.paymentFrequency}</div>
-                      </div>
-                      {!!f.rate&&(<div style={{fontSize:13,color:C.inkSoft,marginBottom:14}}>at <span style={{fontWeight:800,color:C.ink}}>{f.rate}% APR</span></div>)}
-                      <div style={{background:C.butterBg,border:`1px solid ${C.butter}55`,borderRadius:14,padding:"12px 14px"}}>
-                        <div style={{fontSize:12,fontWeight:800,color:C.butterInk,marginBottom:4}}><Icon3D name="bolt" size={14}/> Term and total cost not shown</div>
-                        <div style={{fontSize:12,color:C.inkSoft,lineHeight:1.5}}>
-                          This dealer's page uses an interactive calculator with no default term selected, so only the payment and rate above are confirmed. Ask for the exact term and total cost in writing before relying on this payment figure.
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const termMonths=f.termMonths;
-                const totalObligation=f.totalObligation;
-                const totalInterest=f.totalCostOfCredit||0;
-                const periodsPerYear={weekly:52,biweekly:26,monthly:12};
-                const periodsFor=freq=>termMonths*(periodsPerYear[freq]/12);
-                const paymentFor=freq=>totalObligation/periodsFor(freq);
-                const interestFor=freq=>totalInterest/periodsFor(freq);
-                const payment=paymentFor(payFreq);
-                const interest=interestFor(payFreq);
-                const principal=Math.max(payment-interest,0);
-                const interestPct=payment>0?Math.round((interest/payment)*100):0;
-                return (
-                  <div style={cardStyle}>
-                    <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:12}}>
-                      Payment breakdown{f.type==="lease"?" (lease)":f.type==="finance"?" (finance)":""}
-                    </div>
-                    <div style={{display:"flex",gap:6,marginBottom:14}}>
-                      {["weekly","biweekly","monthly"].map(k=>(
-                        <button key={k} onClick={()=>setPayFreq(k)}
-                          style={{background:payFreq===k?C.tealBg:"transparent",color:payFreq===k?C.tealInk:C.inkFaint,border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                          {freqLabel[k]}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:10}}>
-                      <div style={{fontSize:26,fontWeight:1000,color:C.ink}}>${payment.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-                      <div style={{fontSize:12,color:C.inkFaint}}>/{freqSuffix[payFreq]}</div>
-                    </div>
-                    {totalInterest>0&&(
+                    {/* also checked */}
+                    {extraDefs.length>0&&(
                       <>
-                        <div style={{display:"flex",height:10,borderRadius:999,overflow:"hidden",marginBottom:8}}>
-                          <div style={{width:`${100-interestPct}%`,background:C.teal}}/>
-                          <div style={{width:`${interestPct}%`,background:C.coral}}/>
+                        <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:12}}>
+                          <div style={{fontWeight:700,fontSize:15,color:C.ink}}>Also checked</div>
+                          <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>not part of the ten</span>
+                          <div style={{flex:1,height:1,background:C.line}}/>
                         </div>
-                        <div style={{display:"flex",gap:16,flexWrap:"wrap",fontSize:12,color:C.inkSoft,marginBottom:10}}>
-                          <div><span style={{color:C.tealInk,fontWeight:800}}>${principal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> principal{f.type==="lease"?"/depreciation":""}</div>
-                          <div><span style={{color:C.coralInk,fontWeight:800}}>${interest.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</span> {chargeWord} ({interestPct}%)</div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:22}}>
+                          {extraDefs.map((e,i)=>(
+                            <div key={i} className="lcgc-pill" style={{display:"flex",alignItems:"center",gap:9,padding:"9px 14px 9px 12px",borderRadius:999,background:C.paper2,border:`1px solid ${C.line}`}}>
+                              <span style={{width:7,height:7,borderRadius:"50%",flex:"none",background:e.warm?C.butter:C.inkFaint}}/>
+                              <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".05em",color:C.inkFaint,textTransform:"uppercase"}}>{e.label}</span>
+                              <span style={{fontSize:12,color:C.inkSoft}}>{e.value}</span>
+                            </div>
+                          ))}
                         </div>
                       </>
                     )}
-                    <div style={{fontSize:12,color:C.inkFaint,borderTop:`1px solid ${C.line}`,paddingTop:10}}>
-                      {termMonths} months total &middot; ${totalObligation.toLocaleString()} total obligation{f.totalObligationTaxIncluded&&" (tax included)"}{totalInterest>0&&` \u00b7 $${totalInterest.toLocaleString()} total ${chargeWord}`}
-                    </div>
-                  </div>
-                );
-              })()}
 
-              {analysis.warranty?.offered&&(()=>{
-                // A SOLD extended warranty / protection plan is always an optional
-                // add-on. Flag it as such and, when we know the free coverage this
-                // vehicle already carries, put the two side by side so the buyer
-                // has the leverage to decline or negotiate. Neutral + factual:
-                // no "overpriced"/"ripoff" language (see neutral-factual-language,
-                // defamation-proof-and-compliant).
-                const w=analysis.warranty;
-                const sw=analysis.standardWarranty;
-                const isNew=analysis.vehicleCondition==="new";
-                const price=w.price?`$${Number(w.price).toLocaleString()}`:null;
-                return (
-                  <div style={{...cardStyle,border:`1px solid ${C.butter}`,background:C.butterBg}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
-                      <div style={{fontSize:13,fontWeight:800,color:C.inkSoft}}>Extended warranty / protection plan</div>
-                      <span style={{fontSize:10.5,fontWeight:800,color:C.butterInk,background:C.butter+"66",borderRadius:5,padding:"2px 8px",letterSpacing:.3}}><Icon3D name="warning" size={14}/> OPTIONAL ADD-ON</span>
-                    </div>
-                    <div style={{color:C.ink,fontSize:15,fontWeight:800,marginBottom:6}}>{w.offered}{price?` — ${price}`:""}</div>
-                    {isNew&&sw?.coverage?(
-                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
-                        You already get <b>{sw.coverage}</b> at no cost on this new {analysis.make||"vehicle"}{sw.verified?" — verified against the manufacturer's official Canadian terms":""}. This plan is <b>optional and negotiable</b>: you can decline it, and extended coverage can usually be bought later or from another provider.
+                    {/* evidence + counter-script */}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:14,marginBottom:20}}>
+                      <div style={{borderRadius:18,background:C.paper2,border:`1px solid ${C.line}`,padding:20}}>
+                        <div style={{fontWeight:700,fontSize:14,color:C.ink,marginBottom:10}}>Dispute-proof</div>
+                        <div style={{fontSize:12.5,lineHeight:1.6,color:C.inkSoft,marginBottom:12}}>This report is ECDSA-signed at capture and re-verifiable independently of LotCheck — the underlying screenshot, timestamp and every figure above are locked to the signature below.</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderRadius:10,background:C.card}}>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".05em",color:C.inkFaint,textTransform:"uppercase"}}>Algorithm</span>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.tealInk}}>ECDSA P-256</span>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderRadius:10,background:C.card}}>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".05em",color:C.inkFaint,textTransform:"uppercase"}}>Report ID</span>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.tealInk}}>{analysis.reportId||"—"}</span>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderRadius:10,background:C.card}}>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".05em",color:C.inkFaint,textTransform:"uppercase"}}>Captured</span>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.tealInk}}>{analysis.issuedAt?new Date(analysis.issuedAt).toLocaleString("en-CA",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}):"—"}</span>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderRadius:10,background:C.card}}>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".05em",color:C.inkFaint,textTransform:"uppercase"}}>Signature</span>
+                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.tealInk}}>{analysis.sig?`${String(analysis.sig).slice(0,4)}…${String(analysis.sig).slice(-4)}`:"—"}</span>
+                          </div>
+                        </div>
+                        {analysis.verifyPayload&&(
+                          <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:7,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11.5,color:C.tealInk,textDecoration:"none",borderBottom:`1px dashed ${C.tealInk}88`,paddingBottom:2,marginBottom:14}}>Verify this report ↗</a>
+                        )}
+                        {/* The screenshot proof, its SHA-256 digest and the Internet
+                            Archive snapshot link -- the actual dispute-proof evidence,
+                            not just the signature summary above it.
+                            [[report-features-all-views]] */}
+                        <div style={{borderTop:`1px solid ${C.line}`,paddingTop:14,marginTop:4}}>
+                          <EvidenceCard a={analysis} palette={{
+                            CY: C.tealInk, MUT: C.inkFaint, MUT2: C.inkSoft, BORD: C.line,
+                            TEAL: C.tealInk, ROSE: C.coralInk, AMBER: C.butterInk,
+                            ink: C.ink, mono: "ui-monospace,Menlo,Consolas,monospace",
+                            btnBorder: C.line, btnBg: C.tealBg, shotBg: C.card,
+                          }} />
+                        </div>
                       </div>
-                    ):(
-                      <div style={{fontSize:12.5,color:C.ink,lineHeight:1.6,marginBottom:6}}>
-                        This is an <b>optional add-on</b>. Confirm whether the original manufacturer warranty is still active first (it usually runs from the in-service date, not the sale date) — extended coverage is negotiable and can be declined or purchased later.
-                      </div>
-                    )}
-                    {w.assessment&&<div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5}}>{w.assessment}</div>}
-                  </div>
-                );
-              })()}
 
-              </div>{/* ── end detail grid ── */}
+                      {moves.length>0&&(
+                        <div style={{borderRadius:18,background:C.paper2,border:`1px solid ${C.line}`,padding:20}}>
+                          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                            <div style={{fontWeight:700,fontSize:14,color:C.ink}}>Say this at the table</div>
+                            <button onClick={copyCounterScript} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:8,padding:"5px 10px",color:scriptCopied?C.tealInk:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer"}}>{scriptCopied?"Copied":"Copy all"}</button>
+                          </div>
+                          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                            {moves.map((m,i)=>(
+                              <div key={i} style={{display:"flex",gap:12,padding:"12px 14px",borderRadius:12,background:C.coralBg,borderLeft:`2px solid ${C.coral}`}}>
+                                <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.coralInk,flex:"none",paddingTop:2}}>{String(i+1).padStart(2,"0")}</span>
+                                <span style={{fontStyle:"italic",fontSize:13.5,lineHeight:1.5,color:C.ink}}>&ldquo;{m.say}&rdquo;</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
-              {analysis.reportId&&(
-                <div style={cardStyle}>
-                  {/* 3D animated lock — the icon IS the meaning (no emojis):
-                      the shackle drops closed on mount, the whole lock tilts in
-                      3D on hover. Same visual language as the site's 3D logo. */}
-                  <style>{`
-                    @keyframes lcLockClose { 0% { transform: translateY(-5px); } 60% { transform: translateY(1px); } 100% { transform: translateY(0); } }
-                    .lc-lock3d { width: 30px; height: 34px; position: relative; flex: none; perspective: 300px; }
-                    .lc-lock3d .sh { position: absolute; top: 0; left: 6px; width: 18px; height: 15px; border: 3.5px solid ${C.tealInk}; border-bottom: none; border-radius: 10px 10px 0 0; animation: lcLockClose .8s cubic-bezier(.34,1.4,.5,1) both; }
-                    .lc-lock3d .bd { position: absolute; bottom: 0; left: 0; width: 30px; height: 21px; border-radius: 6px; background: linear-gradient(150deg, ${C.teal}, ${C.tealInk}); box-shadow: inset -3px -3px 6px rgba(0,0,0,.25), 0 4px 8px -3px rgba(0,0,0,.35); }
-                    .lc-lock3d .kh { position: absolute; bottom: 7px; left: 13px; width: 4px; height: 8px; border-radius: 3px; background: rgba(255,255,255,.85); }
-                    .lc-lock3d:hover { transform: rotate3d(.5, 1, 0, 24deg); transition: transform .4s ease-out; }
-                  `}</style>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:12,minWidth:0}}>
-                      <div className="lc-lock3d"><span className="sh"/><span className="bd"/><span className="kh"/></div>
-                      <div style={{minWidth:0}}>
-                        <div style={{fontSize:15,fontWeight:900,color:C.ink}}>This report is locked</div>
-                        <div style={{fontSize:12,fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.inkFaint,marginTop:2}}>{analysis.reportId}{analysis.issuedAt?` · ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+                    <div style={{textAlign:"center",paddingTop:18,borderTop:`1px solid ${C.line}`}}>
+                      <div style={{fontStyle:"italic",fontSize:13,color:C.inkSoft}}>The dealer has a whole team. LotCheck is the machine on yours.</div>
+                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".03em",color:C.inkFaint,marginTop:8}}>
+                        {[analysis.dealerSentiment?.dealerName,analysis.issuedAt?`REPORT GENERATED ${new Date(analysis.issuedAt).toLocaleDateString("en-CA",{year:"numeric",month:"short",day:"numeric"}).toUpperCase()}`:null,"LOTCHECK.CA"].filter(Boolean).join(" · ")}
                       </div>
                     </div>
-                    {(analysis.sig||analysis.reportId)&&<div style={{flex:"none",textAlign:"center"}}><Seal seed={sealSeed(analysis.sig||analysis.reportId)} size={62} gid="rseal" ink="#33305a"/><div style={{fontSize:8.5,fontWeight:700,letterSpacing:.5,color:C.inkFaint,marginTop:1}}>ITS SEAL</div></div>}
                   </div>
-                  <div style={{fontSize:12.5,color:C.inkSoft,lineHeight:1.55,margin:"8px 0 12px"}}>
-                    If anyone changes a single number, the seal breaks. Share the link — whoever opens it sees the full report and can check it's genuine.
-                  </div>
-                  {analysis.verifyPayload&&(
-                    <div>
-                      <button onClick={copyVerifyLink} style={{width:"100%",background:verifyCopied?C.tealInk:C.teal,border:"none",borderRadius:10,padding:"12px 16px",color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>{verifyCopied?"Link copied":"Copy the link"}</button>
-                      <a href={verifyLinkFor(analysis)} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:8,fontSize:12,color:C.inkFaint,textDecoration:"underline"}}>or check this report's seal yourself</a>
-                    </div>
-                  )}
+
+                  <div style={{fontSize:11,color:C.inkFaint,marginTop:10,textAlign:"center",lineHeight:1.5}}>Read from the dealer's page by an automated system — including AI reading the page or a screenshot when it can't be parsed directly. Verify the numbers against the original listing before you rely on them.</div>
                 </div>
-              )}
+                );
+              })()}
 
-              {/* EVIDENCE ON THE DEFAULT SURFACE. The sealed listing capture,
-                  the source URL and the Archive link reached the Heatmap and
-                  Sidebar and nowhere else, so most buyers -- who never leave
-                  Scroll -- never saw the proof the report is built on. Vic,
-                  2026-08-27: "scroll doesn't show screenshot evidence as well".
-                  Same component the other views mount, on paper tokens.
-                  [[report-features-all-views]] */}
-              <div style={cardStyle}>
-                <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Evidence · dispute-proof</div>
-                <EvidenceCard a={analysis} palette={{
-                  CY: C.tealInk, MUT: C.inkFaint, MUT2: C.inkSoft, BORD: C.line,
-                  TEAL: C.tealInk, ROSE: C.coralInk, AMBER: C.butterInk,
-                  ink: C.ink, mono: "ui-monospace,Menlo,Consolas,monospace",
-                  btnBorder: C.line, btnBg: C.tealBg, shotBg: C.card,
-                }} />
-              </div>
 
               <div style={cardStyle}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Email me this report</div>
