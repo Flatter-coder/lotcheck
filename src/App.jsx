@@ -10672,23 +10672,20 @@ function QuoteCheckPage(){
   const [fileName,setFileName]=useState("");
   const [dragOver,setDragOver]=useState(false);
   const [urlInput,setUrlInput]=useState("");
-  // Two-step intake wizard (replaced the side-by-side two-panel layout,
-  // 2026-09-08): "choose" asks which of the two ways in, then "link"/"upload"
-  // shows only that one input, full width. Reset to "choose" any time we
-  // return to idle (see reset()) so a retry always starts at the question.
-  const [wizardStep,setWizardStep]=useState("choose"); // "choose" | "link" | "upload"
-  // Each step can be a very different height, so a step change without a
-  // scroll reset can leave the viewport scrolled past the new (shorter)
-  // step's content -- exposing app.html's own hardcoded dark <body>
-  // background above the light-theme wrapper. Scroll-to-top on every
-  // transition, which is also just better wizard UX on its own. Instant,
-  // not smooth: an animated scroll spends real time with the viewport
-  // between the old and new step heights, which is exactly when that dark
-  // seam would be visible -- an instant jump never renders that frame.
-  const goToWizardStep=(step)=>{
-    setWizardStep(step);
-    try{ window.scrollTo(0,0); }catch{}
-  };
+  // The drag-zone-primary intake (2026-09-09) has one idle screen -- no
+  // step to track -- but status still swings between very different
+  // heights (the dropzone is tall; the error/analyzing screens are much
+  // shorter), and a transition without a scroll reset can leave the
+  // viewport scrolled past the new (shorter) screen's content, exposing
+  // app.html's own hardcoded dark <body> background above the light-theme
+  // wrapper. scrollToTop() is called from reset() and from the retry
+  // buttons below for the same reason. Instant, not smooth: an animated
+  // scroll spends real time in exactly the state that would expose that
+  // seam.
+  const scrollToTop=()=>{ try{ window.scrollTo(0,0); }catch{} };
+  // Whether the secondary "paste a dealer's link" panel is expanded.
+  // Collapsed by default -- the dropzone is the one primary action.
+  const [showLinkPanel,setShowLinkPanel]=useState(false);
   // Manual-review request: the buyer's way out when a listing will not read.
   const [mrEmail,setMrEmail]=useState("");
   const [mrState,setMrState]=useState("idle");   // idle | sending | sent
@@ -11619,7 +11616,8 @@ function QuoteCheckPage(){
     setFileName("");
     setUrlInput("");
     setVehicleChoices(null);
-    setWizardStep("choose");
+    setShowLinkPanel(false);
+    scrollToTop();
   };
 
   // Lets someone paste a screenshot (Ctrl+V / Cmd+V) straight in, without
@@ -11882,11 +11880,11 @@ function QuoteCheckPage(){
             </div>
           </div>
         </nav>
-        {/* Step 1 of the wizard is a wide centered choice (needs room for two
-            side-by-side cards); step 2 and everything after idle is a single
-            document/panel, which reads badly past ~640px. So the measure
-            follows the current step, not the page. */}
-        <div style={{maxWidth:status==="idle"&&wizardStep==="choose"?820:640,margin:"0 auto",padding:"24px 16px"}}>
+        {/* The idle dropzone reads fine wide (it's one big target, not a
+            document); everything after idle -- error, analyzing, the report
+            itself -- is a document, which reads badly past ~640px. So the
+            measure follows status, not the page. */}
+        <div style={{maxWidth:status==="idle"?820:640,margin:"0 auto",padding:"24px 16px"}}>
           <div style={{marginBottom:24}}>
             {/* The wizard's own step-1 question ("How do you want to check
                 this?") carries the page's purpose once status is idle, so the
@@ -11932,190 +11930,133 @@ function QuoteCheckPage(){
           )}
 
           {status==="idle"&&(
-            <>
-            {/* Two-step wizard (replaced the side-by-side two-panel layout,
-                2026-09-08 -- picked as concept #6 of 25 decluttered redesigns).
-                Step 1 asks only "how", step 2 shows only that one input, full
-                width, with a Back control. All the REAL handlers below
-                (handleUrlAnalyze, handleFile, isAggregatorUrl,
-                urlCompletenessHint, dragOver, fileInputRef) are unchanged from
-                the old layout -- only the surrounding chrome and what's shown
-                by default changed. Upload still analyzes the instant a file is
-                picked or dropped (matches existing handleFile behavior) rather
-                than staging a file behind a second "confirm" click, since that
-                extra step doesn't exist in the real upload handler. */}
-            {wizardStep==="choose"&&(
-              <div style={{textAlign:"center",maxWidth:820,margin:"0 auto"}}>
-                <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".14em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Step 1 of 2</span>
-                <div style={{fontWeight:1000,fontSize:"clamp(28px,4.4vw,36px)",color:C.ink,marginBottom:10,lineHeight:1.1,letterSpacing:"-.015em"}}>How do you want to check this?</div>
-                <div style={{color:C.inkSoft,fontSize:15,marginBottom:28,maxWidth:440,marginLeft:"auto",marginRight:"auto"}}>Pick one — both run the same 10-point check.</div>
-                <div style={{display:"flex",gap:18,marginBottom:22,flexWrap:"wrap"}}>
-                  <button type="button" onClick={()=>goToWizardStep("link")}
-                    style={{flex:"1 1 220px",display:"flex",flexDirection:"column",alignItems:"center",gap:12,background:C.card,border:`1px solid ${C.line}`,borderRadius:22,padding:"32px 22px 26px",cursor:"pointer",color:C.ink,transition:"transform .15s,border-color .15s"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal+"73";e.currentTarget.style.transform="translateY(-3px)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.borderColor=C.line;e.currentTarget.style.transform="none";}}>
-                    <span style={{width:52,height:52,borderRadius:15,background:C.tealBg,color:C.teal,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon3D name="link" size={24}/></span>
-                    <span style={{fontWeight:800,fontSize:18}}>Paste a link</span>
-                    <span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>From the dealer's own website</span>
-                  </button>
-                  <button type="button" onClick={()=>goToWizardStep("upload")}
-                    style={{flex:"1 1 220px",display:"flex",flexDirection:"column",alignItems:"center",gap:12,background:C.card,border:`1px solid ${C.line}`,borderRadius:22,padding:"32px 22px 26px",cursor:"pointer",color:C.ink,transition:"transform .15s,border-color .15s"}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor=C.teal+"73";e.currentTarget.style.transform="translateY(-3px)";}}
-                    onMouseLeave={e=>{e.currentTarget.style.borderColor=C.line;e.currentTarget.style.transform="none";}}>
-                    <span style={{width:52,height:52,borderRadius:15,background:C.tealBg,color:C.teal,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon3D name="camera" size={24}/></span>
-                    <span style={{fontWeight:800,fontSize:18}}>Upload a quote</span>
-                    <span style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>Screenshot or PDF</span>
-                  </button>
-                </div>
-                <div style={{fontSize:13,fontWeight:700,color:C.inkFaint,marginBottom:24}}>Free to try <span style={{color:C.teal,margin:"0 6px"}}>·</span> no sign-up needed for your first check</div>
-                {/* Video on the right, caption on the left -- big enough for the
-                    report card (doc fee, recalls, score) to read, without being
-                    the dominant element on the step. Re-cropped tighter than the
-                    first cut: the wide crop included the source scene's own
-                    glass-panel edge (a thin vertical seam past the card, visible
-                    once stretched large) -- this crop stays inside the card's
-                    own bounds, so nothing but the card and its immediate
-                    surroundings shows. */}
-                <div style={{display:"flex",alignItems:"center",gap:18,background:C.card,border:`1px solid ${C.line}`,borderRadius:18,padding:14,textAlign:"left"}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:10.5,fontWeight:800,letterSpacing:".1em",textTransform:"uppercase",color:C.tealInk,marginBottom:4}}>Sample report</div>
-                    <div style={{fontSize:13,color:C.inkSoft,lineHeight:1.45}}>A documentation fee flagged, two recalls found, a leverage score — from a real scan.</div>
-                  </div>
-                  {/* Chrome shows its own fullscreen/picture-in-picture buttons
-                      on hover over ANY <video>, even without the controls
-                      attribute -- disablePictureInPicture + controlsList hide
-                      both, since this is ambient proof footage, not a player. */}
-                  <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
-                    disablePictureInPicture controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
-                    style={{width:260,height:"auto",borderRadius:12,flex:"none",background:"#0a0c22",display:"block"}}/>
-                </div>
-              </div>
-            )}
+            <div style={{maxWidth:820,margin:"0 auto",textAlign:"center"}}>
+            {/* Drag-zone-primary (replaced the two-step wizard, 2026-09-09 --
+                picked as concept #10 of 25 decluttered redesigns). The
+                dropzone IS the page's one primary action; "paste a link"
+                collapses to a small secondary toggle below it. All the REAL
+                handlers (handleUrlAnalyze, handleFile, isAggregatorUrl,
+                urlCompletenessHint, dragOver, fileInputRef) are unchanged --
+                only the surrounding chrome changed. Upload still analyzes the
+                instant a file is picked or dropped (matches the real
+                handleFile behavior); there's no separate "confirm" step,
+                since that doesn't exist in the real handler. */}
+            <div style={{marginBottom:22}}>
+              <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".16em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Quote Check</span>
+              <div style={{color:C.inkSoft,fontSize:15,lineHeight:1.5,maxWidth:560,marginLeft:"auto",marginRight:"auto"}}>Drop a screenshot or PDF of any dealer quote. We check all 10 things that matter — price, fees, financing, recalls, warranty, VIN, odometer, rebates and dealer reputation.</div>
+            </div>
 
-            {wizardStep==="link"&&(
-              <div style={{maxWidth:640,margin:"0 auto",background:C.card,border:`1px solid ${C.line}`,borderRadius:26,padding:"clamp(26px,4vw,42px)"}}>
-                <button type="button" onClick={()=>goToWizardStep("choose")}
-                  style={{display:"inline-flex",alignItems:"center",gap:6,background:"none",border:"none",color:C.inkFaint,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"6px 4px",marginBottom:16,marginLeft:-4,borderRadius:8}}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  Back
+            <div
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileInputRef.current?.click()}
+              onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
+              role="button" tabIndex={0}
+              aria-label="Drop a quote screenshot or PDF, or click to choose a file"
+              style={{
+                position:"relative",overflow:"hidden",isolation:"isolate",
+                borderRadius:26,border:`2px ${dragOver?"solid":"dashed"} ${dragOver?C.teal:C.line}`,
+                background:C.card,minHeight:"min(52vh, 460px)",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                padding:"32px 24px",cursor:"pointer",
+                transition:"border-color .18s,background .18s",
+                marginBottom:22,
+              }}
+            >
+              {/* Ambient only -- dimmed and overlaid, not meant to be read
+                  closely, so it's forgiving of exactly how it's framed.
+                  Chrome shows its own fullscreen/picture-in-picture hover
+                  controls on any <video>; disablePictureInPicture +
+                  controlsList hide both. */}
+              <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
+                disablePictureInPicture controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
+                style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",opacity:.5,zIndex:0}}/>
+              <div aria-hidden="true" style={{position:"absolute",inset:0,zIndex:1,background:`radial-gradient(60% 55% at 50% 38%, ${C.card}66 0%, ${C.card}d9 60%, ${C.card}f5 100%)`,pointerEvents:"none"}}/>
+              <div style={{position:"relative",zIndex:2,display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14,maxWidth:480}}>
+                <span style={{width:56,height:56,borderRadius:999,background:C.tealBg,border:`1px solid ${C.teal}66`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk}}><Icon3D name="camera" size={26}/></span>
+                <div style={{fontWeight:1000,fontSize:"clamp(24px,4vw,36px)",color:C.ink,letterSpacing:"-.01em",lineHeight:1.1}}>Drop your quote here</div>
+                <div style={{color:C.inkSoft,fontSize:14.5,fontWeight:600,lineHeight:1.5}}>A screenshot or a PDF — from your phone, your desktop, or pasted straight from your clipboard.</div>
+                <button type="button" onClick={e=>{e.stopPropagation();fileInputRef.current?.click();}}
+                  style={{background:C.teal,border:"none",borderRadius:999,padding:"14px 26px",color:"#03222b",fontWeight:900,fontSize:15.5,cursor:"pointer",marginTop:4}}>
+                  Choose a file
                 </button>
-                <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".14em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Step 2 of 2</span>
-                <div style={{fontWeight:1000,fontSize:"clamp(22px,3vw,27px)",color:C.ink,marginBottom:8,letterSpacing:"-.01em"}}>Paste the dealer's link</div>
-                <div style={{color:C.inkSoft,fontSize:14.5,marginBottom:22,lineHeight:1.5}}>The link to the vehicle page, on the dealer's own site.</div>
-                <input
-                  type="url"
-                  placeholder="https://dealer-site.com/inventory/..."
-                  value={urlInput}
-                  onChange={e=>setUrlInput(e.target.value)}
-                  onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
-                  autoFocus
-                  style={{width:"100%",background:C.paper,border:`1px solid ${C.line}`,borderRadius:14,padding:"16px 18px",color:C.ink,fontSize:15.5,fontWeight:700,outline:"none",boxSizing:"border-box"}}
-                />
-                {/* Non-blocking -- a hint, not a gate. Only shown once there's
-                    something to judge, and cleared instantly if they keep typing
-                    past whatever tripped it. */}
-                {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
-                  <div style={{fontSize:12,color:C.coralInk,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                    <Icon3D name="warning" size={14}/>
-                    <span>{urlCompletenessHint(urlInput)}</span>
-                  </div>
-                )}
-                {/* The reactive full explanation -- fires only on an actual
-                    marketplace match, alongside the quiet standing note below. */}
-                {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
-                  <div style={{fontSize:12,color:C.coralInk,marginTop:10,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                    <Icon3D name="blocked" size={15}/>
-                    <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
-                  </div>
-                )}
-                <div style={{fontSize:12,color:C.inkFaint,margin:"12px 2px 26px",lineHeight:1.5}}>Dealer websites only — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
-                <button type="button" onClick={handleUrlAnalyze}
-                  style={{width:"100%",background:C.teal,border:"none",borderRadius:999,padding:"16px 20px",color:"#03222b",fontWeight:900,fontSize:15.5,cursor:"pointer"}}>
-                  Analyze this quote
-                </button>
-                <div style={{fontSize:12.5,color:C.inkFaint,marginTop:18,lineHeight:1.55}}>LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.</div>
-                {/* Parity-checked: check:parity reads this exact heading + the
-                    ten quoted strings that follow it out of the source and
-                    diffs them against the real audit array, so a report that
-                    grows past 10 (or drops one) fails the build here, not in
-                    front of a buyer. Keep the heading text and the array of
-                    ten literal strings -- see check-report-parity.mjs. */}
-                <div style={{marginTop:20}}>
-                  <div style={{fontSize:10.5,fontWeight:900,color:C.tealInk,letterSpacing:".08em",marginBottom:8}}>EVERY REPORT CHECKS ALL 10</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                    {[
-                      "Price vs MSRP","Add-ons & fee audit",
-                      "Financing APR","Financing math",
-                      "Transport Canada recalls","Included warranty",
-                      "VIN check","Odometer",
-                      "EV / PHEV rebate","Dealer reputation",
-                    ].map((t,i)=>(
-                      <span key={i} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"4px 10px"}}>{t}</span>
-                    ))}
-                  </div>
-                </div>
+                <div style={{color:C.inkFaint,fontSize:12,fontWeight:600,marginTop:2}}>PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB</div>
+                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
+                  onClick={e=>e.stopPropagation()}
+                  onChange={e=>handleFile(e.target.files[0])}/>
               </div>
-            )}
+            </div>
 
-            {wizardStep==="upload"&&(
-              <div style={{maxWidth:640,margin:"0 auto",background:C.card,border:`1px solid ${C.line}`,borderRadius:26,padding:"clamp(26px,4vw,42px)"}}>
-                <button type="button" onClick={()=>goToWizardStep("choose")}
-                  style={{display:"inline-flex",alignItems:"center",gap:6,background:"none",border:"none",color:C.inkFaint,fontSize:13.5,fontWeight:800,cursor:"pointer",padding:"6px 4px",marginBottom:16,marginLeft:-4,borderRadius:8}}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  Back
-                </button>
-                <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".14em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Step 2 of 2</span>
-                <div style={{fontWeight:1000,fontSize:"clamp(22px,3vw,27px)",color:C.ink,marginBottom:8,letterSpacing:"-.01em"}}>Upload your quote</div>
-                <div style={{color:C.inkSoft,fontSize:14.5,marginBottom:22,lineHeight:1.5}}>A screenshot or PDF of the quote you were given.</div>
-                <div
-                  onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-                  onDragLeave={()=>setDragOver(false)}
-                  onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
-                  onClick={()=>fileInputRef.current?.click()}
-                  style={{
-                    display:"flex",flexDirection:"column",alignItems:"center",gap:10,textAlign:"center",
-                    border:`1.5px dashed ${dragOver?C.teal:C.line}`,borderRadius:18,padding:"40px 20px",cursor:"pointer",
-                    background:dragOver?C.tealBg:"transparent",transition:"border-color .15s,background .15s",
-                  }}
-                >
-                  <span style={{width:52,height:52,borderRadius:16,background:C.tealBg,color:C.teal,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon3D name="camera" size={22}/></span>
-                  <div style={{fontSize:16,fontWeight:800,color:C.ink}}>Drop a screenshot or PDF here</div>
-                  <div style={{fontSize:13,color:C.inkFaint,fontWeight:600}}>or click to browse · up to {MAX_FILE_SIZE_MB}MB</div>
-                  <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
-                    onChange={e=>handleFile(e.target.files[0])}/>
-                </div>
-                {/* Say what a good upload looks like BEFORE the attempt, not in an
-                    error afterwards. Every line here is a real failure we've seen
-                    and can prevent (own-the-process-no-user-limits). */}
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,margin:"18px 0 26px"}}>
-                  {["Include price & fees","Full page, not cropped","One vehicle per upload","Straight-on & in focus"].map((tip,i)=>(
-                    <span key={i} style={{fontSize:11.5,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"6px 12px"}}>{tip}</span>
-                  ))}
-                </div>
-                <div style={{fontSize:12.5,color:C.inkFaint,lineHeight:1.55}}>LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.</div>
-                {/* Parity-checked: check:parity reads this exact heading + the
-                    ten quoted strings that follow it out of the source and
-                    diffs them against the real audit array, so a report that
-                    grows past 10 (or drops one) fails the build here, not in
-                    front of a buyer. Keep the heading text and the array of
-                    ten literal strings -- see check-report-parity.mjs. */}
-                <div style={{marginTop:20}}>
-                  <div style={{fontSize:10.5,fontWeight:900,color:C.tealInk,letterSpacing:".08em",marginBottom:8}}>EVERY REPORT CHECKS ALL 10</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                    {[
-                      "Price vs MSRP","Add-ons & fee audit",
-                      "Financing APR","Financing math",
-                      "Transport Canada recalls","Included warranty",
-                      "VIN check","Odometer",
-                      "EV / PHEV rebate","Dealer reputation",
-                    ].map((t,i)=>(
-                      <span key={i} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"4px 10px"}}>{t}</span>
-                    ))}
+            {/* Secondary door: paste a dealer link. Collapsed by default --
+                the dropzone above is the one primary action. */}
+            <div style={{marginBottom:24}}>
+              <button type="button" onClick={()=>setShowLinkPanel(v=>!v)} aria-expanded={showLinkPanel}
+                style={{background:"none",border:"none",color:C.inkSoft,fontWeight:800,fontSize:13.5,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:7,padding:"8px 4px"}}>
+                <Icon3D name="link" size={15}/>
+                Or paste a dealer's link instead
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{transition:"transform .15s",transform:showLinkPanel?"rotate(180deg)":"none"}}><path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              {showLinkPanel&&(
+                <div style={{maxWidth:480,margin:"10px auto 0",textAlign:"left"}}>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <input
+                      type="url"
+                      placeholder="https://dealer-site.com/inventory/..."
+                      value={urlInput}
+                      onChange={e=>setUrlInput(e.target.value)}
+                      onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
+                      autoFocus
+                      style={{flex:"1 1 220px",background:C.paper,border:`1px solid ${C.line}`,borderRadius:999,padding:"11px 16px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
+                    />
+                    <button type="button" onClick={handleUrlAnalyze}
+                      style={{background:"transparent",border:`1.5px solid ${C.teal}`,color:C.tealInk,borderRadius:999,padding:"10px 20px",fontWeight:800,fontSize:14,cursor:"pointer",flex:"none"}}>
+                      Check it
+                    </button>
                   </div>
+                  {/* Non-blocking -- a hint, not a gate. */}
+                  {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
+                    <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                      <Icon3D name="warning" size={14}/>
+                      <span>{urlCompletenessHint(urlInput)}</span>
+                    </div>
+                  )}
+                  {/* The reactive full explanation -- fires only on an actual
+                      marketplace match, alongside the quiet standing note below. */}
+                  {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
+                    <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                      <Icon3D name="blocked" size={15}/>
+                      <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
+                    </div>
+                  )}
+                  <div style={{fontSize:12,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>Dealer websites only — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
                 </div>
+              )}
+            </div>
+
+            {/* Parity-checked: check:parity reads this exact heading + the
+                ten quoted strings that follow it out of the source and diffs
+                them against the real audit array, so a report that grows
+                past 10 (or drops one) fails the build here, not in front of
+                a buyer. Keep the heading text and the array of ten literal
+                strings -- see check-report-parity.mjs. */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:900,color:C.inkFaint,letterSpacing:".1em",textTransform:"uppercase",marginBottom:10}}>EVERY REPORT CHECKS ALL 10</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
+                {[
+                  "Price vs MSRP","Add-ons & fee audit",
+                  "Financing APR","Financing math",
+                  "Transport Canada recalls","Included warranty",
+                  "VIN check","Odometer",
+                  "EV / PHEV rebate","Dealer reputation",
+                ].map((t,i)=>(
+                  <span key={i} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"4px 10px"}}>{t}</span>
+                ))}
               </div>
-            )}
-            </>
+            </div>
+
+            <div style={{color:C.inkFaint,fontSize:12,fontWeight:600,lineHeight:1.6}}>LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.</div>
+            </div>
           )}
 
           {status==="analyzing"&&(
@@ -12205,7 +12146,7 @@ function QuoteCheckPage(){
                   <div style={{fontSize:12,color:C.inkFaint,margin:"10px 0 14px",lineHeight:1.5}}>
                     Dealer sites occasionally can't be read automatically. Take a screenshot of the <b>whole page</b> (price, VIN and fine print all visible) and upload it instead — that works even when the link doesn't, since it never depends on the dealer's site cooperating. Accepts PDF, JPG, PNG, WEBP or HEIC, up to {MAX_FILE_SIZE_MB}MB.
                   </div>
-                  <button onClick={()=>{reset(); setWizardStep("upload");}} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
+                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10}}>Upload a screenshot instead →</button>
                   {/* THE THIRD DOOR. A screenshot works, but it puts the work on
                       the buyer at the exact moment we have just failed them, and
                       some pages (a bot wall, a login) cannot be usefully
@@ -12256,7 +12197,7 @@ function QuoteCheckPage(){
                       -- so the ledger row and the support email both name this
                       as a failed UPLOAD, and support follows up with the buyer
                       directly to get the file. See requestManualReview(). */}
-                  <button onClick={()=>{reset(); setWizardStep("upload");}} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10,marginTop:8}}>Try a different file →</button>
+                  <button onClick={reset} style={{background:C.ink,border:"none",borderRadius:999,padding:"11px 22px",color:C.paper,fontWeight:800,cursor:"pointer",boxShadow:"5px 6px 0 rgba(51,48,90,.16)",marginBottom:10,marginTop:8}}>Try a different file →</button>
                   <div style={{margin:"14px 0 4px",paddingTop:14,borderTop:`1px solid ${C.line}`}}>
                     {mrState==="sent"?(
                       <div style={{fontSize:13,color:C.tealInk,fontWeight:800,lineHeight:1.5}}>

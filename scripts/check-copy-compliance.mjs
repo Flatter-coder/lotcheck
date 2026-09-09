@@ -212,12 +212,15 @@ const RULES = [
     //                                 copy from elsewhere on the page.
     //   public/alberta.html        1  nav link
     //   public/live-price-index.html 1  nav link
-    //   src/App.jsx                5  4 nav links, plus the Quote Check
-    //                                 two-step wizard's step-1 subtitle
-    //                                 ("both run the same 10-point check"),
-    //                                 added 2026-09-08.
+    //   src/App.jsx                4  nav links only. The two-step wizard's
+    //                                 step-1 subtitle ("both run the same
+    //                                 10-point check", added 2026-09-08) is
+    //                                 gone -- replaced 2026-09-09 by the
+    //                                 drag-zone-primary intake (concept #10),
+    //                                 whose eyebrow copy says "all 10 things
+    //                                 that matter" instead. Net -1.
     //                              ─
-    //                             14
+    //                             13
     //
     // So this rule polices the ADVERTISEMENT, and only the advertisement.
     //
@@ -231,7 +234,7 @@ const RULES = [
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].
-    expected: 14,
+    expected: 13,
   },
 ];
 
