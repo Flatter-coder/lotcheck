@@ -169,17 +169,20 @@ const RULES = [
     condition: "true only while every occurrence sits inside a listingShotKind === \"fullpage\" branch",
     why: "The capture ladder can degrade to a photo of the top of the listing. Calling that the full page is an unbacked claim about our own evidence, printed on the one artifact a buyer hands to a dealer. [[capture-always-whole-page]] [[claims-must-stay-backed]]",
     patterns: [/full[-\s]page (capture|photo|screenshot)/i],
-    // ── THE INVENTORY, enumerated 2026-08-27 (comments are stripped first) ──
-    //   src/App.jsx:8202   the report card's fullpage arm, guarded on
+    // ── THE INVENTORY, enumerated 2026-08-27, re-confirmed 2026-09-08 ───────
+    //   src/App.jsx:8065   the report card's fullpage arm, guarded on
     //                      a.listingShotKind === "fullpage". THE claim.
-    //   src/App.jsx:11524  "A full-page screenshot works better than a cropped
-    //                      one" -- upload guidance to the USER about their own
-    //                      photo, not a claim about our capture. In scope on
-    //                      purpose: if the wording ever migrates to describing
-    //                      what WE produce, the count moves and someone looks.
+    //   src/App.jsx        the old upload-guidance tip ("A full-page screenshot
+    //                      works better than a cropped one") was rewritten as
+    //                      part of the Quote Check two-step wizard, 2026-09-08 --
+    //                      the new tip pill reads "Full page, not cropped" and
+    //                      no longer matches this pattern (no capture/photo/
+    //                      screenshot word follows "full page"). Net -1, on
+    //                      purpose: still user-facing guidance about their own
+    //                      photo, never a claim about our own capture.
     //   email-quote-report/index.ts  0  the emailed body and the PDF caption
     //                      are both neutral, because neither can read the kind.
-    expected: 2,
+    expected: 1,
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a
@@ -209,9 +212,12 @@ const RULES = [
     //                                 copy from elsewhere on the page.
     //   public/alberta.html        1  nav link
     //   public/live-price-index.html 1  nav link
-    //   src/App.jsx                4  nav links only (comments are not counted)
+    //   src/App.jsx                5  4 nav links, plus the Quote Check
+    //                                 two-step wizard's step-1 subtitle
+    //                                 ("both run the same 10-point check"),
+    //                                 added 2026-09-08.
     //                              ─
-    //                             13
+    //                             14
     //
     // So this rule polices the ADVERTISEMENT, and only the advertisement.
     //
@@ -225,7 +231,7 @@ const RULES = [
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].
-    expected: 13,
+    expected: 14,
   },
 ];
 
