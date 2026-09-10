@@ -9182,7 +9182,7 @@ function VerifyPage(){
   .vnav-links a:hover{color:${T.cyan}!important}`+SHIELD_CSS;
   const Row=({t,v,c})=>(<div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"9px 0",borderTop:`1px solid ${T.rowBd}`}}><span style={{fontSize:13,color:T.soft}}>{t}</span><span style={{fontFamily:mono,fontWeight:700,color:c||T.text,whiteSpace:"nowrap",fontSize:13}}>{v}</span></div>);
 
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Inventory Daily","/inventory-daily"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
   return (
     <div style={{minHeight:"100vh",background:T.pageBg,color:T.text,transition:"background .4s ease,color .4s ease",fontFamily:"system-ui,-apple-system,'Nunito',sans-serif"}}>
       <style dangerouslySetInnerHTML={{__html:css}}/>
@@ -10840,6 +10840,7 @@ function QuoteCheckPage(){
             <div style={{display:"flex",alignItems:"center",gap:2,flexWrap:"wrap",flex:"1 1 auto"}}>
               {[
                 ["/live-price-index","MSRP Price Index"],
+                ["/inventory-daily","Inventory Daily"],
                 ["/alberta","Alberta Dealers Map"],
                 ["/crawl","Used-car market"],
                 ["/#how","How it works"],
@@ -11888,7 +11889,7 @@ function QuoteCheckPage(){
 // VinAudit can only post a "beware" banner; we can prove authenticity, so this
 // page teaches the one-scan check. Nav on top per the site-wide rule.
 function TrustPage(){
-  const NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
+  const NAV=[["MSRP Price Index","/live-price-index"],["Inventory Daily","/inventory-daily"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["10-point lane","/#pipeline"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
   const card={background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:16};
   const css=`@media(max-width:900px){.tnav-links{display:none!important}.tnav-cta{margin-left:auto!important}}
   @media(max-width:600px){.tsteps,.tcols{grid-template-columns:1fr!important}}
@@ -11974,7 +11975,7 @@ function NavMore({items,c,h,bg,bd}){
     </div>
   );
 }
-const SITE_NAV=[["MSRP Price Index","/live-price-index"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
+const SITE_NAV=[["MSRP Price Index","/live-price-index"],["Inventory Daily","/inventory-daily"],["Alberta Dealers Map","/alberta"],["Used-car market","/crawl"],["How it works","/#how"],["Sample report","/#report"],["What LotCheck does","/#what"],["Verify report","/verify"]];
 
 // ── /crawl — LIVE used-car coverage from our OWN Alberta crawl ─────────────
 // Reads fn_crawl_coverage (used-only aggregate) on load. Shows the dataset the
