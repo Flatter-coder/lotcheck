@@ -9497,6 +9497,54 @@ function CountdownTimer({until,onExpire,C}){
   );
 }
 
+// Sample-report gauge cluster for the Quote Check intake hero (concept #23
+// of the "Analyze my quote" redesign round, 2026-09-09 -- Vic: "replace it
+// with 23"). Purely illustrative: static sample numbers off the same RAV4
+// XLE sample report used elsewhere in the product, labelled "Sample"
+// throughout and never presented as the buyer's own data.
+function GaugeDial({id,value,min,max,bands,needleColor,tickCount=5,tickFormat,marker,markerLabel,C}){
+  const CX=100,CY=118,R=78;
+  const polar=(r,a)=>{const rad=a*Math.PI/180;return {x:CX+r*Math.sin(rad),y:CY-r*Math.cos(rad)};};
+  const angleFor=v=>{const t=Math.max(0,Math.min(1,(v-min)/(max-min)));return -120+240*t;};
+  const arc=(r,a0,a1)=>{const p0=polar(r,a0),p1=polar(r,a1);const large=(a1-a0)>180?1:0;return `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`;};
+  const target=angleFor(value);
+  const ticks=[];
+  for(let i=0;i<=tickCount;i++){
+    const v=min+(max-min)*(i/tickCount), a=angleFor(v);
+    const p1=polar(R+7,a), p2=polar(R-3,a), lbl=polar(R+18,a);
+    ticks.push(<line key={"t"+i} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={C.inkFaint} strokeWidth="1.4" opacity=".55"/>);
+    ticks.push(<text key={"l"+i} x={lbl.x} y={lbl.y} textAnchor="middle" dominantBaseline="middle" fontSize="8" fontFamily="ui-monospace,Menlo,Consolas,monospace" fill={C.inkFaint} opacity=".8">{tickFormat?tickFormat(v):Math.round(v)}</text>);
+  }
+  let markerEl=null;
+  if(marker!=null){
+    const a=angleFor(marker);
+    const p1=polar(R+11,a), p2=polar(R-13,a), lbl=polar(R-25,a);
+    markerEl=<>
+      <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={C.ink} strokeWidth="1.3" strokeDasharray="2 2" opacity=".8"/>
+      <text x={lbl.x} y={lbl.y} textAnchor="middle" fontSize="7" fontWeight="800" fontFamily="ui-monospace,Menlo,Consolas,monospace" fill={C.inkSoft}>{markerLabel}</text>
+    </>;
+  }
+  return (
+    <svg viewBox="0 0 200 158" style={{width:"100%",height:"auto",display:"block"}} aria-hidden="true">
+      <path d={arc(R,-120,120)} fill="none" stroke={C.line} strokeWidth="11"/>
+      {bands.map((b,i)=>(<path key={i} d={arc(R,angleFor(b.from),angleFor(b.to))} fill="none" stroke={b.color} strokeWidth="10" opacity=".92"/>))}
+      {ticks}
+      {markerEl}
+      <g className={`gd-needle-${id}`} style={{transformOrigin:"100px 118px",transform:`rotate(${target}deg)`}}>
+        <polygon points={`100,${CY-4} 97.6,${CY+3} 100,${CY-(R-15)} 102.4,${CY+3}`} fill={needleColor}/>
+        <polygon points={`100,${CY+3} 96,${CY+13} 104,${CY+13}`} fill={needleColor} opacity=".85"/>
+      </g>
+      <circle cx={CX} cy={CY} r="8.5" fill={C.card} stroke={needleColor} strokeWidth="1.6"/>
+      <circle cx={CX} cy={CY} r="3" fill={needleColor}/>
+      <style>{`
+        @keyframes gdSweep-${id}{from{transform:rotate(-120deg);}to{transform:rotate(${target}deg);}}
+        .gd-needle-${id}{animation:gdSweep-${id} 1s cubic-bezier(.22,1.35,.36,1) .1s both;}
+        @media (prefers-reduced-motion: reduce){.gd-needle-${id}{animation:none!important;}}
+      `}</style>
+    </svg>
+  );
+}
+
 function QuoteCheckPage(){
   // Alberta-only gate. Hooks must run unconditionally, so this sits at the top
   // and the early return happens after every other hook has been declared.
@@ -9667,9 +9715,11 @@ function QuoteCheckPage(){
   // scroll spends real time in exactly the state that would expose that
   // seam.
   const scrollToTop=()=>{ try{ window.scrollTo(0,0); }catch{} };
-  // Whether the secondary "paste a dealer's link" panel is expanded.
-  // Collapsed by default -- the dropzone is the one primary action.
-  const [showLinkPanel,setShowLinkPanel]=useState(false);
+  // Which intake method is active: "url" (paste a dealer link) or "file"
+  // (upload a screenshot/PDF). Concept #23's two-tab intake (2026-09-09,
+  // Vic: "replace it with 23") -- replaced the earlier dropzone-primary +
+  // collapsible-link pattern. Real handlers underneath are unchanged.
+  const [intakeTab,setIntakeTab]=useState("url");
   // Manual-review request: the buyer's way out when a listing will not read.
   const [mrEmail,setMrEmail]=useState("");
   const [mrState,setMrState]=useState("idle");   // idle | sending | sent
@@ -10600,7 +10650,7 @@ function QuoteCheckPage(){
     setFileName("");
     setUrlInput("");
     setVehicleChoices(null);
-    setShowLinkPanel(false);
+    setIntakeTab("url");
     scrollToTop();
   };
 
@@ -10913,109 +10963,167 @@ function QuoteCheckPage(){
             </div>
           )}
 
-          {status==="idle"&&(
-            <div style={{maxWidth:820,margin:"0 auto",textAlign:"center"}}>
-            {/* Drag-zone-primary (replaced the two-step wizard, 2026-09-09 --
-                picked as concept #10 of 25 decluttered redesigns). The
-                dropzone IS the page's one primary action; "paste a link"
-                collapses to a small secondary toggle below it. All the REAL
-                handlers (handleUrlAnalyze, handleFile, isAggregatorUrl,
-                urlCompletenessHint, dragOver, fileInputRef) are unchanged --
-                only the surrounding chrome changed. Upload still analyzes the
-                instant a file is picked or dropped (matches the real
-                handleFile behavior); there's no separate "confirm" step,
-                since that doesn't exist in the real handler. */}
-            <div style={{marginBottom:22}}>
-              <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".16em",textTransform:"uppercase",color:C.tealInk,marginBottom:10}}>Quote Check</span>
-              <div style={{color:C.inkSoft,fontSize:15,lineHeight:1.5,maxWidth:560,marginLeft:"auto",marginRight:"auto"}}>Drop a screenshot or PDF of any dealer quote. We check all 10 things that matter — price, fees, financing, recalls, warranty, VIN, odometer, rebates and dealer reputation.</div>
+          {status==="idle"&&(()=>{
+            // Concept #23 (dashboard gauge cluster) of the "Analyze my quote"
+            // 25-concept round, 2026-09-09 -- Vic: "replace it with 23".
+            // Replaces the earlier dropzone-primary + collapsible-link
+            // pattern (itself concept #10 of an earlier round, same day).
+            // All the REAL handlers (handleUrlAnalyze, handleFile,
+            // isAggregatorUrl, urlCompletenessHint, dragOver, fileInputRef)
+            // are unchanged -- only the surrounding composition changed.
+            // Upload still analyzes the instant a file is picked or
+            // dropped; URL still needs its own "Analyze my quote" click --
+            // neither gained a fake shared submit step that doesn't exist
+            // in the real handlers. The trust line that used to render here
+            // AND unconditionally at the foot of this component (a real
+            // duplicate on every idle load) is now only the page-level one.
+            const QC_POINT_DESC={
+              "Price vs MSRP":"Cross-checked against the manufacturer's own published pricing for this exact trim and drivetrain.",
+              "Add-ons & fee audit":"Every itemized dealer fee compared against what's typical, so padding shows up by name.",
+              "AMVIC":"Confirms the dealer holds a current licence on AMVIC's public registry.",
+              "Financing math":"The advertised payment recalculated from the price, rate and term — flagged if it doesn't reconcile.",
+              "Transport Canada recalls":"Open safety recalls looked up in Transport Canada's public registry.",
+              "Included warranty":"Remaining factory coverage worked out from the model year and current odometer.",
+              "VIN check":"Confirms the VIN is a validly formed identifier, decoded where the listing publishes one.",
+              "Odometer":"Flags a reading that doesn't square with the vehicle's stated condition.",
+              "EV / PHEV rebate":"Checked against the current federal and provincial EV incentive rules for this drivetrain.",
+              "Dealer reputation":"Pulled from real, public Google reviews — never curated testimonials.",
+            };
+            return (
+            <div style={{maxWidth:1100,margin:"0 auto"}}>
+            <div style={{textAlign:"center",maxWidth:640,margin:"0 auto 32px"}}>
+              <span style={{display:"block",fontSize:11.5,fontWeight:800,letterSpacing:".16em",textTransform:"uppercase",color:C.tealInk,marginBottom:12}}>Quote Check</span>
+              <div style={{fontWeight:1000,fontSize:"clamp(26px,4vw,40px)",color:C.ink,letterSpacing:"-.01em",lineHeight:1.15,marginBottom:14}}>Before you sign, run the 10-point check the dealer already assumes you won't.</div>
+              <div style={{color:C.inkSoft,fontSize:15,lineHeight:1.6}}>Paste the link from a dealer's own listing, or upload a screenshot or PDF of your quote. LotCheck reads dealers' own advertised prices and public government data to check it against what it should say.</div>
             </div>
 
-            <div
-              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-              onDragLeave={()=>setDragOver(false)}
-              onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
-              onClick={()=>fileInputRef.current?.click()}
-              onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
-              role="button" tabIndex={0}
-              aria-label="Drop a quote screenshot or PDF, or click to choose a file"
-              style={{
-                position:"relative",overflow:"hidden",isolation:"isolate",
-                borderRadius:26,border:`2px ${dragOver?"solid":"dashed"} ${dragOver?C.teal:C.line}`,
-                background:C.card,minHeight:"min(52vh, 460px)",
-                display:"flex",alignItems:"center",justifyContent:"center",
-                padding:"32px 24px",cursor:"pointer",
-                transition:"border-color .18s,background .18s",
-                marginBottom:22,
-              }}
-            >
-              {/* Ambient only -- dimmed and overlaid, not meant to be read
-                  closely, so it's forgiving of exactly how it's framed.
-                  Chrome shows its own fullscreen/picture-in-picture hover
-                  controls on any <video>; disablePictureInPicture +
-                  controlsList hide both. */}
-              <video src="/scan-cta.mp4" poster="/scan-poster.jpg" muted loop autoPlay playsInline aria-hidden="true"
-                disablePictureInPicture controlsList="nofullscreen nodownload noremoteplayback noplaybackrate"
-                style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",opacity:.5,zIndex:0}}/>
-              <div aria-hidden="true" style={{position:"absolute",inset:0,zIndex:1,background:`radial-gradient(60% 55% at 50% 38%, ${C.card}66 0%, ${C.card}d9 60%, ${C.card}f5 100%)`,pointerEvents:"none"}}/>
-              <div style={{position:"relative",zIndex:2,display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14,maxWidth:480}}>
-                <span style={{width:56,height:56,borderRadius:999,background:C.tealBg,border:`1px solid ${C.teal}66`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk}}><Icon3D name="camera" size={26}/></span>
-                <div style={{fontWeight:1000,fontSize:"clamp(24px,4vw,36px)",color:C.ink,letterSpacing:"-.01em",lineHeight:1.1}}>Drop your quote here</div>
-                <div style={{color:C.inkSoft,fontSize:14.5,fontWeight:600,lineHeight:1.5}}>A screenshot or a PDF — from your phone, your desktop, or pasted straight from your clipboard.</div>
-                <button type="button" onClick={e=>{e.stopPropagation();fileInputRef.current?.click();}}
-                  style={{background:C.teal,border:"none",borderRadius:999,padding:"14px 26px",color:"#03222b",fontWeight:900,fontSize:15.5,cursor:"pointer",marginTop:4}}>
-                  Choose a file
-                </button>
-                <div style={{color:C.inkFaint,fontSize:12,fontWeight:600,marginTop:2}}>PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB</div>
-                <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
-                  onClick={e=>e.stopPropagation()}
-                  onChange={e=>handleFile(e.target.files[0])}/>
-              </div>
-            </div>
+            <style>{`@media (max-width: 860px){ .qc-hero-grid{grid-template-columns:1fr!important;} .qc-cluster{order:2;} .qc-intake{order:1;} }`}</style>
+            <div className="qc-hero-grid" style={{display:"grid",gridTemplateColumns:"minmax(300px,440px) 1fr",gap:20,alignItems:"start",marginBottom:36}}>
 
-            {/* Secondary door: paste a dealer link. Collapsed by default --
-                the dropzone above is the one primary action. */}
-            <div style={{marginBottom:24}}>
-              <button type="button" onClick={()=>setShowLinkPanel(v=>!v)} aria-expanded={showLinkPanel}
-                style={{background:"none",border:"none",color:C.inkSoft,fontWeight:800,fontSize:13.5,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:7,padding:"8px 4px"}}>
-                <Icon3D name="link" size={15}/>
-                Or paste a dealer's link instead
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{transition:"transform .15s",transform:showLinkPanel?"rotate(180deg)":"none"}}><path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-              {showLinkPanel&&(
-                <div style={{maxWidth:480,margin:"10px auto 0",textAlign:"left"}}>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {/* INTAKE CARD */}
+              <div className="qc-intake" style={{...cardStyle,marginBottom:0}}>
+                <div style={{display:"flex",gap:4,background:C.paper,border:`1px solid ${C.line}`,borderRadius:999,padding:4,marginBottom:18}}>
+                  <button type="button" onClick={()=>setIntakeTab("url")}
+                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="url"?C.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="url"?C.tealInk:C.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+                    <Icon3D name="link" size={14}/> Paste a link
+                  </button>
+                  <button type="button" onClick={()=>setIntakeTab("file")}
+                    style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:intakeTab==="file"?C.tealBg:"transparent",border:"none",borderRadius:999,padding:"10px 8px",color:intakeTab==="file"?C.tealInk:C.inkFaint,fontWeight:800,fontSize:13.5,cursor:"pointer"}}>
+                    <Icon3D name="camera" size={14}/> Upload a file
+                  </button>
+                </div>
+
+                {intakeTab==="url"?(
+                  <div>
+                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:C.inkSoft,marginBottom:8}}>Dealer listing or quote URL</label>
                     <input
                       type="url"
                       placeholder="https://dealer-site.com/inventory/..."
                       value={urlInput}
                       onChange={e=>setUrlInput(e.target.value)}
                       onKeyDown={e=>{if(e.key==="Enter") handleUrlAnalyze();}}
-                      autoFocus
-                      style={{flex:"1 1 220px",background:C.paper,border:`1px solid ${C.line}`,borderRadius:999,padding:"11px 16px",color:C.ink,fontSize:14,outline:"none",boxSizing:"border-box"}}
+                      style={{width:"100%",background:C.paper,border:`1px solid ${C.line}`,borderRadius:12,padding:"12px 14px",color:C.ink,fontSize:13.5,fontFamily:"ui-monospace,Menlo,Consolas,monospace",outline:"none",boxSizing:"border-box"}}
                     />
+                    <div style={{fontSize:12,color:C.inkFaint,marginTop:9,lineHeight:1.5}}><strong style={{color:C.inkSoft}}>Dealer websites only</strong> — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
+                    {/* Non-blocking -- a hint, not a gate. */}
+                    {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
+                      <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                        <Icon3D name="warning" size={14}/>
+                        <span>{urlCompletenessHint(urlInput)}</span>
+                      </div>
+                    )}
+                    {/* The reactive full explanation -- fires only on an
+                        actual marketplace match, alongside the quiet
+                        standing note above. */}
+                    {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
+                      <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
+                        <Icon3D name="blocked" size={15}/>
+                        <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
+                      </div>
+                    )}
                     <button type="button" onClick={handleUrlAnalyze}
-                      style={{background:"transparent",border:`1.5px solid ${C.teal}`,color:C.tealInk,borderRadius:999,padding:"10px 20px",fontWeight:800,fontSize:14,cursor:"pointer",flex:"none"}}>
-                      Check it
+                      style={{width:"100%",marginTop:16,background:C.teal,border:"none",borderRadius:999,padding:"14px 18px",color:"#03222b",fontWeight:900,fontSize:15,cursor:"pointer"}}>
+                      Analyze my quote
                     </button>
                   </div>
-                  {/* Non-blocking -- a hint, not a gate. */}
-                  {urlInput.trim()&&urlCompletenessHint(urlInput)&&(
-                    <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                      <Icon3D name="warning" size={14}/>
-                      <span>{urlCompletenessHint(urlInput)}</span>
+                ):(
+                  <div>
+                    <label style={{display:"block",fontSize:12.5,fontWeight:700,color:C.inkSoft,marginBottom:8}}>Screenshot or PDF of your quote</label>
+                    <div
+                      onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+                      onDragLeave={()=>setDragOver(false)}
+                      onDrop={e=>{e.preventDefault();setDragOver(false);handleFile(e.dataTransfer.files[0]);}}
+                      onClick={()=>fileInputRef.current?.click()}
+                      onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInputRef.current?.click();}}}
+                      role="button" tabIndex={0}
+                      aria-label="Drop a quote screenshot or PDF, or click to choose a file"
+                      style={{border:`1.5px dashed ${dragOver?C.teal:C.line}`,borderRadius:16,background:C.paper,padding:"26px 16px",textAlign:"center",cursor:"pointer",transition:"border-color .15s,background .15s"}}
+                    >
+                      <span style={{width:42,height:42,borderRadius:12,background:C.tealBg,border:`1px solid ${C.teal}66`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk,margin:"0 auto 12px"}}><Icon3D name="camera" size={20}/></span>
+                      <div style={{fontSize:14.5,fontWeight:800,color:C.ink,marginBottom:4}}>Drop your quote here</div>
+                      <div style={{fontSize:12.5,color:C.inkFaint}}>or click to browse · PDF, JPG, PNG, WEBP or HEIC · up to {MAX_FILE_SIZE_MB}MB</div>
+                      <input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{display:"none"}}
+                        onClick={e=>e.stopPropagation()}
+                        onChange={e=>handleFile(e.target.files[0])}/>
                     </div>
-                  )}
-                  {/* The reactive full explanation -- fires only on an actual
-                      marketplace match, alongside the quiet standing note below. */}
-                  {urlInput.trim()&&isAggregatorUrl(urlInput)&&(
-                    <div style={{fontSize:12,color:C.coralInk,marginTop:8,lineHeight:1.5,display:"flex",gap:6,alignItems:"flex-start"}}>
-                      <Icon3D name="blocked" size={15}/>
-                      <span><strong>That's a listing marketplace</strong> — AutoTrader, CarGurus, Kijiji, eBay and Facebook Marketplace can't be checked by link. Paste the dealer's own page for the same vehicle, or upload a screenshot instead.</span>
-                    </div>
-                  )}
-                  <div style={{fontSize:12,color:C.inkFaint,marginTop:8,lineHeight:1.5}}>Dealer websites only — not AutoTrader, Kijiji, CarGurus or Facebook Marketplace.</div>
+                  </div>
+                )}
+
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:16,paddingTop:16,borderTop:`1px solid ${C.line}`,fontSize:11.5,color:C.inkFaint}}>
+                  <Icon3D name="lock" size={13}/>
+                  Nothing is charged until a full report is delivered.
                 </div>
-              )}
+              </div>
+
+              {/* GAUGE CLUSTER -- sample only, static RAV4 XLE numbers,
+                  labelled SAMPLE throughout, never presented as live data. */}
+              <div className="qc-cluster" style={{...cardStyle,marginBottom:0}}>
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:6}}>
+                  <div>
+                    <div style={{fontWeight:900,fontSize:13,color:C.ink}}>Sample LotCheck Report</div>
+                    <div style={{fontSize:11.5,color:C.inkFaint,marginTop:2}}>What a finished check looks like</div>
+                  </div>
+                  <span style={{fontSize:10.5,fontWeight:800,letterSpacing:".08em",color:"#181205",background:C.butter,padding:"5px 9px",borderRadius:6,whiteSpace:"nowrap"}}>SAMPLE</span>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:14}}>
+                  <div style={{textAlign:"center"}}>
+                    <GaugeDial id="leverage" C={C} value={8.2} min={0} max={10} tickCount={5} tickFormat={v=>v.toFixed(0)}
+                      bands={[{from:0,to:4,color:C.coral},{from:4,to:7,color:C.butter},{from:7,to:10,color:C.teal}]}
+                      needleColor={C.butter}/>
+                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Leverage</div>
+                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
+                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#3ae0ff",textShadow:"0 0 12px rgba(58,224,255,.5)"}}>8.2</div>
+                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>of 10 · leverage</div>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <GaugeDial id="fees" C={C} value={899} min={0} max={1200} tickCount={4} tickFormat={v=>v===0?"$0":v>=1000?`$${(v/1000).toFixed(v%1000===0?0:1)}k`:`$${Math.round(v)}`}
+                      marker={499} markerLabel="TYP $499"
+                      bands={[{from:0,to:499,color:C.teal},{from:499,to:750,color:C.butter},{from:750,to:1200,color:C.coral}]}
+                      needleColor={C.coral}/>
+                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Fees flagged</div>
+                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
+                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#ff8f7a",textShadow:"0 0 12px rgba(255,93,115,.5)"}}>$899</div>
+                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>doc fee · typical $499</div>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <GaugeDial id="recalls" C={C} value={2} min={0} max={5} tickCount={5} tickFormat={v=>v.toFixed(0)}
+                      bands={[{from:0,to:1,color:C.teal},{from:1,to:3,color:C.butter},{from:3,to:5,color:C.coral}]}
+                      needleColor={C.butter}/>
+                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Recalls</div>
+                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
+                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#ffb130",textShadow:"0 0 12px rgba(255,177,48,.5)"}}>2 OPEN</div>
+                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>Transport Canada, by VIN</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{marginTop:18,paddingTop:14,borderTop:`1px solid ${C.line}`,fontSize:12.5,color:C.inkSoft}}>
+                  Sample vehicle: <strong style={{color:C.ink}}>2024 Toyota RAV4 XLE</strong>
+                </div>
+              </div>
             </div>
 
             {/* Parity-checked: check:parity reads this exact heading + the
@@ -11024,9 +11132,12 @@ function QuoteCheckPage(){
                 past 10 (or drops one) fails the build here, not in front of
                 a buyer. Keep the heading text and the array of ten literal
                 strings -- see check-report-parity.mjs. */}
-            <div style={{marginBottom:20}}>
-              <div style={{fontSize:11,fontWeight:900,color:C.inkFaint,letterSpacing:".1em",textTransform:"uppercase",marginBottom:10}}>EVERY REPORT CHECKS ALL 10</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center"}}>
+            <div style={{marginBottom:36}}>
+              <div style={{textAlign:"center",marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:900,color:C.tealInk,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>EVERY REPORT CHECKS ALL 10</div>
+                <div style={{fontWeight:1000,fontSize:"clamp(20px,2.6vw,26px)",color:C.ink}}>Every point ships in the report — never partial, never "—".</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:1,background:C.line,border:`1px solid ${C.line}`,borderRadius:20,overflow:"hidden"}}>
                 {[
                   "Price vs MSRP","Add-ons & fee audit",
                   "AMVIC","Financing math",
@@ -11034,14 +11145,26 @@ function QuoteCheckPage(){
                   "VIN check","Odometer",
                   "EV / PHEV rebate","Dealer reputation",
                 ].map((t,i)=>(
-                  <span key={i} style={{fontSize:11,fontWeight:700,color:C.inkSoft,background:C.paper2,border:`1px solid ${C.line}`,borderRadius:999,padding:"4px 10px"}}>{t}</span>
+                  <div key={i} style={{background:C.card,padding:"18px 18px",display:"flex",gap:12}}>
+                    <span style={{flex:"none",width:28,height:28,borderRadius:8,border:`1px solid ${C.line}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:12,color:C.tealInk,background:C.tealBg}}>{String(i+1).padStart(2,"0")}</span>
+                    <div>
+                      <div style={{fontSize:13.5,fontWeight:800,color:C.ink,marginBottom:3}}>{t}</div>
+                      <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5}}>{QC_POINT_DESC[t]}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
 
-            <div style={{color:C.inkFaint,fontSize:12,fontWeight:600,lineHeight:1.6}}>LotCheck never saves your quote to our own systems. It's analyzed once, then discarded on our end — nothing is stored.</div>
+            <div style={{display:"flex",alignItems:"center",gap:14,background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"18px 22px",flexWrap:"wrap"}}>
+              <span style={{flex:"none",width:38,height:38,borderRadius:10,background:C.tealBg,border:`1px solid ${C.teal}4d`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk}}><Icon3D name="shield" size={18}/></span>
+              <div style={{flex:"1 1 240px",fontSize:13.5,color:C.inkSoft,lineHeight:1.55}}>
+                <strong style={{color:C.ink}}>LotCheck reads dealers' own advertised prices</strong> and public government data — Transport Canada recalls, manufacturer pricing, provincial licensing registries. It never accesses listings behind a marketplace's own gate, and nothing is billed until a report is delivered.
+              </div>
             </div>
-          )}
+            </div>
+            );
+          })()}
 
           {status==="analyzing"&&(
             <ScanTakeover C={C} cardStyle={cardStyle} phase="running"
