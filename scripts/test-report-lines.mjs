@@ -18,7 +18,7 @@
 //      copy gate forbids -- so a state no surface exercises today cannot ship a
 //      banned word tomorrow.
 import { readFileSync } from "node:fs";
-import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
+import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder, hintIsDiscriminating } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
 import { priceMovesLine, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
 
@@ -669,6 +669,92 @@ console.log("\n-- advertised price moves --");
     [drop, rise, flat].every((r) => /not (read every dealer every day|see every day)/.test(r.line)));
   check("no state assigns the dealer a motive",
     [drop, rise, flat].every((r) => !/hiding|desperate|panic|confess|admits?/i.test(r.line)));
+}
+
+// ---------------------------------------------------------------------------
+// THE FUEL-TYPE HINT MAY NOT WALL OFF A WHOLE NAMEPLATE.
+//
+// A real customer report (LC-01EE-2B7, a used 2024 Toyota Land Cruiser 1958 at
+// Country Hills Toyota, 2026-09-10) said "no used 2023 to 2024 Toyota Land
+// Cruiser Hybrid ... were among the listings read" and "0 read, 5 per model
+// year needed" for a nameplate Alberta lots do stock. The J250 Land Cruiser is
+// hybrid-ONLY in Canada, so no dealer writes "Hybrid" on one -- there is no gas
+// sibling to distinguish it from. The subject's page DID declare hybrid, so the
+// one-sided fuel-type hint disagreed with every candidate row and the powertrain
+// wall rejected the entire market. Vic: "it didn't compare other used land
+// cruzers around Alberta that's big failure".
+//
+// These cases pin BOTH directions: the wall stands down when no row in the pool
+// names a powertrain, and it keeps full force the moment one does.
+{
+  console.log("");
+  console.log("-- fuel-type hint / powertrain wall --");
+  const today = "2026-09-10";
+
+  // A hybrid-only nameplate: five real Alberta listings, none carrying a marker.
+  const lcRows = [
+    { trim: "1958", price: 79995, year: 2024, odometerKm: 30000, asOf: "2026-09-08" },
+    { trim: "First Edition", price: 92000, year: 2024, odometerKm: 22000, asOf: "2026-09-07" },
+    { trim: "1958", price: 76500, year: 2024, odometerKm: 51000, asOf: "2026-09-06" },
+    { trim: "Land Cruiser", price: 81000, year: 2024, odometerKm: 40000, asOf: "2026-09-05" },
+    { trim: "1958", price: 73900, year: 2024, odometerKm: 58000, asOf: "2026-09-04" },
+  ];
+  check("a pool where no row names a powertrain gives the hint nothing to judge",
+    hintIsDiscriminating("Land Cruiser", lcRows) === false);
+  const lc = likeForLikePool(lcRows, { model: "Land Cruiser", trim: "1958", year: 2024,
+    condition: "used", odometerKm: 46680, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("a page-declared hybrid still finds its market on a hybrid-only nameplate",
+    lc.insufficient === false && lc.nRead === 5, `insufficient=${lc.insufficient} nRead=${lc.nRead}`);
+  // The label has to follow the wall: a set that was never powertrain-separated
+  // must not be described as though it had been.
+  check("a set the wall did not separate is not labelled with a powertrain",
+    lc.powertrain === null, String(lc.powertrain));
+
+  // A nameplate sold in both forms: the vocabulary IS in use, so silence on the
+  // other rows means gas and the wall must hold.
+  const rav4Rows = [
+    { trim: "XLE", price: 38000, year: 2024, odometerKm: 40000, asOf: "2026-09-08" },
+    { trim: "LE", price: 35000, year: 2024, odometerKm: 45000, asOf: "2026-09-07" },
+    { trim: "XLE AWD", price: 39000, year: 2024, odometerKm: 48000, asOf: "2026-09-06" },
+    { trim: "Limited", price: 44000, year: 2024, odometerKm: 39000, asOf: "2026-09-05" },
+    { trim: "XSE AWD Hybrid", price: 46000, year: 2024, odometerKm: 44000, asOf: "2026-09-04" },
+    { trim: "TRD Off-Road", price: 43000, year: 2024, odometerKm: 41000, asOf: "2026-09-03" },
+  ];
+  check("one row naming a powertrain proves the vocabulary is in use",
+    hintIsDiscriminating("RAV4", rav4Rows) === true);
+  const hyb = likeForLikePool(rav4Rows, { model: "RAV4", trim: "XLE AWD", year: 2024,
+    condition: "used", odometerKm: 46000, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("a hybrid RAV4 is STILL walled off from the gas RAV4s",
+    hyb.insufficient === true && hyb.nRead === 1, `insufficient=${hyb.insufficient} nRead=${hyb.nRead}`);
+  check("and it still says which car it was looking for",
+    hyb.powertrain === "Hybrid", String(hyb.powertrain));
+  const gas = likeForLikePool(rav4Rows, { model: "RAV4", trim: "XLE AWD", year: 2024,
+    condition: "used", odometerKm: 46000, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Gasoline") });
+  check("a gas RAV4 still excludes the one hybrid row",
+    gas.insufficient === false && gas.nRead === 5, `insufficient=${gas.insufficient} nRead=${gas.nRead}`);
+
+  // The Equinox EV incident the wall was built for, unchanged.
+  check("an EV nameplate marker is still discriminating",
+    hintIsDiscriminating("Equinox", [
+      { trim: "LT", price: 32000, year: 2024, odometerKm: 40000, asOf: "2026-09-08" },
+      { trim: "EV LT", price: 45000, year: 2024, odometerKm: 41000, asOf: "2026-09-06" },
+    ]) === true);
+
+  // The model-year ladder reads the same market and must agree with the card.
+  const olderRows = [
+    { trim: "1958", price: 71000, year: 2023, odometerKm: 60000, asOf: "2026-09-08" },
+    { trim: "1958", price: 69500, year: 2023, odometerKm: 72000, asOf: "2026-09-07" },
+    { trim: "First Edition", price: 78000, year: 2023, odometerKm: 55000, asOf: "2026-09-06" },
+    { trim: "1958", price: 70200, year: 2023, odometerKm: 66000, asOf: "2026-09-05" },
+    { trim: "Land Cruiser", price: 72400, year: 2023, odometerKm: 61000, asOf: "2026-09-04" },
+  ];
+  const ladder = olderYearsLadder(olderRows, { model: "Land Cruiser", trim: "1958", year: 2024,
+    minRows: 5, today, powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("the model-year ladder reads the same market as the comparison card",
+    ladder.nRead === 5, `nRead=${ladder.nRead}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed${fail ? `\n  ${failures.join("\n  ")}` : ""}`);

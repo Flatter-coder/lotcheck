@@ -107,6 +107,43 @@ export function fuelPowertrainHint(fuelType) {
   return "";
 }
 
+// Does the fuel-type hint have anything to DISCRIMINATE against in this pool?
+//
+// The hint is a ONE-SIDED signal. The subject gets it from its own listing's
+// fuel-type declaration; the candidate rows never do -- a crawl row carries
+// only whatever the dealer typed into the model and trim. So on a nameplate
+// whose dealers never write the powertrain, a page-declared hybrid subject
+// disagreed with every single row and the wall rejected the entire market.
+//
+// Confirmed live 2026-09-10 on a real customer report (LC-01EE-2B7, a used
+// 2024 Toyota Land Cruiser 1958 at Country Hills Toyota, Calgary): the J250
+// Land Cruiser is hybrid-ONLY in Canada, so no Alberta dealer writes "Hybrid"
+// on one -- there is no gas sibling to tell it apart from. The subject's page
+// did declare hybrid, the hint fired, and the report printed "no used 2023 to
+// 2024 Toyota Land Cruiser Hybrid ... were among the listings read" plus
+// "0 read, 5 per model year needed" for a nameplate Alberta lots do stock.
+// Vic: "it didn't compare other used land cruzers around Alberta that's big
+// failure".
+//
+// The wall keeps FULL force wherever the vocabulary is in use: if any row in
+// the pool names a powertrain the model name doesn't, then this nameplate's
+// dealers do write the word, silence on the other rows means gas, and a
+// hybrid must not join them -- the RAV4/Equinox case the wall was built for.
+//
+// It stands down only when NO row names one, because then marker absence
+// carries no information whatsoever and refusing every row is not caution, it
+// is discarding the market on the strength of something nobody wrote down.
+// [[powertrain-identity-rule]] [[two-authors-per-fact]] [[report-never-empty]]
+export function hintIsDiscriminating(model, rows) {
+  const inModel = powertrainMarkers(String(model || ""));
+  for (const r of Array.isArray(rows) ? rows : []) {
+    for (const m of powertrainMarkers(`${model || ""} ${r?.trim || ""}`)) {
+      if (!inModel.has(m)) return true;
+    }
+  }
+  return false;
+}
+
 // Today in the market's own time zone (Alberta): both cards on one report --
 // the count line and the comparison -- must take their 30-day window from the
 // same clock, or a row last seen exactly 30 days ago is in one and out of the
@@ -160,7 +197,9 @@ export function computeMarketCount(rows, ctx = {}) {
   const hasPrice = Number.isFinite(price) && price > 0;
   const model = ctx.model ?? null;
   const trim = dropModelWords(ctx.trim ?? null, model);
-  const hint = ctx.powertrainHint || "";
+  // Gated: see hintIsDiscriminating. Dropping the hint drops it from the
+  // label below too, which is what makes the printed claim match the set.
+  const hint = hintIsDiscriminating(model, rows) ? (ctx.powertrainHint || "") : "";
   const out = emptyMarketCount({
     province: ctx.province || null, year: ctx.year ?? null, make: ctx.make ?? null, model,
     price: hasPrice ? price : null, priceVerified: !!ctx.priceVerified, subjectExcluded: !!ctx.subjectExcluded,
@@ -221,7 +260,12 @@ export function computeMarketCount(rows, ctx = {}) {
 export function likeForLikePool(rows, ctx = {}) {
   const { model, trim: rawTrim, year, condition, odometerKm, minRows = 5, yearSteps = [0, 1], today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "" } = ctx;
   const trim = dropModelWords(rawTrim ?? null, model);
-  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
+  // The hint only walls rows off when this pool proves the vocabulary is in
+  // use; otherwise it is dropped from BOTH the wall and the printed label, so
+  // a set that was never powertrain-separated is never described as though it
+  // had been. [[powertrain-identity-rule]]
+  const ptHint = hintIsDiscriminating(model, rows) ? (powertrainHint || "") : "";
+  const subjectPt = `${model || ""} ${rawTrim || ""} ${ptHint}`;
   // The count line's recency window (30 days to `today`), applied here too: a
   // row last seen months ago may be a car that sold without a delisting, and
   // the two cards on one report must read the same market.
@@ -248,7 +292,7 @@ export function likeForLikePool(rows, ctx = {}) {
     // from. (Reading those off the whole RPC pool printed "2 listings at 3
     // dealers", dated by a hybrid that was never one of the two.)
     rows: [], read: [], scope: null, yearFrom: null, yearTo: null, insufficient: true, nRead: 0, need: minRows, reason: null,
-    trimLabel: trimOk ? trimLabelOf(trim) : null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    trimLabel: trimOk ? trimLabelOf(trim) : null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${ptHint}`) || null,
     kmLow: kmHalf == null ? null : Math.max(0, odo - kmHalf), kmHigh: kmHalf == null ? null : odo + kmHalf,
     condition: used ? "used" : (String(condition || "").toLowerCase() || null),
   };
@@ -318,10 +362,14 @@ export function olderYearsLadder(rows, ctx = {}) {
   const { model, trim: rawTrim, year, minRows = 5, maxRungs = 3, today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", lowerMult = 0.4, upperMult = 2.0, truncated = false } = ctx;
   const y = Number(year);
   const trim = dropModelWords(rawTrim ?? null, model);
-  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
+  // Same gate as the comparison card: a one-sided fuel-type hint may not
+  // reject rows on a nameplate whose dealers never write the powertrain.
+  // [[powertrain-identity-rule]]
+  const ptHint = hintIsDiscriminating(model, rows) ? (powertrainHint || "") : "";
+  const subjectPt = `${model || ""} ${rawTrim || ""} ${ptHint}`;
   const out = {
     state: "insufficient", reason: null, subjectYear: y > 0 ? y : null, condition: "used",
-    scope: null, trimLabel: null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    scope: null, trimLabel: null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${ptHint}`) || null,
     nRead: 0, need: minRows, rungs: [], missing: [], truncated: !!truncated, asOf: null, seenMin: null, seenMax: null,
   };
   if (!(y > 0)) { out.reason = "year_missing"; return out; }
