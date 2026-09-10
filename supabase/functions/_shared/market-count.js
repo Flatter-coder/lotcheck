@@ -107,6 +107,89 @@ export function fuelPowertrainHint(fuelType) {
   return "";
 }
 
+// Does the fuel-type hint have anything to DISCRIMINATE against in this pool?
+//
+// The hint is a ONE-SIDED signal. The subject gets it from its own listing's
+// fuel-type declaration; the candidate rows never do -- a crawl row carries
+// only whatever the dealer typed into the model and trim. So on a nameplate
+// whose dealers never write the powertrain, a page-declared hybrid subject
+// disagreed with every single row and the wall rejected the entire market.
+//
+// Confirmed live 2026-09-10 on a real customer report (LC-01EE-2B7, a used
+// 2024 Toyota Land Cruiser 1958 at Country Hills Toyota, Calgary): the J250
+// Land Cruiser is hybrid-ONLY in Canada, so no Alberta dealer writes "Hybrid"
+// on one -- there is no gas sibling to tell it apart from. The subject's page
+// did declare hybrid, the hint fired, and the report printed "no used 2023 to
+// 2024 Toyota Land Cruiser Hybrid ... were among the listings read" plus
+// "0 read, 5 per model year needed" for a nameplate Alberta lots do stock.
+// Vic: "it didn't compare other used land cruzers around Alberta that's big
+// failure".
+//
+// The wall keeps FULL force wherever the vocabulary is in use: if any row in
+// the pool names a powertrain the model name doesn't, then this nameplate's
+// dealers do write the word, silence on the other rows means gas, and a
+// hybrid must not join them -- the RAV4/Equinox case the wall was built for.
+//
+// It stands down only when NO row names one, because then marker absence
+// carries no information whatsoever and refusing every row is not caution, it
+// is discarding the market on the strength of something nobody wrote down.
+// [[powertrain-identity-rule]] [[two-authors-per-fact]] [[report-never-empty]]
+export function hintIsDiscriminating(model, rows) {
+  const inModel = powertrainMarkers(String(model || ""));
+  for (const r of Array.isArray(rows) ? rows : []) {
+    for (const m of powertrainMarkers(`${model || ""} ${r?.trim || ""}`)) {
+      if (!inModel.has(m)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Resolve the powertrain wall for ONE comparison, on the population it will
+ * actually filter.
+ *
+ * THE POPULATION MUST BE THE FILTERED ONE. `eligible` has to be the rows the
+ * wall is about to be applied to -- already cut by price, recency, model year
+ * and anything else -- never the raw RPC result. Reviewed 2026-09-10 and this
+ * was wrong at all three call sites: the gate read every row it was handed
+ * while the wall acted on a subset, so ONE row that could never be compared
+ * anyway silently reverted the whole fix. Measured -- a Land Cruiser with five
+ * good comparables dropped back to zero when a single row a dealer had typed
+ * "Hybrid" into was four months stale, or carried no price, or (for the ladder)
+ * sat in a model year the ladder never reads. The gate is a claim about the
+ * vocabulary of the set being compared, and evidence from outside that set is
+ * not evidence.
+ *
+ * Every caller goes through here and has to name its eligible set, so the
+ * mistake is hard to make again rather than merely fixed once.
+ *
+ * @param {string|null} model
+ * @param {string|null} rawTrim
+ * @param {string} declaredHint  fuelPowertrainHint(page fuel type); "" if none
+ * @param {Array} eligible       rows the wall will filter, already cut by
+ *                               every NON-powertrain criterion
+ * @returns {{subjectPt: string, hint: string, separated: boolean}}
+ */
+export function resolvePowertrainWall(model, rawTrim, declaredHint, eligible) {
+  const declared = String(declaredHint || "");
+  // Nothing declared means nothing to gate, so the row scan is skipped.
+  const discriminating = declared ? hintIsDiscriminating(model, eligible) : false;
+  const hint = discriminating ? declared : "";
+  const subjectNamesOwn = powertrainMarkers(`${model || ""} ${rawTrim || ""}`).size > 0;
+  // IS THE RETURNED SET KNOWN TO SHARE THE SUBJECT'S POWERTRAIN?
+  // One case says no: we HELD a declared powertrain, could not apply it, and
+  // the subject's own model/trim does not name one either. The rows kept are
+  // then merely unlabelled -- not known to match -- and no surface may describe
+  // the set as "same powertrain". Every other case is exactly what it was
+  // before this gate existed:
+  //   * nothing declared         -> unchanged behaviour, nothing was lost
+  //   * declared and applied     -> the wall filtered on it
+  //   * subject's text names one -> the wall filtered on that
+  // [[powertrain-identity-rule]] [[claims-must-stay-backed]]
+  const separated = !declared || discriminating || subjectNamesOwn;
+  return { subjectPt: `${model || ""} ${rawTrim || ""} ${hint}`, hint, separated };
+}
+
 // Today in the market's own time zone (Alberta): both cards on one report --
 // the count line and the comparison -- must take their 30-day window from the
 // same clock, or a row last seen exactly 30 days ago is in one and out of the
@@ -129,7 +212,7 @@ export function emptyMarketCount(fields = {}) {
   return {
     state: "unchecked", scope: null, n: 0, below: 0, same: 0, dealers: null,
     seenMin: null, seenMax: null, province: null, year: null, make: null, model: null,
-    trimKey: null, trimLabel: null, powertrain: null, modelN: 0, modelBelow: 0, modelSame: 0, unpriced: 0,
+    trimKey: null, trimLabel: null, powertrain: null, powertrainSeparated: true, modelN: 0, modelBelow: 0, modelSame: 0, unpriced: 0,
     price: null, priceVerified: false, subjectExcluded: false, windowDays: MARKET_COUNT_WINDOW_DAYS, asOf: null,
     truncated: false, reason: null,
     ...fields,
@@ -160,19 +243,24 @@ export function computeMarketCount(rows, ctx = {}) {
   const hasPrice = Number.isFinite(price) && price > 0;
   const model = ctx.model ?? null;
   const trim = dropModelWords(ctx.trim ?? null, model);
-  const hint = ctx.powertrainHint || "";
   const out = emptyMarketCount({
     province: ctx.province || null, year: ctx.year ?? null, make: ctx.make ?? null, model,
     price: hasPrice ? price : null, priceVerified: !!ctx.priceVerified, subjectExcluded: !!ctx.subjectExcluded,
     windowDays, asOf: today, truncated: !!ctx.truncated,
-    powertrain: powertrainLabel(model, `${ctx.trim || ""} ${hint}`) || null,
+    // If the read never happens, nothing was separated. The label still names
+    // what we were looking for; the flag stops any surface calling it matched.
+    powertrain: powertrainLabel(model, `${ctx.trim || ""} ${ctx.powertrainHint || ""}`) || null,
+    powertrainSeparated: false,
   });
   if (!Array.isArray(rows)) { out.reason = "rows_unavailable"; return out; }
 
   const cutoff = today ? dayMinus(today, windowDays) : null;
-  const subjectPt = `${model || ""} ${ctx.trim || ""} ${hint}`;
   const inWindow = rows.filter((r) => r && (!cutoff || !r.asOf || String(r.asOf) >= cutoff));
-  const compatible = inWindow.filter((r) => powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
+  // The wall reads the IN-WINDOW rows -- the ones it is about to filter.
+  const wall = resolvePowertrainWall(model, ctx.trim ?? null, ctx.powertrainHint || "", inWindow);
+  out.powertrain = powertrainLabel(model, `${ctx.trim || ""} ${wall.hint}`) || null;
+  out.powertrainSeparated = wall.separated;
+  const compatible = inWindow.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
   out.unpriced = compatible.filter((r) => !(Number(r.price) > 0)).length;
   const pool = compatible.filter((r) => Number(r.price) > 0);
 
@@ -221,14 +309,16 @@ export function computeMarketCount(rows, ctx = {}) {
 export function likeForLikePool(rows, ctx = {}) {
   const { model, trim: rawTrim, year, condition, odometerKm, minRows = 5, yearSteps = [0, 1], today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "" } = ctx;
   const trim = dropModelWords(rawTrim ?? null, model);
-  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
   // The count line's recency window (30 days to `today`), applied here too: a
   // row last seen months ago may be a car that sold without a delisting, and
   // the two cards on one report must read the same market.
   const cutoff = today ? dayMinus(today, windowDays) : null;
-  const compatible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
-    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff)
-    && powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
+  // Everything that passes every NON-powertrain test. This is the population
+  // the wall filters, so it is the population the gate is allowed to read.
+  const eligible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
+    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff));
+  const wall = resolvePowertrainWall(model, rawTrim, powertrainHint, eligible);
+  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
   const y = Number(year);
   const used = String(condition || "").toLowerCase() === "used";
   // An odometer that was never read (null) or reads 0 -- which the pipeline
@@ -248,7 +338,8 @@ export function likeForLikePool(rows, ctx = {}) {
     // from. (Reading those off the whole RPC pool printed "2 listings at 3
     // dealers", dated by a hybrid that was never one of the two.)
     rows: [], read: [], scope: null, yearFrom: null, yearTo: null, insufficient: true, nRead: 0, need: minRows, reason: null,
-    trimLabel: trimOk ? trimLabelOf(trim) : null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    trimLabel: trimOk ? trimLabelOf(trim) : null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${wall.hint}`) || null,
+    powertrainSeparated: wall.separated,
     kmLow: kmHalf == null ? null : Math.max(0, odo - kmHalf), kmHigh: kmHalf == null ? null : odo + kmHalf,
     condition: used ? "used" : (String(condition || "").toLowerCase() || null),
   };
@@ -318,18 +409,24 @@ export function olderYearsLadder(rows, ctx = {}) {
   const { model, trim: rawTrim, year, minRows = 5, maxRungs = 3, today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", lowerMult = 0.4, upperMult = 2.0, truncated = false } = ctx;
   const y = Number(year);
   const trim = dropModelWords(rawTrim ?? null, model);
-  const subjectPt = `${model || ""} ${rawTrim || ""} ${powertrainHint || ""}`;
   const out = {
     state: "insufficient", reason: null, subjectYear: y > 0 ? y : null, condition: "used",
     scope: null, trimLabel: null, powertrain: powertrainLabel(model, `${rawTrim || ""} ${powertrainHint || ""}`) || null,
+    powertrainSeparated: false,
     nRead: 0, need: minRows, rungs: [], missing: [], truncated: !!truncated, asOf: null, seenMin: null, seenMax: null,
   };
   if (!(y > 0)) { out.reason = "year_missing"; return out; }
   const cutoff = today ? dayMinus(today, windowDays) : null;
-  const compatible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
+  // The rungs this ladder can actually read -- older model years only. The gate
+  // reads exactly these, so a marker in the subject's OWN year (which the
+  // ladder never compares) cannot decide the wall for the years it does.
+  const eligible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
     && Number(r.year) > 0 && Number(r.year) < y && Number(r.year) >= y - maxRungs
-    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff)
-    && powertrainCompatible(subjectPt, `${model || ""} ${r.trim || ""}`));
+    && (!cutoff || !r.asOf || String(r.asOf) >= cutoff));
+  const wall = resolvePowertrainWall(model, rawTrim, powertrainHint, eligible);
+  out.powertrain = powertrainLabel(model, `${rawTrim || ""} ${wall.hint}`) || null;
+  out.powertrainSeparated = wall.separated;
+  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
   out.nRead = compatible.length;
   Object.assign(out, seenOf(compatible));
   out.asOf = out.seenMax;

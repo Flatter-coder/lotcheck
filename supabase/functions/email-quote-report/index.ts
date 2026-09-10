@@ -1270,11 +1270,28 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // from these same tokens, so this one swap recolors the whole document.
   // Flat (no 3D tilt) -- diorama's own print CSS already drops the tilt for
   // the printed/PDF state, which is what this ports.
-  const PAPER = rgb(0.02, 0.027, 0.043), INK = rgb(0.906, 0.925, 0.961),
-        SOFT = rgb(0.545, 0.592, 0.678), FAINT = rgb(0.357, 0.4, 0.486),
-        TEAL = rgb(0.176, 0.831, 0.749), CORAL = rgb(0.984, 0.486, 0.42),
-        AMBER = rgb(0.961, 0.725, 0.247),
-        HAIR = rgb(0.137, 0.173, 0.243), TRACK = rgb(0.063, 0.086, 0.137),
+  // A PDF IS PRINTED. THE GROUND IS WHITE.
+  // Vic, 2026-09-10, reviewing the dark build: "pages are to dark" ->
+  // "for pdf files change them in white backgroud" -> "pdf must [look] the
+  // same as price terrain pdf file". The dark HUD stays the approved treatment
+  // for the ON-SCREEN report; the emailed PDF is read on paper and gets white.
+  // The two surfaces now differ deliberately. [[pdf-must-match-price-terrain]]
+  //
+  // Accents are the LIGHT-SAFE versions, not the screen ones: #2dd4bf teal on
+  // white is 1.9:1 and unreadable as text, so every accent here is darkened
+  // until small text clears 4.5:1 on both white and the #F5F7FA panel fill.
+  // Measured: TEAL 5.2:1, CORAL 5.8:1, AMBER 5.1:1, FAINT 5.2:1 on white and
+  // 4.7:1 on a panel, SOFT 6.9:1, INK 17.8:1.
+  const PAPER = rgb(1, 1, 1), INK = rgb(0.078, 0.098, 0.169),
+        SOFT = rgb(0.290, 0.329, 0.408), FAINT = rgb(0.384, 0.424, 0.490),
+        TEAL = rgb(0.043, 0.478, 0.437), CORAL = rgb(0.725, 0.220, 0.082),
+        AMBER = rgb(0.631, 0.384, 0.027),
+        HAIR = rgb(0.847, 0.875, 0.910), TRACK = rgb(0.961, 0.969, 0.980),
+        // an unfilled gauge arc or range-bar track has to read as a track, so
+        // it sits a step below a panel fill rather than sharing it
+        RAIL = rgb(0.863, 0.890, 0.925),
+        // the recessed surface behind a panel
+        PANEL2 = rgb(0.929, 0.945, 0.965),
         PURPLE = rgb(0.427, 0.231, 0.839), PURPLE_LT = rgb(0.545, 0.361, 0.965);
 
   const PW = 595.28, PH = 841.89, M = 56, W = PW - M * 2;
@@ -1296,6 +1313,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const center = (str: string, yy: number, o: any = {}) => { const s = pdfSafe(str), f = o.font ?? sans, sz = o.size ?? 10; page.drawText(s, { x: (o.cx ?? PW / 2) - f.widthOfTextAtSize(s, sz) / 2, y: yy, size: sz, font: f, color: o.color ?? INK }); };
   function wrap(str: string, f: any, size: number, maxW: number): string[] {
     const words = pdfSafe(str).split(/\s+/).filter(Boolean); const out: string[] = []; let cur = "";
+    /* pdf-safe: `words` is already split out of pdfSafe(str) above */
     for (const w of words) { const t = cur ? cur + " " + w : w; if (f.widthOfTextAtSize(t, size) > maxW && cur) { out.push(cur); cur = w; } else cur = t; }
     if (cur) out.push(cur); return out;
   }
@@ -1306,6 +1324,50 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const rule = (color = HAIR, th = 0.7, pad = 6) => { need(pad * 2); page.drawLine({ start: { x: M, y: y - pad }, end: { x: M + W, y: y - pad }, thickness: th, color }); y -= pad * 2 + 2; };
   const kicker = (str: string) => { need(18); T(str, { size: 8.5, font: sansB, color: TEAL }); y -= 13; };
   const advance = (h: number) => { y -= h; };
+
+  // MEASURE WHAT YOU DRAW.
+  // Every drawing helper here passes its string through pdfSafe(), which
+  // rewrites characters the embedded fonts cannot set -- and some of those
+  // rewrites CHANGE WIDTH: "..." becomes three dots, an em dash becomes a
+  // hyphen, a check mark disappears. Measuring the raw string and drawing the
+  // rewritten one therefore sizes a box for text that is not what lands in it.
+  // Reviewed 2026-09-10: the "also checked" pills measured raw, so a value
+  // containing an ellipsis would have been drawn wider than its own border, and
+  // a tone chip sized for an em dash drew a hyphen. check:pdf-measure now
+  // refuses any width measurement in this file that does not go through here.
+  const wSafe = (f: any, str: string, size: number) => f.widthOfTextAtSize(pdfSafe(str), size);
+
+  // ---- ROUNDED PANELS ----
+  // Every surface in the approved diorama design is a rounded panel: the card
+  // and hero tiles at 14px, the audit tiles at 12px, the chips as full pills.
+  // The PDF drew all of them as hard 90-degree rectangles, which is most of
+  // why the printed page read as loose text on black rather than as
+  // instrumentation mounted on panels (Vic, 2026-09-10, holding the mockup
+  // next to the real report).
+  //
+  // pdf-lib has no rounded-rect primitive, and drawSvgPath's arc sweep flag
+  // inverts with its y-axis flip -- an arc that bulges the right way on screen
+  // bulges inward on the page. So the shape is composed from three rectangles
+  // and four corner circles, which cannot be got wrong, and a border is the
+  // outer shape with the fill laid `borderWidth` inside it.
+  const rrfill = (x: number, yTop: number, w: number, h: number, r: number, col: any) => {
+    if (!(w > 0) || !(h > 0)) return;
+    const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    page.drawRectangle({ x: x + rr, y: yTop - h, width: Math.max(w - rr * 2, 0), height: h, color: col });
+    page.drawRectangle({ x, y: yTop - h + rr, width: rr, height: Math.max(h - rr * 2, 0), color: col });
+    page.drawRectangle({ x: x + w - rr, y: yTop - h + rr, width: rr, height: Math.max(h - rr * 2, 0), color: col });
+    if (rr <= 0) return;
+    for (const [ccx, ccy] of [[x + rr, yTop - rr], [x + w - rr, yTop - rr], [x + rr, yTop - h + rr], [x + w - rr, yTop - h + rr]]) {
+      page.drawCircle({ x: ccx, y: ccy, size: rr, color: col });
+    }
+  };
+  const rrect = (x: number, yTop: number, w: number, h: number, r: number, o: any = {}) => {
+    const bw = o.borderColor ? (o.borderWidth ?? 0.7) : 0;
+    if (bw > 0) {
+      rrfill(x, yTop, w, h, r, o.borderColor);
+      if (o.color) rrfill(x + bw, yTop - bw, w - bw * 2, h - bw * 2, Math.max(r - bw, 0), o.color);
+    } else if (o.color) rrfill(x, yTop, w, h, r, o.color);
+  };
 
   // ---- BRAND MARK ---- the real LotCheck logo (isometric gate + car driving
   // through), drawn from the SAME polygons as the site's animated mark so print
@@ -1358,7 +1420,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     page.drawEllipse({ x: cxAbs, y: cyCentre, xScale: S * 1.34, yScale: S * 1.34, borderColor: TEAL, borderWidth: 0.5 });
     const rings = guillocheRings(SEALSEED, cxAbs, 0, S, 420);
     rings.forEach((d, i) => page.drawSvgPath(d, { x: 0, y: cyCentre, borderColor: i < 2 ? PURPLE : TEAL, borderWidth: i % 2 ? 0.35 : 0.6 }));
-    page.drawText("LC", { x: cxAbs - monoB.widthOfTextAtSize("LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
+    page.drawText("LC", { x: cxAbs - wSafe(monoB, "LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
   };
   // Plain verified badge -- a filled green circle with a white check mark,
   // no ornament. Replaces the guilloché seal in the masthead: Vic, 2026-09-10,
@@ -1386,7 +1448,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // (same measured-not-guessed positioning the old seal used, see git history
   // for the "letters are shining" incident this pattern was built to avoid).
   const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
-  const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
+  const hdrW = Math.max(wSafe(sansB, HDR_TITLE, 8.5), wSafe(mono, HDR_NO, 8.5));
   const BADGE_S = 8, BADGE_GAP = 10;
   // No "VERIFIED" label here -- that word already means something else on
   // this page (priceVerified / "STATUS - VERIFIED QUOTE" below is about the
@@ -1395,9 +1457,14 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   drawCheckBadge(M + W - hdrW - BADGE_GAP - BADGE_S, y - 9, BADGE_S);
   right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
   y -= 20;
-  right(HDR_NO, { size: 8.5, font: mono, color: FAINT });
+  // The mockup sets the report number in TEAL mono as the masthead's one
+  // accent; FAINT made the report's own identifier the quietest thing on it.
+  right(HDR_NO, { size: 8.5, font: mono, color: TEAL });
   y -= 2;
-  page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 1.4, color: INK });
+  // 1.4pt of near-white was a rule the mockup draws as a 1px hairline in
+  // --line. Two heavy near-white rules stacked under the masthead (this one
+  // and the dek rule below) were the loudest marks on page 1.
+  page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, thickness: 0.7, color: HAIR });
   y -= 22;
 
   // ---- HEADLINE ----
@@ -1408,7 +1475,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   y -= 2;
   const dek = [a.dealerName, a.dealerCity].filter(Boolean).join(", ");
   if (dek) { T(dek + "   -   " + reportDate, { size: 10.5, font: serifI, color: SOFT }); y -= 18; }
-  rule(INK, 0.7, 6);
+  rule(HAIR, 0.7, 6);
 
   // ---- THE DEAL ----
   advance(4);
@@ -1422,8 +1489,27 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // PDF. The label follows the basis now, from the one shared rule.
   const pdfClaim = qualifyMsrpClaim(a);
   Tat(msrpExact ? "MSRP (VERIFIED)" : pdfClaim.label.toUpperCase(), figTop - 9, { x: rx, size: 8, font: sansB, color: FAINT });
-  Tat(ms ? money(ms) : "-", figTop - 34, { x: rx, size: 25, font: monoB, color: msrpExact ? TEAL : SOFT });
-  Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
+  if (ms) {
+    Tat(money(ms), figTop - 34, { x: rx, size: 25, font: monoB, color: msrpExact ? TEAL : SOFT });
+    Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
+  } else {
+    // This printed a bare "-" at 25pt whenever no MSRP of any basis was found:
+    // the largest dead character on page 1, sitting under a caption that
+    // described a "reference figure" which was not there. Reported live
+    // 2026-09-10 (report LC-01EE-2B7, a used 2024 Toyota Land Cruiser 1958 --
+    // Vic: "what report miss MSRP").
+    //
+    // A sticker we do not hold is a fact to state, not a blank to leave. The
+    // slot says so in words and hands the reader the one move that actually
+    // gets them the number; the paragraph below already explains why no
+    // over/under-MSRP claim is made. No figure is invented here -- a used
+    // 2024's original sticker is not in our catalogue, and guessing it would
+    // put a fabricated denominator under the whole price comparison.
+    // [[report-never-empty]] [[no-llm-generated-valuation-numbers]]
+    // [[present-without-creating-questions]] [[msrp-100-percent-accuracy]]
+    Tat("Not published", figTop - 32, { x: rx, size: 15, font: sansB, color: SOFT });
+    Tat("ask for the original window sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
+  }
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
   y = figTop - 58;
   // ---- MSRP RANGE BAR (concept #7, "price-terrain-chart") ----
@@ -1440,8 +1526,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const pad = Math.max((hi - lo) * 0.2, 60);
     const lo2 = lo - pad, hi2 = hi + pad, span = (hi2 - lo2) || 1;
     const xFor = (v: number) => M + ((v - lo2) / span) * W;
-    const over = delta > 0, gapColor = over ? CORAL : TEAL, gapBg = over ? rgb(0.98, 0.925, 0.902) : rgb(0.906, 0.957, 0.945);
-    page.drawRectangle({ x: M, y: barY - barH, width: W, height: barH, color: TRACK });
+    // The shaded gap between the MSRP mark and the asking mark was a cream-theme
+    // tint (#FAECE6 / #E7F4F1) left behind when the palette went dark, so the
+    // one figure page 1 exists to show sat inside a near-WHITE bar on a dark
+    // page -- the same defect as the white days-on-lot card, on the report's
+    // most important visual. It takes a dark tint of its own accent now, the
+    // same pair the tone chips use.
+    // The gap fill has to separate from the RAIL it sits inside, not just from
+    // the page: the first light build used the same ~0.9-luminance tint as the
+    // rail and the shaded gap disappeared. This is a stronger tint of the same
+    // accent, chosen to read against RAIL rather than against white.
+    const over = delta > 0, gapColor = over ? CORAL : TEAL,
+          gapBg = over ? rgb(0.953, 0.769, 0.690) : rgb(0.655, 0.871, 0.839);
+    page.drawRectangle({ x: M, y: barY - barH, width: W, height: barH, color: RAIL });
     const xMsrp = xFor(ms), xAsk = xFor(qp);
     const gx0 = Math.min(xMsrp, xAsk), gx1 = Math.max(xMsrp, xAsk);
     page.drawRectangle({ x: gx0, y: barY - barH, width: Math.max(gx1 - gx0, 1), height: barH, color: gapBg });
@@ -1453,7 +1550,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const label = (over ? "+" : "-") + money(Math.abs(delta)) + (over ? " OVER MSRP" : " UNDER MSRP");
     const pct = ms ? ` -- ${Math.abs(delta / ms * 100).toFixed(1)}%` : "";
     T(label + pct, { size: 12.5, font: sansB, color: gapColor });
-    if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
+    if (!priceVerified) { const wl = wSafe(sansB, label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
     y -= 24;
   }
   // "What this means" -- the printed twin of the on-screen explanation, and
@@ -1493,12 +1590,16 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     kicker("NEGOTIATION LEVERAGE");
     const cx = M + 92, gy = y - 96, r = 78, seg = 64;
     const pt = (ang: number): [number, number] => [cx + r * Math.cos(ang), gy + r * Math.sin(ang)];
-    for (let i = 0; i < seg; i++) { const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI); page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: TRACK }); }
+    for (let i = 0; i < seg; i++) { const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI); page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: RAIL }); }
     // Gradient fill (concept #7): coral -> amber -> teal across the WHOLE 0-10
     // scale, not just the filled portion, so a low score still reads as "low
     // on a red-to-green scale" rather than "a short grey arc" -- the colour
     // itself carries the verdict the way the gauge's numbers already do.
-    const GRAD: [number, number, number][] = [[0.816, 0.294, 0.184], [0.827, 0.647, 0.157], [0.09, 0.459, 0.42]];
+    // These three were carried over from the cream theme (#D04B2F / #D3A528 /
+    // #177569) and read as muddy brown-to-bottle-green on a near-black page.
+    // The gauge is the report's signature instrument, so it takes the diorama
+    // accents themselves: coral -> amber -> teal. [[gauges-divide-into-multiple-things]]
+    const GRAD: [number, number, number][] = [[0.725, 0.220, 0.082], [0.631, 0.384, 0.027], [0.043, 0.478, 0.437]];
     const lerp3 = (t: number): [number, number, number] => {
       const seg2 = t <= 0.5 ? 0 : 1, lt = t <= 0.5 ? t * 2 : (t - 0.5) * 2;
       const a0 = GRAD[seg2], a1 = GRAD[seg2 + 1];
@@ -1565,35 +1666,151 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const EXTRA = POINTS.slice(POINT_TITLES.length);
   kicker(`${CORE.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  const toneChipBg: Record<string, any> = { pass: rgb(0.106, 0.196, 0.176), flag: rgb(0.22, 0.129, 0.114), muted: rgb(0.12, 0.14, 0.18) };
+  // Light tints of each accent, for a white ground.
+  const toneChipBg: Record<string, any> = { pass: rgb(0.863, 0.941, 0.925), flag: rgb(0.984, 0.894, 0.855), muted: rgb(0.922, 0.937, 0.957) };
   const toneChipText: Record<string, string> = { pass: "PASS", flag: "FLAG", muted: "—" };
-  const TILE_GAP = 10, TILE_COLS = 3, TILE_W = (W - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS;
-  const TILE_PAD = 11;
-  const tileNoteLines = (p: { t: string; v: string; tone: string }) => wrap(pointExplain(p.t, a) || "", serifI, 8, TILE_W - TILE_PAD * 2);
-  const tileHeight = (p: { t: string; v: string; tone: string }) => TILE_PAD * 2 + 12 /* label row */ + 6 + 15 /* value */ + 6 + tileNoteLines(p).length * 10.5;
-  const drawTile = (x: number, yTop: number, rowH: number, p: { t: string; v: string; tone: string }) => {
-    const tone = toneColor[p.tone] || INK, bg = toneChipBg[p.tone] || TRACK;
-    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: rowH, color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
-    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: 2, color: tone });
+  // COLUMN COUNT IS PER CLUSTER, not one global 3.
+  // The ten canonical points land 4 / 4 / 2 across the three clusters, and the
+  // mockup lays each out flush: four across, four across, then two at half
+  // width. A fixed 3 left Safety with a lone orphan tile on a second row and
+  // Trust with a third of a row blank -- two ragged holes the mockup does not
+  // have, on the page Vic compared side by side.
+  const TILE_GAP = 10, TILE_PAD = 11;
+  const tileW = (cols: number) => (W - TILE_GAP * (cols - 1)) / cols;
+  // COLUMNS ARE DERIVED FROM THE POINT COUNT, so no row is ever ragged.
+  // The mockup lays its clusters out 4 / 4 / 2 because its tile subs are one
+  // short sentence each. Production's subs come from pointExplain and run to a
+  // paragraph, so at four columns (113pt wide) a tile grows past 130pt tall and
+  // the next row cannot fit the page. The column count is CHOSEN per cluster
+  // further down (colsFor), by measuring both candidate grids -- see there.
+  type Pt = { t: string; v: string; tone: string };
+  // Memoised: colsFor measures BOTH candidate grids, firstBlockHeight measures
+  // again, drawTileGrid measures per row and drawTile measures once more to
+  // draw -- about six identical pointExplain + wrap passes per point, each of
+  // which measures every word. Same output, one pass per (point, cols).
+  const noteCache = new Map<string, string[]>();
+  const tileNoteLines = (p: Pt, cols: number) => {
+    const k = `${cols}\u0000${p.t}`;
+    let v = noteCache.get(k);
+    if (!v) { v = wrap(pointExplain(p.t, a) || "", serifI, 8, tileW(cols) - TILE_PAD * 2); noteCache.set(k, v); }
+    return v;
+  };
+  // NO GLOBAL MINIMUM HEIGHT.
+  // The mockup sets min-height:118px (88.5pt) on its tiles so a row reads as one
+  // object. Ported as a floor on tileHeight it was dead weight: a tile clears
+  // 88.5pt at three wrapped note lines, and every pointExplain string wraps to
+  // at least three at these widths, so the floor never once bound -- measured
+  // identical page geometry with and without it. drawTileGrid already sizes each
+  // row to its tallest tile, which is what actually makes a row read flush.
+  const tileHeight = (p: Pt, cols: number) =>
+    TILE_PAD * 2 + 12 /* label row */ + 6 + 15 /* value */ + 6 + tileNoteLines(p, cols).length * 10.5;
+  // At four columns a tile is ~113pt wide, so a long value ("46,680 km FLAG")
+  // overruns 13pt. Step it down on the font's own metrics rather than clipping.
+  const tileValueSize = (v: string, cols: number) => {
+    let sz = 13;
+    while (sz > 8 && wSafe(monoB, v, sz) > tileW(cols) - TILE_PAD * 2) sz -= 0.5;
+    return sz;
+  };
+  const drawTile = (x: number, yTop: number, rowH: number, p: Pt, cols: number) => {
+    const tone = toneColor[p.tone] || INK, bg = toneChipBg[p.tone] || TRACK, TW = tileW(cols);
+    rrect(x, yTop, TW, rowH, 9, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
+    // The accent bar belongs on the tile's TOP edge, inset from both sides
+    // (mockup `.tile .bar { top: 0; left: 14px; right: 14px }`). It was drawn
+    // at `yTop - rowH` -- the BOTTOM edge, full width -- so every tile was
+    // underlined instead of capped.
+    page.drawRectangle({ x: x + 14, y: yTop - 2.2, width: Math.max(TW - 28, 0), height: 1.6, color: tone });
     let ty = yTop - TILE_PAD;
     // label (left) + tone chip (right), same row
     Tat(p.t, ty - 8.5, { x: x + TILE_PAD, size: 8, font: sansB, color: FAINT });
-    const chipLbl = toneChipText[p.tone] || "—", chipW = sansB.widthOfTextAtSize(chipLbl, 6.5) + 10;
-    page.drawRectangle({ x: x + TILE_W - TILE_PAD - chipW, y: ty - 10.5, width: chipW, height: 11, color: bg });
-    center(chipLbl, ty - 8, { size: 6.5, font: sansB, color: tone, cx: x + TILE_W - TILE_PAD - chipW / 2 });
+    const chipLbl = toneChipText[p.tone] || "—", chipW = wSafe(sansB, chipLbl, 6.5) + 12;
+    rrect(x + TW - TILE_PAD - chipW, ty + 0.5, chipW, 11, 5.5, { color: bg });
+    center(chipLbl, ty - 8, { size: 6.5, font: sansB, color: tone, cx: x + TW - TILE_PAD - chipW / 2 });
     ty -= 18;
-    Tat(p.v, ty - 13, { x: x + TILE_PAD, size: 13, font: monoB, color: tone, });
+    Tat(p.v, ty - 13, { x: x + TILE_PAD, size: tileValueSize(p.v, cols), font: monoB, color: tone });
     ty -= 21;
-    for (const ln of tileNoteLines(p)) { Tat(ln, ty - 8, { x: x + TILE_PAD, size: 8, font: serifI, color: SOFT }); ty -= 10.5; }
+    for (const ln of tileNoteLines(p, cols)) { Tat(ln, ty - 8, { x: x + TILE_PAD, size: 8, font: serifI, color: SOFT }); ty -= 10.5; }
   };
-  const drawTileGrid = (points: Array<{ t: string; v: string; tone: string }>) => {
-    for (let i = 0; i < points.length; i += TILE_COLS) {
-      const row = points.slice(i, i + TILE_COLS);
-      const rowH = Math.max(...row.map(tileHeight));
-      need(rowH + 6);
-      row.forEach((p, ci) => drawTile(M + ci * (TILE_W + TILE_GAP), y, rowH, p));
-      y -= rowH + TILE_GAP;
+  // AN OUTLIER-LONG NOTE TAKES THE FULL WIDTH.
+  // A row is as tall as its tallest tile, so one point whose explanation runs
+  // far longer than its neighbours' inflates the whole row -- and a row too
+  // tall for the space left on the page pushes to the next one, stranding the
+  // bottom of the previous page empty. That is the trailing whitespace Vic has
+  // now called out twice. Toyota's warranty-remaining note is the usual
+  // culprit at ~700 characters: 13 lines inside a two-column tile, 7 across the
+  // full width. Giving it the full width in place makes the CLUSTER shorter
+  // than it was and truncates nothing. [[report-never-empty]]
+  const WIDE_NOTE_LINES = 8;
+  const isWide = (p: Pt, cols: number) => cols > 1 && tileNoteLines(p, cols).length > WIDE_NOTE_LINES;
+  // THE COLUMN COUNT IS MEASURED, NOT ASSUMED.
+  // More columns is not automatically more compact: a narrower tile wraps its
+  // note to more lines, and a row costs the height of its tallest tile. For
+  // these explanations two wide columns frequently beat three narrow ones, and
+  // which way it falls depends on the actual strings, which are data. So both
+  // candidate grids are laid out arithmetically and the shorter one wins, with
+  // a flush grid breaking a tie -- shortest first because trailing whitespace
+  // is the thing Vic has called out twice, and no row is left ragged for free.
+  // gridHeight MIRRORS drawTileGrid exactly, full-width outliers included; if
+  // one changes the other must.
+  const gridHeight = (points: Pt[], cols: number) => {
+    let h = 0, buf: Pt[] = [];
+    const flushH = () => {
+      for (let i = 0; i < buf.length; i += cols) {
+        h += Math.max(...buf.slice(i, i + cols).map((p) => tileHeight(p, cols))) + TILE_GAP;
+      }
+      buf = [];
+    };
+    for (const p of points) {
+      if (isWide(p, cols)) { flushH(); h += tileHeight(p, 1) + TILE_GAP; } else buf.push(p);
     }
+    flushH();
+    return h;
+  };
+  const colsFor = (points: Pt[]) => {
+    // A single point takes the whole width: at two columns it drew one tile
+    // beside an equal area of blank page.
+    if (points.length <= 1) return 1;
+    let best = 2, bestH = Infinity, bestRagged = 9;
+    for (const c of [2, 3]) {
+      const h = gridHeight(points, c);
+      // Raggedness counts the tiles that will actually SIT IN THE GRID --
+      // outlier-long notes are pulled out into their own full-width rows, so
+      // counting them made a ragged layout look flush and could win the
+      // tie-break on a false claim.
+      const inGrid = points.filter((p) => !isWide(p, c)).length;
+      const ragged = inGrid === 0 || inGrid % c === 0 ? 0 : 1;
+      if (h < bestH - 0.5 || (h <= bestH + 0.5 && ragged < bestRagged)) { best = c; bestH = h; bestRagged = ragged; }
+    }
+    return best;
+  };
+  // The height of whatever this cluster draws FIRST, so the header reservation
+  // knows what it is holding a place for.
+  const firstBlockHeight = (points: Pt[], cols: number) => {
+    if (!points.length) return 0;
+    if (isWide(points[0], cols)) return tileHeight(points[0], 1);
+    const run: Pt[] = [];
+    for (const p of points) { if (isWide(p, cols)) break; run.push(p); if (run.length === cols) break; }
+    return Math.max(...run.map((p) => tileHeight(p, cols)));
+  };
+  const drawTileGrid = (points: Pt[], cols: number) => {
+    const flush = (buf: Pt[]) => {
+      for (let i = 0; i < buf.length; i += cols) {
+        const row = buf.slice(i, i + cols);
+        const rowH = Math.max(...row.map((p) => tileHeight(p, cols)));
+        need(rowH + 6);
+        row.forEach((p, ci) => drawTile(M + ci * (tileW(cols) + TILE_GAP), y, rowH, p, cols));
+        y -= rowH + TILE_GAP;
+      }
+    };
+    let buf: Pt[] = [];
+    for (const p of points) {
+      if (!isWide(p, cols)) { buf.push(p); continue; }
+      flush(buf); buf = [];
+      const h = tileHeight(p, 1);
+      need(h + 6);
+      drawTile(M, y, h, p, 1);
+      y -= h + TILE_GAP;
+    }
+    flush(buf);
   };
   // ---- THREE NAMED CLUSTERS ("the winner" -- Isometric Dashboard Wall,
   // Vic, 2026-09-10) instead of one flat grid. The ten canonical points
@@ -1612,34 +1829,68 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   for (const cl of clusters) {
     const points = CORE.filter((p) => p.t !== "Price vs MSRP" && clusterOf(p.t) === cl.key);
     if (!points.length) continue;
-    need(34);
+    // A section header is worth nothing at the foot of a page with its tiles
+    // on the next one, so the reservation covers the header, its blurb AND the
+    // first tile row -- the smallest unit that still reads as one section.
+    // (need(34) covered the header and blurb only, which is how a cluster
+    // heading could land alone above a page break.)
+    const blurbH = wrap(cl.blurb, sans, 8, W).length * 11;
+    const cols = colsFor(points);
+    const firstRowH = firstBlockHeight(points, cols);
+    need(17 + blurbH + 4 + firstRowH + 6);
     page.drawCircle({ x: M + 3.5, y: y - 5, size: 3.5, color: cl.dot });
     T(cl.label, { x: M + 13, size: 8.5, font: sansB, color: SOFT });
-    page.drawLine({ start: { x: M + 13 + sansB.widthOfTextAtSize(cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
+    page.drawLine({ start: { x: M + 13 + wSafe(sansB, cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
     y -= 17;
     para(cl.blurb, { size: 8, font: sans, color: FAINT, lead: 3 });
     advance(4);
-    drawTileGrid(points);
+    drawTileGrid(points, cols);
     advance(4);
   }
   advance(2); rule();
 
   if (EXTRA.length) {
-    // ---- ALSO CHECKED — chip strip (concept #7). Extra context this listing
+    // ---- ALSO CHECKED -- chip strip (concept #7). Extra context this listing
     // happened to support; never counted among the ten, so it reads as a row
     // of small pills, not another numbered list. ----
+    //
+    // THE STRANDED-STRIP BUG. `rowTop` used to be captured from `y` BEFORE the
+    // need() that followed it. When the kicker fit at the foot of a page but
+    // the chips did not, need() started a fresh page and reset `y` to its top
+    // -- while `rowTop` still held the PREVIOUS page's bottom. The strip drew
+    // at the foot of the new page and left everything above it blank, and the
+    // need() inside the wrap loop did the same thing again per row.
+    //
+    // Reported live 2026-09-10 (report LC-01EE-2B7, a used 2024 Land Cruiser):
+    // page 2 ended on the words "ALSO CHECKED ON THIS LISTING (3)", page 3 held
+    // those three chips alone at its foot and nothing else. Vic: "3rd page is
+    // empty".
+    //
+    // The fix is to MEASURE the whole block -- header plus every wrapped row --
+    // and reserve it once, up front, before a single mark is made. Nothing
+    // inside the layout calls need() any more, so `y` cannot move under it and
+    // the header can never be separated from its strip.
+    const CHIP_H = 22, CHIP_GAP = 8;
+    const chipWidth = (p: { t: string; v: string }) =>
+      wSafe(sansB, `${p.t}: `, 8) + wSafe(monoB, p.v, 8) + 24;
+    let chipRows = 1, lineUsed = 0;
+    for (const p of EXTRA) {
+      const cw = chipWidth(p);
+      if (lineUsed > 0 && lineUsed + cw > W) { chipRows++; lineUsed = cw + CHIP_GAP; }
+      else lineUsed += cw + CHIP_GAP;
+    }
+    need(18 + chipRows * CHIP_H + (chipRows - 1) * CHIP_GAP + 10);
     kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
     let cx2 = M, rowTop = y;
-    const CHIP_H = 22, CHIP_GAP = 8;
-    need(CHIP_H + 6);
     for (const p of EXTRA) {
-      const label = `${p.t}: `, valTxt = p.v;
-      const chipW = sansB.widthOfTextAtSize(label, 8) + monoB.widthOfTextAtSize(valTxt, 8) + 20;
-      if (cx2 + chipW > M + W) { cx2 = M; rowTop -= CHIP_H + CHIP_GAP; need(CHIP_H + 6); }
-      page.drawRectangle({ x: cx2, y: rowTop - CHIP_H, width: chipW, height: CHIP_H, borderColor: HAIR, borderWidth: 0.7 });
-      Tat(label, rowTop - CHIP_H / 2 - 3, { x: cx2 + 10, size: 8, font: sansB, color: FAINT });
-      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 10 + sansB.widthOfTextAtSize(label, 8), size: 8, font: monoB, color: INK });
-      cx2 += chipW + CHIP_GAP;
+      const label = `${p.t}: `, valTxt = p.v, cw = chipWidth(p);
+      // `cx2 > M` guards the first chip on a row: a single chip wider than the
+      // full column used to wrap before it was ever drawn, costing a blank row.
+      if (cx2 > M && cx2 + cw > M + W) { cx2 = M; rowTop -= CHIP_H + CHIP_GAP; }
+      rrect(cx2, rowTop, cw, CHIP_H, CHIP_H / 2, { borderColor: HAIR, borderWidth: 0.7, color: PAPER });
+      Tat(label, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12, size: 8, font: sansB, color: FAINT });
+      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12 + wSafe(sansB, label, 8), size: 8, font: monoB, color: INK });
+      cx2 += cw + CHIP_GAP;
     }
     y = rowTop - CHIP_H - 4;
     rule();
@@ -1735,8 +1986,15 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const dolMonths = d >= 60 ? (d / 30.4).toFixed(1).replace(/\.0$/, "") : null;
     // Same tiers as the app card: green < 31, amber 31-89, red 90+.
     const tier = d >= 90 ? 2 : d >= 31 ? 1 : 0;
-    const ACC = [rgb(0.557, 0.835, 0), rgb(1, 0.69, 0.125), rgb(1, 0.231, 0.361)][tier];
-    const DK = rgb(0.078, 0.078, 0.078), DK2 = rgb(0.165, 0.165, 0.165);
+    // THE WHITE HOLE. This card was ported from the app's light-theme alert
+    // card and kept its literals: a pure white frame (rgb 1,1,1) with a 2pt
+    // near-black border, a panel flooded in #8ED500 lime / #FFB020 / #FF3B5C,
+    // and body copy in #141414. On the diorama's #05070b page it read as a
+    // hole punched through the document -- the single most off-palette element
+    // in the report (Vic, 2026-09-10: the PDF is nowhere near the design).
+    // Same geometry, same traffic light, diorama tokens throughout.
+    const ACC = [TEAL, AMBER, CORAL][tier];
+
     const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
     const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 
@@ -1759,14 +2017,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     kicker("DAYS ON LOT");
     const top = y;                          // PDF y of the card's top edge
     // white frame + dark border
-    page.drawRectangle({ x: CX, y: top - CARD_H, width: CARD_W, height: CARD_H, color: rgb(1, 1, 1), borderColor: DK, borderWidth: 2 });
+    rrect(CX, top, CARD_W, CARD_H, 10.5, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
     // tier-coloured content panel
-    page.drawRectangle({ x: CX + 2, y: top - CARD_H + 2, width: CARD_W - 4, height: panelH - 2, color: ACC });
+    // The tier colour is now a 2pt accent cap on the panel instead of a full
+    // flood: a whole panel of saturated teal/amber/coral would fight the page
+    // as hard as the lime did, and the mockup only ever uses an accent bar.
+    rrfill(CX + 0.7, top - STRIP, CARD_W - 1.4, panelH - 1.4, 9.8, PANEL2);
+    page.drawRectangle({ x: CX + 14, y: top - STRIP - 2.2, width: CARD_W - 28, height: 1.6, color: ACC });
     // brand mark on the white strip
     drawLogo(CX + 12, top - 6, 34);
     // first-seen date box (dark, accent-bordered), straddling strip and panel
     const DB = 54, DBX = CX + CARD_W - DB - 16, DBY = top - 12;
-    page.drawRectangle({ x: DBX, y: DBY - DB, width: DB, height: DB, color: DK, borderColor: ACC, borderWidth: 1 });
+    rrect(DBX, DBY, DB, DB, 7, { color: PAPER, borderColor: ACC, borderWidth: 1 });
     if (sinceD) {
       center(`${M3[sinceD.getMonth()]} ${sinceD.getFullYear()}`, DBY - 15, { cx: DBX + DB / 2, size: 6.5, font: sansB, color: ACC });
       center(String(sinceD.getDate()), DBY - 34, { cx: DBX + DB / 2, size: 17, font: serifB, color: ACC });
@@ -1775,21 +2037,29 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       center(`${d.toLocaleString("en-CA")}d`, DBY - 34, { cx: DBX + DB / 2, size: 15, font: serifB, color: ACC });
     }
     // traffic light below the date box — the tier's bulb is lit
-    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16;
-    page.drawRectangle({ x: TLX - 10, y: TLTOP - GAP * 2 - 10 - BULB, width: 20, height: GAP * 2 + BULB * 2 + 10, color: DK, borderColor: DK2, borderWidth: 1 });
-    ([[rgb(1, 0.231, 0.361), tier === 2], [rgb(1, 0.69, 0.125), tier === 1], [rgb(0.557, 0.835, 0), tier === 0]] as const)
+    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16, TL_PAD = 7;
+    // THE HOUSING IS DERIVED FROM THE BULBS IT CONTAINS, so the two cannot
+    // disagree. Hand-computing it is exactly how the bottom bulb came to hang
+    // 2.5pt below its own enclosure (reviewed 2026-09-10): the box was ported
+    // from drawRectangle, whose `y` is the BOTTOM edge, to rrect, whose `y` is
+    // the TOP, and the conversion picked up a stray +5. Now the box is always
+    // TL_PAD beyond the outermost bulb centres, whatever those become.
+    const bulbCy = [0, 1, 2].map((i) => TLTOP - BULB - 2 - i * GAP);
+    const tlTop = bulbCy[0] + BULB + TL_PAD, tlBottom = bulbCy[2] - BULB - TL_PAD;
+    rrect(TLX - 10, tlTop, 20, tlTop - tlBottom, 9, { color: PAPER, borderColor: HAIR, borderWidth: 0.7 });
+    ([[CORAL, tier === 2], [AMBER, tier === 1], [TEAL, tier === 0]] as const)
       .forEach(([col, on], i) => {
-        page.drawCircle({ x: TLX, y: TLTOP - BULB - 2 - i * GAP, size: BULB, color: on ? col : DK2 });
+        page.drawCircle({ x: TLX, y: bulbCy[i], size: BULB, color: on ? col : HAIR });
       });
     // headline + body inside the panel
     let cy = top - STRIP - 16;
-    Tat(`${d.toLocaleString("en-CA")} DAYS ON LOT`, cy - 17, { x: CX + PADX, size: 17, font: serifB, color: DK });
+    Tat(`${d.toLocaleString("en-CA")} DAYS ON LOT`, cy - 17, { x: CX + PADX, size: 17, font: serifB, color: INK });
     cy -= TITLE_H + 6;
-    for (const ln of bodyLines) { Tat(ln, cy - 9, { x: CX + PADX, size: 9, font: sans, color: DK }); cy -= LINE_H; }
+    for (const ln of bodyLines) { Tat(ln, cy - 9, { x: CX + PADX, size: 9, font: sans, color: SOFT }); cy -= LINE_H; }
     // CTA chip (dark, accent text) — mirrors the app card's chip
     const chipTxt = d >= 31 ? "ASK FOR A DISCOUNT" : "FRESH ON THE LOT";
-    const chipW = sansB.widthOfTextAtSize(chipTxt, 8) + 20;
-    page.drawRectangle({ x: CX + PADX, y: cy - CHIP_H - 6, width: chipW, height: CHIP_H, color: DK });
+    const chipW = wSafe(sansB, chipTxt, 8) + 20;
+    rrect(CX + PADX, cy - 6, chipW, CHIP_H, CHIP_H / 2, { color: PAPER, borderColor: ACC, borderWidth: 0.7 });
     Tat(chipTxt, cy - CHIP_H + 1, { x: CX + PADX + 10, size: 8, font: sansB, color: ACC });
     y = top - CARD_H - 12;
 

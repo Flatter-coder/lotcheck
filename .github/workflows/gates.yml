@@ -313,6 +313,12 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      # A PDF box sized from the RAW string but drawn with the pdfSafe()
+      # rewrite of it is sized for text that never lands in it -- and only
+      # the one value carrying the rewritten character shows it, so no
+      # single rendered report proves the absence.
+      - name: PDF width measurements are sanitised (measure what you draw)
+        run: npm run check:pdf-measure
       - name: Report lines (other listings read; if you do nothing) + page-default reader
         run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)

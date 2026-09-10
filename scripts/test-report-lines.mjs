@@ -18,9 +18,9 @@
 //      copy gate forbids -- so a state no surface exercises today cannot ship a
 //      banned word tomorrow.
 import { readFileSync } from "node:fs";
-import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder } from "../supabase/functions/_shared/market-count.js";
+import { computeMarketCount, normTrim, fullTrimKey, trimLabelOf, likeForLikePool, dropModelWords, fuelPowertrainHint, olderYearsLadder, hintIsDiscriminating, resolvePowertrainWall } from "../supabase/functions/_shared/market-count.js";
 import { readPageDefault, readSm360PageDefault, readPageTextDefault, readEdealerPageDefault, parseAmount } from "../supabase/functions/_shared/page-default.js";
-import { priceMovesLine, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney } from "../supabase/functions/_shared/report-lines.js";
+import { priceMovesLine, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, albertaRulesApply, insurancePremiumLine, financingAprNote, financingAprValue, pageDefaultApr, provinceOf, fmtDateEn, fmtMoney, allTrimsWords, allTrimsClause } from "../supabase/functions/_shared/report-lines.js";
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -670,6 +670,226 @@ console.log("\n-- advertised price moves --");
   check("no state assigns the dealer a motive",
     [drop, rise, flat].every((r) => !/hiding|desperate|panic|confess|admits?/i.test(r.line)));
 }
+
+// ---------------------------------------------------------------------------
+// THE FUEL-TYPE HINT MAY NOT WALL OFF A WHOLE NAMEPLATE.
+//
+// A real customer report (LC-01EE-2B7, a used 2024 Toyota Land Cruiser 1958 at
+// Country Hills Toyota, 2026-09-10) said "no used 2023 to 2024 Toyota Land
+// Cruiser Hybrid ... were among the listings read" and "0 read, 5 per model
+// year needed" for a nameplate Alberta lots do stock. The J250 Land Cruiser is
+// hybrid-ONLY in Canada, so no dealer writes "Hybrid" on one -- there is no gas
+// sibling to distinguish it from. The subject's page DID declare hybrid, so the
+// one-sided fuel-type hint disagreed with every candidate row and the powertrain
+// wall rejected the entire market. Vic: "it didn't compare other used land
+// cruzers around Alberta that's big failure".
+//
+// These cases pin BOTH directions: the wall stands down when no row in the pool
+// names a powertrain, and it keeps full force the moment one does.
+{
+  console.log("");
+  console.log("-- fuel-type hint / powertrain wall --");
+  const today = "2026-09-10";
+
+  // A hybrid-only nameplate: five real Alberta listings, none carrying a marker.
+  const lcRows = [
+    { trim: "1958", price: 79995, year: 2024, odometerKm: 30000, asOf: "2026-09-08" },
+    { trim: "First Edition", price: 92000, year: 2024, odometerKm: 22000, asOf: "2026-09-07" },
+    { trim: "1958", price: 76500, year: 2024, odometerKm: 51000, asOf: "2026-09-06" },
+    { trim: "Land Cruiser", price: 81000, year: 2024, odometerKm: 40000, asOf: "2026-09-05" },
+    { trim: "1958", price: 73900, year: 2024, odometerKm: 58000, asOf: "2026-09-04" },
+  ];
+  check("a pool where no row names a powertrain gives the hint nothing to judge",
+    hintIsDiscriminating("Land Cruiser", lcRows) === false);
+  const lc = likeForLikePool(lcRows, { model: "Land Cruiser", trim: "1958", year: 2024,
+    condition: "used", odometerKm: 46680, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("a page-declared hybrid still finds its market on a hybrid-only nameplate",
+    lc.insufficient === false && lc.nRead === 5, `insufficient=${lc.insufficient} nRead=${lc.nRead}`);
+  // The label has to follow the wall: a set that was never powertrain-separated
+  // must not be described as though it had been.
+  check("a set the wall did not separate is not labelled with a powertrain",
+    lc.powertrain === null, String(lc.powertrain));
+
+  // A nameplate sold in both forms: the vocabulary IS in use, so silence on the
+  // other rows means gas and the wall must hold.
+  const rav4Rows = [
+    { trim: "XLE", price: 38000, year: 2024, odometerKm: 40000, asOf: "2026-09-08" },
+    { trim: "LE", price: 35000, year: 2024, odometerKm: 45000, asOf: "2026-09-07" },
+    { trim: "XLE AWD", price: 39000, year: 2024, odometerKm: 48000, asOf: "2026-09-06" },
+    { trim: "Limited", price: 44000, year: 2024, odometerKm: 39000, asOf: "2026-09-05" },
+    { trim: "XSE AWD Hybrid", price: 46000, year: 2024, odometerKm: 44000, asOf: "2026-09-04" },
+    { trim: "TRD Off-Road", price: 43000, year: 2024, odometerKm: 41000, asOf: "2026-09-03" },
+  ];
+  check("one row naming a powertrain proves the vocabulary is in use",
+    hintIsDiscriminating("RAV4", rav4Rows) === true);
+  const hyb = likeForLikePool(rav4Rows, { model: "RAV4", trim: "XLE AWD", year: 2024,
+    condition: "used", odometerKm: 46000, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("a hybrid RAV4 is STILL walled off from the gas RAV4s",
+    hyb.insufficient === true && hyb.nRead === 1, `insufficient=${hyb.insufficient} nRead=${hyb.nRead}`);
+  check("and it still says which car it was looking for",
+    hyb.powertrain === "Hybrid", String(hyb.powertrain));
+  const gas = likeForLikePool(rav4Rows, { model: "RAV4", trim: "XLE AWD", year: 2024,
+    condition: "used", odometerKm: 46000, minRows: 5, today,
+    powertrainHint: fuelPowertrainHint("Gasoline") });
+  check("a gas RAV4 still excludes the one hybrid row",
+    gas.insufficient === false && gas.nRead === 5, `insufficient=${gas.insufficient} nRead=${gas.nRead}`);
+
+  // The Equinox EV incident the wall was built for, unchanged.
+  check("an EV nameplate marker is still discriminating",
+    hintIsDiscriminating("Equinox", [
+      { trim: "LT", price: 32000, year: 2024, odometerKm: 40000, asOf: "2026-09-08" },
+      { trim: "EV LT", price: 45000, year: 2024, odometerKm: 41000, asOf: "2026-09-06" },
+    ]) === true);
+
+  // The model-year ladder reads the same market and must agree with the card.
+  const olderRows = [
+    { trim: "1958", price: 71000, year: 2023, odometerKm: 60000, asOf: "2026-09-08" },
+    { trim: "1958", price: 69500, year: 2023, odometerKm: 72000, asOf: "2026-09-07" },
+    { trim: "First Edition", price: 78000, year: 2023, odometerKm: 55000, asOf: "2026-09-06" },
+    { trim: "1958", price: 70200, year: 2023, odometerKm: 66000, asOf: "2026-09-05" },
+    { trim: "Land Cruiser", price: 72400, year: 2023, odometerKm: 61000, asOf: "2026-09-04" },
+  ];
+  const ladder = olderYearsLadder(olderRows, { model: "Land Cruiser", trim: "1958", year: 2024,
+    minRows: 5, today, powertrainHint: fuelPowertrainHint("Hybrid") });
+  check("the model-year ladder reads the same market as the comparison card",
+    ladder.nRead === 5, `nRead=${ladder.nRead}`);
+}
+
+// ---------------------------------------------------------------------------
+// THE WALL'S EVIDENCE MUST COME FROM THE SET IT FILTERS.
+//
+// Reviewed 2026-09-10, after the fix above shipped for review: the gate scanned
+// every row it was handed while the wall it controls acts only on rows that
+// survive the price, recency and model-year cuts. So ONE row that could never
+// be compared anyway silently reverted the whole fix -- a Land Cruiser with
+// five good comparables dropped back to zero on a single four-month-stale row
+// a dealer had typed "Hybrid" into. The first round of tests could not catch it
+// because every row they used was in-window, priced and in the subject's year.
+//
+// These cases pin the population boundary at all three call sites. Each one
+// adds a marker row that is INELIGIBLE for that particular comparison, and
+// asserts the comparison is unaffected -- then adds an ELIGIBLE marker row and
+// asserts the wall still slams shut.
+{
+  console.log("");
+  console.log("-- powertrain wall: evidence comes from the filtered set --");
+  const today = "2026-09-10";
+  const lcRows = [
+    { trim: "1958", price: 79995, year: 2024, odometerKm: 30000, asOf: "2026-09-08" },
+    { trim: "First Edition", price: 92000, year: 2024, odometerKm: 22000, asOf: "2026-09-07" },
+    { trim: "1958", price: 76500, year: 2024, odometerKm: 51000, asOf: "2026-09-06" },
+    { trim: "Land Cruiser", price: 81000, year: 2024, odometerKm: 40000, asOf: "2026-09-05" },
+    { trim: "1958", price: 73900, year: 2024, odometerKm: 58000, asOf: "2026-09-04" },
+  ];
+  const lcCtx = { model: "Land Cruiser", trim: "1958", year: 2024, condition: "used",
+    odometerKm: 46680, minRows: 5, today, powertrainHint: fuelPowertrainHint("Hybrid") };
+  const pool = (extra) => likeForLikePool(extra ? [...lcRows, extra] : lcRows, lcCtx);
+
+  check("comparison card: a STALE marker row cannot re-arm the wall",
+    pool({ trim: "Hybrid", price: 88000, year: 2024, odometerKm: 35000, asOf: "2026-05-02" }).nRead === 5);
+  check("comparison card: an UNPRICED marker row cannot re-arm the wall",
+    pool({ trim: "Hybrid", price: 0, year: 2024, odometerKm: 35000, asOf: "2026-09-08" }).nRead === 5);
+  const armed = pool({ trim: "Hybrid", price: 88000, year: 2024, odometerKm: 35000, asOf: "2026-09-08" });
+  check("comparison card: an ELIGIBLE marker row DOES re-arm the wall",
+    armed.nRead === 1 && armed.insufficient === true, `nRead=${armed.nRead}`);
+
+  const olderRows = [0, 1, 2, 3, 4].map((i) => ({ trim: "1958", price: 70000 + i * 500,
+    year: 2023, odometerKm: 60000 + i * 2000, asOf: `2026-09-0${4 + (i % 5)}` }));
+  const ladder = (extra) => olderYearsLadder(extra ? [...olderRows, extra] : olderRows,
+    { model: "Land Cruiser", trim: "1958", year: 2024, minRows: 5, today, powertrainHint: "Hybrid" });
+  check("model-year ladder: a marker row in the SUBJECT's year cannot re-arm the wall",
+    ladder({ trim: "Hybrid", price: 90000, year: 2024, odometerKm: 10000, asOf: "2026-09-08" }).nRead === 5);
+  check("model-year ladder: a marker row in a year it DOES read re-arms the wall",
+    ladder({ trim: "Hybrid", price: 75000, year: 2023, odometerKm: 65000, asOf: "2026-09-08" }).nRead === 1);
+
+  const count = (extra) => computeMarketCount(extra ? [...lcRows, extra] : lcRows,
+    { ...lcCtx, price: 74883, province: "AB", make: "Toyota" });
+  check("count line: a STALE marker row cannot re-arm the wall",
+    count({ trim: "Hybrid", price: 88000, year: 2024, odometerKm: 35000, asOf: "2026-05-02" }).n === 5);
+  // The count line deliberately counts UNPRICED listings too (out.unpriced), so
+  // an unpriced in-window hybrid IS in the population its wall filters and is
+  // legitimate evidence. Pinned so the asymmetry is deliberate, not accidental.
+  check("count line: an unpriced in-window marker row IS evidence, because that line counts unpriced rows",
+    count({ trim: "Hybrid", price: 0, year: 2024, odometerKm: 35000, asOf: "2026-09-08" }).powertrainSeparated === true);
+
+  // Every producer must state the flag, so the permissive default in
+  // allTrimsWords is never reached by live code.
+  check("every producer states powertrainSeparated as a boolean",
+    [pool(null).powertrainSeparated, ladder(null).powertrainSeparated,
+     count(null).powertrainSeparated, computeMarketCount(null, lcCtx).powertrainSeparated]
+      .every((v) => typeof v === "boolean"));
+
+  // resolvePowertrainWall, directly: the four cases that decide the claim.
+  check("wall: nothing declared -> separated (nothing was lost)",
+    resolvePowertrainWall("Land Cruiser", "1958", "", lcRows).separated === true);
+  check("wall: declared and applicable -> separated",
+    resolvePowertrainWall("RAV4", "XLE", "Hybrid", [{ trim: "XSE Hybrid" }, { trim: "LE" }]).separated === true);
+  check("wall: declared, inapplicable, subject text silent -> NOT separated",
+    resolvePowertrainWall("Land Cruiser", "1958", "Hybrid", lcRows).separated === false);
+  check("wall: declared, inapplicable, but the subject's OWN trim names it -> separated",
+    resolvePowertrainWall("RAV4", "XSE Hybrid", "Hybrid", [{ trim: "LE" }]).separated === true);
+}
+
+// ---------------------------------------------------------------------------
+// "SAME POWERTRAIN" IS A CLAIM, AND IT MAY NOT OUTLIVE THE FILTER.
+//
+// Relaxing the wall made `scope === "model"` reachable on a set assembled by
+// IGNORING powertrain, while five surfaces printed "(all trims, same
+// powertrain)" off the trim scope alone -- an unbacked claim in customer-facing
+// copy on the PDF, the on-screen report and the shared link at once. The phrase
+// now comes from one helper, and the last check below is what stops a sixth
+// site hardcoding it again.
+{
+  console.log("");
+  console.log("-- \"same powertrain\" only when the set earned it --");
+  const mvSep = { average: 57999, low: 53489, high: 72995, comps: 6, asOf: "2026-08-18",
+    seenMin: "2026-08-03", seenMax: "2026-08-18", yearFrom: 2024, yearTo: 2025,
+    trimScope: "model", trimLabel: "Luxury", kmLow: 0, kmHigh: 62000, condition: "used",
+    dealers: 2, make: "Lexus", model: "RX", province: "AB", powertrainSeparated: true };
+  const mvUnsep = { ...mvSep, powertrainSeparated: false };
+  const ask = { quotedPrice: 56000, make: "Lexus", model: "RX", year: 2025, province: "AB" };
+
+  const sep = marketCompareLine({ ...ask, marketValue: mvSep });
+  const unsep = marketCompareLine({ ...ask, marketValue: mvUnsep });
+  const simSep = sep.lines.find((l) => /Similar listings/i.test(l.k)).v;
+  const simUnsep = unsep.lines.find((l) => /Similar listings/i.test(l.k)).v;
+  check("separated set keeps the claim", /\(all trims, same powertrain\)/.test(simSep), simSep);
+  check("UNSEPARATED set drops the claim and still says all trims",
+    /\(all trims\)/.test(simUnsep) && !/same powertrain/.test(simUnsep), simUnsep);
+  check("dropping the claim changes nothing else in the sentence",
+    simUnsep.replace("(all trims)", "(all trims, same powertrain)") === simSep);
+
+  check("the helper is the only thing that decides the phrase",
+    allTrimsWords({ powertrainSeparated: false }) === "all trims" &&
+    allTrimsWords({ powertrainSeparated: true }) === "all trims, same powertrain" &&
+    allTrimsClause({ powertrainSeparated: false }) === " (all trims)");
+  // An analysis sealed before the flag existed keeps the sentence it was
+  // correctly given at the time, so the default stays permissive on purpose.
+  check("an analysis with no flag keeps the sentence it was sealed with",
+    allTrimsWords({}) === "all trims, same powertrain" && allTrimsWords(null) === "all trims, same powertrain");
+
+  // THE DRIFT GUARD. The phrase may exist in exactly one expression in
+  // report-lines.js -- the helper's own return -- and nowhere else in any
+  // shared module. Without this, the next person to add a market sentence
+  // copies the literal and the claim is unbacked again on that one surface.
+  const shared = ["report-lines.js", "market-count.js", "marketvalue.ts", "page-default.js"]
+    .map((f) => [f, readFileSync(new URL(`../supabase/functions/_shared/${f}`, import.meta.url), "utf8")]);
+  const offenders = [];
+  for (const [name, src] of shared) {
+    src.split(/\r?\n/).forEach((line, i) => {
+      if (!/same powertrain/.test(line)) return;
+      const code = line.replace(/^\s*\/\/.*$/, "").replace(/\/\/.*$/, "");
+      if (!/same powertrain/.test(code)) return;                 // a comment, fine
+      if (/powertrainSeparated/.test(code)) return;              // gated, fine
+      offenders.push(`${name}:${i + 1}`);
+    });
+  }
+  check("no shared module hardcodes \"same powertrain\" outside a powertrainSeparated gate",
+    offenders.length === 0, offenders.join(", "));
+}
+
 
 console.log(`\n${pass} passed, ${fail} failed${fail ? `\n  ${failures.join("\n  ")}` : ""}`);
 process.exit(fail ? 1 : 0);
