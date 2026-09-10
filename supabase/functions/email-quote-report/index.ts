@@ -1406,12 +1406,40 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   Tat(msrpExact ? "manufacturer suggested" : "reference figure - not the sticker", figTop - 48, { x: rx, size: 8, font: sans, color: FAINT });
   page.drawLine({ start: { x: M + colW, y: figTop - 6 }, end: { x: M + colW, y: figTop - 50 }, thickness: 0.7, color: HAIR });
   y = figTop - 58;
+  // ---- MSRP RANGE BAR (concept #7, "price-terrain-chart") ----
+  // The honest half of #7's terrain chart: a real MSRP mark and a real
+  // asking-price mark on one shared scale, the gap between them shaded and
+  // quantified. What #7's mockup drew as a continuous bezier "ridge line"
+  // between the two points was decorative, not data -- nothing else on this
+  // listing backs a curve, so only the two real marks and the real gap are
+  // drawn. [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]]
   if (delta && a.msrpBasis === "exact") {
-    const label = (delta > 0 ? "+" + money(delta) + " OVER MSRP" : money(Math.abs(delta)) + " UNDER MSRP");
-    T(label, { size: 11, font: sansB, color: delta > 0 ? CORAL : TEAL });
-    if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label, 11); Tat("(vs catalog MSRP - listing price not yet verified)", y - 11, { x: M + wl + 6, size: 8.5, font: sans, color: FAINT }); }
-    y -= 22;
+    need(58);
+    const barH = 10, barY = y - 4;
+    const lo = Math.min(qp, ms), hi = Math.max(qp, ms);
+    const pad = Math.max((hi - lo) * 0.2, 60);
+    const lo2 = lo - pad, hi2 = hi + pad, span = (hi2 - lo2) || 1;
+    const xFor = (v: number) => M + ((v - lo2) / span) * W;
+    const over = delta > 0, gapColor = over ? CORAL : TEAL, gapBg = over ? rgb(0.98, 0.925, 0.902) : rgb(0.906, 0.957, 0.945);
+    page.drawRectangle({ x: M, y: barY - barH, width: W, height: barH, color: TRACK });
+    const xMsrp = xFor(ms), xAsk = xFor(qp);
+    const gx0 = Math.min(xMsrp, xAsk), gx1 = Math.max(xMsrp, xAsk);
+    page.drawRectangle({ x: gx0, y: barY - barH, width: Math.max(gx1 - gx0, 1), height: barH, color: gapBg });
+    page.drawLine({ start: { x: xMsrp, y: barY + 5 }, end: { x: xMsrp, y: barY - barH - 5 }, thickness: 1.6, color: INK });
+    page.drawCircle({ x: xMsrp, y: barY - barH / 2, size: 3, color: INK });
+    page.drawLine({ start: { x: xAsk, y: barY + 5 }, end: { x: xAsk, y: barY - barH - 5 }, thickness: 2.2, color: gapColor });
+    page.drawCircle({ x: xAsk, y: barY - barH / 2, size: 3.6, color: gapColor });
+    y = barY - barH - 16;
+    const label = (over ? "+" : "-") + money(Math.abs(delta)) + (over ? " OVER MSRP" : " UNDER MSRP");
+    const pct = ms ? ` -- ${Math.abs(delta / ms * 100).toFixed(1)}%` : "";
+    T(label + pct, { size: 12.5, font: sansB, color: gapColor });
+    if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
+    y -= 24;
   }
+  // "What this means" -- the printed twin of the on-screen explanation, and
+  // the only place a non-exact basis (gated price, used/original-when-new,
+  // dealer-stated) explains itself, since that case draws no range bar above.
+  { const ex = pointExplain("Price vs MSRP", a); if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W }); advance(4); } }
   // Where the buyer checks us. The PDF is the artifact that gets forwarded to
   // the dealer, so the citation has to travel WITH the number -- a figure the
   // reader cannot re-verify is one they have to take on trust, and this whole
@@ -1446,8 +1474,22 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const cx = M + 92, gy = y - 96, r = 78, seg = 64;
     const pt = (ang: number): [number, number] => [cx + r * Math.cos(ang), gy + r * Math.sin(ang)];
     for (let i = 0; i < seg; i++) { const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI); page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: TRACK }); }
+    // Gradient fill (concept #7): coral -> amber -> teal across the WHOLE 0-10
+    // scale, not just the filled portion, so a low score still reads as "low
+    // on a red-to-green scale" rather than "a short grey arc" -- the colour
+    // itself carries the verdict the way the gauge's numbers already do.
+    const GRAD: [number, number, number][] = [[0.816, 0.294, 0.184], [0.827, 0.647, 0.157], [0.09, 0.459, 0.42]];
+    const lerp3 = (t: number): [number, number, number] => {
+      const seg2 = t <= 0.5 ? 0 : 1, lt = t <= 0.5 ? t * 2 : (t - 0.5) * 2;
+      const a0 = GRAD[seg2], a1 = GRAD[seg2 + 1];
+      return [a0[0] + (a1[0] - a0[0]) * lt, a0[1] + (a1[1] - a0[1]) * lt, a0[2] + (a1[2] - a0[2]) * lt];
+    };
     const f = score / 10, nAng = Math.PI - f * Math.PI, vSeg = Math.max(1, Math.round(seg * f));
-    for (let i = 0; i < vSeg; i++) { const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI); page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: TEAL }); }
+    for (let i = 0; i < vSeg; i++) {
+      const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI);
+      const [gr, gg, gb] = lerp3(i / seg);
+      page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: rgb(gr, gg, gb) });
+    }
     center("0", gy - 4, { size: 8.5, font: monoB, color: SOFT, cx: cx - r });
     center("5", gy + r + 7, { size: 8.5, font: monoB, color: SOFT, cx });
     center("10", gy - 4, { size: 8.5, font: monoB, color: SOFT, cx: cx + r });
@@ -1481,28 +1523,64 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const EXTRA = POINTS.slice(POINT_TITLES.length);
   kicker(`${CORE.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  const renderPoint = (p: { t: string; v: string; tone: string }) => {
-    // THE LABEL IS ALWAYS LEGIBLE. It used to render in SOFT whenever the tone
-    // was muted, so a muted row arrived as faded title + faint value + soft
-    // body -- the whole row receding at once. Vic caught it on a PDF where
-    // "Financing math -- $2,075/MO REF" was the most actionable number on the
-    // page and the hardest line to read on it.
-    //
-    // A row's LABEL carries no verdict; it is just the name of the check, and a
-    // reader scanning the audit has to be able to find it. Only the VALUE
-    // carries tone. Fixes every muted row, not just this one.
-    need(19); T(p.t, { size: 10.5, font: serif, color: INK }); right(p.v, { size: 9.5, font: monoB, color: toneColor[p.tone] || INK }); y -= 16.5;
-    // "What this means" — the printed twin of the on-screen explanation box,
-    // indented under its point in small italic so the audit stays scannable.
-    const ex = pointExplain(p.t, a);
-    if (ex) { para(ex, { size: 8.5, font: serifI, color: SOFT, lead: 3, x: M + 10, maxW: W - 10 }); advance(4); }
+  const toneChipBg: Record<string, any> = { pass: rgb(0.906, 0.957, 0.945), flag: rgb(0.98, 0.925, 0.902), muted: rgb(0.94, 0.93, 0.90) };
+  const toneChipText: Record<string, string> = { pass: "PASS", flag: "FLAG", muted: "—" };
+  // ---- SATELLITE GRID (concept #7, "price-terrain-chart") ----
+  // "Price vs MSRP" already gets its own hero treatment in THE DEAL /
+  // MSRP RANGE above, so it is excluded here -- the same split #7 draws
+  // between the hero terrain card and "the other nine checks".
+  const gridPoints = CORE.filter((p) => p.t !== "Price vs MSRP");
+  const TILE_GAP = 10, TILE_COLS = 3, TILE_W = (W - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS;
+  const TILE_PAD = 11;
+  // A tile's content height, computed BEFORE drawing anything, so a row of
+  // three can share one height (the tallest tile) instead of pdf-lib's
+  // drawing calls silently overlapping the next row down.
+  const tileNoteLines = (p: { t: string; v: string; tone: string }) => wrap(pointExplain(p.t, a) || "", serifI, 8, TILE_W - TILE_PAD * 2);
+  const tileHeight = (p: { t: string; v: string; tone: string }) => TILE_PAD * 2 + 12 /* label row */ + 6 + 15 /* value */ + 6 + tileNoteLines(p).length * 10.5;
+  const drawTile = (x: number, yTop: number, rowH: number, p: { t: string; v: string; tone: string }) => {
+    const tone = toneColor[p.tone] || INK, bg = toneChipBg[p.tone] || TRACK;
+    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: rowH, borderColor: HAIR, borderWidth: 0.7 });
+    page.drawRectangle({ x, y: yTop - rowH, width: 3, height: rowH, color: tone });
+    let ty = yTop - TILE_PAD;
+    // label (left) + tone chip (right), same row
+    Tat(p.t, ty - 8.5, { x: x + TILE_PAD, size: 8, font: sansB, color: FAINT });
+    const chipLbl = toneChipText[p.tone] || "—", chipW = sansB.widthOfTextAtSize(chipLbl, 6.5) + 10;
+    page.drawRectangle({ x: x + TILE_W - TILE_PAD - chipW, y: ty - 10.5, width: chipW, height: 11, color: bg });
+    center(chipLbl, ty - 8, { size: 6.5, font: sansB, color: tone, cx: x + TILE_W - TILE_PAD - chipW / 2 });
+    ty -= 18;
+    Tat(p.v, ty - 13, { x: x + TILE_PAD, size: 13, font: monoB, color: tone, });
+    ty -= 21;
+    for (const ln of tileNoteLines(p)) { Tat(ln, ty - 8, { x: x + TILE_PAD, size: 8, font: serifI, color: SOFT }); ty -= 10.5; }
   };
-  for (const p of CORE) renderPoint(p);
-  if (EXTRA.length) {
-    kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
-    for (const p of EXTRA) renderPoint(p);
+  for (let i = 0; i < gridPoints.length; i += TILE_COLS) {
+    const row = gridPoints.slice(i, i + TILE_COLS);
+    const rowH = Math.max(...row.map(tileHeight));
+    need(rowH + 6);
+    row.forEach((p, ci) => drawTile(M + ci * (TILE_W + TILE_GAP), y, rowH, p));
+    y -= rowH + TILE_GAP;
   }
-  rule();
+  advance(2); rule();
+
+  if (EXTRA.length) {
+    // ---- ALSO CHECKED — chip strip (concept #7). Extra context this listing
+    // happened to support; never counted among the ten, so it reads as a row
+    // of small pills, not another numbered list. ----
+    kicker(`ALSO CHECKED ON THIS LISTING (${EXTRA.length})`);
+    let cx2 = M, rowTop = y;
+    const CHIP_H = 22, CHIP_GAP = 8;
+    need(CHIP_H + 6);
+    for (const p of EXTRA) {
+      const label = `${p.t}: `, valTxt = p.v;
+      const chipW = sansB.widthOfTextAtSize(label, 8) + monoB.widthOfTextAtSize(valTxt, 8) + 20;
+      if (cx2 + chipW > M + W) { cx2 = M; rowTop -= CHIP_H + CHIP_GAP; need(CHIP_H + 6); }
+      page.drawRectangle({ x: cx2, y: rowTop - CHIP_H, width: chipW, height: CHIP_H, borderColor: HAIR, borderWidth: 0.7 });
+      Tat(label, rowTop - CHIP_H / 2 - 3, { x: cx2 + 10, size: 8, font: sansB, color: FAINT });
+      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 10 + sansB.widthOfTextAtSize(label, 8), size: 8, font: monoB, color: INK });
+      cx2 += chipW + CHIP_GAP;
+    }
+    y = rowTop - CHIP_H - 4;
+    rule();
+  }
 
   // ---- THE DEALER'S OWN PRICE BREAKDOWN ----
   // Printed because the dealer published it. Where the page's arithmetic
