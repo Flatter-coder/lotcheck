@@ -352,27 +352,20 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     });
   }
 
-  // 3 -- Financing APR (compact; glow if the dealer rate beats the maker's advertised)
-  // Dealer APR only powers the "high"/dollar-gap claim when it carries
-  // evidence (sm360_feed/convertus_vms/page_text -- see App.jsx
-  // TRUSTED_APR_SOURCES and _shared/deal.ts's trustedDealerApr, kept in
-  // sync). An unconfirmed LLM read ("llm", or the pre-2026-08-19 shape with
-  // no source) accused a dealer of a 25% rate and a $23,275 markup for a
-  // page that discloses no APR anywhere (easytermauto.ca).
-  const fr = a.financeRates;
-  const frDealerTrusted = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
-  if (fr && (frDealerTrusted != null || fr.manufacturer)) {
-    const high = frDealerTrusted != null && fr.manufacturer && (frDealerTrusted - fr.manufacturer.apr > 0.1);
-    let body = "";
-    if (frDealerTrusted != null) body += `<div style="font-size:18px;font-weight:900;color:${high ? "#A63C25" : "#33305A"};">${frDealerTrusted}% APR <span style="font-size:12px;font-weight:700;color:${high ? "#A63C25" : "#706D96"};">${high ? "· high" : "· this dealer"}</span></div>`;
-    if (high) {
-      const rd = frDealerTrusted / 1200, rm = fr.manufacturer.apr / 1200;
-      const extra = Math.round((price * rd / (1 - Math.pow(1 + rd, -60)) - price * rm / (1 - Math.pow(1 + rm, -60))) * 60);
-      body += `<div style="font-size:12.5px;color:#33305A;margin-top:5px;line-height:1.5;">${(frDealerTrusted - fr.manufacturer.apr).toFixed(2)}% above ${escapeHtml(a.make || "the manufacturer")}'s advertised ${fr.manufacturer.apr}% — about <b>${money(extra)}</b> more over 60 months. Ask them to match it.</div>`;
-    } else if (fr.manufacturer) {
-      body += `<div style="font-size:12px;color:#706D96;margin-top:4px;">${escapeHtml(a.make || "Manufacturer")} advertises ${fr.manufacturer.apr}% on new.</div>`;
-    }
-    deck.push({ label: "AMVIC", tone: high ? "flag" : "muted", glow: high, body });
+  // 3 -- AMVIC (point 4): the regulator's own status, verbatim. Retitled from
+  // "Financing APR" 2026-09-09, then wired to this real data 2026-09-10 (Vic:
+  // "make it real AMVIC data") after a live PDF showed this card titled AMVIC
+  // with a 4.9% financing rate as its body -- the 09-09 pass renamed the
+  // label only, per that day's explicit "just replace the words ... the rest
+  // do not touch". Worded once in report-lines.js so this card can never
+  // read differently than the point card or the compact "10-point
+  // verification" row below.
+  if (a.dealerLicence && a.dealerLicence.status) {
+    const L = a.dealerLicence, dl = dealerLicenceLine(a);
+    deck.push({ label: "AMVIC", tone: dl.tone, glow: dl.tone === "flag", body:
+      `<div style="font-size:18px;font-weight:900;color:${dl.tone === "pass" ? "#17756B" : "#A63C25"};">${escapeHtml(L.status)}</div>` +
+      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${L.legalName ? escapeHtml(L.legalName) + " &middot; " : ""}${L.licenceNumber ? "Licence " + escapeHtml(L.licenceNumber) + " &middot; " : ""}AMVIC public registry</div>` +
+      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${escapeHtml(dl.line)}</div>` });
   }
 
   // 3a -- Payment default: the page's own pre-selected payment scenario
@@ -765,14 +758,8 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
       `</div>` });
   }
 
-  // 5b2 -- AMVIC dealer licence (#11): the regulator's own status, verbatim.
-  if (a.dealerLicence && a.dealerLicence.status) {
-    const L = a.dealerLicence, good = L.state === "valid";
-    deck.push({ label: "Dealer licence - AMVIC", tone: good ? "pass" : "flag", glow: !good, body:
-      `<div style="font-size:18px;font-weight:900;color:${good ? "#17756B" : "#A63C25"};">${escapeHtml(L.status)}</div>` +
-      `<div style="font-size:12px;color:#706D96;margin-top:2px;">${L.legalName ? escapeHtml(L.legalName) + " &middot; " : ""}${L.licenceNumber ? "Licence " + escapeHtml(L.licenceNumber) + " &middot; " : ""}AMVIC public registry</div>` +
-      `<div style="font-size:12.5px;color:#33305A;margin-top:6px;line-height:1.5;">${good ? "AMVIC is Alberta's regulator and its registry currently shows this business as licensed - that's what you want to see." : "AMVIC's registry currently shows this status. Ask the dealer to confirm their current licence number and status in writing before any deposit, and check it yourself at amvic.org."}</div>` });
-  }
+  // AMVIC dealer licence moved up to card 3, 2026-09-10 (it's point 4 now,
+  // not an extra beyond the ten) -- no longer built twice.
 
   // 5b2 -- Finance-contingent price (S37). A flag, not a note: the cash buyer
   // and the buyer with their own bank approval are the ones it costs.
@@ -869,7 +856,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
-import { recallDigest, recallsShownNote, warrantyLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn } from "../_shared/report-lines.js";
+import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1051,15 +1038,13 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // page was actually read. [[report-never-empty]] means backed, not filled in.
   else if (a.feesRead === true) P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
   else P.push({ t: "Add-ons & fee audit", v: "NOT READ", tone: "muted" });
-  const fr = a.financeRates;
-  // See the fuller comment at the deck-card version above: an untrusted
-  // (LLM-only) dealer APR falls through to the same states as if none were
-  // disclosed at all, same as every other surface.
-  const frDealerVerified = fr?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(fr.dealer.source) ? fr.dealer.apr : null;
-  if (frDealerVerified != null) { const high = fr.manufacturer && frDealerVerified - fr.manufacturer.apr > 0.1; P.push({ t: "AMVIC (this dealer)", v: frDealerVerified + "%" + (high ? " HIGH" : ""), tone: high ? "flag" : "muted" }); }
-  else if (fr?.manufacturer) P.push({ t: "AMVIC", v: fr.manufacturer.apr + "% OEM REF", tone: "muted" }); // manufacturer promo APR as a reference when the dealer shows none
-  // A page whose calculator opens at a rate has not "advertised none".
-  else P.push({ t: "AMVIC", v: financingAprValue(a, null, null, false), tone: "muted" });
+  // AMVIC (point 4): real dealer-licence data, not financing APR. Retitled
+  // "AMVIC" 2026-09-09 but left wired to the old APR fields until 2026-09-10
+  // (Vic: "make it real AMVIC data"), after a live PDF showed point 4 titled
+  // AMVIC with a 4.9% financing rate as its value. Worded once in
+  // report-lines.js so this value can never read differently than the app's
+  // point card or this same email's deck card.
+  { const dl = dealerLicenceLine(a); P.push({ t: "AMVIC", v: dl.value, tone: dl.tone }); }
   if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
   // No dealer terms is not "nothing to say": we hold the manufacturer's own
   // published rate and price, so the payment is arithmetic we can do ourselves.
@@ -1109,9 +1094,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
     const pm = priceMovesLine(a);
     if (pm) P.push({ t: "Advertised price moves", v: pm.value, tone: pm.tone });
   }
-  if (a.dealerLicence?.status) {
-    P.push({ t: "Dealer licence · AMVIC", v: String(a.dealerLicence.status).toUpperCase(), tone: a.dealerLicence.state === "ok" ? "pass" : "muted" });
-  }
+  // Dealer licence · AMVIC folded into point 4 above, 2026-09-10 -- no
+  // longer pushed here (would duplicate the point's own data).
   if (a.tradeInWidget?.detected) {
     P.push({ t: "Trade-in tool on this listing", v: String(a.tradeInWidget.vendor || "DETECTED").toUpperCase(), tone: "muted" });
   }
@@ -1179,10 +1163,10 @@ function pointExplain(t: string, a: any): string | null {
       return (a.addOns || []).length
         ? "These are extras the dealer added on top of the car's price - where dealers make extra margin. You can say no to most of them; every line is one you're allowed to question."
         : "No dealer extras were itemized. That doesn't mean there are none - get the full out-the-door breakdown in writing.";
-    case "AMVIC": case "AMVIC (this dealer)":
+    case "AMVIC":
       // Worded once in report-lines.js so this sentence can never contradict
-      // the Payment starting point card in the same email or PDF.
-      return financingAprNote(a, (a.financeRates?.dealer?.apr != null && ["sm360_feed", "convertus_vms", "page_text"].includes(a.financeRates.dealer.source)) ? a.financeRates.dealer.apr : null);
+      // the deck card's own AMVIC paragraph in the same email.
+      return dealerLicenceLine(a).line;
     case "Financing math":
       // Worded once in report-lines.js from the fields computeFinancingCheck
       // records. The old sentence here and on screen named the price and the
@@ -1836,7 +1820,11 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rule();
   }
 
-  // ---- DEALER LICENCE (#11) — AMVIC public registry, verbatim status ----
+  // ---- DEALER LICENCE (point 4, "AMVIC") — public registry, verbatim
+  // status. Supplementary to the generic point-4 paragraph the CORE loop
+  // below prints (pointExplain's "AMVIC" case): this block adds the legal
+  // name, licence number and expiry the generic renderer has no room for.
+  // Promoted from an "also checked" extra 2026-09-10. ----
   if (a.dealerLicence && a.dealerLicence.status) {
     const L = a.dealerLicence, good = L.state === "valid";
     need(70);

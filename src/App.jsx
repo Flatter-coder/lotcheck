@@ -12,7 +12,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // are built ONCE here and rendered verbatim by every surface -- scroll,
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
-import { warrantyLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -11399,7 +11399,9 @@ function QuoteCheckPage(){
             if(analysis.financeContingent&&analysis.financeContingent.contingent) tiles.push({label:"Price conditions",value:"Financing-tied",sub:"cash or your own bank may not get this price — ask in writing",flag:true});
             { const pdl=pageDefaultLine(analysis), pdv=analysis.pageDefault;
               tiles.push({label:"Payment starting point",value:pdl.value,sub:pageDefaultMeta(pdv)||(pdv&&pdv.state==="confirmed"?"pre-selected on the page":pdl.headline),flag:false}); }
-            if(analysis.dealerLicence&&analysis.dealerLicence.status) tiles.push({label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,sub:analysis.dealerLicence.licenceNumber?`licence ${analysis.dealerLicence.licenceNumber}`:"AMVIC public registry",flag:analysis.dealerLicence.state!=="valid"});
+            // Dealer licence · AMVIC folded into point 4 ("AMVIC") 2026-09-10
+            // -- no longer a separate tile (it would duplicate the point
+            // card's own data verbatim).
             tiles.push({label:"Watch-outs",value:String(watchOuts),sub:watchOuts===0?"nothing flagged":"flagged items below",flag:watchOuts>0});
             const vehName=analysis.vehicle||[analysis.year,analysis.make,analysis.model].filter(Boolean).join(" ")||"Vehicle";
             const metaBits=[analysis.vehicleCondition,analysis.odometerKm?`${analysis.odometerKm.toLocaleString()} km`:null,analysis.dealerSentiment?.dealerName].filter(Boolean);
@@ -11548,13 +11550,8 @@ function QuoteCheckPage(){
                     ? <DealerLineItems items={dli} money={money} ink={C.ink} faint={C.inkFaint} line={C.line} teal={C.tealInk} />
                     : null;
                   PG.push({title:"Add-ons & fee audit",tone,v,sub,body}); }
-                { const dr=(analysis.financeRates?.dealer?.apr!=null&&TRUSTED_APR_SOURCES.has(analysis.financeRates.dealer.source))?analysis.financeRates.dealer.apr:null;
-                  const mr=analysis.financeRates?.manufacturer?.apr; const high=dr!=null&&mr!=null&&dr-mr>0.1;
-                  const tone=high?"flag":"muted"; const v=financingAprValue(analysis,dr,mr??null,high);
-                  const price=qp||ms||0; let extra=null;
-                  if(high&&price){const rd=dr/1200,rm=mr/1200;extra=Math.round((price*rd/(1-Math.pow(1+rd,-60))-price*rm/(1-Math.pow(1+rm,-60)))*60);}
-                  const sub=dr!=null?(high?`${mr}% advertised${extra?` — ~${money(extra)} more over 60mo`:""}`:(mr!=null?`${mr}% advertised on new`:"This dealer's quoted rate")):"No financing rate was quoted";
-                  PG.push({title:"AMVIC",tone,v,sub}); }
+                { const dl=dealerLicenceLine(analysis);
+                  PG.push({title:"AMVIC",tone:dl.tone,v:dl.value,sub:dl.line}); }
                 { const fc=analysis.financingCheck; const rf=!fc?.checked?analysis.referenceFinancing:null;
                   const tone=fc?.checked?(fc.consistent?"pass":"flag"):"muted";
                   const v=fc?.checked?(fc.consistent?"RECONCILES":"DOESN'T ADD UP"):(rf?.atAsking?"$"+Math.round(rf.atAsking.monthly).toLocaleString()+"/MO REF":"NOT CHECKED");
@@ -11604,8 +11601,10 @@ function QuoteCheckPage(){
 
                 // "Also checked" -- the same real fields the old hero tiles
                 // strip used, filtered to what isn't already one of the ten.
+                // Dealer licence · AMVIC folded into point 4 2026-09-10 --
+                // check:points refuses an "also checked" extra that
+                // duplicates a canonical point's data.
                 const extraDefs=[
-                  analysis.dealerLicence&&analysis.dealerLicence.status&&{label:"Dealer licence · AMVIC",value:analysis.dealerLicence.state==="valid"?"Valid":analysis.dealerLicence.status,warm:analysis.dealerLicence.state!=="valid"},
                   analysis.daysOnLot&&Number(analysis.daysOnLot.days)>0&&{label:"Days on lot",value:`${Number(analysis.daysOnLot.days).toLocaleString()} days`,warm:Number(analysis.daysOnLot.days)>=90},
                   {label:"Other listings read",value:marketCountLine(analysis).value,warm:false},
                   {label:"Payment starting point",value:pageDefaultLine(analysis).value,warm:false},
