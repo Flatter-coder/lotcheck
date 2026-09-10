@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-10a";  // 10a: dealerLicenceLine() added to report-lines.js (AMVIC point 4 now real registry data, not a financing rate) -- changes what the AMVIC point says.
+const CACHE_VER = "2026-09-10b";  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js) -- a hybrid-only model like the J250 Land Cruiser now gets its Alberta comparison set, the model-year ladder with it, and a set the wall did not separate is no longer labelled with a powertrain. Cached reports MUST re-run or they replay "0 read".
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
