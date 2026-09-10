@@ -1294,8 +1294,11 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     if (cur) out.push(cur); return out;
   }
   const para = (str: string, o: any = {}) => { const f = o.font ?? serif, sz = o.size ?? 10, lead = o.lead ?? 5, mw = o.maxW ?? W, x = o.x ?? M; for (const ln of wrap(str, f, sz, mw)) { need(sz + lead); page.drawText(ln, { x, y: y - sz, size: sz, font: f, color: o.color ?? SOFT }); y -= sz + lead; } };
-  const rule = (color = HAIR, th = 0.7, pad = 8) => { need(pad * 2); page.drawLine({ start: { x: M, y: y - pad }, end: { x: M + W, y: y - pad }, thickness: th, color }); y -= pad * 2 + 2; };
-  const kicker = (str: string) => { need(20); T(str, { size: 8.5, font: sansB, color: TEAL }); y -= 16; };
+  // Vic, 2026-09-10: "too many gaps" -- tightened from pad=8/16 (this doc has
+  // 15-20+ kicker/rule sections; a few points saved per call compounds across
+  // a whole report into real pages). Still enough breathing room to read.
+  const rule = (color = HAIR, th = 0.7, pad = 6) => { need(pad * 2); page.drawLine({ start: { x: M, y: y - pad }, end: { x: M + W, y: y - pad }, thickness: th, color }); y -= pad * 2 + 2; };
+  const kicker = (str: string) => { need(18); T(str, { size: 8.5, font: sansB, color: TEAL }); y -= 13; };
   const advance = (h: number) => { y -= h; };
 
   // ---- BRAND MARK ---- the real LotCheck logo (isometric gate + car driving
@@ -1351,6 +1354,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     rings.forEach((d, i) => page.drawSvgPath(d, { x: 0, y: cyCentre, borderColor: i < 2 ? PURPLE : TEAL, borderWidth: i % 2 ? 0.35 : 0.6 }));
     page.drawText("LC", { x: cxAbs - monoB.widthOfTextAtSize("LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
   };
+  // Plain verified badge -- a filled green circle with a white check mark,
+  // no ornament. Replaces the guilloché seal in the masthead: Vic, 2026-09-10,
+  // "i don't like qr code and check lc report on top right dosent look
+  // professional" -- a checkmark reads as "verified" at a glance, a seal ring
+  // does not. [[verification-needs-green-checkmark]]
+  const drawCheckBadge = (cxAbs: number, cyCentre: number, S: number) => {
+    page.drawCircle({ x: cxAbs, y: cyCentre, size: S, color: TEAL });
+    page.drawSvgPath("M-4.6 0.3 L-1.4 3.6 L5 -4.2", {
+      x: cxAbs, y: cyCentre, scale: S / 11,
+      borderColor: PAPER, borderWidth: 2.6,
+    });
+  };
 
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = qp && ms ? qp - ms : 0;
   // MSRP basis, NOT quotedPrice verification -- "VERIFIED" must mean exact-trim
@@ -1361,18 +1376,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // ---- MASTHEAD ----
   drawLogo(M, y + 2, 38);
   T("LOTCHECK", { size: 15, font: serifB, color: INK, x: M + 48 });
-  // SEAL POSITION IS MEASURED, NOT GUESSED. This was drawSeal(M + W - 116, ...)
-  // with S=15, whose outer ring reaches cx + S*1.46 = cx + 21.9 -> its right
-  // edge landed at M+W-94, while `right()` starts "QUOTE CHECK REPORT" at
-  // M+W-(text width ~118) = M+W-118. The seal was therefore drawn UNDER both
-  // header lines, and a 420-segment guilloché behind 8.5pt type reads as
-  // shimmering, illegible text -- reported from a real emailed report as
-  // "letters are shining", on the artifact a buyer forwards to a dealer.
-  // Measure the widest header line and seat the seal clear to its left.
+  // Measure the widest header line and seat the check badge clear to its left
+  // (same measured-not-guessed positioning the old seal used, see git history
+  // for the "letters are shining" incident this pattern was built to avoid).
   const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
   const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
-  const SEAL_S = 15, SEAL_GAP = 12;
-  drawSeal(M + W - hdrW - SEAL_GAP - SEAL_S * 1.46, y - 9, SEAL_S);
+  const BADGE_S = 8, BADGE_GAP = 10;
+  // No "VERIFIED" label here -- that word already means something else on
+  // this page (priceVerified / "STATUS - VERIFIED QUOTE" below is about the
+  // PRICE, not the document). The checkmark alone signals report authenticity;
+  // the Dispute-proof section spells out what it means in prose.
+  drawCheckBadge(M + W - hdrW - BADGE_GAP - BADGE_S, y - 9, BADGE_S);
   right(HDR_TITLE, { size: 8.5, font: sansB, color: SOFT });
   y -= 20;
   right(HDR_NO, { size: 8.5, font: mono, color: FAINT });
@@ -1502,6 +1516,28 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const noteX = cx + r + 26, noteW = M + W - noteX;
     if (a.leverageScore.note) { let ny2 = y - 20; for (const ln of wrap(a.leverageScore.note, serifI, 11, noteW)) { page.drawText(ln, { x: noteX, y: ny2 - 11, size: 11, font: serifI, color: SOFT }); ny2 -= 16; } }
     y = gy - 78;
+    rule();
+  }
+
+  // ---- DEPRECIATION PER YEAR ---- Vic, 2026-09-10, spotted on the Brasso
+  // Nissan Armada ($72,999 asking vs $97,556 MSRP, a ~$24.5k gap on a ~1-year
+  // demo): "we clearly need ... deprecation gauge per year in dollars".
+  // Real-data-only: needs a real MSRP, a real asking price BELOW it (a used
+  // vehicle priced AT OR OVER MSRP hasn't "depreciated", so the gauge is
+  // omitted rather than shown negative), and a real age basis. We don't carry
+  // an in-service date, so age is estimated from model year and labelled as
+  // such -- same honesty rule warrantyLine() already uses for this same gap.
+  // [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]]
+  if (ms > 0 && qp > 0 && ms > qp && a.vehicleCondition !== "new" && Number(a.year) > 0) {
+    const nowYear = new Date().getFullYear();
+    const ageYears = Math.max(0.5, nowYear - Number(a.year));
+    const perYear = (ms - qp) / ageYears;
+    need(56);
+    kicker("DEPRECIATION SINCE NEW");
+    T(money(Math.round(perYear)) + " / YEAR", { size: 22, font: sansB, color: INK });
+    y -= 26;
+    para(`${money(ms - qp)} below MSRP over an estimated ${ageYears.toFixed(1)} year${ageYears >= 1.5 ? "s" : ""} (from the ${a.year} model year, not a confirmed in-service date -- ask for it in writing to firm this up).`, { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W });
+    advance(6);
     rule();
   }
 
@@ -2034,37 +2070,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   for (const ln of wrap("You did the smart thing by looking before you signed. Walk in knowing your numbers, ask the questions above, and good luck at the table - we're rooting for you.", serifI, 10.5, W - 60)) { center(ln, y - 11, { size: 10.5, font: serifI, color: SOFT }); y -= 15; }
   y -= 6;
 
-  // ---- VERIFY QR ---- scan the printed page to open the signed, self-contained
-  // check. Guarded: a QR failure must never break the report. The payload rides
-  // in the URL (nothing stored), so the code is dense -> printed large (~2").
+  // ---- VERIFIED CLOSER ---- Vic, 2026-09-10: "i don't like qr code and check
+  // lc report on top right dosent look professional" -- dropped the QR code
+  // and the guilloché seal here in favour of the same plain check badge used
+  // in the masthead, plus a plain-text verify link. [[verification-needs-green-checkmark]]
   if (verifyUrl) {
-    try {
-      const qrcode = (await import("https://esm.sh/qrcode-generator@1.4.4")).default as any;
-      // EC level "M" (15% recovery) — verified with a real QR decoder to stay
-      // scannable WITH the centred logo, while keeping the module count coarse
-      // enough to scan easily (EC-H made it needlessly dense). Payload is gzip-
-      // compressed (report-sign) so a whole signed report still fits.
-      const qr = qrcode(0, "M"); qr.addData(verifyUrl); qr.make();
-      const count = qr.getModuleCount();
-      const QS = 210, cell = QS / count;
-      need(QS + 34);
-      const qx = PW / 2 - QS / 2, qbot = y - QS;
-      page.drawRectangle({ x: qx - 7, y: qbot - 7, width: QS + 14, height: QS + 14, color: rgb(1, 1, 1) });
-      for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) {
-        page.drawRectangle({ x: qx + c * cell, y: qbot + (count - 1 - r) * cell, width: cell + 0.4, height: cell + 0.4, color: INK });
-      }
-      // Centred LotCheck logo — white knockout box (EC-H recovers the covered
-      // modules) + the real isometric mark, so the code is branded and scannable.
-      const lw = QS * 0.19, lx = PW / 2 - lw / 2, ly = qbot + QS / 2 - lw / 2;
-      page.drawRectangle({ x: lx - 4, y: ly - 4, width: lw + 8, height: lw + 8, color: rgb(1, 1, 1) });
-      drawLogo(lx, ly + lw * 0.784, lw);
-      // Unique seal beside the QR — the impossible-to-copy mark for THIS report.
-      drawSeal(M + 66, qbot + QS / 2 + 6, 34);
-      center("UNIQUE SEAL", qbot + QS / 2 - 56, { size: 7, font: sansB, color: FAINT, cx: M + 66 });
-      y = qbot - 14;
-      center("Scan to verify - recomputes the fingerprint and checks LotCheck's signature.", y, { size: 8.5, font: sansB, color: SOFT });
-      y -= 16;
-    } catch (e) { console.warn("QR generation skipped:", (e as Error)?.message); }
+    need(70);
+    drawCheckBadge(PW / 2, y - 24, 20);
+    y -= 54;
+    center("This report is verified — tamper-evident, checked against public sources.", y, { size: 9.5, font: sansB, color: TEAL });
+    y -= 15;
+    center("lotcheck.ca/verify  -  report No. " + RID, y, { size: 8.5, font: mono, color: SOFT });
+    y -= 16;
   }
 
   rule(HAIR, 0.7, 6);
@@ -2126,7 +2143,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // Reserving the whole trailer up front means the paragraph and the mark it
   // belongs to either share a page or move to the next one together. A block
   // must not be able to open a page it cannot fill.
-  const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Scan the code above (or use the link in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
+  const colophonText = "Analyzed once, never stored on our end. This report's ID is a fingerprint of its own contents" + (issued ? " issued " + issued.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "") + " - change any figure and the ID changes, so it is tamper-evident. " + (verifyUrl ? "Use the link above (or the one in your email) to verify it at lotcheck.ca/verify - it recomputes the fingerprint and checks the signature, and nothing is stored on our end. " : "Verify it anytime at lotcheck.ca/verify using the link in this email. ") + (capImg && capPages > 0 ? "The sealed listing capture is printed on the pages that follow and attached as its own photo file. " : sealedShot ? "The sealed listing capture is attached to your email as its own photo file. " : "") + "Every figure traces to a public source you can re-check: recalls to Transport Canada, MSRP to the manufacturer catalogue, reviews to Google. Vehicle, price, and fee details were read from the dealer's page by an automated system, including AI reading the page or a screenshot when it couldn't be parsed directly - verify them against the original listing before you rely on them. LotCheck reviews the deal, not the car's history - pair it with a vehicle-history report before you buy.";
   const COLOPHON_H = 40 + 30;                      // logo + ID line, per the draws below
   {
     const lines = Math.max(1, Math.ceil(String(colophonText).length / 110));
