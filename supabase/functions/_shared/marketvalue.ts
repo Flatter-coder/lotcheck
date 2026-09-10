@@ -50,6 +50,7 @@ export interface MarketValue {
   trimScope?: "trim" | "trim_family" | "model" | null;
   trimLabel?: string | null;      // the subject's trim as written, when scope is trim/trim_family
   powertrain?: string | null;     // "Hybrid" / "Plug-in Hybrid" / "EV" when the trim carries it
+  powertrainSeparated?: boolean;  // false when the wall could not be applied, so no "same powertrain" claim
   kmLow?: number | null;          // mileage window applied (used subjects with a known odometer)
   kmHigh?: number | null;
   condition?: string | null;      // "used" | "new"
@@ -385,6 +386,9 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
     const basisOf = (set: any[]) => ({
       yearFrom: set.length ? yearsOf(set)[0] : pool.yearFrom, yearTo: set.length ? yearsOf(set)[1] : pool.yearTo,
       trimScope: pool.scope, trimLabel: pool.trimLabel, powertrain: pool.powertrain,
+      // Rides with the basis so every surface that prints "same powertrain"
+      // can check whether the set earned the phrase. [[claims-must-stay-backed]]
+      powertrainSeparated: pool.powertrainSeparated !== false,
       kmLow: pool.kmLow, kmHigh: pool.kmHigh, condition: pool.condition, need: COMP_FLOOR,
       dealers: set.length ? dealersOf(set) : null, asOf: set.length ? asOfOf(set) : null,
       seenMin: set.length ? seenMinOf(set) : null, seenMax: set.length ? asOfOf(set) : null,
@@ -444,7 +448,10 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
     // RPC pool, which put hybrids under a gas car's premium.
     if (String(ctx.saleCondition) === "certified" && Number(ctx.asking) > 0) {
       const prem = computeCpoPremium(pool.rows as CompRow[], Number(ctx.asking), { odometerKm: null, trim: null, minComps: COMP_FLOOR });
-      if (prem) mv.cpoPremium = { ...prem, basis: `${scopeWord}${pool.kmLow != null ? ", similar mileage" : ""}, same powertrain, ${pool.yearFrom === pool.yearTo ? `model year ${pool.yearFrom}` : `model years ${pool.yearFrom} to ${pool.yearTo}`}` };
+      // Same rule as the report sentences: the basis may not say "same
+      // powertrain" over a set the wall could not separate.
+      const ptClause = pool.powertrainSeparated === false ? "" : ", same powertrain";
+      if (prem) mv.cpoPremium = { ...prem, basis: `${scopeWord}${pool.kmLow != null ? ", similar mileage" : ""}${ptClause}, ${pool.yearFrom === pool.yearTo ? `model year ${pool.yearFrom}` : `model years ${pool.yearFrom} to ${pool.yearTo}`}` };
     }
     return mv;
   } catch (e) {

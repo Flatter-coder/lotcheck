@@ -1313,6 +1313,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const center = (str: string, yy: number, o: any = {}) => { const s = pdfSafe(str), f = o.font ?? sans, sz = o.size ?? 10; page.drawText(s, { x: (o.cx ?? PW / 2) - f.widthOfTextAtSize(s, sz) / 2, y: yy, size: sz, font: f, color: o.color ?? INK }); };
   function wrap(str: string, f: any, size: number, maxW: number): string[] {
     const words = pdfSafe(str).split(/\s+/).filter(Boolean); const out: string[] = []; let cur = "";
+    /* pdf-safe: `words` is already split out of pdfSafe(str) above */
     for (const w of words) { const t = cur ? cur + " " + w : w; if (f.widthOfTextAtSize(t, size) > maxW && cur) { out.push(cur); cur = w; } else cur = t; }
     if (cur) out.push(cur); return out;
   }
@@ -1323,6 +1324,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const rule = (color = HAIR, th = 0.7, pad = 6) => { need(pad * 2); page.drawLine({ start: { x: M, y: y - pad }, end: { x: M + W, y: y - pad }, thickness: th, color }); y -= pad * 2 + 2; };
   const kicker = (str: string) => { need(18); T(str, { size: 8.5, font: sansB, color: TEAL }); y -= 13; };
   const advance = (h: number) => { y -= h; };
+
+  // MEASURE WHAT YOU DRAW.
+  // Every drawing helper here passes its string through pdfSafe(), which
+  // rewrites characters the embedded fonts cannot set -- and some of those
+  // rewrites CHANGE WIDTH: "..." becomes three dots, an em dash becomes a
+  // hyphen, a check mark disappears. Measuring the raw string and drawing the
+  // rewritten one therefore sizes a box for text that is not what lands in it.
+  // Reviewed 2026-09-10: the "also checked" pills measured raw, so a value
+  // containing an ellipsis would have been drawn wider than its own border, and
+  // a tone chip sized for an em dash drew a hyphen. check:pdf-measure now
+  // refuses any width measurement in this file that does not go through here.
+  const wSafe = (f: any, str: string, size: number) => f.widthOfTextAtSize(pdfSafe(str), size);
 
   // ---- ROUNDED PANELS ----
   // Every surface in the approved diorama design is a rounded panel: the card
@@ -1407,7 +1420,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     page.drawEllipse({ x: cxAbs, y: cyCentre, xScale: S * 1.34, yScale: S * 1.34, borderColor: TEAL, borderWidth: 0.5 });
     const rings = guillocheRings(SEALSEED, cxAbs, 0, S, 420);
     rings.forEach((d, i) => page.drawSvgPath(d, { x: 0, y: cyCentre, borderColor: i < 2 ? PURPLE : TEAL, borderWidth: i % 2 ? 0.35 : 0.6 }));
-    page.drawText("LC", { x: cxAbs - monoB.widthOfTextAtSize("LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
+    page.drawText("LC", { x: cxAbs - wSafe(monoB, "LC", S * 0.22) / 2, y: cyCentre - S * 0.22 / 2, size: S * 0.22, font: monoB, color: INK });
   };
   // Plain verified badge -- a filled green circle with a white check mark,
   // no ornament. Replaces the guilloché seal in the masthead: Vic, 2026-09-10,
@@ -1435,7 +1448,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // (same measured-not-guessed positioning the old seal used, see git history
   // for the "letters are shining" incident this pattern was built to avoid).
   const HDR_TITLE = "QUOTE CHECK REPORT", HDR_NO = "No. " + RID;
-  const hdrW = Math.max(sansB.widthOfTextAtSize(pdfSafe(HDR_TITLE), 8.5), mono.widthOfTextAtSize(pdfSafe(HDR_NO), 8.5));
+  const hdrW = Math.max(wSafe(sansB, HDR_TITLE, 8.5), wSafe(mono, HDR_NO, 8.5));
   const BADGE_S = 8, BADGE_GAP = 10;
   // No "VERIFIED" label here -- that word already means something else on
   // this page (priceVerified / "STATUS - VERIFIED QUOTE" below is about the
@@ -1537,7 +1550,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     const label = (over ? "+" : "-") + money(Math.abs(delta)) + (over ? " OVER MSRP" : " UNDER MSRP");
     const pct = ms ? ` -- ${Math.abs(delta / ms * 100).toFixed(1)}%` : "";
     T(label + pct, { size: 12.5, font: sansB, color: gapColor });
-    if (!priceVerified) { const wl = sansB.widthOfTextAtSize(label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
+    if (!priceVerified) { const wl = wSafe(sansB, label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
     y -= 24;
   }
   // "What this means" -- the printed twin of the on-screen explanation, and
@@ -1671,7 +1684,17 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // the next row cannot fit the page. The column count is CHOSEN per cluster
   // further down (colsFor), by measuring both candidate grids -- see there.
   type Pt = { t: string; v: string; tone: string };
-  const tileNoteLines = (p: Pt, cols: number) => wrap(pointExplain(p.t, a) || "", serifI, 8, tileW(cols) - TILE_PAD * 2);
+  // Memoised: colsFor measures BOTH candidate grids, firstBlockHeight measures
+  // again, drawTileGrid measures per row and drawTile measures once more to
+  // draw -- about six identical pointExplain + wrap passes per point, each of
+  // which measures every word. Same output, one pass per (point, cols).
+  const noteCache = new Map<string, string[]>();
+  const tileNoteLines = (p: Pt, cols: number) => {
+    const k = `${cols}\u0000${p.t}`;
+    let v = noteCache.get(k);
+    if (!v) { v = wrap(pointExplain(p.t, a) || "", serifI, 8, tileW(cols) - TILE_PAD * 2); noteCache.set(k, v); }
+    return v;
+  };
   // NO GLOBAL MINIMUM HEIGHT.
   // The mockup sets min-height:118px (88.5pt) on its tiles so a row reads as one
   // object. Ported as a floor on tileHeight it was dead weight: a tile clears
@@ -1685,7 +1708,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // overruns 13pt. Step it down on the font's own metrics rather than clipping.
   const tileValueSize = (v: string, cols: number) => {
     let sz = 13;
-    while (sz > 8 && monoB.widthOfTextAtSize(pdfSafe(v), sz) > tileW(cols) - TILE_PAD * 2) sz -= 0.5;
+    while (sz > 8 && wSafe(monoB, v, sz) > tileW(cols) - TILE_PAD * 2) sz -= 0.5;
     return sz;
   };
   const drawTile = (x: number, yTop: number, rowH: number, p: Pt, cols: number) => {
@@ -1699,7 +1722,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     let ty = yTop - TILE_PAD;
     // label (left) + tone chip (right), same row
     Tat(p.t, ty - 8.5, { x: x + TILE_PAD, size: 8, font: sansB, color: FAINT });
-    const chipLbl = toneChipText[p.tone] || "—", chipW = sansB.widthOfTextAtSize(chipLbl, 6.5) + 12;
+    const chipLbl = toneChipText[p.tone] || "—", chipW = wSafe(sansB, chipLbl, 6.5) + 12;
     rrect(x + TW - TILE_PAD - chipW, ty + 0.5, chipW, 11, 5.5, { color: bg });
     center(chipLbl, ty - 8, { size: 6.5, font: sansB, color: tone, cx: x + TW - TILE_PAD - chipW / 2 });
     ty -= 18;
@@ -1743,11 +1766,18 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     return h;
   };
   const colsFor = (points: Pt[]) => {
-    if (points.length <= 1) return 2;
+    // A single point takes the whole width: at two columns it drew one tile
+    // beside an equal area of blank page.
+    if (points.length <= 1) return 1;
     let best = 2, bestH = Infinity, bestRagged = 9;
     for (const c of [2, 3]) {
       const h = gridHeight(points, c);
-      const ragged = points.length % c === 0 ? 0 : 1;
+      // Raggedness counts the tiles that will actually SIT IN THE GRID --
+      // outlier-long notes are pulled out into their own full-width rows, so
+      // counting them made a ragged layout look flush and could win the
+      // tie-break on a false claim.
+      const inGrid = points.filter((p) => !isWide(p, c)).length;
+      const ragged = inGrid === 0 || inGrid % c === 0 ? 0 : 1;
       if (h < bestH - 0.5 || (h <= bestH + 0.5 && ragged < bestRagged)) { best = c; bestH = h; bestRagged = ragged; }
     }
     return best;
@@ -1810,7 +1840,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     need(17 + blurbH + 4 + firstRowH + 6);
     page.drawCircle({ x: M + 3.5, y: y - 5, size: 3.5, color: cl.dot });
     T(cl.label, { x: M + 13, size: 8.5, font: sansB, color: SOFT });
-    page.drawLine({ start: { x: M + 13 + sansB.widthOfTextAtSize(cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
+    page.drawLine({ start: { x: M + 13 + wSafe(sansB, cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
     y -= 17;
     para(cl.blurb, { size: 8, font: sans, color: FAINT, lead: 3 });
     advance(4);
@@ -1842,7 +1872,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // the header can never be separated from its strip.
     const CHIP_H = 22, CHIP_GAP = 8;
     const chipWidth = (p: { t: string; v: string }) =>
-      sansB.widthOfTextAtSize(`${p.t}: `, 8) + monoB.widthOfTextAtSize(p.v, 8) + 24;
+      wSafe(sansB, `${p.t}: `, 8) + wSafe(monoB, p.v, 8) + 24;
     let chipRows = 1, lineUsed = 0;
     for (const p of EXTRA) {
       const cw = chipWidth(p);
@@ -1859,7 +1889,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       if (cx2 > M && cx2 + cw > M + W) { cx2 = M; rowTop -= CHIP_H + CHIP_GAP; }
       rrect(cx2, rowTop, cw, CHIP_H, CHIP_H / 2, { borderColor: HAIR, borderWidth: 0.7, color: PAPER });
       Tat(label, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12, size: 8, font: sansB, color: FAINT });
-      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12 + sansB.widthOfTextAtSize(label, 8), size: 8, font: monoB, color: INK });
+      Tat(valTxt, rowTop - CHIP_H / 2 - 3, { x: cx2 + 12 + wSafe(sansB, label, 8), size: 8, font: monoB, color: INK });
       cx2 += cw + CHIP_GAP;
     }
     y = rowTop - CHIP_H - 4;
@@ -1964,7 +1994,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // in the report (Vic, 2026-09-10: the PDF is nowhere near the design).
     // Same geometry, same traffic light, diorama tokens throughout.
     const ACC = [TEAL, AMBER, CORAL][tier];
-    const DK = PAPER, DK2 = HAIR;
+
     const sinceD = a.daysOnLot.since ? new Date(a.daysOnLot.since + "T00:00:00") : null;
     const M3 = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 
@@ -2007,11 +2037,19 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
       center(`${d.toLocaleString("en-CA")}d`, DBY - 34, { cx: DBX + DB / 2, size: 15, font: serifB, color: ACC });
     }
     // traffic light below the date box — the tier's bulb is lit
-    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16;
-    rrect(TLX - 10, TLTOP + BULB + 5, 20, GAP * 2 + BULB * 2 + 10, 9, { color: PAPER, borderColor: HAIR, borderWidth: 0.7 });
+    const TLX = DBX + DB / 2, TLTOP = DBY - DB - 10, BULB = 5.5, GAP = 16, TL_PAD = 7;
+    // THE HOUSING IS DERIVED FROM THE BULBS IT CONTAINS, so the two cannot
+    // disagree. Hand-computing it is exactly how the bottom bulb came to hang
+    // 2.5pt below its own enclosure (reviewed 2026-09-10): the box was ported
+    // from drawRectangle, whose `y` is the BOTTOM edge, to rrect, whose `y` is
+    // the TOP, and the conversion picked up a stray +5. Now the box is always
+    // TL_PAD beyond the outermost bulb centres, whatever those become.
+    const bulbCy = [0, 1, 2].map((i) => TLTOP - BULB - 2 - i * GAP);
+    const tlTop = bulbCy[0] + BULB + TL_PAD, tlBottom = bulbCy[2] - BULB - TL_PAD;
+    rrect(TLX - 10, tlTop, 20, tlTop - tlBottom, 9, { color: PAPER, borderColor: HAIR, borderWidth: 0.7 });
     ([[CORAL, tier === 2], [AMBER, tier === 1], [TEAL, tier === 0]] as const)
       .forEach(([col, on], i) => {
-        page.drawCircle({ x: TLX, y: TLTOP - BULB - 2 - i * GAP, size: BULB, color: on ? col : DK2 });
+        page.drawCircle({ x: TLX, y: bulbCy[i], size: BULB, color: on ? col : HAIR });
       });
     // headline + body inside the panel
     let cy = top - STRIP - 16;
@@ -2020,7 +2058,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     for (const ln of bodyLines) { Tat(ln, cy - 9, { x: CX + PADX, size: 9, font: sans, color: SOFT }); cy -= LINE_H; }
     // CTA chip (dark, accent text) — mirrors the app card's chip
     const chipTxt = d >= 31 ? "ASK FOR A DISCOUNT" : "FRESH ON THE LOT";
-    const chipW = sansB.widthOfTextAtSize(chipTxt, 8) + 20;
+    const chipW = wSafe(sansB, chipTxt, 8) + 20;
     rrect(CX + PADX, cy - 6, chipW, CHIP_H, CHIP_H / 2, { color: PAPER, borderColor: ACC, borderWidth: 0.7 });
     Tat(chipTxt, cy - CHIP_H + 1, { x: CX + PADX + 10, size: 8, font: sansB, color: ACC });
     y = top - CARD_H - 12;
