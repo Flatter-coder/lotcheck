@@ -1265,10 +1265,16 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const mono   = await doc.embedFont(StandardFonts.Courier);
   const monoB  = await doc.embedFont(StandardFonts.CourierBold);
 
-  const PAPER = rgb(0.976, 0.965, 0.925), INK = rgb(0.114, 0.106, 0.094),
-        SOFT = rgb(0.365, 0.341, 0.298), FAINT = rgb(0.55, 0.52, 0.47),
-        TEAL = rgb(0.09, 0.459, 0.42), CORAL = rgb(0.651, 0.235, 0.149),
-        HAIR = rgb(0.82, 0.80, 0.73), TRACK = rgb(0.87, 0.85, 0.78),
+  // Dark palette -- "the winner" from the 10-design gallery (Isometric
+  // Dashboard Wall / diorama), Vic, 2026-09-10. Every section below draws
+  // from these same tokens, so this one swap recolors the whole document.
+  // Flat (no 3D tilt) -- diorama's own print CSS already drops the tilt for
+  // the printed/PDF state, which is what this ports.
+  const PAPER = rgb(0.02, 0.027, 0.043), INK = rgb(0.906, 0.925, 0.961),
+        SOFT = rgb(0.545, 0.592, 0.678), FAINT = rgb(0.357, 0.4, 0.486),
+        TEAL = rgb(0.176, 0.831, 0.749), CORAL = rgb(0.984, 0.486, 0.42),
+        AMBER = rgb(0.961, 0.725, 0.247),
+        HAIR = rgb(0.137, 0.173, 0.243), TRACK = rgb(0.063, 0.086, 0.137),
         PURPLE = rgb(0.427, 0.231, 0.839), PURPLE_LT = rgb(0.545, 0.361, 0.965);
 
   const PW = 595.28, PH = 841.89, M = 56, W = PW - M * 2;
@@ -1559,24 +1565,16 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const EXTRA = POINTS.slice(POINT_TITLES.length);
   kicker(`${CORE.length}-POINT AUDIT`);
   const toneColor: Record<string, any> = { pass: TEAL, flag: CORAL, muted: FAINT };
-  const toneChipBg: Record<string, any> = { pass: rgb(0.906, 0.957, 0.945), flag: rgb(0.98, 0.925, 0.902), muted: rgb(0.94, 0.93, 0.90) };
+  const toneChipBg: Record<string, any> = { pass: rgb(0.106, 0.196, 0.176), flag: rgb(0.22, 0.129, 0.114), muted: rgb(0.12, 0.14, 0.18) };
   const toneChipText: Record<string, string> = { pass: "PASS", flag: "FLAG", muted: "—" };
-  // ---- SATELLITE GRID (concept #7, "price-terrain-chart") ----
-  // "Price vs MSRP" already gets its own hero treatment in THE DEAL /
-  // MSRP RANGE above, so it is excluded here -- the same split #7 draws
-  // between the hero terrain card and "the other nine checks".
-  const gridPoints = CORE.filter((p) => p.t !== "Price vs MSRP");
   const TILE_GAP = 10, TILE_COLS = 3, TILE_W = (W - TILE_GAP * (TILE_COLS - 1)) / TILE_COLS;
   const TILE_PAD = 11;
-  // A tile's content height, computed BEFORE drawing anything, so a row of
-  // three can share one height (the tallest tile) instead of pdf-lib's
-  // drawing calls silently overlapping the next row down.
   const tileNoteLines = (p: { t: string; v: string; tone: string }) => wrap(pointExplain(p.t, a) || "", serifI, 8, TILE_W - TILE_PAD * 2);
   const tileHeight = (p: { t: string; v: string; tone: string }) => TILE_PAD * 2 + 12 /* label row */ + 6 + 15 /* value */ + 6 + tileNoteLines(p).length * 10.5;
   const drawTile = (x: number, yTop: number, rowH: number, p: { t: string; v: string; tone: string }) => {
     const tone = toneColor[p.tone] || INK, bg = toneChipBg[p.tone] || TRACK;
-    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: rowH, borderColor: HAIR, borderWidth: 0.7 });
-    page.drawRectangle({ x, y: yTop - rowH, width: 3, height: rowH, color: tone });
+    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: rowH, color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
+    page.drawRectangle({ x, y: yTop - rowH, width: TILE_W, height: 2, color: tone });
     let ty = yTop - TILE_PAD;
     // label (left) + tone chip (right), same row
     Tat(p.t, ty - 8.5, { x: x + TILE_PAD, size: 8, font: sansB, color: FAINT });
@@ -1588,12 +1586,41 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     ty -= 21;
     for (const ln of tileNoteLines(p)) { Tat(ln, ty - 8, { x: x + TILE_PAD, size: 8, font: serifI, color: SOFT }); ty -= 10.5; }
   };
-  for (let i = 0; i < gridPoints.length; i += TILE_COLS) {
-    const row = gridPoints.slice(i, i + TILE_COLS);
-    const rowH = Math.max(...row.map(tileHeight));
-    need(rowH + 6);
-    row.forEach((p, ci) => drawTile(M + ci * (TILE_W + TILE_GAP), y, rowH, p));
-    y -= rowH + TILE_GAP;
+  const drawTileGrid = (points: Array<{ t: string; v: string; tone: string }>) => {
+    for (let i = 0; i < points.length; i += TILE_COLS) {
+      const row = points.slice(i, i + TILE_COLS);
+      const rowH = Math.max(...row.map(tileHeight));
+      need(rowH + 6);
+      row.forEach((p, ci) => drawTile(M + ci * (TILE_W + TILE_GAP), y, rowH, p));
+      y -= rowH + TILE_GAP;
+    }
+  };
+  // ---- THREE NAMED CLUSTERS ("the winner" -- Isometric Dashboard Wall,
+  // Vic, 2026-09-10) instead of one flat grid. The ten canonical points
+  // split cleanly 4/4/2 by what they're actually about -- Price vs MSRP
+  // stays excluded here since it already has hero treatment above.
+  const clusterOf = (t: string) => (
+    ["Add-ons & fee audit", "Financing math", "EV / PHEV rebate"].includes(t) ? "money" :
+    ["Transport Canada recalls", "Included warranty", "Odometer", "VIN check"].includes(t) ? "safety" :
+    ["AMVIC", "Dealer reputation"].includes(t) ? "trust" : "money"
+  );
+  const clusters: Array<{ key: string; label: string; dot: any; blurb: string }> = [
+    { key: "money", label: "PRICE & FINANCING", dot: TEAL, blurb: "What this vehicle costs against the manufacturer's own numbers, and what's added on top." },
+    { key: "safety", label: "SAFETY & COVERAGE", dot: CORAL, blurb: "Open recalls and how much factory protection is left on this specific vehicle." },
+    { key: "trust", label: "TRUST & DEALER", dot: AMBER, blurb: "Who you'd be dealing with, by the public record." },
+  ];
+  for (const cl of clusters) {
+    const points = CORE.filter((p) => p.t !== "Price vs MSRP" && clusterOf(p.t) === cl.key);
+    if (!points.length) continue;
+    need(34);
+    page.drawCircle({ x: M + 3.5, y: y - 5, size: 3.5, color: cl.dot });
+    T(cl.label, { x: M + 13, size: 8.5, font: sansB, color: SOFT });
+    page.drawLine({ start: { x: M + 13 + sansB.widthOfTextAtSize(cl.label, 8.5) + 10, y: y - 6.5 }, end: { x: M + W, y: y - 6.5 }, thickness: 0.7, color: HAIR });
+    y -= 17;
+    para(cl.blurb, { size: 8, font: sans, color: FAINT, lead: 3 });
+    advance(4);
+    drawTileGrid(points);
+    advance(4);
   }
   advance(2); rule();
 
