@@ -7957,8 +7957,12 @@ function DroneSentBeat({compact,body,accent}){
             <span className="lcDroneRotor" style={{position:"absolute",top:-5,left:-6,width:20,height:3,borderRadius:2,background:accent,animation:"lcRotor .16s linear infinite"}}/>
             <span className="lcDroneRotor" style={{position:"absolute",top:-5,right:-6,width:20,height:3,borderRadius:2,background:accent,animation:"lcRotor .16s linear infinite"}}/>
             <span style={{position:"absolute",top:4,left:21,width:1.5,height:5,background:body}}/>
-            <span style={{position:"absolute",top:9,left:14,width:16,height:11,borderRadius:2,border:`1.2px solid ${accent}`,background:"rgba(34,211,238,.08)"}}>
-              <span style={{position:"absolute",inset:0,background:`linear-gradient(to bottom right,transparent 44%,${accent} 48%,transparent 54%),linear-gradient(to bottom left,transparent 44%,${accent} 48%,transparent 54%)`,opacity:.7}}/>
+            {/* Package: was a hard-diagonal criss-cross gradient at 16x11px --
+                photographed as a pixelated checkerboard bleeding off the icon
+                in a real screenshot (Vic, 2026-09-10). A plain check reads
+                cleanly at this size instead. */}
+            <span style={{position:"absolute",top:9,left:14,width:16,height:11,borderRadius:2,border:`1.2px solid ${accent}`,background:"rgba(34,211,238,.08)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <svg width="9" height="7" viewBox="0 0 9 7" aria-hidden="true"><path d="M1 3.4 L3.3 5.8 L8 0.8" fill="none" stroke={accent} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </span>
           </span>
         </span>
@@ -9046,6 +9050,19 @@ const SHIELD_CSS=`
   .sh-anim .sh-check{stroke-dasharray:80;animation:shCheck 3.6s ease-in-out infinite}
   @keyframes shCheck{0%,45%{stroke-dashoffset:80;opacity:0}55%{opacity:1}62%,92%{stroke-dashoffset:0;opacity:1}100%{stroke-dashoffset:80;opacity:0}}
   @media(prefers-reduced-motion:reduce){.sh-fill{transform:translateY(0)!important}.sh-anim *{animation:none!important}}`;
+
+// ── Plain "verified" checkmark — a filled circle + check, no ornament.
+// Vic, 2026-09-10: "i need green check mark confirmation that is verified" --
+// same visual language as the PDF's drawCheckBadge, so the two surfaces agree
+// on what "verified" looks like. [[verification-needs-green-checkmark]]
+function CheckBadge({size=16,color="#2FA79A"}){
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true" style={{flex:"none"}}>
+      <circle cx="10" cy="10" r="10" fill={color}/>
+      <path d="M5.5 10.3 L8.6 13.6 L14.5 6.8" fill="none" stroke="#fff" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 // ── /verify?d=<payload> — recomputes the fingerprint from the link and shows
 // the report's ID + figures. Purely client-side; nothing is fetched or stored.
@@ -10651,6 +10668,12 @@ function QuoteCheckPage(){
     setUrlInput("");
     setVehicleChoices(null);
     setIntakeTab("url");
+    // Without these, "Check another quote" carried the PREVIOUS report's
+    // "Sent to {email}" confirmation straight into a fresh report that was
+    // never actually emailed. Vic, 2026-09-10, spotted from a real report.
+    setEmailStatus("idle");
+    setEmailInput("");
+    setEmailErr("");
     scrollToTop();
   };
 
@@ -11659,6 +11682,29 @@ function QuoteCheckPage(){
                       </div>
                     </div>
 
+                    {/* depreciation per year — Vic, 2026-09-10, spotted on the
+                        Brasso Nissan Armada ($72,999 asking vs $97,556 MSRP):
+                        "we clearly need ... deprecation gauge per year in
+                        dollars". Same gate and same honesty rule as the PDF's
+                        matching card: real MSRP, real asking BELOW it (never
+                        shown negative), age estimated from model year and
+                        labelled as an estimate. [[no-llm-generated-valuation-numbers]] */}
+                    {ms>0&&qp>0&&ms>qp&&analysis.vehicleCondition!=="new"&&Number(analysis.year)>0&&(()=>{
+                      const ageYears=Math.max(0.5,new Date().getFullYear()-Number(analysis.year));
+                      const perYear=(ms-qp)/ageYears;
+                      return (
+                        <div style={{padding:"14px 18px",borderRadius:15,background:C.card,border:`1px solid ${C.line}`,marginBottom:20,display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                          <div>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".08em",color:C.inkFaint,textTransform:"uppercase"}}>Depreciation since new</div>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:22,marginTop:4,color:C.ink}}>${Math.round(perYear).toLocaleString("en-CA")} <small style={{fontSize:".55em",color:C.inkFaint,fontWeight:600}}>/ year</small></div>
+                          </div>
+                          <div style={{flex:1,minWidth:180,fontSize:11.5,color:C.inkFaint,lineHeight:1.4}}>
+                            ${(ms-qp).toLocaleString("en-CA")} below MSRP over an estimated {ageYears.toFixed(1)} year{ageYears>=1.5?"s":""} (from the {analysis.year} model year, not a confirmed in-service date — ask for it in writing to firm this up).
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* stat strip — the worst of the ten, at a glance */}
                     {flagPoints.length>0&&(
                       <div style={{display:"grid",gridTemplateColumns:`repeat(${flagPoints.length},1fr)`,gap:12,marginBottom:20}}>
@@ -11718,7 +11764,7 @@ function QuoteCheckPage(){
                     {/* evidence + counter-script */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:14,marginBottom:20}}>
                       <div style={{borderRadius:18,background:C.paper2,border:`1px solid ${C.line}`,padding:20}}>
-                        <div style={{fontWeight:700,fontSize:14,color:C.ink,marginBottom:10}}>Dispute-proof</div>
+                        <div style={{display:"flex",alignItems:"center",gap:7,fontWeight:700,fontSize:14,color:C.ink,marginBottom:10}}><CheckBadge size={15} color={C.tealInk}/>Dispute-proof</div>
                         <div style={{fontSize:12.5,lineHeight:1.6,color:C.inkSoft,marginBottom:12}}>This report is ECDSA-signed at capture and re-verifiable independently of LotCheck — the underlying screenshot, timestamp and every figure above are locked to the signature below.</div>
                         <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
                           <div style={{display:"flex",justifyContent:"space-between",gap:10,padding:"8px 10px",borderRadius:10,background:C.card}}>
@@ -11786,8 +11832,13 @@ function QuoteCheckPage(){
                 );
               })()}
 
-
-              <div style={cardStyle}>
+              {/* Vic, 2026-09-10: the dispute-proof block's own footer line
+                  ("REPORT GENERATED ... LOTCHECK.CA") sat directly against
+                  this card with no gap, reading as overlapping text in a
+                  screenshot. Explicit marginTop instead of relying on
+                  cardStyle's marginBottom (which only spaces what comes
+                  AFTER a card, not before it). */}
+              <div style={{...cardStyle,marginTop:22}}>
                 <div style={{fontSize:13,fontWeight:800,color:C.inkSoft,marginBottom:10}}>Email me this report</div>
                 {emailStatus==="sent"?(
                   <div style={{display:"flex",alignItems:"center",gap:8,color:C.tealInk,fontWeight:700,fontSize:14}}>
