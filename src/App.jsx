@@ -10977,18 +10977,6 @@ function QuoteCheckPage(){
             // in the real handlers. The trust line that used to render here
             // AND unconditionally at the foot of this component (a real
             // duplicate on every idle load) is now only the page-level one.
-            const QC_POINT_DESC={
-              "Price vs MSRP":"Cross-checked against the manufacturer's own published pricing for this exact trim and drivetrain.",
-              "Add-ons & fee audit":"Every itemized dealer fee compared against what's typical, so padding shows up by name.",
-              "AMVIC":"Confirms the dealer holds a current licence on AMVIC's public registry.",
-              "Financing math":"The advertised payment recalculated from the price, rate and term — flagged if it doesn't reconcile.",
-              "Transport Canada recalls":"Open safety recalls looked up in Transport Canada's public registry.",
-              "Included warranty":"Remaining factory coverage worked out from the model year and current odometer.",
-              "VIN check":"Confirms the VIN is a validly formed identifier, decoded where the listing publishes one.",
-              "Odometer":"Flags a reading that doesn't square with the vehicle's stated condition.",
-              "EV / PHEV rebate":"Checked against the current federal and provincial EV incentive rules for this drivetrain.",
-              "Dealer reputation":"Pulled from real, public Google reviews — never curated testimonials.",
-            };
             return (
             <div style={{maxWidth:1100,margin:"0 auto"}}>
             <div style={{textAlign:"center",maxWidth:640,margin:"0 auto 32px"}}>
@@ -11126,36 +11114,11 @@ function QuoteCheckPage(){
               </div>
             </div>
 
-            {/* Parity-checked: check:parity reads this exact heading + the
-                ten quoted strings that follow it out of the source and diffs
-                them against the real audit array, so a report that grows
-                past 10 (or drops one) fails the build here, not in front of
-                a buyer. Keep the heading text and the array of ten literal
-                strings -- see check-report-parity.mjs. */}
-            <div style={{marginBottom:36}}>
-              <div style={{textAlign:"center",marginBottom:20}}>
-                <div style={{fontSize:11,fontWeight:900,color:C.tealInk,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>EVERY REPORT CHECKS ALL 10</div>
-                <div style={{fontWeight:1000,fontSize:"clamp(20px,2.6vw,26px)",color:C.ink}}>Every point ships in the report — never partial, never "—".</div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:1,background:C.line,border:`1px solid ${C.line}`,borderRadius:20,overflow:"hidden"}}>
-                {[
-                  "Price vs MSRP","Add-ons & fee audit",
-                  "AMVIC","Financing math",
-                  "Transport Canada recalls","Included warranty",
-                  "VIN check","Odometer",
-                  "EV / PHEV rebate","Dealer reputation",
-                ].map((t,i)=>(
-                  <div key={i} style={{background:C.card,padding:"18px 18px",display:"flex",gap:12}}>
-                    <span style={{flex:"none",width:28,height:28,borderRadius:8,border:`1px solid ${C.line}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:12,color:C.tealInk,background:C.tealBg}}>{String(i+1).padStart(2,"0")}</span>
-                    <div>
-                      <div style={{fontSize:13.5,fontWeight:800,color:C.ink,marginBottom:3}}>{t}</div>
-                      <div style={{fontSize:12,color:C.inkFaint,lineHeight:1.5}}>{QC_POINT_DESC[t]}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
+            {/* The "every report checks all 10" list was removed 2026-09-10
+                (Vic: "remove this please, they are getting this info on
+                report") -- the ten checks are already named, with real
+                values, on the report itself; naming them again on the
+                intake page before a scan even runs was redundant. */}
             <div style={{display:"flex",alignItems:"center",gap:14,background:C.card,border:`1px solid ${C.line}`,borderRadius:20,padding:"18px 22px",flexWrap:"wrap"}}>
               <span style={{flex:"none",width:38,height:38,borderRadius:10,background:C.tealBg,border:`1px solid ${C.teal}4d`,display:"flex",alignItems:"center",justifyContent:"center",color:C.tealInk}}><Icon3D name="shield" size={18}/></span>
               <div style={{flex:"1 1 240px",fontSize:13.5,color:C.inkSoft,lineHeight:1.55}}>
