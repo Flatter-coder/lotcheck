@@ -12,20 +12,30 @@
 // over deliver specially if helps buyer even more, minimum 10 points we will
 // keep increasing ... yes we advertising 10 points". Extra checks a listing
 // supports (MSRP per trim, comparable listings, days on lot, trade-in widget,
-// finance-contingent pricing, AMVIC licence) are real and are shown — but they
-// are labelled "also checked", numbered in their own sequence, and never
-// counted as one of the ten. A report that calls a trim-price card "point 12 /
-// 14" has made the ten meaningless.
+// finance-contingent pricing) are real and are shown — but they are labelled
+// "also checked", numbered in their own sequence, and never counted as one of
+// the ten. A report that calls a trim-price card "point 12 / 14" has made the
+// ten meaningless.
 //
 // `title` must match the report surfaces verbatim. `marketing` is the buyer-
 // facing phrasing for the landing page. check:points asserts both directions.
-
+//
+// Point 4, "AMVIC": retitled from "Financing APR" 2026-09-09 (Vic:
+// "Financing APR needs to be replace with AMVIC check"), then wired to real
+// AMVIC-registry data 2026-09-10 (Vic: "make it real AMVIC data") after a
+// live report showed the AMVIC-titled point still carrying a 4.9% financing
+// rate -- the 09-09 pass renamed the label only, per that day's explicit
+// "just replace the words ... the rest do not touch". Backed by
+// dealerLicenceLine() in report-lines.js, the same regulator lookup that
+// used to be the separate "Dealer licence · AMVIC" also-checked extra --
+// that extra is retired, folded into this point, to avoid the same fact
+// appearing twice under two different labels.
 export const REPORT_POINTS = [
-  { key: "price_vs_msrp", title: "Price vs MSRP",             marketing: "MSRP verification against manufacturer data" },
-  { key: "recalls",       title: "Transport Canada recalls",  marketing: "Open-recall lookup (Transport Canada)" },
-  { key: "fees",          title: "Add-ons & fee audit",       marketing: "Fee itemization audit" },
-  { key: "apr",           title: "AMVIC",                     marketing: "AMVIC against the published rate" },
-  { key: "finance_math",  title: "Financing math",            marketing: "Financing math check" },
+  { key: "price_vs_msrp",  title: "Price vs MSRP",             marketing: "MSRP verification against manufacturer data" },
+  { key: "recalls",        title: "Transport Canada recalls",  marketing: "Open-recall lookup (Transport Canada)" },
+  { key: "fees",           title: "Add-ons & fee audit",       marketing: "Fee itemization audit" },
+  { key: "dealer_licence", title: "AMVIC",                     marketing: "AMVIC business licence verification" },
+  { key: "finance_math",   title: "Financing math",            marketing: "Financing math check" },
   { key: "odometer",      title: "Odometer",                  marketing: "Odometer consistency check" },
   { key: "vin",           title: "VIN check",                 marketing: "VIN pattern validity check" },
   { key: "rebate",        title: "EV / PHEV rebate",          marketing: "EV rebate eligibility" },

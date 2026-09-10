@@ -171,20 +171,30 @@ const SURFACES = [
     },
   },
   {
-    // Added 2026-09-03 after report LC-FE77-C58 printed "No financing rate is
-    // advertised" on page 1 and "3.9% APR ... read from the page's own text"
-    // on page 4. One wording, from report-lines.js, on both surfaces.
-    field: "financing APR note (never contradicts the payment card)",
-    // The prose wording (financingAprNote) is no longer called on-screen since
-    // 2026-09-09 -- the glass-console point card uses a short hand-written
-    // "sub" line instead, built from the SAME dr/mr/high fields, not a second
-    // description of them. The value badge still calls the shared builder.
+    // Added 2026-09-10: point 4 ("AMVIC") is real AMVIC-registry data, not
+    // financing APR (Vic: "make it real AMVIC data") -- a live PDF had shown
+    // the AMVIC-titled point still carrying a 4.9% financing rate as its
+    // value, because the 09-09 rename ("just replace the words ... the rest
+    // do not touch") was correctly scoped to the label only. Worded once in
+    // report-lines.js (dealerLicenceLine) so a dealer's licence status can
+    // never read differently on the point card, the emailed deck card and
+    // the emailed compact row -- the exact divergence found while wiring
+    // this in (the app checked state==="valid", the email's old extras row
+    // checked state==="ok", a value classifyStatus() never returns, so a
+    // validly-licensed dealer always read "muted" there).
+    field: "AMVIC (point 4 — dealer licence, real registry data)",
     app: {
-      "shared value":    "financingAprValue(analysis,dr,",
+      "shared line builder import": "dealerLicenceLine",
+      "glass-console point card":   'PG.push({title:"AMVIC"',
+      "share link encode":          "lic:a.dealerLicence&&a.dealerLicence.status",
+      "share link decode":          "dealerLicence:c.lic?",
     },
     email: {
-      "shared wording":  "financingAprNote(a,",
-      "shared value":    "financingAprValue(a, null, null, false)",
+      "shared line builder import": "dealerLicenceLine",
+      "tenPoints core row":         'P.push({ t: "AMVIC"',
+      "emailed HTML deck":          'deck.push({ label: "AMVIC"',
+      "emailed PDF point explain":  'case "AMVIC"',
+      "emailed PDF supplementary":  'kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY")',
     },
   },
   {

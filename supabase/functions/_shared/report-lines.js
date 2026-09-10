@@ -1090,6 +1090,39 @@ export function warrantyLine(a) {
 }
 
 /**
+ * AMVIC: the regulator's own status, verbatim, matched from AMVIC's public
+ * licensee registry. Point 4 -- retitled from "Financing APR" 2026-09-09
+ * (Vic: "Financing APR needs to be replace with AMVIC check"), then wired to
+ * this real data 2026-09-10 after a real report showed point 4 titled
+ * "AMVIC" with a 4.9% financing rate as its value -- the earlier pass only
+ * renamed the label (Vic: "just replace the words ... the rest do not
+ * touch"), which was correct for that ask, but left the value computation
+ * untouched underneath a since-changed title.
+ *
+ * ONE function, reused by every surface (report card, emailed deck, emailed
+ * PDF) so a status can never read differently on one than another -- this is
+ * exactly the divergence found earlier: the app checked `state === "valid"`
+ * (the real value classifyStatus() returns) while the emailed report's
+ * compact row checked `state === "ok"`, a value classifyStatus() never
+ * produces, so a validly-licensed dealer always read as "muted" there.
+ * [[two-authors-per-fact]]
+ */
+export function dealerLicenceLine(a) {
+  const L = a?.dealerLicence;
+  if (!L || !L.status) {
+    return { value: "NOT ON QUOTE", line: "No dealer name was confirmed to match against AMVIC's public registry. Ask the dealer for their AMVIC licence number and check it yourself before any deposit.", tone: "muted" };
+  }
+  const good = L.state === "valid";
+  return {
+    value: good ? "VALID" : String(L.status).toUpperCase(),
+    line: good
+      ? "AMVIC is Alberta's regulator — every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads licensed, which is what you want to see."
+      : `AMVIC's public registry currently lists this business as "${L.status}". That does not always mean they can't sell you a car — records lag and businesses reapply — but it is the regulator's own wording, and it is worth clearing up before money changes hands. Ask for their current licence number in writing, then check it yourself on AMVIC's site.`,
+    tone: good ? "pass" : "flag",
+  };
+}
+
+/**
  * A recall, reduced to the two things a buyer acts on: what it is, and what it
  * could do. Transport Canada's own text runs three paragraphs per campaign
  * (Issue / Safety Risk / Corrective Actions), so a five-recall vehicle put four
