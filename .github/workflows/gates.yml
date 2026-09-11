@@ -304,6 +304,12 @@ jobs:
       # rate limiter cannot be backed off, circuit-broken or counted -- so the
       # one thing we promise (that we stop when told to) would be quietly false
       # for one function. 2,403 refusals were ignored in a single pass before this.
+      # dealer_source.active IS the crawl roster. Discovery wrote seeds back
+      # dormant and upserted with ignoreDuplicates onto a table that already held
+      # every host, so it promoted nothing for a month while reporting the rows it
+      # sent. A promotion that promotes nothing must not report success.
+      - name: The dealer promotion path can actually promote
+        run: npm run check:promotion-path
       - name: Every crawl request goes through the rate limiter
         run: npm run check:crawl-politeness
       - name: The rate limiter actually backs off (429/503, Retry-After, circuit)
