@@ -300,6 +300,14 @@ jobs:
       # listing_observation is keyed on an instant now, so one row is no longer
       # one day. A count of rows labelled as days silently DOUBLES at two reads
       # a day, and the number it inflates is days-on-lot.
+      # The crawler reads other people's servers. A request that bypasses the
+      # rate limiter cannot be backed off, circuit-broken or counted -- so the
+      # one thing we promise (that we stop when told to) would be quietly false
+      # for one function. 2,403 refusals were ignored in a single pass before this.
+      - name: Every crawl request goes through the rate limiter
+        run: npm run check:crawl-politeness
+      - name: The rate limiter actually backs off (429/503, Retry-After, circuit)
+        run: npm run test:crawl-backoff
       - name: A duration is days, not observation rows
         run: npm run check:observation-math
       - name: Migration columns exist (a 42703 must not reach the SQL editor)

@@ -1,0 +1,60 @@
+# WHO PERMITS US TO READ THEM, re-asked every day.
+#
+# This is NOT the inventory crawl and is not what is with counsel. It fetches
+# one file per dealer -- robots.txt -- which is published specifically to be
+# read by automated clients. You cannot honour a rule you are not allowed to
+# read, and a permission we cannot date is a permission we cannot rely on.
+#
+# It also HEADs the usual Terms-of-Service paths to record where a ToS lives and
+# hash it, so a CHANGE is detectable. Nothing here decides whether a clause
+# binds us; that is a question for a person.
+#
+# Cost: free. GitHub-hosted runner, one to a few requests per host, no vendor.
+name: Dealer permission (daily)
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_hosts:
+        description: "Survey only the first N hosts (blank = all)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Fetch but write nothing"
+        type: boolean
+        default: false
+  schedule:
+    # 06:10 Calgary. Deliberately BEFORE any inventory read, so a crawl always
+    # runs against permission read the same morning rather than yesterday's.
+    - cron: "10 12 * * *"
+
+concurrency:
+  group: dealer-permission
+  cancel-in-progress: false
+
+jobs:
+  survey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci --omit=dev || npm install --omit=dev
+      - name: Survey dealer permission
+        run: |
+          node scripts/survey-dealer-permission.mjs \
+            --out=permission.json \
+            ${{ inputs.max_hosts && format('--max-hosts={0}', inputs.max_hosts) || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Upload the list
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dealer-permission
+          path: permission.json
+          if-no-files-found: warn
