@@ -355,3 +355,47 @@ jobs:
           fi
           echo "Every required make wrote fresh rows — MSRP and rates both current."
           echo "All makes wrote. Catalog refresh complete."
+
+      # THE DAILY MSRP REPORT. Vic, 2026-09-11: "i need daily report of msrp".
+      #
+      # Runs AFTER the refresh and AFTER the failure gate, with !cancelled() so
+      # a red run still produces it — the morning the refresh breaks is the
+      # morning the report matters most.
+      #
+      # It answers a question no step above can: the guards compare each make
+      # against its own pre-run snapshot, so a make with NO STEP AT ALL is
+      # compared against nothing and passes silently. Jaguar, Land Rover and
+      # Mitsubishi sat at 2026-08-08 for 34 days through green run after green
+      # run for exactly that reason. This step reads the catalog itself and
+      # prints a DATE for every make, wired or not.
+      #
+      # Anon key only, no writes. It cannot affect the refresh it reports on.
+      - name: Daily MSRP report (every make, with a date)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          # Exit code captured, not swallowed. The report exits 1 when a make the
+          # refresh was SUPPOSED to write is 2+ days stale — an INDEPENDENT check
+          # from the guards above, which only ever compare a make against its own
+          # pre-run snapshot. The two can disagree, and when they do the report is
+          # reading the catalog that reports are actually built from. The summary
+          # is written either way, because the run that fails is the run whose
+          # report someone needs to read.
+          rc=0
+          node scripts/daily-msrp-report.mjs | tee "$RUNNER_TEMP/msrp-report.txt" || rc=$?
+          {
+            echo "## Daily MSRP report"
+            echo ""
+            echo '```'
+            cat "$RUNNER_TEMP/msrp-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The ::warning annotation for un-refreshed makes is emitted by the
+          # report itself (it checks GITHUB_ACTIONS), because only the program
+          # holding the data can name a make correctly. Grepping this output for
+          # names was tried first and returned "Jaguar Land Mitsubishi MAKE Acura
+          # Alfa BMW ..." — "Land Rover" split at the space and the match ran on
+          # into the next section. A warning, not an error: a make with no step
+          # is a gap in what we built, and a permanently-red job is a job people
+          # stop reading, which is the failure this whole report exists to end.
+          exit "$rc"
