@@ -24,8 +24,28 @@ name: Catalog refresh — daily FULL (MSRP + rates)
 on:
   workflow_dispatch:
   schedule:
-    # Daily 10:00 UTC (~4am Calgary). Full MSRP + rate rewrite.
-    - cron: "0 10 * * *"
+    # DAILY, BEFORE THE BUSINESS DAY. Vic, 2026-09-11: "daily run of msrp
+    # catalogue update must be run daily 6 am". MSRP is the denominator under
+    # every price claim the product makes, so a day without a refresh is a day
+    # of dividing by a number nobody checked. [[msrp-daily-6am-nonnegotiable]]
+    #
+    # 11:23 UTC = 5:23am Calgary (MDT) / 4:23am (MST, Nov-Mar). The hour of
+    # winter drift is accepted and stated rather than silently tolerated;
+    # GitHub cron has no timezone.
+    #
+    # WHY :23 AND NOT :00. The previous schedule was "0 10 * * *" and the eight
+    # runs from 2026-09-04 to 09-11 started at 13:05, 13:17, 13:51, 13:55,
+    # 13:56, 13:58, 14:01 and 15:22 UTC — a MEAN DELAY OF 3.9 HOURS, never less
+    # than three. Top of the hour is the most contended slot on GitHub's
+    # scheduler and queued runs are dropped, not queued fairly. The schedule
+    # said 4am and the job landed at 8am, so nobody could have known from the
+    # cron line when the catalog was actually refreshed.
+    #
+    # An off-peak minute is the standard mitigation. It is a mitigation, not a
+    # guarantee: GitHub makes no delivery promise for scheduled workflows. If
+    # the measured start does not move toward 11:23 within a week, the honest
+    # next step is a real scheduler, not an earlier cron line to absorb the lag.
+    - cron: "23 11 * * *"
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -290,7 +310,42 @@ jobs:
         run: |
           f="$RUNNER_TEMP/failed-makes.txt"
           if [ -s "$f" ]; then
-            echo "::error title=Catalog refresh incomplete::$(wc -l < "$f") make(s) did not write: $(paste -sd' ' "$f")"
+            # WHICH HALF BROKE. For eight consecutive days this run went red and
+            # said only "N make(s) did not write" — while MSRP was FINE on every
+            # one of them (29 of 32 makes wrote fresh on 09-11) and the failure
+            # was entirely finance/lease rates. One undifferentiated red signal
+            # meant nobody could tell the denominator from a side card, so an
+            # eight-day streak read as "the catalog is broken" when the thing
+            # that actually matters was current. A price is wrong without MSRP;
+            # it is merely less complete without a rate.
+            msrp=$(grep -i "msrp_catalog" "$f" || true)
+            rates=$(grep -iE "finance_rate_catalog|lease_rate_catalog" "$f" || true)
+            other=$(grep -ivE "msrp_catalog|finance_rate_catalog|lease_rate_catalog" "$f" || true)
+            # Counted with grep -c, not `wc -l` on the variable: a shell string
+            # with no trailing newline counts one short, and a wrong number in an
+            # alarm title is its own small lie.
+            n_msrp=$(grep -ci "msrp_catalog" "$f" || true)
+            n_rates=$(grep -ciE "finance_rate_catalog|lease_rate_catalog" "$f" || true)
+
+            if [ -n "$msrp" ]; then
+              echo "::error title=MSRP STALE — the denominator did not refresh::${n_msrp} make(s): $(printf '%s' "$msrp" | paste -sd' ')"
+            fi
+            if [ -n "$rates" ]; then
+              echo "::error title=Rates did not refresh (MSRP unaffected)::${n_rates} make(s): $(printf '%s' "$rates" | paste -sd' ')"
+            fi
+            if [ -n "$other" ]; then
+              echo "::error title=Scraper process died::$(printf '%s' "$other" | paste -sd' ')"
+            fi
+
+            {
+              echo "## Catalog refresh — what did not write"
+              echo ""
+              [ -n "$msrp" ]  && { echo "### MSRP — STALE (this is the denominator)"; printf '%s\n' "$msrp"  | sed 's/^/  - /'; echo ""; }
+              [ -n "$rates" ] && { echo "### Finance / lease rates"; printf '%s\n' "$rates" | sed 's/^/  - /'; echo ""; }
+              [ -n "$other" ] && { echo "### Scraper died before it could write"; printf '%s\n' "$other" | sed 's/^/  - /'; echo ""; }
+              [ -z "$msrp" ]  && echo "**MSRP refreshed cleanly for every make it was required for.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+
             echo "Makes that failed to refresh:"; sed 's/^/  - /' "$f"
             echo ""
             echo "Their previous rows were left in place (replaceRows refuses a >50% collapse"
@@ -298,4 +353,5 @@ jobs:
             echo "not empty. Read the step logs above for the underlying error."
             exit 1
           fi
+          echo "Every required make wrote fresh rows — MSRP and rates both current."
           echo "All makes wrote. Catalog refresh complete."
