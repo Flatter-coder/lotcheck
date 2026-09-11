@@ -505,6 +505,36 @@ async function candidatesFromAmvic() {
   return { rows: rows.map((r) => ({ website: r.website, name: r.trade_name || r.name, city: r.city })), total: all.length };
 }
 
+// WHO HAS ALREADY TOLD US NO.
+//
+// dealer_permission records every host's robots.txt verdict, re-read daily. The
+// crawler honours robots at crawl time; this probe did not consult it at all, so
+// a host whose robots.txt disallows the very inventory paths we probe for got
+// probed anyway — we knew the answer and asked regardless. Six such hosts were
+// identified by the first survey on 2026-09-11.
+//
+// Only `disallowed` is skipped. `partial` still has paths we may read, `unknown`
+// means we could not confirm either way (the crawler treats that as no, but a
+// probe is how we learn whether there is anything there at all), and a host with
+// no permission row has never been surveyed.
+//
+// Fails OPEN deliberately: if the table cannot be read we probe as before rather
+// than silently discovering nothing. A missing skip-list must not look like a
+// clean run, so the count of what it skipped is always printed.
+// [[dealer-tos-daily-checks]]
+async function disallowedHosts(supabase) {
+  const out = new Set();
+  try {
+    const { data, error } = await supabase
+      .from("dealer_permission").select("host").eq("verdict", "disallowed");
+    if (error) { console.warn(`  (could not read dealer_permission: ${error.message} — probing without a skip-list)`); return out; }
+    for (const r of data || []) { const h = toOrigin(r.host); if (h) out.add(h); }
+  } catch (e) {
+    console.warn(`  (could not read dealer_permission: ${e.message} — probing without a skip-list)`);
+  }
+  return out;
+}
+
 async function candidatesFromOsm() {
   console.log("Fetching Alberta shop=car from OpenStreetMap...");
   const osm = await fetchOverpass();
@@ -528,6 +558,28 @@ async function main() {
   }
   let candidates = [...byHost.values()];
   console.log(`${candidates.length} distinct usable hosts (source: ${SOURCE}).`);
+
+  // ASK BEFORE KNOCKING. Applied here, before the first request goes out, so a
+  // host that disallows us is never probed rather than probed and discarded.
+  {
+    const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (url && key) {
+      const { createClient } = await import("@supabase/supabase-js");
+      const no = await disallowedHosts(createClient(url, key, { auth: { persistSession: false } }));
+      if (no.size) {
+        const before = candidates.length;
+        const dropped = candidates.filter((c) => no.has(c.host));
+        candidates = candidates.filter((c) => !no.has(c.host));
+        console.log(`robots.txt: ${before - candidates.length} host(s) skipped — they disallow the paths this probe asks for:`);
+        for (const d of dropped.slice(0, 20)) console.log(`    ${d.host}${d.name ? "  " + d.name : ""}`);
+        if (dropped.length > 20) console.log(`    … and ${dropped.length - 20} more`);
+      } else {
+        console.log("robots.txt: no host in dealer_permission is marked disallowed — nothing skipped.");
+      }
+    } else {
+      console.log("robots.txt: no credentials, so no skip-list was read — probing every candidate.");
+    }
+  }
   if (SKIP) {
     const before = candidates.length;
     candidates = candidates.slice(SKIP);
