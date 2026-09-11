@@ -6,6 +6,7 @@
   "rewrites": [
     { "source": "/", "destination": "/index.html" },
     { "source": "/live-price-index", "destination": "/live-price-index.html" },
+    { "source": "/inventory-daily", "destination": "/alberta-inventory-daily.html" },
     { "source": "/alberta", "destination": "/alberta.html" },
     { "source": "/((?!api/).*)", "destination": "/app.html" }
   ],

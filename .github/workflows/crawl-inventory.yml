@@ -77,3 +77,14 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/build-city-price-index.mjs
+      # The public daily new/used count (/inventory-daily). Reads today's
+      # listing_observation rows this crawl just wrote -- a database fact, not
+      # a re-parse of this job's own log -- and applies its own plausibility
+      # cap independently of any upstream fix. Same guard as the step above:
+      # never runs on a dry-run, so a report day is never backed by zero reads.
+      - name: Build Alberta daily inventory report
+        if: ${{ !inputs.dry_run }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/build-alberta-inventory-daily.mjs

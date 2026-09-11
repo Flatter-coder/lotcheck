@@ -1,0 +1,43 @@
+# Rebuild one day of alberta_inventory_daily WITHOUT re-crawling.
+#
+# WHY THIS EXISTS. On 2026-09-07 the crawl itself ran cleanly (32 dealers, 2
+# failed, delisting completed for all of them) but the report-writing step's
+# unordered .range() pagination silently dropped one dealer's ~10,000-unit
+# block, writing an undercounted "verified" row -- a confident, wrong,
+# too-low number, on the day this feature was requested. The data was never
+# bad; only the READ of it was. Re-crawling Alberta to fix a read bug would
+# cost another ~2 hours and hit every dealer's site again for nothing.
+#
+# This job re-runs only the aggregation, against whatever vehicle_listing and
+# listing_observation already hold for the given day -- safe to run any
+# number of times, since the write is an upsert keyed on `day`.
+name: Rebuild Alberta inventory daily (no crawl)
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Day to rebuild, YYYY-MM-DD (blank = today)"
+        required: false
+        default: ""
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run test:inventory-daily
+      - name: Install
+        run: npm install --no-audit --no-fund @supabase/supabase-js
+      - name: Rebuild the day
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.date }}" ]; then ARGS="--date=${{ inputs.date }}"; fi
+          echo "node scripts/build-alberta-inventory-daily.mjs $ARGS"
+          node scripts/build-alberta-inventory-daily.mjs $ARGS

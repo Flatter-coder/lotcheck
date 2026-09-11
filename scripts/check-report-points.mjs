@@ -31,33 +31,46 @@ check("no duplicate keys", uniqInOrder(REPORT_POINTS.map((p) => p.key)).length =
 check("every point has marketing copy", REPORT_POINTS.every((p) => p.marketing && p.marketing.length > 3));
 
 // ── the on-screen report (src/App.jsx) ─────────────────────────────────────
+// Sidebar/Heatmap retired 2026-09-09 (Vic: "lets go with #02, you can remove
+// Sidebar/Heatmap") in favour of one glass-console report view. The old
+// checks here policed a two-band rail (pointItems/extraItems, a shared
+// `sel`-indexed detail panel, a `point:true/false` flag) that no longer
+// exists -- replaced with checks against the array the new view actually
+// builds (`PG`, the canonical ten) and the separate `extraDefs` array
+// ("also checked", never merged into PG).
 console.log("\nthe report on screen");
 {
   const src = read("src/App.jsx");
-  const titles = uniqInOrder([...src.matchAll(/P\.push\(\{\s*title:\s*"([^"]+)"/g)].map((m) => m[1]));
+  const titles = uniqInOrder([...src.matchAll(/PG\.push\(\{\s*title:\s*"([^"]+)"/g)].map((m) => m[1]));
   check(`App.jsx pushes exactly ten distinct points (${titles.length})`, titles.length === 10, titles.join(" | "));
   check("App.jsx's ten are the canonical ten, in order",
     JSON.stringify(titles) === JSON.stringify(POINT_TITLES),
     `app: ${JSON.stringify(titles)}\n         canon: ${JSON.stringify(POINT_TITLES)}`);
-  // The grid captioned with the point count must render the POINT array.
-  check("the N-point caption is derived from pointItems, never the mixed pool",
-    /\{pointItems\.length\}-point verification/.test(src), "caption must read {pointItems.length}");
-  check("optional cards are explicitly flagged as non-points",
-    /\.map\(\(c\) => \(\{ \.\.\.c, point: false \}\)\)/.test(src));
-  // The Heatmap view was retired 2026-08-27 and the Sidebar carries the two
-  // bands now, so the ordinal is keyed off the rail's selection rather than a
-  // tile index. What must not change is WHERE the ordinal comes from: the
-  // item's own `point` flag, never its position in the concatenated array.
-  check("the detail counter numbers by KIND, not by array position",
-    /c\.point \? `point \$\{sel\} \/ \$\{pointItems\.length\}`/.test(src),
-    "the ordinal must read the item's own `point` flag");
-  check("the verdict card carries no ordinal at all",
-    /sel === 0 \? null/.test(src),
-    "the verdict is not one of the ten and must not be numbered");
-  check("the Sidebar rail labels both bands",
-    /\$\{pointItems\.length\}-point verification/.test(src)
-    && /Also checked on this listing \(\$\{extraItems\.length\}\)/.test(src),
-    "the 10-point framing moved here when the Heatmap was retired");
+  // The heading captioned with the point count must read the real array's
+  // own length, never a hardcoded "10" -- so a report that grows past ten
+  // (or drops one) fails here, not in front of a buyer.
+  check("the ten-point heading counts the real array, never a hardcoded 10",
+    /\{PG\.length\} \/ 10 backed/.test(src), "caption must read {PG.length}");
+  // "Also checked" is a SEPARATE array (extraDefs), built after PG and never
+  // pushed into it -- so an extra can never be miscounted as one of the ten.
+  // Same property the emailed report's "no additional check is named the
+  // same as one of the ten" rule guards, checked here on the app side too.
+  const extraDefsBlock = (() => {
+    const start = src.indexOf("const extraDefs=[");
+    if (start === -1) return null;
+    const end = src.indexOf("].filter(Boolean);", start);
+    return end === -1 ? null : src.slice(start, end);
+  })();
+  check("App.jsx builds \"also checked\" as its own array, not pushed into the ten",
+    !!extraDefsBlock, "expected a `const extraDefs=[...]` block after the PG.push sequence");
+  if (extraDefsBlock) {
+    const extraLabels = [...extraDefsBlock.matchAll(/label:\s*"([^"]+)"/g)].map((m) => m[1]);
+    check("no \"also checked\" extra is named the same as one of the ten",
+      !extraLabels.some((l) => POINT_TITLES.includes(l)),
+      `extras: ${JSON.stringify(extraLabels)}`);
+  }
+  check("the \"also checked\" section says it isn't part of the ten",
+    /Also checked/.test(src) && /not part of the ten/.test(src));
 }
 
 // ── the emailed PDF (email-quote-report) ───────────────────────────────────

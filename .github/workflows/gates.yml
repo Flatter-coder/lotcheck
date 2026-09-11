@@ -297,6 +297,19 @@ jobs:
         run: npm run test:robots
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
+      # listing_observation is keyed on an instant now, so one row is no longer
+      # one day. A count of rows labelled as days silently DOUBLES at two reads
+      # a day, and the number it inflates is days-on-lot.
+      # The crawler reads other people's servers. A request that bypasses the
+      # rate limiter cannot be backed off, circuit-broken or counted -- so the
+      # one thing we promise (that we stop when told to) would be quietly false
+      # for one function. 2,403 refusals were ignored in a single pass before this.
+      - name: Every crawl request goes through the rate limiter
+        run: npm run check:crawl-politeness
+      - name: The rate limiter actually backs off (429/503, Retry-After, circuit)
+        run: npm run test:crawl-backoff
+      - name: A duration is days, not observation rows
+        run: npm run check:observation-math
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
@@ -313,6 +326,12 @@ jobs:
         run: npm run test:incentives
       - name: Finance-contingent pricing (S37)
         run: npm run test:finance-contingent
+      # A PDF box sized from the RAW string but drawn with the pdfSafe()
+      # rewrite of it is sized for text that never lands in it -- and only
+      # the one value carrying the rewritten character shows it, so no
+      # single rendered report proves the absence.
+      - name: PDF width measurements are sanitised (measure what you draw)
+        run: npm run check:pdf-measure
       - name: Report lines (other listings read; if you do nothing) + page-default reader
         run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
@@ -480,6 +499,13 @@ jobs:
       # wrong by ~$2,000 in the dealer's favour on every comparison.
       - name: Archived MSRP parser and its refusals
         run: npm run test:archived-msrp
+      # The public daily new/used count has to survive a single contaminated
+      # dealer pass (one rooftop returning thousands of units, e.g. a group or
+      # platform feed misread as one dealer) without that number reaching the
+      # verified total — this pins the cap and the exact Shaw-shaped case that
+      # first exposed the need for it.
+      - name: Alberta daily inventory aggregation and its plausibility cap
+        run: npm run test:inventory-daily
       - name: The shared reader keeps absences (read-num)
         run: npm run test:read-num
       # Two promises to the buyer that are control flow, not data: a report

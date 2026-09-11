@@ -66,12 +66,15 @@ for (const m of reads) {
 }
 
 // ── Rule 3 (guarded, count-pinned): every resolver call site is accounted for ─
-// Pinned at 3: (1) ReportViews — the hoisted `evap`, feeding both the 10-point
-// card and its "what this means" explainer; (2) the emailed-report payload;
-// (3) the scroll view. A new report surface that renders the rebate SHOULD add
-// a fourth — this gate failing is the prompt to confirm you wired every view,
-// then bump EXPECTED_CALL_SITES with the new surface named below.
-const EXPECTED_CALL_SITES = 3;
+// Pinned at 2: (1) the emailed-report payload; (2) the glass-console report
+// (QuoteCheckPage's done-state block), which hoists ONE `resolveEvap` call and
+// reuses its `rebate`/`effectiveFuelType` result for both the EV/PHEV rebate
+// point and the "also checked" extras. Was 3 until 2026-09-09 (Vic: "lets go
+// with #02, you can remove Sidebar/Heatmap") — ReportViews's own hoisted call
+// site went with it. A new report surface that renders the rebate SHOULD add
+// a call site back — this gate failing is the prompt to confirm you wired
+// every view, then bump EXPECTED_CALL_SITES with the new surface named below.
+const EXPECTED_CALL_SITES = 2;
 const calls = [...code.matchAll(/(?<!function\s)\bresolveEvap\s*\(/g)];
 if (calls.length !== EXPECTED_CALL_SITES) {
   failures.push(
@@ -103,15 +106,14 @@ const SURFACES = [
     // strictly better than a count, which stayed green when the scroll card was
     // deleted during this gate's own trial run.
     app: {
-      // Display modes have been cut twice: Bento/Deck/Scorecard/HUD on
-      // 2026-08-12, then Heatmap/Book/3D on 2026-08-27. The surviving report
-      // surfaces are SCROLL and SIDEBAR on screen, plus the emailed HTML and
-      // PDF. Sidebar renders from the shared item pool below.
-      "sidebar card pool":     "financeContingentItem = {",
-      "flag pool (sidebar)":             "financeContingentItem ? [financeContingentItem]",
+      // Display modes have been cut three times: Bento/Deck/Scorecard/HUD on
+      // 2026-08-12, Heatmap/Book/3D on 2026-08-27, Sidebar itself on
+      // 2026-09-09 (Vic: "lets go with #02, you can remove Sidebar/Heatmap").
+      // The one surviving on-screen surface is the glass-console report; it
+      // renders this as an "also checked" pill, not its own card.
       "scroll summary tile strip":       'tiles.push({label:"Price conditions"',
       "bento watch-outs count":          "analysis.financeContingent?.contingent) watchOuts",
-      "scroll view card":                "analysis.financeContingent&&analysis.financeContingent.contingent&&(",
+      "glass-console also-checked pill": 'analysis.financeContingent&&analysis.financeContingent.contingent&&{label:"Price conditions"',
       "share link encode":               "fcx:a.financeContingent&&a.financeContingent.contingent",
       "share link decode":               "financeContingent:c.fcx",
       "signed verify payload":           "fcx:a.financeContingent?.contingent?{r:",
@@ -131,8 +133,7 @@ const SURFACES = [
     field: "marketCount (other listings read, M below this one)",
     app: {
       "shared line builder import":  "marketCountLine, pageDefaultLine",
-      "sidebar card pool":           "marketCountItem = {",
-      "scroll view card":            "<MarketCountCard analysis={analysis}",
+      "glass-console also-checked pill": 'value:marketCountLine(analysis).value',
       "scroll summary tile strip":   'tiles.push({label:"Other listings read"',
       "share link encode":           "mc:a.marketCount?",
       "share link decode":           "marketCount:c.mc",
@@ -151,10 +152,13 @@ const SURFACES = [
     // (marketvalue.ts + likeForLikePool) and worded by ONE builder
     // (report-lines.js marketCompareLine) as three plain lines on every surface.
     field: "marketValue comparison (this car / similar listings / difference)",
+    // Dropped from the on-screen report 2026-09-09 (full replacement with
+    // concept #02 -- Vic accepted this specific capability going away rather
+    // than the light hero-only restyle). /verify and the share link still
+    // carry it -- those are checked below; there is no more app render path
+    // to pin.
     app: {
       "shared line builder import":  "marketCompareLine",
-      "sidebar card pool":           "marketCompareItem = {",
-      "scroll view card":            "<MarketCompareCard analysis={analysis}",
       "share link encode":           "mv:a.marketValue?{avg:",
       "share link decode":           "marketValue:c.mv?{average:c.mv.avg",
       "signed verify payload":       "marketValue:a.marketValue?{avg:nn(",
@@ -167,17 +171,30 @@ const SURFACES = [
     },
   },
   {
-    // Added 2026-09-03 after report LC-FE77-C58 printed "No financing rate is
-    // advertised" on page 1 and "3.9% APR ... read from the page's own text"
-    // on page 4. One wording, from report-lines.js, on both surfaces.
-    field: "financing APR note (never contradicts the payment card)",
+    // Added 2026-09-10: point 4 ("AMVIC") is real AMVIC-registry data, not
+    // financing APR (Vic: "make it real AMVIC data") -- a live PDF had shown
+    // the AMVIC-titled point still carrying a 4.9% financing rate as its
+    // value, because the 09-09 rename ("just replace the words ... the rest
+    // do not touch") was correctly scoped to the label only. Worded once in
+    // report-lines.js (dealerLicenceLine) so a dealer's licence status can
+    // never read differently on the point card, the emailed deck card and
+    // the emailed compact row -- the exact divergence found while wiring
+    // this in (the app checked state==="valid", the email's old extras row
+    // checked state==="ok", a value classifyStatus() never returns, so a
+    // validly-licensed dealer always read "muted" there).
+    field: "AMVIC (point 4 — dealer licence, real registry data)",
     app: {
-      "shared wording":  "financingAprNote(a,",
-      "shared value":    "financingAprValue(a, dr,",
+      "shared line builder import": "dealerLicenceLine",
+      "glass-console point card":   'PG.push({title:"AMVIC"',
+      "share link encode":          "lic:a.dealerLicence&&a.dealerLicence.status",
+      "share link decode":          "dealerLicence:c.lic?",
     },
     email: {
-      "shared wording":  "financingAprNote(a,",
-      "shared value":    "financingAprValue(a, null, null, false)",
+      "shared line builder import": "dealerLicenceLine",
+      "tenPoints core row":         'P.push({ t: "AMVIC"',
+      "emailed HTML deck":          'deck.push({ label: "AMVIC"',
+      "emailed PDF point explain":  'case "AMVIC"',
+      "emailed PDF supplementary":  'kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY")',
     },
   },
   {
@@ -188,10 +205,10 @@ const SURFACES = [
     // all -- it is regulator copy -- so /verify gates on the canonical version
     // instead, and older reports do not grow a section their PDF lacks.
     field: "insurancePremium (your premium after this purchase)",
+    // Dropped from the on-screen report 2026-09-09 (full replacement). /verify
+    // still carries it -- checked below.
     app: {
       "shared line builder import":  "insurancePremiumLine",
-      "sidebar card pool":           "insurancePremiumItem = {",
-      "scroll view card":            "<InsurancePremiumCard analysis={analysis}",
       "Alberta-only gate":           "financeCoverageApplies",
       "verify page row":             'financeCoverageApplies(o)&&Number(o.v)>=10&&<Row t="Your premium after this purchase"',
       "verify detail is version-gated too": 'financeCoverageApplies(o)&&Number(o.v)>=10&&<div',
@@ -209,11 +226,11 @@ const SURFACES = [
     // Derived entirely from fields the canonical already seals (dflt, fcx,
     // finance, mc.pv), so there is no new share-link field to keep in step.
     field: "financeCoverage (insurance before you sign)",
+    // Dropped from the on-screen report 2026-09-09 (full replacement).
+    // /verify still carries it -- checked below.
     app: {
       "shared line builder import":  "financeCoverageLine",
       "Alberta-only gate":           "financeCoverageApplies",
-      "sidebar card pool":           "financeCoverItem = {",
-      "scroll view card":            "<FinanceCoverCard analysis={analysis}",
       "verify page row":             'financeCoverageApplies(o)&&Number(o.v)>=9&&<Row t="Insurance before you sign"',
       // The detail block reads .meta/.lines off the line, which is null below
       // v9. Ungated, it blanked /verify for every pre-v9 Alberta report.
@@ -232,10 +249,10 @@ const SURFACES = [
     // ladder as a report line, worded once (report-lines.js olderYearsLine)
     // from the sealed ladder (canonical v8 `oy`).
     field: "olderYears (what older model years ask today)",
+    // Dropped from the on-screen report 2026-09-09 (full replacement).
+    // /verify and the share link still carry it -- checked below.
     app: {
       "shared line builder import":  "olderYearsLine",
-      "sidebar card pool":           "olderYearsItem = {",
-      "scroll view card":            "<OlderYearsCard analysis={analysis}",
       "share link encode":           "oy:a.olderYears?{st:",
       "share link decode":           "olderYears:c.oy?{state:c.oy.st",
       "signed verify payload":       "oy:a.olderYears?{st:a.olderYears.state||null,rs:a.olderYears.reason||null,sy:nn(",
@@ -253,8 +270,7 @@ const SURFACES = [
     // in the canonical (dflt), rendered by report-lines.js pageDefaultLine.
     field: "pageDefault (this page's payment default is...)",
     app: {
-      "sidebar card pool":           "pageDefaultItem = {",
-      "scroll view card":            "<PageDefaultCard analysis={analysis}",
+      "glass-console also-checked pill": 'value:pageDefaultLine(analysis).value',
       "scroll summary tile strip":   'tiles.push({label:"Payment starting point"',
       "share link encode":           "dflt:a.pageDefault?",
       "share link decode":           "pageDefault:c.dflt",
@@ -275,10 +291,13 @@ const SURFACES = [
     // price-gated listing produces. Pinned per-surface so a future edit that
     // drops one says WHICH one.
     field: "gated-price recovery note (D2C 'Call for pricing')",
+    // The full recovery-note PROSE (gatedPriceNote) is no longer called
+    // on-screen since 2026-09-09 -- the glass-console price point uses a
+    // short hand-written "sub" line off the same priceGatedG boolean instead.
+    // The underlying fact (price was gated but recovered) still ships via the
+    // share link / signed payload / verify row below.
     app: {
       "shared note helper":        "function gatedPriceNote(a){",
-      "sidebar":         "const gatedRecoveredNote = gatedPriceNote(a);",
-      "scroll view card":          "const gatedNoteScroll=gatedPriceNote(analysis);",
       "share link encode":         "pg:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
       "share link decode":         "priceGatedButRecovered:c.pg?true:undefined",
       "signed verify payload":     "gate:a.priceGatedButRecovered?{m:a.priceGateMessage||null",
@@ -291,16 +310,11 @@ const SURFACES = [
   },
   {
     field: "trimRange (MSRP per trim, standing req 2026-08-19)",
+    // Dropped from the on-screen report 2026-09-09 (full replacement).
+    // <TrimMsrpRange> and useTrimRange() are unmounted dead code now, kept
+    // only because the email surface's payload still needs mainTrimRange.
     app: {
       "shared hook + cache":        "function useTrimRange",
-      "scroll view card":           "<TrimMsrpRange analysis={analysis}",
-      "sidebar pool item":  'key: "trimrange"',
-      // Added 2026-08-27 after I shipped the nameplate label to 3 of 5 surfaces
-      // in the very change that was fixing this class. A trim ladder spanning
-      // several separately-priced vehicles must say so on EVERY surface, or the
-      // buyer sees six rows named "Luxury" at six prices and no explanation.
-      "sidebar nameplate label": "trimRange.multiNameplate && t.nameplate",
-      "scroll trim card nameplate label": "tr.multiNameplate&&t.nameplate",
       "email payload attach":       "trimRangePayload(mainTrimRange)",
     },
     email: {
@@ -312,20 +326,10 @@ const SURFACES = [
       "emailed HTML nameplate label": 'x.p ? escapeHtml(String(x.p))',
     },
   },
-  {
-    // The worked financing example had exactly ONE call site in the whole app.
-    field: "financing worked example (FinancingBreakdown)",
-    app: {
-      "component":              "function FinancingBreakdown(",
-      "scroll view mount":      "<FinancingBreakdown analysis={analysis}",
-      "sidebar mount":  "<FinancingBreakdown analysis={a}",
-      "in the shared item pool": 'key: "finex"',
-    },
-    email: {
-      // The emailed report states the same two figures as its own points.
-      "emailed financing points": 'P.push({ t: "Financing math"',
-    },
-  },
+  // "financing worked example (FinancingBreakdown)" field removed 2026-09-09:
+  // <FinancingBreakdown> had exactly one mount (the scroll view) plus
+  // ReportViews's sidebar mount, both gone with the full replacement. Nothing
+  // else in the app renders a financing worked example now.
   {
     // TWO AUTHORS PER FACT is this repo's most common defect shape, and the
     // financing-math sentence was the plainest example: computeFinancingCheck
@@ -341,21 +345,22 @@ const SURFACES = [
     // NOT into App.jsx, so the screen kept saying nothing at all -- the
     // all-views defect, committed inside the fix for it. This anchor is why the
     // next one fails the build instead of shipping. [[report-features-all-views]]
-    field: "price read state (priceCheckState)",
-    app: {
-      "shared line builder import": "priceCheckState",
-      "scroll + sidebar explainer": "priceCheckState(a).line",
-    },
-    email: {
-      "shared line builder import": "priceCheckState",
-      "emailed cover chip": "priceCheckState(a).short",
-    },
-  },
-  {
+    // "price read state (priceCheckState)" field removed 2026-09-09: its only
+    // app anchor was ReportViews/scroll's explainer text, both gone with the
+    // full replacement -- the glass-console price point uses a short
+    // hand-written sub line off the same underlying fields instead. The
+    // emailed cover chip still calls priceCheckState() on its own; that is
+    // now an email-internal concern with no on-screen counterpart to compare
+    // against, so it is untracked here rather than gated on a surface that no
+    // longer exists.
     field: "financing math sentence (financingMathNote)",
+    // Same story as priceCheckState just above: ReportViews's explainFor
+    // entry is gone with the full replacement. The glass-console Financing
+    // math point's sub line reads fc.note/rf.note directly (the same real
+    // fields financingMathNote() itself reads) rather than a second call to
+    // the shared builder.
     app: {
       "shared line builder import": "financingMathNote",
-      "scroll + sidebar explainer": '"Financing math": financingMathNote(a)',
     },
     email: {
       "shared line builder import": "financingMathNote",
@@ -382,7 +387,8 @@ const SURFACES = [
       // existed somewhere in the file, and `src.includes()` cannot tell where.
       "shared evidence component": "function EvidenceCard(",
       "scroll view mount":         "<EvidenceCard a={analysis}",
-      "sidebar mount":     "<EvidenceCard a={a}",
+      // Sidebar retired 2026-09-09 -- its own <EvidenceCard a={a}> mount went
+      // with it; the glass-console report is the only on-screen mount now.
       // The Book is the surface a buyer is most likely to PRINT and hand over,
       // and it carried no report id, no verify link, no seal and no capture.
       "signed verify payload":   "shot:a.listingShotSha256||null",
@@ -421,13 +427,15 @@ const REGION_OF = [
   // QuoteCheckPage. The mount itself is pinned separately ("scroll view card").
   [/trim card/i,         "TrimMsrpRange"],
   [/scroll view/i,       "QuoteCheckPage"],
-  [/sidebar/i,           "ReportViews"],
+  [/glass-console/i,     "QuoteCheckPage"],
   [/verify page/i,       "VerifyPage"],
 ];
 // The Heatmap, Book and 3D views were retired 2026-08-27 (Vic: "remove Book
-// tab, Heatmap, 3D"). Their anchors are gone rather than left pointing at
-// deleted code -- a gate that pins a surface nobody can open is the same lie
-// this gate was made range-aware to stop.
+// tab, Heatmap, 3D"), and Sidebar itself on 2026-09-09 (Vic: "lets go with
+// #02, you can remove Sidebar/Heatmap") -- ReportViews went with it. Their
+// anchors are gone rather than left pointing at deleted code -- a gate that
+// pins a surface nobody can open is the same lie this gate was made
+// range-aware to stop.
 
 /**
  * Byte range of a top-level `function NAME(`, ending where the next top-level
@@ -475,33 +483,15 @@ for (const { field, app, email } of SURFACES) {
 }
 
 // ── The intake page's "Every report checks all 10" list vs the audit itself ──
-// The Quote Check intake card names the ten checks a report contains, as a
-// static list. The canonical audit pushes those titles in the report renderer.
-// Two copies of the same ten strings drift the moment someone renames a check
-// in one place -- and a promise on the intake screen that the report does not
-// keep is exactly the claim-without-a-check-behind-it this repo forbids. So the
-// intake list is read back out of the source and compared, as a SET, to the
-// titles the audit actually pushes. Rename one, and this is the gate that says so.
-{
-  const auditStart = src.indexOf("the canonical 10-point audit");
-  const auditEnd = auditStart === -1 ? -1 : src.indexOf("\n}\n", auditStart);
-  const auditRegion = auditStart === -1 ? "" : src.slice(auditStart, auditEnd === -1 ? undefined : auditEnd);
-  const audit = new Set([...auditRegion.matchAll(/P\.push\(\{ title: "([^"]+)"/g)].map((m) => m[1]));
-
-  const intakeAnchor = "EVERY REPORT CHECKS ALL 10";
-  // Read only the array literal itself -- from its opening "{[" to "].map(" --
-  // not from the heading, or the style strings between them ("grid",
-  // "1fr 1fr") get counted as promised checks.
-  const anchorAt = src.indexOf(intakeAnchor);
-  const intakeStart = anchorAt === -1 ? -1 : src.indexOf("{[", anchorAt);
-  const intakeRegion = intakeStart === -1 ? "" : src.slice(intakeStart, src.indexOf("].map(", intakeStart));
-  const intake = [...intakeRegion.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-
-  if (audit.size !== 10) failures.push(`${FILE}: expected the canonical audit to push 10 titled checks, found ${audit.size} (${[...audit].join(", ") || "none"}). If the audit grew, the intake list and its heading must grow with it.`);
-  if (intake.length !== 10) failures.push(`${FILE}: the intake card's "${intakeAnchor}" list has ${intake.length} entries, not 10.`);
-  for (const t of intake) if (!audit.has(t)) failures.push(`${FILE}: intake promises "${t}" but no audit check carries that title -- the report would not keep that promise.`);
-  for (const t of audit) if (!intake.includes(t)) failures.push(`${FILE}: the audit runs "${t}" but the intake list omits it -- the page undersells the report.`);
-}
+// RETIRED 2026-09-10 (Vic: "remove this please, they are getting this info on
+// report"). The Quote Check intake card used to name the ten checks a report
+// contains, as a static list -- this rule kept that list in sync with the
+// canonical audit's own titles by reading both back out of source and
+// comparing them as a SET. The intake card no longer makes that promise at
+// all (the ten are still named, with real values, on the report itself), so
+// there is nothing left for this rule to compare. The landing page's own
+// "what we advertise" section (public/index.html) still carries the
+// equivalent promise and is still checked, in check-report-points.mjs.
 
 if (failures.length) {
   console.error("REPORT PARITY GATE — FAILED\n");

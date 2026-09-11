@@ -60,6 +60,7 @@
     "golden:build": "node scripts/build-golden-set.mjs",
     "golden:grade": "node scripts/grade-golden-set.mjs",
     "test:msrp-claim": "node --experimental-strip-types supabase/functions/_shared/msrp-claim.test.ts",
+    "check:pdf-measure": "node scripts/check-pdf-measure.mjs",
     "check:cache-ver": "node scripts/check-cache-ver.mjs",
     "check:coercion": "node scripts/check-number-coercion.mjs",
     "test:read-num": "node scripts/test-read-num.mjs",
@@ -72,6 +73,11 @@
     "test:value-canonical": "node --experimental-strip-types supabase/functions/_shared/value-report.test.ts",
     "test:value-math": "node --experimental-strip-types scripts/test-value-math.mjs",
     "test:supersede": "node scripts/test-supersede-enrichment.mjs",
+    "report:daily-history": "node scripts/daily-history-report.mjs",
+    "check:observation-math": "node scripts/check-observation-math.mjs",
+    "check:crawl-politeness": "node scripts/check-crawl-politeness.mjs",
+    "test:crawl-backoff": "node scripts/test-crawl-backoff.mjs",
+    "survey:permission": "node scripts/survey-dealer-permission.mjs",
     "check:migrations": "node scripts/check-migration-columns.mjs",
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
     "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts",
@@ -105,7 +111,8 @@
     "test:reputation-budget": "node scripts/test-reputation-budget.mjs",
     "test:fee-stack": "node scripts/test-fee-stack.mjs",
     "test:share-round-trip": "node scripts/test-share-round-trip.mjs",
-    "test:archived-msrp": "node scripts/test-archived-msrp.mjs"
+    "test:archived-msrp": "node scripts/test-archived-msrp.mjs",
+    "test:inventory-daily": "node scripts/test-inventory-daily.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

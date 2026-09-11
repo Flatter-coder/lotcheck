@@ -20,6 +20,35 @@
 
 import { FREQ_LABEL, POSITIVE_ABSENCE } from "./page-default.js";
 
+// "same powertrain" IS A CLAIM ABOUT THE SET, so it may only be made when the
+// set was actually powertrain-separated.
+//
+// The powertrain wall stands down when a listing declares a powertrain that no
+// comparable row names -- a hybrid-only nameplate like the J250 Land Cruiser,
+// where no dealer writes "Hybrid" because there is no gas sibling. The rows
+// kept are then merely UNLABELLED, not known to match, and resolvePowertrainWall
+// reports that as `powertrainSeparated: false`.
+//
+// Reviewed 2026-09-10: the five surfaces below each hardcoded the phrase off
+// the trim SCOPE alone, so relaxing the wall would have printed "5 used 2024
+// Toyota Land Cruiser (all trims, same powertrain)" over a set assembled by
+// ignoring powertrain -- an unbacked claim in customer-facing copy, on the PDF,
+// the on-screen report and the shared link at once. The phrase now lives in
+// exactly ONE place so it cannot drift between them again.
+//
+// The claim is dropped only on an explicit `false`. Every producer sets the
+// flag (asserted by test:report-lines), so the permissive default is never
+// exercised by live code -- it exists so an analysis sealed before this field
+// existed keeps the sentence it was correctly given at the time.
+// [[claims-must-stay-backed]] [[powertrain-identity-rule]] [[make-it-dispute-proof]]
+export function allTrimsWords(src) {
+  return src && src.powertrainSeparated === false ? "all trims" : "all trims, same powertrain";
+}
+export function allTrimsClause(src) {
+  return ` (${allTrimsWords(src)})`;
+}
+
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // 'YYYY-MM-DD' or ISO timestamp -> 'Aug 18, 2026' (en-CA short form the app
@@ -121,7 +150,7 @@ export function marketCountLine(a) {
   const withTrim = scope === "trim";
   const labelBase = vehicleLabel(mc, a, withTrim);
   const familyClause = scope === "trim_family" && mc.trimLabel ? ` with a trim beginning "${mc.trimLabel.split(/\s+/)[0]}"` : "";
-  const allTrims = scope === "model" ? " (all trims, same powertrain)" : "";
+  const allTrims = scope === "model" ? allTrimsClause(mc) : "";
   const other = mc.subjectExcluded ? "other " : "";
   const scopeTag = scope === "model" ? " · ALL TRIMS" : scope === "trim_family" && mc.trimLabel ? ` · ${mc.trimLabel.split(/\s+/)[0].toUpperCase()} FAMILY` : "";
   out.meta = [labelBase, prov, when ? `read ${when}` : null].filter(Boolean).join(" · ");
@@ -326,7 +355,7 @@ export function marketCompareLine(a) {
   // ("RX 350h", "RX 500h") and the powertrain wall leaves them out on purpose,
   // so "all trims" alone would not be true.
   const allTrims = mv.trimScope === "model" || (mv.insufficient && !mv.trimScope && Number(mv.nRead) > 0);
-  const scopeWord = mv.trimScope === "trim" && mv.trimLabel ? ` ${mv.trimLabel}` : mv.trimScope === "trim_family" && mv.trimLabel ? ` whose trim begins "${mv.trimLabel.split(/\s+/)[0]}"` : allTrims ? " (all trims, same powertrain)" : "";
+  const scopeWord = mv.trimScope === "trim" && mv.trimLabel ? ` ${mv.trimLabel}` : mv.trimScope === "trim_family" && mv.trimLabel ? ` whose trim begins "${mv.trimLabel.split(/\s+/)[0]}"` : allTrims ? allTrimsClause(mv) : "";
   const kmClause = mv.kmLow != null && mv.kmHigh != null ? (Number(mv.kmLow) <= 0 ? ` with up to ${kmCeil(mv.kmHigh)}` : ` with ${kmFloor(mv.kmLow)} to ${kmCeil(mv.kmHigh)}`) : "";
   const when = readClause(mv);
   const what = `${cond ? cond + " " : ""}${years ? years + " " : ""}${nameplate}${scopeWord}${kmClause}`;
@@ -466,7 +495,7 @@ export function olderYearsLine(a) {
   const mk = oy.make || a?.make || null, md = oy.model || a?.model || null;
   const hasBasis = !!((mk || md) && sy);
   const nameplate = [mk, md, oy.powertrain].filter(Boolean).join(" ");
-  const scopeWord = oy.scope === "trim" && oy.trimLabel ? ` ${oy.trimLabel}` : oy.scope === "trim_family" && oy.trimLabel ? ` whose trim begins "${oy.trimLabel.split(/\s+/)[0]}"` : " (all trims, same powertrain)";
+  const scopeWord = oy.scope === "trim" && oy.trimLabel ? ` ${oy.trimLabel}` : oy.scope === "trim_family" && oy.trimLabel ? ` whose trim begins "${oy.trimLabel.split(/\s+/)[0]}"` : allTrimsClause(oy);
   const when = readClause(oy);
   const thisV = !hasAsk ? `${sy ? sy + " · " : ""}no asking price shown, so no difference is worked out`
     : contingent ? `${sy ? sy + " · " : ""}${fmtMoney(ask)} asking (depends on financing with the dealer, so no difference is worked out)`
@@ -505,7 +534,7 @@ export function olderYearsLine(a) {
       out.body = `The set of used ${nameplate} one to three model years older than this ${sy} came back at its size limit, so the dearest listings are missing from it and nothing is stated per model year.`;
       return out;
     }
-    const older = `used ${nameplate}${n > 0 ? " (all trims, same powertrain)" : ""} one to three model years older than this ${sy}`.replace(/\s+/g, " ").trim();
+    const older = `used ${nameplate}${n > 0 ? allTrimsClause(oy) : ""} one to three model years older than this ${sy}`.replace(/\s+/g, " ").trim();
     const anyOutliers = missing.some((m) => Number(m.nRead) > Number(m.nKept || 0));
     out.lines = [thisLine, ...missing.map(missLine)];
     if (!missing.length) out.lines.push({ k: "Older model years", v: n === 0 ? `none read: no ${older} were among the listings read from ${prov} dealers' own pages` : `${n} read${when ? " " + when : ""}, but no single model year had ${need} or more` });
@@ -542,7 +571,7 @@ export function olderYearsLine(a) {
   out.note = OY_NOTE;
   out.value = `${olderWord(first.d).toUpperCase()} ${fd == null ? `MIDDLE ${fmtMoney(first.median)}` : fd > 0 ? `${fmtMoney(fd)} LESS` : fd < 0 ? `${fmtMoney(-fd)} MORE` : "THE SAME"}`;
   out.headline = fd == null ? `${olderWord(first.d)}: middle ${fmtMoney(first.median)}` : `${olderWord(first.d)} asks ${fd > 0 ? `${fmtMoney(fd)} less` : fd < 0 ? `${fmtMoney(-fd)} more` : "the same"}`;
-  out.meta = [`${rungs.length} model year${rungs.length === 1 ? "" : "s"} stated`, oy.scope === "model" ? "all trims, same powertrain" : oy.scope === "trim" ? "same trim" : oy.scope === "trim_family" ? "trim family" : null, when ? `read ${when}` : null].filter(Boolean).join(" · ");
+  out.meta = [`${rungs.length} model year${rungs.length === 1 ? "" : "s"} stated`, oy.scope === "model" ? allTrimsWords(oy) : oy.scope === "trim" ? "same trim" : oy.scope === "trim_family" ? "trim family" : null, when ? `read ${when}` : null].filter(Boolean).join(" · ");
   out.lines = lines;
   out.body = `${thisLine.k}: ${thisLine.v}. ${lines.slice(1).map((l) => `${l.k}: ${l.v}`).join(". ")}.`;
   return out;
@@ -1086,6 +1115,39 @@ export function warrantyLine(a) {
     value: "SEE FACTORY TERMS",
     line: "We could not confirm the factory warranty terms for this vehicle. Ask exactly what is covered, for how long, and from what date — in writing — before considering any paid coverage.",
     tone: "muted",
+  };
+}
+
+/**
+ * AMVIC: the regulator's own status, verbatim, matched from AMVIC's public
+ * licensee registry. Point 4 -- retitled from "Financing APR" 2026-09-09
+ * (Vic: "Financing APR needs to be replace with AMVIC check"), then wired to
+ * this real data 2026-09-10 after a real report showed point 4 titled
+ * "AMVIC" with a 4.9% financing rate as its value -- the earlier pass only
+ * renamed the label (Vic: "just replace the words ... the rest do not
+ * touch"), which was correct for that ask, but left the value computation
+ * untouched underneath a since-changed title.
+ *
+ * ONE function, reused by every surface (report card, emailed deck, emailed
+ * PDF) so a status can never read differently on one than another -- this is
+ * exactly the divergence found earlier: the app checked `state === "valid"`
+ * (the real value classifyStatus() returns) while the emailed report's
+ * compact row checked `state === "ok"`, a value classifyStatus() never
+ * produces, so a validly-licensed dealer always read as "muted" there.
+ * [[two-authors-per-fact]]
+ */
+export function dealerLicenceLine(a) {
+  const L = a?.dealerLicence;
+  if (!L || !L.status) {
+    return { value: "NOT ON QUOTE", line: "No dealer name was confirmed to match against AMVIC's public registry. Ask the dealer for their AMVIC licence number and check it yourself before any deposit.", tone: "muted" };
+  }
+  const good = L.state === "valid";
+  return {
+    value: good ? "VALID" : String(L.status).toUpperCase(),
+    line: good
+      ? "AMVIC is Alberta's regulator — every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads licensed, which is what you want to see."
+      : `AMVIC's public registry currently lists this business as "${L.status}". That does not always mean they can't sell you a car — records lag and businesses reapply — but it is the regulator's own wording, and it is worth clearing up before money changes hands. Ask for their current licence number in writing, then check it yourself on AMVIC's site.`,
+    tone: good ? "pass" : "flag",
   };
 }
 

@@ -1,6 +1,6 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-09-04",
+  "generatedAt": "2026-09-10",
   "totalDealers": 405,
   "cities": [
     {
@@ -20,13 +20,13 @@
         "Heninger Toyota",
         "Calgary Honda",
         "Advantage Ford",
-        "CMP Classic",
         "T&T Honda",
         "Eastside Kia",
         "South Pointe Toyota",
         "Woodridge Ford",
         "Renfrew Chrysler Dodge Jeep Ram",
-        "Royal Oak Nissan"
+        "Royal Oak Nissan",
+        "Charlesglen Toyota"
       ]
     },
     {

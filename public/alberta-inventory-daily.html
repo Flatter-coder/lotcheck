@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>LotCheck — Alberta Inventory Daily</title>
+<meta name="description" content="New and used vehicles for sale in Alberta, read from dealers' own listings by LotCheck — verified and raw, with the source and the day named."/>
+<script>
+/* Site-wide theme sync (lc-theme, same key as index.html/App.jsx/live-price-index.html):
+   the saved choice wins, else the OS preference. Runs before first paint. */
+(function(){
+  try{
+    var saved=localStorage.getItem("lc-theme");
+    var light = saved ? (saved==="light"||saved==="outdoor") : window.matchMedia("(prefers-color-scheme: light)").matches;
+    if(light) document.documentElement.setAttribute("data-theme","light");
+  }catch(e){}
+})();
+</script>
+<style>
+  /* Compact-dashboard direction: dense one-line rows, a cyan accent that
+     matches the rest of the live product (live-price-index.html), semantic
+     colour kept separate from the accent. */
+  :root{
+    --bg:#0a0d13; --panel:#12161f; --panel-2:#181d29;
+    --ink:#e6eaf0; --dim:#8b95a8; --dimmer:#565f70;
+    --line:rgba(230,234,240,.12); --line-soft:rgba(230,234,240,.07);
+    --accent:#22d3ee; --good:#34d399; --bad:#fb7185; --flag:#f5a623;
+    --mono:"SF Mono",Consolas,"IBM Plex Mono",monospace;
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#f1f3f6;
+    --ink:#161b22; --dim:#5b6674; --dimmer:#8a94a3;
+    --line:rgba(22,27,34,.12); --line-soft:rgba(22,27,34,.06);
+    --accent:#0891b2; --good:#0a8f56; --bad:#c62b46; --flag:#a86200;
+  }
+  *{box-sizing:border-box}
+  html,body{background:var(--bg)}
+  body{margin:0;color:var(--ink);font-family:-apple-system,"Segoe UI",Inter,sans-serif;-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+  .wrap{max-width:1040px;margin:0 auto;padding:24px 20px 70px}
+  .backbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;font-size:13px;color:var(--dim)}
+  .backbar a{color:var(--dim);text-decoration:none}
+  .backbar a:hover{color:var(--ink)}
+  header{margin-bottom:18px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dimmer);font-family:var(--mono)}
+  h1{font-size:clamp(20px,2.6vw,26px);margin:0;letter-spacing:-.01em}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--good);display:inline-block;
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 18%, transparent);animation:pulse 2.4s ease-in-out infinite;margin-right:5px}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .lede{color:var(--dim);font-size:13.5px;line-height:1.5;max-width:70ch;margin:6px 0 18px}
+
+  /* dense KPI strip */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:14px}
+  .kpi{background:var(--panel);padding:12px 14px}
+  .kpi .k{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--dimmer);margin-bottom:5px}
+  .kpi .v{font-family:var(--mono);font-size:21px;font-weight:700;line-height:1}
+  .kpi .v .raw{font-size:12.5px;color:var(--dimmer);font-weight:500;margin-left:5px}
+  .kpi .s{font-size:11.5px;color:var(--dim);margin-top:5px;line-height:1.35}
+
+  .callout{display:flex;gap:9px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--flag);
+    border-radius:8px;padding:11px 13px;margin:12px 0;font-size:12.5px;color:var(--dim);line-height:1.5}
+  .callout b{color:var(--ink)}
+  .callout.note{border-left-color:var(--accent)}
+
+  .cols{display:grid;grid-template-columns:1.15fr 1fr;gap:14px;margin-top:16px}
+  @media (max-width:760px){.cols{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:13px 14px}
+  .panel h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);margin:0 0 3px;font-weight:700}
+  .panel .sub{font-size:11px;color:var(--dimmer);margin-bottom:10px}
+
+  /* dense one-line rows, shared by the city list and the activity list */
+  .rows{display:flex;flex-direction:column}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;
+    border-bottom:1px solid var(--line-soft);font-size:12.5px}
+  .row:last-child{border-bottom:none}
+  .row .name{font-weight:600;color:var(--ink)}
+  .row .meta{font-size:11px;color:var(--dimmer);margin-left:6px;font-weight:400}
+  .row .val{font-family:var(--mono);font-weight:700;text-align:right}
+  .row .val .u{font-size:10.5px;color:var(--dimmer);font-weight:500;margin-left:3px}
+  .pct-under{color:var(--good)} .pct-over{color:var(--bad)}
+  .empty-row{padding:14px 0;color:var(--dimmer);font-size:12px}
+  .badge{font-family:var(--mono);font-size:10px;padding:1px 6px;border-radius:99px;border:1px solid var(--line);
+    color:var(--dimmer);white-space:nowrap}
+  .badge.new{color:var(--good);border-color:color-mix(in srgb, var(--good) 40%, transparent)}
+  .badge.price_move{color:var(--accent);border-color:color-mix(in srgb, var(--accent) 40%, transparent)}
+  .badge.delisted{color:var(--bad);border-color:color-mix(in srgb, var(--bad) 40%, transparent)}
+  .ticker{max-height:340px;overflow-y:auto}
+  .ticker-row{display:flex;flex-direction:column;gap:2px;padding:7px 0;border-bottom:1px solid var(--line-soft);font-size:12px}
+  .ticker-row:last-child{border-bottom:none}
+  .ticker-top{display:flex;align-items:center;gap:6px}
+  .ticker-title{font-weight:600;color:var(--ink)}
+  .ticker-meta{font-size:11px;color:var(--dimmer);display:flex;justify-content:space-between}
+  .price-up{color:var(--bad)} .price-down{color:var(--good)}
+
+  h2.section{font-size:14px;margin:26px 0 8px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:right;padding:7px 9px;border-bottom:1px solid var(--line-soft)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--dimmer);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em}
+  td{font-family:var(--mono)}
+  tbody tr:hover{background:var(--panel-2)}
+  .flag-row{color:var(--flag)}
+
+  .empty,.loading{padding:40px 0;text-align:center;color:var(--dim);font-size:14px}
+  footer{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);font-size:11px;color:var(--dimmer)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="backbar">
+    <a href="/">&larr; LotCheck</a>
+    <a href="/live-price-index">MSRP live index &rarr;</a>
+  </div>
+  <header>
+    <h1><span class="live-dot" aria-hidden="true"></span>Alberta inventory, daily</h1>
+    <span class="eyebrow" id="asOfLabel"></span>
+  </header>
+  <p class="lede">New and used vehicles for sale at Alberta dealers, read from
+    their own public listings. Every count is shown two ways — <b>verified</b>
+    and <b>raw</b> — because a single unusually large source can otherwise make
+    the raw count look cleaner than it is.</p>
+
+  <div id="loading" class="loading">Reading today's count&hellip;</div>
+  <div id="empty" class="empty" style="display:none">No report has been recorded yet.</div>
+
+  <div id="content" style="display:none">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="k">New for sale — verified</div>
+        <div class="v mono" id="newVerified">—</div>
+        <div class="s" id="newRawNote"></div>
+      </div>
+      <div class="kpi">
+        <div class="k">Used for sale — verified</div>
+        <div class="v mono" id="usedVerified">—</div>
+        <div class="s" id="usedRawNote"></div>
+      </div>
+      <div class="kpi">
+        <div class="k">Dealers read</div>
+        <div class="v mono" id="dealersSeen">—</div>
+        <div class="s" id="coverageNote"></div>
+      </div>
+      <div class="kpi">
+        <div class="k">Today's activity</div>
+        <div class="v mono" id="deltas">—</div>
+        <div class="s">new listings · price moves · delisted</div>
+      </div>
+    </div>
+
+    <div class="callout" id="flagCallout" style="display:none"></div>
+
+    <div class="cols">
+      <div class="panel">
+        <h2>By city</h2>
+        <div class="sub">New/used for-sale counts, verified the same way as the totals above. Only shown once a city has 3+ dealers seen — fewer than that and a count is close enough to naming one dealer's lot size to withhold it. The small badge is a different measure, carried over from the MSRP price index: how far live asking prices sit from catalog sticker, where that also clears its own gate.</div>
+        <div class="rows" id="cityRows"><div class="empty-row">Loading&hellip;</div></div>
+      </div>
+
+      <div class="panel">
+        <h2>Recent activity</h2>
+        <div class="sub">Real listings, most recent first — a new arrival, a price change, or a delisting. Named plainly; no motive implied either way a price moves.</div>
+        <div class="rows ticker" id="tickerRows"><div class="empty-row">Loading&hellip;</div></div>
+      </div>
+    </div>
+
+    <div class="callout note">
+      <div><b>About this report.</b> "Verified" excludes any single dealer
+        pass that returned more used or new units than one Alberta rooftop
+        plausibly carries — a signal worth checking, not one dealer's real
+        lot. "Raw" is the count before that check. This is what LotCheck has
+        read, on the days it read it — never a claim about the whole Alberta
+        market, and it updates only on the days a crawl actually ran (the
+        crawl runs on demand today, pending a legal review of a standing
+        daily schedule).</div>
+    </div>
+
+    <h2 class="section">History</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Day</th><th>New (verified)</th><th>New (raw)</th><th>Used (verified)</th><th>Used (raw)</th><th>Dealers</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    Source: LotCheck's own crawl of Alberta dealers' public listings. Not affiliated with AMVIC, any manufacturer, or any dealer.
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var SUPA = "https://debigtyjhjamipooajhk.supabase.co/rest/v1";
+  var ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlYmlndHlqaGphbWlwb29hamhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4NjQ4OTEsImV4cCI6MjA5ODQ0MDg5MX0.PujrRSJA_CWQKEtzGLtbAwk2Uq6VZAJDKEyS56exP9A";
+  var fmt = function(n){ return (n||0).toLocaleString("en-CA"); };
+  var fmt1 = function(n){ return (n||0).toLocaleString("en-CA",{minimumFractionDigits:1,maximumFractionDigits:1}); };
+
+  function rpc(name, body){
+    return fetch(SUPA + "/rpc/" + name, {
+      method: "POST",
+      headers: { apikey: ANON, Authorization: "Bearer " + ANON, "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    }).then(function(r){ if(!r.ok) throw new Error(name + " HTTP " + r.status); return r.json(); });
+  }
+
+  function renderDaily(rows){
+    var loading = document.getElementById("loading");
+    var empty = document.getElementById("empty");
+    var content = document.getElementById("content");
+    if (!rows || !rows.length){ loading.style.display="none"; empty.style.display="block"; return null; }
+    loading.style.display="none"; content.style.display="block";
+
+    var today = rows[0];
+    document.getElementById("asOfLabel").textContent = "as of " + today.day;
+
+    document.getElementById("newVerified").innerHTML = fmt(today.newUnitsVerified) +
+      (today.newUnitsRaw !== today.newUnitsVerified ? '<span class="raw">/ ' + fmt(today.newUnitsRaw) + ' raw</span>' : "");
+    document.getElementById("usedVerified").innerHTML = fmt(today.usedUnitsVerified) +
+      (today.usedUnitsRaw !== today.usedUnitsVerified ? '<span class="raw">/ ' + fmt(today.usedUnitsRaw) + ' raw</span>' : "");
+    document.getElementById("newRawNote").textContent = today.newUnitsRaw === today.newUnitsVerified ? "no exclusions today" : "raw total shown when it differs";
+    document.getElementById("usedRawNote").textContent = today.usedUnitsRaw === today.usedUnitsVerified ? "no exclusions today" : "raw total shown when it differs";
+
+    document.getElementById("dealersSeen").textContent = fmt(today.dealersSeen);
+    document.getElementById("coverageNote").textContent = today.amvicIssuedHosts
+      ? "of " + fmt(today.amvicIssuedHosts) + " AMVIC-issued hosts (" + ((today.dealersSeen/today.amvicIssuedHosts)*100).toFixed(1) + "%) — not a market total"
+      : (today.dealersActive ? fmt(today.dealersActive) + " active in our catalogue" : "");
+
+    document.getElementById("deltas").textContent = fmt(today.arrived) + " · " + fmt(today.priceEvents) + " · " + fmt(today.delisted);
+
+    var flagBox = document.getElementById("flagCallout");
+    if (today.notes){
+      flagBox.style.display = "flex";
+      var heading = today.dealersFlagged > 0
+        ? "<b>" + today.dealersFlagged + " source" + (today.dealersFlagged===1?"":"s") + " excluded from the verified count today.</b> "
+        : "<b>Note on today's count.</b> ";
+      flagBox.innerHTML = "<div>" + heading + today.notes + "</div>";
+    } else {
+      flagBox.style.display = "none";
+    }
+
+    var tbody = document.getElementById("historyBody");
+    tbody.innerHTML = "";
+    rows.slice(0, 14).forEach(function(r){
+      var tr = document.createElement("tr");
+      if (r.dealersFlagged > 0) tr.className = "flag-row";
+      tr.innerHTML = "<td>" + r.day + "</td>" +
+        "<td>" + fmt(r.newUnitsVerified) + "</td><td>" + fmt(r.newUnitsRaw) + "</td>" +
+        "<td>" + fmt(r.usedUnitsVerified) + "</td><td>" + fmt(r.usedUnitsRaw) + "</td>" +
+        "<td>" + fmt(r.dealersSeen) + "</td>";
+      tbody.appendChild(tr);
+    });
+    return today;
+  }
+
+  // fn_city_inventory_daily is the real for-sale count, gated at 3+ dealers.
+  // fn_city_price_index is a DIFFERENT measure (listings matched to a catalog
+  // MSRP row, for the price-index feature) with its own gate -- merged here
+  // by city name only when both happen to clear their own gate for the day;
+  // never invented for a city that has only one of the two.
+  function renderCities(inventory, priceIndex){
+    var box = document.getElementById("cityRows");
+    var latestDay = null;
+    (inventory || []).forEach(function(r){ if (!latestDay || r.day > latestDay) latestDay = r.day; });
+    var today = (inventory || []).filter(function(r){ return r.day === latestDay; });
+    var priceByCity = {};
+    (priceIndex || []).forEach(function(p){ priceByCity[p.city] = p; });
+
+    if (!today.length){
+      box.innerHTML = '<div class="empty-row">No city has 3+ dealers seen yet today.</div>';
+      return;
+    }
+    today.sort(function(a,b){ return b.usedUnitsVerified - a.usedUnitsVerified; });
+    box.innerHTML = today.map(function(c){
+      var p = priceByCity[c.city];
+      var badge = "";
+      if (p){
+        var cls = p.index_pct < 0 ? "pct-under" : "pct-over";
+        var sign = p.index_pct > 0 ? "+" : "";
+        badge = '<span class="badge ' + cls + '">' + sign + fmt1(p.index_pct) + '% vs sticker</span>';
+      }
+      return '<div class="row"><span><span class="name">' + c.city + '</span>' +
+        '<span class="meta">' + fmt(c.dealersSeen) + ' dealer' + (c.dealersSeen===1?"":"s") + '</span></span>' +
+        '<span class="val">' + fmt(c.newUnitsVerified) + '<span class="u">new</span> &middot; ' + fmt(c.usedUnitsVerified) + '<span class="u">used</span> ' + badge + '</span></div>';
+    }).join("");
+  }
+
+  // eventAt is always midnight UTC of the day it was recorded -- the crawl
+  // gives us a DAY, not a time of day. An hours/minutes figure here would be
+  // false precision the data doesn't have; say the day plainly instead.
+  function dayLabel(iso){
+    var d = new Date(iso), today = new Date();
+    var startOfDay = function(x){ return Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()); };
+    var diffDays = Math.round((startOfDay(today) - startOfDay(d)) / 86400000);
+    if (diffDays <= 0) return "today";
+    if (diffDays === 1) return "yesterday";
+    return d.toLocaleDateString("en-CA", { month: "short", day: "numeric" });
+  }
+
+  var KIND_LABEL = { new: "NEW", price_move: "PRICE", delisted: "GONE" };
+
+  function renderTicker(events){
+    var box = document.getElementById("tickerRows");
+    if (!events || !events.length){
+      box.innerHTML = '<div class="empty-row">No listing activity in the last few days.</div>';
+      return;
+    }
+    box.innerHTML = events.map(function(e){
+      var title = [e.year, e.make, e.model].filter(Boolean).join(" ") + (e.trim ? " " + e.trim : "");
+      var priceHtml;
+      if (e.kind === "price_move" && e.prevPrice != null){
+        var up = e.price > e.prevPrice;
+        priceHtml = '<span class="' + (up ? "price-up" : "price-down") + '">' + (up ? "&uarr;" : "&darr;") + ' $' + fmt(e.price) +
+          '</span> <span style="color:var(--dimmer)">from $' + fmt(e.prevPrice) + '</span>';
+      } else if (e.price != null) {
+        priceHtml = '$' + fmt(e.price);
+      } else {
+        priceHtml = "price not stated";
+      }
+      return '<div class="ticker-row">' +
+        '<div class="ticker-top"><span class="badge ' + e.kind + '">' + KIND_LABEL[e.kind] + '</span>' +
+        '<span class="ticker-title">' + (title.trim() || (e.condition || "vehicle")) + '</span></div>' +
+        '<div class="ticker-meta"><span>' + (e.city || "Alberta") + ' &middot; ' + (e.dealerName || "a dealer") + '</span>' +
+        '<span class="mono">' + priceHtml + ' &middot; ' + dayLabel(e.eventAt) + '</span></div>' +
+        '</div>';
+    }).join("");
+  }
+
+  Promise.all([
+    rpc("fn_alberta_inventory_daily", { p_days: 30 }).catch(function(e){ console.error(e); return null; }),
+    rpc("fn_city_inventory_daily", { p_days: 3 }).catch(function(e){ console.error(e); return []; }),
+    rpc("fn_city_price_index", {}).catch(function(e){ console.error(e); return []; }),
+    rpc("fn_recent_listing_events", { p_limit: 60 }).catch(function(e){ console.error(e); return []; }),
+  ]).then(function(results){
+    var daily = results[0], cityInventory = results[1], priceIndex = results[2], events = results[3];
+    if (daily === null){
+      document.getElementById("loading").textContent = "Could not load today's report — try again shortly.";
+      return;
+    }
+    renderDaily(daily);
+    renderCities(cityInventory, priceIndex);
+    renderTicker(events);
+  });
+})();
+</script>
+</body>
+</html>

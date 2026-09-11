@@ -19,19 +19,9 @@
 // Run (from repo root):
 //   node scripts/audit-dealer-licenses.mjs --dry-run   # report only, write nothing
 //   node scripts/audit-dealer-licenses.mjs              # deactivates unconfirmed hosts; needs SUPABASE_* env
-const DRY = process.argv.includes("--dry-run");
+import { issuedAmvicHosts } from "./lib/amvic-hosts.mjs";
 
-function toOrigin(raw) {
-  if (!raw || typeof raw !== "string") return null;
-  let s = raw.trim();
-  if (!s || /^(mailto:|tel:)/i.test(s)) return null;
-  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
-  try {
-    const u = new URL(s);
-    if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(u.hostname)) return null;
-    return `https://${u.hostname}`;
-  } catch { return null; }
-}
+const DRY = process.argv.includes("--dry-run");
 
 async function main() {
   const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -43,21 +33,9 @@ async function main() {
     .from("dealer_source").select("id,host,name,platform,active").eq("active", true);
   if (e1) { console.error("could not read dealer_source:", e1.message); process.exit(1); }
 
-  const licensees = [];
-  const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("amvic_licensees").select("website,facility_status")
-      .not("website", "is", null)
-      .range(from, from + PAGE - 1);
-    if (error) { console.error("could not read amvic_licensees:", error.message); process.exit(1); }
-    licensees.push(...(data || []));
-    if (!data || data.length < PAGE) break;
-  }
-  const issuedHosts = new Set(
-    licensees.filter((r) => /issued/i.test(r.facility_status || ""))
-      .map((r) => toOrigin(r.website)).filter(Boolean)
-  );
+  let issuedHosts;
+  try { issuedHosts = await issuedAmvicHosts(supabase); }
+  catch (e) { console.error(e.message); process.exit(1); }
 
   const confirmed = dealers.filter((d) => issuedHosts.has(d.host));
   const unconfirmed = dealers.filter((d) => !issuedHosts.has(d.host));

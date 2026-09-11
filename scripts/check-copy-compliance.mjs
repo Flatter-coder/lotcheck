@@ -37,6 +37,7 @@ const SURFACES = [
   "public/alberta.html",
   "public/dealer-portal.html",
   "public/live-price-index.html",
+  "public/alberta-inventory-daily.html",
   "public/canada-map.html",
   "public/statcan-zev-map.html",
   "src/App.jsx",
@@ -168,17 +169,20 @@ const RULES = [
     condition: "true only while every occurrence sits inside a listingShotKind === \"fullpage\" branch",
     why: "The capture ladder can degrade to a photo of the top of the listing. Calling that the full page is an unbacked claim about our own evidence, printed on the one artifact a buyer hands to a dealer. [[capture-always-whole-page]] [[claims-must-stay-backed]]",
     patterns: [/full[-\s]page (capture|photo|screenshot)/i],
-    // ── THE INVENTORY, enumerated 2026-08-27 (comments are stripped first) ──
-    //   src/App.jsx:8202   the report card's fullpage arm, guarded on
+    // ── THE INVENTORY, enumerated 2026-08-27, re-confirmed 2026-09-08 ───────
+    //   src/App.jsx:8065   the report card's fullpage arm, guarded on
     //                      a.listingShotKind === "fullpage". THE claim.
-    //   src/App.jsx:11524  "A full-page screenshot works better than a cropped
-    //                      one" -- upload guidance to the USER about their own
-    //                      photo, not a claim about our capture. In scope on
-    //                      purpose: if the wording ever migrates to describing
-    //                      what WE produce, the count moves and someone looks.
+    //   src/App.jsx        the old upload-guidance tip ("A full-page screenshot
+    //                      works better than a cropped one") was rewritten as
+    //                      part of the Quote Check two-step wizard, 2026-09-08 --
+    //                      the new tip pill reads "Full page, not cropped" and
+    //                      no longer matches this pattern (no capture/photo/
+    //                      screenshot word follows "full page"). Net -1, on
+    //                      purpose: still user-facing guidance about their own
+    //                      photo, never a claim about our own capture.
     //   email-quote-report/index.ts  0  the emailed body and the PDF caption
     //                      are both neutral, because neither can read the kind.
-    expected: 2,
+    expected: 1,
   },
   {
     // The claim must map to ten checks that actually run and actually deliver a
@@ -198,13 +202,28 @@ const RULES = [
     // count change would have believed four report surfaces had been checked
     // when none was ever in the count.
     //
-    //   public/index.html          6  nav link ×2, "10-point pipeline",
-    //                                 the section aria-label, the <h2>, the lede
+    //   public/index.html          7  nav link ×2, "10-point pipeline",
+    //                                 the section aria-label, the <h2>, the lede,
+    //                                 and the #scan-cta caption ("...10-point
+    //                                 verification lane"), added 2026-09-08 when
+    //                                 the anecdotal story + fake terminal CTA were
+    //                                 replaced with a real scan video whose
+    //                                 caption stack reuses only already-approved
+    //                                 copy from elsewhere on the page.
     //   public/alberta.html        1  nav link
     //   public/live-price-index.html 1  nav link
-    //   src/App.jsx                4  nav links only (comments are not counted)
+    //   src/App.jsx                5  nav links, plus the intake hero
+    //                                 headline ("run the 10-point check the
+    //                                 dealer already assumes you won't"),
+    //                                 added 2026-09-09 by concept #23 of the
+    //                                 "Analyze my quote" redesign round (Vic:
+    //                                 "replace it with 23"), which replaced
+    //                                 the drag-zone-primary intake's eyebrow
+    //                                 copy ("all 10 things that matter" --
+    //                                 not a "10-point" match, so no change
+    //                                 there) with this headline. Net +1.
     //                              ─
-    //                             12
+    //                             14
     //
     // So this rule polices the ADVERTISEMENT, and only the advertisement.
     //
@@ -218,7 +237,7 @@ const RULES = [
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].
-    expected: 12,
+    expected: 14,
   },
 ];
 

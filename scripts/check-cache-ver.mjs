@@ -160,6 +160,17 @@ const after = readVer("HEAD");
 
 if (before !== null && after !== null && before !== after) {
   console.log(`✅ cache-ver: analysis changed and CACHE_VER moved "${before}" -> "${after}".`);
+  // A bump is not free, and it is easy to land without noticing what it does.
+  // It invalidates EVERY cached analysis, so every previously-checked URL
+  // re-runs the full paid read path the next time someone opens it. That is
+  // the right trade when the output really changed -- buyers must not be
+  // served a stale figure -- but it is a spend, and the vendor plan's real
+  // ceiling is concurrency, not volume. Say so every time, so a bump is
+  // never quietly a bill. [[cost-exploit-guards]] [[billing-honesty-rules]]
+  console.log("");
+  console.log("   NOTE: this invalidates every cached analysis. Each previously-checked");
+  console.log("   URL re-runs the full paid read path on its next open. Expected re-run");
+  console.log("   volume and spend belong in the PR description before this merges.");
   process.exit(0);
 }
 if (before === null || after === null) {
