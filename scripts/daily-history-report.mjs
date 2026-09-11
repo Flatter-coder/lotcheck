@@ -82,10 +82,16 @@ async function main() {
     console.log("");
     return;
   }
-  const pct = Number(cov.dealersActive) > 0
-    ? ((Number(cov.dealersRead) / Number(cov.dealersActive)) * 100).toFixed(1) : "?";
+  // TWO SEPARATE FACTS, NOT A RATIO. dealersRead counts every dealer seen in the
+  // window INCLUDING ones since deactivated; dealersActive is today's roster.
+  // The first can legitimately exceed the second -- the first real run of this
+  // report returned 35 read against 32 active -- and "35 of 32 active (109.4%)"
+  // reads as a broken report, which is the kind of figure that makes a reader
+  // stop trusting the ones underneath it.
+  const read = Number(cov.dealersRead) || 0, active = Number(cov.dealersActive) || 0;
   console.log(`  Reads in window : ${cov.readsInWindow}  (${when(cov.firstReadAt)} → ${when(cov.lastReadAt)})`);
-  console.log(`  Dealers read    : ${cov.dealersRead} of ${cov.dealersActive} active (${pct}%) — a sample, not the Alberta market`);
+  console.log(`  Dealers read    : ${read} in this window${read > active ? " (some no longer on the active roster)" : ""}`);
+  console.log(`  Dealers active  : ${active} today — a sample of Alberta, never the whole market`);
   console.log("");
   console.log(`  Arrived ${c.new ?? 0} · price moves ${c.priceMoves ?? 0} · detail changes ${c.fieldChanges ?? 0} · stopped being advertised ${c.delisted ?? 0}`);
   if (d.truncated) console.log(`  (capped at ${LIMIT} events — raise --limit to see the rest)`);
