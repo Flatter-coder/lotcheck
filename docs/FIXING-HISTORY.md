@@ -14,6 +14,51 @@ the next instance.
 | **One-surface fix** | a shared bug fixed in one consumer, left in the others |
 | **Optional step, fatal failure** | something non-essential takes down the whole request |
 | **A count read as a classification** | a surface feature counted, and the tally answered a question it cannot answer |
+| **Not attempted, reading as passed** | a per-item guard driven by a hand-maintained list reports "N of N passed", blind to whatever is not on the list |
+
+---
+
+## 2026-09-11 - the MSRP catalogue: three makes never read, two makes half-read
+
+Vic asked why MSRP had not refreshed for Jaguar, Land Rover, Mitsubishi, Honda
+and Acura, and asked for a daily MSRP report. The five turned out to be **three
+separate problems**, and the most important one was not a bug at all.
+
+Jaguar, Land Rover and Mitsubishi sat at `fetched_at 2026-08-08` for **34 days**
+while `catalog-refresh.yml` ran green every night. It ran green honestly: none
+of the three has a scraper file or a workflow step, so nothing failed because
+nothing was attempted. The fresh-write guard compares each make against its own
+pre-run snapshot, which means **a make nobody pointed the guard at is compared
+against nothing and passes.** The nightly snapshot even printed their row counts
+and nobody read it as an alarm, because a count is not a date. Hence the new
+shape in the table above.
+
+Ask of any green check: *what is NOT in the population it examined, and would I
+be able to tell?*
+
+| fix | live | what broke | class | guard now in place |
+|---|---|---|---|---|
+| `0e1fbb9` `2607b00` | PENDING PR #437 | **Nothing could distinguish "refreshed this morning" from "last touched by hand five weeks ago".** Every instrument was keyed on the RUN - did the step pass, did max(id) move - and none on the DATA. A make with no step produced no signal of any kind, in either direction, for 34 days. | **Not attempted, reading as passed** | `npm run report:msrp` enumerates the catalogue and prints a DATE for every make, stale first, so an absence surfaces as an old date rather than as silence. Runs as the last step of the refresh with `if: !cancelled()`, so a red run still produces it. Which makes are "wired" is **parsed out of the guard arguments in catalog-refresh.yml** - a hardcoded list here would have been written from the same wrong assumption and would have agreed with itself. `test:msrp-report` guards the parser: reformat that workflow and the report believes zero makes are wired and condemns all 32, and a monitor that fails into TOTAL alarm gets disbelieved on the morning it is finally right. Verified to fail on the guard args reformatted to single quotes, and on an orphaned scraper file. |
+| `2607b00` | PENDING PR #437 | **In the report shipped an hour earlier: a make with ZERO rows was invisible.** It derived its make list from `msrp_catalog` itself, so it could only speak about makes holding at least one row. It therefore said nothing at all about **Audi** - 15 rows seeded 2026-08-08, zero today, in `CANONICAL_MAKES`, so a listing can name it and a report can be asked for one and there is no denominator to divide by. Tesla and Polestar likewise. A freshness report whose blind spot is the emptiest make is pointed the wrong way round. | **Absence read as knowledge** | The expected set is the union of the workflow's wired makes and `CANONICAL_MAKES`, parsed from `makes.ts`. "Absent" is its own verdict, separate from "stale" - different problem, different fix. `test:msrp-report` checks the parse specifically for the Audi case; verified to fail when a TS type annotation is added to that declaration. |
+| `2607b00` | PENDING PR #437 | **If the refresh stopped entirely, every make read as FRESH.** Freshness was measured against the newest write anywhere in the catalogue. That is right while the job runs - it absorbs a late cron, and GitHub delivered the eight runs before 09-11 a mean 3.9h late - and it inverts completely when the job dies: every make sits at the same frozen date, every relative age computes to zero, and the report prints "EVERY MAKE REFRESHED" over a catalogue nobody has touched in a week. | **Green signal, no check** - a monitor that gets QUIETER the worse things get | `catalogFreshness()` is an absolute check that leads the report when it fires and fails the run on its own, because it invalidates every line beneath it. It is a **pure exported function taking an explicit clock**, driven through seven fixed-clock cases including the real 2026-08-08 date - its trigger condition does not exist in production on a healthy day, and a guard that can only fire during an outage is a guard nobody has ever seen fire. |
+| `65193a4` | PENDING PR #438 | **Mitsubishi was recorded as unbuildable in `scripts/COVERAGE.md` in three places, and that record is why nobody looked again for a year.** The resolver was never dead - the `path` argument was wrong. `/ngc-configurator` returns `vehicles: []`: zero results, HTTP 200, **no error**. The payments path returns all five. A query that answers "zero, successfully" is the most expensive kind of wrong, because it reads as a finished investigation. | **Absence read as knowledge** - an empty successful response filed as "there is nothing here" | Built and wired: 4 hand-seeded rows to **30 per-trim rows**, plain fetch, no spend. The guard step ships in the SAME commit as the scraper, because a scraper with no guard step is the state this undoes and is invisible by construction. Step placement asserted between the snapshot and the cache invalidation - before the snapshot a WORKING scraper reports "no fresh rows"; after the invalidate step, cached reports keep serving the old MSRP. COVERAGE.md and MITSUBISHI-NOTES.md corrected, and the correction **names the two other entries on that page in the same position** (Audi's "503 site-wide"; JLR's "deep dig", which is really a robots `Disallow: /`). A recorded blocker is an assertion with a date on it that silently becomes a claim nobody may re-examine. |
+| `36eda5b` | PENDING PR #439 | **A `^` in Honda's own colour keys got 63 of 69 Honda/Acura trims 403'd for 21 days.** An Azure gateway WAF rule refuses any request BODY containing a caret, and Honda's default interior colour keys look like `bkblack_fabric_^2020_crv`. The tell was in the numbers the whole time: 20 of 60 finance rows and 16 of 48 lease, **exactly one third on two independent tables** - one per-trim loop split by PaymentMethod, both deduping to a model-level key. The 2026-08-21 diagnosis ("deliberate, business-motivated, scoped to that endpoint") was wrong, and the fix it implied - route through Scrapfly's headless browser - would have been **paid for and would not have worked**: a real browser sends the same caret. Every experiment changed who was asking; none changed what was asked. | **Green signal, no check** - the `catch` turned 49 gateway refusals into 49 log lines and exited 0 with a third of the data | Substituted in the request BODY. `test:honda-caret` exists because **a grep cannot tell the right fix from the wrong one**: both contain the same regex, and at the read site an empty string is falsy, so the guard three lines down skips the very 63 trims being rescued - `ok=6 / blocked=0`, a clean green run, tables collapsed FURTHER than under the block. The gate calls the extracted `paymentBody()` with five real caret keys and asserts the read site is clean. Part two: refusals are counted and **throw before `writeCatalogs`**, so the next gateway change arrives as a refusal instead of disguised as a collapsed catalogue. Verified to fail on all three: read-site substitution, ternary reverted, throw deleted. |
+
+**Two things deliberately NOT done.** The collapse guard was not weakened and
+`CATALOG_ALLOW_COLLAPSE` was not set - it refused the Honda/Acura write for
+three weeks and was right every night ([[catalog-refresh-can-empty-catalog]]).
+And Land Rover is not built: its only correct source is
+`rules.config.landrover.com`, whose robots.txt is `User-agent: *` /
+`Disallow: /`. The robots-clean alternative mixes price bases within a single
+page (Range Rover Sport SV differs by $18,092), so a scraper over it would write
+pre-freight and all-in figures into one make with nothing saying which is which.
+That is a decision for Vic, not an engineering problem to route around.
+
+**Still open, and named rather than quietly carried:** 5 of the 8 existing
+Jaguar/Land Rover rows disagree with the manufacturer today and err toward
+UNDERSTATING MSRP, which manufactures false "priced above sticker" findings -
+Discovery is out by $7,100. They should be quarantined; that is a delete and
+needs Vic's yes ([[always-ask-before-deleting]]).
 
 ---
 
