@@ -171,6 +171,38 @@ jobs:
         if: ${{ !cancelled() }}
         run: node scripts/catalog-refresh-guard.mjs verify --step="Porsche" --makes="Porsche" --msrp=required
 
+      # MITSUBISHI — the first of the three makes that had no step at all.
+      #
+      # Jaguar, Land Rover and Mitsubishi sat at fetched_at 2026-08-08 for 34
+      # days while this workflow ran green every night. It was green honestly:
+      # the fresh-write guard compares each make against its own pre-run
+      # snapshot, so a make with no step is compared against nothing and passes.
+      # They were never broken. They were never built.
+      #
+      # PLACEMENT IS LOAD-BEARING. This must sit AFTER the snapshot step and
+      # BEFORE "Invalidate cached reports". Before the snapshot, verify() exits
+      # 1 on a missing snapshot file, and a write taken before the snapshot
+      # makes max(id) look unchanged so a working scraper reports "no fresh
+      # rows". After the invalidate step, fresh rows land after the cache purge
+      # and cached reports keep serving the old MSRP — the 2026-08-11 regression
+      # that step exists to prevent.
+      #
+      # The guard ships in the SAME commit as the scraper, deliberately. A
+      # scraper with no guard step is the state this whole change is undoing,
+      # and it is invisible by construction.
+      #
+      # 4 rows -> 30, so the >50% collapse guard is not implicated: this is
+      # growth. Plain fetch, no Scrapfly, no key, no spend. Permission is
+      # explicit — mitsubishi-motors.ca/robots.txt is "User-agent: *" with an
+      # empty "Disallow:", which permits everything. [[dealer-tos-daily-checks]]
+      - name: Mitsubishi — MSRP only (rates are a separate, later build)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: node scripts/scrape-mitsubishi.mjs || echo "mitsubishi" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mitsubishi wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Mitsubishi" --makes="Mitsubishi" --msrp=required
+
       - name: MINI — MSRP + finance/lease rates
         if: ${{ !cancelled() }}
         continue-on-error: true
