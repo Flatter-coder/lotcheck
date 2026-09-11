@@ -202,14 +202,18 @@ const RULES = [
     // count change would have believed four report surfaces had been checked
     // when none was ever in the count.
     //
-    //   public/index.html          7  nav link ×2, "10-point pipeline",
-    //                                 the section aria-label, the <h2>, the lede,
-    //                                 and the #scan-cta caption ("...10-point
-    //                                 verification lane"), added 2026-09-08 when
-    //                                 the anecdotal story + fake terminal CTA were
-    //                                 replaced with a real scan video whose
-    //                                 caption stack reuses only already-approved
-    //                                 copy from elsewhere on the page.
+    //   public/index.html          6  nav link ×2, "10-point pipeline",
+    //                                 the section aria-label, the <h2>, the lede.
+    //                                 Was 7: the #scan-cta caption ("...10-point
+    //                                 verification lane") went with the section
+    //                                 on 2026-09-11 (Vic: "remove this from
+    //                                 welcome page"). Net -1, and the direction
+    //                                 matters: we now advertise the claim in one
+    //                                 FEWER place, which this rule permits -- it
+    //                                 polices making the claim, not retiring it.
+    //                                 The count is still pinned both ways on
+    //                                 purpose, so a claim cannot reappear
+    //                                 unnoticed either.
     //   public/alberta.html        1  nav link
     //   public/live-price-index.html 1  nav link
     //   src/App.jsx                5  nav links, plus the intake hero
@@ -223,7 +227,7 @@ const RULES = [
     //                                 not a "10-point" match, so no change
     //                                 there) with this headline. Net +1.
     //                              ─
-    //                             14
+    //                             13
     //
     // So this rule polices the ADVERTISEMENT, and only the advertisement.
     //
@@ -237,7 +241,7 @@ const RULES = [
     // rendered under their own heading and never numbered as points.
     // Keep BOTH: this one catches a NEW use of the claim, that one catches the
     // claim drifting from the product. See [[ten-point-claim-policy]].
-    expected: 14,
+    expected: 13,
   },
 ];
 
