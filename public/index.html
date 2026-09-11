@@ -133,33 +133,6 @@ h3{font-size:1.25rem;line-height:1.25}
 @media (prefers-reduced-motion: reduce){
   .rv{opacity:1;transform:none;transition:none}
 }
-.scan-cta{
-  position:relative;overflow:hidden;border-radius:var(--r-lg);
-  box-shadow:var(--shadow-soft);
-}
-.scan-cta video{width:100%;height:auto;display:block}
-.scan-cta::after{
-  content:"";position:absolute;inset:0;
-  background:linear-gradient(180deg,rgba(10,8,20,.5) 0%,rgba(10,8,20,.45) 35%,rgba(10,8,20,.88) 65%,rgba(10,8,20,.95) 100%);
-}
-.scan-content{
-  position:absolute;left:0;right:0;bottom:0;z-index:1;
-  padding:clamp(28px,5vw,64px);
-  display:flex;flex-direction:column;align-items:flex-start;gap:22px;
-}
-.scan-caption-stack{display:grid;min-height:2.6em}
-.scan-caption{
-  grid-row:1;grid-column:1;
-  color:#fff;font-weight:1000;font-size:clamp(1.3rem,3.2vw,2.1rem);letter-spacing:-.01em;line-height:1.15;
-  max-width:20ch;
-  opacity:0;transform:translateY(10px);
-  transition:opacity .7s var(--ease-out),transform .7s var(--ease-out);
-}
-.scan-caption.is-active{opacity:1;transform:none}
-.scan-cta .btn-primary{background:var(--butter);color:#33305A;border-color:var(--butter);box-shadow:5px 6px 0 rgba(0,0,0,.3)}
-.scan-cta .btn-primary:hover{box-shadow:8px 10px 0 rgba(0,0,0,.3)}
-@media (prefers-reduced-motion: reduce){ .scan-caption{transition:none} }
-@media (max-width:560px){ .scan-caption{font-size:1.15rem;max-width:18ch} }
 .nav{
   position:sticky;top:0;z-index:50;
   background:rgba(251,245,236,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
@@ -841,29 +814,6 @@ footer{padding:34px 0 44px}
 </section>
 
 
-<section id="scan-cta" aria-label="See LotCheck verify a lot in real time" style="padding-top:0">
-  <div class="wrap">
-    <div class="scan-cta">
-      <video autoplay muted loop playsinline preload="auto" poster="/scan-poster.jpg" aria-label="LotCheck's verification beam sweeping across a dealer lot at night">
-        <source src="/scan-cta.mp4" type="video/mp4">
-      </video>
-      <div class="scan-content">
-        <div class="scan-caption-stack" id="scanCaptions" aria-live="polite">
-          <p class="scan-caption is-active">Every quote runs through a 10-point verification lane.</p>
-          <p class="scan-caption">Live Transport Canada recall data, checked in seconds.</p>
-          <p class="scan-caption">Verified MSRP — not just the number on the sticker.</p>
-          <p class="scan-caption">Two open recalls found. We'd tell you first.</p>
-          <p class="scan-caption">An $899 doc fee, flagged before you sign.</p>
-        </div>
-        <a class="btn btn-primary" href="/quote-check">
-          Analyze my quote
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </a>
-      </div>
-    </div>
-  </div>
-</section>
-
 <footer>
   <div class="wrap foot-in">
     <a class="logo" href="/" aria-label="LotCheck home">
@@ -1396,19 +1346,6 @@ buildPortal();
       soundBtn.setAttribute("aria-label", soundNowOn ? "Turn off rain sound" : "Turn on rain sound");
     });
   }
-})();
-(function scanCaptions(){
-  var stack = document.getElementById("scanCaptions");
-  if(!stack) return;
-  var items = stack.querySelectorAll(".scan-caption");
-  if(items.length < 2) return;
-  if(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  var i = 0;
-  setInterval(function(){
-    items[i].classList.remove("is-active");
-    i = (i + 1) % items.length;
-    items[i].classList.add("is-active");
-  }, 6000);
 })();
 })();
 </script>
