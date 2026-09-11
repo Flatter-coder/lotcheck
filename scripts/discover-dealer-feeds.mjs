@@ -643,15 +643,25 @@ async function main() {
   // jsonld_itemlist/edealer must have yielded at least one real vehicle on
   // probe — without that a seeded host is unaddressable or empty, either way
   // a nightly no-op that looks like coverage.
+  // ACTIVE, BECAUSE THIS IS THE PROMOTION.
+  // `active` defaults to false (20260830) so a catalogue row arrives dormant and
+  // is promoted "only by" a run that confirms it — this run. Every candidate
+  // below has cleared BOTH gates: a probe that returned real vehicles, and (a
+  // few lines down) a fresh AMVIC read confirming an Issued licence. Omitting
+  // `active` meant a host could pass both and still never be crawled, which is
+  // exactly what happened: the only thing that has ever set active = true is a
+  // one-shot migration from 2026-08-12, and the roster has only been able to
+  // shrink since. 32 active of 1,622 catalogued was a high-water mark, not a
+  // rate. [[alberta-website-catalog]]
   let seed = [
     ...sm360.filter((r) => r.withVin > 0)
-      .map((r) => ({ host: r.host, platform: "sm360", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new-inventory", "used-inventory"] })),
+      .map((r) => ({ host: r.host, platform: "sm360", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new-inventory", "used-inventory"], active: true })),
     ...convertus.filter((r) => r.cp)
-      .map((r) => ({ host: r.host, platform: "convertus", platform_id: r.cp, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+      .map((r) => ({ host: r.host, platform: "convertus", platform_id: r.cp, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
     ...jsonldList.filter((r) => r.page1 > 0)
-      .map((r) => ({ host: r.host, platform: "jsonld_itemlist", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+      .map((r) => ({ host: r.host, platform: "jsonld_itemlist", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
     ...edealerList.filter((r) => r.page1 > 0)
-      .map((r) => ({ host: r.host, platform: "edealer", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"] })),
+      .map((r) => ({ host: r.host, platform: "edealer", platform_id: null, name: r.name, city: r.city, province: "AB", sections: ["new", "used"], active: true })),
   ];
   if (!seed.length) { console.log("nothing to seed"); return; }
 
@@ -684,9 +694,43 @@ async function main() {
   }
   if (!seed.length) { console.log("\nnothing left to seed after the license gate"); return; }
 
-  const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host", ignoreDuplicates: true });
+  // THE WRITE WAS A NO-OP. `ignoreDuplicates: true` skips any row whose host is
+  // already present — and the AMVIC catalogue build put EVERY Alberta host in
+  // dealer_source months ago. So this upsert matched on host, found one, and
+  // did nothing, every single time. A probe could confirm a working feed and a
+  // current licence and the row stayed dormant for ever.
+  //
+  // It updates now, and only the columns this run just re-confirmed:
+  // platform/platform_id/sections (what the probe found), name/city (from the
+  // licence record) and active (the promotion itself). Operational columns —
+  // consecutive_failures, last_ok_at, last_error — are absent from the seed
+  // object and so are left alone by the upsert; a promotion must not erase a
+  // dealer's failure history.
+  const before = await countActive(supabase);
+  const { error } = await supabase.from("dealer_source").upsert(seed, { onConflict: "host" });
   if (error) { console.error("seed failed:", error.message); process.exit(1); }
+  const after = await countActive(supabase);
+
   console.log(`\nSeeded ${seed.length} confirmed, AMVIC-Issued dealers into dealer_source (of ${beforeGate} platform-confirmed candidates).`);
+  // WHAT ACTUALLY CHANGED. The old line reported how many rows were SENT, which
+  // stayed reassuringly constant while the number promoted was zero. Report the
+  // delta the database actually holds, and say so plainly when it is nil.
+  console.log(`  active dealers: ${before} -> ${after}  (${after - before >= 0 ? "+" : ""}${after - before})`);
+  if (after === before) {
+    console.log("  NOTE: no change in the active roster. Either every candidate was already");
+    console.log("  active, or the write did not take. This line existing at all is the fix for");
+    console.log("  a run that reported success while promoting nothing.");
+  }
+}
+
+// How many dealers the crawler would actually visit today. Read before and
+// after a seed so a run states the promotion it achieved rather than the rows
+// it sent — the two were silently different for a month.
+async function countActive(supabase) {
+  const { count, error } = await supabase
+    .from("dealer_source").select("id", { count: "exact", head: true }).eq("active", true);
+  if (error) { console.warn("  (could not count active dealers:", error.message + ")"); return -1; }
+  return count ?? -1;
 }
 
 // ---------------------------------------------------------------------------
