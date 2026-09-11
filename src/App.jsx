@@ -11653,6 +11653,42 @@ function QuoteCheckPage(){
                       </div>
                     </div>
 
+                    {/* price-vs-MSRP range bar — the honest half of concept #7's
+                        "price terrain" (a real MSRP tick and a real asking tick
+                        on one shared scale, the gap shaded and quantified). This
+                        already shipped in the emailed PDF (PR #424); Vic asked
+                        for the same hero treatment on-screen, twice, after it
+                        was left "optional" the first pass. Gated exactly like
+                        the PDF's: only draws with a real exact-trim MSRP match,
+                        never a decorative curve between the two points.
+                        [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]] */}
+                    {deltaOkG&&(()=>{
+                      const lo=Math.min(qp,ms),hi=Math.max(qp,ms),pad=Math.max((hi-lo)*0.2,60);
+                      const lo2=lo-pad,hi2=hi+pad,span=(hi2-lo2)||1;
+                      const pct=(v)=>((v-lo2)/span)*100;
+                      const over=delta>0,gapColor=over?C.coral:C.teal,gapBg=over?C.coralBg:C.tealBg;
+                      const xMsrp=pct(ms),xAsk=pct(qp);
+                      const gx0=Math.min(xMsrp,xAsk),gx1=Math.max(xMsrp,xAsk);
+                      return (
+                        <div style={{padding:"clamp(14px,2vw,20px) clamp(16px,2.4vw,26px)",borderRadius:20,background:C.card,border:`1px solid ${C.line}`,marginBottom:16}}>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10.5,letterSpacing:".1em",color:C.inkFaint,textTransform:"uppercase",marginBottom:14}}>Price vs. MSRP</div>
+                          <div style={{position:"relative",height:10,borderRadius:6,background:C.paper2,margin:"0 4px 28px"}}>
+                            <div style={{position:"absolute",left:gx0+"%",width:Math.max(gx1-gx0,0.5)+"%",top:0,bottom:0,background:gapBg,borderRadius:3}}/>
+                            <div style={{position:"absolute",left:xMsrp+"%",top:-5,bottom:-5,width:2,background:C.ink,transform:"translateX(-1px)"}}/>
+                            <div style={{position:"absolute",left:xMsrp+"%",top:-3,width:6,height:6,borderRadius:"50%",background:C.ink,transform:"translate(-50%,-50%)"}}/>
+                            <div style={{position:"absolute",left:xAsk+"%",top:-6,bottom:-6,width:2.5,background:gapColor,transform:"translateX(-1.25px)"}}/>
+                            <div style={{position:"absolute",left:xAsk+"%",top:-3,width:8,height:8,borderRadius:"50%",background:gapColor,transform:"translate(-50%,-50%)"}}/>
+                            <div style={{position:"absolute",left:xMsrp+"%",top:18,fontSize:10.5,color:C.inkFaint,transform:"translateX(-50%)",whiteSpace:"nowrap"}}>MSRP {money(ms)}</div>
+                            <div style={{position:"absolute",left:xAsk+"%",top:18,fontSize:10.5,fontWeight:700,color:gapColor,transform:"translateX(-50%)",whiteSpace:"nowrap"}}>Asking {money(qp)}</div>
+                          </div>
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:"clamp(16px,2vw,19px)",fontWeight:700,color:gapColor}}>
+                            {(over?"+":"−")+money(Math.abs(delta))+(over?" OVER MSRP":" UNDER MSRP")}
+                            {ms?<span style={{color:C.inkFaint,fontWeight:600,fontSize:"0.7em"}}> — {Math.abs(delta/ms*100).toFixed(1)}%</span>:null}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* hero: gauge + verdict */}
                     <div style={{display:"grid",gridTemplateColumns:"minmax(180px,220px) 1fr",gap:24,alignItems:"center",padding:"clamp(16px,2.4vw,26px)",borderRadius:20,background:C.tealBg,border:`1px solid ${C.line}`,marginBottom:20}}>
                       <div style={{position:"relative",width:"100%",maxWidth:220,margin:"0 auto"}}>
