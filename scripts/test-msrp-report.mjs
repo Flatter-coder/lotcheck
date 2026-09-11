@@ -21,7 +21,7 @@
 // Run: npm run test:msrp-report
 
 import { readFileSync, readdirSync } from "node:fs";
-import { wiredMakes, ratesMakes } from "./daily-msrp-report.mjs";
+import { wiredMakes, ratesMakes, canonicalMakes, catalogFreshness } from "./daily-msrp-report.mjs";
 
 const WF = ".github/workflows/catalog-refresh.yml";
 const RATES_WF = ".github/workflows/catalog-rates-daily.yml";
@@ -79,7 +79,53 @@ else if (rates.size < 10) fail(`only ${rates.size} make(s) parsed out of ${RATES
   "the matrix format changed; the report's rates footer will understate coverage");
 else pass(`${rates.size} makes parsed from ${RATES_WF}`);
 
-// ---- 4. BUILT BUT NEVER WIRED ---------------------------------------------
+// ---- 4. THE FROZEN-CATALOG ALARM ACTUALLY FIRES ---------------------------
+// The report measures each make against the newest write ANYWHERE, which is
+// correct while the refresh runs and inverts completely when it stops: every
+// make sits at the same frozen date, every relative age is zero, and the report
+// prints "EVERY MAKE REFRESHED" over a catalog nobody has touched in a week.
+// catalogFreshness() is the absolute check that catches that day. Its trigger
+// condition does not exist in production on a healthy day, so without this it
+// would be a guard nobody had ever seen fire — driven here with a fixed clock.
+{
+  const NOW = Date.parse("2026-09-11T20:00:00Z");
+  const cases = [
+    // [newest, staleDays, expect frozen, what it is]
+    ["2026-09-11", 2, false, "written today"],
+    ["2026-09-10", 2, false, "yesterday — a late cron, not a stopped one"],
+    ["2026-09-09", 2, false, "two days — still inside the window"],
+    ["2026-09-08", 2, true,  "three days — at least one run produced nothing"],
+    ["2026-08-08", 2, true,  "the real JLR/Mitsubishi date, 34 days"],
+    [null,         2, false, "an empty catalog cannot be judged stale"],
+    ["not-a-date", 2, false, "an unparseable date must not fake an alarm"],
+  ];
+  let bad = 0;
+  for (const [newest, sd, want, label] of cases) {
+    const got = catalogFreshness(newest, NOW, sd).frozen;
+    if (got !== want) { bad++; fail(`catalogFreshness(${JSON.stringify(newest)}) returned frozen=${got}, expected ${want}`, label); }
+  }
+  // Same-day must be zero, never negative: the age is measured from the END of
+  // the newest day, so an un-clamped subtraction prints "-3h ago" in the header.
+  const sameDay = catalogFreshness("2026-09-11", NOW, 2).ageHours;
+  if (sameDay !== 0) { bad++; fail(`same-day age is ${sameDay}h, expected 0`, "clamp the subtraction at zero"); }
+  if (!bad) pass(`frozen-catalog alarm fires correctly across ${cases.length} clock cases`);
+}
+
+// ---- 5. the canonical make list ------------------------------------------
+// A make with ZERO rows is invisible to a group-by over the catalog — Audi is
+// exactly that today. The report unions CANONICAL_MAKES in so it can report on
+// a make that has nothing at all; if that parse breaks it goes silent again.
+{
+  const canon = canonicalMakes("supabase/functions/_shared/makes.ts");
+  if (!canon) fail("CANONICAL_MAKES could not be parsed from makes.ts",
+    "the report then cannot see a make that holds zero rows — the Audi case");
+  else if (canon.length < 25) fail(`only ${canon.length} canonical make(s) parsed — expected at least 25`);
+  else if (!canon.includes("Audi")) fail("Audi missing from the parsed canonical makes",
+    "it holds zero rows and is the exact case this list exists to surface");
+  else pass(`${canon.length} canonical makes parsed, including the zero-row ones`);
+}
+
+// ---- 6. BUILT BUT NEVER WIRED ---------------------------------------------
 // The other half of the same defect. Jaguar was never built; the opposite case
 // is a scraper that exists in scripts/ and is referenced by no workflow at all,
 // so it runs never and nobody notices because nothing failed. Checked against

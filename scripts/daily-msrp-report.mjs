@@ -65,6 +65,7 @@ const STALE_DAYS = Number(arg("stale-days", 2));
 
 const WF = ".github/workflows/catalog-refresh.yml";
 const RATES_WF = ".github/workflows/catalog-rates-daily.yml";
+const MAKES_TS = "supabase/functions/_shared/makes.ts";
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 const days = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
@@ -90,6 +91,30 @@ export function wiredMakes(path) {
   return out;
 }
 
+// A MAKE WITH ZERO ROWS IS INVISIBLE TO A GROUP-BY.
+//
+// The first version of this report derived its make list from msrp_catalog
+// itself, so it could only ever report on makes that have at least one row. It
+// therefore said nothing at all about AUDI — 0 rows, no scraper, no workflow
+// step, seeded with 15 rows by 20260808_german_mbz_audi_vw_msrp_catalog.sql and
+// gone since. A freshness report whose blind spot is the emptiest make is
+// pointed the wrong way round: it was fluent about the 29 makes that are fine
+// and silent about the one with nothing at all.
+//
+// CANONICAL_MAKES in supabase/functions/_shared/makes.ts is the set of makes the
+// product can actually encounter on a listing, which is the right denominator
+// for "do we have a denominator". Parsed, not copied, for the same reason the
+// wired list is parsed: a second copy drifts and then agrees with itself.
+export function canonicalMakes(path) {
+  let src = "";
+  try { src = readFileSync(path, "utf8"); } catch { return null; }
+  const m = /const CANONICAL_MAKES\s*=\s*\[([\s\S]*?)\]/.exec(src);
+  if (!m) return null;
+  const out = [];
+  for (const q of m[1].matchAll(/"([^"]+)"/g)) out.push(q[1]);
+  return out.length ? out : null;
+}
+
 export function ratesMakes(path) {
   let src = "";
   try { src = readFileSync(path, "utf8"); } catch { return null; }
@@ -97,6 +122,30 @@ export function ratesMakes(path) {
   const re = /-\s*\{\s*name:\s*([^,]+),\s*script:/g;
   for (let m; (m = re.exec(src)); ) out.add(norm(m[1]));
   return out;
+}
+
+// ---- IS THE BASELINE ITSELF ANY GOOD? -------------------------------------
+// Comparing every make to the newest write ANYWHERE is right while the refresh
+// is running: it absorbs a late cron without crying wolf. It is catastrophic
+// when the refresh STOPS. Every make then sits at the same frozen date, every
+// age computes to zero, and the report cheerfully prints "EVERY MAKE
+// REFRESHED" over a catalog nobody has touched in a week — a monitor that gets
+// QUIETER the worse things get. The relative test finds the make that fell
+// behind the others; only an absolute test finds the day they all did.
+//
+// Pure, and exported, so scripts/test-msrp-report.mjs can drive it with a
+// frozen clock. A guard whose trigger condition only exists in production is a
+// guard nobody has ever seen fire. [[repeat-fix-pattern]]
+//
+// Measured from the END of the newest written day, because `newest` is a date
+// and not an instant — a write at 14:00 UTC must not read as 14 hours old at
+// midnight. Clamped at zero: same-day is zero hours old, never negative.
+export function catalogFreshness(newest, nowMs, staleDays) {
+  if (!newest) return { ageHours: null, frozen: false };
+  const endOfDay = Date.parse(`${newest}T23:59:59Z`);
+  if (!Number.isFinite(endOfDay)) return { ageHours: null, frozen: false };
+  const ageHours = Math.max(0, Math.round((nowMs - endOfDay) / 3600000));
+  return { ageHours, frozen: ageHours > staleDays * 24 };
 }
 
 // ---- production -----------------------------------------------------------
@@ -159,6 +208,7 @@ async function main() {
     return;
   }
   const rateWired = ratesMakes(RATES_WF) || new Set();
+  const canonical = canonicalMakes(MAKES_TS);
 
   const msrp = byMake(await page("msrp_catalog", "make,model,fetched_at"), "fetched_at");
 
@@ -183,6 +233,9 @@ async function main() {
   // 5am before the 5:23am cron must not report the whole catalog as stale.
   const newest = [...msrp.values()].map((e) => e.newest).filter(Boolean).sort().pop() || null;
 
+  const { ageHours: catalogAgeHours, frozen: catalogFrozen } =
+    catalogFreshness(newest, Date.now(), STALE_DAYS);
+
   const makes = [];
   const seen = new Set();
   for (const [k, e] of msrp) {
@@ -199,17 +252,28 @@ async function main() {
   // failure in its purest form: a step runs, a guard passes, nothing is stored.
   for (const [k, w] of wired) {
     if (seen.has(k)) continue;
+    seen.add(k);
     makes.push({ make: w.make, rows: 0, models: 0, newest: null, oldest: null, wired: true, level: w.msrp, ageDays: null, state: "empty" });
+  }
+  // And a make the PRODUCT can encounter that is in neither place — no rows and
+  // no step. Audi is exactly this: 15 rows seeded by the 20260808 migration, now
+  // zero, in CANONICAL_MAKES, invisible to every group-by over the table. A
+  // report on an Audi has no denominator at all, which is a worse state than a
+  // stale one, and nothing said so.
+  for (const mk of canonical || []) {
+    if (seen.has(norm(mk))) continue;
+    makes.push({ make: mk, rows: 0, models: 0, newest: null, oldest: null, wired: false, level: null, ageDays: null, state: "absent" });
   }
   makes.sort((a, b) => (a.newest || "0").localeCompare(b.newest || "0") || a.make.localeCompare(b.make));
 
   const stale = makes.filter((m) => m.state === "stale" || m.state === "empty");
   const unwired = makes.filter((m) => m.state === "not-wired");
+  const absent = makes.filter((m) => m.state === "absent");
   const fresh = makes.filter((m) => m.state === "fresh");
 
   if (AS_JSON) {
     console.log(JSON.stringify({
-      newestWriteAnywhere: newest, staleDays: STALE_DAYS, makes,
+      newestWriteAnywhere: newest, catalogAgeHours, catalogFrozen, staleDays: STALE_DAYS, makes,
       rates: {
         financeReadable: !finErr, financeNote: finErr,
         leaseReadable: !leaseErr, leaseNote: leaseErr, leaseFreshnessColumn: leaseCol,
@@ -220,7 +284,7 @@ async function main() {
   } else {
     console.log("DAILY MSRP — is the denominator current?");
     console.log("=".repeat(72));
-    console.log(`  Newest write anywhere in the catalog : ${newest || "none"}`);
+    console.log(`  Newest write anywhere in the catalog : ${newest || "none"}${catalogAgeHours == null ? "" : catalogAgeHours === 0 ? "  (written today)" : `  (${catalogAgeHours}h since that day ended)`}`);
     console.log(`  Makes in the catalog                 : ${msrp.size}`);
     console.log(`  Makes the refresh attempts           : ${wired.size}`);
     console.log(`  Total MSRP rows                      : ${[...msrp.values()].reduce((n, e) => n + e.rows, 0)}`);
@@ -228,6 +292,17 @@ async function main() {
     // STALE FIRST, ALWAYS. If there is nothing wrong this section says so in
     // one line; it never becomes a scroll past good news to find bad.
     console.log("");
+    // And this above everything else: if the baseline itself is old, no
+    // per-make comparison below it means anything.
+    if (catalogFrozen) {
+      console.log("THE WHOLE CATALOG IS FROZEN".padEnd(72, " "));
+      console.log("-".repeat(72));
+      console.log(`  Nothing has been written to msrp_catalog in ${catalogAgeHours} hours.`);
+      console.log("  The per-make comparison below is relative to that frozen date, so it will");
+      console.log("  read as if every make is current. IT IS NOT. The refresh itself has stopped:");
+      console.log("  check the catalog-refresh workflow before reading anything else here.");
+      console.log("");
+    }
     if (unwired.length) {
       console.log(`NEVER REFRESHED — ${unwired.length} make(s) have NO step in the refresh`);
       console.log("-".repeat(72));
@@ -250,7 +325,17 @@ async function main() {
         console.log(`    ${pad(m.make, 16)} ${pad(m.rows + " rows", 10)} ${pad(m.newest || "never", 12)} ${why}${m.level === "optional" ? "  (msrp=optional)" : ""}`);
       }
     }
-    if (!unwired.length && !stale.length) {
+    if (absent.length) {
+      if (unwired.length || stale.length) console.log("");
+      console.log(`NO DENOMINATOR AT ALL — ${absent.length} make(s) the product can encounter hold ZERO rows`);
+      console.log("-".repeat(72));
+      console.log("  These are in CANONICAL_MAKES, so a listing can name them and a report can be");
+      console.log("  asked for one — but there is no MSRP to divide by. Not stale: absent. A");
+      console.log("  group-by over the catalog cannot see these, which is why they are listed");
+      console.log("  from the make list rather than from the rows.");
+      for (const m of absent) console.log(`    ${pad(m.make, 16)} 0 rows     never written`);
+    }
+    if (!unwired.length && !stale.length && !absent.length) {
       console.log(`EVERY MAKE IN THE CATALOG REFRESHED WITHIN THE LAST ${STALE_DAYS} DAY(S).`);
     }
 
@@ -296,16 +381,26 @@ async function main() {
       console.log(`::warning title=${unwired.length} make(s) have no refresh step::` +
         unwired.map((m) => `${m.make} (last written ${m.newest || "never"})`).join(", "));
     }
+    if (absent.length) {
+      console.log(`::warning title=${absent.length} make(s) have no MSRP rows at all::` +
+        absent.map((m) => m.make).join(", "));
+    }
     if (stale.length) {
       console.log(`::error title=MSRP STALE for ${stale.length} wired make(s)::` +
         stale.map((m) => `${m.make} (${m.newest || "never"})`).join(", "));
+    }
+    if (catalogFrozen) {
+      console.log(`::error title=msrp_catalog has not been written in ${catalogAgeHours}h::` +
+        "the refresh has stopped; per-make freshness below is measured against a frozen baseline");
     }
   }
 
   // Red only for a make the refresh was SUPPOSED to write. An un-wired make is
   // a gap in what we built, reported every morning, not a nightly false alarm
   // about a job that is behaving exactly as configured.
-  if (stale.length) process.exitCode = 1;
+  // A frozen catalog is the loudest failure this report can find — louder than
+  // any single make — so it fails the run on its own.
+  if (stale.length || catalogFrozen) process.exitCode = 1;
 }
 
 // Only run when invoked directly. scripts/test-msrp-report.mjs imports the two
