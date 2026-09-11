@@ -297,6 +297,11 @@ jobs:
         run: npm run test:robots
       - name: Supersede must carry enrichment (replaceRows end-to-end)
         run: npm run test:supersede
+      # listing_observation is keyed on an instant now, so one row is no longer
+      # one day. A count of rows labelled as days silently DOUBLES at two reads
+      # a day, and the number it inflates is days-on-lot.
+      - name: A duration is days, not observation rows
+        run: npm run check:observation-math
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
