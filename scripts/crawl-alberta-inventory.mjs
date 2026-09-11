@@ -36,6 +36,7 @@
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
 import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
+import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { pathToFileURL } from "node:url";
 
@@ -80,6 +81,8 @@ const FETCH_TIMEOUT_MS = 20_000;
 let effectiveDelayMs = REQUEST_DELAY_MS;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+
 const num = (x) => { const v = Number(x); return Number.isFinite(v) ? v : null; };
 // Feeds use 0 to mean "not stated" for prices and day counts — a real Ford
 // F-150 came back with asking_price 0 and days_on_lot 0. Storing those as
@@ -320,9 +323,8 @@ export async function crawlConvertus(host, sc, robots, opts = {}) {
 }
 
 async function fetchPage(host, section, page) {
-  const res = await fetch(`${host}/en/${section}/api/listing?page=${page}`, {
-    headers: { "User-Agent": UA, Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  const res = await politeFetch(`${host}/en/${section}/api/listing?page=${page}`, {
+    ua: UA, headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   if (!/json/.test(res.headers.get("content-type") || "")) throw new Error("non-JSON response");
@@ -365,7 +367,7 @@ async function crawlSection(host, section) {
 // carries its own ItemList (up to 20 vehicles) with rel="next" pagination.
 // See scripts/lib/structured-inventory.mjs for the parser itself.
 async function fetchHtml(url) {
-  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  const res = await politeFetch(url, { ua: UA });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
 }
@@ -413,7 +415,7 @@ async function crawlEdealerSection(host, section) {
 // per dealer per run.
 async function fetchRobots(host) {
   try {
-    const res = await fetch(`${host}/robots.txt`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const res = await politeFetch(`${host}/robots.txt`, { ua: UA });
     if (res.status === 404) return { ok: true, robots: { rules: [], crawlDelay: null }, note: "no robots.txt (404) — crawling allowed" };
     if (!res.ok) return { ok: false, note: `robots.txt HTTP ${res.status} — can't confirm permission` };
     return { ok: true, robots: parseRobots(await res.text(), "lotcheckbot"), note: "robots.txt read" };
@@ -616,6 +618,24 @@ async function main() {
   }
 
   console.log(`\n${totals.failed ? "⚠" : "✅"} ${totals.dealers} dealers · ${totals.rows} units · ${totals.new} new · ${totals.priced} price events · ${totals.delisted} delisted · ${totals.failed} failed${totals.robotsSkipped ? ` · ${totals.robotsSkipped} skipped (robots.txt)` : ""}`);
+
+  // WHAT WE SENT. Before anyone is asked to bless more traffic, a run has to be
+  // able to state how much it already sends -- the 2,403 refusals that prompted
+  // the backoff above had to be reconstructed from failure lines after the fact.
+  const ledger = requestLedger();
+  const sent = ledger.reduce((n, h) => n + h.requests, 0);
+  const refused = ledger.reduce((n, h) => n + h.refusals, 0);
+  const opened = ledger.filter((h) => h.circuitOpen);
+  console.log(`   requests sent: ${sent} across ${ledger.length} hosts · ${refused} refused (429/503)` +
+    (opened.length ? ` · ${opened.length} circuit(s) opened` : ""));
+  for (const h of ledger.slice(0, 5)) {
+    console.log(`     ${h.requests.toString().padStart(5)} ${h.origin}${h.refusals ? `  (${h.refusals} refused${h.circuitOpen ? ", circuit opened" : ""})` : ""}`);
+  }
+  if (opened.length) {
+    console.log(`   circuits opened for: ${opened.map((h) => h.origin).join(", ")}`);
+    console.log("   Those hosts refused repeatedly and were left alone for the rest of the run.");
+  }
+
   if (totals.failed === totals.dealers && totals.dealers > 0) process.exit(1);
 }
 
