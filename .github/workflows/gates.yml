@@ -316,6 +316,14 @@ jobs:
         run: npm run test:crawl-backoff
       - name: A duration is days, not observation rows
         run: npm run check:observation-math
+      # A WAF rule 403s any request body containing "^" — a character Honda puts
+      # in its own colour keys — so 63 of 69 Honda/Acura trims were refused for
+      # three weeks. The fix and the WRONG fix contain the same regex and differ
+      # only in position: at the read site an empty string is falsy, so the
+      # guard below skips the very trims being rescued and the run goes green
+      # with LESS data. A grep cannot tell them apart; this calls the builder.
+      - name: The Honda caret workaround is in the body, not the read site
+        run: npm run test:honda-caret
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
