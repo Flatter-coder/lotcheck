@@ -352,6 +352,14 @@ jobs:
       # determinism, the website path, and refusal on a genuine tie.
       - name: AMVIC matching is deterministic and refuses ambiguity
         run: npm run test:amvic-match
+      # A dealer platform keeps four dates about its own listing and we read
+      # one. date_updated separates an actively managed price from one posted
+      # and forgotten; date_sold on a LIVE listing is worth a question before a
+      # buyer drives across town. Guards the two ways this goes wrong: MySQL's
+      # "0000-00-00" must never flag every unsold car as sold, and the sale
+      # flag must ask about a data field, never allege bait-advertising.
+      - name: Listing dates read, zero dates refused, the sale flag asks
+        run: npm run test:lot-dates
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
