@@ -62,6 +62,7 @@ import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
+import { readBrandedTitle } from "../_shared/branded-title.js";
 import { readFeeLadder, ladderFees } from "../_shared/fee-ladder.ts";
 import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
@@ -116,7 +117,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12b";  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
+const CACHE_VER = "2026-09-12c";  // 12c: title branding (salvage/rebuilt) is READ for the first time -- until now nothing in this file referenced it, so a listing stating "carries a REBUILT TITLE" produced a report that never mentioned it. AMVIC matching also became deterministic (it returned seven different businesses across orderings of the same rows). Every cached analysis predates both and MUST re-run.  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -4441,6 +4442,26 @@ Deno.serve(async (req: Request) => {
     // cash or bringing their own bank approval is the one this costs, and today
     // nothing on the report tells them. Deterministic and evidence-carrying —
     // see finance-contingent.js. Never sinks the scan.
+    // TITLE BRANDING — salvage / rebuilt / reconstructed.
+    //
+    // Read here, beside the other page-text checks, because this is where the
+    // page's own words are still in hand. Until 2026-09-12 nothing in this file
+    // referenced "rebuilt" or "salvage" at all, so a 2017 Model X whose dealer
+    // page states "carries a REBUILT TITLE due to previous rear-end damage"
+    // produced a report that never mentioned it — the most decision-relevant
+    // fact on that listing, which the dealer had disclosed properly. Three
+    // states, never two: silence is a gap, not a clean title.
+    // [[make-recalls-fail-safe]] [[present-without-creating-questions]]
+    try {
+      const bt = readBrandedTitle(
+        [typeof pageContent === "string" ? pageContent : "", typeof rawHtml === "string" ? rawHtml : ""].join(" "),
+      );
+      analysis.brandedTitle = bt;
+      if (bt.status === "branded") console.log(`Title brand detected: ${bt.brand} -- ${bt.basis}`);
+    } catch (e) {
+      console.warn("readBrandedTitle threw (ignored):", (e as Error)?.message);
+    }
+
     try {
       const fc = detectFinanceContingent(typeof pageContent === "string" ? pageContent : "")
         || (typeof rawHtml === "string" ? detectFinanceContingent(rawHtml) : null);

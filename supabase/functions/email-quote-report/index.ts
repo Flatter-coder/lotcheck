@@ -857,6 +857,7 @@ import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
 import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
+import { brandedTitleLine } from "../_shared/branded-title.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1053,7 +1054,7 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (a.odometerCheck?.checked) P.push({ t: "Odometer", v: Number(a.odometerCheck.km).toLocaleString() + " km" + (a.odometerCheck.flag ? " FLAG" : ""), tone: a.odometerCheck.flag ? "flag" : "pass" });
   else P.push({ t: "Odometer", v: a.vehicleCondition === "new" ? "N/A (NEW)" : "NOT LISTED", tone: "muted" });
   if (a.vinCheck?.present) P.push({ t: "VIN check", v: a.vinCheck.valid ? "VALID" : "CHECK PATTERN", tone: a.vinCheck.valid ? "pass" : "flag" });
-  else P.push({ t: "VIN check", v: "NOT PUBLISHED", tone: "muted" });
+  else P.push({ t: "VIN check", v: "NOT PUBLISHED", tone: "muted" });
   if (a.evapRebate?.eligible) P.push({ t: "EV / PHEV rebate", v: money(a.evapRebate.total) + " ELIGIBLE", tone: "pass" });
   else if (a.evapRebate && a.evapRebate.ineligibleReason) P.push({ t: "EV / PHEV rebate", v: "NOT ELIGIBLE", tone: "muted" });
   else if (a.fuelType === "BEV" || a.fuelType === "PHEV") { const over = (Number(a.quotedPrice) || Number(a.msrp) || 0) > 50000; P.push({ t: "EV / PHEV rebate", v: over ? "OVER $50K CAP" : "CHECK ELIGIBILITY", tone: "muted" }); }
@@ -1064,6 +1065,22 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // which printed "No public reviews were found" about Charlesglen Toyota --
   // a dealer with 4.7 stars from 5,930 Google reviews.
   { const dr = dealerReputationPoint(a.dealerSentiment); P.push({ t: "Dealer reputation", v: dr.value, tone: dr.tone }); }
+  // TITLE STATUS — salvage / rebuilt / reconstructed.
+  //
+  // Placed here, immediately AFTER the canonical ten, so it lands first among
+  // the "also checked" extras. report-points.js is explicit that the advertised
+  // ten is fixed and extras are never counted among them, and changing what is
+  // advertised is not a code decision.
+  //
+  // It is nonetheless the most decision-relevant fact on some listings — the
+  // brand is permanent in Alberta, every future seller must disclose it, and it
+  // drives insurability, financing, resale and, on an EV, whether the maker
+  // still supports the car. Until 2026-09-12 it was not read AT ALL: a listing
+  // stating "carries a REBUILT TITLE due to previous rear-end damage" produced
+  // a report that never mentioned it. First among the extras is where it can
+  // ship today; whether it should displace one of the ten is Vic's call.
+  // [[ten-point-claim-policy]]
+  { const bt = brandedTitleLine(a.brandedTitle); P.push({ t: "Title status", v: bt.value, tone: bt.tone }); }
 
   // ---- BEYOND THE ADVERTISED FLOOR ----------------------------------------
   // Vic, 2026-08-27: "always good to over deliver ... minimum 10 points we
@@ -1152,6 +1169,8 @@ function pointExplain(t: string, a: any): string | null {
         ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`);
       return gatedNote + "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
     }
+    case "Title status":
+      return brandedTitleLine(a.brandedTitle).line;
     case "Transport Canada recalls":
       if (a.recalls?.checked && a.recalls.count > 0) return `A recall is a safety defect the manufacturer must fix free of charge. Have the dealer complete the repair${a.recalls.count > 1 ? "s" : ""} before delivery - it costs you nothing.`;
       if (a.recalls?.checked && a.recalls.confirmed !== false) return "A recall is a safety defect the manufacturer must fix for free. The government registry shows none outstanding for this model.";
