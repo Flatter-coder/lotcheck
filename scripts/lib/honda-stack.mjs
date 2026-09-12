@@ -90,6 +90,58 @@ function parseModels(html) {
   return models;
 }
 
+// THE REQUEST BODY, BUILT WHERE A TEST CAN SEE IT.
+//
+// Extracted for scripts/test-honda-caret.mjs. The defect this guards against is
+// invisible to a source grep: the correct fix and the wrong one contain the
+// SAME regex, and only the position differs. Patching where interiorColorKey is
+// READ makes the `if (!interiorColorKey) continue` guard skip the very trims
+// the fix exists to rescue — the scrape then gets QUIETER and still exits 0.
+// Only calling the builder can tell the two apart.
+export function paymentBody({ province, year, modelKey, trimKey, transmissionKey, exteriorColorKey, interiorColorKey, paymentOptions }) {
+  return {
+      ProvinceKey: province, ModelYear: year, ModelKey: modelKey, TrimKey: trimKey,
+      TransmissionKey: transmissionKey, ExteriorColorKey: exteriorColorKey,
+      // A CARET IN THE BODY GETS THE WHOLE REQUEST 403'd BY THE GATEWAY.
+      //
+      // Honda's default interior colour keys look like
+      // "bkblack_fabric_^2020_crv". An Azure Application Gateway WAF rule
+      // refuses any request body containing a "^" byte — verified in
+      // isolation: {"ProvinceKey":"A^B"} -> 403 HTML, {"ProvinceKey":"AB"}
+      // -> the application's own 422. It decodes ^ too, so escaping
+      // does not help. Nothing about this is Honda's intent; it is a
+      // generic injection rule matching a character Honda itself puts in
+      // its own identifiers.
+      //
+      // 9 of Honda's 13 models and 4 of 4 configurable Acura models carry a
+      // caret in that default key. Rate rows dedupe on `model|term`, so the
+      // 4 surviving models x 5 finance terms = 20 rows against 60 held and
+      // x 4 lease terms = 16 against 48 — the exact one-third that made the
+      // collapse guard refuse both tables since 2026-08-21. Two tables
+      // landing on the same fraction was never a coincidence: it is one
+      // per-trim loop split by PaymentMethod, both deduping to a
+      // model-level key.
+      //
+      // The field is required-for-presence but INERT in the response:
+      // real key / garbage key / empty string return byte-identical
+      // PaymentMethod/Term/Apr/Msrp on every caret-free trim tested. The
+      // configuration still resolves from Trim+Transmission+Exterior, so
+      // no price or rate moves.
+      //
+      // SUBSTITUTED HERE, IN THE BODY — NOT where interiorColorKey is read
+      // twenty lines up. The guard on the next line up from the body is
+      // `if (!trimKey || … || !interiorColorKey) continue;` and an empty
+      // string is falsy, so substituting at the read site makes the loop
+      // skip exactly the trims this exists to rescue. The real key must
+      // survive that guard so a trim with genuinely no interior colour is
+      // still skipped.
+      InteriorColorKey: /\^/.test(interiorColorKey) ? "" : interiorColorKey,
+      IncludeFees: true, IncludeTaxes: false,
+      Accessories: [], Protections: [], ProtectionAddOns: [], OwnerPrograms: [], OfferKeys: [], WarrantyKey: "",
+      PaymentOptions: paymentOptions,
+    };
+}
+
 async function postJson(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -116,6 +168,8 @@ export async function run(cfg) {
 
   const msrpRows = [], financeRows = [], leaseRows = [];
   const finSeen = new Set(), leaseSeen = new Set();
+  // A REFUSAL IS NOT A LOG LINE. See the throw at the end of run().
+  let payAsked = 0, payRefused = 0, caretSubs = 0;
 
   for (const mdl of list) {
     const years = args.year ? [Number(args.year)] : (mdl.years.length ? mdl.years : YEARS);
@@ -179,16 +233,19 @@ export async function run(cfg) {
           ...FIN_TERMS.map((term, i) => ({ ClientRequestId: `f${i}`, PaymentMethod: "Finance", PaymentFrequency: "Monthly", Term: term, DownPaymentAmount: 0, TradeInValueAmount: 0, TradeInOwingAmount: 0, LeaseAnnualKmAllowance: 0, LeaseAdditionalAnnualKm: 0 })),
           ...LEASE_TERMS.map((term, i) => ({ ClientRequestId: `l${i}`, PaymentMethod: "Lease", PaymentFrequency: "Monthly", Term: term, DownPaymentAmount: 0, TradeInValueAmount: 0, TradeInOwingAmount: 0, LeaseAnnualKmAllowance: LEASE_KM, LeaseAdditionalAnnualKm: 0 })),
         ];
-        const body = {
-          ProvinceKey: PROVINCE, ModelYear: year, ModelKey: mdl.key, TrimKey: trimKey,
-          TransmissionKey: transmissionKey, ExteriorColorKey: exteriorColorKey, InteriorColorKey: interiorColorKey,
-          IncludeFees: true, IncludeTaxes: false,
-          Accessories: [], Protections: [], ProtectionAddOns: [], OwnerPrograms: [], OfferKeys: [], WarrantyKey: "",
-          PaymentOptions: paymentOptions,
-        };
+        const body = paymentBody({ province: PROVINCE, year, modelKey: mdl.key, trimKey, transmissionKey, exteriorColorKey, interiorColorKey, paymentOptions });
+        // NEVER SILENT. If Honda drops the WAF rule or stops putting carets in
+        // its keys, this line stops appearing and we find out from the log
+        // rather than from a number that quietly changed.
+        if (/\^/.test(interiorColorKey)) {
+          caretSubs++;
+          console.log(`    caret workaround: ${cfg.make} ${model} ${t.name} — sending InteriorColorKey:"" instead of ${JSON.stringify(interiorColorKey)}`);
+        }
+
         let resp;
+        payAsked++;
         try { resp = await postJson(`${cfg.apiBase}/calculator/payment`, body); }
-        catch (e) { console.log(`  ${model} ${t.name}: payment ${e.message}`); await sleep(120); continue; }
+        catch (e) { payRefused++; console.log(`  ${model} ${t.name}: payment ${e.message}`); await sleep(120); continue; }
 
         for (const o of resp?.PaymentOptions || []) {
           const apr = Number(o.Apr), term = Number(o.Term);
@@ -209,5 +266,28 @@ export async function run(cfg) {
     if (!anyYear) console.log(`  ${mdl.key}: no trims for ${years.join("/")}`);
   }
   console.log(`[${cfg.make}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
+  console.log(`[${cfg.make}] payment calls: ${payAsked} asked, ${payRefused} refused${caretSubs ? `, ${caretSubs} caret workaround(s)` : ""}.`);
+
+  // A GATEWAY REFUSAL IS NOT A LOG LINE.
+  //
+  // The catch above turned 49 refusals into 49 console lines and let the
+  // scrape exit 0 holding a third of the data, leaning on the downstream
+  // collapse guard to notice. The guard did notice — that is why Honda and
+  // Acura went red for three weeks — but it could only say "the row count
+  // halved", which reads as a lineup change, not as a network refusal. The
+  // scraper is the only thing that knows a request was REFUSED rather than
+  // answered, and it must be the thing that says so.
+  //
+  // This is the warn-not-refuse entry in [[repeat-fix-pattern]]: the caret fix
+  // closes today's cause, this closes the class. The next time a gateway rule
+  // changes shape, the step fails on the refusal itself instead of arriving
+  // downstream disguised as a collapsed catalogue.
+  if (payRefused) {
+    throw new Error(
+      `${cfg.make}: ${payRefused} of ${payAsked} payment requests were REFUSED by the gateway. ` +
+      `Rates are incomplete, so nothing was written. This is a refusal, not a lineup change — ` +
+      `do not resolve it by allowing the collapse.`);
+  }
+
   await writeCatalogs(cfg.make, { msrpRows, financeRows, leaseRows }, { priceBasis: "excl_freight" });
 }
