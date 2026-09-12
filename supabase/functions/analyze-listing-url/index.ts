@@ -63,6 +63,7 @@ import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
 import { readBrandedTitle } from "../_shared/branded-title.js";
+import { readLotDates } from "../_shared/lot-dates.js";
 import { readFeeLadder, ladderFees } from "../_shared/fee-ladder.ts";
 import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
@@ -117,7 +118,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12c";  // 12c: title branding (salvage/rebuilt) is READ for the first time -- until now nothing in this file referenced it, so a listing stating "carries a REBUILT TITLE" produced a report that never mentioned it. AMVIC matching also became deterministic (it returned seven different businesses across orderings of the same rows). Every cached analysis predates both and MUST re-run.  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
+const CACHE_VER = "2026-09-12d";  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines. Cached analyses hold none of them.  // 12c: title branding (salvage/rebuilt) is READ for the first time -- until now nothing in this file referenced it, so a listing stating "carries a REBUILT TITLE" produced a report that never mentioned it. AMVIC matching also became deterministic (it returned seven different businesses across orderings of the same rows). Every cached analysis predates both and MUST re-run.  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2105,8 +2106,30 @@ async function captureConvertusDaysOnLot(url: string, analysis: any, sharedHtml?
     if (!/\/vehicles\/\d{4}\//i.test(u.pathname)) return;
     const html = sharedHtml ? await sharedHtml.catch(() => null) : await fetchDirectHtml(url, 12_000);
     if (!html) return;
-    const m = html.match(/"date_on_lot":"(\d{4}-\d{2}-\d{2})[^"]*"/) || html.match(/"date_added":"(\d{4}-\d{2}-\d{2})[^"]*"/);
-    const since = m ? m[1] : null;
+    // ALL FOUR DATES, not just the one. The platform keeps date_on_lot,
+    // date_added, date_updated and date_sold side by side in the same blob and
+    // we were reading one of them. date_updated separates an actively managed
+    // price from one posted and forgotten; date_sold, when set on a listing
+    // that is still advertised, is a question worth asking before driving
+    // across town. Vic, 2026-09-12: "i want this added to report".
+    const grab = (k: string): string | null => {
+      const g = html.match(new RegExp(`"${k}"\s*:\s*"([^"]*)"`));
+      return g ? g[1] : null;
+    };
+    const raw = {
+      date_on_lot: grab("date_on_lot"),
+      date_added: grab("date_added"),
+      date_updated: grab("date_updated"),
+      date_sold: grab("date_sold"),
+    };
+    const lot = readLotDates(raw);
+    if (lot) {
+      analysis.lotDates = lot;
+      console.log(`Lot dates: on_lot=${lot.onLot} added=${lot.added} updated=${lot.updated} sold=${lot.sold ?? "-"} (${lot.daysOnLot} days on lot).`);
+    }
+    // daysOnLot stays exactly as it was — it is consumed by the leverage score
+    // and the existing report line, and this change must not move either.
+    const since = lot?.onLot || lot?.added || null;
     const t = since ? Date.parse(since + "T00:00:00Z") : NaN;
     const days = Number.isFinite(t) ? Math.floor((Date.now() - t) / 86_400_000) : 0;
     if (days > 0 && days <= 3650) {
