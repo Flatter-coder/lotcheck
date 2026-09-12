@@ -352,6 +352,14 @@ jobs:
       # determinism, the website path, and refusal on a genuine tie.
       - name: AMVIC matching is deterministic and refuses ambiguity
         run: npm run test:amvic-match
+      # A used EV's battery is the most valuable part of the car and the one
+      # thing a listing never measures. The tempting regression looks like an
+      # improvement: apply a published fleet curve to this car's odometer and
+      # print "estimated 89% health". That is a fabricated figure about one
+      # named vehicle. Two Model X at 200,000 km differ by double digits of
+      # usable capacity; only the car's own BMS can say. Sourced or silent.
+      - name: The battery section never puts a number on this car's pack
+        run: npm run test:ev-battery
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
