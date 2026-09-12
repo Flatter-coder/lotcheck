@@ -339,6 +339,19 @@ jobs:
       # coverage. Both verified to fail on injection.
       - name: Warranty labels name the cover, and a hedged row refuses
         run: npm run test:warranty-labels
+      # A dealer page said "carries a REBUILT TITLE due to previous rear-end
+      # damage" and the report never mentioned it — nothing in the pipeline
+      # referenced rebuilt or salvage. The opposite error is worse: a rebuilt
+      # GEARBOX is not a branded title, and reading one as such invents a
+      # permanent defect on a clean car. Silence is a gap, never a clean title.
+      - name: A branded title is found, and a rebuilt gearbox is not one
+        run: npm run test:branded-title
+      # AMVIC ranking ignored the name score, so "Auto House" returned SEVEN
+      # different businesses across 200 orderings of the same rows — 71% of them
+      # another company's live licence number, one a named individual. Pins
+      # determinism, the website path, and refusal on a genuine tie.
+      - name: AMVIC matching is deterministic and refuses ambiguity
+        run: npm run test:amvic-match
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
