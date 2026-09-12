@@ -324,6 +324,13 @@ jobs:
       # with LESS data. A grep cannot tell them apart; this calls the builder.
       - name: The Honda caret workaround is in the body, not the read site
         run: npm run test:honda-caret
+      # The daily MSRP report decides which makes the refresh ATTEMPTS by parsing
+      # catalog-refresh.yml. Reformat that file and the parser matches nothing,
+      # so the report condemns all 32 makes as NEVER REFRESHED -- a monitor that
+      # fails into total alarm gets disbelieved on the morning it is finally
+      # right. Also catches a scraper that exists and is wired into no workflow.
+      - name: The MSRP report can still see which makes are wired
+        run: npm run test:msrp-report
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup

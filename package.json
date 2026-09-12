@@ -80,6 +80,8 @@
     "survey:permission": "node scripts/survey-dealer-permission.mjs",
     "check:promotion-path": "node scripts/check-promotion-path.mjs",
     "test:honda-caret": "node scripts/test-honda-caret.mjs",
+    "report:msrp": "node scripts/daily-msrp-report.mjs",
+    "test:msrp-report": "node scripts/test-msrp-report.mjs",
     "check:migrations": "node scripts/check-migration-columns.mjs",
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
     "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts",

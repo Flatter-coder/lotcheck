@@ -171,6 +171,38 @@ jobs:
         if: ${{ !cancelled() }}
         run: node scripts/catalog-refresh-guard.mjs verify --step="Porsche" --makes="Porsche" --msrp=required
 
+      # MITSUBISHI — the first of the three makes that had no step at all.
+      #
+      # Jaguar, Land Rover and Mitsubishi sat at fetched_at 2026-08-08 for 34
+      # days while this workflow ran green every night. It was green honestly:
+      # the fresh-write guard compares each make against its own pre-run
+      # snapshot, so a make with no step is compared against nothing and passes.
+      # They were never broken. They were never built.
+      #
+      # PLACEMENT IS LOAD-BEARING. This must sit AFTER the snapshot step and
+      # BEFORE "Invalidate cached reports". Before the snapshot, verify() exits
+      # 1 on a missing snapshot file, and a write taken before the snapshot
+      # makes max(id) look unchanged so a working scraper reports "no fresh
+      # rows". After the invalidate step, fresh rows land after the cache purge
+      # and cached reports keep serving the old MSRP — the 2026-08-11 regression
+      # that step exists to prevent.
+      #
+      # The guard ships in the SAME commit as the scraper, deliberately. A
+      # scraper with no guard step is the state this whole change is undoing,
+      # and it is invisible by construction.
+      #
+      # 4 rows -> 30, so the >50% collapse guard is not implicated: this is
+      # growth. Plain fetch, no Scrapfly, no key, no spend. Permission is
+      # explicit — mitsubishi-motors.ca/robots.txt is "User-agent: *" with an
+      # empty "Disallow:", which permits everything. [[dealer-tos-daily-checks]]
+      - name: Mitsubishi — MSRP only (rates are a separate, later build)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: node scripts/scrape-mitsubishi.mjs || echo "mitsubishi" >> "$RUNNER_TEMP/failed-makes.txt"
+      - name: "Guard: Mitsubishi wrote fresh rows"
+        if: ${{ !cancelled() }}
+        run: node scripts/catalog-refresh-guard.mjs verify --step="Mitsubishi" --makes="Mitsubishi" --msrp=required
+
       - name: MINI — MSRP + finance/lease rates
         if: ${{ !cancelled() }}
         continue-on-error: true
@@ -355,3 +387,47 @@ jobs:
           fi
           echo "Every required make wrote fresh rows — MSRP and rates both current."
           echo "All makes wrote. Catalog refresh complete."
+
+      # THE DAILY MSRP REPORT. Vic, 2026-09-11: "i need daily report of msrp".
+      #
+      # Runs AFTER the refresh and AFTER the failure gate, with !cancelled() so
+      # a red run still produces it — the morning the refresh breaks is the
+      # morning the report matters most.
+      #
+      # It answers a question no step above can: the guards compare each make
+      # against its own pre-run snapshot, so a make with NO STEP AT ALL is
+      # compared against nothing and passes silently. Jaguar, Land Rover and
+      # Mitsubishi sat at 2026-08-08 for 34 days through green run after green
+      # run for exactly that reason. This step reads the catalog itself and
+      # prints a DATE for every make, wired or not.
+      #
+      # Anon key only, no writes. It cannot affect the refresh it reports on.
+      - name: Daily MSRP report (every make, with a date)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          # Exit code captured, not swallowed. The report exits 1 when a make the
+          # refresh was SUPPOSED to write is 2+ days stale — an INDEPENDENT check
+          # from the guards above, which only ever compare a make against its own
+          # pre-run snapshot. The two can disagree, and when they do the report is
+          # reading the catalog that reports are actually built from. The summary
+          # is written either way, because the run that fails is the run whose
+          # report someone needs to read.
+          rc=0
+          node scripts/daily-msrp-report.mjs | tee "$RUNNER_TEMP/msrp-report.txt" || rc=$?
+          {
+            echo "## Daily MSRP report"
+            echo ""
+            echo '```'
+            cat "$RUNNER_TEMP/msrp-report.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The ::warning annotation for un-refreshed makes is emitted by the
+          # report itself (it checks GITHUB_ACTIONS), because only the program
+          # holding the data can name a make correctly. Grepping this output for
+          # names was tried first and returned "Jaguar Land Mitsubishi MAKE Acura
+          # Alfa BMW ..." — "Land Rover" split at the space and the match ran on
+          # into the next section. A warning, not an error: a make with no step
+          # is a gap in what we built, and a permanently-red job is a job people
+          # stop reading, which is the failure this whole report exists to end.
+          exit "$rc"
