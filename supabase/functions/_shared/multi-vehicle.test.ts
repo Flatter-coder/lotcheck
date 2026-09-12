@@ -16,7 +16,7 @@
 //   node --experimental-strip-types supabase/functions/_shared/multi-vehicle.test.ts
 // ============================================================================
 
-import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "./multi-vehicle.ts";
+import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "./multi-vehicle.ts";
 import { jsonLdVehicleVins, jsonLdVehicles } from "./jsonld-vehicle.js";
 import { readFileSync } from "node:fs";
 
@@ -417,6 +417,68 @@ check("an empty or tiny page is a FETCH problem, not an identity problem",
 
 check("a non-string page body cannot make it refuse",
   urlVinMismatch("https://x.ca/inventory/used-1gkennrs2sj181578/", null) === false);
+
+// ---------------------------------------------------------------------------
+// DOMINANCE: the last-resort rung, for a page that declares nothing at all.
+//
+// xpertsautos.com embeds the dealer's ENTIRE inventory in every vehicle page
+// and publishes no schema.org nodes, no anchor and no platform blob. So its
+// detail pages arrived here with 63 VINs and nothing declared, and were refused
+// for ever -- a real buyer was told on 2026-09-12 that his single-vehicle link
+// "looks like a search-results or inventory page". Its actual inventory page
+// carries the SAME 63 VINs, so no distinct count and no threshold can separate
+// them. Only repetition does: measured 7-vs-1 on the detail page against
+// 1-vs-1 on the grid.
+// ---------------------------------------------------------------------------
+const DOM_NONE: Declaration = { count: 0, vins: [], anchoredVin: null };
+const DOM_SUBJECT = "5YJXCBE28HF046037";
+const DOM_RAIL = ["WDDMH4GBXJJ463791", "JTHGZ1E21S5040581", "5TDGSKFC8RS126073", "WBA8A3C50HK691245", "YV4102RK3J1031837"];
+const domOcc = (pairs: [string, number][]) => new Map<string, number>(pairs);
+const DOM_ALL = [DOM_SUBJECT, ...DOM_RAIL];
+
+check("a detail page that declares nothing is read from its own repetition", (() => {
+  const r = classifyVehiclePage(DOM_ALL, DOM_NONE, null, true,
+    domOcc([[DOM_SUBJECT, 7], ...DOM_RAIL.map((v) => [v, 1] as [string, number])]));
+  return r.kind === "single" && r.subjectVin === DOM_SUBJECT;
+})());
+
+check("the SAME vehicles, each mentioned once, is still a grid", (() => {
+  const r = classifyVehiclePage(DOM_RAIL, DOM_NONE, null, true,
+    domOcc(DOM_RAIL.map((v) => [v, 1] as [string, number])));
+  return r.kind === "multi";
+})());
+
+check("a tie at the top is NOT dominance -- refuse rather than pick one", (() => {
+  const r = classifyVehiclePage(DOM_ALL, DOM_NONE, null, true,
+    domOcc([[DOM_SUBJECT, 4], [DOM_RAIL[0], 4], [DOM_RAIL[1], 1]]));
+  return r.kind === "multi";
+})());
+
+check("every VIN mentioned once over is not a subject", (() => {
+  const r = classifyVehiclePage(DOM_ALL, DOM_NONE, null, true,
+    domOcc([[DOM_SUBJECT, 1], [DOM_RAIL[0], 1], [DOM_RAIL[1], 1]]));
+  return r.kind === "multi";
+})());
+
+check("without occurrences the old refusal is unchanged", (() => {
+  const r = classifyVehiclePage(DOM_ALL, DOM_NONE, null, true);
+  return r.kind === "multi";
+})());
+
+check("a DECLARED subject outranks a more-repeated neighbour", (() => {
+  const r = classifyVehiclePage([DOM_SUBJECT, DOM_RAIL[0]],
+    { count: 1, vins: [DOM_SUBJECT], anchoredVin: null }, null, true,
+    domOcc([[DOM_RAIL[0], 9], [DOM_SUBJECT, 2]]));
+  return r.kind === "single" && r.subjectVin === DOM_SUBJECT;
+})());
+
+// Four 17-digit numbers on the xpertsautos page passed the check digit. The
+// checksum is only 1-in-11 protection, so ~9% of long numeric ids clear it.
+const DOM_DIGITS = "15139672402911808 21254087398897337 29570825983699023 32186731679077507";
+check("17-digit numbers never count as VINs",
+  distinctValidVins(DOM_DIGITS).length === 0 && vinOccurrences(DOM_DIGITS).size === 0);
+check("a real VIN alongside them is still found",
+  distinctValidVins(DOM_DIGITS + " " + DOM_SUBJECT).join() === DOM_SUBJECT);
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 if (fail) (globalThis as any).process?.exit?.(1);

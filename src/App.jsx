@@ -11260,19 +11260,19 @@ function QuoteCheckPage(){
                     ):(
                       <>
                         <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
-                          Or hand it to us. We'll read this listing ourselves and email you the report <b>within 24 hours</b> — no screenshot needed, and it costs you nothing extra.
+                          Prefer to hand it over? Leave your email and our analysts will read this listing themselves and send your report <b>within one business day</b> — no screenshot needed, at no extra cost. You can also forward the link to <b>support@lotcheck.ca</b> and we'll take it from there.
                         </div>
                         <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
                           <input
                             type="email" value={mrEmail} onChange={e=>setMrEmail(e.target.value)}
-                            placeholder="your email, so we can send it back"
+                            placeholder="your email, so we can send the report back"
                             style={{margin:0,maxWidth:280,width:"100%",fontSize:13,padding:"9px 14px",borderRadius:999,border:`1px solid ${C.line}`,background:C.paper,color:C.ink,outline:"none"}}
                           />
                           <button
                             onClick={requestManualReview}
                             disabled={mrState==="sending"||!mrEmail.trim()}
                             style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:mrState==="sending"||!mrEmail.trim()?"not-allowed":"pointer",opacity:mrState==="sending"||!mrEmail.trim()?.55:1}}>
-                            {mrState==="sending"?"Sending…":"Ask us to check it by hand →"}
+                            {mrState==="sending"?"Sending…":"Have an analyst review it →"}
                           </button>
                         </div>
                         {mrMsg&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{mrMsg}</div>}
@@ -11300,19 +11300,19 @@ function QuoteCheckPage(){
                     ):(
                       <>
                         <div style={{fontSize:12,color:C.inkFaint,marginBottom:10,lineHeight:1.5}}>
-                          Or hand it to us. Leave your email and we'll follow up to get the file, read it ourselves, and send you the report <b>within 24 hours</b> — costs you nothing extra.
+                          Prefer to hand it over? Leave your email and our analysts will follow up for the file, read it themselves, and send your report <b>within one business day</b> — at no extra cost. You can also email it to <b>support@lotcheck.ca</b> and we'll take it from there.
                         </div>
                         <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
                           <input
                             type="email" value={mrEmail} onChange={e=>setMrEmail(e.target.value)}
-                            placeholder="your email, so we can send it back"
+                            placeholder="your email, so we can send the report back"
                             style={{margin:0,maxWidth:280,width:"100%",fontSize:13,padding:"9px 14px",borderRadius:999,border:`1px solid ${C.line}`,background:C.paper,color:C.ink,outline:"none"}}
                           />
                           <button
                             onClick={requestManualReview}
                             disabled={mrState==="sending"||!mrEmail.trim()}
                             style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"9px 20px",color:C.inkSoft,fontWeight:800,fontSize:13,cursor:mrState==="sending"||!mrEmail.trim()?"not-allowed":"pointer",opacity:mrState==="sending"||!mrEmail.trim()?.55:1}}>
-                            {mrState==="sending"?"Sending…":"Ask us to check it by hand →"}
+                            {mrState==="sending"?"Sending…":"Have an analyst review it →"}
                           </button>
                         </div>
                         {mrMsg&&<div style={{fontSize:11,color:C.inkFaint,marginTop:8}}>{mrMsg}</div>}

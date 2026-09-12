@@ -61,7 +61,7 @@ import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
-import { distinctValidVins, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
+import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
 import { readFeeLadder, ladderFees } from "../_shared/fee-ladder.ts";
 import { catalogKey, chooseFetchPlan, buildObservation, detectPlatform, directVerdict } from "../_shared/dealer-catalog.ts";
 import { extractConvertusVmsVehicle } from "../_shared/convertus-vms.js";
@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12b";  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js) -- a hybrid-only model like the J250 Land Cruiser now gets its Alberta comparison set, the model-year ladder with it, and a set the wall did not separate is no longer labelled with a powertrain. Cached reports MUST re-run or they replay "0 read".
+const CACHE_VER = "2026-09-12b";  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -4204,7 +4204,11 @@ Deno.serve(async (req: Request) => {
         }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
       }
 
-      const page = classifyVehiclePage(vins, declared, blobVin, sawPageSource);
+      // Occurrence counts are the last-resort evidence for a page that declares
+      // nothing — a platform that embeds its whole inventory in every listing
+      // arrives here with dozens of VINs and no markup, and repetition is the
+      // only thing left that distinguishes its detail pages from its grids.
+      const page = classifyVehiclePage(vins, declared, blobVin, sawPageSource, vinOccurrences(pageContent));
       console.log(`Page subject: ${page.kind} -- ${page.why} (found ${vins.length}, declared ${declared.count} node(s)/${declared.vins.length} vin(s)${blobVin ? `, blob ${blobVin}` : ""}, html ${pageMarkup !== null ? "ok" : "unavailable"}).`);
       if (page.kind === "multi") {
         // THE THROTTLE IS CONSULTED ONLY ONCE WE STILL MEAN TO REFUSE, and it
@@ -4232,7 +4236,7 @@ Deno.serve(async (req: Request) => {
           await logUsage({ success: false, errorMessage: `repeat multi-vehicle URL, cooldown active (not charged)` });
           return new Response(JSON.stringify({
             error: "repeat_multivehicle_cooldown",
-            message: "Sorry, we can't process a page with multiple vehicles. You've already tried this link — try a different listing, or paste the link to the ONE vehicle you want checked.",
+            message: "We still can't tell which vehicle that page is for. You haven't been charged. Paste the link to a single vehicle, or forward this link to support@lotcheck.ca and one of our analysts will read it for you and send the report back — no extra cost.",
             cooldownUntil: cooldown.cooldownUntil,
           }), { status: 429, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
         }
@@ -4245,8 +4249,8 @@ Deno.serve(async (req: Request) => {
           // page" when the truth is that we could not read their page is the
           // same unbacked claim the whole change is about, aimed at them.
           message: page.blameThePage
-            ? "Sorry, we can't process a page with multiple vehicles. This looks like a search-results or inventory page — paste the link to the ONE vehicle you want checked instead."
-            : "We couldn't read enough of that page to tell which vehicle it's for, and it mentions several. You haven't been charged. Try the link again in a moment, or upload a screenshot of the vehicle you want checked.",
+            ? "That link opens a page listing several vehicles, so we can't tell which one you mean. Open the vehicle you want and paste that link — or forward this one to support@lotcheck.ca and an analyst will read it for you, at no extra cost."
+            : "We couldn't read enough of that page to tell which vehicle it's for, and it mentions several. You haven't been charged. Try the link again in a moment, upload a screenshot of the vehicle you want checked, or forward the link to support@lotcheck.ca and an analyst will handle it.",
         }), { status: 422, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } });
       }
       // Accepting a page that mentions several vehicles is only safe while the
