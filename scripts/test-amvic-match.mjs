@@ -5,6 +5,7 @@
 // or over-confident match would attach a real regulator status to the wrong
 // business. Every "expect null" case below is a claim we must NOT make.
 
+import { readFileSync } from "node:fs";
 import { matchLicensee, classifyStatus, nameScore, pageDomains, normHost } from "../supabase/functions/_shared/amvic-match.js";
 
 // Real shapes from AMVIC's registry (values observed live 2026-08-10).
@@ -200,6 +201,44 @@ const check = (label, cond, detail) => {
     matchLicensee([mk2("CITY MOTORS LTD.", "B111"), mk2("CITY MOTORS LTD.", "B333")], { dealerName: "City Motors", dealerCity: "Calgary" }) !== null);
   check("a clear winner still wins",
     (matchLicensee([mk2("CITY MOTORS LTD.", "B111"), mk2("SUMMIT CITY MOTORS AND RV LTD.", "B222")], { dealerName: "City Motors", dealerCity: "Calgary" }) || {}).row?.registration_number === "B111");
+}
+
+
+// ---------------------------------------------------------------------------
+// THE CALLER ACTUALLY USES IT.
+//
+// 2026-09-12: the website path was built, unit-tested against the real page and
+// the real registry, and shipped — and the caller never passed it the domains.
+// Every test above was green while the live report still said "No dealer name
+// was confirmed" for a dealer whose licence was in our own table. A unit test
+// of a matcher proves the matcher; it proves nothing about whether anything
+// calls it. [[repeat-fix-pattern]] shape 2: built, tested, never wired.
+//
+// This reads the caller's source and asserts the wiring exists. It is a coarse
+// check and it is deliberately coarse: it only has to fail when the connection
+// is missing, which is exactly the failure that shipped.
+// ---------------------------------------------------------------------------
+{
+  const src = readFileSync("supabase/functions/analyze-listing-url/index.ts", "utf8");
+
+  check("the caller extracts the page's own domains",
+    /domainsFromText\s*\(/.test(src),
+    "domainsFromText is never called — the website path can never fire");
+
+  check("the caller hands those domains to matchLicensee",
+    /matchLicensee\([^)]*domains/s.test(src),
+    "matchLicensee is called without `domains`, so it falls back to the listing host alone — " +
+    "which is the exact case that failed: the host is xpertsautos.com, the registry holds xpertsauto.ca");
+
+  check("the licence check no longer bails when only a domain is known",
+    /!name\s*&&\s*!domains\.length/.test(src),
+    "an early `if (!name) return` means a dealer whose name never extracted can never be matched, " +
+    "even when their own e-mail domain is sitting in the registry");
+
+  check("candidates are fetched by website as well as by name",
+    /website\.ilike/.test(src),
+    "the candidate query searches names only, so a row matchable by domain is never fetched for " +
+    "the matcher to see");
 }
 
 

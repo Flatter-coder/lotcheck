@@ -59,7 +59,7 @@ import { lookupRecalls } from "../_shared/recalls.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
 import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
-import { matchLicensee, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
+import { matchLicensee, domainsFromText, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
 import { readBrandedTitle } from "../_shared/branded-title.js";
@@ -117,7 +117,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12c";  // 12c: title branding (salvage/rebuilt) is READ for the first time -- until now nothing in this file referenced it, so a listing stating "carries a REBUILT TITLE" produced a report that never mentioned it. AMVIC matching also became deterministic (it returned seven different businesses across orderings of the same rows). Every cached analysis predates both and MUST re-run.  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
+const CACHE_VER = "2026-09-12e";  // 12e: the AMVIC website path is finally WIRED. It shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed". Cached reports carry that empty card.  // 12c: title branding (salvage/rebuilt) is READ for the first time -- until now nothing in this file referenced it, so a listing stating "carries a REBUILT TITLE" produced a report that never mentioned it. AMVIC matching also became deterministic (it returned seven different businesses across orderings of the same rows). Every cached analysis predates both and MUST re-run.  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1922,7 +1922,24 @@ async function checkDealerLicence(analysis: any): Promise<void> {
   try {
     if (!analysis || analysis.dealerLicence) return;
     const name = String(analysis.dealerName || "").trim();
-    if (!name) return;
+    // EVERY DOMAIN THE PAGE CLAIMS FOR ITSELF — the host, the website in its
+    // contact block, and the domain of any e-mail on it.
+    //
+    // 2026-09-12: a report said "No dealer name was confirmed to match against
+    // AMVIC's public registry" for XPERTS AUTO SALES LTD., whose licence
+    // B2036047 (Issued to Feb-28-2027) was in our own copy of the registry the
+    // whole time. The listing is on xpertsautos.com; AMVIC records the website
+    // as xpertsauto.ca. Host-only matching compared those two and moved on —
+    // but the page also prints sales@xpertsauto.ca, and that domain is an
+    // EXACT match. The matcher gained a website path for this; it was never
+    // handed the domains, so it could never use it. Built and never wired.
+    // [[repeat-fix-pattern]] shape 2.
+    const domains: string[] = Array.isArray(analysis.pageDomains) ? analysis.pageDomains : [];
+    // A domain alone is enough to identify a business, so this no longer
+    // requires a name. Without that, a listing whose dealer name never
+    // extracted could not be matched even when its own e-mail domain is
+    // sitting in the registry.
+    if (!name && !domains.length) return;
     // CA-AB provider (locale-abstraction-rule: other provinces plug their own
     // registry in behind this same dealerLicence field -- OMVIC, VSA, etc.).
     const city = String(analysis.dealerCity || "");
@@ -1930,20 +1947,32 @@ async function checkDealerLicence(analysis: any): Promise<void> {
     // Candidate fetch: the most distinctive token of the dealer name, so a
     // single indexed query returns a small set for the matcher to judge.
     const toks = amvicNorm(name).split(" ").filter((t: string) => t.length > 2);
-    if (!toks.length) return;
-    const probe = toks.sort((a: string, b: string) => b.length - a.length)[0];
+    const probe = toks.sort((a: string, b: string) => b.length - a.length)[0] || "";
+    // CANDIDATES BY NAME **OR** BY WEBSITE. Querying on the name probe alone
+    // meant a website match could never be found when the name was missing or
+    // spelled differently from the registry — the matcher would have resolved
+    // it, but the row was never fetched for it to look at.
+    // PostgREST wildcard is `*`, not `%`: a raw % inside an or() filter is a
+    // URL escape character and the request is rejected outright (HTTP 1101),
+    // so every licence lookup silently found nothing. Verified 2026-08-11.
+    const clauses: string[] = [];
+    if (probe) clauses.push(`name_key.ilike.*${probe}*`, `trade_key.ilike.*${probe}*`);
+    // The registry stores websites inconsistently (bare host, with www, with a
+    // scheme, and sometimes an e-mail address), so match the domain anywhere in
+    // the field and let matchLicensee's exact normalised compare decide.
+    for (const d of domains.slice(0, 4)) {
+      if (/^[a-z0-9.-]+$/.test(d)) clauses.push(`website.ilike.*${d}*`);
+    }
+    if (!clauses.length) return;
     const { data, error } = await supabase
       .from("amvic_licensees")
       .select("name, trade_name, city, facility_status, registration_number, expiry_date, website")
-      // PostgREST wildcard is `*`, not `%`: a raw % inside an or() filter is a
-      // URL escape character and the request is rejected outright (HTTP 1101),
-      // so every licence lookup silently found nothing. Verified 2026-08-11.
-      .or(`name_key.ilike.*${probe}*,trade_key.ilike.*${probe}*`)
+      .or(clauses.join(","))
       .limit(60);
     if (error) { console.warn("AMVIC lookup failed:", error.message); return; }
     if (!data || !data.length) return;
 
-    const hit = matchLicensee(data, { dealerName: name, dealerCity: city, website: analysis.sourceUrl || "" });
+    const hit = matchLicensee(data, { dealerName: name, dealerCity: city, domains, website: analysis.sourceUrl || "" });
     if (!hit) { console.log(`AMVIC: no confident match for "${name}" -- reporting unverified.`); return; }
     analysis.dealerLicence = {
       status: hit.row.facility_status || null,      // regulator's own wording, verbatim
@@ -4452,6 +4481,20 @@ Deno.serve(async (req: Request) => {
     // fact on that listing, which the dealer had disclosed properly. Three
     // states, never two: silence is a gap, not a clean title.
     // [[make-recalls-fail-safe]] [[present-without-creating-questions]]
+    // THE DEALER'S OWN DOMAINS, captured where the page text still exists.
+    // checkDealerLicence runs inside enrichAnalysis, long after pageContent has
+    // gone out of scope, so the domains have to be carried on the analysis —
+    // the same route the branded-title verdict takes.
+    try {
+      analysis.pageDomains = domainsFromText(
+        [typeof pageContent === "string" ? pageContent : "", typeof rawHtml === "string" ? rawHtml : ""].join(" "),
+        url,
+      );
+      if (analysis.pageDomains?.length) console.log(`Dealer domains on the page: ${analysis.pageDomains.join(", ")}`);
+    } catch (e) {
+      console.warn("domainsFromText threw (ignored):", (e as Error)?.message);
+    }
+
     try {
       const bt = readBrandedTitle(
         [typeof pageContent === "string" ? pageContent : "", typeof rawHtml === "string" ? rawHtml : ""].join(" "),
