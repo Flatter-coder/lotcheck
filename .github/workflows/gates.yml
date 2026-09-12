@@ -331,6 +331,14 @@ jobs:
       # right. Also catches a scraper that exists and is wired into no workflow.
       - name: The MSRP report can still see which makes are wired
         run: npm run test:msrp-report
+      # A real customer report told a buyer a 2020 Model X was past its battery
+      # warranty at 198,909 km. The real term is 8yr/240,000 km — it had 41,091
+      # km left. Our row hedged ("varies by model") and the parser read past the
+      # hedge. Same card printed "PASS / COVER REMAINING" on a car whose only
+      # live cover was corrosion. Hedges must refuse; the label must name the
+      # coverage. Both verified to fail on injection.
+      - name: Warranty labels name the cover, and a hedged row refuses
+        run: npm run test:warranty-labels
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup

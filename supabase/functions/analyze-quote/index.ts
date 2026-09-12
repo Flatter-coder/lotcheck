@@ -56,7 +56,7 @@ import { canonicalMake } from "../_shared/makes.ts";
 // so did analyze-listing-url and search-recalls, four in all, and they had
 // already drifted apart. See _shared/recalls.ts for what the drift cost.
 import { lookupRecalls } from "../_shared/recalls.ts";
-import { computeRemainingWarranty } from "../_shared/warranty.ts";
+import { computeRemainingWarranty, pickWarrantyRow } from "../_shared/warranty.ts";
 import { fetchMarketValue, fetchOlderYears } from "../_shared/marketvalue.ts";
 import { todayLocal } from "../_shared/market-count.js";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
@@ -1151,27 +1151,31 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
     const make = canonicalMake(analysis.make); // normalize "Mercedes"/"VW"/"Range Rover" -> catalog make
     const { data, error } = await supabase
       .from("manufacturer_warranties")
-      .select("basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
-      .ilike("make", make)
-      .maybeSingle();
+      .select("id, make, model, year_from, year_to, basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
+      .ilike("make", make);
     if (error) {
       console.warn("⚠️ manufacturer_warranties lookup failed:", error.message);
       if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
       return;
     }
-    if (!data) {
+      // ONE RESOLVER, NOT FOUR LOOKUPS. Terms vary by model and by the era the
+      // car was sold in, so `make ilike ... maybeSingle()` cannot be right: it
+      // takes whatever row comes back first. pickWarrantyRow() chooses, and it
+      // REFUSES (null) rather than hand back a row from the wrong era.
+    const row = pickWarrantyRow(data, analysis.model, analysis.year != null ? Number(analysis.year) : null);
+    if (!row) {
       if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
       return;
     }
-    const parts = [`${data.basic_coverage} comprehensive`, `${data.powertrain_coverage} powertrain`];
-    if (data.corrosion_coverage) parts.push(`${data.corrosion_coverage} corrosion`);
+    const parts = [`${row.basic_coverage} comprehensive`, `${row.powertrain_coverage} powertrain`];
+    if (row.corrosion_coverage) parts.push(`${row.corrosion_coverage} corrosion`);
     analysis.standardWarranty = {
       coverage: parts.join(", "),
       note: `Included at no extra cost with every new ${make} -- verified against ${make}'s official Canadian warranty terms, not an AI estimate.`,
       verified: true,
-      roadsideAssistance: data.roadside_assistance ?? null,
-      hybridEvCoverage: data.hybrid_ev_coverage ?? null,
-      sourceUrl: data.source_url,
+      roadsideAssistance: row.roadside_assistance ?? null,
+      hybridEvCoverage: row.hybrid_ev_coverage ?? null,
+      sourceUrl: row.source_url,
     };
   } catch (err) {
     console.warn("⚠️ applyVerifiedWarranty threw:", err);
@@ -1189,12 +1193,24 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
     const make = canonicalMake(analysis.make);
     const { data, error } = await supabase
       .from("manufacturer_warranties")
-      .select("basic_coverage, powertrain_coverage, source_url")
-      .ilike("make", make)
-      .maybeSingle();
+      // corrosion, roadside and EV cover are all selected here now. This
+      // function used to ask for only basic + powertrain, so it reported "all
+      // of it looks to have run out" about a corrosion term it had never
+      // fetched -- corrosion is usually the one TIME-ONLY term (unlimited km)
+      // and so the cover most likely still live on a high-km car. The sibling
+      // function was fixed for this and carried the explaining comment; this
+      // one was not. [[repeat-fix-pattern]] shape 4: the sibling nobody looked for.
+      .select("id, make, model, year_from, year_to, basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
+      .ilike("make", make);
     if (error || !data) return;
+      // ONE RESOLVER, NOT FOUR LOOKUPS. Terms vary by model and by the era the
+      // car was sold in, so `make ilike ... maybeSingle()` cannot be right: it
+      // takes whatever row comes back first. pickWarrantyRow() chooses, and it
+      // REFUSES (null) rather than hand back a row from the wrong era.
+    const row = pickWarrantyRow(data, analysis.model, Number(analysis.year));
+    if (!row) return;
     const odo = analysis.odometerKm != null ? Number(analysis.odometerKm) : null;
-    const rw = computeRemainingWarranty(data, Number(analysis.year), odo, new Date().getUTCFullYear());
+    const rw = computeRemainingWarranty(row, Number(analysis.year), odo, new Date().getUTCFullYear());
     if (rw) { rw.make = make; analysis.remainingWarranty = rw; }
   } catch (err) {
     console.warn("⚠️ applyRemainingWarranty threw:", err);
