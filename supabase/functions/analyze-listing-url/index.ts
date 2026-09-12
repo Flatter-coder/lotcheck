@@ -75,7 +75,7 @@ import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts";
 import { buildFeeObservations } from "../_shared/fee-vocab.ts";
 import { canonicalMake } from "../_shared/makes.ts";
-import { computeRemainingWarranty } from "../_shared/warranty.ts";
+import { computeRemainingWarranty, pickWarrantyRow } from "../_shared/warranty.ts";
 import { fetchMarketValue, servesComps, fetchOlderYears } from "../_shared/marketvalue.ts";
 import { computeReconciliation, computeFinancingTrap, buildCounterScript, hasTrustedFinanceRate } from "../_shared/deal.ts";
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
@@ -116,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12a";  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance) -- every listing on a platform that embeds its whole inventory, xpertsautos.com among them, was permanently unreadable and the buyer was told the link was theirs to fix. Cached refusals and any report pinned to the wrong subject VIN MUST re-run.  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js) -- a hybrid-only model like the J250 Land Cruiser now gets its Alberta comparison set, the model-year ladder with it, and a set the wall did not separate is no longer labelled with a powertrain. Cached reports MUST re-run or they replay "0 read".
+const CACHE_VER = "2026-09-12b";  // 12b: warranty terms that HEDGE ("varies by model") now refuse instead of publishing the make-wide figure as this car's, and the label names which cover is left rather than a generic "cover remaining". A cached 2020 Model X report says the battery cover ran out at 198,909 km when the real term is 240,000 km -- it MUST re-run.  // 12a: a detail page that declares nothing is no longer refused as an inventory page (multi-vehicle.ts subjectByDominance).  // 10b: the fuel-type hint no longer walls off a whole nameplate (market-count.js).
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -531,27 +531,31 @@ async function applyVerifiedWarranty(analysis: any): Promise<void> {
     const make = canonicalMake(analysis.make); // normalize "Mercedes"/"VW"/"Range Rover" -> catalog make
     const { data, error } = await supabase
       .from("manufacturer_warranties")
-      .select("basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
-      .ilike("make", make)
-      .maybeSingle();
+      .select("id, make, model, year_from, year_to, basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
+      .ilike("make", make);
     if (error) {
       console.warn("⚠️ manufacturer_warranties lookup failed:", error.message);
       if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
       return;
     }
-    if (!data) {
+      // ONE RESOLVER, NOT FOUR LOOKUPS. Terms vary by model and by the era the
+      // car was sold in, so `make ilike ... maybeSingle()` cannot be right: it
+      // takes whatever row comes back first. pickWarrantyRow() chooses, and it
+      // REFUSES (null) rather than hand back a row from the wrong era.
+    const row = pickWarrantyRow(data, analysis.model, analysis.year != null ? Number(analysis.year) : null);
+    if (!row) {
       if (analysis.standardWarranty) analysis.standardWarranty.verified = false;
       return;
     }
-    const parts = [`${data.basic_coverage} comprehensive`, `${data.powertrain_coverage} powertrain`];
-    if (data.corrosion_coverage) parts.push(`${data.corrosion_coverage} corrosion`);
+    const parts = [`${row.basic_coverage} comprehensive`, `${row.powertrain_coverage} powertrain`];
+    if (row.corrosion_coverage) parts.push(`${row.corrosion_coverage} corrosion`);
     analysis.standardWarranty = {
       coverage: parts.join(", "),
       note: `Included at no extra cost with every new ${make} -- verified against ${make}'s official Canadian warranty terms, not an AI estimate.`,
       verified: true,
-      roadsideAssistance: data.roadside_assistance ?? null,
-      hybridEvCoverage: data.hybrid_ev_coverage ?? null,
-      sourceUrl: data.source_url,
+      roadsideAssistance: row.roadside_assistance ?? null,
+      hybridEvCoverage: row.hybrid_ev_coverage ?? null,
+      sourceUrl: row.source_url,
     };
   } catch (err) {
     console.warn("⚠️ applyVerifiedWarranty threw:", err);
@@ -572,12 +576,24 @@ async function applyRemainingWarranty(analysis: any): Promise<void> {
       // on a high-km car it is the cover most likely still live -- and without
       // it the report said "all of it looks to have run out" about a term it
       // had never fetched.
-      .select("basic_coverage, powertrain_coverage, corrosion_coverage, source_url")
-      .ilike("make", make)
-      .maybeSingle();
+      // corrosion, roadside and EV cover are all selected here now. This
+      // function used to ask for only basic + powertrain, so it reported "all
+      // of it looks to have run out" about a corrosion term it had never
+      // fetched -- corrosion is usually the one TIME-ONLY term (unlimited km)
+      // and so the cover most likely still live on a high-km car. The sibling
+      // function was fixed for this and carried the explaining comment; this
+      // one was not. [[repeat-fix-pattern]] shape 4: the sibling nobody looked for.
+      .select("id, make, model, year_from, year_to, basic_coverage, powertrain_coverage, corrosion_coverage, roadside_assistance, hybrid_ev_coverage, source_url")
+      .ilike("make", make);
     if (error || !data) return;
+      // ONE RESOLVER, NOT FOUR LOOKUPS. Terms vary by model and by the era the
+      // car was sold in, so `make ilike ... maybeSingle()` cannot be right: it
+      // takes whatever row comes back first. pickWarrantyRow() chooses, and it
+      // REFUSES (null) rather than hand back a row from the wrong era.
+    const row = pickWarrantyRow(data, analysis.model, Number(analysis.year));
+    if (!row) return;
     const odo = analysis.odometerKm != null ? Number(analysis.odometerKm) : null;
-    const rw = computeRemainingWarranty(data, Number(analysis.year), odo, new Date().getUTCFullYear());
+    const rw = computeRemainingWarranty(row, Number(analysis.year), odo, new Date().getUTCFullYear());
     if (rw) { rw.make = make; analysis.remainingWarranty = rw; }
   } catch (err) {
     console.warn("⚠️ applyRemainingWarranty threw:", err);

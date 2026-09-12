@@ -116,7 +116,8 @@
     "test:fee-stack": "node scripts/test-fee-stack.mjs",
     "test:share-round-trip": "node scripts/test-share-round-trip.mjs",
     "test:archived-msrp": "node scripts/test-archived-msrp.mjs",
-    "test:inventory-daily": "node scripts/test-inventory-daily.mjs"
+    "test:inventory-daily": "node scripts/test-inventory-daily.mjs",
+    "test:warranty-labels": "node --experimental-strip-types scripts/test-warranty-labels.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

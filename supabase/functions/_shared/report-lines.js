@@ -1079,6 +1079,21 @@ export function warrantyLine(a) {
   ].filter(([, t]) => t && t.term) : [];
 
   if (terms.length) {
+    // A HEDGED TERM IS NOT AN ANSWER. warranty.ts marks any coverage string
+    // whose own text says it varies by model or trim. One string per MAKE
+    // cannot express a term that varies by model AND by the date the car was
+    // first sold, and the Tesla row proved both halves of that on 2026-09-12:
+    // it understated a 2020 Model X's battery cover by 80,000 km (saying the
+    // car was past a cap it had 41,091 km of headroom on) and invented a
+    // distance cap the 2017 car never had. We refuse rather than annotate.
+    const hedged = terms.filter(([, t]) => t.hedged);
+    if (hedged.length) {
+      return {
+        value: "CANNOT STATE",
+        line: `${rw.make || "The manufacturer"}'s published ${hedged.map(([n]) => n).join(" and ")} cover varies by model, and our catalogue holds only one figure for the whole make — so we will not put a number on this car. What we hold reads "${hedged[0][1].term}". Ask ${rw.make || "the manufacturer"} or the dealer for the terms that applied to THIS model when it was first sold, in writing, and the in-service date they run from. A warranty figure you cannot check is worse than none.`,
+        tone: "muted",
+      };
+    }
     const live = terms.filter(([, t]) => t.active);
     const say = (t) => {
       const yrs = Math.max(0, Math.round(t.yearsLeft * 10) / 10);
@@ -1104,10 +1119,37 @@ export function warrantyLine(a) {
       ? ` The ${dead.map(([n]) => n).join(" and ")} cover looks to have run out already.`
       : "";
     const parts = live.map(([name, t]) => `${name}: ${say(t)}`);
+    // NAME THE COVERAGE IN THE LABEL, NOT ONLY THE PARAGRAPH.
+    // Vic, 2026-09-12: "always explain reming warrynity is appliying for
+    // corroriosn to make awre client".
+    //
+    // This card read "PASS / COVER REMAINING" on a 2020 Model X at 198,909 km
+    // whose only live cover was corrosion. Everywhere else in the report FLAG
+    // means bad and PASS means fine, so a buyer skimming the traffic lights
+    // reads that as "still under warranty" — while the expensive half, the
+    // battery and drive unit, was the half that had gone.
+    //
+    // Corrosion is the LAST cover to expire on nearly every make (7-12 years,
+    // usually unlimited distance), so it is the one still standing on exactly
+    // the old high-kilometre cars where the buyer most needs to know the
+    // powertrain is naked. A generic "cover remaining" is therefore at its most
+    // misleading precisely when it matters most.
+    // [[warranty-remaining-name-the-component]] [[present-without-creating-questions]]
+    const liveNames = live.map(([n]) => n);
+    const onlyCorrosion = liveNames.length === 1 && liveNames[0] === "corrosion";
+    const value = onlyCorrosion
+      ? "CORROSION ONLY"
+      : `${liveNames.join(" + ").toUpperCase()} LEFT`;
+    // Corrosion alone is not a pass. It is rust-through cover on a car whose
+    // drivetrain is no longer covered, and the buyer must see that without
+    // reading on.
+    const corrosionNote = onlyCorrosion
+      ? " Corrosion cover is rust-through (perforation) only — it does NOT pay for the battery, drive unit, engine, transmission or any other repair. On this car, those are now yours."
+      : "";
     return {
-      value: "COVER REMAINING",
-      line: `This is a used vehicle, so what matters is what is LEFT of the factory warranty, and ${rw.make || "the manufacturer"} publishes ${live.map(([n, t]) => `${t.term} ${n}`).join(", ")}. On this car's model year and odometer that leaves — ${parts.join("; ")}.${expiredClause} Estimated from the ${rw.modelYear} model year, not the in-service date, so ask for the in-service date in writing; it can move these by up to a year. Check what is still covered before you pay for an extended warranty that overlaps it.`,
-      tone: "pass",
+      value,
+      line: `This is a used vehicle, so what matters is what is LEFT of the factory warranty, and ${rw.make || "the manufacturer"} publishes ${live.map(([n, t]) => `${t.term} ${n}`).join(", ")}. On this car's model year and odometer that leaves — ${parts.join("; ")}.${expiredClause}${corrosionNote} Estimated from the ${rw.modelYear} model year, not the in-service date, so ask for the in-service date in writing; it can move these by up to a year. Check what is still covered before you pay for an extended warranty that overlaps it.`,
+      tone: onlyCorrosion ? "flag" : "pass",
     };
   }
 
