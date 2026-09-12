@@ -44,14 +44,68 @@ import { validateVin } from "./invariants.ts";
  * over any count-based threshold.
  */
 export function distinctValidVins(text: string): string[] {
-  const seen = new Set<string>();
+  return [...vinOccurrences(text).keys()];
+}
+
+/**
+ * Every valid VIN in the text, WITH how many times it appears.
+ *
+ * The count is the evidence `classifyVehiclePage` needs when a page carries no
+ * structured markup at all -- see the dominance rung there. Kept in one place so
+ * the distinct list and the counts can never disagree about what a VIN is.
+ *
+ * A 17-character run of PURE DIGITS is rejected outright. Timestamps, order ids
+ * and tracking numbers reach 17 digits routinely, and the check digit is only
+ * 1-in-11 protection, so roughly 9% of them sail through: four did so on
+ * xpertsautos.com's 2017 Model X page alone. Every real VIN's WMI carries at
+ * least one letter, so requiring one costs nothing and removes the whole class.
+ */
+export function vinOccurrences(text: string): Map<string, number> {
+  const counts = new Map<string, number>();
   const re = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const check = validateVin(m[0]);
-    if (check.valid) seen.add(check.vin!);
+    const raw = m[0];
+    if (!/[A-HJ-NPR-Z]/.test(raw)) continue;
+    const check = validateVin(raw);
+    if (!check.valid) continue;
+    counts.set(check.vin!, (counts.get(check.vin!) ?? 0) + 1);
   }
-  return [...seen];
+  return counts;
+}
+
+/**
+ * The subject VIN a page's own REPETITION points at, or null if none does.
+ *
+ * The last resort, for pages with no schema.org nodes, no anchor and no
+ * platform blob -- where every structured rung above has nothing to say and the
+ * only remaining choice is refusing a real listing or reading its repetition.
+ *
+ * A detail page states its own VIN several times: title, spec table, meta tags,
+ * enquiry form, breadcrumb. The similar-vehicles rail mentions each neighbour
+ * exactly once. Measured on three real pages, 2026-09-12:
+ *
+ *   xpertsautos.com VDP, 2017 Model X   63 VINs, subject x7, next x1
+ *   autoshouse.com VDP, 2020 Model X     1 VIN,  subject x3, next x0
+ *   xpertsautos.com /cars/used           63 VINs, top x1,    next x1
+ *
+ * The inventory page carries the SAME 63 VINs as the detail page -- the rail is
+ * literally the inventory -- so nothing about the distinct count can separate
+ * them, and no threshold ever could. Dominance separates them at 7-vs-1 against
+ * 1-vs-1.
+ *
+ * Deliberately strict: a clear plurality, not a majority and not a ratio. Two
+ * VINs tied at the top is a comparison page and returns null. It is evidence
+ * only when the page has volunteered nothing better, and it is ranked below
+ * every structured source precisely because repetition is a weaker claim than a
+ * declaration.
+ */
+export function subjectByDominance(counts: Map<string, number>): string | null {
+  if (counts.size === 0) return null;
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [topVin, topCount] = ranked[0];
+  const runnerUp = ranked[1]?.[1] ?? 0;
+  return topCount >= 2 && topCount > runnerUp ? topVin : null;
 }
 
 export type PageSubject =
@@ -69,6 +123,9 @@ export type PageSubject =
  * `declaredVins` VINs on schema.org vehicle nodes -- what the page says it is ABOUT
  * `blobVin`     the subject VIN from a platform's own vehicle-data blob
  *               (Convertus vmsData / D2C __vdpJSON), for pages with no JSON-LD
+ * `occurrences` how often each VIN appears -- the last-resort evidence for a
+ *               page that declares nothing at all. Optional: omit it and the
+ *               function behaves exactly as it did before, refusing such pages.
  */
 export type Declaration = { count: number; vins: string[]; anchoredVin: string | null };
 
@@ -77,6 +134,7 @@ export function classifyVehiclePage(
   declaredRaw: Declaration,
   blobVinRaw: string | null,
   sawPageSource = true,
+  occurrences?: Map<string, number> | null,
 ): PageSubject {
   // CHECKSUM THE DECLARATION TOO. The reader checks SHAPE only -- 17 characters
   // from the VIN alphabet -- and a platform publishing a placeholder or a typo
@@ -133,10 +191,33 @@ export function classifyVehiclePage(
     return { kind: "multi", blameThePage: false, why: `${foundVins.length} vehicles on the page and its own markup was never readable, so nothing could be established as the subject` };
   }
 
+  // NOTHING IS DECLARED -- SO READ WHAT THE PAGE REPEATS.
+  //
+  // Every rung above needs the page to have volunteered something: a schema.org
+  // node, an anchor, a platform blob. A platform that publishes none of those
+  // reaches here, and until 2026-09-12 that meant every one of its detail pages
+  // was refused for ever. xpertsautos.com is such a platform: its page for ONE
+  // 2017 Model X embeds the dealer's whole inventory, so it arrives with 63
+  // VINs and no declaration, and a real buyer was told "this looks like a
+  // search-results or inventory page - paste the link to the ONE vehicle you
+  // want checked instead" about the single-vehicle link he had already pasted.
+  //
+  // Its own repetition is the evidence that was there all along: the subject
+  // appears 7 times, every neighbour once. The dealer's actual inventory page
+  // carries the SAME 63 VINs, each once, and still refuses. See
+  // subjectByDominance for the measurements.
+  //
+  // Ranked last on purpose. Repetition is a weaker claim than a declaration, so
+  // it only speaks when nothing better has. [[establish-page-before-report]]
+  const dominant = occurrences ? subjectByDominance(occurrences) : null;
+  if (dominant) {
+    return { kind: "single", subjectVin: dominant, why: `the page declares nothing, but states ${dominant} ${occurrences!.get(dominant)} times against ${foundVins.length - 1} vehicles mentioned once` };
+  }
+
   // A grid with no structured data.
   // MISSING BEATS WRONG: we cannot tell which of these the buyer meant, and
   // guessing would produce a signed report about a car they never asked about.
-  return { kind: "multi", blameThePage: true, why: `${foundVins.length} vehicles on the page and none declared as its subject` };
+  return { kind: "multi", blameThePage: true, why: `${foundVins.length} vehicles on the page, none declared as its subject and none stated more often than the rest` };
 }
 
 /**
