@@ -858,6 +858,7 @@ import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
 import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
 import { brandedTitleLine } from "../_shared/branded-title.js";
+import { lotDateLines } from "../_shared/lot-dates.js";
 
 // The count, default, comparison and older-model-year lines (marketCount,
 // pageDefault, marketValue, olderYears) come from ONE shared builder, so the
@@ -1081,6 +1082,22 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   // ship today; whether it should displace one of the ten is Vic's call.
   // [[ten-point-claim-policy]]
   { const bt = brandedTitleLine(a.brandedTitle); P.push({ t: "Title status", v: bt.value, tone: bt.tone }); }
+  // THE LISTING'S OWN DATES. Vic, 2026-09-12: "i want this added to report",
+  // looking at a Go Kia page carrying date_on_lot, date_added, date_updated and
+  // date_sold side by side. We were reading one of the four.
+  //
+  // "Listing last updated" is the one days-on-lot cannot replace: it separates
+  // a keenly priced car being actively worked from one posted and forgotten,
+  // whose asking price is however many days stale. "Sale flag" is the one that
+  // protects the buyer — a sale date recorded on a still-live listing is worth
+  // one question before driving across town, asked as a question about a data
+  // field and never as an allegation.
+  //
+  // After the canonical ten, like Title status: these are extras by design.
+  for (const L of lotDateLines(a.lotDates)) {
+    if (L.label === "Days on lot") continue;   // already a point of its own
+    P.push({ t: L.label, v: L.value, tone: L.tone });
+  }
 
   // ---- BEYOND THE ADVERTISED FLOOR ----------------------------------------
   // Vic, 2026-08-27: "always good to over deliver ... minimum 10 points we
@@ -1168,6 +1185,12 @@ function pointExplain(t: string, a: any): string | null {
       if (ms) return gatedNote + (qualifyMsrpClaim(a).refusal
         ?? `The manufacturer's price for this model starts at ${money(ms)} for the base version. This exact car carries extra options, so no over/under call is made - use the base figure as your reference and make the dealer justify everything above it.`);
       return gatedNote + "The manufacturer's sticker couldn't be verified for this exact car, so no comparison is made - never trust a savings claim you can't check.";
+    }
+    case "Listing last updated":
+    case "Sale flag on this listing":
+    case "Arrival date": {
+      const L = lotDateLines(a.lotDates).find((x) => x.label === t);
+      return L ? L.line : "";
     }
     case "Title status":
       return brandedTitleLine(a.brandedTitle).line;
