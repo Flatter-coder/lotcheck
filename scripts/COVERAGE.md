@@ -48,6 +48,7 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - **Audi** — audi.ca serving a global "not-available" 503 maintenance page; retry later (likely VW OneHub platform).
 - **VW** — actually CRACKED (public `globalapi.vwtools.ca/special-offers` + `/finance`), but its `price` is a selling price incl. freight, not pure MSRP; build with that caveat or source MSRP from the auth-gated `/viso/catalogue`. Rates (`financial_values.{PROV}.apr`/`.alr`) are clean.
 - Mercedes-Benz, BMW, MINI, Porsche, Jaguar, Land Rover, Mitsubishi, Maserati, Alfa Romeo (shares FCA) — not yet recon'd.
+  (Mitsubishi SHIPPED 2026-09-11 — see the correction at the foot of this file.)
 
 ## Notes
 - All scrapers dry-run without credentials (write to `scripts/out/`) and delete-then-insert their make's rows when `SUPABASE_SERVICE_ROLE_KEY` is set.
@@ -62,7 +63,7 @@ That's **12 makes across 6 platforms** with full MSRP+finance+lease.
 - **Audi** — still 503 (down).
 - **Subaru** — `scrape-subaru.mjs`, FULL MSRP+finance+lease. MSRP from the homepage `<script id="Cars">` JSON; rates from the WebPage.aspx pricing page XML (`WebSiteID=282`, `<finance>`/`<leasestd>` blocks). 40 trims / 9 models.
 - **Alfa Romeo** — added to `scrape-stellantis.mjs` (FCA), full data.
-- **Mitsubishi** — GraphQL resolver returns empty (backend CMS mapping dead-end); only 4 model-level base prices reachable. Left unbuilt; see MITSUBISHI-NOTES.md.
+- **Mitsubishi** — ~~GraphQL resolver returns empty (backend CMS mapping dead-end); only 4 model-level base prices reachable. Left unbuilt~~ **WRONG — see the 2026-09-11 correction at the foot of this file. SHIPPED, 30 per-trim rows.**
 - **Kia** — `scrape-kia.mjs`, MSRP only. Parses the build-and-price page's entity-encoded JSON (string-aware bracket-match + JSON.parse of the `models` arrays) so trim↔price association is structural, not regex. 100 rows / 19 models. Rates not exposed as a clean API.
 - **Nissan / Infiniti** — `scrape-nissan.mjs` / `scrape-infiniti.mjs` (shared `lib/nissan-stack.mjs`), MSRP only. Parsed from the `#individualVehiclePriceJSON` iframe body on each vehicle page (Node fetch; Akamai blocks curl). Rates need the gated GraphQL — see NISSAN-NOTES.md.
 - **Volvo** — `scrape-volvo.mjs`, MSRP only, model-level. Starting MSRP per model from the /en-ca/build/{model} SSR (Node fetch; Akamai). Per-trim (Core/Plus/Ultra) is behind gated GraphQL. 7 models.
@@ -77,7 +78,7 @@ Remaining (each blocked or a dedicated deep-dig — NOT quick):
 - Jaguar / Land Rover — AEM configurator with a separate pricing service; deep dig, low CA volume.
 - Maserati — maserati.com/ca bot-walled (403); not on the FCA modelYears platform; tiny volume.
 - Audi — audi.ca serving a maintenance 503 site-wide (unbuildable until back up); VW's vwtools API ignores brand=audi.
-- Mitsubishi — open GraphQL but the resolver returns empty (backend CMS mapping dead-end). See MITSUBISHI-NOTES.md.
+- Mitsubishi — ~~open GraphQL but the resolver returns empty (backend CMS mapping dead-end)~~ **SHIPPED 2026-09-11. The resolver was never dead; the `path` argument was wrong. See the correction at the foot of this file.**
 
 Open RATE captures to upgrade MSRP-only → full: GM (IPE), Ford (estimate-payment), Mercedes (payment-estimator), Kia, Nissan/Infiniti (gated GraphQL). Each is a browser capture like Honda/Ford.
 - **BMW** — `scrape-bmw.mjs`, MSRP + finance/lease via the SM360 dealer inventory feed (bmw.ca prices are identity-gated). Calgary BMW; listPrice=MSRP, deduped to starting-price-per-trim; default-term rates. 25 models. See BMW-NOTES.md.
@@ -116,3 +117,34 @@ Checked two more Lincoln dealers (user-supplied). Neither yields a CI-durable ra
 - Universal Lincoln = **EDealer** platform. Inventory embeds as JSON but the per-vehicle object is PRICE-ONLY (vin/model/year/trim/display_price/make/fueltype — NO apr/finance_rate/lease_rate/term). EDealer computes payments per-VDP via a province/credit-gated calculator, not in the feed. ⇒ **Kia (also EDealer) is gated the same way** — its rates aren't in the listing feed either.
 - Waterloo Lincoln = Convertus cp=1151 (right feed shape) BUT the ajax proxy is **Cloudflare-walled** (403 challenge to Node/datacenter IPs). Denham Ford / Fish Creek Nissan Convertus proxies lack Cloudflare, which is why those work; a headless GitHub Actions runner would 403 here every run.
 CONCLUSION: Lincoln stays MSRP-only. To ever get Lincoln/Kia rates would need per-VDP EDealer payment-calculator scraping (heavier, province/credit-gated) — not attempted. Coverage unchanged: 24 FULL / 5 MSRP-only.
+
+## CORRECTION (2026-09-11) — Mitsubishi was never a dead end
+
+**Mitsubishi SHIPPED: `scrape-mitsubishi.mjs` + `lib/mitsubishi-stack.mjs`,
+MSRP-only, 30 per-trim rows across 4 nameplates / 5 model-years.** Plain fetch,
+no auth, no Scrapfly, no key, no spend.
+
+This file recorded Mitsubishi as an unbuildable "backend CMS mapping dead-end"
+in three places for over a year, and that record is why nobody looked again. The
+resolver was never dead. **The `path` argument was wrong.**
+`/content/.../ngc-configurator` returns 0 vehicles with no error; the payments
+path `/ca/en/buy/payment-calculator` returns all five. A query that answers
+"zero, successfully" is the most expensive kind of wrong, because it reads as a
+finished investigation.
+
+**The lesson is about this file, not about Mitsubishi.** A recorded blocker is
+an assertion with a date on it, and it silently becomes a claim that nobody may
+re-examine. Two others on this page are in the same position and should be
+re-tested rather than trusted:
+- **Audi** — "503 maintenance site-wide". Audi holds **ZERO** MSRP rows today,
+  so whatever the truth is, the product currently has no denominator for it.
+- **Jaguar / Land Rover** — "AEM configurator with a separate pricing service;
+  deep dig". Re-tested 2026-09-11: the pricing service is
+  `rules.config.landrover.com`, unauthenticated and plain-fetchable, ~129 priced
+  rows. The real blocker is not technical at all — that host's robots.txt is
+  `User-agent: *` / `Disallow: /`. Recording "deep dig" instead of "we are asked
+  not to" sent a year of readers down the wrong road.
+
+Permission, for the record: `mitsubishi-motors.ca/robots.txt` reads
+`User-agent: *` with an empty `Disallow:`, which permits everything. Read
+2026-09-11. [[dealer-tos-daily-checks]]
