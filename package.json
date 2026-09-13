@@ -124,7 +124,8 @@
     "test:unchecked-states": "node --experimental-strip-types scripts/test-unchecked-states.mjs",
     "test:report-bands": "node --experimental-strip-types scripts/test-report-bands.mjs",
     "check:rpc-exposure": "node scripts/check-rpc-exposure.mjs",
-    "test:warranty-verify": "node scripts/test-warranty-verify.mjs"
+    "test:warranty-verify": "node scripts/test-warranty-verify.mjs",
+    "test:place-match": "node scripts/test-place-match.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

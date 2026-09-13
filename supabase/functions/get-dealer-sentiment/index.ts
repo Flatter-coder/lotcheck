@@ -30,6 +30,7 @@
 // as the Payment Breakdown card when financing data isn't present.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { matchPlace, NO_CONFIDENT_MATCH, REPUTATION_OUTCOME } from "../_shared/place-match.js";
 
 const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
@@ -108,13 +109,9 @@ Return ONLY a JSON array, nothing else, in this exact shape:
 // off the reason code keeps the five outcomes distinct: a dealer with genuinely
 // no Google listing is a resolved answer, while a Places API failure is a miss,
 // and collapsing those is how a broken lookup would read as a clean bill.
-const REPUTATION_OUTCOME: Record<string, "checked_no_match" | "error" | "not_attempted"> = {
-  no_dealer_name: "not_attempted",
-  no_places_match: "checked_no_match",
-  search_failed: "error",
-  details_failed: "error",
-  threw: "error",
-};
+// Imported from _shared/place-match.js so the telemetry and the REPORT read the
+// same map. It used to live here and be used only for telemetry, while
+// analyze-listing-url decided "checked" for itself from the HTTP status.
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return await handleSentiment(req);
@@ -156,7 +153,7 @@ async function handleSentiment(req: Request): Promise<Response> {
 
   try {
     const startedAt = Date.now();
-    const { dealerName, dealerCity } = await req.json();
+    const { dealerName, dealerCity, listingHost } = await req.json();
     if (!dealerName || typeof dealerName !== "string") {
       // Not an error -- plenty of quotes/listings won't have a clean
       // dealer name extracted. Just no card for this one.
@@ -214,8 +211,12 @@ async function handleSentiment(req: Request): Promise<Response> {
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        // formattedAddress and websiteUri are what make an IDENTITY check
+        // possible. They cost nothing extra: rating and userRatingCount are
+        // already in this mask and bill at the top tier, and the highest tier in
+        // a mask sets the price for the whole call.
         "X-Goog-FieldMask":
-          "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri",
+          "places.id,places.displayName,places.rating,places.userRatingCount,places.googleMapsUri,places.formattedAddress,places.websiteUri",
       },
       body: JSON.stringify({ textQuery: searchQuery }),
     });
@@ -229,7 +230,23 @@ async function handleSentiment(req: Request): Promise<Response> {
     }
 
     const searchData = await searchRes.json();
-    const place = searchData.places?.[0];
+    // NOT places[0]. Google's order is not evidence of identity, and taking the
+    // first result attaches another company's star rating and its worst reviews
+    // to a named business in a document the buyer carries into that business.
+    // matchPlace refuses rather than guess. [[ai-defamation-entity-match-lesson]]
+    const picked = matchPlace(searchData.places, {
+      dealerName, dealerCity,
+      domains: listingHost ? [listingHost] : [],
+    });
+    if (searchData.places?.length && !picked) {
+      console.warn(`Places returned ${searchData.places.length} candidate(s) for "${searchQuery}" and none could be confirmed as this dealer — making no claim.`);
+      return new Response(
+        JSON.stringify({ dealerSentiment: null, reason: NO_CONFIDENT_MATCH }),
+        { status: 200, headers: { ...CORS_HEADERS, "Content-Type": "application/json" } },
+      );
+    }
+    if (picked) console.log(`Matched "${dealerName}" -> ${picked.basis} (confidence ${picked.confidence}).`);
+    const place = picked?.place;
     if (!place?.id) {
       console.log(`No Places match for dealer lookup: "${searchQuery}"`);
       return new Response(

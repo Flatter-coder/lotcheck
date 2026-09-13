@@ -60,6 +60,7 @@ import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedSc
 import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
 import { matchLicensee, domainsFromText, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
+import { reputationChecked } from "../_shared/place-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
 import { readBrandedTitle } from "../_shared/branded-title.js";
@@ -118,7 +119,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-12e";  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
+const CACHE_VER = "2026-09-13a";  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -966,7 +967,10 @@ async function resolveDealerReputation(analysis: any): Promise<void> {
       headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
       // The city comes from the same signals as the province and was arriving
       // null; Places disambiguates far better with one.
-      body: JSON.stringify({ dealerName: name, dealerCity: resolveCity(analysis) }),
+      // The listing host is the strongest identity signal we hold: if Google's
+      // own record for a place points at the same website the listing came
+      // from, it is the same business, and no name comparison improves on that.
+      body: JSON.stringify({ dealerName: name, dealerCity: resolveCity(analysis), listingHost: hostOf(analysis.sourceUrl || "") }),
       signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) {
@@ -974,8 +978,18 @@ async function resolveDealerReputation(analysis: any): Promise<void> {
       return;
     }
     const data: any = await res.json();
-    // A 200 IS a completed check, whether or not it found a rating.
-    analysis.dealerSentiment = { ...(data?.dealerSentiment ?? {}), checked: true };
+    // A 200 IS NOT A COMPLETED CHECK. get-dealer-sentiment answers 200 with
+    // { dealerSentiment: null, reason: "search_failed" | "details_failed" |
+    // "threw" | "no_confident_match" } on its own failures, and the old spread
+    // dropped `reason` on the floor before hard-setting checked:true. So a
+    // Places outage rendered as "NONE FOUND -- we searched and found no public
+    // reviews for this dealer" about a named business that may have thousands.
+    //
+    // reputationChecked() is the one line that was missing, and it reads the
+    // same map the verification telemetry has always used.
+    const checked = reputationChecked(data?.reason);
+    analysis.dealerSentiment = { ...(data?.dealerSentiment ?? {}), checked, reason: data?.reason ?? null };
+    if (!checked) console.log(`dealer reputation: not a completed check (${data?.reason}) -- leaving UNCHECKED rather than implying none exist.`);
     console.log(`dealer reputation: ${name} -> ${data?.dealerSentiment?.rating ?? "none found"} (${data?.dealerSentiment?.reviewCount ?? 0} reviews)`);
   } catch (e) {
     // A failed call is NOT evidence about the dealer. Leave it unchecked.
