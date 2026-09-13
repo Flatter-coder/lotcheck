@@ -373,6 +373,17 @@ jobs:
       # checker on every run; verified to fail on four separate injections.
       - name: A check that failed never renders as a fact about the car or dealer
         run: npm run test:unchecked-states
+      # The ten points were assembled TWICE -- once in App.jsx, once in the
+      # emailed PDF -- from the same analysis by two different pieces of code,
+      # and they already disagree: an unread drivetrain prints "NOT DETERMINED"
+      # on screen and "N/A (GAS)" in the PDF the buyer carries to the dealer.
+      # One is a fabricated fact about the car. report-bands.js is the single
+      # author, with `unchecked` as a real third state. Driven here with an
+      # empty analysis -- what every fallback path and every uploaded quote
+      # actually produces -- where all ten bands must name OUR gap and none may
+      # claim a verdict. Verified to fail on five injections.
+      - name: The ten bands, and what they say when a check did not run
+        run: npm run test:report-bands
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
