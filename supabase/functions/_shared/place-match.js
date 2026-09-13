@@ -128,6 +128,42 @@ export function matchPlace(places, sig = {}) {
  */
 export const NO_CONFIDENT_MATCH = "no_confident_match";
 
+// ── the two ways back to a cached place_id ──────────────────────────────────
+//
+// place_id is the ONLY Google Places field exempt from the 30-day caching cap,
+// so it is the only thing worth keying on. A scan that knows the listing host
+// keys on the host -- the signal that made the match identity rather than
+// inference. A scan without one falls back to name+city.
+//
+// Both are stored so a dealer first seen WITHOUT a host gains its host_key on a
+// later sighting instead of becoming a second row for the same business. That
+// duplicate-dealer shape already bit the AMVIC catalogue, where a non-unique
+// key let one dealer exist twice and a soft tie-break picked one of them.
+
+/** null, never "", so a unique index treats two hostless rows as distinct. */
+export function hostKey(listingHost) {
+  return normHost(listingHost || "") || null;
+}
+
+/** Both halves required: a name without a city is what matchPlace already refuses. */
+export function nameCityKey(dealerName, dealerCity) {
+  const n = normName(dealerName || ""), c = normName(dealerCity || "");
+  return n && c ? `${n}|${c}` : null;
+}
+
+/**
+ * How identity was established, in OUR words.
+ *
+ * Deliberately a code and not matchPlace's prose basis: the prose quotes
+ * Google's displayName, and echoing licensed 30-day data into a table we keep
+ * indefinitely is precisely what the caching cap forbids.
+ */
+export function basisCode(match) {
+  const b = String(match?.basis || "");
+  if (/website matches/.test(b)) return /address is in/.test(b) ? "domain+city" : "domain";
+  return "name+city";
+}
+
 /**
  * What each refusal reason MEANS, in one place.
  *

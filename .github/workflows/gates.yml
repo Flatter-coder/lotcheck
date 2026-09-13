@@ -404,6 +404,15 @@ jobs:
       # reachable -- a matcher that always answers IS the bug.
       - name: Another dealer’s reviews are never attached to this one
         run: npm run test:place-match
+      # Google caps caching of Places data at 30 CONSECUTIVE DAYS and exempts
+      # exactly one field: place_id. dealer_place is kept forever, so it may
+      # hold an identifier and our own keys and nothing else. The pressure to
+      # break that is obvious and will arrive -- caching the rating beside the
+      # id makes a report faster and the column would look harmless in a diff.
+      # That is the difference between a cache and an unlicensed copy of
+      # someone else’s database. Verified to fail on a planted rating column.
+      - name: The place_id cache holds an identifier, never licensed data
+        run: npm run test:dealer-place
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
