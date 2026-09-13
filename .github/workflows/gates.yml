@@ -384,6 +384,16 @@ jobs:
       # claim a verdict. Verified to fail on five injections.
       - name: The ten bands, and what they say when a check did not run
         run: npm run test:report-bands
+      # manufacturer_warranties is 35 makes of hand-typed figures that had NO
+      # refresh job of any kind -- not stale, never checked. The Tesla row said
+      # 160,000 km (the Extended Service Agreement ceiling, not the battery
+      # term) and a 2020 Model X at 198,909 km was told its cover was gone with
+      # 41,091 km left. The verifier re-reads each manufacturer page twice a day
+      # and NEVER rewrites a figure. This gate pins the matching: a failed fetch
+      # is not drift, a shell page is not drift, every pair of a multi-pair term
+      # is checked, and no result ever carries a replacement number.
+      - name: Warranty verification confirms, and never invents a fix
+        run: npm run test:warranty-verify
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup

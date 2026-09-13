@@ -21,6 +21,7 @@ const LIMITER = "scripts/lib/polite-fetch.mjs";
 const CALLERS = [
   "scripts/crawl-alberta-inventory.mjs",
   "scripts/survey-dealer-permission.mjs",
+  "scripts/verify-warranty-catalog.mjs",
 ];
 const RAW = /(^|[^a-zA-Z.])fetch\s*\(/;
 const strip = (l) => l.replace(/\/\/.*$/, "");

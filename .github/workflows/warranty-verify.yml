@@ -1,0 +1,82 @@
+# Warranty catalogue verification — 6am and midnight (America/Edmonton).
+#
+# Vic, 2026-09-13: "fix warranty catalog, 6am and midnight".
+#
+# manufacturer_warranties holds 35 makes, every figure typed by hand from a
+# manufacturer's official Canadian page, and it had NO refresh job of any kind.
+# Not stale — never checked. Point 09 of the ten tells a buyer what factory cover
+# is left on a specific car and whether it transfers to them, and that claim
+# rested on a row nobody had re-read since the day it was written.
+#
+# The cost is on the record: the hand-written Tesla row said 160,000 km, which is
+# the Extended Service Agreement ceiling and not the battery term. On a 2020
+# Model X at 198,909 km we told a buyer the cover was used up. It had 41,091 km
+# left. [[every-point-has-a-catalogue]]
+#
+# WHY TWICE A DAY FOR DATA THAT MOVES ONCE A MODEL YEAR. The cadence is not about
+# catching changes. It is about the age of the last CONFIRMATION: a row nobody
+# has re-read in six months is a claim with no current backing, and the report
+# cannot tell that apart from a row checked this morning. Twice a day means the
+# answer to "when did this figure last agree with its source?" is never worse
+# than twelve hours.
+#
+# IT VERIFIES, IT NEVER REWRITES. Drift is reported and goes RED; no coverage
+# value is ever auto-corrected. A regex confident enough to overwrite a warranty
+# term is confident enough to invent one, and an invented warranty term is a
+# false statement about a named vehicle in a document a buyer hands to a dealer.
+#
+# IT REPORTS, IT DOES NOT SEND. Nothing here emails anyone. The red run IS the
+# report. [[never-send-without-approval]]
+#
+# COST: ~35 requests per run, one page per make, through the shared rate limiter
+# (honest User-Agent, honours Retry-After, breaks the circuit on a host that
+# refuses). The request ledger is printed at the end of every run.
+name: Warranty catalogue verification (6am + midnight MT)
+
+on:
+  schedule:
+    - cron: "30 12 * * *"   # 06:30 MDT (summer)
+    - cron: "30 13 * * *"   # 06:30 MST (winter)
+    - cron: "30 6 * * *"    # 00:30 MDT (summer)
+    - cron: "30 7 * * *"    # 00:30 MST (winter)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if it is not 6:30am or 00:30 in Edmonton"
+        type: boolean
+        default: true
+      dry_run:
+        description: "Fetch and report, write nothing"
+        type: boolean
+        default: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Is it 6:30am or 00:30 in Edmonton?
+        id: gate
+        run: |
+          HOUR=$(TZ=America/Edmonton date +%-H)
+          echo "Edmonton local hour: $HOUR"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$HOUR" = "0" ] || [ "$HOUR" = "6" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=no" >> "$GITHUB_OUTPUT"
+            echo "Not 6:30am or 00:30 in Edmonton - this is the other DST cron line. Skipping."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'yes'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'yes'
+        with:
+          node-version: "20"
+      - name: Re-read every manufacturer page and compare
+        if: steps.gate.outputs.run == 'yes'
+        run: node scripts/verify-warranty-catalog.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
