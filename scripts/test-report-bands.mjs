@@ -14,9 +14,10 @@
 //
 // Run: npm run test:report-bands
 
-import { reportBands, bandTally, RAISE, CLEAR, UNCHECKED, STATE_WORD }
+import { reportBands, bandTally, RAISE, CLEAR, NOTED, UNCHECKED, STATE_WORD }
   from "../supabase/functions/_shared/report-bands.js";
 import { REPORT_POINTS } from "../supabase/functions/_shared/report-points.js";
+import fs from "node:fs";
 
 let failed = 0;
 const fail = (m, d) => { failed++; console.error(`FAIL  ${m}`); if (d) console.error(`      ${d}`); };
@@ -111,7 +112,8 @@ console.log("\npart 2 -- the five that reached a paying customer");
   const gas = reportBands({ fuelType: "Gas" })[7];
   check("08 unread drivetrain is not reported as gas", !/GAS/.test(noFuel.value), noFuel.value);
   check("08 unread drivetrain is unchecked", noFuel.state === UNCHECKED, noFuel.state);
-  check("08 a drivetrain we DID read still renders N/A", gas.state === CLEAR && /N\/A/.test(gas.value), `${gas.state} "${gas.value}"`);
+  check("08 a drivetrain we DID read still renders N/A", /N\/A/.test(gas.value), `${gas.state} "${gas.value}"`);
+  check("08 a not-applicable is NOTED, never green", gas.state === NOTED, gas.state);
 
   // Odometer: a missing MODEL YEAR must not print as the dealer omitting the reading.
   const odo = reportBands({})[5];
@@ -149,8 +151,12 @@ console.log("\npart 3 -- a fully-checked listing still says something");
   check("02 raises the open recall", b[1].state === RAISE && b[1].value === "1 OPEN", b[1].value);
   check("04 reads LICENSED, not a bare status", b[3].state === CLEAR && b[3].value === "LICENSED", b[3].value);
   check("07 VIN valid", b[6].state === CLEAR && b[6].value === "VALID", b[6].value);
-  check(`tally adds to ${REPORT_POINTS.length}`, t.raise + t.clear + t.unchecked === REPORT_POINTS.length, JSON.stringify(t));
-  check("tally is not a constant: 3 raise / 7 clear", t.raise === 3 && t.clear === 7, JSON.stringify(t));
+  check(`tally adds to ${REPORT_POINTS.length}`,
+    t.raise + t.clear + t.noted + t.unchecked === REPORT_POINTS.length, JSON.stringify(t));
+  // The gas rebate band is NOTED, not green: "no rebate applies to a petrol car"
+  // is a true statement and not a thing we verified about this vehicle.
+  check("tally is not a constant: 3 raise / 6 verified / 1 noted",
+    t.raise === 3 && t.clear === 6 && t.noted === 1, JSON.stringify(t));
 }
 
 /* ── 4. the counter can never be ten-by-construction ─────────────────────── */
@@ -162,6 +168,55 @@ console.log("\npart 4 -- the counter measures something");
     `${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
   check("every state has a printable word", [RAISE, CLEAR, UNCHECKED].every((s) => typeof STATE_WORD[s] === "string" && STATE_WORD[s].length),
     JSON.stringify(STATE_WORD));
+}
+
+/* ── 5. green is a claim ─────────────────────────────────────────────────── */
+console.log("\npart 5 -- green carries its evidence, or it is not green");
+{
+  // Vic, 2026-09-13: "putting pass in green on report without any data or
+  // factual evindence is not acceptble." Six bands were doing exactly that.
+  const FIXTURES = [
+    ["{}", {}],
+    ["page read, nothing else", { feesRead: true }],
+    ["petrol car", { fuelType: "Gas" }],
+    ["new vehicle", { vehicleCondition: "new" }],
+    ["reference payment only", { referenceFinancing: { atAsking: { monthly: 312 } } }],
+    ["searched, no reviews", { dealerSentiment: { checked: true } }],
+    ["rebate ruled out", { evapRebate: { ineligibleReason: "Used vehicles are not eligible." } }],
+  ];
+  // An ABSENCE and a NOT-APPLICABLE are both true and neither is a pass.
+  const NOT_A_VERIFICATION = /^(NONE\b|NOT ELIGIBLE$|N\/A\b|NO\b)|\/MO REF$/;
+  let bad = 0;
+  for (const [name, a] of FIXTURES) {
+    for (const b of reportBands(a)) {
+      if (b.state !== CLEAR) continue;
+      if (!b.source) { bad++; fail(`${name} \u00b7 ${b.n} ${b.title}: green with no source`, b.value); }
+      if (NOT_A_VERIFICATION.test(b.value)) {
+        bad++;
+        fail(`${name} \u00b7 ${b.n} ${b.title}: green on an absence or a not-applicable`,
+          `"${b.value}" \u2014 true, but nothing was verified. That is NOTED.`);
+      }
+    }
+  }
+  if (!bad) ok(`across ${FIXTURES.length} fixtures, every green band names what it was verified against`);
+
+  // And the invariant is structural: a sourceless green cannot be built at all.
+  const t = bandTally(reportBands({ feesRead: true }));
+  check("a page we merely read produces no green at all", t.clear === 0,
+    reportBands({ feesRead: true }).filter((b) => b.state === CLEAR).map((b) => b.n + " " + b.value).join(", "));
+  check("...but it is not all unknown either \u2014 what we did read is NOTED",
+    t.noted > 0, JSON.stringify(t));
+
+  // AND THE GUARD ITSELF MUST STILL BE THERE. Every fixture above passes with
+  // the invariant deleted, because none of them violates it -- so the throw
+  // could be removed in one line and nothing would go red until someone later
+  // added a sourceless green. Found by injecting exactly that and watching
+  // this file stay green. A guard that can be silently deleted is not a guard.
+  // [[audit-your-own-fix-same-night]]
+  const SRC = fs.readFileSync(new URL("../supabase/functions/_shared/report-bands.js", import.meta.url), "utf8");
+  check("reportBands still refuses to build a green band with no source",
+    /b\.state === CLEAR && !b\.source/.test(SRC) && /Green must name what it was verified against/.test(SRC),
+    "the CLEAR-requires-a-source throw is gone from report-bands.js");
 }
 
 console.log("");

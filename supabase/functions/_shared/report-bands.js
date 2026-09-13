@@ -52,12 +52,38 @@ import { REPORT_POINTS } from "./report-points.js";
 import { fmtMoney, warrantyLine } from "./report-lines.js";
 import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
 
-export const RAISE = "raise", CLEAR = "clear", UNCHECKED = "unchecked";
+// FOUR STATES, because green is a claim.
+//
+// Vic, 2026-09-13: "putting pass in green on report without any data or factual
+// evindence is not acceptble."
+//
+// He is right, and it was live in six bands of this very module. GREEN is the
+// strongest mark on the page -- a buyer skimming the rail reads it as "LotCheck
+// checked this and it is good" -- and three different things were wearing it:
+//
+//   a real verification   VIN decodes, AMVIC reads licensed        <- earned
+//   a NOT-APPLICABLE      "N/A (GAS)", "N/A (NEW)", "NOT ELIGIBLE" <- not earned
+//   an ABSENCE            "NONE LISTED", "NONE FOUND"              <- not earned
+//
+// and one band was green for arithmetic WE did precisely because the dealer
+// published nothing to check against ("$312/MO REF") -- the opposite of a
+// verified figure.
+//
+// An absence is not evidence and a not-applicable is not a pass. Both are true,
+// both are worth printing, and neither is a green check. They are NOTED: a
+// solid neutral rail, no accent, no tick.
+//
+// THE RULE IS STRUCTURAL, NOT A CONVENTION. A CLEAR band must name the source it
+// was verified against, and reportBands() THROWS if one does not -- so green
+// cannot be constructed without its evidence attached.
+// [[make-it-dispute-proof]] [[claims-must-stay-backed]]
+export const RAISE = "raise", CLEAR = "clear", NOTED = "noted", UNCHECKED = "unchecked";
 
 /** The word printed beside every band, so the verdict survives greyscale. */
 export const STATE_WORD = {
   [RAISE]: "Raise it",
-  [CLEAR]: "Checked, clear",
+  [CLEAR]: "Verified",
+  [NOTED]: "Noted",
   [UNCHECKED]: "Not checked",
 };
 
@@ -99,10 +125,10 @@ function priceBand(a) {
       { hero: true, scale });
     if (d < 0) return band("price_vs_msrp", "01", CLEAR, `${fmtMoney(-d)} UNDER`,
       `${fmtMoney(qp)} asking, below the ${fmtMoney(ms)} manufacturer figure for this configuration.`,
-      { hero: true, scale });
+      { hero: true, scale, source: "the manufacturer's published price for this exact configuration" });
     return band("price_vs_msrp", "01", CLEAR, "AT MSRP",
       `${fmtMoney(qp)} asking, level with the manufacturer's figure for this configuration.`,
-      { hero: true, scale });
+      { hero: true, scale, source: "the manufacturer's published price for this exact configuration" });
   }
   if (ms > 0 && qp > 0) {
     // We hold a figure but not one we may measure against.
@@ -130,7 +156,8 @@ function recallsBand(a) {
   if (r.confirmed === false) return gap("recalls", "02", "MODEL NOT CONFIRMED",
     "Transport Canada's database returned no match we could confirm for this exact year, make and model, so we cannot say whether recalls are open. Search it yourself at recalls-rappels.canada.ca.");
   return band("recalls", "02", CLEAR, "NONE OPEN",
-    "Transport Canada records no open recall for this year, make and model at the time of this scan.");
+    "Transport Canada records no open recall for this year, make and model at the time of this scan.",
+    { source: "Transport Canada's recall database, which answered for this vehicle" });
 }
 
 /* ── 03 add-ons & fees ── "we looked" is not "we could not look". */
@@ -146,12 +173,17 @@ function feesBand(a) {
       `${flagged.length === 1 ? "One line item" : `${flagged.length} line items`} on this quote ${flagged.length === 1 ? "is" : "are"} worth questioning at the table.`);
   }
   if (list.length) return band("fees", "03", CLEAR, "TRANSPARENT",
-    "The extras on this listing are itemised and nothing in them was flagged.");
+    "The extras on this listing are itemised and nothing in them was flagged.",
+    { source: "the dealer's own itemised list of extras, audited line by line" });
   if (dliTotal > 0) return band("fees", "03", CLEAR, "ITEMIZED",
-    `The dealer publishes their own breakdown, totalling ${fmtMoney(dliTotal)}. Check it against the final bill of sale.`);
+    `The dealer publishes their own breakdown, totalling ${fmtMoney(dliTotal)}. Check it against the final bill of sale.`,
+    { source: "the dealer's own published fee breakdown" });
   if (a?.feesRead === true) {
+    // We read a priced page and saw no itemised extras. That is an ABSENCE, and
+    // an absence is not a verification -- a fee box we failed to parse looks
+    // exactly like a page that has no fees. Noted, never green.
     const c = pageAbsenceCopy("addons", true);
-    return band("fees", "03", CLEAR, c.value, c.explain);
+    return band("fees", "03", NOTED, c.value, c.explain);
   }
   const c = pageAbsenceCopy("addons", false);
   return gap("fees", "03", c.value, c.explain);
@@ -171,7 +203,8 @@ function amvicBand(a) {
   if (!L || !L.status) return gap("dealer_licence", "04", "NOT CHECKED",
     "We did not confirm this dealer against AMVIC's public registry. That says nothing about the dealer — look them up yourself at amvic.org, and ask for their licence number in writing before any deposit.");
   if (L.state === "valid") return band("dealer_licence", "04", CLEAR, "LICENSED",
-    `AMVIC is Alberta's regulator and every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads licensed${L.registration_number ? ` (${L.registration_number})` : ""}.`);
+    `AMVIC is Alberta's regulator and every business selling vehicles here must hold a licence. We matched this dealer to AMVIC's public registry and it currently reads licensed${L.registration_number ? ` (${L.registration_number})` : ""}.`,
+    { source: "AMVIC's public licensee registry" });
   return band("dealer_licence", "04", RAISE, String(L.status).toUpperCase(),
     `AMVIC's public registry currently lists this business as "${L.status}". That does not always mean they cannot sell you a car — records lag and businesses reapply — but it is the regulator's own wording. Ask for their current licence number in writing, then check it yourself at amvic.org.`);
 }
@@ -182,12 +215,15 @@ function financeBand(a) {
   if (fc?.checked) {
     return fc.consistent
       ? band("finance_math", "05", CLEAR, "RECONCILES",
-          fc.note || "The advertised payments cross-check cleanly against the total obligation shown.")
+          fc.note || "The advertised payments cross-check cleanly against the total obligation shown.",
+          { source: "the listing's own payment, rate, term and total" })
       : band("finance_math", "05", RAISE, "DOESN'T ADD UP",
           fc.note || "The advertised payment, rate and term do not reconcile against the total shown. Ask for the full amount financed and the total of payments, in writing.");
   }
   const rf = a?.referenceFinancing?.atAsking;
-  if (rf) return band("finance_math", "05", CLEAR, `${fmtMoney(Math.round(num(rf.monthly)))}/MO REF`,
+  // Arithmetic WE did because the dealer published nothing to check. Green here
+  // would say their figures reconciled. There were no figures.
+  if (rf) return band("finance_math", "05", NOTED, `${fmtMoney(Math.round(num(rf.monthly)))}/MO REF`,
     rf.note || "No dealer terms were published, so this is the payment computed from the manufacturer's own advertised rate at this asking price — a reference to hold them to, not their quote.");
   return gap("finance_math", "05", "NOT CHECKED",
     "We could not re-check the financing arithmetic on this listing. Ask for the rate, the term, the amount financed and the total of payments in writing, and check that they multiply out.");
@@ -206,10 +242,11 @@ function odometerBand(a) {
       ? band("odometer", "06", RAISE, `${km} · CHECK`, o.note ||
           "This reading is worth questioning against the age of the car. Read it off the dash yourself before signing — never off the paperwork alone.")
       : band("odometer", "06", CLEAR, km, o.note ||
-          "Read from the listing. Compare it against the dash before you sign — never off the paperwork alone.");
+          "Read from the listing. Compare it against the dash before you sign — never off the paperwork alone.",
+          { source: "the odometer reading the listing itself publishes" });
   }
   if (String(a?.vehicleCondition || "").toLowerCase() === "new") {
-    return band("odometer", "06", CLEAR, "N/A (NEW)",
+    return band("odometer", "06", NOTED, "N/A (NEW)",
       "The listing states this is a new vehicle. New cars still arrive with delivery kilometres on them; read the dash before you sign.");
   }
   return gap("odometer", "06", "NOT READ",
@@ -228,7 +265,8 @@ function vinBand(a) {
   if (vc?.present) {
     return vc.valid
       ? band("vin", "07", CLEAR, "VALID",
-          `The VIN decodes cleanly and matches the advertised year, make and model${vc.vin ? ` (${vc.vin})` : ""}.`)
+          `The VIN decodes cleanly and matches the advertised year, make and model${vc.vin ? ` (${vc.vin})` : ""}.`,
+          { source: "the VIN's own check digit, decoded against the advertised year, make and model" })
       : band("vin", "07", RAISE, "CHECK PATTERN",
           "The VIN on this listing does not decode cleanly against the advertised year, make and model. Ask the dealer to confirm it against the dash plate and the registration.");
   }
@@ -247,12 +285,13 @@ function vinBand(a) {
 function rebateBand(a) {
   const ev = a?.evapRebate;
   if (ev?.eligible) return band("rebate", "08", CLEAR, `${fmtMoney(num(ev.total))} ELIGIBLE`,
-    `${fmtMoney(num(ev.federal))} federal${num(ev.provincial) > 0 ? ` plus ${fmtMoney(num(ev.provincial))} provincial` : ""}. Confirm the dealer applies it to your price rather than keeping it.`);
-  if (ev?.ineligibleReason) return band("rebate", "08", CLEAR, "NOT ELIGIBLE", String(ev.ineligibleReason));
+    `${fmtMoney(num(ev.federal))} federal${num(ev.provincial) > 0 ? ` plus ${fmtMoney(num(ev.provincial))} provincial` : ""}. Confirm the dealer applies it to your price rather than keeping it.`,
+    { source: "the federal rebate programme's published eligibility terms" });
+  if (ev?.ineligibleReason) return band("rebate", "08", NOTED, "NOT ELIGIBLE", String(ev.ineligibleReason));
   const fuel = String(a?.fuelType || "").toUpperCase();
   if (fuel === "BEV" || fuel === "PHEV") return gap("rebate", "08", "CHECK ELIGIBILITY",
     "This is an electric or plug-in vehicle, but we could not establish whether it qualifies for the federal rebate. Check the current programme terms yourself before you count on it.");
-  if (fuel) return band("rebate", "08", CLEAR, `N/A (${fuel})`,
+  if (fuel) return band("rebate", "08", NOTED, `N/A (${fuel})`,
     `The listing states this is a ${fuel.toLowerCase()} vehicle. The federal rebate applies to electric and plug-in vehicles only.`);
   return gap("rebate", "08", "DRIVETRAIN NOT READ",
     "We could not establish this vehicle's drivetrain from the listing, so we have not checked rebate eligibility. If it is electric or plug-in there may be money on the table — ask the dealer, and check the federal programme terms.");
@@ -271,14 +310,20 @@ function warrantyBand(a) {
   // bury it. Nothing here is a claim against the dealer; it is a fact about the
   // car, which is exactly what a raise band is for. [[no-accusation-language]]
   const act = w.tone === "flag" || w.value === "LIKELY EXPIRED" || w.value === "CORROSION ONLY";
-  return band("warranty", "09", act ? RAISE : CLEAR, w.value, w.line);
+  return band("warranty", "09", act ? RAISE : CLEAR, w.value, w.line,
+    { source: "the manufacturer's own published warranty terms for this make" });
 }
 
 /* ── 10 dealer reputation ── the point that named the class. */
 function reputationBand(a) {
   const r = dealerReputationPoint(a?.dealerSentiment);
   if (r.state === "unchecked") return gap("reputation", "10", r.value, r.explain);
-  return band("reputation", "10", r.state === "confirmed" && r.tone === "flag" ? RAISE : CLEAR, r.value, r.explain);
+  // "NONE FOUND" is the ABSENT state: we searched and there were no reviews.
+  // True, backed, and not a pass -- a dealer with no track record has not
+  // passed anything. Only a real rating earns green.
+  if (r.state === "absent") return band("reputation", "10", NOTED, r.value, r.explain);
+  return band("reputation", "10", r.tone === "flag" ? RAISE : CLEAR, r.value, r.explain,
+    { source: "the dealer's public Google rating, read at the time of this scan" });
 }
 
 /**
@@ -294,6 +339,16 @@ export function reportBands(a) {
   if (out.length !== REPORT_POINTS.length) {
     throw new Error(`report-bands: built ${out.length} bands, canonical ten is ${REPORT_POINTS.length}`);
   }
+  // GREEN IS A CLAIM AND MUST CARRY ITS EVIDENCE. Not a lint and not a
+  // convention: a CLEAR band with no named source cannot leave this function.
+  // Each of the six bands that were green for an absence or a not-applicable
+  // was one line of code away from looking exactly like a verification, and no
+  // reader of the report could have told them apart. [[make-it-dispute-proof]]
+  for (const b of out) {
+    if (b.state === CLEAR && !b.source) {
+      throw new Error(`report-bands: band ${b.n} ${b.title} is CLEAR with no source. Green must name what it was verified against, or it is not green.`);
+    }
+  }
   return out;
 }
 
@@ -306,7 +361,7 @@ export function reportBands(a) {
  * ten is not a measurement. [[claims-must-stay-backed]]
  */
 export function bandTally(bands) {
-  const t = { raise: 0, clear: 0, unchecked: 0 };
+  const t = { raise: 0, clear: 0, noted: 0, unchecked: 0 };
   for (const b of bands || []) if (t[b?.state] !== undefined) t[b.state]++;
   return t;
 }
