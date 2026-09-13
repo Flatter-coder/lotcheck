@@ -233,7 +233,7 @@ function inspectUnchecked(value, line) {
 // exists to stop.
 const QUARANTINE = new Map([
   ["value:NOT ON QUOTE",        "2026-09-13 audit #4/#5 -- odometer and VIN, hardcoded on screen (the AMVIC one is builder:dealerLicenceLine)"],
-  ["value:NONE FOUND",          "2026-09-13 audit #8/#13 -- reputation on screen; the builder is right, its caller is not"],
+  ["value:NONE FOUND",          "2026-09-13 audit #8 -- reputation on screen; the CALLER was fixed in fdf-rep (identity + reason), but App.jsx still hardcodes this string. Closes when the render reads report-bands."],
   ["value:NOT PUBLISHED",       "2026-09-13 audit #20 -- VIN, emailed PDF"],
   ["value:NOT LISTED",          "2026-09-13 audit #19 -- odometer, emailed PDF"],
   ["value:NO TERMS QUOTED",     "2026-09-13 audit #18 -- financing math"],
@@ -241,7 +241,6 @@ const QUARANTINE = new Map([
   ["value:\u2014",              "2026-09-13 audit #48 -- price vs MSRP, on screen"],
   ["builder:dealerLicenceLine", "2026-09-13 audit #10/#11 -- no unchecked state on this builder; renders NOT ON QUOTE"],
   ["builder:brandedTitleLine",  "2026-09-13 audit #6/#26/#49 -- default param collapses unchecked into NOT STATED"],
-  ["caller:dealerSentiment",    "2026-09-13 audit #8/#13 -- a 200 carrying reason:search_failed is stamped checked:true"],
   ["wired:pageAbsenceCopy",     "2026-09-13 audit #9/#12 -- built, tested, zero production call sites"],
 ]);
 const hit = new Set();
@@ -373,10 +372,23 @@ console.log("\npart 1c -- callers do not manufacture a completed check");
   const at = src.findIndex((l) => /analysis\.dealerSentiment\s*=/.test(l));
   if (at < 0) fail(`${f}: no dealerSentiment assignment found`, "the gate cannot check what it cannot find");
   else {
-    const near = src.slice(Math.max(0, at - 12), at + 12).join("\n");
-    if (/\breason\b/.test(near)) pass("the sentiment caller consults `reason` before claiming a completed check");
+    // COMMENTS STRIPPED FIRST. Twice now this check has passed on prose: once
+    // matching the word `reason` in `reason: data?.reason`, and then matching
+    // `reputationChecked()` inside the comment explaining the fix. Both found
+    // by injecting the regression and watching it stay green. A gate that
+    // reads the explanation instead of the code is a gate that passes when the
+    // code is deleted and the comment is not.
+    const near = src.slice(Math.max(0, at - 12), at + 12)
+      .map((l) => l.replace(/\/\/.*$/, ""))
+      .join("\n");
+    // Was /reason/ nearby. That became too weak the moment the fix landed:
+    // reverting the call to `const checked = true` left `reason: data?.reason`
+    // on the very next line, so the word was still there and this passed.
+    // Found by injecting exactly that. Name the FUNCTION that decides, not a
+    // word that happens to sit near it. [[audit-your-own-fix-same-night]]
+    if (/reputationChecked\s*\(/.test(near)) pass("the sentiment caller decides `checked` with reputationChecked(), not the HTTP status");
     else violation("caller:dealerSentiment",
-      `${f}:${at + 1} asserts checked:true without consulting the reason the response carries`,
+      `${f}:${at + 1} decides checked without reputationChecked() -- a 200 from get-dealer-sentiment is not a completed check`,
       "get-dealer-sentiment returns 200 + reason:search_failed on its own failures, so a 200 is not a completed check");
   }
 }

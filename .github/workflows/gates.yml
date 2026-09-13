@@ -394,6 +394,16 @@ jobs:
       # is checked, and no result ever carries a replacement number.
       - name: Warranty verification confirms, and never invents a fix
         run: npm run test:warranty-verify
+      # get-dealer-sentiment took searchData.places[0] -- the first free-text
+      # Google result -- with no comparison of the returned name, address or
+      # website against the dealer we asked about, cached it 30 days and signed
+      # it into the report. A near-name collision publishes another company’s
+      # star rating and its worst reviews against a named business, in a document
+      # the buyer carries into that business. Same defect and same fix as the
+      # AMVIC matcher: refuse rather than guess. Pins that the refusal is still
+      # reachable -- a matcher that always answers IS the bug.
+      - name: Another dealer’s reviews are never attached to this one
+        run: npm run test:place-match
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup

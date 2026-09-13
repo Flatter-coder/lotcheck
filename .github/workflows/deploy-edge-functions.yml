@@ -42,6 +42,7 @@ jobs:
       - run: npm run check:copy
       - run: npm run test:unchecked-states
       - run: npm run test:report-bands
+      - run: npm run test:place-match
       # msrp/price-gate/consent-overlay fixes ship INSIDE these functions too.
       - run: npm run check:scan-accuracy
 
