@@ -360,6 +360,19 @@ jobs:
       # flag must ask about a data field, never allege bait-advertising.
       - name: Listing dates read, zero dates refused, the sale flag asks
         run: npm run test:lot-dates
+      # Three defects reached a paying customer on 2026-09-12 and all three were
+      # caught by a person reading screenshots, not by a gate: AMVIC "NOT ON
+      # QUOTE" for a dealer whose licence was in our own registry copy, a
+      # reputation card printing "NOT CHECKED" as a finding, and a rebuilt title
+      # the dealer HAD disclosed going unmentioned. One defect, three times:
+      # our failure rendered as the car's fact. Every gate we had proves a
+      # MODULE works -- test:amvic-match was green the whole time the matcher
+      # was never called -- and check:points reads point TITLES, never a value.
+      # This drives the builders with a check that did not run and refuses any
+      # render that blames the dealer or describes the car. Self-tests its own
+      # checker on every run; verified to fail on four separate injections.
+      - name: A check that failed never renders as a fact about the car or dealer
+        run: npm run test:unchecked-states
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
       - name: Every seeded model is reachable by the lookup
