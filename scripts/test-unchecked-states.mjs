@@ -232,14 +232,14 @@ function inspectUnchecked(value, line) {
 // read as wider coverage than it has, which is the same dishonesty the gate
 // exists to stop.
 const QUARANTINE = new Map([
-  ["value:NOT ON QUOTE",        "2026-09-13 audit #4/#5 -- odometer and VIN, hardcoded on screen (the AMVIC one is builder:dealerLicenceLine)"],
-  ["value:NONE FOUND",          "2026-09-13 audit #8 -- reputation on screen; the CALLER was fixed in fdf-rep (identity + reason), but App.jsx still hardcodes this string. Closes when the render reads report-bands."],
   ["value:NOT PUBLISHED",       "2026-09-13 audit #20 -- VIN, emailed PDF"],
   ["value:NOT LISTED",          "2026-09-13 audit #19 -- odometer, emailed PDF"],
   ["value:NO TERMS QUOTED",     "2026-09-13 audit #18 -- financing math"],
   ["value:N/A (GAS)",           "2026-09-13 audit #25/#43/#44 -- EV rebate"],
-  ["value:\u2014",              "2026-09-13 audit #48 -- price vs MSRP, on screen"],
-  ["builder:dealerLicenceLine", "2026-09-13 audit #10/#11 -- no unchecked state on this builder; renders NOT ON QUOTE"],
+  // report-bands.js no longer calls dealerLicenceLine -- amvicBand() replaced
+  // it for the on-screen ten. It stays quarantined because the EMAILED PDF
+  // still calls it directly, so "NOT ON QUOTE" is reachable there.
+  ["builder:dealerLicenceLine", "2026-09-13 audit #10/#11 -- still live in email-quote-report; closes when the PDF reads report-bands"],
   ["builder:brandedTitleLine",  "2026-09-13 audit #6/#26/#49 -- default param collapses unchecked into NOT STATED"],
   ["wired:pageAbsenceCopy",     "2026-09-13 audit #9/#12 -- built, tested, zero production call sites"],
 ]);
@@ -493,7 +493,11 @@ function functionBody(src, header) {
 }
 
 const ASSEMBLERS = [
-  { file: "src/App.jsx", from: "const PG=[];", to: "const toneColor=" },
+  // src/App.jsx IS DELIBERATELY ABSENT, and that is the result rather than a
+  // gap: it renders reportBands() and contains no point-value literals at all,
+  // so a literal scan has nothing to classify. Part 1 drives that model
+  // directly, which is stronger than reading strings out of JSX. check:points
+  // guards that the app has not grown its own second copy again.
   { file: "supabase/functions/email-quote-report/index.ts", fn: "function tenPoints(" },
 ];
 

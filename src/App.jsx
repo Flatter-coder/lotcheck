@@ -13,6 +13,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // sidebar, share link, /verify, and server-side the emailed HTML + PDF -- so
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
 import { warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
+import { reportBands, bandTally, STATE_WORD } from "../supabase/functions/_shared/report-bands.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8119,6 +8120,47 @@ function EvidenceCard({ a, palette }) {
 // what they charge is being transparent, and the report must read that way --
 // the ONE useful thing to tell the buyer is which line is the dealer's own and
 // therefore the one they can ask about. [[no-accusation-language]]
+// Band 01 is the only band that breaks the rhythm, because the money is why the
+// report was bought. Three prices as three positions on ONE scale: the distance
+// IS the finding, with nothing to decode.
+//
+// Every mark is a real figure from the analysis. There is no curve between them
+// -- the concept art's hand-drawn ridge implied a price history we do not hold,
+// and it was never ported. [[no-llm-generated-valuation-numbers]]
+function PriceScale({ scale, C, money }) {
+  const { msrp, asking, comps } = scale || {};
+  if (!(msrp > 0 && asking > 0)) return null;
+  const lo = Math.min(msrp, asking, comps || Infinity) * 0.985;
+  const hi = Math.max(msrp, asking, comps || 0) * 1.015;
+  const x = (v) => ((v - lo) / (hi - lo)) * 100;
+  const over = asking > msrp;
+  return (
+    <div style={{ marginTop: 10, marginBottom: 2 }}>
+      <div style={{ position: "relative", height: 26 }}>
+        <div style={{ position: "absolute", left: 0, right: 0, top: 12, height: 1, background: C.line }} />
+        {/* the gap, drawn as distance */}
+        <div style={{ position: "absolute", top: 8, height: 9, borderRadius: 2,
+          left: `${x(Math.min(msrp, asking))}%`, width: `${Math.abs(x(asking) - x(msrp))}%`,
+          background: over ? C.coralBg : C.tealBg }} />
+        {comps > 0 && (
+          <div style={{ position: "absolute", top: 7, left: `${x(comps)}%`, width: 11, height: 11, marginLeft: -5.5,
+            borderRadius: "50%", border: `2px solid ${C.tealInk}`, background: C.card }} title={`${money(comps)} · comparable listings nearby`} />
+        )}
+        <div style={{ position: "absolute", top: 4, left: `${x(msrp)}%`, width: 3, height: 17, marginLeft: -1.5, background: C.ink }} />
+        <div style={{ position: "absolute", top: 5, left: `${x(asking)}%`, width: 15, height: 15, marginLeft: -7.5,
+          borderRadius: "50%", background: over ? C.coralInk : C.tealInk }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap",
+        fontFamily: "ui-monospace,Menlo,Consolas,monospace", fontSize: 10, color: C.inkFaint }}>
+        <span>{money(msrp)} manufacturer</span>
+        {comps > 0 && <span style={{ color: C.tealInk }}>{money(comps)} nearby</span>}
+        <span style={{ color: over ? C.coralInk : C.tealInk }}>{money(asking)} this listing</span>
+      </div>
+    </div>
+  );
+}
+
+
 function DealerLineItems({ items, money, ink, faint, line, teal }) {
   if (!items || !Array.isArray(items.fees) || !items.fees.length) return null;
   const total = items.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0);
@@ -11510,81 +11552,43 @@ function QuoteCheckPage(){
                 const priceGatedG=!qp&&analysis.priceDisclosure==="contact_for_price";
                 const priceVerifiedG=analysis.priceVerified!==undefined?!!analysis.priceVerified:(qp>0);
 
-                // ── the canonical ten -- tone/value verbatim from the same
-                //    logic ReportViews used, plus one short real "sub" line
-                //    each drawn from the same fields. [[report-features-all-views]]
-                const PG=[];
-                PG.push({title:"Price vs MSRP",tone:priceGatedG?"flag":!priceVerifiedG?"muted":(!ms?"muted":(deltaOkG?(delta>0?"flag":"pass"):"muted")),
-                  v:priceGatedG?"HIDDEN BY DEALER":(!priceVerifiedG&&!ms)?"PRICE READ ONCE":deltaOkG?(delta===0?"AT MSRP":delta>0?money(delta)+" OVER":money(-delta)+" UNDER"):(ms?"FROM "+money(ms):(priceVerifiedG?"—":"UNVERIFIED")),
-                  sub:priceGatedG?"Dealer withheld the price — page says \"contact us\"":deltaOkG?`${money(qp)} vs ${money(ms)} MSRP`:(qp?`${money(qp)} asking`:(ms?`MSRP ${money(ms)}`:"Price not shown on this listing"))});
-                { const r=analysis.recalls; const tone=!r?.checked?"muted":r.count>0?"flag":(r.confirmed===false?"muted":"pass");
-                  const v=!r?.checked?"COULDN'T VERIFY":r.count>0?r.count+" OPEN":(r.confirmed===false?"UNCONFIRMED":"NONE OPEN");
-                  const first=(r?.items||[])[0];
-                  const sub=!r?.checked?"Couldn't reach the registry":r.count>0?(first?.system?`${first.system}${first.date&&!Number.isNaN(new Date(first.date).getFullYear())?" · "+new Date(first.date).getFullYear():""}`:"Repaired free of charge — confirm before signing"):(r.confirmed===false?"Couldn't confirm this exact model":"Transport Canada registry, this year/make/model");
-                  PG.push({title:"Transport Canada recalls",tone,v,sub}); }
-                { const flagged=(analysis.addOns||[]).filter(x=>x.verdict==="flagged");
-                  const flaggedTotal=Number(analysis.totalFlaggedCost)||flagged.reduce((s,x)=>s+(Number(x.price)||0),0);
-                  const dli=analysis.dealerLineItems; const dliTotal=dli&&Array.isArray(dli.fees)?dli.fees.reduce((t,f)=>t+(Number(f?.amount)||0),0):0;
-                  const tone=flagged.length?"flag":(analysis.addOns||[]).length?"pass":"muted";
-                  // dliTotal > 0 is a REAL itemized breakdown read off the page (a
-                  // dealer's own fee list, not our addOns verdicts) -- it must never
-                  // fall through to "NONE LISTED"/"NOT READ", the exact contradiction
-                  // ("$899 doc fee on a page reading NONE LISTED") this point exists
-                  // to catch. [[report-never-empty]]
-                  const v=flagged.length?flagged.length+" FLAGGED":(analysis.addOns||[]).length?"TRANSPARENT":dliTotal > 0 ? "ITEMIZED":(analysis.feesRead===true?"NONE LISTED":"NOT READ");
-                  const sub=flagged.length?`${money(flaggedTotal)} across ${flagged.length} item${flagged.length>1?"s":""}`:((analysis.addOns||[]).length?"Itemized, nothing flagged":dliTotal > 0?`${money(dliTotal)} itemized by the dealer`:"No dealer add-ons were itemized");
-                  const body=(!(analysis.addOns||[]).length&&dliTotal > 0)
-                    ? <DealerLineItems items={dli} money={money} ink={C.ink} faint={C.inkFaint} line={C.line} teal={C.tealInk} />
-                    : null;
-                  PG.push({title:"Add-ons & fee audit",tone,v,sub,body}); }
-                { const dl=dealerLicenceLine(analysis);
-                  PG.push({title:"AMVIC",tone:dl.tone,v:dl.value,sub:dl.line}); }
-                { const fc=analysis.financingCheck; const rf=!fc?.checked?analysis.referenceFinancing:null;
-                  const tone=fc?.checked?(fc.consistent?"pass":"flag"):"muted";
-                  const v=fc?.checked?(fc.consistent?"RECONCILES":"DOESN'T ADD UP"):(rf?.atAsking?"$"+Math.round(rf.atAsking.monthly).toLocaleString()+"/MO REF":"NOT CHECKED");
-                  const sub=rf?.atAsking?rf.note:(fc?.note||(fc?.checked?"Payment, price, rate and term cross-checked":"Not enough financing detail to re-check"));
-                  PG.push({title:"Financing math",tone,v,sub}); }
-                { const o=analysis.odometerCheck; const isNewV=analysis.vehicleCondition==="new";
-                  const tone=o?.checked?(o.flag?"flag":"pass"):"muted";
-                  const v=o?.checked?Number(o.km).toLocaleString()+" km"+(o.flag?" FLAG":""):(isNewV?"N/A (NEW)":"NOT ON QUOTE");
-                  // Banded, not "vehicleCondition alone" -- a fixed sentence beside
-                  // a variable reading is what printed "thousands on the clock
-                  // means it's been driven" under a 12 km delivery-distance
-                  // reading. analysis.odometerCheck.band is the SAME band
-                  // computeOdometerCheck wrote the km-aware note from; branch on
-                  // it here too, same as the emailed report. [[repeat-fix-pattern]]
-                  const sub=o?.checked
-                    ? (analysis.odometerCheck.band==="new_delivery"
-                        ? "New vehicles don't arrive on zero — coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. That's delivery distance, not use."
-                      : analysis.odometerCheck.band==="new_beyond_delivery"
-                        ? "Further than a car gets being delivered — most often a demonstrator or a service loaner. Normal, not a fault; ask for the in-service date, since that's when the factory warranty clock actually starts."
-                      : analysis.odometerCheck.band==="used_nearly_new"
-                        ? "On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return. Ask for the in-service date — the factory warranty started then."
-                        : (o.note||"Compare it against the age of the car — roughly 15,000–20,000 km per year is typical."))
-                    : "No odometer reading was on this quote";
-                  PG.push({title:"Odometer",tone,v,sub}); }
-                { const vc=analysis.vinCheck; const tone=vc?.present?(vc.valid?"pass":"flag"):"muted";
-                  const v=vc?.present?(vc.valid?"VALID":"CHECK PATTERN"):"NOT ON QUOTE";
-                  const sub=vc?.present?(vc.vin?`VIN ${vc.vin}`:(vc.valid?"Decodes cleanly":"Check the pattern")):"No VIN was listed to check";
-                  PG.push({title:"VIN check",tone,v,sub}); }
-                { const ev=rebate, eft=effectiveFuelType; const notEv=!!eft&&eft!=="BEV"&&eft!=="PHEV";
-                  const tone=ev?.eligible?"pass":"muted";
-                  const v=ev?.eligible?money(ev.total)+" ELIGIBLE":(ev?.ineligibleReason?"NOT ELIGIBLE":notEv?`N/A (${String(eft).toUpperCase()})`:"NOT DETERMINED");
-                  const sub=ev?.eligible?`${money(ev.federal)} federal${ev.provincial>0?` + ${money(ev.provincial)} provincial`:""}`:(ev?.ineligibleReason||(notEv?"Rebates apply to electric/plug-in only":"Drivetrain not confirmed from the listing"));
-                  PG.push({title:"EV / PHEV rebate",tone,v,sub}); }
-                { const wl=warrantyLine(analysis);
-                  PG.push({title:"Included warranty",tone:wl.tone,v:wl.value,sub:wl.line}); }
-                { const d=analysis.dealerSentiment; const rated=Number(d?.rating)>0;
-                  const tone=rated?(Number(d.rating)>=4?"pass":"muted"):"muted";
-                  const rc=d&&d.reviewCount!=null&&Number.isFinite(Number(d.reviewCount))?Number(d.reviewCount):null;
-                  const v=rated?Number(d.rating).toFixed(1)+"★"+(rc==null?"":" / "+rc.toLocaleString()):(d?.checked===true?"NONE FOUND":"NOT CHECKED");
-                  const rep=dealerReputationPoint(analysis.dealerSentiment);
-                  const sub=rated?(d.highlights?.[0]?.text||(rc?`${rc.toLocaleString()} Google reviews`:"Google rating for this dealer")):(rep.state==="absent"?"We searched and found no public reviews":"This lookup wasn't completed");
-                  PG.push({title:"Dealer reputation",tone,v,sub}); }
+                // ── THE CANONICAL TEN, BUILT ONCE, IN report-bands.js ──────────
+                // This used to be seventy lines of hand-written pushes, and the
+                // emailed PDF had its own seventy lines doing the same job from
+                // the same analysis object. They disagreed four ways in
+                // production: an unread drivetrain printed "NOT DETERMINED"
+                // here and "N/A (GAS)" in the document the buyer carries to the
+                // dealer, which is a fabricated fact about the car.
+                // [[two-authors-per-fact]] [[report-features-all-views]]
+                const BANDS = reportBands(analysis);
+                const TALLY = bandTally(BANDS);
 
+                // The dealer's own itemised fee table still renders inside band
+                // 03. It is a React node, so it cannot live in the shared model
+                // -- the model is imported by Deno edge functions that have no
+                // JSX. Attached here, to the band the model already built.
+                const dliG = analysis.dealerLineItems;
+                const dliTotalG = dliG && Array.isArray(dliG.fees) ? dliG.fees.reduce((t,f)=>t+(Number(f?.amount)||0),0) : 0;
+                const PG = BANDS.map((band) => ({
+                  ...band,
+                  v: band.value,
+                  sub: band.note,
+                  // Legacy tone, for the surfaces below that still key on it.
+                  tone: band.state==="raise" ? "flag" : band.state==="clear" ? "pass" : "muted",
+                  body: (band.key==="fees" && !(analysis.addOns||[]).length && dliTotalG > 0)
+                    ? <DealerLineItems items={dliG} money={money} ink={C.ink} faint={C.inkFaint} line={C.line} teal={C.tealInk} />
+                    : null,
+                }));
+
+                // FOUR RAILS, because green is a claim. raise / clear are solid
+                // accents; noted is solid NEUTRAL (an absence and a
+                // not-applicable are true and are not a pass); not-checked is
+                // HATCHED, never filled -- a solid grey rail reads as a quiet
+                // pass. [[supervised-correctness-is-not-correctness]]
+                const railColor = { raise:C.coralInk, clear:C.tealInk, noted:C.inkFaint, unchecked:C.inkFaint };
                 const toneColor={flag:C.coralInk,pass:C.tealInk,muted:C.inkFaint};
                 const toneBg={flag:C.coralBg,pass:C.tealBg,muted:"transparent"};
-                const flagPoints=PG.filter(p=>p.tone==="flag").slice(0,4);
+                const flagPoints=PG.filter(p=>p.state==="raise").slice(0,4);
 
                 // "Also checked" -- the same real fields the old hero tiles
                 // strip used, filtered to what isn't already one of the ten.
@@ -11755,28 +11759,56 @@ function QuoteCheckPage(){
                       </div>
                     )}
 
-                    {/* the ten points */}
-                    <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:12}}>
+                    {/* the ten points — Traffic Column */}
+                    <div style={{display:"flex",alignItems:"baseline",gap:10,marginBottom:12,flexWrap:"wrap"}}>
                       <div style={{fontWeight:700,fontSize:15,color:C.ink}}>The ten-point check</div>
-                      <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>{PG.length} / 10 backed</span>
-                      <div style={{flex:1,height:1,background:C.line}}/>
+                      {/* STATES, never a total. "10 / 10 backed" was ten
+                          unconditional pushes and the array's own length printed
+                          as the count -- true by construction, so it read ten
+                          over a report where five checks never ran.
+                          [[claims-must-stay-backed]] */}
+                      <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>
+                        <span style={{color:TALLY.raise?C.coralInk:C.inkFaint}}>{TALLY.raise} to raise</span>
+                        {TALLY.clear>0&&<> · <span style={{color:C.tealInk}}>{TALLY.clear} verified</span></>}
+                        {TALLY.noted>0&&<> · {TALLY.noted} noted</>}
+                        {TALLY.unchecked>0&&<> · {TALLY.unchecked} not checked</>}
+                      </span>
+                      <div style={{flex:1,height:1,background:C.line,minWidth:20}}/>
                     </div>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12,marginBottom:22}}>
+                    <div style={{marginBottom:22}}>
                       {PG.map((p,i)=>(
-                        <article key={i} className="lcgc-point" style={{position:"relative",padding:"14px 15px",borderRadius:15,background:C.card,border:`1px solid ${C.line}`,borderLeft:`3px solid ${toneColor[p.tone]}`}}>
-                          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:8}}>
-                            <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint}}>{String(i+1).padStart(2,"0")}</span>
-                            <span style={{width:22,height:22,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",background:toneBg[p.tone],color:toneColor[p.tone]}}>
-                              {p.tone==="flag"?<Icon3D name="warning" size={12}/>:p.tone==="pass"?<Icon3D name="check" size={12}/>:<span style={{width:8,height:1.6,background:"currentColor",display:"block"}}/>}
-                            </span>
+                        <article key={i} className="lcgc-point" style={{position:"relative",display:"grid",
+                          gridTemplateColumns:"26px minmax(0,1fr) auto",gap:"0 14px",alignItems:"center",
+                          padding:"11px 15px 11px 12px",marginBottom:5,borderRadius:10,
+                          background:p.state==="raise"?C.coralBg:C.card,
+                          border:`1px solid ${C.line}`,
+                          borderLeft:`7px solid ${p.state==="unchecked"?"transparent":railColor[p.state]}`,overflow:"hidden"}}>
+                          {/* A check that never ran gets NO rail. Hatched, not
+                              filled: an obviously absent reading, the way a dead
+                              gauge is obviously dead — and it survives greyscale. */}
+                          {p.state==="unchecked"&&(
+                            <span aria-hidden="true" style={{position:"absolute",left:0,top:0,bottom:0,width:7,
+                              background:`repeating-linear-gradient(45deg, ${C.inkFaint} 0 2px, transparent 2px 5px)`}}/>
+                          )}
+                          <span style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:11,color:C.inkFaint,opacity:.7}}>{p.n}</span>
+                          <div style={{minWidth:0}}>
+                            <div style={{fontWeight:700,fontSize:13,color:C.ink,letterSpacing:"-.005em"}}>{p.title}</div>
+                            <div style={{fontSize:11.5,color:C.inkFaint,marginTop:1,lineHeight:1.45}}>{p.sub}</div>
+                            {p.hero&&p.scale&&<PriceScale scale={p.scale} C={C} money={money}/>}
+                            {p.body&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.line}`}}>{p.body}</div>}
                           </div>
-                          <div style={{fontWeight:600,fontSize:12.5,color:C.inkSoft}}>{p.title}</div>
-                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:15.5,marginTop:5,color:p.tone==="muted"?C.inkFaint:toneColor[p.tone]}}>{p.v}</div>
-                          <div style={{fontSize:11,color:C.inkFaint,marginTop:5,lineHeight:1.4}}>{p.sub}</div>
-                          {p.body&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.line}`}}>{p.body}</div>}
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,
+                              fontSize:p.hero?17:14,color:railColor[p.state],whiteSpace:"nowrap",letterSpacing:"-.01em"}}>{p.v}</div>
+                            {/* The verdict in WORDS as well as colour: this page
+                                gets printed and photocopied. */}
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:8.5,
+                              letterSpacing:".1em",textTransform:"uppercase",color:railColor[p.state],marginTop:3,whiteSpace:"nowrap"}}>{STATE_WORD[p.state]}</div>
+                          </div>
                         </article>
                       ))}
                     </div>
+
 
                     {/* also checked */}
                     {extraDefs.length>0&&(

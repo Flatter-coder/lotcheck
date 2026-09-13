@@ -41,16 +41,44 @@ check("every point has marketing copy", REPORT_POINTS.every((p) => p.marketing &
 console.log("\nthe report on screen");
 {
   const src = read("src/App.jsx");
-  const titles = uniqInOrder([...src.matchAll(/PG\.push\(\{\s*title:\s*"([^"]+)"/g)].map((m) => m[1]));
-  check(`App.jsx pushes exactly ten distinct points (${titles.length})`, titles.length === 10, titles.join(" | "));
-  check("App.jsx's ten are the canonical ten, in order",
-    JSON.stringify(titles) === JSON.stringify(POINT_TITLES),
-    `app: ${JSON.stringify(titles)}\n         canon: ${JSON.stringify(POINT_TITLES)}`);
-  // The heading captioned with the point count must read the real array's
-  // own length, never a hardcoded "10" -- so a report that grows past ten
-  // (or drops one) fails here, not in front of a buyer.
-  check("the ten-point heading counts the real array, never a hardcoded 10",
-    /\{PG\.length\} \/ 10 backed/.test(src), "caption must read {PG.length}");
+  // COMMENTS STRIPPED BEFORE ANY ASSERTION. Three separate checks today have
+  // passed or failed on PROSE rather than code: one matched the word `reason`
+  // inside `reason: data?.reason`, one matched `reputationChecked()` inside the
+  // comment explaining the fix, and the caption rule below failed on a comment
+  // QUOTING the very string it forbids. A gate that reads the explanation
+  // instead of the code passes when the code is deleted and the comment is not.
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+
+  // THE APP NO LONGER BUILDS THE TEN. It renders reportBands(), which derives
+  // them from REPORT_POINTS and throws on a count or order mismatch -- so the
+  // canonical ten is enforced in the model rather than re-asserted by scraping
+  // a title out of each of ten hand-written pushes. What this gate has to check
+  // is that the app still goes through the model and has not grown its own
+  // second copy, which is the defect the model exists to end.
+  // [[two-authors-per-fact]]
+  check("App.jsx renders the shared band model", /\breportBands\s*\(/.test(code),
+    "the on-screen ten must come from report-bands.js, not be hand-built here");
+  check("App.jsx does NOT hand-build the ten any more",
+    !/PG\.push\(\{\s*title:/.test(code),
+    "a second author for the ten points is exactly what report-bands.js replaced");
+
+  // THE OLD RULE HERE WAS THE BUG, NOT THE GUARD.
+  //
+  // It required the caption to read `{PG.length} / 10 backed` -- written to stop
+  // someone hardcoding "10". There were exactly ten PG.push calls and not one
+  // was conditional, so the rule GUARANTEED the number was computed and the
+  // computation always returned ten. A report whose ten points all read
+  // NOT CHECKED passed this gate and printed "10 / 10 backed" above them.
+  //
+  // A count that cannot be anything but ten is not a measurement. The caption
+  // must now name STATES, which differ between two scans of two cars.
+  // [[claims-must-stay-backed]]
+  check("the ten-point caption is gone -- it could only ever read ten",
+    !/\/ 10 backed/.test(code),
+    'the literal "/ 10 backed" is back; it is true by construction and says nothing');
+  check("the caption names states from the real tally",
+    /TALLY\.raise/.test(code) && /TALLY\.clear/.test(code) && /TALLY\.unchecked/.test(code),
+    "the heading must render bandTally() states, not a count");
   // "Also checked" is a SEPARATE array (extraDefs), built after PG and never
   // pushed into it -- so an extra can never be miscounted as one of the ten.
   // Same property the emailed report's "no additional check is named the

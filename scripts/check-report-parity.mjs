@@ -185,7 +185,11 @@ const SURFACES = [
     field: "AMVIC (point 4 — dealer licence, real registry data)",
     app: {
       "shared line builder import": "dealerLicenceLine",
-      "glass-console point card":   'PG.push({title:"AMVIC"',
+      // Was 'PG.push({title:"AMVIC"'. The app no longer hand-builds the ten --
+      // it renders reportBands(), so the AMVIC point ships to the glass console
+      // by construction. The parity property is now stronger: the point cannot
+      // exist on one surface and not the other, because there is one builder.
+      "glass-console point card":   "reportBands(analysis)",
       "share link encode":          "lic:a.dealerLicence&&a.dealerLicence.status",
       "share link decode":          "dealerLicence:c.lic?",
     },
