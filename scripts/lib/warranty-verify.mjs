@@ -37,15 +37,36 @@
 // this module decides. That split is what makes the matching testable against
 // real page text without hitting 35 manufacturer sites.
 
+// Manufacturers write the YEARS out in words and the DISTANCE in digits, in the
+// same sentence: Acura's own page says "Five years or 100,000 Km, whichever
+// occurs first" and "Eight years or 160,000km". A matcher that requires digits
+// on both sides reads that as "our stored 5-year/100,000 km is no longer on the
+// page" -- drift reported against a manufacturer for spelling a number.
+const WORD_NUM = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8,
+  nine: 9, ten: 10, eleven: 11, twelve: 12, fifteen: 15, twenty: 20,
+};
+
 /** Numbers only. "80,000" and "80000" and "80 000" are the same distance. */
 export function normalizePage(text) {
   return String(text || "")
     .toLowerCase()
     .replace(/&nbsp;|&#160;/g, " ")
     .replace(/[   ]/g, " ")          // non-breaking spaces
-    .replace(/(\d)[, \s](\d{3})\b/g, "$1$2")   // 80,000 -> 80000
+    // (?!\d) and not : Acura writes "160,000km" with no space, and there is
+    // NO word boundary between "0" and "k" -- both are word characters. So the
+    // separator survived, "160000 km" never matched it, and a correct row was
+    // reported as drift. Found by running this against the real page.
+    // {1,2}: Acura's page renders "80 ,000" -- a space AND a comma.
+    .replace(/(\d)[, \s]{1,2}(\d{3})(?!\d)/g, "$1$2")   // 80,000 -> 80000
     .replace(/[‐-―]/g, "-")               // en/em dashes -> hyphen
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    // "Five years" -> "5 years", but ONLY before a time word, so a "four-door
+    // sedan" or "eight airbags" elsewhere on the page never becomes a term.
+    .replace(
+      new RegExp(`\\b(${Object.keys(WORD_NUM).join("|")})\\b(?=[ -](?:year|yr|month))`, "g"),
+      (w) => String(WORD_NUM[w]),
+    );
 }
 
 /**
@@ -91,14 +112,31 @@ export function parseTerm(term) {
 export function pairOnPage(pair, page) {
   const p = normalizePage(page);
   if (!p) return false;
+  // "UNLIMITED" IS THE WORD WE CHOSE; IT IS NOT THE WORD THEY USE.
+  // Lexus states its corrosion cover as "72 months, regardless of distance
+  // travelled" -- the word "unlimited" appears NOWHERE on that page. Matching
+  // only our own vocabulary reported a correct row as drifted, which is an
+  // accusation against the manufacturer produced by our own word choice.
   const dist = pair.km === "unlimited"
-    ? "unlimited\\s*(?:km|kilometre|kilometer|mileage|distance)?"
+    ? "(?:unlimited\\s*(?:km|kilometre|kilometer|mileage|distance)?"
+      + "|regardless of (?:the )?(?:distance|mileage|kilometre|kilometer)[a-z ]*"
+      + "|(?:no|without) (?:a )?(?:distance|mileage|kilometre|kilometer) (?:limit|restriction)"
+      + "|whatever the (?:distance|mileage))"
     : `${pair.km}\\s*(?:km|kilometre|kilometer)`;
   const yrs = `(?:${pair.years}\\s*-?\\s*(?:year|yr)s?|${pair.years * 12}\\s*months?)`;
+  // PERIODS ARE ALLOWED INSIDE THE WINDOW. Acura writes its rust-perforation
+  // cover as TWO SENTENCES -- "Five years. No distance limit." -- and a window
+  // that refused to cross a full stop reported our CORRECT stored value as
+  // drift. The window stays 40 characters, which is the real guard; excluding
+  // the punctuation was never what kept an unrelated sentence out.
+  // The trade is stated plainly: a slightly looser window can CONFIRM something
+  // it should have flagged. That direction is the safer one here, because this
+  // job never writes a figure -- a false confirm delays a finding, while a
+  // false drift accuses a manufacturer of changing something they did not.
   // Either order, within a short window -- the two numbers must be presented
   // together, which is how a coverage term is always written.
-  const a = new RegExp(`${yrs}[^.;]{0,40}?${dist}`);
-  const b = new RegExp(`${dist}[^.;]{0,40}?${yrs}`);
+  const a = new RegExp(`${yrs}[^;]{0,40}?${dist}`);
+  const b = new RegExp(`${dist}[^;]{0,40}?${yrs}`);
   return a.test(p) || b.test(p);
 }
 
@@ -124,15 +162,42 @@ export function pairOnPage(pair, page) {
 export function pageStatesAnyTerm(page) {
   const p = normalizePage(page);
   if (!p) return false;
-  return /(?:\d{1,2}\s*-?\s*(?:year|yr)s?|\d{2,3}\s*months?)[^.;]{0,40}?(?:unlimited|\d{4,7}\s*(?:km|kilometre|kilometer))/.test(p)
-    || /(?:unlimited|\d{4,7}\s*(?:km|kilometre|kilometer))[^.;]{0,40}?(?:\d{1,2}\s*-?\s*(?:year|yr)s?|\d{2,3}\s*months?)/.test(p);
+  return /(?:\d{1,2}\s*-?\s*(?:year|yr)s?|\d{2,3}\s*months?)[^;]{0,40}?(?:unlimited|\d{4,7}\s*(?:km|kilometre|kilometer))/.test(p)
+    || /(?:unlimited|\d{4,7}\s*(?:km|kilometre|kilometer))[^;]{0,40}?(?:\d{1,2}\s*-?\s*(?:year|yr)s?|\d{2,3}\s*months?)/.test(p);
 }
 
-/** "confirmed" | "drifted" | "unparsed" — never "corrected". */
-export function verifyField(term, page) {
+/**
+ * Does this page DISCUSS this kind of cover, in a coverage context?
+ *
+ * Not merely 'does the word appear'. Every manufacturer's navigation and footer
+ * mention roadside assistance, warranties and accessories on every page; Acura’s
+ * nav reads "Warranty & Protection Roadside Assistance Resources" 578 characters
+ * in. A bare word test therefore said "this page covers roadside", found no term,
+ * and reported DRIFT against the manufacturer for a link in their own menu.
+ *
+ * So the subject has to appear NEAR a year/distance pair. Chrome has no numbers
+ * beside it; a coverage table always does.
+ */
+export function fieldCoveredOnPage(field, page) {
+  const subject = FIELD_SUBJECT[field];
+  if (!subject) return true;
+  const p = normalizePage(page);
+  const re = new RegExp(subject.source, "gi");
+  let m;
+  while ((m = re.exec(p))) {
+    const around = p.slice(Math.max(0, m.index - 160), m.index + 240);
+    if (pageStatesAnyTerm(around)) return true;
+  }
+  return false;
+}
+/** "confirmed" | "drifted" | "not_covered" | "unparsed" — never "corrected". */
+export function verifyField(term, page, field) {
   if (term == null || String(term).trim() === "") return { state: "absent", pairs: [] };
   const { pairs, unparsed } = parseTerm(term);
   if (unparsed) return { state: "unparsed", pairs: [] };
+  // Does this page even discuss this kind of cover? If not, the figure is not
+  // contradicted -- it is uncited.
+  if (!fieldCoveredOnPage(field, page)) return { state: "not_covered", pairs: [] };
   const checked = pairs.map((pr) => ({ ...pr, found: pairOnPage(pr, page) }));
   // EVERY pair must still be findable. Confirming a term because its FIRST pair
   // matched is how "8-year/160,000 km (components), 10-year/240,000 km (battery)"
@@ -143,6 +208,27 @@ export function verifyField(term, page) {
 
 const FIELDS = ["basic_coverage", "powertrain_coverage", "corrosion_coverage",
   "roadside_assistance", "hybrid_ev_coverage"];
+
+// WHAT EACH FIELD IS ABOUT, so "this page never mentions roadside" can be told
+// apart from "this page no longer states the roadside term we hold".
+//
+// Lexus's warranty page covers comprehensive, powertrain, corrosion, emissions
+// and hybrid -- and says nothing about roadside assistance at all. Reporting
+// that as DRIFT blames the manufacturer for a page we chose. It is a CITATION
+// gap: our source_url does not support every field we cite it for, and the fix
+// is a better URL, not a corrected figure. [[make-it-dispute-proof]]
+const FIELD_SUBJECT = {
+  basic_coverage: /\b(basic|comprehensive|bumper[- ]to[- ]bumper|new vehicle limited|whole vehicle|major component)/i,
+  // EV-only makes have no ICE powertrain, so migration 20260802 deliberately
+  // stores the BATTERY AND DRIVE UNIT term in powertrain_coverage -- the Tesla
+  // row is exactly that. Narrow phrasings only: a bare "battery" matches the
+  // 12V accessory battery on half the pages on the internet, and a false "this
+  // page covers powertrain" turns straight back into false drift.
+  powertrain_coverage: /\b(powertrain|power train|engine and transmission|drivetrain|major component|drive unit|traction battery|high[- ]voltage battery|battery and drive)/i,
+  corrosion_coverage: /\b(corrosion|perforation|rust|anti[- ]?perforation)/i,
+  roadside_assistance: /\broadside\b/i,
+  hybrid_ev_coverage: /\b(hybrid|electric|high[- ]voltage|traction battery|drive unit|ev\b)/i,
+};
 
 /**
  * One row against one page.
@@ -166,12 +252,13 @@ export function verifyRow(row, page) {
   }
 
   const fields = {};
-  for (const f of FIELDS) fields[f] = verifyField(row[f], page);
+  for (const f of FIELDS) fields[f] = verifyField(row[f], page, f);
   const live = FIELDS.filter((f) => fields[f].state !== "absent");
   if (!live.length) return { status: "empty_row", fields, note: "this make has no coverage figures stored" };
 
   const drifted = live.filter((f) => fields[f].state === "drifted");
   const unparsed = live.filter((f) => fields[f].state === "unparsed");
+  const uncited = live.filter((f) => fields[f].state === "not_covered");
   if (drifted.length) {
     return {
       status: "drifted", fields,
@@ -180,6 +267,12 @@ export function verifyRow(row, page) {
   }
   if (unparsed.length) {
     return { status: "unparsed", fields, note: `could not read our own stored value as a term: ${unparsed.join(", ")}` };
+  }
+  if (uncited.length) {
+    return {
+      status: "uncited", fields,
+      note: `this page does not cover ${uncited.join(", ")} at all, so our source_url does not support ${uncited.length === 1 ? "that figure" : "those figures"}. Not a finding about the manufacturer -- find a URL that states ${uncited.length === 1 ? "it" : "them"}.`,
+    };
   }
   return { status: "confirmed", fields, note: `all ${live.length} stored figure(s) still stated on the manufacturer's page` };
 }

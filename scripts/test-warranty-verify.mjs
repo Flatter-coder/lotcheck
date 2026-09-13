@@ -162,6 +162,92 @@ console.log("\npart 6b -- a page with no terms at all is unreachable, not drifte
   check("the two are distinguishable", r.status !== d.status);
 }
 
+/* ── 2b. their words, not ours ───────────────────────────────────── */
+console.log("\npart 2b -- the vocabulary manufacturers actually use");
+{
+  // Every string below is copied from a live manufacturer page, read 2026-09-13.
+  // Each one was reported as DRIFT by the first version of this matcher -- an
+  // accusation against a manufacturer produced by our own word choice.
+
+  // Lexus states corrosion as months + "regardless of distance travelled".
+  // The word "unlimited" appears NOWHERE on that page.
+  check("Lexus: '72 months, regardless of distance travelled' is 6-year/unlimited",
+    pairOnPage({ years: 6, km: "unlimited" },
+      "Corrosion Perforation ... 72 months, regardless of distance travelled."),
+    "our stored 6-year/unlimited km is correct; only our vocabulary was wrong");
+
+  // Acura spells the years out and closes up the km.
+  check("Acura: 'Five years or 100,000 Km' is 5-year/100,000 km",
+    pairOnPage({ years: 5, km: 100000 }, "Major Components Warranty Five years or 100,000 Km, whichever occurs first."));
+  check("Acura: 'Eight years or 160,000km' is 8-year/160,000 km",
+    pairOnPage({ years: 8, km: 160000 }, "Hybrid System Warranty Eight years or 160,000km, whichever occurs first."));
+
+  // Acura writes its rust-perforation cover as TWO SENTENCES. A window that
+  // refused to cross a full stop reported our CORRECT stored value as drift.
+  check("Acura: 'Five years. No distance limit.' is 5-year/unlimited",
+    pairOnPage({ years: 5, km: "unlimited" },
+      "Rust Perforation Warranty Five years. No distance limit. This warranty is your guarantee"),
+    "a term may span a sentence boundary");
+
+  // And their page renders a space AND a comma inside the number.
+  check("Acura: 'Four years or 80 ,000 Km' is 4-year/80,000 km",
+    pairOnPage({ years: 4, km: 80000 }, "Surface Corrosion Warranty Four years or 80 ,000 Km, whichever comes first."));
+
+  // The window is still the guard: two unrelated terms far apart must not pair.
+  check("a year and a distance 200 characters apart do not pair",
+    !pairOnPage({ years: 4, km: 80000 },
+      "4 years of scheduled maintenance. " + "Filler about the infotainment system. ".repeat(6) + "Towing 80,000 km."),
+    "the 40-character window stopped doing its job");
+
+  // Other real phrasings for no distance limit.
+  check("'unlimited distance' still matches",
+    pairOnPage({ years: 12, km: "unlimited" }, "Perforation: 12 years, unlimited distance."));
+  check("'no distance limit' matches",
+    pairOnPage({ years: 7, km: "unlimited" }, "Corrosion cover runs 7 years with no distance limit."));
+
+  // AND THE GUARD ON THE GUARD: the word->digit rule must fire only in front of
+  // a time word. A page full of "four-door" and "eight airbags" must not start
+  // manufacturing warranty terms out of trim copy.
+  check("'four-door sedan' does not become a 4-year term",
+    !pairOnPage({ years: 4, km: 80000 }, "The four-door sedan tows up to 80,000 kg of nonsense."),
+    "word->digit fired outside a time context");
+  check("'eight airbags' does not become an 8-year term",
+    !pairOnPage({ years: 8, km: 160000 }, "Eight airbags. 160,000 km of adventure ahead."));
+}
+
+/* ── 3b. a page that never mentions the field ───────────────────────── */
+console.log("\npart 3b -- uncited is not drifted");
+{
+  // Lexus's warranty page covers comprehensive, powertrain, corrosion,
+  // emissions and hybrid -- and says nothing at all about roadside assistance.
+  // Reporting that as drift blames the manufacturer for a URL we chose.
+  const page = "Comprehensive Coverage 48 months/80,000 km, whichever comes first. "
+    + "Powertrain & Safety Restraints 72 months/110,000 km, whichever comes first. "
+    + "Corrosion Perforation 72 months, regardless of distance travelled.";
+  const row = {
+    make: "Lexus", source_url: "https://www.lexus.ca/x",
+    basic_coverage: "4-year/80,000 km",
+    powertrain_coverage: "6-year/110,000 km",
+    corrosion_coverage: "6-year/unlimited km",
+    roadside_assistance: "4-year/unlimited km",
+  };
+  const r = verifyRow(row, page);
+  check("the three fields the page DOES state are matched",
+    r.fields.basic_coverage.state === "confirmed"
+    && r.fields.powertrain_coverage.state === "confirmed"
+    && r.fields.corrosion_coverage.state === "confirmed",
+    JSON.stringify({ b: r.fields.basic_coverage.state, p: r.fields.powertrain_coverage.state, c: r.fields.corrosion_coverage.state }));
+  check("roadside, which the page never mentions, is not_covered",
+    r.fields.roadside_assistance.state === "not_covered", r.fields.roadside_assistance.state);
+  check("the row reports UNCITED, not DRIFTED", r.status === "uncited", r.status);
+  check("...and says to find a better URL, not to correct the figure",
+    /does not support/.test(r.note) && !/human must re-read/.test(r.note), r.note);
+
+  // A field the page DOES discuss, with a different number, is still drift.
+  const moved = verifyRow(row, page.replace("72 months/110,000 km", "60 months/100,000 km"));
+  check("a covered field whose number moved is still drifted", moved.status === "drifted", moved.status);
+}
+
 /* ── 7. normalisation ────────────────────────────────────────────────────── */
 console.log("\npart 7 -- thousands separators and dashes");
 {
