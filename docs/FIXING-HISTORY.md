@@ -15,6 +15,66 @@ the next instance.
 | **Optional step, fatal failure** | something non-essential takes down the whole request |
 | **A count read as a classification** | a surface feature counted, and the tally answered a question it cannot answer |
 | **Not attempted, reading as passed** | a per-item guard driven by a hand-maintained list reports "N of N passed", blind to whatever is not on the list |
+| **A guard that cannot fail** | a gate whose assertion is true by construction, so it is green in every world including the broken one |
+
+---
+
+## 2026-09-13 - the report could not tell the buyer our failure from the car's fact
+
+Vic, after a customer report went out on 2026-09-12 with three defects in it,
+every one caught by him reading screenshots:
+
+> "it was done because i was around and on first attempt to create report we
+> found 3 mistakes because i was around, which means doesn't give confidences
+> to me."
+
+The three were one defect three times. `AMVIC - NOT ON QUOTE` for a dealer whose
+licence B2036047 was in our own copy of the registry. `Dealer reputation - NOT
+CHECKED` printed as though it were a finding. A rebuilt title the dealer HAD
+disclosed, absent from the report entirely. **None of them looked like an error.
+They looked like findings.** That is precisely why a person had to be the one to
+catch them.
+
+The confidence problem is not a mood, it is arithmetic: **every report Vic has
+inspected is one he was present for**, so there is no sample from which the
+unsupervised rate can be estimated at all. A system that is correct only when
+watched has an unmeasured error rate, not a low one.
+[[supervised-correctness-is-not-correctness]]
+
+An audit of `origin/main` for this one shape found **49 confirmed instances**
+across the shared builders, the enrichment path, the PDF, the on-screen report
+and the gates - 23 of them accusation-shaped (they say something adverse about a
+named dealer), 24 false-cleans (they imply the car is fine where nothing ran).
+
+| fix | live | what broke | class | guard now in place |
+|---|---|---|---|---|
+| `PENDING` | PENDING PR | **No gate had ever looked at a report VALUE.** `check:points` extracts `PG.push({ title: "..." })` - titles only - and its one numeric rule requires the caption to read `{PG.length} / 10 backed`, written to stop someone hardcoding "10". There are exactly ten `PG.push` calls and **not one is conditional**, so that rule guarantees the number is computed and the computation always returns ten. A report whose ten points all read NOT CHECKED passes green and prints "10 / 10 backed" directly above them. | **A guard that cannot fail** | `npm run test:unchecked-states`. Three layers, because each catches what the others cannot: EXECUTED drives every shared builder with a check that did not run and reads what it returns; CLASSIFIED requires every value literal in both ten-point assemblers to be declared as what it ASSERTS (us / result / dealer / vehicle / nothing) and whether that assertion is BACKED - **an undeclared value fails**, so a new string cannot arrive unclassified; WIRED fails a three-state helper with zero production call sites. |
+| `PENDING` | PENDING PR | **The rule was already written down.** `report-lines.js:17-19` says: *"Absence states say what was established, never more: 'Not shown' only when the page's own data says so, 'None found' for a miss, 'Not read' when no attempt was made."* It was a comment. Comments do not fail builds, and the file containing it renders `NOT ON QUOTE` for six distinct failures-to-look including a Postgres error. | **Absence read as knowledge** | The comment is now an executable table. `dealerLicenceLine` and `brandedTitleLine` are driven with an unchecked input on every CI run and their output is read, not trusted. |
+| `PENDING` | PENDING PR | **`pageAbsenceCopy` - the helper that distinguishes "the page didn't say" from "we couldn't read the page" - was built, unit-tested, and imported by exactly one file: its own test.** Zero production call sites. The fix for the VIN defect has been in the repo, green under `test:report-truth`, connected to nothing. This is the second time in one day: the AMVIC website-matching path shipped the same way on 09-12. | **One-surface fix** - built and never wired | Part 3 of the new gate fails any named three-state helper that no render surface calls. It carries two helpers on purpose - one that passes and one that does not - so the check is demonstrated working in both directions rather than asserted. |
+| `PENDING` | PENDING PR | **A builder can only be as honest as its caller.** `dealerReputationPoint` gets all three states right; it is lied to. `get-dealer-sentiment` answers **HTTP 200** with `{ dealerSentiment: null, reason: "search_failed" }` when its own Places call fails, and the caller does `{ ...(data?.dealerSentiment ?? {}), checked: true }` under a comment reading *"A 200 IS a completed check"*. The premise is false and `reason` - the only field separating "none exist" from "our lookup broke" - is dropped by the spread. A dealer with thousands of reviews publishes as having none. | **Green signal, no check** | Part 1c asserts that wherever `checked: true` is claimed for the sentiment lookup, `reason` is consulted nearby. Narrow on purpose: it encodes one real defect rather than pretending to a general theory of callers. |
+
+**The 11 defects this gate can currently see are QUARANTINED, not fixed** - each
+named with its audit number in `QUARANTINE`, so the ledger is a visible debt
+list rather than a silent skip. The list may only shrink: **a quarantined entry
+that starts passing FAILS the gate** and demands its own removal, so a fix
+cannot be silently un-credited and the ledger cannot go stale.
+
+**The gate self-tests on every run.** Part 0 plants a violation and requires its
+own checker to catch it, then plants a compliant render and requires it to stay
+quiet; either way round it `process.exit(1)` before a single real assertion has
+run. Given that the defect being fixed here IS a guard that could not fail, a
+guard that merely asserts it works would have been the same mistake again.
+Verified against four separate injections into production code: an undeclared
+point value, a builder blaming the dealer on an unchecked input, a quarantined
+defect genuinely fixed, and the extractor's target renamed out from under it -
+that last one because an extractor that silently reads nothing is how this
+whole class survives.
+
+**Known blind spot, named rather than carried quietly:** the CLASSIFIED layer
+reads literals, so a value routed through a builder (`v: dl.value`) is invisible
+to it and is caught one layer up instead. The quarantine keys say which layer
+owns which defect. Listing them under both would have made the ledger read as
+wider coverage than it has - the same dishonesty the gate exists to stop.
 
 ---
 
