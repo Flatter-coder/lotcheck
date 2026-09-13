@@ -30,7 +30,7 @@
 // as the Payment Breakdown card when financing data isn't present.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { matchPlace, NO_CONFIDENT_MATCH, REPUTATION_OUTCOME } from "../_shared/place-match.js";
+import { matchPlace, NO_CONFIDENT_MATCH, REPUTATION_OUTCOME, hostKey, nameCityKey, basisCode } from "../_shared/place-match.js";
 
 const GOOGLE_PLACES_API_KEY = Deno.env.get("GOOGLE_PLACES_API_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
@@ -202,10 +202,49 @@ async function handleSentiment(req: Request): Promise<Response> {
       }
     }
 
-    // 2. Text Search (New) -- find the actual place. Essentials-tier
-    // fields only here (no "reviews"), so this step is cheap no matter
-    // what happens next.
+    // 1b. A place_id we already resolved.
+    //
+    // place_id is the ONE Places field exempt from Google's 30-day caching cap,
+    // so this lookup is permanently free and permanently allowed. It skips the
+    // Text Search below, which carries `rating` in its field mask and therefore
+    // bills at ENTERPRISE tier -- 1,000 free calls a month, then $35/1,000
+    // (the pooled $200 credit was replaced by per-SKU caps on 2025-03-01, and
+    // they neither pool nor roll over).
+    //
+    // The bigger win is not the money. A free-text search is re-run every time
+    // and can resolve DIFFERENTLY next month: a rooftop opens, a name changes,
+    // Google reorders. A dealer resolved once by domain match stays resolved.
+    // Identity stops being a coin toss we re-flip on every report.
+    const hk = hostKey(listingHost), nck = nameCityKey(dealerName, dealerCity);
+    let knownPlaceId: string | null = null;
+    if (hk || nck) {
+      try {
+        const or = [hk ? `host_key.eq.${hk}` : null, nck ? `namecity_key.eq.${nck}` : null]
+          .filter(Boolean).join(",");
+        const { data: dp } = await supabase.from("dealer_place")
+          .select("place_id,match_basis").or(or).limit(1).maybeSingle();
+        if (dp?.place_id) {
+          knownPlaceId = dp.place_id;
+          console.log(`place_id cache hit for "${dealerName}" (resolved by ${dp.match_basis}) -- skipping Text Search.`);
+          await supabase.from("dealer_place")
+            .update({ last_used_at: new Date().toISOString() }).eq("place_id", dp.place_id);
+        }
+      } catch (e) {
+        // A cache miss must never fail a lookup. Worst case we pay for the
+        // search we were paying for anyway.
+        console.warn("dealer_place read skipped:", (e as Error)?.message);
+      }
+    }
+
+    // 2. Text Search (New) -- find the actual place. Skipped entirely on a
+    // place_id cache hit.
+    // Declared out here because the no-match log below refers to it, and the
+    // search itself is now conditional. check:edge-syntax caught this as an
+    // unbound identifier -- it would have thrown the moment Deno loaded the
+    // module, on every reputation lookup.
     const searchQuery = `${dealerName} ${dealerCity || ""} car dealership`.trim();
+    let place: any = knownPlaceId ? { id: knownPlaceId } : null;
+    if (!place) {
     const searchRes = await fetch("https://places.googleapis.com/v1/places:searchText", {
       method: "POST",
       headers: {
@@ -246,7 +285,28 @@ async function handleSentiment(req: Request): Promise<Response> {
       );
     }
     if (picked) console.log(`Matched "${dealerName}" -> ${picked.basis} (confidence ${picked.confidence}).`);
-    const place = picked?.place;
+    place = picked?.place;
+
+    // Remember the identity, and ONLY the identity. No rating, no review count,
+    // no display name, no address -- all of those are 30-day licensed data and
+    // belong in dealer_sentiment_cache. match_basis is our own code, not an echo
+    // of Google's copy.
+    if (place?.id && picked) {
+      try {
+        await supabase.from("dealer_place").upsert({
+          place_id: place.id,
+          host_key: hk,
+          namecity_key: nck,
+          match_basis: basisCode(picked),
+          confidence: picked.confidence,
+          resolved_at: new Date().toISOString(),
+          last_used_at: new Date().toISOString(),
+        }, { onConflict: "place_id" });
+      } catch (e) {
+        console.warn("dealer_place write skipped (non-fatal):", (e as Error)?.message);
+      }
+    }
+    }
     if (!place?.id) {
       console.log(`No Places match for dealer lookup: "${searchQuery}"`);
       return new Response(
