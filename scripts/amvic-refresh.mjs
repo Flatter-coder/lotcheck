@@ -1,4 +1,4 @@
-// Weekly AMVIC licensee snapshot (check #11).
+// AMVIC licensee snapshot (check #11) — 6am and midnight, America/Edmonton.
 //
 // Pulls AMVIC's public Online Search Portal dataset (Thentia Cloud JSON API —
 // the same endpoint the regulator's own consumer search UI calls) and upserts
@@ -8,12 +8,27 @@
 // Run: node scripts/amvic-refresh.mjs            (needs SUPABASE_ACCESS_TOKEN)
 //      node scripts/amvic-refresh.mjs --dry-run  (fetch + report, no writes)
 //
-// Polite by design: one page at a time, 400ms apart, single weekly run.
+// Polite by design: one page at a time, 400ms apart. ~88 requests per pass
+// (21.8k rows at 250/page), about 35 seconds of traffic, twice a day.
+//
+// THE PORTAL IS BEHIND AN AWS WAF. A request with an honest bot User-Agent gets
+// an "Human Verification" CAPTCHA page, not data — verified 2026-09-13 by asking
+// for /robots.txt and receiving the challenge. The browser headers below are the
+// only reason this works at all, and that is a fact about the arrangement worth
+// stating plainly rather than leaving as an unexplained constant.
+//
+// So the cadence is a bounded, deliberate choice: twice a day against a
+// regulator LotCheck may one day need a licence from. If this ever needs to be
+// more frequent, the right move is to ASK AMVIC for a data feed, not to turn the
+// dial up. [[dealer-tos-daily-checks]]
 
 const PROJECT_REF = "debigtyjhjamipooajhk";
 const BASE = "https://amvic.ca.thentiacloud.net/rest/public/facility/search/";
 const PAGE = 250;
 const PAUSE_MS = 400;
+// A WAF challenge is served as HTML with HTTP 200, so it does not trip res.ok.
+// Named here so a bot-wall can never be reported as "AMVIC got smaller".
+const WAF_MARKERS = /awswaf|Human Verification|captcha-container|gokuProps/i;
 const DRY = process.argv.includes("--dry-run");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,9 +66,22 @@ async function fetchAll() {
       try {
         res = await fetch(url, { headers: HEADERS });
         if (!res.ok) throw new Error("HTTP " + res.status);
-        json = await res.json();
+        const body = await res.text();
+        // Distinguish "the bot-wall answered" from "the network glitched".
+        // Retrying a WAF challenge three times is both useless and rude, so it
+        // aborts the whole pass immediately rather than backing off into it.
+        if (WAF_MARKERS.test(body)) {
+          throw Object.assign(new Error(
+            `AMVIC's portal served a WAF human-verification challenge at skip=${skip}. ` +
+            `This is a bot-wall, not an outage: stop, do not retry, and do not publish. ` +
+            `If this persists, ask AMVIC for a data feed rather than increasing the retry count.`,
+          ), { fatal: true });
+        }
+        try { json = JSON.parse(body); }
+        catch { throw new Error(`Non-JSON response at skip=${skip} (${body.slice(0, 80)})`); }
         break;
       } catch (e) {
+        if (e && e.fatal) throw e;               // a bot-wall is not retryable
         if (attempt === 3) throw new Error(`Fetch failed at skip=${skip}: ${e.message}`);
         await sleep(1500 * attempt);
       }
@@ -63,12 +91,28 @@ async function fetchAll() {
       console.log(`AMVIC registry: ${total} facilities to sync.`);
     }
     const rows = json.result || [];
-    if (!rows.length) break;
+    // AN EMPTY PAGE MID-PASS IS NOT THE END OF THE REGISTRY.
+    // This used to `break`, which silently truncated the snapshot. With >1000
+    // rows already collected the small-snapshot guard below then passed, and a
+    // PARTIAL registry published as if it were complete — every dealer past the
+    // cut-off reading as "not in AMVIC's registry", which is the exact false
+    // accusation this catalogue exists to prevent. Rare weekly; at twice a day
+    // it is fourteen times as likely. Fail instead, and keep yesterday's data.
+    if (!rows.length) {
+      if (out.length >= total) break;          // genuinely finished
+      throw new Error(`Registry pass truncated: an empty page at skip=${skip} with only ${out.length} of ${total} rows. Refusing to publish a partial snapshot — the live table keeps its previous data.`);
+    }
     out.push(...rows);
     process.stdout.write(`\r  fetched ${out.length}/${total}`);
     await sleep(PAUSE_MS);
   }
   process.stdout.write("\n");
+  // The pass either got the whole registry or it did not. `total` is the
+  // portal's own count, so this compares our result against the source's own
+  // claim rather than against a number we chose.
+  if (total > 0 && out.length < total) {
+    throw new Error(`Registry pass incomplete: ${out.length} of ${total} rows. Refusing to publish — the live table keeps its previous data.`);
+  }
   return out;
 }
 

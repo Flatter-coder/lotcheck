@@ -1,22 +1,73 @@
-# Weekly snapshot of AMVIC's public licensee registry (check #11).
-# Uses the SUPABASE_ACCESS_TOKEN secret the deploy workflow already has —
-# no new credentials. Polite: one paginated pass, 400ms between pages, weekly.
-name: AMVIC registry refresh
+# AMVIC registry refresh — 6am and midnight (America/Edmonton).
+#
+# Vic, 2026-09-13: "fix amvic to 6am and midnight". Point 04 of the ten is the
+# regulator's licence status, and this is the catalogue behind it.
+#
+# WHY IT MOVED OFF WEEKLY. On 2026-09-12 a paying customer's report said
+# "No dealer name was confirmed to match against AMVIC's public registry" for
+# XPERTS AUTO SALES LTD., whose licence B2036047 was in our own copy the whole
+# time. The matcher was the bug — but even a perfect matcher was reading a
+# registry up to SEVEN DAYS old, and a licence status is exactly the field that
+# changes between Mondays. A weekly snapshot cannot back a point that speaks
+# about a named business in the present tense.
+# [[every-point-has-a-catalogue]]
+#
+# FOUR CRON LINES FOR TWO RUNS. GitHub cron is UTC with no daylight-saving, so a
+# single line drifts an hour twice a year. Both UTC hours are scheduled for each
+# local hour, and the job EXITS EARLY unless the Edmonton hour is actually 0 or
+# 6 — so it runs exactly twice a day, all year. Same pattern as
+# api-key-health.yml, for the same reason.
+#
+# COST: none. One paginated pass is ~88 requests (21.8k rows at 250/page) at
+# 400ms apart — about 35 seconds of traffic, twice a day.
+#
+# READ THE HEADER OF scripts/amvic-refresh.mjs BEFORE INCREASING THIS FURTHER.
+# The portal sits behind an AWS WAF and the script only gets through because it
+# sends a browser User-Agent and the portal's own Referer. Twice a day against a
+# regulator we may one day need a licence from is a deliberate, bounded choice;
+# hourly would not be.
+name: AMVIC registry refresh (6am + midnight MT)
 
 on:
   schedule:
-    - cron: "17 9 * * 1"      # Mondays 09:17 UTC (~03:17 MT)
+    - cron: "0 12 * * *"   # 06:00 MDT (summer)
+    - cron: "0 13 * * *"   # 06:00 MST (winter)
+    - cron: "0 6 * * *"    # 00:00 MDT (summer)
+    - cron: "0 7 * * *"    # 00:00 MST (winter)
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if it is not 6am or midnight in Edmonton"
+        type: boolean
+        default: true
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - name: Is it 6am or midnight in Edmonton?
+        id: gate
+        run: |
+          HOUR=$(TZ=America/Edmonton date +%-H)
+          echo "Edmonton local hour: $HOUR"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          elif [ "$HOUR" = "0" ] || [ "$HOUR" = "6" ]; then
+            echo "run=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=no" >> "$GITHUB_OUTPUT"
+            echo "Not 6am or midnight in Edmonton - this is the other DST cron line. Skipping."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'yes'
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.run == 'yes'
         with:
           node-version: "20"
       - name: Pull registry and publish snapshot
+        if: steps.gate.outputs.run == 'yes'
         run: node scripts/amvic-refresh.mjs
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
