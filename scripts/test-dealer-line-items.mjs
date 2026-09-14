@@ -127,9 +127,19 @@ console.log("\nthe wiring: the merge must not drop these fields");
 
 console.log("\nevery surface says it, and none of them says 'added on top'");
 {
-  const app = read("src/App.jsx"), email = read("supabase/functions/email-quote-report/index.ts");
-  check("the on-screen point stops reading NONE LISTED", /dliTotal > 0 \? "ITEMIZED"/.test(app));
-  check("the on-screen card renders the breakdown", /<DealerLineItems items=\{dli\}/.test(app));
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^\s*\/\/.*$/gm, " ");
+  const app = strip(read("src/App.jsx"));
+  const email = strip(read("supabase/functions/email-quote-report/index.ts"));
+  const model = strip(read("supabase/functions/_shared/report-bands.js"));
+  // THE FEE POINT'S VALUE IS DECIDED IN THE SHARED MODEL NOW, and the app
+  // renders what the model returns. This gate used to anchor on the app's
+  // local variable name, so it failed on a rename while the behaviour was
+  // intact -- a gate measuring spelling rather than substance.
+  check("the fee point reads ITEMIZED off the dealer's own breakdown",
+    /dliTotal\s*>\s*0\)\s*return band\("fees", "03", CLEAR, "ITEMIZED"/.test(model));
+  check("the on-screen card still renders the breakdown component",
+    /<DealerLineItems\s+items=\{/.test(app),
+    "the itemised table is a React node, so it cannot live in the shared model");
   check("the emailed point stops reading NONE LISTED", /dealerFeeTotal\(a\) > 0\) P\.push\(\{ t: "Add-ons & fee audit", v: "ITEMIZED"/.test(email));
   check("the PDF prints the breakdown", /kicker\("THE DEALER'S OWN PRICE BREAKDOWN"\)/.test(email));
   check("the share link carries it", /dli:a\.dealerLineItems/.test(app) && /dealerLineItems:c\.dli/.test(app));
