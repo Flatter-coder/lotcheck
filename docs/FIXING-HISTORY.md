@@ -18,6 +18,45 @@ the next instance.
 | **A guard that cannot fail** | a gate whose assertion is true by construction, so it is green in every world including the broken one |
 | **A deleted surface passes its own negative checks** | every "this surface must NOT say X" assertion is satisfied by removing the thing that could say it, so a gate protecting copy goes half-green when that copy is deleted rather than corrupted |
 | **A guard bound to spelling, not substance** | a gate anchored on a local variable name or a caption's exact words, so a rename fails it while the behaviour is intact - and a gate that cries wolf gets overridden |
+| **A guard calibrated from imagination** | a threshold invented rather than measured, so it fires on healthy data the first time it runs and gets switched off before it ever catches anything real |
+| **A happy path that hides a branch** | an assertion written for the fallback never reaches it, because the primary path answers first in every test fixture - the branch is untested and the gate looks complete |
+
+---
+
+## 2026-09-14 (later) - a source that reports success while shipping 1.5% of itself
+
+Building the reported-faults catalogue meant reading someone else's data for the
+first time at this scale, and the failures were theirs before they were ours.
+
+`FLAT_CMPL.zip` is the file NHTSA's own page documents and **advertises at 354
+MB**. It serves **3,225,032 bytes**: 56,997 records ending 1996-10-10, about
+1.5% of the corpus. Wayback has it at 340 MB on 2025-05-31, and NHTSA is still
+rewriting the broken file **daily** - so their pipeline reports success on every
+run while publishing a truncated file, and has for up to fifteen months without
+anyone noticing. It is the exact shape this file exists to name, arriving from
+outside.
+
+| fix | live | what broke | class | guard now in place |
+|---|---|---|---|---|
+| `f83e426` | ✓ merged #456 | **Reading the documented file would have given every car built after 1996 an empty fault list**, which renders on a report as "nothing reported" - our failure as the car's fact, sourced from someone else's failure. | **Absence read as knowledge** | `FLAT_CMPL` is refused **by name**, with the reason attached, because the documentation still recommends it. The catalogue is built from the seven `COMPLAINTS_RECEIVED_*` slices, each with a truncation floor, and `test:vehicle-faults` fails if the builder so much as names the forbidden file. |
+| `f83e426` | ✓ merged #456 | **A block is byte-for-byte indistinguishable from "no faults".** Both NHTSA hosts sit behind one Akamai property that answers overload with HTTP 403 and ~500 bytes of `text/html` - no 429, no `Retry-After` - **at a `.zip` URL**. Their API separately returns **HTTP 400 for "count: 0, results returned successfully"**. Two non-200 codes meaning opposite things, both of which render as an empty fault list. An adversarial agent's own sweep silently produced **32 false zeros** and did not notice. | **Absence read as knowledge** | Every fetch is validated on its **bytes** (zip magic), never its status, because HEAD returns no `Content-Length` so size cannot be pre-checked. The first 403 **aborts the whole run** rather than retrying: retrying extends the ban, which took 600s of total silence to clear while 304s of polite polling did not. No partial catalogue is ever written. |
+| `f83e426` | ✓ merged #456 | **My own truncation floors were guessed, and failed a healthy slice on the first run.** `COMPLAINTS_RECEIVED_2000-2004` parses 289,823 vehicle rows against a floor I had invented at 300,000. | **A guard calibrated from imagination** | Floors are now **85% of counts actually measured on 2026-09-14**, with the observed figure recorded in the comment beside each one so the next person can re-derive the number instead of trusting it. A guard that cries wolf on day one is switched off by day two, and then it is not a guard. |
+| `f83e426` | ✓ merged #456 | **The gate missed one of its own injections.** A planted change letting a plain nameplate borrow a *variant's* complaints - a 2021 RAV4 served the RAV4 Prime's record - passed every assertion. The fixture always held an exact `RAV4` row, so the exact match answered first and the fallback branch was never reached by any test. | **A happy path that hides a branch** | The uphill case is now its own fixture: a catalogue containing **only** the variant, queried for the plain nameplate, must come back empty. 12 planted violations, 12 caught. Found only because the injection pass was run at all - the gate read as complete at 57 green assertions. |
+
+**136,125 complaints are missing from NHTSA's bulk files outright**, verified in
+our own parse: the slices jump from record 56,997 to 193,123, and the file
+labelled `1995-1999` actually stops on **1996-10-10**. Every complaint received
+between then and 1999-12-31 is absent. Cars of MY2000 and older say so on the
+card rather than quietly under-reporting.
+
+**And the panel withholds more often than it speaks, by design.** Three
+adversarial lenses refused the original framing on measured grounds: only 19% of
+year/make/model cells can be ranked, 44% of rankable ones yield an all-generic
+top three, and 58% of rankings flip when same-family buckets are merged - so the
+ranking is a property of NHTSA's labelling, not of the car. It ships as **what
+owners reported**, not as a reliability verdict, with no green state and no red
+one, and the 2014 Grand Cherokee - 2,375 complaints, the most in the catalogue -
+displays nothing at all. [[claims-must-stay-backed]] [[no-accusation-language]]
 
 ---
 
