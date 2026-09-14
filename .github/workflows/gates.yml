@@ -115,6 +115,9 @@ jobs:
       # written where the reading is judged, read by every surface.
       - name: Odometer copy (the explanation fits the reading)
         run: npm run test:odometer-copy
+
+      - name: the reported-faults panel withholds rather than guess
+        run: npm run test:vehicle-faults
       # A dealer who itemises their own price is being transparent, and we
       # reported "Add-ons & fee audit: NONE LISTED" over an openly-published
       # $795 Admin. Fee. The fee is INSIDE the advertised price -- the page's
