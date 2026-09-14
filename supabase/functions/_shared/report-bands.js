@@ -234,14 +234,58 @@ function financeBand(a) {
  * a real reading parsed — so the emailed PDF printed "NOT LISTED", a flat false
  * statement about the dealer's page, because WE could not establish the year.
  */
+/*
+ * THE EXPLAINER LIVES HERE, because it is the sentence that stops a flag from
+ * reading as an accusation.
+ *
+ * 2026-08-27, on a real report for a 2025 Mazda CX-90 reading 12 km: the
+ * server's own km-aware note printed directly above a hand-written explainer
+ * that branched on vehicleCondition alone and told the buyer a new car showing
+ * kilometres had been driven. Both sentences were ours, on one card, and they
+ * contradicted each other. The fix was to band the reading once, where it is
+ * judged, and have every surface branch on the BAND instead of re-deriving the
+ * story for itself.
+ *
+ * 2026-09-14: the render swap moved the on-screen ten onto this file, and the
+ * on-screen explainer left with the JSX that used to hold it — leaving this
+ * band with nothing but the server's one-line note. What that dropped was the
+ * beyond-delivery sentence saying a demonstrator is a normal part of the
+ * business and not a fault. The screen would have flagged a new-listed car at
+ * 3,200 km red, with no sentence saying it is not wrongdoing.
+ *
+ * Note how it hid: every "this surface must NOT say X" assertion still passed,
+ * because deleting a surface passes every negative check ever written about
+ * it. Only the positive ones failed. [[no-accusation-language]]
+ */
+export function odometerExplain(bandName, km) {
+  const kmTxt = `${num(km).toLocaleString("en-CA")} km`;
+  switch (bandName) {
+    case "new_delivery":
+      return `New vehicles do not arrive on zero. Coming off the transport truck, moving around the lot and the pre-delivery inspection all put kilometres on the clock. ${kmTxt} is delivery distance, not use. Read the dash yourself when you see the car and confirm it still matches.`;
+    case "new_beyond_delivery":
+      return `A new vehicle normally shows only delivery distance. This one reads ${kmTxt}, which is further than a car gets being delivered — most often that means it was a demonstrator or a service loaner. That is a normal part of the business, not a fault. What matters to you is that the factory warranty clock starts when a vehicle goes into service, not when you buy it: ask for the in-service date in writing, and ask how the price reflects it.`;
+    case "used_nearly_new":
+      return `On a car this new, low kilometres usually mean a demonstrator, a loaner or a short lease return rather than anything unusual. Ask for the in-service date — the factory warranty started then, not on the day you buy.`;
+    default:
+      // "used" is deliberately absent. computeOdometerCheck writes a note
+      // carrying this car's OWN age and typical-km figures, which is a better
+      // sentence than any fixed one this switch could return.
+      return null;
+  }
+}
+
 function odometerBand(a) {
   const o = a?.odometerCheck;
   if (o?.checked) {
     const km = `${num(o.km).toLocaleString("en-CA")} km`;
+    // Band first, server note second. The fallback matters: an analysis cached
+    // before bands existed carries a note and no band, and must still explain
+    // itself rather than print a generic line beside a specific number.
+    const explain = odometerExplain(o.band, o.km) || o.note;
     return o.flag
-      ? band("odometer", "06", RAISE, `${km} · CHECK`, o.note ||
+      ? band("odometer", "06", RAISE, `${km} · CHECK`, explain ||
           "This reading is worth questioning against the age of the car. Read it off the dash yourself before signing — never off the paperwork alone.")
-      : band("odometer", "06", CLEAR, km, o.note ||
+      : band("odometer", "06", CLEAR, km, explain ||
           "Read from the listing. Compare it against the dash before you sign — never off the paperwork alone.",
           { source: "the odometer reading the listing itself publishes" });
   }
