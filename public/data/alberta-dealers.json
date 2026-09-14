@@ -1,7 +1,7 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-09-13",
-  "totalDealers": 405,
+  "generatedAt": "2026-09-14",
+  "totalDealers": 404,
   "cities": [
     {
       "name": "Calgary",
@@ -20,18 +20,18 @@
         "Heninger Toyota",
         "Calgary Honda",
         "Advantage Ford",
+        "CMP Classic",
         "T&T Honda",
         "Eastside Kia",
         "South Pointe Toyota",
         "Woodridge Ford",
         "Renfrew Chrysler Dodge Jeep Ram",
-        "Royal Oak Nissan",
-        "Charlesglen Toyota"
+        "Royal Oak Nissan"
       ]
     },
     {
       "name": "Edmonton",
-      "count": 88,
+      "count": 86,
       "sample": [
         "Car Corner Inc.",
         "Alberta Honda",
@@ -41,25 +41,27 @@
         "DriveNation West Edmonton",
         "Northgate Chevrolet Buick GMC",
         "Dawson Motors",
+        "GMC",
+        "Buick",
         "Platinum Fine Cars",
         "Koch Ford",
         "Amigo's Car Sales",
         "Derrick Dodge (Dealership)",
-        "Revolution Auto Sales",
+        "Mr. Vehicles",
         "Sunny Auto Sales",
         "European Auto Tinting",
         "Matrix Motors YEG",
         "Dubsport",
-        "Ay Motor Dealership",
-        "Off Whyte",
-        "Fort Road Motors"
+        "Ay Motor Dealership"
       ]
     },
     {
       "name": "Red Deer",
       "count": 17,
       "sample": [
+        "Innisfail Chrysler",
         "Palliser Chevrolet",
+        "Fourlane Ford",
         "Red Deer Toyota",
         "Gary Moe Mitsubishi Red Deer",
         "Southside Dodge Chrysler Jeep Ram",
@@ -67,13 +69,11 @@
         "Wheaton Chevrolet of Red Deer",
         "Kipp Scott GMC Cadillac Buick",
         "Red Deer Nissan",
-        "Red Deer Dodge",
+        "Go Dodge Red Deer",
         "Gary Moe Hyundai",
         "Kia Red Deer",
         "Cam Clark Ford",
         "Gary Moe Mazda",
-        "Fourlane Ford",
-        "Innisfail Chrysler",
         "Scott Subaru",
         "Kia Red Deer"
       ]
@@ -129,8 +129,9 @@
     },
     {
       "name": "Airdrie",
-      "count": 13,
+      "count": 14,
       "sample": [
+        "Shift Happens Auto Sales",
         "Cam Clark Super Store",
         "Airdrie Chrysler",
         "Dodge Truck Centre",
@@ -141,7 +142,7 @@
         "House Of Cars (Airdrie)",
         "Cam Clark Ford",
         "SJL Auto Ltd.",
-        "Airdrie Truck & Auto Sales",
+        "Airdrie Truck & Auto",
         "Starwest Motorcars",
         "Great West Kenworth Balzac"
       ]
