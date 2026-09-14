@@ -14,6 +14,8 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
 import { warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { reportBands, bandTally, STATE_WORD } from "../supabase/functions/_shared/report-bands.js";
+import { faultsPanel, precisionNote, FAULTS_BASIS, FAULTS_SHOWN, FAULTS_NOT_CHECKED } from "../supabase/functions/_shared/vehicle-faults.js";
+import { lookupFaults, cellKey, CATALOGUE_UNREADABLE } from "../supabase/functions/_shared/fault-model-match.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
@@ -8161,6 +8163,123 @@ function PriceScale({ scale, C, money }) {
 }
 
 
+/* WHAT OWNERS REPORTED TO THE SAFETY REGULATOR.
+ *
+ * Its own section, BELOW the ten, and never one of them. The ten points are
+ * about this listing, this dealer and this paperwork; this is about the model
+ * year. Printing a model-wide complaint pattern among them would imply we
+ * inspected the vehicle. [[claims-must-stay-backed]]
+ *
+ * The catalogue is read from the client because the table is anon-readable by
+ * design and the figures are public federal records. A read that FAILS renders
+ * as "not checked" with a hatched rail -- never as an absence of faults.
+ * [[supervised-correctness-is-not-correctness]]
+ */
+function ReportedFaults({ analysis, C }) {
+  const [state, setState] = useState({ row: null, reason: null, precision: null, loading: true });
+  const key = cellKey(analysis?.year, analysis?.make, analysis?.model);
+
+  useEffect(() => {
+    let alive = true;
+    if (!key) { setState({ row: null, reason: "no_vehicle", precision: null, loading: false }); return; }
+    (async () => {
+      try {
+        // Both candidate keys in one round trip: the exact model and, for a
+        // hybrid NHTSA does not record separately, its nameplate.
+        const np = key.replace(/(HYBRID|PHEV|EV|PRIME|ENERGI|HEV)$/, "");
+        const keys = np !== key ? [key, np] : [key];
+        const { data, error } = await supabase
+          .from("vehicle_fault_catalog").select("*").in("cell_key", keys);
+        if (!alive) return;
+        if (error) { setState({ row: null, reason: CATALOGUE_UNREADABLE, precision: null, loading: false }); return; }
+        const map = new Map((data || []).map((r) => [r.cell_key, r]));
+        const hit = lookupFaults(map, analysis);
+        setState({ row: hit.row, reason: hit.reason, precision: hit.precision, loading: false });
+      } catch {
+        if (alive) setState({ row: null, reason: CATALOGUE_UNREADABLE, precision: null, loading: false });
+      }
+    })();
+    return () => { alive = false; };
+  }, [key]);
+
+  if (state.loading) return null;
+
+  const p = faultsPanel(state.row, state.reason, state.precision || "exact");
+  const shown = p.state === FAULTS_SHOWN;
+  const modelLabel = [analysis?.make, analysis?.model].filter(Boolean).join(" ") || "this model";
+  const pNote = precisionNote(p, modelLabel);
+  const src = p.sourceUpdatedAt ? String(p.sourceUpdatedAt).replace(/^\w+, /, "").replace(/ \d\d:\d\d:\d\d.*$/, "") : null;
+  const max = shown ? Math.max(...p.top.map((t) => t.count)) : 1;
+
+  return (
+    <div style={{ marginTop: 26, marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ fontWeight: 700, fontSize: 15, color: C.ink }}>{p.title}</div>
+        <span style={{ fontFamily: "ui-monospace,Menlo,Consolas,monospace", fontSize: 11, color: C.inkFaint }}>
+          {p.total != null ? `${p.total.toLocaleString("en-CA")} complaints filed` : "not checked"}
+        </span>
+        <div style={{ flex: 1, height: 1, background: C.line, minWidth: 20 }} />
+      </div>
+
+      <article style={{ position: "relative", borderRadius: 10, overflow: "hidden",
+        background: C.card, border: `1px solid ${C.line}`,
+        borderLeft: `7px solid ${shown ? C.inkFaint : "transparent"}` }}>
+        {/* A check that did not run gets NO rail -- hatched, the way a dead
+            gauge is obviously dead. It must never read as a quiet pass. */}
+        {!shown && (
+          <span aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 7,
+            background: `repeating-linear-gradient(45deg, ${C.inkFaint} 0 2px, transparent 2px 5px)` }} />
+        )}
+        <div style={{ padding: "13px 16px", borderBottom: `1px solid ${C.line}`, fontSize: 12, color: C.inkFaint, lineHeight: 1.5 }}>
+          About this <b style={{ color: C.ink }}>model year</b>, never about this specific vehicle.
+          {pNote ? <> {pNote}</> : null}
+        </div>
+
+        {shown ? p.top.map((t, i) => (
+          <div key={i} style={{ padding: "13px 16px", borderTop: i ? `1px solid ${C.line}` : "none",
+            display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", gap: "0 12px" }}>
+            <span style={{ fontFamily: "ui-monospace,Menlo,Consolas,monospace", fontSize: 11, color: C.inkFaint, opacity: .7 }}>0{i + 1}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
+                <b style={{ fontSize: 13.5, color: C.ink }}>{t.system}</b>
+                <span style={{ fontFamily: "ui-monospace,Menlo,Consolas,monospace", fontSize: 12, color: C.inkFaint, whiteSpace: "nowrap" }}>
+                  {t.count.toLocaleString("en-CA")} · {t.share}% of filings
+                </span>
+              </div>
+              <div style={{ height: 6, background: C.line, borderRadius: 3, margin: "7px 0 0", overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 3, background: C.inkFaint,
+                  width: `${Math.round((100 * t.count) / max)}%` }} />
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {t.harm > 0 && (
+                  <span style={{ fontSize: 11, color: C.coralInk, background: C.coralBg, borderRadius: 5, padding: "2px 8px" }}>
+                    {t.harm.toLocaleString("en-CA")} mention a crash, fire or injury
+                  </span>
+                )}
+                {t.recallDriven && (
+                  <span style={{ fontSize: 11, color: C.inkFaint, border: `1px solid ${C.line}`, borderRadius: 5, padding: "2px 8px" }}>
+                    Mostly recall filings — see the recalls point
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )) : (
+          <div style={{ padding: "15px 16px", fontSize: 13, color: C.inkFaint, lineHeight: 1.6 }}>{p.note}</div>
+        )}
+
+        <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.line}`, fontSize: 11, color: C.inkFaint, lineHeight: 1.55 }}>
+          {FAULTS_BASIS}
+          {p.unknownOnly > 0 && ` ${p.unknownOnly.toLocaleString("en-CA")} further filings NHTSA records only as "unknown or other" are excluded.`}
+          {analysis?.year && Number(analysis.year) <= 2000 &&
+            " Older cars are undercounted: complaints received between October 1996 and December 1999 are missing from NHTSA's own bulk files."}
+          {src && <> NHTSA last updated this data <b style={{ color: C.ink }}>{src}</b>.</>}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function DealerLineItems({ items, money, ink, faint, line, teal }) {
   if (!items || !Array.isArray(items.fees) || !items.fees.length) return null;
   const total = items.fees.reduce((t, f) => t + (Number(f?.amount) || 0), 0);
@@ -11809,6 +11928,8 @@ function QuoteCheckPage(){
                       ))}
                     </div>
 
+
+                    <ReportedFaults analysis={analysis} C={C} />
 
                     {/* also checked */}
                     {extraDefs.length>0&&(

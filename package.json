@@ -126,7 +126,8 @@
     "check:rpc-exposure": "node scripts/check-rpc-exposure.mjs",
     "test:warranty-verify": "node scripts/test-warranty-verify.mjs",
     "test:place-match": "node scripts/test-place-match.mjs",
-    "test:dealer-place": "node scripts/test-dealer-place.mjs"
+    "test:dealer-place": "node scripts/test-dealer-place.mjs",
+    "test:vehicle-faults": "node scripts/test-vehicle-faults.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",
