@@ -51,6 +51,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolvePriceVerified, isVerifiedPriceSource } from "../_shared/price-verified.ts";
+import { isVinShape, vinShapeOrNull } from "../_shared/vin.ts";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
 // so did analyze-listing-url and search-recalls, four in all, and they had
@@ -116,7 +117,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03e";  // 03e: "is this price verified" consolidated into _shared/price-verified.ts -- four expressions, one of which disagreed with the other three, replaced by one resolver. Behaviour is unchanged by construction (24 exhaustive cases pin the old rule), so this bump is the invariant being honoured rather than a figure moving: the files that shape a report changed, so cached reports are not replayed. 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
+const CACHE_VER = "2026-09-03f";  // 03f: what a VIN looks like consolidated into _shared/vin.ts -- the shape rule was written 14 times in 3 strengths (case-sensitive or not, placeholder-rejecting or not) and none of the differences were chosen. Behaviour is unchanged except that a lower-cased VIN is now accepted everywhere rather than at two sites out of fourteen. 03e: "is this price verified" consolidated into _shared/price-verified.ts -- four expressions, one of which disagreed with the other three, replaced by one resolver. Behaviour is unchanged by construction (24 exhaustive cases pin the old rule), so this bump is the invariant being honoured rather than a figure moving: the files that shape a report changed, so cached reports are not replayed. 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1199,7 +1200,7 @@ async function lookupCatalogMsrp(
 // copy. Best-effort: 6s budget, null on any failure, never throws.
 async function decodeVinDrive(vin: string | null | undefined): Promise<string | null> {
   const v = String(vin || "").trim();
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/i.test(v)) return null;
+  if (!isVinShape(v)) return null;
   try {
     const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(v)}?format=json`, { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return null;
@@ -1968,7 +1969,7 @@ async function captureOwnDaysOnLot(analysis: any): Promise<void> {
   try {
     if (analysis?.daysOnLot) return;                    // platform data wins: it is exact
     const vin = String(analysis?.vin || "").toUpperCase();
-    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return;     // no VIN, nothing to join on
+    if (!isVinShape(vin)) return;     // no VIN, nothing to join on
 
     // Two own sources, best first. vehicle_listing carries the dealer's own
     // inventory date from the SM360 crawl — exact, but only for SM360 dealers.
@@ -2112,7 +2113,7 @@ function captureSm360PageDefault(v: any, analysis: any): void {
 // Fill-only: never overwrites page-extracted values.
 function captureSm360Extras(v: any, analysis: any): void {
   const vin = String(v?.serialNo || "").trim().toUpperCase();
-  if (!analysis.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) analysis.vin = vin;
+  if (!analysis.vin && isVinShape(vin)) analysis.vin = vinShapeOrNull(vin);
   const odo = Number(v?.odometer);
   if ((analysis.odometerKm == null || Number(analysis.odometerKm) === 0) && Number.isFinite(odo) && odo > 0) analysis.odometerKm = odo;
   if (!Array.isArray(analysis.addOns) || analysis.addOns.length === 0) {
@@ -2272,7 +2273,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
     // looks like a 17-char VIN; validateVin re-checks the check digit
     // downstream. Never invent one.
     const vinRaw = typeof match?.serialNo === "string" ? match.serialNo.trim().toUpperCase() : "";
-    const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : null;
+    const vin = vinShapeOrNull(vinRaw);
 
     const odoNum = Number(match?.odometer);
     const odometerKm = Number.isFinite(odoNum) && odoNum >= 0 ? odoNum : null;
@@ -2766,7 +2767,7 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
     if (!prov) { analysis.marketCount = { ...base, reason: "province_unknown" }; return; }
     if (!servesComps(prov)) { analysis.marketCount = { ...base, reason: "outside_province" }; return; }
     const vin = String(analysis?.vin || "").toUpperCase();
-    const excludeVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null;
+    const excludeVin = vinShapeOrNull(vin);
     // Bounded: an optional card must not spend the request budget.
     const rpc = supabase.rpc("fn_market_comps", {
       p_year: year, p_make: make, p_model: model, p_condition: condition,
@@ -4308,7 +4309,7 @@ Deno.serve(async (req: Request) => {
     // time anyone runs a check on it.
     try {
       const vin = String(analysis?.vin || "").toUpperCase();
-      if (/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+      if (isVinShape(vin)) {
         await supabase.rpc("fn_note_listing_seen", { p_vin: vin, p_host: hostOf(url) });
       }
     } catch (e) { console.warn("listing_seen note failed (non-fatal):", e); }

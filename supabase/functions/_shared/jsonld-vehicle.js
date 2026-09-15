@@ -23,6 +23,8 @@
 //
 // Deliberately NOT built on extractJsonLdVehicle: that returns the FIRST
 // priced vehicle node and stops, so it can never answer "how many".
+import { plausibleVinOrNull, vinShapeOrNull } from "./vin.ts";
+
 export function jsonLdVehicles(html, pageUrl) {
   const empty = { count: 0, vins: [], anchoredVin: null };
   if (typeof html !== "string" || !html) return empty;
@@ -41,7 +43,7 @@ export function jsonLdVehicles(html, pageUrl) {
   const vinOf = (n) => {
     // Four fields real dealer schemas use for it, in decreasing directness.
     const vin = n.vehicleIdentificationNumber ?? n.vin ?? n.sku ?? n.mpn;
-    return (typeof vin === "string" && /^[A-HJ-NPR-Z0-9]{17}$/i.test(vin.trim())) ? vin.trim().toUpperCase() : null;
+    return vinShapeOrNull(vin);
   };
   const anchorOf = (n) => norm(
     typeof n.url === "string" ? n.url
@@ -132,7 +134,7 @@ export function extractJsonLdVehicle(html) {
   const trim = titleCase(str(node.vehicleConfiguration) || str(node.trim) || str(node.vehicleModelConfiguration));
 
   const vinRaw = typeof node.vehicleIdentificationNumber === "string" ? node.vehicleIdentificationNumber.trim().toUpperCase() : "";
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+  const vin = plausibleVinOrNull(vinRaw);
 
   let odometerKm = null;
   const odo = node.mileageFromOdometer;

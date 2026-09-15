@@ -75,6 +75,24 @@ const RESHAPERS = new Set(["canonicalReport", "decodeReport", "encodeReport", "c
 // Coercion wrappers: `num(x)` is the same fact as `x`.
 const COERCE = /^(n|num|toNum|readNum|Number|parseInt|parseFloat|String|Boolean)$/;
 
+// CALLING THE AUTHORITY IS READING, NOT AUTHORING. Consolidating the VIN shape
+// rule replaced `analysis.vin = vin` with `analysis.vin = vinShapeOrNull(vin)`
+// and this gate counted vin's authors 6 -> 7: the fix that removed thirteen
+// duplicate definitions was scored as making the problem worse. A gate that
+// punishes the exact remedy it asks for teaches people to route around it.
+//
+// So a call to a function on this list is forwarding, and the DERIVATION INSIDE
+// that function is the one author — which is the whole point of consolidating.
+// The list is explicit rather than a name pattern, because "anything called
+// resolve*" would let a new function quietly exempt itself from the gate by
+// being named well. Adding to it is a deliberate act with a reviewable diff.
+const AUTHORITIES = new Set([
+  // _shared/vin.ts — what a VIN looks like, decided once.
+  "normalizeVin", "isVinShape", "isPlausibleVin", "plausibleVinOrNull", "vinShapeOrNull",
+  // _shared/price-verified.ts — "is this price verified", decided once.
+  "resolvePriceVerified", "isVerifiedPriceSource",
+]);
+
 // Normalising a forwarded value is not authoring it. `String(ctx.vin).toUpperCase()`
 // is the same VIN; `!!ctx.priceVerified` is the same boolean. Both were being
 // counted as new authors on the first run against current code -- three phantom
@@ -103,7 +121,7 @@ const EXTRACTORS = new Set([
 const BASELINE = {
   addOns: [
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
-    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#82353f1c",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
@@ -145,7 +163,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
   ],
   financeRates: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#82353f1c",
   ],
   financingCheck: [
     "supabase/functions/analyze-listing-url/index.ts::computeFinancingCheck",
@@ -191,7 +209,7 @@ const BASELINE = {
   ],
   pageDefault: [
     "supabase/functions/_shared/invariants.ts::repair",
-    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#82353f1c",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::anon#31a3c6bc",
@@ -211,7 +229,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
   ],
   priceVerified: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#82353f1c",
   ],
   quotedPrice: [
     "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",
@@ -236,13 +254,8 @@ const BASELINE = {
   ],
   vin: [
     "src/App.jsx::UnlockModal",
-    "supabase/functions/_shared/convertus-vms.js::extractConvertusVmsVehicle",
-    "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",
-    "supabase/functions/_shared/invariants.ts::validateVin",
-    "supabase/functions/_shared/jsonld-vehicle.js::extractJsonLdVehicle",
     "supabase/functions/_shared/jsonld-vehicle.js::walk",
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
-    "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
     "supabase/functions/value-report/index.ts::anon#831ecb02",
   ],
 };
@@ -318,6 +331,8 @@ function isForwarded(node) {
     case "OptionalCallExpression": {
       // num(x) / String(x) -- a bare coercion wrapper.
       if (node.callee.type === "Identifier") {
+        // A read from the single authority for this fact.
+        if (AUTHORITIES.has(node.callee.name)) return true;
         return COERCE.test(node.callee.name) &&
                node.arguments.length === 1 &&
                isForwarded(node.arguments[0]);

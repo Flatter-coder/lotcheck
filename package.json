@@ -87,6 +87,7 @@
     "check:canonical": "node scripts/check-canonical-parity.mjs",
     "check:lineage": "node scripts/check-fact-lineage.mjs",
     "test:price-verified": "node --experimental-strip-types supabase/functions/_shared/price-verified.test.ts",
+    "test:vin": "node --experimental-strip-types supabase/functions/_shared/vin.test.ts",
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "key:scrapfly": "node scripts/set-scrapfly-key.mjs",
     "key:sync": "node scripts/sync-scrapfly-key.mjs",
