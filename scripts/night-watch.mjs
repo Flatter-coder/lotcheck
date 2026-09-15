@@ -150,10 +150,57 @@ function analysisFrom(html) {
   return null;
 }
 
+// ── Drift, and why most points cannot be graded against an older key ────────
+// FOUND ON THE FIRST REAL RUN, 2026-09-15. The instrument reported 10 price
+// defects at Silverhill Acura, all in the same direction. Every one was wrong.
+// The answer keys were built 08-20; the pages were snapshotted 09-15. The
+// dealer had cut prices in between, and our extraction matched all three of
+// today's page statements exactly — meta description, JSON-LD offers.price, and
+// the blob's internet_price. The key's own recorded evidence for one unit reads
+// `internet_price=45130`; that same field on the same page now reads 42475.
+// Same field, different day, different number.
+//
+// So a stale key does not measure our accuracy. It measures how much the market
+// moved, and books it against us — which is this product's own cardinal sin
+// aimed inward: accusing on evidence that has expired.
+//
+// grade-golden-set.mjs already knew this and prints a warning when results and
+// keys are more than a day apart. A warning was the cheap branch and I took it
+// by omitting it. This refuses instead: past the window, every point that can
+// drift becomes not_gradable — never silently passed, never counted as a
+// defect. What is left still grades, because it cannot drift: a VIN, a model
+// year and a new/used condition are properties of the vehicle, not of the day.
+const FRESH_MS = 24 * 3600e3;
+const DRIFTS = new Set(["price", "price_gating", "msrp_dealer_stated", "odometer"]);
+const keysBuiltAt = Date.parse(keys?.meta?.builtAt || "");
+
+function applyDrift(g, fetchedAt) {
+  const pageAt = Date.parse(fetchedAt || "");
+  if (!Number.isFinite(keysBuiltAt) || !Number.isFinite(pageAt)) return { g, suppressed: 0 };
+  if (pageAt - keysBuiltAt <= FRESH_MS) return { g, suppressed: 0 };
+
+  let suppressed = 0;
+  const points = { ...g.points };
+  for (const p of Object.keys(points)) {
+    if (DRIFTS.has(p) && points[p] !== "not_gradable") { points[p] = "not_gradable"; suppressed++; }
+  }
+  if (!suppressed) return { g, suppressed: 0 };
+  const vals = Object.values(points);
+  const verdict = vals.includes("false_accusation") ? "FAIL_FALSE_ACCUSATION"
+    : vals.includes("wrong") ? "FAIL"
+    : vals.every((v) => v === "not_gradable") ? "NOT_GRADABLE"
+    : "PASS";
+  // Keep only the reasons for points that survived, so a suppressed point can
+  // never leave its accusation behind in the output.
+  const reasons = g.reasons.filter((r) => !DRIFTS.has(String(r).split(":")[0]));
+  return { g: { ...g, points, verdict, reasons }, suppressed };
+}
+
 const grades = [];
 const unrecognised = [];
 let noKey = 0;
 let outOfScope = 0;
+let suppressedPoints = 0;
 
 for (const p of pages) {
   if (isFeedBacked(p.url)) { outOfScope++; continue; }
@@ -170,7 +217,9 @@ for (const p of pages) {
     unrecognised.push(p.url);
     continue;
   }
-  grades.push({ ...gradeListing(key, a), extractor: a._extractor, fetchedAt: p.fetchedAt });
+  const { g, suppressed } = applyDrift(gradeListing(key, a), p.fetchedAt);
+  suppressedPoints += suppressed;
+  grades.push({ ...g, extractor: a._extractor, fetchedAt: p.fetchedAt });
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────
@@ -202,6 +251,15 @@ if (oldestDays != null && oldestDays > 30) {
 console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}`);
 console.log(`matched to an answer key: ${grades.length}   no key: ${noKey}   unreadable by any extractor: ${unrecognised.length}`);
 for (const u of unrecognised.slice(0, 5)) console.log(`  unread: ${String(u).slice(0, 84)}`);
+const keyAgeDays = Number.isFinite(keysBuiltAt) ? Math.round((Date.now() - keysBuiltAt) / 864e5) : null;
+if (suppressedPoints) {
+  console.log(`\nanswer keys built ${String(keys?.meta?.builtAt).slice(0, 10)} (${keyAgeDays} days ago), ` +
+    `pages snapshotted later — ${suppressedPoints} drift-prone points NOT graded`);
+  console.log(`  (price, price-gating, dealer-stated MSRP, odometer). A dealer moving a price`);
+  console.log(`  is not our defect, and grading it against an expired key would accuse us of`);
+  console.log(`  one. Identity, VIN and condition still grade — those cannot drift.`);
+  console.log(`  To grade price again, rebuild the keys against the same snapshot: npm run golden:build`);
+}
 console.log(`graded: ${s.graded}   pass: ${s.pass}   fail: ${s.fail}   false accusations: ${s.false_accusations}`);
 if (s.accuracyPct != null) console.log(`extraction accuracy (page-provable points): ${s.accuracyPct}%`);
 // The rule of three needs a real n to say anything: 0 fails in 1 listing bounds
@@ -231,6 +289,8 @@ const entry = {
   accuracyPct: s.accuracyPct,
   ruleOfThree95UpperPct: s.ruleOfThree95UpperPct,
   unreadable: unrecognised.length,
+  suppressedDriftPoints: suppressedPoints,
+  keysBuiltAt: keys?.meta?.builtAt || null,
   defects: defects.map((g) => ({ url: g.url, verdict: g.verdict, reasons: g.reasons, extractor: g.extractor })),
 };
 

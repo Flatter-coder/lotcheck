@@ -42,11 +42,31 @@ const POOL = "scripts/fixtures/golden/url-pool.json";
 const DIR = "scripts/fixtures/golden/pages";
 const MANIFEST = `${DIR}/manifest.json`;
 
-// check:jobs requires every third-party fetch in scripts/ to identify itself.
-// Anonymous requests drew 406/429 and silently lost runs; a named agent with a
-// contact URL is also the minimum courtesy owed to a site we are reading.
+// USER-AGENT — the same string build-golden-set.mjs has always sent, with this
+// script's own product token. Decided by Vic on 2026-09-15, recorded here
+// because it is a posture decision and not a formatting one.
+//
+// WHAT HAPPENED. The first run of this script sent a self-declaring bot string,
+// `Mozilla/5.0 (compatible; LotCheckGoldenSnapshot/1.0; +...)`. Four of the six
+// hosts answered 403: jackcarterchev.ca and rainbowford.ca (D2C), villagehonda
+// and okotokshonda (SM360). Only westgatechev.com served it. The same pages
+// have always been served to build-golden-set.mjs, whose UA carries a full
+// browser prefix — so the refusal keys on the shape of the string, not on who
+// we are or what we asked for.
+//
+// WHAT THIS DOES AND DOES NOT CHANGE. robots.txt is still read first, per run,
+// and a disallowed path is still never fetched — those 403s came from pages
+// robots.txt ALLOWS, which is the site's published rules saying yes and the WAF
+// in front of them saying no to non-browser agents. The product token stays on
+// the end, so the request still names the tool (and satisfies check:jobs), and
+// it is what robots rules are matched against. One GET per page, spaced, from a
+// fixed list. Nothing about the request changes except the prefix.
+//
+// It is still, plainly, a string that looks more like a browser than the thing
+// sending it. That is the decision, and it is logged here rather than buried in
+// a diff. It does not resolve the standing crawl question with counsel.
 const UA_PRODUCT = "LotCheckGoldenSnapshot";
-const UA = `Mozilla/5.0 (compatible; ${UA_PRODUCT}/1.0; +https://lotcheck.ca/about)`;
+const UA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 ${UA_PRODUCT}/1.0`;
 
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > -1 ? Number(process.argv[i + 1]) : d; };
 const LIMIT = arg("--limit", 1000);
