@@ -181,7 +181,7 @@ const BASELINE = {
     "supabase/functions/_shared/jsonld-vehicle.js::walk",
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
-    "supabase/functions/value-report/index.ts::anon#3d947e8e",
+    "supabase/functions/value-report/index.ts::anon#831ecb02",
   ],
 };
 
@@ -288,9 +288,16 @@ function bindingAround(fn) {
 // then miss exactly what it exists to catch. A short digest of the function's
 // own source is unique, and unlike a line number it does not move when code
 // above it does.
+// LINE ENDINGS ARE NOT PART OF THE IDENTITY. Hashing the raw slice made the
+// same function digest differently on a CRLF checkout than on an LF one, so the
+// pin was machine-dependent: green on Windows, red in CI, for code nobody had
+// touched. CI caught it on the first run. Normalise before hashing, and only
+// line endings -- collapsing more would let two genuinely different functions
+// share a label, which is the miss this fallback exists to prevent.
 function digestOf(fn, src) {
   const { start, end } = fn.node;
-  return createHash("sha256").update(src.slice(start, end)).digest("hex").slice(0, 8);
+  const text = src.slice(start, end).split(String.fromCharCode(13)).join("");  // strip CR: a CRLF checkout must digest like an LF one
+  return createHash("sha256").update(text).digest("hex").slice(0, 8);
 }
 
 function siteOf(path, file, src) {
