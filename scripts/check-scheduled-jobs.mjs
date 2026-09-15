@@ -82,8 +82,42 @@ for (const f of scriptFiles(SCRIPTS)) {
     `upstream will too. Add a descriptive header with a contact URL.`);
 }
 
+// ---- 3. a workflow that builds a Supabase client needs Node >= 22 ----------
+//
+// @supabase/supabase-js requires a global WebSocket. Node gained one at 22; on
+// 20 the client constructor throws "Node.js detected but native WebSocket not
+// found" -- at RUN time, and only on the path that actually writes. So a job
+// can download, parse and compute everything correctly and still die on its
+// last line, which is exactly what fault-catalog.yml did on 2026-09-15: pinned
+// to 20, it failed twice in a row AFTER parsing 1,587,434 complaints, first for
+// a missing `npm ci` and then for this.
+//
+// Every other workflow in the repo was already on 22 or 24. That one was
+// written from habit rather than from the repo, and nothing could tell.
+//
+// The FLOOR is checked, never an exact version: 22 and 24 are both fine, and
+// pinning one would fight the next upgrade for no safety.
+const NODE_FLOOR = 22;
+const SUPABASE_SCRIPTS = /build-fault-catalog|amvic-activities|audit-dealer-licenses|backfill-drivetrain|apply-migrations/;
+for (const f of yamls) {
+  const rel = relative(".", f).replace(/\\/g, "/");
+  if (!rel.startsWith(LIVE_DIR + "/")) continue;
+  const src = readFileSync(f, "utf8");
+  const buildsClient = /supabase-js|createClient|SUPABASE_SERVICE_ROLE_KEY/.test(src)
+    || SUPABASE_SCRIPTS.test(src);
+  if (!buildsClient) continue;
+  const m = src.match(/node-version:\s*"?(\d+)"?/);
+  if (!m) continue;                    // unpinned: the runner default is current
+  if (Number(m[1]) < NODE_FLOOR) {
+    problems.push(
+      `${rel}\n      Pins Node ${m[1]} and builds a Supabase client. supabase-js needs a global ` +
+      `WebSocket,\n      which Node gained at ${NODE_FLOOR}; on ${m[1]} it throws "native WebSocket not found" ` +
+      `at run time --\n      after the job has already done all of its work. Raise node-version to ${NODE_FLOOR} or higher.`);
+  }
+}
+
 if (!problems.length) {
-  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, and every third-party fetch identifies itself.`);
+  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+.`);
   process.exit(0);
 }
 console.error(`❌ scheduled-jobs: ${problems.length} job(s) cannot reliably do their work.\n`);
