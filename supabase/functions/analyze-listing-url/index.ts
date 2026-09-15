@@ -50,6 +50,8 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolvePriceVerified, isVerifiedPriceSource } from "../_shared/price-verified.ts";
+import { isVinShape, vinShapeOrNull } from "../_shared/vin.ts";
 import { readNum, odometerReading } from "../_shared/read-num.js";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
@@ -119,7 +121,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-13b";  // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
+const CACHE_VER = "2026-09-13c";  // 13c: "price verified" is STRICT wherever it is a CLAIM; VIN shape decided once in _shared/vin.ts. // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1243,7 +1245,7 @@ async function lookupCatalogMsrp(
 // copy. Best-effort: 6s budget, null on any failure, never throws.
 async function decodeVinDrive(vin: string | null | undefined): Promise<string | null> {
   const v = String(vin || "").trim();
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/i.test(v)) return null;
+  if (!isVinShape(v)) return null;
   try {
     const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(v)}?format=json`, { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return null;
@@ -2041,7 +2043,7 @@ async function captureOwnDaysOnLot(analysis: any, urlHint?: string | null): Prom
   try {
     if (analysis?.daysOnLot) return;                    // platform data wins: it is exact
     const vin = String(analysis?.vin || "").toUpperCase();
-    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return;     // no VIN, nothing to join on
+    if (!isVinShape(vin)) return;     // no VIN, nothing to join on
 
     // THE DEALER WHOSE REPORT THIS IS. The old lookup selected on VIN alone and
     // took the EARLIEST first_seen_on -- but vehicle_listing is keyed
@@ -2259,7 +2261,7 @@ function captureSm360PageDefault(v: any, analysis: any): void {
 // Fill-only: never overwrites page-extracted values.
 function captureSm360Extras(v: any, analysis: any): void {
   const vin = String(v?.serialNo || "").trim().toUpperCase();
-  if (!analysis.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) analysis.vin = vin;
+  if (!analysis.vin && isVinShape(vin)) analysis.vin = vinShapeOrNull(vin);
   const odo = Number(v?.odometer);
   if ((analysis.odometerKm == null || Number(analysis.odometerKm) === 0) && Number.isFinite(odo) && odo > 0) analysis.odometerKm = odo;
   if (!Array.isArray(analysis.addOns) || analysis.addOns.length === 0) {
@@ -2419,7 +2421,7 @@ async function buildSm360FallbackAnalysis(url: string): Promise<any | null> {
     // looks like a 17-char VIN; validateVin re-checks the check digit
     // downstream. Never invent one.
     const vinRaw = typeof match?.serialNo === "string" ? match.serialNo.trim().toUpperCase() : "";
-    const vin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) ? vinRaw : null;
+    const vin = vinShapeOrNull(vinRaw);
 
     const odoNum = readNum(match?.odometer);   // blank is not 0 km [[read-num]]
     const odometerKm = odoNum != null && odoNum >= 0 ? odoNum : null;
@@ -2885,10 +2887,8 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // ONE definition of "the price came from the page's own machine-readable
 // data". priceVerified is stamped from it on the main path; the fallback
 // builders never reach that stamp, so the count reads the same rule here.
-function isVerifiedPriceSource(src: unknown): boolean {
-  const s = String(src || "");
-  return s === "structured_data" || s === "sm360_feed" || s === "sm360_feed_fallback" || s === "convertus_vms" || s === "d2c_vdp";
-}
+// The source list lives in _shared/price-verified.ts with the rule that uses
+// it -- a second copy here is a second definition of "verified".
 
 // "Of N other listings LotCheck read, M advertised below this one when read."
 // Our OWN crawl rows (fn_market_comps: exact model year, same make/model/
@@ -2911,8 +2911,10 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
     const condition = String(analysis?.vehicleCondition || "").toLowerCase();
     const prov = String(resolveJurisdiction({ ...analysis, url: analysis?.sourceUrl || urlHint || null }).code || "").toUpperCase();
     const price = Number(analysis?.quotedPrice);
-    const priceVerified = analysis?.priceVerified === true
-      || (analysis?.priceVerified == null && price > 0 && isVerifiedPriceSource(analysis?.quotedPriceSource));
+    // `dealerPublished`: a recorded verdict if there is one, else the source
+    // check. Counting a listing against others on an unverified number would
+    // turn a guess into a data point.
+    const priceVerified = resolvePriceVerified(analysis).dealerPublished;
     const today = todayIso();
     const base = emptyMarketCount({ province: prov || null, year: year > 0 ? year : null, make: make || null, model: model || null, price: price > 0 ? price : null, priceVerified, asOf: today });
     if (!(year > 0) || !make || !model) { analysis.marketCount = { ...base, reason: "identity_missing" }; return; }
@@ -2920,7 +2922,7 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
     if (!prov) { analysis.marketCount = { ...base, reason: "province_unknown" }; return; }
     if (!servesComps(prov)) { analysis.marketCount = { ...base, reason: "outside_province" }; return; }
     const vin = String(analysis?.vin || "").toUpperCase();
-    const excludeVin = /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null;
+    const excludeVin = vinShapeOrNull(vin);
     // Bounded: an optional card must not spend the request budget.
     const rpc = supabase.rpc("fn_market_comps", {
       p_year: year, p_make: make, p_model: model, p_condition: condition,
@@ -4469,7 +4471,7 @@ Deno.serve(async (req: Request) => {
     // time anyone runs a check on it.
     try {
       const vin = String(analysis?.vin || "").toUpperCase();
-      if (/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+      if (isVinShape(vin)) {
         await supabase.rpc("fn_note_listing_seen", { p_vin: vin, p_host: hostOf(url) });
       }
     } catch (e) { console.warn("listing_seen note failed (non-fatal):", e); }

@@ -238,7 +238,7 @@ function coverCard(a: any): string {
   const hasCmp = claim.comparable;
   const over = claim.over;
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
+  const pv = resolvePriceVerified(a).sourceVerified;
   const score = a.leverageScore?.computed ? Number(a.leverageScore.score) : null;
   const pct = score != null ? Math.max(4, Math.min(100, Math.round(score * 10))) : 0;
   const barColor = score == null ? "#3ae0ff" : score >= 7 ? "#5eead4" : score >= 4 ? "#facc15" : "#fb7185";
@@ -310,7 +310,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const hasCmp = claim.comparable;
   const over = claim.over;
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
+  const pv = resolvePriceVerified(a).sourceVerified;
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
   // The emailed HTML body is its own render surface. e80122c put the
   // gated-price disclosure in the attached PDF but not here, so the email a
@@ -390,13 +390,20 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
     else if (rc.count === 0 && rc.confirmed === false) deck.push({ label: "Recalls · Transport Canada", tone: "muted", glow: false, body: `<div style="font-size:14px;font-weight:800;color:#9A6B00;">Couldn't confirm for this exact model</div><div style="font-size:12px;color:#5B5885;margin-top:3px;line-height:1.5;">Not an all-clear — check open recalls by VIN at Transport Canada.</div>` });
     else if (rc.count === 0) deck.push({ label: "Recalls · Transport Canada", tone: "pass", glow: false, body: `<div style="font-size:15px;font-weight:800;color:#17756B;">✓ None open</div>` });
     else {
-      // The PDF in this same email prints EVERY recall. This deck printed the
-      // first three under a headline count that could say seven -- the two
-      // halves of one email disagreeing about how many safety recalls a car
-      // has. A cap is defensible; a silent one is not, so the note below says
-      // it. [[recalls-detail-list-must-match-count]]
-      const DECK_RECALL_CAP = 3;
-      const shownDeck = Math.min((rc.items || []).length, DECK_RECALL_CAP);
+      // The PDF in this same email prints EVERY recall. This deck printed the
+
+      // first three under a headline count that could say seven -- the two
+
+      // halves of one email disagreeing about how many safety recalls a car
+
+      // has. A cap is defensible; a silent one is not, so the note below says
+
+      // it. [[recalls-detail-list-must-match-count]]
+
+      const DECK_RECALL_CAP = 3;
+
+      const shownDeck = Math.min((rc.items || []).length, DECK_RECALL_CAP);
+
       const items = (rc.items || []).slice(0, DECK_RECALL_CAP).map((it: any) => {
         const yr = it.date && !Number.isNaN(new Date(it.date).getFullYear()) ? " · " + new Date(it.date).getFullYear() : "";
         return `<div style="font-size:12px;color:#33305A;margin-top:6px;padding-top:6px;border-top:1px solid #F2836B33;"><b>${escapeHtml(it.system || "Recall")}${yr}</b>${it.summary ? `<div style="color:#5B5885;margin-top:2px;line-height:1.45;">${escapeHtml(it.summary)}</div>` : ""}</div>`;
@@ -852,6 +859,7 @@ function u8ToB64(u8: Uint8Array): string {
 // Sealed listing capture — shape/size/magic-byte validation lives in the pure,
 // tested module (_shared/capture.ts, pinned by capture.test.ts).
 import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
+import { resolvePriceVerified } from "../_shared/price-verified.ts";
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
@@ -996,7 +1004,7 @@ function dealerFeeTotal(a: any): number {
 function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (qp > 0);
+  const pv = resolvePriceVerified(a).sourceVerified;
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
   const msrpExactTp = ms > 0 && a.msrpBasis === "exact";
   if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
@@ -1055,7 +1063,8 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   if (a.odometerCheck?.checked) P.push({ t: "Odometer", v: Number(a.odometerCheck.km).toLocaleString() + " km" + (a.odometerCheck.flag ? " FLAG" : ""), tone: a.odometerCheck.flag ? "flag" : "pass" });
   else P.push({ t: "Odometer", v: a.vehicleCondition === "new" ? "N/A (NEW)" : "NOT LISTED", tone: "muted" });
   if (a.vinCheck?.present) P.push({ t: "VIN check", v: a.vinCheck.valid ? "VALID" : "CHECK PATTERN", tone: a.vinCheck.valid ? "pass" : "flag" });
-  else P.push({ t: "VIN check", v: "NOT PUBLISHED", tone: "muted" });
+  else P.push({ t: "VIN check", v: "NOT PUBLISHED", tone: "muted" });
+
   if (a.evapRebate?.eligible) P.push({ t: "EV / PHEV rebate", v: money(a.evapRebate.total) + " ELIGIBLE", tone: "pass" });
   else if (a.evapRebate && a.evapRebate.ineligibleReason) P.push({ t: "EV / PHEV rebate", v: "NOT ELIGIBLE", tone: "muted" });
   else if (a.fuelType === "BEV" || a.fuelType === "PHEV") { const over = (Number(a.quotedPrice) || Number(a.msrp) || 0) > 50000; P.push({ t: "EV / PHEV rebate", v: over ? "OVER $50K CAP" : "CHECK ELIGIBILITY", tone: "muted" }); }
@@ -1343,7 +1352,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   let y = PH - M;
 
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
-  const priceVerified = (a.priceVerified !== undefined) ? !!a.priceVerified : (Number(a.quotedPrice) > 0);
+  const priceVerified = resolvePriceVerified(a).sourceVerified;
   const RID = a.reportId || reportNo(a);  // tamper-evident ID stamped client-side; fallback to legacy hash
   const issued = a.issuedAt ? new Date(a.issuedAt) : null;
   const reportDate = a.reportDate || (issued ? issued.toLocaleDateString("en-CA", { month: "long", year: "numeric" }) : new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" }));

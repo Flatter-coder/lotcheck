@@ -48,9 +48,12 @@
 // Offline and pure: no network, no clock, no model. Imported by src/App.jsx
 // (Vite) and by the Deno edge functions alike.
 
+import { priceUsableForComparison } from "./price-verified.ts";
+
 import { REPORT_POINTS } from "./report-points.js";
 import { fmtMoney, warrantyLine } from "./report-lines.js";
-import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
+import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
+
 import { marketCompareLine } from "./report-lines.js";
 
 // FOUR STATES, because green is a claim.
@@ -109,7 +112,7 @@ const band = (key, n, state, value, note, extra) =>
  */
 function priceBand(a) {
   const qp = num(a?.quotedPrice), ms = num(a?.msrp);
-  const pv = a?.priceVerified !== undefined ? !!a.priceVerified : qp > 0;
+  const pv = priceUsableForComparison(a);  // draws a scale, so: is there a price
   const exact = ms > 0 && a?.msrpBasis === "exact";
   // marketValue has no `median` field and never has -- the median is stored as
   // `average` (see report-sign.ts, which seals avg). This read has been null

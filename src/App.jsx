@@ -17,6 +17,7 @@ import { reportBands, bandTally, STATE_WORD } from "../supabase/functions/_share
 import { faultsPanel, precisionNote, FAULTS_BASIS, FAULTS_SHOWN, FAULTS_NOT_CHECKED } from "../supabase/functions/_shared/vehicle-faults.js";
 import { lookupFaults, cellKey, CATALOGUE_UNREADABLE } from "../supabase/functions/_shared/fault-model-match.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
+import { resolvePriceVerified } from "../supabase/functions/_shared/price-verified.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
 // like a different product on Android than on macOS.
@@ -9055,7 +9056,7 @@ function canonicalReport(a){
     v:11,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
-    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
+    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:resolvePriceVerified(a).sourceVerified},
     leverage:a.leverageScore&&a.leverageScore.score!=null?Number(a.leverageScore.score):null,
     lvn:a.leverageScore?.note||null,
     recalls:a.recalls&&a.recalls.checked?{count:a.recalls.count||0,confirmed:a.recalls.confirmed!==false,items:(a.recalls.items||[]).map(it=>({system:it.system||null,date:it.date||null}))}:null,
@@ -11690,7 +11691,7 @@ function QuoteCheckPage(){
                 const msrpExact=isExactMsrp(a);
                 const deltaOkG=!!(qp&&ms&&msrpExact);
                 const priceGatedG=!qp&&analysis.priceDisclosure==="contact_for_price";
-                const priceVerifiedG=analysis.priceVerified!==undefined?!!analysis.priceVerified:(qp>0);
+                const priceVerifiedG=resolvePriceVerified(analysis).sourceVerified;
 
                 // ── THE CANONICAL TEN, BUILT ONCE, IN report-bands.js ──────────
                 // This used to be seventy lines of hand-written pushes, and the
