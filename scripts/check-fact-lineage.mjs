@@ -103,14 +103,26 @@ const EXTRACTORS = new Set([
 const BASELINE = {
   addOns: [
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
+    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::buildAnalysis",
   ],
+  allInPricing: [
+    "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
+  ],
   capturedAt: [
     "src/App.jsx::EvidenceCard",
     "src/App.jsx::handleUrlAnalyze",
+    "supabase/functions/_shared/scrapfly.ts::attachSealedScreenshot",
+  ],
+  daysOnLot: [
+    "supabase/functions/_shared/jsonld-vehicle.js::fillFromJsonLd",
+    "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
+    "supabase/functions/analyze-listing-url/index.ts::captureConvertusDaysOnLot",
+    "supabase/functions/analyze-listing-url/index.ts::captureOwnDaysOnLot",
+    "supabase/functions/analyze-listing-url/index.ts::captureSm360DaysOnLot",
   ],
   dealerCity: [
     "supabase/functions/_shared/convertus-vms.js::extractConvertusVmsVehicle",
@@ -125,22 +137,64 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::rawVehicles",
   ],
+  dealerSentiment: [
+    "supabase/functions/analyze-listing-url/index.ts::resolveDealerReputation",
+  ],
   financeContingent: [
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
   ],
+  financeRates: [
+    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+  ],
+  financingCheck: [
+    "supabase/functions/analyze-listing-url/index.ts::computeFinancingCheck",
+    "supabase/functions/analyze-quote/index.ts::computeFinancingCheck",
+  ],
   issuedAt: [
     "src/App.jsx::finalizeReport",
+    "supabase/functions/_shared/report-sign.ts::finalizeServerSide",
     "supabase/functions/email-quote-report/index.ts::verifySealedShot",
+  ],
+  leverageScore: [
+    "supabase/functions/analyze-listing-url/index.ts::computeLeverageScore",
+    "supabase/functions/analyze-quote/index.ts::computeLeverageScore",
+  ],
+  listingShotSha256: [
+    "supabase/functions/_shared/scrapfly.ts::attachSealedScreenshot",
+    "supabase/functions/_shared/scrapfly.ts::rescueListingViaScrapfly",
+  ],
+  marketCount: [
+    "supabase/functions/_shared/invariants.ts::repair",
+    "supabase/functions/analyze-listing-url/index.ts::captureMarketCount",
+    "supabase/functions/analyze-quote/index.ts::anon#31a3c6bc",
+  ],
+  marketValue: [
+    "supabase/functions/_shared/invariants.ts::repair",
   ],
   msrp: [
     "supabase/functions/_shared/msrp-authority.js::resolveMsrpAuthority",
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
   ],
+  msrpBasis: [
+    "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
+  ],
   odometerKm: [
     "supabase/functions/_shared/convertus-vms.js::extractConvertusVmsVehicle",
     "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
+  ],
+  olderYears: [
+    "supabase/functions/_shared/invariants.ts::repair",
+    "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
+    "supabase/functions/analyze-quote/index.ts::anon#31a3c6bc",
+  ],
+  pageDefault: [
+    "supabase/functions/_shared/invariants.ts::repair",
+    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
+    "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
+    "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
+    "supabase/functions/analyze-quote/index.ts::anon#31a3c6bc",
   ],
   priceDisclosure: [
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
@@ -157,16 +211,24 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
   ],
   priceVerified: [
-    "src/App.jsx::ReportViews",
-    "supabase/functions/_shared/msrp-claim.ts::qualifyMsrpClaim",
-    "supabase/functions/analyze-listing-url/index.ts::captureMarketCount",
-    "supabase/functions/email-quote-report/index.ts::buildReportPdf",
+    "supabase/functions/analyze-listing-url/index.ts::anon#19cc4fe3",
   ],
   quotedPrice: [
     "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
     "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
     "supabase/functions/analyze-quote/index.ts::lookupVerifiedMsrp",
+  ],
+  quotedPriceSource: [
+    "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
+    "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
+    "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
+    "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
+  ],
+  recalls: [
+    "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
+    "supabase/functions/analyze-quote/index.ts::anon#31a3c6bc",
+    "supabase/functions/value-report/index.ts::anon#831ecb02",
   ],
   sourceUrl: [
     "supabase/functions/_shared/msrp-authority.js::resolveMsrpAuthority",
@@ -193,7 +255,33 @@ function publishedFacts() {
   const body = src.slice(at);
   const end = body.indexOf("\n}");
   if (end < 0) throw new Error(`${SIGN_FILE}: canonicalReport() has no closing brace at column 0`);
-  const names = new Set([...body.slice(0, end).matchAll(/\ba\.([A-Za-z_][\w]*)/g)].map((m) => m[1]));
+  const projected = body.slice(0, end);
+  const names = new Set([...projected.matchAll(/\ba\.([A-Za-z_][\w]*)/g)].map((m) => m[1]));
+
+  // A FACT READ THROUGH A RESOLVER IS STILL A FACT. Consolidating priceVerified
+  // into resolvePriceVerified(a) removed the literal `a.priceVerified` from
+  // canonicalReport, and this harvest quietly stopped tracking the field — the
+  // gate then reported "0 authors" for a fact that plainly has one, and it was
+  // a GOOD refactor that blinded it. Exactly the failure this file's header
+  // warns about, one fact at a time instead of all of them.
+  //
+  // So follow every resolve*() call the signed projection makes, find that
+  // function in the shared modules, and harvest the analysis fields it reads.
+  for (const m of projected.matchAll(/\b(resolve[A-Z][A-Za-z0-9_]*)\s*\(/g)) {
+    const fn = m[1];
+    for (const file of SURFACES) {
+      let fsrc;
+      try { fsrc = readFileSync(file, "utf8"); } catch { continue; }
+      const decl = new RegExp("function\\s+" + fn + "\\b");
+      const at2 = fsrc.search(decl);
+      if (at2 < 0) continue;
+      const stop = fsrc.indexOf("\n}", at2);
+      const fnBody = fsrc.slice(at2, stop < 0 ? fsrc.length : stop);
+      for (const r of fnBody.matchAll(/\ba\??\.([A-Za-z_][\w]*)/g)) names.add(r[1]);
+      break;
+    }
+  }
+
   for (const skip of UNTRACKED) names.delete(skip);
   return names;
 }
@@ -360,6 +448,20 @@ function lineage(facts) {
         if (isForwarded(path.node.value) || insideReshaper(path) || insideDataTable(path)) return;
         record(name, path);
       },
+      // `analysis.priceVerified = <derivation>` -- the enrichment path mutates
+      // the analysis object rather than building a literal, so an assignment is
+      // how most server-side facts are actually authored. Tracking only object
+      // properties and declarations made this gate blind to them: after
+      // priceVerified was consolidated it reported ZERO authors for a fact that
+      // plainly has one, which is a false all-clear about lineage itself.
+      AssignmentExpression(path) {
+        const l = path.node.left;
+        if (l?.type !== "MemberExpression" || l.computed) return;
+        const name = l.property?.type === "Identifier" ? l.property.name : null;
+        if (!name || !facts.has(name)) return;
+        if (isForwarded(path.node.right) || insideReshaper(path)) return;
+        record(name, path);
+      },
       VariableDeclarator(path) {
         const id = path.node.id;
         if (id.type !== "Identifier" || !facts.has(id.name)) return;
@@ -401,6 +503,22 @@ if (process.argv.includes("--emit-baseline")) {
   }
   console.log("};");
   process.exit(0);
+}
+
+// A PINNED FACT THAT LEAVES THE HARVEST MUST SAY SO. Every fact in BASELINE
+// was, when pinned, something the signed record depends on. If it stops being
+// visible here, either the report no longer publishes it — worth knowing — or
+// this gate has gone blind to it and would report it clean while checking
+// nothing. That second case already happened once, to priceVerified, and it
+// took a manual read of the output to notice. Neither passes now.
+const untracked = Object.keys(BASELINE).filter((f) => !facts.has(f));
+if (untracked.length) {
+  console.error("fact-lineage: pinned facts are no longer visible to the harvest.\n");
+  for (const f of untracked) console.error(`  ${f}`);
+  console.error("\nEither the report stopped publishing them — remove them from BASELINE and say");
+  console.error("so in the commit — or this gate can no longer see how they are produced, which");
+  console.error("means it would have reported them clean while checking nothing.");
+  process.exit(1);
 }
 
 const allFacts = [...new Set([...Object.keys(observed), ...Object.keys(BASELINE)])].sort();

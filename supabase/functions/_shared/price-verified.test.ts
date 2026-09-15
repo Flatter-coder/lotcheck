@@ -1,0 +1,93 @@
+// Truth table for resolvePriceVerified — pinned, because the point of the
+// module is that there is exactly one of these and it does not drift.
+//
+// The cases that matter are the last two: they are the ones where the five
+// loose call sites and captureMarketCount used to disagree, and where the
+// signed record made the looser claim.
+//
+// Run: node --experimental-strip-types supabase/functions/_shared/price-verified.test.ts
+import { resolvePriceVerified, isVerifiedPriceSource } from "./price-verified.ts";
+
+let pass = 0;
+const fails: string[] = [];
+
+function eq(name: string, got: unknown, want: unknown) {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g === w) { pass++; return; }
+  fails.push(`${name}\n    got  ${g}\n    want ${w}`);
+}
+
+// ── the source list ─────────────────────────────────────────────────────────
+for (const s of ["structured_data", "sm360_feed", "sm360_feed_fallback", "convertus_vms", "d2c_vdp"]) {
+  eq(`isVerifiedPriceSource("${s}")`, isVerifiedPriceSource(s), true);
+}
+for (const s of ["page_text", "vision", "", null, undefined, "STRUCTURED_DATA"]) {
+  eq(`isVerifiedPriceSource(${JSON.stringify(s)})`, isVerifiedPriceSource(s), false);
+}
+
+// ── a recorded verdict wins, either way ─────────────────────────────────────
+eq("recorded true beats everything",
+  resolvePriceVerified({ priceVerified: true, quotedPrice: 0, quotedPriceSource: "page_text" }),
+  { verified: true, sourceVerified: false, dealerPublished: true, basis: "recorded", unknown: false });
+
+eq("recorded false beats a verified source",
+  resolvePriceVerified({ priceVerified: false, quotedPrice: 50000, quotedPriceSource: "d2c_vdp" }),
+  { verified: false, sourceVerified: true, dealerPublished: false, basis: "recorded", unknown: false });
+
+// ── no price is not a verdict about verification ────────────────────────────
+eq("no price at all",
+  resolvePriceVerified({ quotedPrice: 0 }),
+  { verified: false, sourceVerified: false, dealerPublished: false, basis: "no_price", unknown: false });
+
+eq("a negative price is not a price (never renders as verified)",
+  resolvePriceVerified({ quotedPrice: -1, quotedPriceSource: "d2c_vdp" }),
+  { verified: false, sourceVerified: false, dealerPublished: false, basis: "no_price", unknown: false });
+
+eq("a non-numeric price is not a price",
+  resolvePriceVerified({ quotedPrice: "call for pricing" }),
+  { verified: false, sourceVerified: false, dealerPublished: false, basis: "no_price", unknown: false });
+
+// ── unset verdict, price from the dealer's own data: both readings agree ────
+eq("unset + verified source",
+  resolvePriceVerified({ quotedPrice: 42475, quotedPriceSource: "convertus_vms" }),
+  { verified: true, sourceVerified: true, dealerPublished: true, basis: "source_checked", unknown: false });
+
+// ── THE DIVERGENCE. Unset verdict, a price, no source we recognise. ─────────
+// This is every Quote Check report (analyze-quote sets neither field) and any
+// price read out of page text. `verified` is true because that is what has
+// always shipped and what the signed record carries; `sourceVerified` is false
+// because nothing checked it; `unknown` says so out loud.
+eq("unset + unverified source -- the Quote Check case",
+  resolvePriceVerified({ quotedPrice: 30990, quotedPriceSource: "page_text" }),
+  { verified: true, sourceVerified: false, dealerPublished: false, basis: "presence_only", unknown: true });
+
+eq("unset + NO source at all -- analyze-quote",
+  resolvePriceVerified({ quotedPrice: 30990 }),
+  { verified: true, sourceVerified: false, dealerPublished: false, basis: "presence_only", unknown: true });
+
+// ── junk in ─────────────────────────────────────────────────────────────────
+eq("null analysis", resolvePriceVerified(null),
+  { verified: false, sourceVerified: false, dealerPublished: false, basis: "no_price", unknown: false });
+eq("empty analysis", resolvePriceVerified({}),
+  { verified: false, sourceVerified: false, dealerPublished: false, basis: "no_price", unknown: false });
+
+// dealerPublished must reproduce captureMarketCount's old expression EXACTLY:
+//   a.priceVerified === true || (a.priceVerified == null && price > 0 && isVerifiedPriceSource(src))
+for (const pv of [true, false, undefined, null]) {
+  for (const src of ["d2c_vdp", "page_text", undefined]) {
+    for (const price of [0, 30990]) {
+      const a = { priceVerified: pv, quotedPrice: price, quotedPriceSource: src };
+      const old = a.priceVerified === true
+        || (a.priceVerified == null && price > 0 && isVerifiedPriceSource(src));
+      eq(`dealerPublished matches the old rule (pv=${pv} src=${src} price=${price})`,
+        resolvePriceVerified(a).dealerPublished, old);
+    }
+  }
+}
+
+if (fails.length) {
+  console.error(`price-verified: ${fails.length} FAILED, ${pass} passed\n`);
+  for (const f of fails) console.error(`  ${f}\n`);
+  process.exit(1);
+}
+console.log(`price-verified: ${pass}/${pass} pass — one author, truth table pinned.`);

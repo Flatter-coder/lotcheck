@@ -238,7 +238,7 @@ function coverCard(a: any): string {
   const hasCmp = claim.comparable;
   const over = claim.over;
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
+  const pv = resolvePriceVerified(a).verified;
   const score = a.leverageScore?.computed ? Number(a.leverageScore.score) : null;
   const pct = score != null ? Math.max(4, Math.min(100, Math.round(score * 10))) : 0;
   const barColor = score == null ? "#3ae0ff" : score >= 7 ? "#5eead4" : score >= 4 ? "#facc15" : "#fb7185";
@@ -305,7 +305,7 @@ function buildDeckBody(analysis: any): { total: number; deckHtml: string; sayHtm
   const hasCmp = claim.comparable;
   const over = claim.over;
   const diff = claim.delta !== null ? Math.abs(claim.delta) : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (a.quotedPrice > 0);
+  const pv = resolvePriceVerified(a).verified;
   const flaggedN = (a.addOns || []).filter((x: any) => x.verdict === "flagged").length;
   // The emailed HTML body is its own render surface. e80122c put the
   // gated-price disclosure in the attached PDF but not here, so the email a
@@ -831,6 +831,7 @@ function u8ToB64(u8: Uint8Array): string {
 // Sealed listing capture — shape/size/magic-byte validation lives in the pure,
 // tested module (_shared/capture.ts, pinned by capture.test.ts).
 import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
+import { resolvePriceVerified } from "../_shared/price-verified.ts";
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
@@ -973,7 +974,7 @@ function dealerFeeTotal(a: any): number {
 function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
-  const pv = (a.priceVerified !== undefined) ? !!a.priceVerified : (qp > 0);
+  const pv = resolvePriceVerified(a).verified;
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
   const msrpExactTp = ms > 0 && a.msrpBasis === "exact";
   if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
@@ -1257,7 +1258,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   let y = PH - M;
 
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
-  const priceVerified = (a.priceVerified !== undefined) ? !!a.priceVerified : (Number(a.quotedPrice) > 0);
+  const priceVerified = resolvePriceVerified(a).verified;
   const RID = a.reportId || reportNo(a);  // tamper-evident ID stamped client-side; fallback to legacy hash
   const issued = a.issuedAt ? new Date(a.issuedAt) : null;
   const reportDate = a.reportDate || (issued ? issued.toLocaleDateString("en-CA", { month: "long", year: "numeric" }) : new Date().toLocaleDateString("en-CA", { month: "long", year: "numeric" }));

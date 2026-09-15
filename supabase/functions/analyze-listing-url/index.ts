@@ -50,6 +50,7 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolvePriceVerified, isVerifiedPriceSource } from "../_shared/price-verified.ts";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
 // so did analyze-listing-url and search-recalls, four in all, and they had
@@ -115,7 +116,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-03d";  // 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
+const CACHE_VER = "2026-09-03e";  // 03e: "is this price verified" consolidated into _shared/price-verified.ts -- four expressions, one of which disagreed with the other three, replaced by one resolver. Behaviour is unchanged by construction (24 exhaustive cases pin the old rule), so this bump is the invariant being honoured rather than a figure moving: the files that shape a report changed, so cached reports are not replayed. 03d: the value report rebuilt on the rich template (marketvalue.ts gained mileageAdjustedValue/valueTiers/lotcheckValueReport); 03c: the Financing APR point no longer says "no rate is advertised" over a page whose own calculator opens at one; 03b: "Your premium after this purchase" (change of vehicle + liability limit, canonical v10); 03a: "Insurance before you sign" (the AIRB coverage-sequencing line, canonical v9); 02d: "What older model years ask today" (the model-year ladder as a report line, canonical v8); 02c: the like-for-like comparison (three plain lines, traffic light) with its basis sealed, canonical v7; + marketCount ("of N other listings read, M below") and pageDefault ("this page's payment default is...") computed server-side and sealed (canonical v6); SM360 feed payment frequency is read (52/26/12), not assumed monthly; 02b: the payment-default card renamed and its sentence rewritten
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -2730,10 +2731,8 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // ONE definition of "the price came from the page's own machine-readable
 // data". priceVerified is stamped from it on the main path; the fallback
 // builders never reach that stamp, so the count reads the same rule here.
-function isVerifiedPriceSource(src: unknown): boolean {
-  const s = String(src || "");
-  return s === "structured_data" || s === "sm360_feed" || s === "sm360_feed_fallback" || s === "convertus_vms" || s === "d2c_vdp";
-}
+// The source list lives in _shared/price-verified.ts with the rule that uses
+// it -- a second copy here is a second definition of "verified".
 
 // "Of N other listings LotCheck read, M advertised below this one when read."
 // Our OWN crawl rows (fn_market_comps: exact model year, same make/model/
@@ -2756,8 +2755,10 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
     const condition = String(analysis?.vehicleCondition || "").toLowerCase();
     const prov = String(resolveJurisdiction({ ...analysis, url: analysis?.sourceUrl || urlHint || null }).code || "").toUpperCase();
     const price = Number(analysis?.quotedPrice);
-    const priceVerified = analysis?.priceVerified === true
-      || (analysis?.priceVerified == null && price > 0 && isVerifiedPriceSource(analysis?.quotedPriceSource));
+    // `dealerPublished`: a recorded verdict if there is one, else the source
+    // check. Counting a listing against others on an unverified number would
+    // turn a guess into a data point.
+    const priceVerified = resolvePriceVerified(analysis).dealerPublished;
     const today = todayIso();
     const base = emptyMarketCount({ province: prov || null, year: year > 0 ? year : null, make: make || null, model: model || null, price: price > 0 ? price : null, priceVerified, asOf: today });
     if (!(year > 0) || !make || !model) { analysis.marketCount = { ...base, reason: "identity_missing" }; return; }
