@@ -50,6 +50,7 @@
 // pays for a driver it no longer needs.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolvePriceVerified, isVerifiedPriceSource } from "../_shared/price-verified.ts";
 import { finalizeServerSide } from "../_shared/report-sign.ts";
 // The Transport Canada recall lookup. This file used to carry its own copy —
 // so did analyze-listing-url and search-recalls, four in all, and they had
@@ -2730,10 +2731,8 @@ async function structuredFactsBlock(early: Promise<any | null>): Promise<string>
 // ONE definition of "the price came from the page's own machine-readable
 // data". priceVerified is stamped from it on the main path; the fallback
 // builders never reach that stamp, so the count reads the same rule here.
-function isVerifiedPriceSource(src: unknown): boolean {
-  const s = String(src || "");
-  return s === "structured_data" || s === "sm360_feed" || s === "sm360_feed_fallback" || s === "convertus_vms" || s === "d2c_vdp";
-}
+// The source list lives in _shared/price-verified.ts with the rule that uses
+// it -- a second copy here is a second definition of "verified".
 
 // "Of N other listings LotCheck read, M advertised below this one when read."
 // Our OWN crawl rows (fn_market_comps: exact model year, same make/model/
@@ -2756,8 +2755,10 @@ async function captureMarketCount(analysis: any, urlHint?: string | null): Promi
     const condition = String(analysis?.vehicleCondition || "").toLowerCase();
     const prov = String(resolveJurisdiction({ ...analysis, url: analysis?.sourceUrl || urlHint || null }).code || "").toUpperCase();
     const price = Number(analysis?.quotedPrice);
-    const priceVerified = analysis?.priceVerified === true
-      || (analysis?.priceVerified == null && price > 0 && isVerifiedPriceSource(analysis?.quotedPriceSource));
+    // `dealerPublished`: a recorded verdict if there is one, else the source
+    // check. Counting a listing against others on an unverified number would
+    // turn a guess into a data point.
+    const priceVerified = resolvePriceVerified(analysis).dealerPublished;
     const today = todayIso();
     const base = emptyMarketCount({ province: prov || null, year: year > 0 ? year : null, make: make || null, model: model || null, price: price > 0 ? price : null, priceVerified, asOf: today });
     if (!(year > 0) || !make || !model) { analysis.marketCount = { ...base, reason: "identity_missing" }; return; }

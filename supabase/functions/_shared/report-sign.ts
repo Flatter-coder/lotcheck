@@ -15,6 +15,8 @@
 // server is authoritative (it emits the payload the client ships verbatim).
 // ============================================================================
 
+import { resolvePriceVerified } from "./price-verified.ts";
+
 const KEY_ID = "k1"; // bump + keep old public keys in the client on rotation
 
 function num(x: unknown): number | null {
@@ -65,7 +67,7 @@ export function canonicalReport(a: any): any {
     v: 10,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
-    price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: a.priceVerified !== undefined ? !!a.priceVerified : (num(a.quotedPrice) as number) > 0 },
+    price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: resolvePriceVerified(a).verified },
     leverage: a.leverageScore && a.leverageScore.score != null ? Number(a.leverageScore.score) : null,
     lvn: a.leverageScore?.note || null,
     recalls: a.recalls && a.recalls.checked ? { count: a.recalls.count || 0, confirmed: a.recalls.confirmed !== false, items: (a.recalls.items || []).map((it: any) => ({ system: it.system || null, date: it.date || null })) } : null,

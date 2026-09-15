@@ -526,6 +526,13 @@ jobs:
       # green run.
       - name: Fact lineage (one author per published fact)
         run: npm run check:lineage
+      # The truth table behind that gate's headline finding: priceVerified had
+      # four authors and they disagreed, so the signed record could claim
+      # "verified" on a listing the market-count card refused to count. 24 of
+      # these cases pin the consolidated resolver against the exact expression
+      # captureMarketCount used to carry.
+      - name: Price verification (one rule, pinned truth table)
+        run: npm run test:price-verified
       # Same Babel-scope technique as the check above, pointed at
       # supabase/functions/**/*.ts -- nothing else in this workflow parses
       # that tree at all. A recall-lookup consolidation (4aca3c3, 2026-08-19)

@@ -14,6 +14,7 @@ import { qualifyMsrpClaim, isManufacturerFigure, qualifyCeilingClaim } from "../
 // the sentence on screen is byte-for-byte the sentence a buyer hands a dealer.
 import { marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, financingAprNote, financingAprValue, fmtDateEn, provinceName } from "../supabase/functions/_shared/report-lines.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
+import { resolvePriceVerified } from "../supabase/functions/_shared/price-verified.ts";
 // Every icon in the UI. Replaced the emoji that used to do this job — those
 // rendered as whatever glyph the device shipped, so the same report looked
 // like a different product on Android than on macOS.
@@ -8235,7 +8236,7 @@ function ReportViews({ analysis: a, view, onView, onExit, onShare, copied, share
   // "Contact Us For Price" — the page deliberately withholds the number
   // (detected from the page's own call-to-action text). A tactic, not a miss.
   const priceGated = !qp && a.priceDisclosure === "contact_for_price";
-  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : (qp > 0);
+  const priceVerified = resolvePriceVerified(a).verified;
   // The page ITSELF gated the price ("Call for pricing" or similar) but its
   // own machine-readable data (D2C's window.__vdpJSON, see d2c-vdp.js)
   // carried the real ask -- a verifiable claim about what the page's source
@@ -9832,7 +9833,7 @@ function canonicalReport(a){
     v:10,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
-    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:a.priceVerified!==undefined?!!a.priceVerified:(num(a.quotedPrice)>0)},
+    price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:resolvePriceVerified(a).verified},
     leverage:a.leverageScore&&a.leverageScore.score!=null?Number(a.leverageScore.score):null,
     lvn:a.leverageScore?.note||null,
     recalls:a.recalls&&a.recalls.checked?{count:a.recalls.count||0,confirmed:a.recalls.confirmed!==false,items:(a.recalls.items||[]).map(it=>({system:it.system||null,date:it.date||null}))}:null,
@@ -12323,7 +12324,7 @@ function QuoteCheckPage(){
                 // qualify it. Same signed report, two different confidence
                 // levels depending on which view you opened. Mirrors the PDF's
                 // wording rather than hiding the delta, so no finding is lost.
-                const priceVerifiedScroll=analysis.priceVerified!==undefined?!!analysis.priceVerified:(Number(analysis.quotedPrice)>0);
+                const priceVerifiedScroll=resolvePriceVerified(analysis).verified;
                 // The dealer's page refuses to show this number; the page's own
                 // data carries it. Shared helper so every surface agrees.
                 const gatedNoteScroll=gatedPriceNote(analysis);
