@@ -22,6 +22,7 @@ import { createInflateRaw } from "node:zlib";
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import {
   SLICES, fetchSlice, parseRow, assertSliceSane, BannedError,
 } from "./lib/nhtsa-slices.mjs";
@@ -242,5 +243,26 @@ if (stale.length) {
   console.log(`removed ${stale.length.toLocaleString()} cells that no longer qualify`);
 }
 
-writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 console.log(`catalogue written: ${rows.length.toLocaleString()} rows`);
+
+/* THE SLICE STATE IS A CACHE HINT, NOT A RESULT, AND IT GOES LAST.
+ *
+ * 2026-09-15: this line failed the run. Every slice had been fetched, 1,587,385
+ * complaints parsed, all 6,584 catalogue rows upserted and the stale ones
+ * removed -- and then `ENOENT: scripts/data/nhtsa-slice-state.json`, because
+ * that directory exists on my machine and has never existed in the repo. The
+ * job reported FAILURE over a bookkeeping file, on a run whose actual work had
+ * completely succeeded. A red run that means "everything worked" is worse than
+ * no signal: it is the one people learn to ignore.
+ *
+ * So: create the directory, and never let this take the run down. All it buys
+ * is a conditional request on the next run, and a fresh CI runner has no cache
+ * to conditionally skip anyway. [[no-single-point-of-failure]]
+ */
+try {
+  mkdirSync(dirname(STATE_FILE), { recursive: true });
+  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+} catch (e) {
+  console.warn(`  (could not record slice state: ${e.message} — the catalogue is written and correct; ` +
+    `the next run simply re-downloads instead of asking If-Modified-Since)`);
+}
