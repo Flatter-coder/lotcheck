@@ -20,6 +20,8 @@
 // current-ask/was-price, not MSRP). Never populate msrp from this source;
 // the catalog lookup already owns that.
 
+import { plausibleVinOrNull } from "./vin.ts";
+
 function extractBalancedJson(text, startIdx) {
   let depth = 0, inStr = false, esc = false;
   for (let i = startIdx; i < text.length; i++) {
@@ -69,7 +71,7 @@ export function extractD2cVdpVehicle(html) {
   };
 
   const vinRaw = String(v.niv || "").trim().toUpperCase();
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+  const vin = plausibleVinOrNull(vinRaw);
 
   const condition = v.isNew ? "new" : (v.isDemo ? "used" : (v.isCertified ? "used" : null));
   // Finer condition, kept alongside the binary `condition` (which stays used for

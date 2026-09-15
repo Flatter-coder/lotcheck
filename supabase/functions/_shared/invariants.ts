@@ -26,6 +26,8 @@
 // as a copy-pasted expression in three branches of analyze-listing-url and was
 // missing from a fourth; a gate carrying a fifth copy would be a gate asserting
 // a stale version of the rule it is supposed to enforce. See msrp-basis.ts.
+import { isVinShape } from "./vin.ts";
+
 import { applyConditionToMsrp, msrpIsPresentTense } from "./msrp-basis.ts";
 import { PAGE_DEFAULT_SOURCES } from "./page-default.js";
 
@@ -55,7 +57,7 @@ export function normalizeVin(vinRaw: unknown): string | null {
 export function validateVin(vinRaw: unknown): VinCheck {
   const vin = normalizeVin(vinRaw);
   if (!vin) return { present: false };
-  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+  if (!isVinShape(vin)) {
     const reason = vin.length !== 17
       ? `A VIN must be 17 characters; this one is ${vin.length}.`
       : `This VIN contains a letter (I, O, or Q) that VINs never use -- likely a mis-read.`;

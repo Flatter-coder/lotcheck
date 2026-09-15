@@ -533,6 +533,13 @@ jobs:
       # captureMarketCount used to carry.
       - name: Price verification (one rule, pinned truth table)
         run: npm run test:price-verified
+      # Same shape of defect, found by the same gate: what a VIN looks like was
+      # written fourteen times across the edge functions in three strengths --
+      # case-sensitive or not, placeholder-rejecting or not -- and none of the
+      # differences were chosen. One rule now, with the case bug and the
+      # placeholder run pinned.
+      - name: VIN shape (one rule, pinned truth table)
+        run: npm run test:vin
       # Same Babel-scope technique as the check above, pointed at
       # supabase/functions/**/*.ts -- nothing else in this workflow parses
       # that tree at all. A recall-lookup consolidation (4aca3c3, 2026-08-19)

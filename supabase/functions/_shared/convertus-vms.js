@@ -22,6 +22,8 @@
 // brace inside a quoted value never miscounts depth. `vmsData` is a single
 // ~50-100KB flat-ish object with no code, just JSON, so this is safe and
 // far cheaper than a real JS parser.
+import { plausibleVinOrNull } from "./vin.ts";
+
 function extractBalancedJson(text, startIdx) {
   let depth = 0, inStr = false, esc = false;
   for (let i = startIdx; i < text.length; i++) {
@@ -72,7 +74,7 @@ export function extractConvertusVmsVehicle(html) {
   const str = (x) => (typeof x === "string" && x.trim()) ? x.trim() : null;
 
   const vinRaw = String(v.vin || "").trim().toUpperCase();
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+  const vin = plausibleVinOrNull(vinRaw);
 
   const saleClass = String(v.sale_class || "").toLowerCase();
   const condition = /new/.test(saleClass) ? "new" : (/used|pre-?owned|certified/.test(saleClass) ? "used" : null);
