@@ -96,6 +96,28 @@ an adversary with a motive, not an availability risk.
 - **VinAudit is permanently rejected** (removed 2026-08-11). Do not reintroduce
   it or propose it.
 
+## Do not weight build cost (hard rule)
+
+When choosing between implementations, give **no weight to how long the work
+takes**. Models estimate build cost on human timelines — days and weeks for
+things an agent finishes in minutes — so "the cheaper option" is systematically
+mispriced, and the bias always points the same way: toward the shortcut.
+
+Read the recurring defect classes in this repo and notice they are all the
+cheaper branch:
+
+- **warn-not-refuse** — refusing means handling the refusal; warning is one line.
+- **missing-read-as-zero** — `Number(null) === 0`; distinguishing absent from
+  zero means threading absence through every caller.
+- **built-but-unwired** — wiring the fourth surface costs more than three.
+- **half-fix** — fixing the instance is cheaper than fixing the class.
+- **silent no-op** — failing loudly means deciding what loud looks like.
+
+Every one of those has shipped here and been logged. They are not carelessness;
+they are what you get when build cost silently enters the decision. So when the
+choice is between the correct structure and a quicker one, the correct structure
+wins by default, and "this would take a while" is not an argument.
+
 ## Conventions
 
 - Locale is Canadian (`en-CA`); copy, pricing, and rebate logic are

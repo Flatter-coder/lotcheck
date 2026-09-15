@@ -47,7 +47,13 @@
    "conflictsResolved": 21,
    "unknownField": 1,
    "listingsInReport": 120
-  }
+  },
+  "dataRepairs": [
+   {
+    "at": "2026-09-15T21:48:06.398Z",
+    "what": "cleared 7 keys built from inventory index pages"
+   }
+  ]
  },
  "listings": [
   {
@@ -1178,7 +1184,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2022-Chevrolet-Silverado",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -1188,47 +1194,11 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "1GNEVGKS6TJ186972",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body"
-    },
-    "askingPrice": {
-     "value": 50990,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree"
-    },
-    "year": {
-     "value": 2026,
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "make": {
-     "value": "Chevrolet",
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "model": {
-     "value": "Traverse",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": ""
-    }
-   },
+   "fields": {},
    "conflicts": [],
    "excluded": true,
-   "excludedReason": "listing gone (redirect to inventory search: wolfechevrolet.com/inventory/used-chevrolet/); VIN present only in 45-car It"
+   "excludedReason": "listing gone (redirect to inventory search: wolfechevrolet.com/inventory/used-chevrolet/); VIN present only in 45-car It",
+   "exclusionReason": "page served the inventory index, not this listing (title: \"45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Ed\")"
   },
   {
    "url": "https://www.jackcarterchev.ca/new/vehicle/2026-chevrolet-trax-1rs-id15142209.htm",
@@ -1495,7 +1465,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2020-Mercedes--Benz-C--Class-C",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "2 Used MERCEDES-BENZ C-class in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -1505,47 +1475,11 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "55SWF4JBXHU217194",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body"
-    },
-    "askingPrice": {
-     "value": 20290,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree"
-    },
-    "year": {
-     "value": 2017,
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "2 Used MERCEDES-BENZ C-class in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "make": {
-     "value": "Mercedes-Benz",
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "2 Used MERCEDES-BENZ C-class in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "model": {
-     "value": "C-Class",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "2 Used MERCEDES-BENZ C-class in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": ""
-    }
-   },
+   "fields": {},
    "conflicts": [],
    "excluded": true,
-   "excludedReason": "listing gone (redirect to inventory search on wolfechevrolet.com); VIN present only in 2-car ItemList"
+   "excludedReason": "listing gone (redirect to inventory search on wolfechevrolet.com); VIN present only in 2-car ItemList",
+   "exclusionReason": "page served the inventory index, not this listing (title: \"2 Used MERCEDES-BENZ C-class in Stock serving Edmonton, Spru\")"
   },
   {
    "url": "https://www.okotokshonda.com/inventory/2027-honda-hr-v-lx-9PlYBijUQ02BSRYY30LYAgvdp",
@@ -2108,7 +2042,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2018-Chevrolet-Silverado",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -2118,47 +2052,11 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "1GNEVGKS6TJ186972",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body"
-    },
-    "askingPrice": {
-     "value": 50990,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree"
-    },
-    "year": {
-     "value": 2026,
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "make": {
-     "value": "Chevrolet",
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "model": {
-     "value": "Traverse",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": ""
-    }
-   },
+   "fields": {},
    "conflicts": [],
    "excluded": true,
-   "excludedReason": "listing gone (redirect): URL 301s to wolfechevrolet.com/inventory/used-chevrolet/ 45-vehicle search page"
+   "excludedReason": "listing gone (redirect): URL 301s to wolfechevrolet.com/inventory/used-chevrolet/ 45-vehicle search page",
+   "exclusionReason": "page served the inventory index, not this listing (title: \"45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Ed\")"
   },
   {
    "url": "https://www.rainbowford.ca/used/vehicle/2024-ford-f-350-lariat-id15321212.htm",
@@ -4099,7 +3997,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2019-GMC-Sierra",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "47 Used GMC cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -4109,47 +4007,11 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "1GTP9EEL4NZ163869",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body"
-    },
-    "askingPrice": {
-     "value": 39913,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree"
-    },
-    "year": {
-     "value": 2022,
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "47 Used GMC cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "make": {
-     "value": "GMC",
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "47 Used GMC cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "model": {
-     "value": "Sierra 1500 Limited",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "47 Used GMC cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": ""
-    }
-   },
+   "fields": {},
    "conflicts": [],
    "excluded": true,
-   "excludedReason": "listing gone (redirect): URL chains to /inventory/used-gmc/ inventory search page, not a vehicle detail page"
+   "excludedReason": "listing gone (redirect): URL chains to /inventory/used-gmc/ inventory search page, not a vehicle detail page",
+   "exclusionReason": "page served the inventory index, not this listing (title: \"47 Used GMC cars, trucks, and SUVs in Stock serving Edmonton\")"
   },
   {
    "url": "https://www.villagehonda.com/inventory/2027-honda-hr-v-sport-1vTWsizDQB2q4jN2Vfg4eAvdp",
@@ -4443,7 +4305,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2026-Chevrolet-Equinox-AWD",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "7 Used CHEVROLET Equinox in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -4453,51 +4315,10 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "2GNAXUEV0N6110676",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body",
-     "verified": true
-    },
-    "askingPrice": {
-     "value": 19995,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree",
-     "verified": true
-    },
-    "year": {
-     "value": 2022,
-     "source": "jsonld",
-     "confidence": "agent",
-     "evidence": "Same-VIN JSON-LD item: name '2022 Chevrolet Equinox LT', modelDate 2022",
-     "verified": true
-    },
-    "make": {
-     "value": "Chevrolet",
-     "source": "jsonld",
-     "confidence": "agent",
-     "evidence": "Same-VIN JSON-LD item brand Chevrolet",
-     "verified": true
-    },
-    "model": {
-     "value": "Equinox",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "7 Used CHEVROLET Equinox in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
-     "verified": true
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": "",
-     "verified": true
-    }
-   },
-   "conflicts": []
+   "fields": {},
+   "conflicts": [],
+   "excluded": true,
+   "exclusionReason": "page served the inventory index, not this listing (title: \"7 Used CHEVROLET Equinox in Stock serving Edmonton, Spruce G\")"
   },
   {
    "url": "https://www.rainbowford.ca/new/vehicle/2026-ford-bronco-sport-big-bend-id14939405.htm",
@@ -5026,7 +4847,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2023-Chevrolet-Colorado-4WD",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "3 Used CHEVROLET Colorado in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -5036,51 +4857,10 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "1GCPTDEK0R1141973",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body",
-     "verified": true
-    },
-    "askingPrice": {
-     "value": 47990,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree",
-     "verified": true
-    },
-    "year": {
-     "value": 2024,
-     "source": "jsonld",
-     "confidence": "agent",
-     "evidence": "Same-VIN JSON-LD item: name '2024 Chevrolet Colorado 4WD Z71', modelDate 2024 (key URL slug says 2023; page truth is 2024)",
-     "verified": true
-    },
-    "make": {
-     "value": "Chevrolet",
-     "source": "jsonld",
-     "confidence": "agent",
-     "evidence": "Same-VIN JSON-LD item brand Chevrolet",
-     "verified": true
-    },
-    "model": {
-     "value": "Colorado",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "3 Used CHEVROLET Colorado in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
-     "verified": true
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": "",
-     "verified": true
-    }
-   },
-   "conflicts": []
+   "fields": {},
+   "conflicts": [],
+   "excluded": true,
+   "exclusionReason": "page served the inventory index, not this listing (title: \"3 Used CHEVROLET Colorado in Stock serving Edmonton, Spruce \")"
   },
   {
    "url": "https://www.rainbowford.ca/new/vehicle/2026-ford-bronco-sport-badlands-id15005975.htm",
@@ -5295,7 +5075,7 @@
   {
    "url": "https://www.westgatechev.com/inventory/Used-2023-Chevrolet-Silverado",
    "host": "westgatechev.com",
-   "platform": "unknown",
+   "platform": "not_a_vdp",
    "httpStatus": 200,
    "pageTitle": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB",
    "condition": "used",
@@ -5305,47 +5085,11 @@
    "vinAbsentConfirmed": false,
    "aprText": null,
    "finePrint": "Prices do not include GST or any costs associated with financing. For all other provinces (excluding Quebec), prices exclude taxes, insurance, and licensing fees. Please contact the dealership for verification or if you would like more information on this vehicle. Please contact the dealership for verification or if yo",
-   "fields": {
-    "vin": {
-     "value": "1GNEVGKS6TJ186972",
-     "source": "structured+page-scan",
-     "confidence": "cross",
-     "evidence": "VIN appears in structured data and page body"
-    },
-    "askingPrice": {
-     "value": 50990,
-     "source": "jsonld",
-     "confidence": "cross",
-     "evidence": "independent on-page sources agree"
-    },
-    "year": {
-     "value": 2026,
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "make": {
-     "value": "Chevrolet",
-     "source": "jsonld",
-     "confidence": "text",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "model": {
-     "value": "Traverse",
-     "source": "jsonld",
-     "confidence": "structured",
-     "evidence": "45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Edmonton, Spruce Grove, St. Albert &amp; Sherwood Park, AB"
-    },
-    "condition": {
-     "value": "used",
-     "source": "url+jsonld",
-     "confidence": "cross",
-     "evidence": ""
-    }
-   },
+   "fields": {},
    "conflicts": [],
    "excluded": true,
-   "excludedReason": "listing gone (redirect to inventory search); VIN only one of 45 items in search-page ItemList"
+   "excludedReason": "listing gone (redirect to inventory search); VIN only one of 45 items in search-page ItemList",
+   "exclusionReason": "page served the inventory index, not this listing (title: \"45 Used CHEVROLET cars, trucks, and SUVs in Stock serving Ed\")"
   },
   {
    "url": "https://www.villagehonda.com/inventory/2024-hyundai-sonata-preferred-trend-QgFQW7IZQlezPjMutAwrlAvdp",
