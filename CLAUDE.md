@@ -23,8 +23,10 @@ There is no linter configured. Pure offline test gates exist (run in CI via
 `test:carry-forward`, `test:catalog-guard` (refresh green must mean "wrote
 fresh rows"), `test:bp-summary` (a premium colour must never seed as trim
 MSRP), `test:supersede` (replaceRows end-to-end), `test:incentives`, `test:finance-contingent`,
-`test:jsonld-vehicle`, plus `check:copy` / `check:parity` /
-`check:undef` / `check:migrations`.
+`test:jsonld-vehicle`, `check:lineage` (one author per published fact — reads the
+fact list out of `canonicalReport()` so it cannot go stale, pins every function
+that derives each fact, and fails when a new author appears or a pinned one is
+removed), plus `check:copy` / `check:parity` / `check:undef` / `check:migrations`.
 
 ## Architecture
 
