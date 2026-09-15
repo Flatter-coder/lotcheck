@@ -35,9 +35,21 @@ import { cellKey } from "../supabase/functions/_shared/fault-model-match.js";
 const ARGS = new Set(process.argv.slice(2));
 const DRY = ARGS.has("--dry-run");
 const OUT = (() => { const i = process.argv.indexOf("--out"); return i > 0 ? process.argv[i + 1] : null; })();
-const STATE_FILE = "scripts/data/nhtsa-slice-state.json";
-
+/* THE STATE LIVES WITH THE CACHE IT DESCRIBES, and that is not cosmetic.
+ *
+ * It used to sit in scripts/data/ -- the git workspace, which GitHub checks out
+ * fresh on every run. The .zip slices ARE cached (actions/cache on .nhtsa-cache),
+ * so `haveCache` was true, but `prev.lastModified` was always undefined, so
+ * fetchSlice() sent no If-Modified-Since and every run took a full 343 MB
+ * download. Seven conditional requests answered by seven 304s is what this was
+ * designed to do and what it has never once done.
+ *
+ * Putting the state inside .nhtsa-cache/ means it is restored by the same cache
+ * entry as the files it describes -- which is the only way the two can ever
+ * disagree less often than they agree.
+ */
 const CACHE = (() => { const i = process.argv.indexOf("--cache"); return i > 0 ? process.argv[i + 1] : null; })();
+const STATE_FILE = CACHE ? `${CACHE}/nhtsa-slice-state.json` : "scripts/data/nhtsa-slice-state.json";
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
 
 /* THE CATALOGUE IS REBUILT WHOLE, EVERY RUN.
@@ -178,6 +190,32 @@ for (const [key, tally] of cells) {
 out.sort((a, b) => b.ranking.total - a.ranking.total);
 console.log(`catalogue rows (>= ${FAULTS_MIN_FILINGS} filings): ${out.length.toLocaleString()}`);
 
+/* THE SLICE STATE IS A CACHE HINT, NOT A RESULT -- AND A DRY RUN STILL WRITES IT.
+ *
+ * Two bugs met here on 2026-09-15.
+ *
+ * It used to run LAST, after the database write, and it failed the whole job:
+ * every slice fetched, 1,587,385 complaints parsed, all 6,584 rows upserted --
+ * then ENOENT on scripts/data/, a directory that exists on my machine and never
+ * in the repo. A red run meaning "everything worked" is the one people learn to
+ * ignore. [[no-single-point-of-failure]]
+ *
+ * And it sat BELOW the --dry-run exit, so the only way to exercise the
+ * conditional-request path was a real database write. That is the fourth time
+ * in this job that the untested step was the one after the dry run returned.
+ * The state describes what we DOWNLOADED; it has nothing to do with the
+ * database, so it belongs here, above the exit, where a dry run reaches it.
+ *
+ * It still cannot fail the run. All it buys is an If-Modified-Since next time.
+ */
+try {
+  mkdirSync(dirname(STATE_FILE), { recursive: true });
+  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+} catch (e) {
+  console.warn(`  (could not record slice state: ${e.message} -- harmless; the next run simply ` +
+    `re-downloads instead of asking If-Modified-Since)`);
+}
+
 if (OUT) { writeFileSync(OUT, JSON.stringify(out)); console.log(`wrote ${OUT}`); }
 if (DRY) { console.log("dry run: nothing written to the database"); process.exit(0); }
 
@@ -244,25 +282,3 @@ if (stale.length) {
 }
 
 console.log(`catalogue written: ${rows.length.toLocaleString()} rows`);
-
-/* THE SLICE STATE IS A CACHE HINT, NOT A RESULT, AND IT GOES LAST.
- *
- * 2026-09-15: this line failed the run. Every slice had been fetched, 1,587,385
- * complaints parsed, all 6,584 catalogue rows upserted and the stale ones
- * removed -- and then `ENOENT: scripts/data/nhtsa-slice-state.json`, because
- * that directory exists on my machine and has never existed in the repo. The
- * job reported FAILURE over a bookkeeping file, on a run whose actual work had
- * completely succeeded. A red run that means "everything worked" is worse than
- * no signal: it is the one people learn to ignore.
- *
- * So: create the directory, and never let this take the run down. All it buys
- * is a conditional request on the next run, and a fresh CI runner has no cache
- * to conditionally skip anyway. [[no-single-point-of-failure]]
- */
-try {
-  mkdirSync(dirname(STATE_FILE), { recursive: true });
-  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-} catch (e) {
-  console.warn(`  (could not record slice state: ${e.message} — the catalogue is written and correct; ` +
-    `the next run simply re-downloads instead of asking If-Modified-Since)`);
-}
