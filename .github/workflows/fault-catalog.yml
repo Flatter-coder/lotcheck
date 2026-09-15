@@ -44,6 +44,20 @@ jobs:
         with:
           node-version: "20"
 
+      # THE FIRST SCHEDULED RUN DIED HERE, 2026-09-15. It downloaded all seven
+      # slices, parsed 2,158,800 rows into 1,587,434 complaints across 31,257
+      # cells -- and then could not write them, because nothing had ever
+      # installed @supabase/supabase-js. Ten minutes of correct work thrown
+      # away on the last line.
+      #
+      # It could not have been caught before it ran: every gate for this feature
+      # is a pure unit test that imports no client, and the local build was only
+      # ever exercised with --dry-run, which returns before the database is
+      # touched. A job whose one untested step is its last one fails at the end
+      # or not at all. [[repeat-fix-pattern]]
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
       # The slice cache makes the conditional request worth making: an unchanged
       # slice is read from disk instead of the wire, so a quiet day moves no
       # bytes at all. A cache miss just means a full download, which is correct
