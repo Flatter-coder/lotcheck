@@ -121,20 +121,40 @@ const isFeedBacked = (url) => {
   } catch { return false; }
 };
 
+// THE EXTRACTORS DO NOT AGREE ON A NAME FOR THE PRICE. convertus and d2c return
+// `quotedPrice`; jsonld returns `price`. Reading only the first name dropped the
+// price on all 11 jsonld-read pages, and the first run duly reported five
+// listings as "page advertises $30,990, report has none" — a defect invented
+// entirely by this harness. Two names for one fact, which is the very thing
+// check:lineage exists to stop.
+//
+// Both names are read here, and a returned object that has some OTHER
+// price-shaped key and neither of these is treated as a shape change worth
+// failing on, not quietly zeroed: a third name appearing is exactly how this
+// bug would come back.
+const PRICE_FIELDS = ["quotedPrice", "price"];
+const readPrice = (v) => {
+  for (const f of PRICE_FIELDS) if (v[f] != null) return { value: v[f], drift: false };
+  const other = Object.keys(v).find((k) => /price/i.test(k) && v[k] != null && typeof v[k] !== "object");
+  return { value: null, drift: !!other, otherKey: other || null };
+};
+
 function analysisFrom(html) {
   for (const [name, fn] of EXTRACTORS) {
     let v = null;
     try { v = fn(html); } catch { v = null; }
     if (!v) continue;
+    const price = readPrice(v);
     return {
       _extractor: name,
+      _priceShapeDrift: price.drift ? `${name} returned no ${PRICE_FIELDS.join("/")} but has "${price.otherKey}"` : null,
       year: v.year ?? null,
       make: v.make ?? null,
       model: v.model ?? null,
       vin: v.vin ?? null,
       odometerKm: v.odometerKm ?? null,
       vehicleCondition: v.condition ?? null,
-      quotedPrice: v.quotedPrice ?? null,
+      quotedPrice: price.value ?? null,
       // The grader reads price-gating out of priceDisclosure/summary the same
       // way the report surfaces do. Only assert gating when the extractor
       // actually found the tell — an absence must never render as a claim.
@@ -176,6 +196,15 @@ function analysisFrom(html) {
 // this check would wave their drift straight through. Each listing carries its
 // own builtAt; the file-level date is only a fallback for keys written before
 // that field existed.
+// NOT APPLICABLE AT THIS LAYER, so never scored here. Extraction does not decide
+// MSRP — msrp-authority does, from the catalog — so this harness passes
+// `msrp: null` deliberately. The shared grader reads that as `missed` and was
+// duly producing 12 "page states MSRP $X, report has none" points that mean
+// nothing about the code under test. They never failed a run (a `missed` is not
+// a `wrong`), which makes them worse, not better: a reader scanning the ledger
+// would find twelve MSRPs we look like we dropped.
+const NOT_APPLICABLE = new Set(["msrp_dealer_stated"]);
+
 const FRESH_MS = 24 * 3600e3;
 const DRIFTS = new Set(["price", "price_gating", "msrp_dealer_stated", "odometer"]);
 const fileBuiltAt = Date.parse(keys?.meta?.builtAt || "");
@@ -183,15 +212,16 @@ const fileBuiltAt = Date.parse(keys?.meta?.builtAt || "");
 function applyDrift(g, fetchedAt, key) {
   const pageAt = Date.parse(fetchedAt || "");
   const keyAt = Date.parse(key?.builtAt || "") || fileBuiltAt;
-  if (!Number.isFinite(keyAt) || !Number.isFinite(pageAt)) return { g, suppressed: 0 };
-  if (Math.abs(pageAt - keyAt) <= FRESH_MS) return { g, suppressed: 0 };
+  const stale = !(Number.isFinite(keyAt) && Number.isFinite(pageAt) && Math.abs(pageAt - keyAt) <= FRESH_MS);
 
-  let suppressed = 0;
+  let suppressed = 0, dropped = 0;
   const points = { ...g.points };
   for (const p of Object.keys(points)) {
-    if (DRIFTS.has(p) && points[p] !== "not_gradable") { points[p] = "not_gradable"; suppressed++; }
+    if (points[p] === "not_gradable") continue;
+    if (NOT_APPLICABLE.has(p)) { points[p] = "not_gradable"; dropped++; continue; }
+    if (stale && DRIFTS.has(p)) { points[p] = "not_gradable"; suppressed++; }
   }
-  if (!suppressed) return { g, suppressed: 0 };
+  if (!suppressed && !dropped) return { g, suppressed: 0 };
   const vals = Object.values(points);
   const verdict = vals.includes("false_accusation") ? "FAIL_FALSE_ACCUSATION"
     : vals.includes("wrong") ? "FAIL"
@@ -199,14 +229,90 @@ function applyDrift(g, fetchedAt, key) {
     : "PASS";
   // Keep only the reasons for points that survived, so a suppressed point can
   // never leave its accusation behind in the output.
-  const reasons = g.reasons.filter((r) => !DRIFTS.has(String(r).split(":")[0]));
+  const reasons = g.reasons.filter((r) => { const n = String(r).split(":")[0]; return !NOT_APPLICABLE.has(n) && !(stale && DRIFTS.has(n)); });
   return { g: { ...g, points, verdict, reasons }, suppressed };
+}
+
+// A DELISTED UNIT IS NOT AN EXTRACTION FAILURE. When a vehicle sells, these
+// dealers serve the inventory SEARCH page at the old VDP URL — HTTP 200, full
+// size, and titled "52 Used CHEVROLET cars… in Stock" with an ItemList instead
+// of a Car. Every one of the 18 pages this harness first reported as "read by
+// no extractor" was one of those. The extractors returning null there is the
+// CORRECT answer; pulling some other vehicle out of that ItemList and filing it
+// under this listing would be the cross-dealer attribution defect.
+//
+// The test is the VIN, because the VIN is what makes a page this listing's
+// page. If the bytes we stored do not contain the VIN the key recorded, the
+// unit is gone and there is nothing here to grade. If the VIN IS present and
+// nothing could read the page, that is a genuine extraction failure and stays a
+// finding. The key is used only to scope — never to supply a graded value.
+// Classify from the page's OWN declaration, not from the key. The key cannot
+// help here anyway: rebuilding it from this same snapshot means it was built
+// from the search page too, so it has no VIN either — a lesson in what a key
+// derived from the bytes can and cannot tell you.
+//
+// An inventory index says what it is, out loud and in machine-readable form: a
+// schema.org ItemList and no Car/Vehicle node, under a title like "52 Used
+// CHEVROLET cars, trucks, and SUVs in Stock". That is the dealer declaring a
+// results page. A VDP whose template merely moved its data elsewhere makes no
+// such declaration, and stays a finding.
+const VEHICLE_TYPE = /^(Car|Vehicle|MotorizedVehicle|Product)$/i;
+function pageDeclaresItself(html) {
+  let sawItemList = false, sawVehicle = false;
+  for (const b of html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let j; try { j = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(j) ? j : (Array.isArray(j["@graph"]) ? j["@graph"] : [j]);
+    for (const n of arr) {
+      const t = n?.["@type"];
+      for (const one of (Array.isArray(t) ? t : [t]).filter(Boolean).map(String)) {
+        if (/^ItemList$/i.test(one)) sawItemList = true;
+        if (VEHICLE_TYPE.test(one)) sawVehicle = true;
+      }
+    }
+  }
+  const title = html.match(/<title[^>]*>([^<]*)</i)?.[1] || "";
+  const titleIsIndex = /\b\d+\s+(new|used|certified)\b[\s\S]{0,60}\bin stock\b/i.test(title) ||
+    /\bvehicles for sale\b/i.test(title);
+  if (sawVehicle) return "vdp";
+  if (sawItemList || titleIsIndex) return "index";
+  return "unknown";
+}
+
+// TWO INDEPENDENT SIGNALS, because one is not safe here. Plenty of real VDPs
+// carry an ItemList for a "similar vehicles" carousel, so "ItemList and no Car
+// node" on its own would quietly reclassify the exact failure this is meant to
+// catch — a template that stopped emitting its Car node — as a delisting, and
+// the run would go green on a broken page.
+//
+// So the page must ALSO no longer be about this unit: the identifying token in
+// its own URL (a 17-character VIN, or the trailing id segment) must be absent
+// from the bytes. A live VDP always names its own unit somewhere. Both signals
+// come from the page and the URL, never from the answer key.
+function identityToken(url) {
+  try {
+    const path = new URL(url).pathname;
+    const vin = path.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0];
+    if (vin) return vin.toUpperCase();
+    const id = path.replace(/\/+$/, "").split("/").pop();
+    return /^\d{4,}$/.test(id) ? id : null;
+  } catch { return null; }
+}
+
+function isDelisted(html, url) {
+  if (pageDeclaresItself(html) !== "index") return false;
+  const token = identityToken(url);
+  // No token to test means one signal only, which is not enough to dismiss a
+  // page. It stays a finding.
+  if (!token) return false;
+  return !html.toUpperCase().includes(token);
 }
 
 const grades = [];
 const unrecognised = [];
+const priceShapeDrift = [];
 let noKey = 0;
 let outOfScope = 0;
+let gone = 0;
 let suppressedPoints = 0;
 
 for (const p of pages) {
@@ -217,11 +323,23 @@ for (const p of pages) {
   try { html = readFileSync(`${DIR}/${p.file}`, "utf8"); } catch { continue; }
 
   const a = analysisFrom(html);
+  if (a?._priceShapeDrift) priceShapeDrift.push(`${p.url} — ${a._priceShapeDrift}`);
   if (!a) {
-    // Read nothing at all from a page we hold bytes for. That is a finding, not
-    // a skip: it is the shape of a platform template change that silently
-    // empties a report.
-    unrecognised.push(p.url);
+    if (isDelisted(html, p.url)) { gone++; continue; }
+    // Nothing read it and it is not a confirmed delisting. That stays a finding
+    // — a miss is never a clean bill — but say WHICH kind, so the two are not
+    // chased as one. "looks like an index, unconfirmed" is a page that declares
+    // itself a results page while its URL carries no VIN or id to corroborate
+    // with; almost certainly a delisting, but not provable from these bytes.
+    // "declares itself a vehicle page" is the serious one: a VDP our extractors
+    // could not read.
+    const shape = pageDeclaresItself(html);
+    unrecognised.push({
+      url: p.url,
+      why: shape === "index" ? "looks like an index, no VIN or id in the URL to confirm"
+        : shape === "vdp" ? "declares itself a vehicle page — REAL extraction gap"
+        : "declares nothing either way",
+    });
     continue;
   }
   const { g, suppressed } = applyDrift(gradeListing(key, a), p.fetchedAt, key);
@@ -265,9 +383,10 @@ if (oldestDays != null && oldestDays > 30) {
   console.log(`  that is a question about our code, not about today's market — but it cannot`);
   console.log(`  tell you what any of these vehicles costs now.`);
 }
-console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}`);
+console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}   delisted (VDP now serves a search page): ${gone}`);
 console.log(`matched to an answer key: ${grades.length}   no key: ${noKey}   unreadable by any extractor: ${unrecognised.length}`);
-for (const u of unrecognised.slice(0, 5)) console.log(`  unread: ${String(u).slice(0, 84)}`);
+for (const u of unrecognised) console.log(`  unread: ${String(u.url).slice(8, 78)}
+          ${u.why}`);
 
 if (suppressedPoints) {
   console.log(`\n${suppressedPoints} drift-prone points NOT graded — their key and page are ` +
@@ -307,9 +426,12 @@ const entry = {
   accuracyPct: s.accuracyPct,
   ruleOfThree95UpperPct: s.ruleOfThree95UpperPct,
   unreadable: unrecognised.length,
+  gone,
+  priceShapeDrift: priceShapeDrift.length,
   suppressedDriftPoints: suppressedPoints,
   keysBuiltAt: keys?.meta?.builtAt || null,
   defects: defects.map((g) => ({ url: g.url, verdict: g.verdict, reasons: g.reasons, extractor: g.extractor })),
+  unreadableDetail: unrecognised,
 };
 
 const ledger = existsSync(LEDGER) ? readJson(LEDGER) : { version: 1, runs: [] };
@@ -343,7 +465,13 @@ if (falseAcc.length) {
   console.error(`class that gets a report discredited, and it outranks every other defect here.`);
   process.exit(1);
 }
-if (defects.length || unrecognised.length || regressed) {
+if (priceShapeDrift.length) {
+  console.error(`
+PRICE SHAPE DRIFT: an extractor returned a price under a name this harness does not read.`);
+  for (const d of priceShapeDrift.slice(0, 5)) console.error(`  ${d}`);
+  console.error(`Add the name to PRICE_FIELDS — until then that listing is graded with no price.`);
+}
+if (defects.length || unrecognised.length || regressed || priceShapeDrift.length) {
   console.error(`\n${defects.length} defect${defects.length === 1 ? "" : "s"} and ${unrecognised.length} unreadable page${unrecognised.length === 1 ? "" : "s"} — fix one, run again, the exit code tells you if it landed.`);
   process.exit(1);
 }
