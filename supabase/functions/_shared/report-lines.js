@@ -18,6 +18,8 @@
 // the page's own data says so, "None found" for a miss, "Not read" when no
 // attempt was made.
 
+import { priceUsableForComparison, priceVerifiedClaim } from "./price-verified.ts";
+
 import { FREQ_LABEL, POSITIVE_ABSENCE } from "./page-default.js";
 
 // "same powertrain" IS A CLAIM ABOUT THE SET, so it may only be made when the
@@ -340,7 +342,7 @@ export function marketCompareLine(a) {
   // The count line's refusals, applied here too: a price the page's own data
   // could not back, or one that depends on financing, is shown but never
   // measured against other listings -- one report must not say both.
-  const unverified = a?.priceVerified === false || a?.price?.verified === false;
+  const unverified = !priceUsableForComparison(a);
   const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
   const mk = mv.make || a?.make || null, md = mv.model || a?.model || null;
   const cond = mv.condition || a?.vehicleCondition || null;
@@ -469,7 +471,7 @@ export function olderYearsLine(a) {
   const out = { key: "olderyears", title: "What older model years ask today", tone: "muted", state: "unchecked", value: "NOT READ", headline: "Not read", body: "", lines: [], meta: "", note: null, askUsed: null };
   const ask = Number(a?.quotedPrice ?? a?.price?.asking);
   const hasAsk = Number.isFinite(ask) && ask >= 1;
-  const unverified = a?.priceVerified === false || a?.price?.verified === false;
+  const unverified = !priceUsableForComparison(a);
   const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
   const canCompare = hasAsk && !unverified && !contingent;
   // The subject's own year is taken from the SEALED ladder only: a set that did
@@ -860,7 +862,7 @@ export function priceCheckState(a) {
   const hasAsk = Number.isFinite(ask) && ask >= 1;
   const gated = String(a?.priceDisclosure || "") === "contact_for_price";
   const contingent = !!(a?.financeContingent?.contingent || a?.fcx);
-  const verified = a?.priceVerified === true || a?.price?.verified === true;
+  const verified = priceVerifiedClaim(a);
 
   if (gated || !hasAsk) {
     return {

@@ -24,6 +24,8 @@
 
 // The like-for-like pool chooser and the powertrain wall are shared with the
 // count line (market-count.js), so the two cards never disagree on one report.
+import { vinShapeOrNull } from "./vin.ts";
+
 import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP } from "./market-count.js";
 import { powertrainCompatible } from "./model-identity.js";
 
@@ -521,7 +523,7 @@ export async function fetchOlderYears(ctx: MarketCtx & { vin?: string | null }):
           // Years y-3 .. y-1: centre on y-2 with a span of 1. Condition "used":
           // an older model year on a lot is a used car.
           p_year: y - 2, p_make: String(ctx.make), p_model: String(ctx.model),
-          p_condition: "used", p_exclude_vin: /^[A-HJ-NPR-Z0-9]{17}$/.test(vin) ? vin : null,
+          p_condition: "used", p_exclude_vin: vinShapeOrNull(vin),
           p_province: prov, p_year_span: 1, p_limit: POOL_CAP,
         }),
       });

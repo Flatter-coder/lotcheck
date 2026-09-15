@@ -28,6 +28,8 @@
 //                     accusation happened -- we would be quoting the dealer to
 //                     themselves and calling it verification.
 
+import { resolvePriceVerified } from "./price-verified.ts";
+
 export type MsrpBasis = "exact" | "starting_at" | "original_when_new" | "dealer_stated";
 
 export type MsrpClaim = {
@@ -220,7 +222,7 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
   // Basis is exact. A comparison still needs a price to compare against, and
   // that price has to be one we actually verified -- comparing a verified MSRP
   // against a number we guessed is not a verified comparison.
-  const priceVerified = a.priceVerified !== undefined ? !!a.priceVerified : !!asking;
+  const priceVerified = resolvePriceVerified(a).verified;
   if (!asking || !priceVerified) {
     return {
       ...base,
