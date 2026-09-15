@@ -8131,30 +8131,39 @@ function EvidenceCard({ a, palette }) {
 // and it was never ported. [[no-llm-generated-valuation-numbers]]
 function PriceScale({ scale, C, money }) {
   const { msrp, asking, comps } = scale || {};
-  if (!(msrp > 0 && asking > 0)) return null;
-  const lo = Math.min(msrp, asking, comps || Infinity) * 0.985;
-  const hi = Math.max(msrp, asking, comps || 0) * 1.015;
+  // THE ANCHOR IS WHICHEVER ONE EXISTS. This used to require an MSRP, so on a
+  // used car -- where we hold almost none, 997 of 1,000 catalogue rows being
+  // model year 2025-26 -- the scale silently rendered nothing and the hero band
+  // was a bare number with nothing to read it against. On a used listing the
+  // market median IS the reference.
+  const anchor = msrp > 0 ? msrp : (comps > 0 ? comps : 0);
+  if (!(anchor > 0 && asking > 0)) return null;
+  const marks = [asking, msrp, comps].filter((v) => v > 0);
+  const lo = Math.min(...marks) * 0.985;
+  const hi = Math.max(...marks) * 1.015;
   const x = (v) => ((v - lo) / (hi - lo)) * 100;
-  const over = asking > msrp;
+  const over = asking > anchor;
   return (
     <div style={{ marginTop: 10, marginBottom: 2 }}>
       <div style={{ position: "relative", height: 26 }}>
         <div style={{ position: "absolute", left: 0, right: 0, top: 12, height: 1, background: C.line }} />
-        {/* the gap, drawn as distance */}
+        {/* the gap, drawn as distance -- from whichever anchor we actually hold */}
         <div style={{ position: "absolute", top: 8, height: 9, borderRadius: 2,
-          left: `${x(Math.min(msrp, asking))}%`, width: `${Math.abs(x(asking) - x(msrp))}%`,
+          left: `${x(Math.min(anchor, asking))}%`, width: `${Math.abs(x(asking) - x(anchor))}%`,
           background: over ? C.coralBg : C.tealBg }} />
         {comps > 0 && (
           <div style={{ position: "absolute", top: 7, left: `${x(comps)}%`, width: 11, height: 11, marginLeft: -5.5,
             borderRadius: "50%", border: `2px solid ${C.tealInk}`, background: C.card }} title={`${money(comps)} · comparable listings nearby`} />
         )}
-        <div style={{ position: "absolute", top: 4, left: `${x(msrp)}%`, width: 3, height: 17, marginLeft: -1.5, background: C.ink }} />
+        {msrp > 0 && (
+          <div style={{ position: "absolute", top: 4, left: `${x(msrp)}%`, width: 3, height: 17, marginLeft: -1.5, background: C.ink }} />
+        )}
         <div style={{ position: "absolute", top: 5, left: `${x(asking)}%`, width: 15, height: 15, marginLeft: -7.5,
           borderRadius: "50%", background: over ? C.coralInk : C.tealInk }} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap",
         fontFamily: "ui-monospace,Menlo,Consolas,monospace", fontSize: 10, color: C.inkFaint }}>
-        <span>{money(msrp)} manufacturer</span>
+        {msrp > 0 && <span>{money(msrp)} manufacturer</span>}
         {comps > 0 && <span style={{ color: C.tealInk }}>{money(comps)} nearby</span>}
         <span style={{ color: over ? C.coralInk : C.tealInk }}>{money(asking)} this listing</span>
       </div>

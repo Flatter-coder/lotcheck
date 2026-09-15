@@ -219,6 +219,64 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
     "the CLEAR-requires-a-source throw is gone from report-bands.js");
 }
 
+/* ── point 01 must answer on a used car ──────────────────────────────────── */
+{
+  // msrp_catalog held 997 of 1,000 rows at model year 2025-26 on 2026-09-15 and
+  // THREE rows for everything older, so every used listing fell through to
+  // "MSRP NOT MATCHED" -- the hero band, the reason the report is bought, blank
+  // on the whole used market.
+  const MV = {
+    average: 31500, low: 27900, high: 37500, comps: 14, dealers: 6,
+    asOf: "2026-09-07", seenMin: "2026-08-24", seenMax: "2026-09-07",
+    yearFrom: 2019, yearTo: 2019, trimScope: "model", condition: "used",
+    make: "Subaru", model: "Outback", province: "AB", kmLow: 60000, kmHigh: 140000,
+  };
+  const used = (ask, mv = MV) => reportBands({
+    quotedPrice: ask, priceVerified: true, year: 2019, make: "Subaru",
+    model: "Outback", vehicleCondition: "used", marketValue: mv,
+  }).find((b) => b.n === "01");
+
+  const above = used(39900), mid = used(36900), below = used(31400);
+
+  check("a used car with comparables gets a real figure, not a catalogue apology",
+    !/MSRP NOT MATCHED/.test(String(above.value)) && /ABOVE THE MIDDLE/.test(String(above.value)),
+    String(above.value));
+
+  // The v7 light rules, unchanged: green is at-or-below the median, red is
+  // above EVERY listing compared, amber is above the median but still inside
+  // the range real cars are advertised at.
+  check("asking above every comparable is a raise", above.state === "raise", above.state);
+  check("asking above the middle but inside the range is NOTED, not red",
+    mid.state === "noted", mid.state);
+  check("asking at or below the middle is clear", below.state === "clear", below.state);
+  check("...and that green names the comparison set it was measured against",
+    /comparable listing/.test(String(below.source || "")), String(below.source));
+
+  // THE REFUSAL. Too few comparables must not become a verdict about the price.
+  const thin = used(31400, { average: null, insufficient: true, nRead: 2, need: 5 });
+  check("too few comparables is never a verdict",
+    thin.state === "unchecked" && !/ABOVE|BELOW|MIDDLE/.test(String(thin.value)),
+    `${thin.state} ${thin.value}`);
+
+  // An exact manufacturer figure still wins: comps are the fallback, not the
+  // replacement. [[reference-point-model]]
+  const exact = reportBands({
+    quotedPrice: 52000, msrp: 49000, msrpBasis: "exact", priceVerified: true, marketValue: MV,
+  }).find((b) => b.n === "01");
+  check("an exact MSRP still outranks the comparison set",
+    /OVER/.test(String(exact.value)), String(exact.value));
+
+  // The hero scale must have something to draw. It read marketValue.median --
+  // a field that does not exist and never has -- so the comps mark had never
+  // once rendered.
+  check("the scale carries the market median on a used car",
+    above.scale && above.scale.comps === 31500 && above.scale.msrp === null,
+    JSON.stringify(above.scale));
+  check("...and still carries both anchors on a new one",
+    exact.scale && exact.scale.msrp === 49000 && exact.scale.comps === 31500,
+    JSON.stringify(exact.scale));
+}
+
 console.log("");
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }
 console.log("all checks passed");

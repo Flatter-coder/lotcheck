@@ -50,7 +50,8 @@
 
 import { REPORT_POINTS } from "./report-points.js";
 import { fmtMoney, warrantyLine } from "./report-lines.js";
-import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
+import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
+import { marketCompareLine } from "./report-lines.js";
 
 // FOUR STATES, because green is a claim.
 //
@@ -110,8 +111,18 @@ function priceBand(a) {
   const qp = num(a?.quotedPrice), ms = num(a?.msrp);
   const pv = a?.priceVerified !== undefined ? !!a.priceVerified : qp > 0;
   const exact = ms > 0 && a?.msrpBasis === "exact";
-  const comps = num(a?.marketValue?.median ?? a?.comps?.average);
-  const scale = ms > 0 && qp > 0 ? { msrp: ms, asking: qp, comps: comps > 0 ? comps : null } : null;
+  // marketValue has no `median` field and never has -- the median is stored as
+  // `average` (see report-sign.ts, which seals avg). This read has been null
+  // since it was written, so the comps mark on the hero scale has never once
+  // drawn. Found 2026-09-15 by checking whether the scale rendered, rather than
+  // by reading the line. [[two-authors-per-fact]]
+  const comps = num(a?.marketValue?.average ?? a?.marketValue?.median ?? a?.comps?.average);
+  // The hero scale draws from whatever anchors exist. With no MSRP the market
+  // median IS the anchor, so a used car still gets a scale instead of a bare
+  // number with nothing to read it against. [[present-without-creating-questions]]
+  const scale = qp > 0 && (ms > 0 || comps > 0)
+    ? { msrp: ms > 0 ? ms : null, asking: qp, comps: comps > 0 ? comps : null }
+    : null;
 
   if (!qp && a?.priceDisclosure === "contact_for_price") {
     return band("price_vs_msrp", "01", RAISE, "HIDDEN BY DEALER",
@@ -130,6 +141,46 @@ function priceBand(a) {
       `${fmtMoney(qp)} asking, level with the manufacturer's figure for this configuration.`,
       { hero: true, scale, source: "the manufacturer's published price for this exact configuration" });
   }
+  /* USED CARS: MEASURE AGAINST THE MARKET, BECAUSE THERE IS NO STICKER.
+   *
+   * Point 01 is the reason the report is bought, and on a used car it said
+   * nothing. Measured 2026-09-15: msrp_catalog holds 997 of 1,000 rows at model
+   * year 2025-2026 and THREE rows for everything older, so every pre-2025
+   * listing fell through to "MSRP NOT MATCHED" -- honest about whose gap it was,
+   * and useless to the buyer standing on the lot.
+   *
+   * A 2019 car's sticker price is history anyway. What a used buyer is actually
+   * asking is "are the other ones cheaper", and we already answer that: the
+   * comparison set is built from dealers' own published prices and
+   * marketCompareLine() already decides the verdict and names the basis -- how
+   * many listings, how many dealers, which model years, which trims, what
+   * odometer range, which province, read when.
+   *
+   * SO THIS WIRES, IT DOES NOT RE-DECIDE. A second opinion on the same comps
+   * would be a second author for one fact, and the verdict would eventually
+   * disagree with the market section printed further down the same report.
+   * [[two-authors-per-fact]] [[market-comparison-plain-language]]
+   * [[no-llm-generated-valuation-numbers]]
+   */
+  const mc = marketCompareLine(a);
+  if (qp > 0 && mc?.state === "confirmed" && mc.value) {
+    const n = num(a?.marketValue?.comps), d = num(a?.marketValue?.dealers);
+    const setLine = `${n} comparable listing${n === 1 ? "" : "s"}` +
+      (d > 0 ? ` at ${d} dealer${d === 1 ? "" : "s"}` : "") + ", read from their own pages";
+    if (mc.light === "red") {
+      return band("price_vs_msrp", "01", RAISE, mc.value, mc.headline,
+        { hero: true, scale });
+    }
+    if (mc.light === "green") {
+      return band("price_vs_msrp", "01", CLEAR, mc.value, mc.headline,
+        { hero: true, scale, source: setLine });
+    }
+    // Amber, or no light: a real figure the buyer should see, but not a verdict.
+    // NOTED, never green -- sitting mid-market is not a finding in anyone's
+    // favour. [[traffic-column-report-direction]]
+    return band("price_vs_msrp", "01", NOTED, mc.value, mc.headline, { hero: true, scale });
+  }
+
   if (ms > 0 && qp > 0) {
     // We hold a figure but not one we may measure against.
     return gap("price_vs_msrp", "01", "NO EXACT MSRP MATCH",
