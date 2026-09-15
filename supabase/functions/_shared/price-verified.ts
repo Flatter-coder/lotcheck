@@ -109,6 +109,39 @@ export interface PriceVerdict {
  * dealer published this price" must read `sourceVerified`, and a caller that
  * means "there is a price here" must read `verified` — and now has to say which.
  */
+/**
+ * "Is there a real asking price here to work a comparison from?"
+ *
+ * NOT a question about provenance. report-lines.js and qualifyMsrpClaim use
+ * this to decide whether to COMPUTE at all -- their false branch refuses to
+ * state a difference, it does not merely soften a label -- so answering it
+ * strictly would delete the comparison from every Quote Check report.
+ *
+ * Accepts EITHER shape, and that is the whole reason it exists. A live analysis
+ * carries `quotedPrice`; the sealed projection carries `price.asking`. The
+ * previous code asked the question itself, in two shapes at once --
+ *
+ *     a?.priceVerified === false || a?.price?.verified === false
+ *
+ * -- reading a PROVENANCE field to answer a PRICE-EXISTS question. The moment
+ * the seal started carrying the strict answer, the live object and its own
+ * sealed projection rendered DIFFERENT SENTENCES for the same report:
+ * `undefined` is not `=== false`, so the live side stayed confident while the
+ * sealed side refused. CI caught it as a round-trip failure. A report whose
+ * seal and whose render disagree is the defect this codebase exists to avoid,
+ * committed against itself.
+ */
+export function priceUsableForComparison(a: any): boolean {
+  // The sealed projection carries the asking price directly, and nothing else
+  // about it. `price` is an object only on that shape -- a live analysis uses
+  // `quotedPrice` -- so this tells the two apart without a flag.
+  if (a?.price && typeof a.price === "object") {
+    const asking = Number(a.price.asking);
+    return Number.isFinite(asking) && asking > 0;
+  }
+  return resolvePriceVerified(a).verified;
+}
+
 export function resolvePriceVerified(a: any): PriceVerdict {
   const price = Number(a?.quotedPrice);
   const hasPrice = Number.isFinite(price) && price > 0;
