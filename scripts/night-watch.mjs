@@ -45,7 +45,7 @@
 // Run:  node scripts/night-watch.mjs [--limit N] [--quiet] [--no-ledger]
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { gradeListing, summarize, normUrl } from "./lib/golden.mjs";
+import { gradeListing, summarize, normUrl, pageDeclaresItself, isInventoryIndex } from "./lib/golden.mjs";
 import { extractD2cVdpVehicle } from "../supabase/functions/_shared/d2c-vdp.js";
 import { extractJsonLdVehicle } from "../supabase/functions/_shared/jsonld-vehicle.js";
 import { extractConvertusVmsVehicle } from "../supabase/functions/_shared/convertus-vms.js";
@@ -88,6 +88,12 @@ if (!pages.length) {
 // excluded = the listing was found gone (sold/404); grading a dead key books
 // drift as defects.
 const byUrl = new Map(keys.listings.filter((k) => !k.excluded).map((k) => [normUrl(k.url), k]));
+// Excluded keys are not absent keys. A key the builder REFUSED to write -- the
+// page served an inventory index, so there was no vehicle on it to be right or
+// wrong about -- must read as "deliberately out of scope", never as "we have no
+// answer for this one", which is what a bare `no key` count would imply.
+const excludedBy = new Map(keys.listings.filter((k) => k.excluded)
+  .map((k) => [normUrl(k.url), k.exclusionReason || "excluded"]));
 
 // ── Replay ──────────────────────────────────────────────────────────────────
 // The shipped extractors, imported directly — not a copy, not a mock. If these
@@ -256,56 +262,10 @@ function applyDrift(g, fetchedAt, key) {
 // CHEVROLET cars, trucks, and SUVs in Stock". That is the dealer declaring a
 // results page. A VDP whose template merely moved its data elsewhere makes no
 // such declaration, and stays a finding.
-const VEHICLE_TYPE = /^(Car|Vehicle|MotorizedVehicle|Product)$/i;
-function pageDeclaresItself(html) {
-  let sawItemList = false, sawVehicle = false;
-  for (const b of html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
-    let j; try { j = JSON.parse(b[1].trim()); } catch { continue; }
-    const arr = Array.isArray(j) ? j : (Array.isArray(j["@graph"]) ? j["@graph"] : [j]);
-    for (const n of arr) {
-      const t = n?.["@type"];
-      for (const one of (Array.isArray(t) ? t : [t]).filter(Boolean).map(String)) {
-        if (/^ItemList$/i.test(one)) sawItemList = true;
-        if (VEHICLE_TYPE.test(one)) sawVehicle = true;
-      }
-    }
-  }
-  const title = html.match(/<title[^>]*>([^<]*)</i)?.[1] || "";
-  const titleIsIndex = /\b\d+\s+(new|used|certified)\b[\s\S]{0,60}\bin stock\b/i.test(title) ||
-    /\bvehicles for sale\b/i.test(title);
-  if (sawVehicle) return "vdp";
-  if (sawItemList || titleIsIndex) return "index";
-  return "unknown";
-}
-
-// TWO INDEPENDENT SIGNALS, because one is not safe here. Plenty of real VDPs
-// carry an ItemList for a "similar vehicles" carousel, so "ItemList and no Car
-// node" on its own would quietly reclassify the exact failure this is meant to
-// catch — a template that stopped emitting its Car node — as a delisting, and
-// the run would go green on a broken page.
-//
-// So the page must ALSO no longer be about this unit: the identifying token in
-// its own URL (a 17-character VIN, or the trailing id segment) must be absent
-// from the bytes. A live VDP always names its own unit somewhere. Both signals
-// come from the page and the URL, never from the answer key.
-function identityToken(url) {
-  try {
-    const path = new URL(url).pathname;
-    const vin = path.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0];
-    if (vin) return vin.toUpperCase();
-    const id = path.replace(/\/+$/, "").split("/").pop();
-    return /^\d{4,}$/.test(id) ? id : null;
-  } catch { return null; }
-}
-
-function isDelisted(html, url) {
-  if (pageDeclaresItself(html) !== "index") return false;
-  const token = identityToken(url);
-  // No token to test means one signal only, which is not enough to dismiss a
-  // page. It stays a finding.
-  if (!token) return false;
-  return !html.toUpperCase().includes(token);
-}
+// pageDeclaresItself / isInventoryIndex live in lib/golden.mjs, imported above.
+// They were written here first and the key builder needed the same judgement;
+// two copies of "is this page a vehicle" is two authors for one fact, which is
+// what check:lineage exists to refuse. One author, both callers.
 
 const grades = [];
 const unrecognised = [];
@@ -318,14 +278,18 @@ let suppressedPoints = 0;
 for (const p of pages) {
   if (isFeedBacked(p.url)) { outOfScope++; continue; }
   const key = byUrl.get(normUrl(p.url));
-  if (!key) { noKey++; continue; }
+  if (!key) {
+    if (excludedBy.has(normUrl(p.url))) { gone++; continue; }
+    noKey++;
+    continue;
+  }
   let html;
   try { html = readFileSync(`${DIR}/${p.file}`, "utf8"); } catch { continue; }
 
   const a = analysisFrom(html);
   if (a?._priceShapeDrift) priceShapeDrift.push(`${p.url} — ${a._priceShapeDrift}`);
   if (!a) {
-    if (isDelisted(html, p.url)) { gone++; continue; }
+    if (isInventoryIndex(html, p.url)) { gone++; continue; }
     // Nothing read it and it is not a confirmed delisting. That stays a finding
     // — a miss is never a clean bill — but say WHICH kind, so the two are not
     // chased as one. "looks like an index, unconfirmed" is a page that declares
@@ -383,7 +347,7 @@ if (oldestDays != null && oldestDays > 30) {
   console.log(`  that is a question about our code, not about today's market — but it cannot`);
   console.log(`  tell you what any of these vehicles costs now.`);
 }
-console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}   delisted (VDP now serves a search page): ${gone}`);
+console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}   not a vehicle page (index served at the VDP url): ${gone}`);
 console.log(`matched to an answer key: ${grades.length}   no key: ${noKey}   unreadable by any extractor: ${unrecognised.length}`);
 for (const u of unrecognised) console.log(`  unread: ${String(u.url).slice(8, 78)}
           ${u.why}`);

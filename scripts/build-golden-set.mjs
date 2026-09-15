@@ -26,7 +26,7 @@
 //   writes scripts/fixtures/golden/answer-keys.json
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { vinValid } from "./lib/golden.mjs";
+import { vinValid, refuseAsKeySource } from "./lib/golden.mjs";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LotCheckGoldenSet/1.0";
 const POOL = "scripts/fixtures/golden/url-pool.json";
@@ -221,6 +221,33 @@ function urlIdentity(url) {
 // ── reconcile one listing ────────────────────────────────────────────────────
 function buildKey(url, html, status) {
   const host = new URL(url).hostname.replace(/^www\./, "");
+
+  // REFUSE BEFORE EXTRACTING. If the dealer served the inventory index at this
+  // URL — because the unit sold, or because the URL never resolved to one — then
+  // there is no vehicle here to be the truth about. Reading one out of the
+  // results list and recording it as this listing's answer is the wrong-entity
+  // error, committed inside the instrument that defines what "correct" means.
+  //
+  // It had already happened. Seven pool URLs were serving search pages on
+  // 2026-08-20 and this function wrote a VIN, asking price, year, make, model
+  // and condition for every one of them. Five were caught later by the
+  // verification pass; two stayed live and gradable. An excluded key with NO
+  // fields is the honest record: we looked, and there was nothing of this
+  // listing to read.
+  const refusal = refuseAsKeySource(html, url);
+  if (refusal) {
+    return {
+      url, host,
+      platform: "not_a_vdp",
+      httpStatus: status,
+      pageTitle: (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").replace(/\s+/g, " ").trim(),
+      excluded: true,
+      exclusionReason: refusal,
+      fields: {},
+      conflicts: [],
+    };
+  }
+
   const ld = fromJsonLd(jsonLdNodes(html));
   const blob = fromBlob(inlineBlob(html));
   const text = pageText(html);

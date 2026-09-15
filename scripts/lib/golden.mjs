@@ -212,3 +212,86 @@ export function summarize(grades) {
     byPoint,
   };
 }
+
+// ── Is this page a vehicle, or the inventory index it fell back to? ─────────
+//
+// WHY THIS IS HERE AND NOT IN TWO PLACES. When a unit sells, these dealers serve
+// the inventory SEARCH page at the old VDP URL: HTTP 200, full size, a
+// schema.org ItemList, titled "45 Used CHEVROLET cars, trucks, and SUVs in
+// Stock". Both halves of this instrument have to recognise that, and they have
+// to agree — a key builder that reads a vehicle off a search page while the
+// grader refuses to is worse than either behaviour alone.
+//
+// It is also the exact defect this closed. Seven pool URLs were ALREADY serving
+// search pages when the keys were built on 2026-08-20, and buildKey extracted a
+// VIN, asking price, year, make, model and condition from them anyway — pulling
+// some vehicle out of the results list and recording it as the truth for a URL
+// that has no vehicle. Five were later marked excluded by the verification pass;
+// two were not, so the answer key carried live, gradable, fabricated values.
+// That is the wrong-entity error aimed at the instrument that defines what
+// "correct" means.
+//
+// TWO INDEPENDENT SIGNALS, never one. Plenty of real VDPs carry an ItemList for
+// a similar-vehicles carousel, so "ItemList and no Car node" alone would
+// reclassify a genuinely broken VDP — a template that stopped emitting its Car
+// node — as a delisting, and go green on it. So the page must declare itself an
+// index AND no longer contain the identifying token from its own URL.
+
+const VEHICLE_LD_TYPE = /^(Car|Vehicle|MotorizedVehicle|Product)$/i;
+
+// What the page says it is, from its own machine-readable declaration.
+export function pageDeclaresItself(html) {
+  let sawItemList = false, sawVehicle = false;
+  for (const b of String(html).matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let j;
+    try { j = JSON.parse(b[1].trim()); } catch { continue; }
+    const arr = Array.isArray(j) ? j : (Array.isArray(j?.["@graph"]) ? j["@graph"] : [j]);
+    for (const n of arr) {
+      const t = n?.["@type"];
+      for (const one of (Array.isArray(t) ? t : [t]).filter(Boolean).map(String)) {
+        if (/^ItemList$/i.test(one)) sawItemList = true;
+        if (VEHICLE_LD_TYPE.test(one)) sawVehicle = true;
+      }
+    }
+  }
+  const title = String(html).match(/<title[^>]*>([^<]*)</i)?.[1] || "";
+  const titleIsIndex = /\b\d+\s+(new|used|certified)\b[\s\S]{0,60}\bin stock\b/i.test(title) ||
+    /\bvehicles for sale\b/i.test(title);
+  if (sawVehicle) return "vdp";
+  if (sawItemList || titleIsIndex) return "index";
+  return "unknown";
+}
+
+// The unit's own name for itself, taken from its URL: a VIN, or a trailing
+// numeric id. Null when the URL carries neither — and a null token is never
+// treated as proof of anything.
+export function identityToken(url) {
+  try {
+    const path = new URL(String(url)).pathname;
+    const vin = path.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0];
+    if (vin && vinValid(vin)) return vin.toUpperCase();
+    if (vin) return vin.toUpperCase();
+    const last = path.replace(/\/+$/, "").split("/").pop() || "";
+    return /^\d{4,}$/.test(last) ? last : null;
+  } catch { return null; }
+}
+
+// Both signals, or it is not a confirmed index. Conservative on purpose: a page
+// this cannot place stays a finding rather than being dismissed.
+export function isInventoryIndex(html, url) {
+  if (pageDeclaresItself(html) !== "index") return false;
+  const token = identityToken(url);
+  if (!token) return false;
+  return !String(html).toUpperCase().includes(token);
+}
+
+// Would a key built from this page be about this listing at all? Used by the key
+// builder to refuse rather than fabricate: an index page with no token to test
+// is still not a vehicle page, and a key built from it would be an invention.
+export function refuseAsKeySource(html, url) {
+  const shape = pageDeclaresItself(html);
+  if (shape !== "index") return null;
+  return isInventoryIndex(html, url)
+    ? "page declares itself an inventory index and no longer contains this listing's id"
+    : "page declares itself an inventory index";
+}
