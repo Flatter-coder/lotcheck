@@ -1,3 +1,5 @@
+import { plausibleVinOrNull, vinShapeOrNull } from "./vin.ts";
+
 import { readNumOrValue } from "./read-num.js";
 // schema.org Vehicle/Offer extraction, shared so it can be regression-tested in
 // Node (same pattern as trim-match.js / amvic-match.js / tradein-detect.js).
@@ -42,7 +44,7 @@ export function jsonLdVehicles(html, pageUrl) {
   const vinOf = (n) => {
     // Four fields real dealer schemas use for it, in decreasing directness.
     const vin = n.vehicleIdentificationNumber ?? n.vin ?? n.sku ?? n.mpn;
-    return (typeof vin === "string" && /^[A-HJ-NPR-Z0-9]{17}$/i.test(vin.trim())) ? vin.trim().toUpperCase() : null;
+    return vinShapeOrNull(vin);
   };
   const anchorOf = (n) => norm(
     typeof n.url === "string" ? n.url
@@ -133,7 +135,7 @@ export function extractJsonLdVehicle(html) {
   const trim = titleCase(str(node.vehicleConfiguration) || str(node.trim) || str(node.vehicleModelConfiguration));
 
   const vinRaw = typeof node.vehicleIdentificationNumber === "string" ? node.vehicleIdentificationNumber.trim().toUpperCase() : "";
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+  const vin = plausibleVinOrNull(vinRaw);
 
   let odometerKm = null;
   const odo = node.mileageFromOdometer;

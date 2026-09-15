@@ -1,3 +1,5 @@
+import { plausibleVinOrNull } from "./vin.ts";
+
 import { readNum } from "./read-num.js";
 // Convertus VMS embedded vehicle data — present on every Convertus
 // "/vehicles/YYYY/make/model/city/prov/adId/" VDP as a single inline
@@ -73,7 +75,7 @@ export function extractConvertusVmsVehicle(html) {
   const str = (x) => (typeof x === "string" && x.trim()) ? x.trim() : null;
 
   const vinRaw = String(v.vin || "").trim().toUpperCase();
-  const vin = (/^[A-HJ-NPR-Z0-9]{17}$/.test(vinRaw) && !/^(.)\1{16}$/.test(vinRaw)) ? vinRaw : null;
+  const vin = plausibleVinOrNull(vinRaw);
 
   const saleClass = String(v.sale_class || "").toLowerCase();
   const condition = /new/.test(saleClass) ? "new" : (/used|pre-?owned|certified/.test(saleClass) ? "used" : null);
