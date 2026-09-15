@@ -42,7 +42,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # 24, not 20. @supabase/supabase-js needs a global WebSocket, which
+          # Node gained at 22; on 20 it throws "Node.js detected but native
+          # WebSocket not found" the moment a client is constructed. This job
+          # spent ten minutes parsing 1.6 million complaints and died on that
+          # line. Every other workflow in this repo was already on 22 or 24 --
+          # this one was the only 20, written from habit rather than from the
+          # repo. check:jobs now enforces the floor.
+          node-version: "24"
 
       # THE FIRST SCHEDULED RUN DIED HERE, 2026-09-15. It downloaded all seven
       # slices, parsed 2,158,800 rows into 1,587,434 complaints across 31,257
