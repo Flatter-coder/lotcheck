@@ -19,7 +19,8 @@
 //
 // Run: npm run test:warranty-verify
 
-import { parseTerm, pairOnPage, verifyField, verifyRow, normalizePage }
+import { readFileSync } from "node:fs";
+import { parseTerm, pairOnPage, verifyField, verifyRow, sourceUrlOf, normalizePage }
   from "./lib/warranty-verify.mjs";
 
 let failed = 0;
@@ -246,6 +247,59 @@ console.log("\npart 3b -- uncited is not drifted");
   // A field the page DOES discuss, with a different number, is still drift.
   const moved = verifyRow(row, page.replace("72 months/110,000 km", "60 months/100,000 km"));
   check("a covered field whose number moved is still drifted", moved.status === "drifted", moved.status);
+}
+
+/* ── their refusal is not our outage ──────────────────────────────────────── */
+console.log("\npart 9 -- four different failures, four different words");
+{
+  // 2026-09-15: 20 of 30 makes read "unreachable", one word covering four
+  // unrelated facts. Re-probed honestly: 13 answered HTTP 403, three stored a
+  // citation of a printed booklet instead of a URL, one 404'd, one failed to
+  // connect, and two simply worked. Only four of the twenty were ours to fix,
+  // and the single word hid that completely.
+  const row = { source_url: "https://www.example.ca/warranty", basic_coverage: "3-year/60,000 km" };
+
+  check("a 403 is the maker declining us, recorded as blocked",
+    verifyRow(row, null, 403).status === "blocked", verifyRow(row, null, 403).status);
+  check("...and the note says whose refusal it is",
+    /their refusal, not a broken link/i.test(verifyRow(row, null, 403).note));
+  check("a 404 is a dead link, and ours to fix",
+    verifyRow(row, null, 404).status === "dead_link" && /[Oo]urs to fix/.test(verifyRow(row, null, 404).note));
+  check("a connection failure stays unreachable",
+    verifyRow(row, null, 0).status === "unreachable", verifyRow(row, null, 0).status);
+
+  // The three real citations, verbatim from production.
+  for (const cite of [
+    "https://www.ford.ca (Ford of Canada New Vehicle Limited Warranty Guide)",
+    "https://www.nissan.ca (2024 Nissan Warranty Information Booklet)",
+    "https://www.subaru.ca (Subaru Warranty Coverage Booklet)",
+  ]) {
+    const v = verifyRow({ ...row, source_url: cite }, null, null);
+    check(`a booklet citation is not a failed fetch: ${cite.slice(8, 26)}`,
+      v.status === "cites_document", v.status);
+  }
+  check("...and it says the gap is in how WE stored it",
+    /gap in how we stored it/i.test(verifyRow({ ...row, source_url: "https://www.ford.ca (Guide)" }, null, null).note));
+
+  // THE TRAP THIS REPLACES. A bare origin must never be fetched in place of the
+  // document: a homepage states no warranty term, so it would come back as
+  // "we looked and found nothing" -- an absence read as knowledge.
+  check("a citation yields NO url to fetch",
+    sourceUrlOf("https://www.ford.ca (Ford of Canada New Vehicle Limited Warranty Guide)").url === null);
+  check("a real url is returned unchanged",
+    sourceUrlOf("https://www.mazda.ca/en/mazda-owners/Overview/warranty/").url
+      === "https://www.mazda.ca/en/mazda-owners/Overview/warranty/");
+  check("an empty source is no_source, not a bad url",
+    sourceUrlOf("  ").why === "no_source");
+
+  // AND THE GUARD ON THE GUARD: splitting one status into five must not let the
+  // "too much went unread" threshold go quiet.
+  const runner = readFileSync(new URL("./verify-warranty-catalog.mjs", import.meta.url), "utf8");
+  for (const st of ["blocked", "dead_link", "bad_url", "cites_document", "no_source", "unreachable"]) {
+    check(`the unread threshold still counts ${st}`,
+      new RegExp(`NOT_READ[\\s\\S]{0,240}"${st}"`).test(runner),
+      "a refactor that narrows this threshold makes the job green by forgetting");
+  }
 }
 
 /* ── 7. normalisation ────────────────────────────────────────────────────── */

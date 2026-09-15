@@ -90,16 +90,25 @@ async function main() {
   for (const row of rows) {
     let page = null, http = null, why = null;
     if (row.source_url) ({ page, http, why } = await readPage(row.source_url));
-    const v = verifyRow(row, page);
+    // The HTTP code travels with the page, so a refusal (403) can be told apart
+    // from a dead link (404) and from a network that simply failed.
+    const v = verifyRow(row, page, http);
     const note = page == null && why ? `${v.note} (${why})` : v.note;
     results.push({ make: row.make, status: v.status, note, http, url: row.source_url, prev: row.prev_status || null });
-    const mark = { confirmed: "ok  ", drifted: "DRIFT", unreachable: "....", no_source: "NOSRC", unparsed: "?????", empty_row: "empty" }[v.status] || "?";
+    const mark = { confirmed: "ok  ", drifted: "DRIFT", unreachable: "....", blocked: "BLOCK", dead_link: "DEAD ", cites_document: "PAPER", bad_url: "BADURL", no_source: "NOSRC", unparsed: "?????", empty_row: "empty" }[v.status] || "?";
     console.log(`  ${mark}  ${row.make.padEnd(16)} ${v.status === "confirmed" ? "" : note}`);
     if (row.source_url) await sleep(PAUSE_MS);
   }
 
   const by = (s) => results.filter((r) => r.status === s);
-  console.log(`\n  confirmed ${by("confirmed").length}  ·  drifted ${by("drifted").length}  ·  unreachable ${by("unreachable").length}  ·  no source ${by("no_source").length}  ·  unparsed ${by("unparsed").length}`);
+  // Counted separately on purpose. Lumping them under one word hid that only
+  // four of twenty were ours to fix.
+  console.log(`\n  confirmed ${by("confirmed").length}  ·  drifted ${by("drifted").length}` +
+    `  ·  blocked by the maker ${by("blocked").length}  ·  cites paper ${by("cites_document").length}` +
+    `  ·  dead link ${by("dead_link").length}  ·  bad url ${by("bad_url").length}` +
+    `  ·  unreachable ${by("unreachable").length}  ·  no source ${by("no_source").length}  ·  unparsed ${by("unparsed").length}`);
+  const ours = by("cites_document").length + by("dead_link").length + by("bad_url").length + by("no_source").length;
+  if (ours) console.log(`  ${ours} of those are OUR data to fix, not the manufacturer's site.`);
 
   console.log("\nrequests sent:");
   for (const l of requestLedger()) console.log(`  ${l.origin.padEnd(48)} ${l.requests} req, ${l.refusals} refusal(s)${l.circuitOpen ? " [circuit open]" : ""}`);
@@ -124,7 +133,20 @@ async function main() {
 
 function finish(results) {
   const drifted = results.filter((r) => r.status === "drifted");
-  const unreachable = results.filter((r) => r.status === "unreachable");
+  /* SPLITTING A STATUS MUST NOT WEAKEN THE THRESHOLD.
+   *
+   * This guard fires when too much of the catalogue went unread, because
+   * "no drift" across pages nobody could read is not a green result. Until
+   * 2026-09-15 there was ONE word for every way that happens, so the count was
+   * automatically complete. Now there are five, and if this kept counting only
+   * "unreachable" the guard would have gone quiet on the very day the problem
+   * was better understood -- a threshold silently loosened by a refactor.
+   *
+   * So it counts every status that means THE FIGURE WAS NOT RE-READ, however
+   * that came about, ours or theirs. [[no-single-point-of-failure]]
+   */
+  const NOT_READ = ["unreachable", "blocked", "dead_link", "bad_url", "cites_document", "no_source"];
+  const unreachable = results.filter((r) => NOT_READ.includes(r.status));
   const noSource = results.filter((r) => r.status === "no_source");
 
   // A RED RUN IS THE REPORT. Nothing here emails anyone.
@@ -173,7 +195,7 @@ function finish(results) {
   // client-rendered or flaky pages; refuse to call a run green when most of the
   // makes went unread, because "0 drifted" would then mean "0 examined".
   if (unreachable.length > results.length / 2) {
-    console.error(`\n${unreachable.length} of ${results.length} pages were unreadable. "No drift" here means "nothing was checked" — treating that as green is the defect this job exists to prevent.`);
+    console.error(`\n${unreachable.length} of ${results.length} figures were not re-read (blocked, dead, unfetchable or uncited). "No drift" here means "nothing was checked" — treating that as green is the defect this job exists to prevent.`);
     process.exit(1);
   }
   if (noSource.length) console.warn(`\n${noSource.length} row(s) cite no source_url: ${noSource.map((r) => r.make).join(", ")}`);

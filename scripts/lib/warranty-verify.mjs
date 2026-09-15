@@ -237,9 +237,63 @@ const FIELD_SUBJECT = {
  * and saying "the manufacturer no longer states this" because our own request
  * timed out is the same defect class as the whole 2026-09-13 report audit.
  */
-export function verifyRow(row, page) {
-  if (!row?.source_url) return { status: "no_source", fields: {}, note: "no source_url on this row -- the figure cites nothing" };
-  if (page == null) return { status: "unreachable", fields: {}, note: "we could not read the manufacturer's page; the stored figures are unchanged and unverified" };
+/* A URL, or the reason it is not one.
+ *
+ * Three rows store a CITATION where a URL belongs:
+ *   "https://www.ford.ca (Ford of Canada New Vehicle Limited Warranty Guide)"
+ * Ford, Nissan and Subaru cite printed booklets. There is no page to fetch, and
+ * `new URL()` throws on the whole string, which the job reported as
+ * "unreachable" -- a word that says the MANUFACTURER'S site failed. It did not.
+ * We stored something that was never fetchable. Different fact, different word,
+ * and only one of the two is ours to fix. [[present-without-creating-questions]]
+ */
+export function sourceUrlOf(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return { url: null, why: "no_source" };
+  let u;
+  try { u = new URL(s); } catch { u = null; }
+  if (u && /^https?:$/.test(u.protocol)) return { url: u.href, why: null };
+  // A bare origin followed by a document title is a citation of something
+  // printed. Do NOT silently fetch the homepage: a homepage states no warranty
+  // term, so it would read as "we looked and found nothing".
+  if (/^https?:\/\/\S+\s+\(.+\)\s*$/.test(s)) return { url: null, why: "cites_document" };
+  return { url: null, why: "bad_url" };
+}
+
+export const SOURCE_NOTE = {
+  no_source: "no source_url on this row -- the figure cites nothing",
+  cites_document: "this figure cites a printed booklet, not a web page, so there is nothing to re-read. " +
+    "It is unverified by this job -- which is a gap in how we stored it, not a failure of the manufacturer's site.",
+  bad_url: "the stored source is not a usable URL, so nothing was fetched. Ours to fix, not theirs.",
+};
+
+export function verifyRow(row, page, http = null) {
+  const src = sourceUrlOf(row?.source_url);
+  if (!src.url) return { status: src.why, fields: {}, note: SOURCE_NOTE[src.why] || SOURCE_NOTE.bad_url };
+  if (page == null) {
+    /* THEIR REFUSAL IS NOT OUR OUTAGE. 13 of 20 "unreachable" makes answer HTTP
+     * 403 to an honest User-Agent -- GM and Stellantis each behind one WAF.
+     * That is a live site declining an identified client, which is their
+     * decision to make and a different thing from a link that is dead or a
+     * network that failed. It is recorded as `blocked` so it can be counted,
+     * escalated or routed through the render path on its own merits.
+     *
+     * We do NOT answer a 403 by pretending to be Chrome. A browser User-Agent
+     * returns 200 from gmccanada.ca -- and sending one would be evasion, which
+     * is not the posture this repo takes toward permission.
+     * [[dealer-tos-daily-checks]]
+     */
+    const code = Number(http) || 0;
+    if (code === 403 || code === 401 || code === 429) {
+      return { status: "blocked", fields: {},
+        note: `the manufacturer's site answered HTTP ${code} to an identified request. The stored figures are unchanged and unverified. This is their refusal, not a broken link.` };
+    }
+    if (code === 404 || code === 410) {
+      return { status: "dead_link", fields: {},
+        note: `the stored source URL returns HTTP ${code}. The page has moved or gone; the URL needs replacing. Ours to fix.` };
+    }
+    return { status: "unreachable", fields: {}, note: "we could not reach the manufacturer's page; the stored figures are unchanged and unverified" };
+  }
 
   // Before judging any field: did we actually read a warranty page? A shell with
   // no year/distance pair anywhere is not evidence that the manufacturer dropped
