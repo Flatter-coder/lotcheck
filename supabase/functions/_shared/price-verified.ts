@@ -41,10 +41,27 @@
 // means. The divergence is now a pinned truth table (price-verified.test.ts)
 // instead of two expressions that happened to differ.
 //
-// THE OPEN DECISION, stated plainly so it is not lost: a quote whose price we
-// never checked against the dealer's published data is currently labelled
-// "verified" on the strength of being a number greater than zero. That is the
-// looser claim, and it is the one that rides in the signed record.
+// THE DECISION, taken 2026-09-15: STRICT, but only where "verified" is a CLAIM.
+//
+// A quote whose price we never checked against the dealer's published data is
+// no longer called verified. The signed record, the PDF badge and every surface
+// that prints "price verified" now read `sourceVerified`, so the seal asserts
+// only what we can point at. Every Quote Check report says "price not verified",
+// because analyze-quote sets no source and nothing checked one.
+//
+// WHAT WAS DELIBERATELY NOT MADE STRICT, and why it matters more than it looks:
+// qualifyMsrpClaim gates on `verified`, and its false branch does not relabel
+// anything -- it REFUSES to measure the asking price against MSRP at all and
+// returns "The asking price could not be verified, so it is not measured
+// against MSRP." Pointing that at sourceVerified would delete the price-vs-MSRP
+// line from every Quote Check report, which is the paid product's central
+// output, because a buyer's uploaded quote is precisely the case we cannot
+// check against a dealer's page.
+//
+// So the two readings are routed by what the caller MEANS. A claim about
+// provenance takes `sourceVerified`. A precondition that asks "is there a real
+// asking price here" takes `verified`. That distinction is the whole reason
+// this module returns a verdict instead of a boolean.
 //
 // Run tests (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/price-verified.test.ts
