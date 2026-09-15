@@ -4,13 +4,24 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * EVERY GUARD BELOW EXISTS BECAUSE THE THING IT GUARDS WAS OBSERVED, 2026-09-14.
  *
- * 1. FLAT_CMPL.zip IS BROKEN AND ITS PUBLISHER DOES NOT KNOW. NHTSA's own page
- *    advertises 354 MB; the object served is 3,225,032 bytes -- 56,997 records
- *    ending 1996-10-10, about 1.5% of the corpus. It was 340 MB on 2025-05-31
- *    (Wayback) and is STILL rewritten daily, so the publisher's pipeline reports
- *    success while shipping a truncated file. Reading it would have given every
- *    car built after 1996 an empty fault list, which renders as "nothing
- *    reported" -- our failure as the car's fact. It is refused BY NAME below.
+ * 1. FLAT_CMPL.zip WAS BROKEN FOR UP TO FIFTEEN MONTHS, AND IS STILL REFUSED.
+ *    On 2026-09-14 NHTSA's page advertised 354 MB while the object served was
+ *    3,225,032 bytes -- 56,997 records ending 1996-10-10, about 1.5% of the
+ *    corpus. It had been 340 MB on 2025-05-31 (Wayback) and was rewritten daily
+ *    throughout, so the publisher's pipeline reported success on every run while
+ *    shipping a truncated file.
+ *
+ *    REPAIRED 2026-09-15 10:24 GMT: it now serves 371,852,420 bytes, and
+ *    COMPLAINTS_RECEIVED_1995-1999.zip was repaired the day before -- 193,122
+ *    rows, CMPLID contiguous from 1, covering the full range its name claims.
+ *    The 136,125-record hole is closed.
+ *
+ *    IT STAYS REFUSED ANYWAY. A file that silently served 1.5% of itself for
+ *    over a year, daily, without its publisher noticing, has demonstrated that
+ *    its health is not something we can read off a successful download. The
+ *    seven slices cost one extra request each and carry their own row floors.
+ *    A source being healthy today is not a reason to remove the guard that
+ *    would have caught it yesterday.
  *
  * 2. A BLOCK IS INDISTINGUISHABLE FROM DATA. Both static.nhtsa.gov and
  *    api.nhtsa.gov sit behind one Akamai property that answers HTTP 403 with

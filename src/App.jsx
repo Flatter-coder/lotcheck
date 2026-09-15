@@ -8271,8 +8271,20 @@ function ReportedFaults({ analysis, C }) {
         <div style={{ padding: "12px 16px", borderTop: `1px solid ${C.line}`, fontSize: 11, color: C.inkFaint, lineHeight: 1.55 }}>
           {FAULTS_BASIS}
           {p.unknownOnly > 0 && ` ${p.unknownOnly.toLocaleString("en-CA")} further filings NHTSA records only as "unknown or other" are excluded.`}
-          {analysis?.year && Number(analysis.year) <= 2000 &&
-            " Older cars are undercounted: complaints received between October 1996 and December 1999 are missing from NHTSA's own bulk files."}
+          {/* THE PRE-2000 UNDERCOUNT WARNING IS GONE, because it stopped being
+              true. On 2026-09-14 NHTSA's bulk files jumped from record 56,997
+              straight to 193,123 -- 136,125 complaints received between
+              1996-10-11 and 1999-12-31, absent -- so every pre-2000 card had to
+              say it undercounted. NHTSA republished the file at 13:42 GMT that
+              day and the hole closed exactly: 193,122 rows, CMPLID contiguous
+              from 1, covering 1995-01-01 to 1999-12-31. Read and verified
+              2026-09-15.
+
+              A warning that outlives its defect is as wrong as a missing one:
+              it tells a buyer the figure is soft when it is not, and it is the
+              kind of copy nobody revisits. What guards a relapse is the
+              per-slice row floor in nhtsa-slices.mjs -- code that fails a run,
+              not a sentence that hedges a report. */}
           {src && <> NHTSA last updated this data <b style={{ color: C.ink }}>{src}</b>.</>}
         </div>
       </article>
