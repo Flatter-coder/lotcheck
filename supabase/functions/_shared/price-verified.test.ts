@@ -6,7 +6,7 @@
 // signed record made the looser claim.
 //
 // Run: node --experimental-strip-types supabase/functions/_shared/price-verified.test.ts
-import { resolvePriceVerified, isVerifiedPriceSource } from "./price-verified.ts";
+import { resolvePriceVerified, isVerifiedPriceSource, priceUsableForComparison } from "./price-verified.ts";
 
 let pass = 0;
 const fails: string[] = [];
@@ -84,6 +84,39 @@ for (const pv of [true, false, undefined, null]) {
     }
   }
 }
+
+// THE ROUTING, pinned. On the Quote Check shape -- a price, no recorded
+// verdict, no source -- the two readings must DISAGREE, because that is the
+// whole point of keeping both: the seal says "not verified" while the MSRP
+// comparison still has a price to measure.
+{
+  const quote = { quotedPrice: 30990 };
+  const v = resolvePriceVerified(quote);
+  eq("quote: the SEAL must not claim verified", v.sourceVerified, false);
+  eq("quote: there IS a price to measure against MSRP", v.verified, true);
+  eq("quote: and it is not countable against other listings", v.dealerPublished, false);
+  eq("quote: flagged as unchecked", v.unknown, true);
+}
+{
+  // A listing read from the dealer's own published data: everything agrees.
+  const listing = { quotedPrice: 42475, quotedPriceSource: "convertus_vms" };
+  const v = resolvePriceVerified(listing);
+  eq("listing: seal may claim verified", v.sourceVerified, true);
+  eq("listing: measurable", v.verified, true);
+  eq("listing: countable", v.dealerPublished, true);
+  eq("listing: nothing unknown", v.unknown, false);
+}
+
+// BOTH SHAPES MUST ANSWER THE SAME. A report and its own seal rendering
+// different sentences is what CI caught when this question was asked by
+// sniffing a provenance field in two shapes at once.
+eq("live quote has a usable price", priceUsableForComparison({ quotedPrice: 56000 }), true);
+eq("its sealed form agrees", priceUsableForComparison({ price: { asking: 56000, verified: false } }), true);
+eq("sealed with no asking price", priceUsableForComparison({ price: { asking: 0, verified: false } }), false);
+eq("sealed with a null asking price", priceUsableForComparison({ price: { asking: null, verified: true } }), false);
+eq("live with no price", priceUsableForComparison({ quotedPrice: 0 }), false);
+eq("a strict-unverified seal still has a usable price",
+  priceUsableForComparison({ price: { asking: 30990, verified: false } }), true);
 
 if (fails.length) {
   console.error(`price-verified: ${fails.length} FAILED, ${pass} passed\n`);

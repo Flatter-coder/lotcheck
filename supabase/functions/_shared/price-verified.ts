@@ -41,10 +41,27 @@
 // means. The divergence is now a pinned truth table (price-verified.test.ts)
 // instead of two expressions that happened to differ.
 //
-// THE OPEN DECISION, stated plainly so it is not lost: a quote whose price we
-// never checked against the dealer's published data is currently labelled
-// "verified" on the strength of being a number greater than zero. That is the
-// looser claim, and it is the one that rides in the signed record.
+// THE DECISION, taken 2026-09-15: STRICT, but only where "verified" is a CLAIM.
+//
+// A quote whose price we never checked against the dealer's published data is
+// no longer called verified. The signed record, the PDF badge and every surface
+// that prints "price verified" now read `sourceVerified`, so the seal asserts
+// only what we can point at. Every Quote Check report says "price not verified",
+// because analyze-quote sets no source and nothing checked one.
+//
+// WHAT WAS DELIBERATELY NOT MADE STRICT, and why it matters more than it looks:
+// qualifyMsrpClaim gates on `verified`, and its false branch does not relabel
+// anything -- it REFUSES to measure the asking price against MSRP at all and
+// returns "The asking price could not be verified, so it is not measured
+// against MSRP." Pointing that at sourceVerified would delete the price-vs-MSRP
+// line from every Quote Check report, which is the paid product's central
+// output, because a buyer's uploaded quote is precisely the case we cannot
+// check against a dealer's page.
+//
+// So the two readings are routed by what the caller MEANS. A claim about
+// provenance takes `sourceVerified`. A precondition that asks "is there a real
+// asking price here" takes `verified`. That distinction is the whole reason
+// this module returns a verdict instead of a boolean.
 //
 // Run tests (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/price-verified.test.ts
@@ -92,6 +109,39 @@ export interface PriceVerdict {
  * dealer published this price" must read `sourceVerified`, and a caller that
  * means "there is a price here" must read `verified` — and now has to say which.
  */
+/**
+ * "Is there a real asking price here to work a comparison from?"
+ *
+ * NOT a question about provenance. report-lines.js and qualifyMsrpClaim use
+ * this to decide whether to COMPUTE at all -- their false branch refuses to
+ * state a difference, it does not merely soften a label -- so answering it
+ * strictly would delete the comparison from every Quote Check report.
+ *
+ * Accepts EITHER shape, and that is the whole reason it exists. A live analysis
+ * carries `quotedPrice`; the sealed projection carries `price.asking`. The
+ * previous code asked the question itself, in two shapes at once --
+ *
+ *     a?.priceVerified === false || a?.price?.verified === false
+ *
+ * -- reading a PROVENANCE field to answer a PRICE-EXISTS question. The moment
+ * the seal started carrying the strict answer, the live object and its own
+ * sealed projection rendered DIFFERENT SENTENCES for the same report:
+ * `undefined` is not `=== false`, so the live side stayed confident while the
+ * sealed side refused. CI caught it as a round-trip failure. A report whose
+ * seal and whose render disagree is the defect this codebase exists to avoid,
+ * committed against itself.
+ */
+export function priceUsableForComparison(a: any): boolean {
+  // The sealed projection carries the asking price directly, and nothing else
+  // about it. `price` is an object only on that shape -- a live analysis uses
+  // `quotedPrice` -- so this tells the two apart without a flag.
+  if (a?.price && typeof a.price === "object") {
+    const asking = Number(a.price.asking);
+    return Number.isFinite(asking) && asking > 0;
+  }
+  return resolvePriceVerified(a).verified;
+}
+
 export function resolvePriceVerified(a: any): PriceVerdict {
   const price = Number(a?.quotedPrice);
   const hasPrice = Number.isFinite(price) && price > 0;
