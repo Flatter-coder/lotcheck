@@ -161,6 +161,15 @@ jobs:
       # and so could not show on /verify for any real report.
       - name: Canonical report parity (the signed shape matches the client copy)
         run: npm run check:canonical
+      # check:canonical proves the two copies project the same SHAPE. It says
+      # nothing about where each field's VALUE came from. The 09-03 audit found
+      # 21 of 22 defects were one fact produced in two places -- two formulas
+      # that agreed when written and drifted after. This pins, per published
+      # fact, every function that DERIVES it, and fails when that set changes.
+      # It does not claim the authors agree, only that adding one is a decision
+      # rather than an accident. Standing debt prints on every green run.
+      - name: Fact lineage (one author per published fact)
+        run: npm run check:lineage
       - name: Flywheel fee-vocab (join keys + de-identification invariant)
         run: npm run test:flywheel
       - name: Copy compliance (shipped claims)

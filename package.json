@@ -85,6 +85,7 @@
     "check:jobs": "node scripts/check-scheduled-jobs.mjs",
     "test:live-dot": "node scripts/test-live-dot.mjs",
     "check:canonical": "node scripts/check-canonical-parity.mjs",
+    "check:lineage": "node scripts/check-fact-lineage.mjs",
     "test:catalog-writes": "node scripts/test-catalog-writes.mjs",
     "key:scrapfly": "node scripts/set-scrapfly-key.mjs",
     "key:sync": "node scripts/sync-scrapfly-key.mjs",
