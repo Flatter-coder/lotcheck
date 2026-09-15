@@ -170,14 +170,21 @@ function analysisFrom(html) {
 // drift becomes not_gradable — never silently passed, never counted as a
 // defect. What is left still grades, because it cannot drift: a VIN, a model
 // year and a new/used condition are properties of the vehicle, not of the day.
+// Freshness is PER LISTING, not per file. Once part of a key file is rebuilt
+// from the snapshot, one file-level builtAt is a lie about the other part: it
+// would make 79 untouched 08-20 keys look as fresh as the 41 rebuilt ones, and
+// this check would wave their drift straight through. Each listing carries its
+// own builtAt; the file-level date is only a fallback for keys written before
+// that field existed.
 const FRESH_MS = 24 * 3600e3;
 const DRIFTS = new Set(["price", "price_gating", "msrp_dealer_stated", "odometer"]);
-const keysBuiltAt = Date.parse(keys?.meta?.builtAt || "");
+const fileBuiltAt = Date.parse(keys?.meta?.builtAt || "");
 
-function applyDrift(g, fetchedAt) {
+function applyDrift(g, fetchedAt, key) {
   const pageAt = Date.parse(fetchedAt || "");
-  if (!Number.isFinite(keysBuiltAt) || !Number.isFinite(pageAt)) return { g, suppressed: 0 };
-  if (pageAt - keysBuiltAt <= FRESH_MS) return { g, suppressed: 0 };
+  const keyAt = Date.parse(key?.builtAt || "") || fileBuiltAt;
+  if (!Number.isFinite(keyAt) || !Number.isFinite(pageAt)) return { g, suppressed: 0 };
+  if (Math.abs(pageAt - keyAt) <= FRESH_MS) return { g, suppressed: 0 };
 
   let suppressed = 0;
   const points = { ...g.points };
@@ -217,7 +224,7 @@ for (const p of pages) {
     unrecognised.push(p.url);
     continue;
   }
-  const { g, suppressed } = applyDrift(gradeListing(key, a), p.fetchedAt);
+  const { g, suppressed } = applyDrift(gradeListing(key, a), p.fetchedAt, key);
   suppressedPoints += suppressed;
   grades.push({ ...g, extractor: a._extractor, fetchedAt: p.fetchedAt });
 }
@@ -229,6 +236,16 @@ const falseAcc = defects.filter((g) => g.verdict === "FAIL_FALSE_ACCUSATION");
 
 const ages = pages.map((p) => Date.parse(p.fetchedAt || "")).filter(Number.isFinite);
 const oldestDays = ages.length ? Math.round((Date.now() - Math.min(...ages)) / 864e5) : null;
+// The answer keys are half of the measurement, so they belong in the identity
+// of a run. Caught the first time this mattered: rebuilding 41 keys from the
+// snapshot gave 5 previously key-less pages a key, which moved them out of
+// "skipped, no key" and into the graded path, where they failed extraction.
+// Unreadable went 13 -> 18 and the run was flagged a REGRESSION. Nothing had got
+// worse — the instrument had started looking at five pages it used to ignore.
+// Comparing two runs graded against different keys is not a comparison.
+const keysHash = createHash("sha256")
+  .update(JSON.stringify((keys.listings || []).map((k) => [k.url, k.builtAt]).sort()))
+  .digest("hex").slice(0, 16);
 const corpusHash = createHash("sha256")
   .update(pages.map((p) => p.sha256 || p.file).sort().join(""))
   .digest("hex").slice(0, 16);
@@ -251,14 +268,14 @@ if (oldestDays != null && oldestDays > 30) {
 console.log(`in scope: ${pages.length - outOfScope}   feed-backed, not replayable offline: ${outOfScope}`);
 console.log(`matched to an answer key: ${grades.length}   no key: ${noKey}   unreadable by any extractor: ${unrecognised.length}`);
 for (const u of unrecognised.slice(0, 5)) console.log(`  unread: ${String(u).slice(0, 84)}`);
-const keyAgeDays = Number.isFinite(keysBuiltAt) ? Math.round((Date.now() - keysBuiltAt) / 864e5) : null;
+
 if (suppressedPoints) {
-  console.log(`\nanswer keys built ${String(keys?.meta?.builtAt).slice(0, 10)} (${keyAgeDays} days ago), ` +
-    `pages snapshotted later — ${suppressedPoints} drift-prone points NOT graded`);
+  console.log(`\n${suppressedPoints} drift-prone points NOT graded — their key and page are ` +
+    `more than a day apart`);
   console.log(`  (price, price-gating, dealer-stated MSRP, odometer). A dealer moving a price`);
   console.log(`  is not our defect, and grading it against an expired key would accuse us of`);
   console.log(`  one. Identity, VIN and condition still grade — those cannot drift.`);
-  console.log(`  To grade price again, rebuild the keys against the same snapshot: npm run golden:build`);
+  console.log(`  Refresh those keys from the stored pages: npm run golden:build -- --from-snapshot`);
 }
 console.log(`graded: ${s.graded}   pass: ${s.pass}   fail: ${s.fail}   false accusations: ${s.false_accusations}`);
 if (s.accuracyPct != null) console.log(`extraction accuracy (page-provable points): ${s.accuracyPct}%`);
@@ -279,6 +296,7 @@ console.log(`clean, and says nothing about the others.`);
 const entry = {
   ranAt: new Date().toISOString(),
   corpusHash,
+  keysHash,
   corpusPages: pages.length,
   outOfScopeFeedBacked: outOfScope,
   corpusOldestDays: oldestDays,
@@ -306,7 +324,7 @@ if (!NO_LEDGER) {
 // is a different question, and comparing across them would manufacture both
 // fake regressions and fake improvements.
 let regressed = false;
-if (prior && prior.corpusHash === corpusHash) {
+if (prior && prior.corpusHash === corpusHash && prior.keysHash === keysHash) {
   const dAcc = (entry.accuracyPct ?? 0) - (prior.accuracyPct ?? 0);
   console.log(`\nvs previous run (${String(prior.ranAt).slice(0, 10)}, same corpus): ` +
     `${dAcc >= 0 ? "+" : ""}${Math.round(dAcc * 10) / 10} points, ` +
@@ -316,7 +334,7 @@ if (prior && prior.corpusHash === corpusHash) {
     console.error(`\nREGRESSION: this run is worse than the last one on the same pages.`);
   }
 } else if (prior) {
-  console.log(`\nprevious run used a different corpus — not compared.`);
+  console.log(`\nprevious run used a different corpus or different answer keys — not compared.`);
 }
 
 if (falseAcc.length) {
