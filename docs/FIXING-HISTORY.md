@@ -23,6 +23,44 @@ the next instance.
 
 ---
 
+## 2026-09-15 - five findings against the product, five defects in the measuring
+
+An instrument was built to estimate the real error rate, because every accuracy
+sample we hold is a supervised one and a supervised sample cannot measure what
+only gets found when somebody is watching. On its first runs it reported five
+defects in the product. **Every one of them was a defect in the measuring.** The
+two real defects it eventually found were found afterwards, and both were in the
+things that define correctness for everything else -- the answer key, and the
+signed record.
+
+The entry worth keeping is not the list. It is that each false finding was only
+caught by being chased to the page bytes instead of believed, and that CI caught
+two of the five before I did.
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| `45feec4` | **`night-watch` could not load on main, and every gate was green.** Re-applying the night's work to main copied the new files but not the MODIFICATIONS they depend on, so the script died on its first line: *"The requested module './lib/golden.mjs' does not provide an export named 'isInventoryIndex'"*. Found by running it. `check:syntax` parses each file ALONE, so a file whose own syntax is perfect passes even when the module it imports has nothing by that name; `check:undef` works inside a file, not across them; and the scripts this breaks are not run in CI at all, because they need a corpus or a network. | **Green signal, no check** (the pipeline reported success over a file that could not execute) | `check:imports`: for every local named import, read the target and confirm the export exists. Static, 91 modules, milliseconds. Mutation-tested both ways. It reported **seven false positives before anything true** -- its own doc comment, multi-declarator `export const A = 1, B = 2`, and trailing `// comments` -- each chased to the source rather than pinned, because a gate whose false positives look like its true ones is a gate that gets switched off. |
+| `63098a4` | **The answer key was reading vehicles off inventory search pages.** Seven pool URLs were already serving the index when the keys were built on 08-20 -- `ItemList`, titled *"45 Used CHEVROLET cars, trucks, and SUVs in Stock"*, no vehicle on the page -- and `buildKey` reached into the results list, took a car, and recorded it as the truth for a URL that has none. Five were later excluded; **two stayed live and gradable**, one of them self-refuting: VIN `2GNAXUEV0N6110676` (model-year character `N`, a 2022) filed against a URL that says 2026. An extractor reading those pages CORRECTLY, by returning nothing, would have been scored WRONG against an invented truth. | **Absence read as knowledge**, and the wrong-entity error [[ai-defamation-entity-match-lesson]] committed inside the instrument that defines correctness | `buildKey` refuses before extracting: a page declaring itself an index yields an excluded key with NO fields and a stated reason. The judgement lives once in `lib/golden.mjs` and needs **two independent signals** -- declares itself an index AND no longer contains the identifying token from its own URL -- because real VDPs carry an `ItemList` for a similar-vehicles carousel, and one signal would reclassify a genuinely broken VDP as a delisting and go green on it. |
+| `63098a4` | **The signed record said "price verified" on a listing the card beside it refused to count.** Five surfaces asked `priceVerified !== undefined ? !! : quotedPrice > 0`; `captureMarketCount` asked a stricter source check. Where the field is unset and the price came from page text, the SEAL claimed verified while the market-count card refused the same listing as `price_unverified`. The seal was the looser claim. | **Two authors per fact** [[two-authors-per-fact]] -- and the looser of the two was the one that got signed | One resolver, three readings routed by what the caller MEANS: `sourceVerified` for a CLAIM about provenance, the permissive reading for a COMPUTATION precondition, `dealerPublished` for counting. That split is the fix, not an implementation detail: `qualifyMsrpClaim`'s false branch REFUSES to measure the price against MSRP rather than relabelling it, so making it strict would have deleted the price-vs-MSRP line from every Quote Check report. Per Vic's call the claim side is strict -- a price nothing checked is no longer called verified. 59 cases pinned, including the two readings DISAGREEING on the Quote Check shape. |
+| `63098a4` | **What a VIN looks like was written fourteen times, in three strengths** -- case-sensitive or not, placeholder-rejecting or not -- and none of the differences were chosen. A lower-cased VIN was a VIN at two sites and not at the other twelve; the placeholder `11111111111111111` was refused by the three platform extractors and **accepted by the path that stores the VIN**. | **Two authors per fact**, thirteen times over | One rule in `_shared/vin.ts`, 62 pinned cases. It does NOT require the ISO 3779 check digit -- `validateVin` already computes that and stays the authority -- and the test pins that gap deliberately rather than hiding it: a VIN can be shaped, plausible, stored and published while failing its own digit. **Open decision.** |
+| `63098a4` | **Nothing measured our accuracy without someone watching, and nothing stopped a published fact acquiring a second author.** | **Green signal, no check** (an unmeasured rate is not a good rate) | `golden:snapshot` stores the pool pages once with sha256 + fetchedAt; `night-watch` replays them through the real shipped extractors against the independent answer key -- no network, no spend -- with a ledger so the rate reads run-over-run. `check:lineage` pins, per published fact, every function that derives it. Both had to be fixed by their own findings first: the lineage gate counted `!!x`, `x.toUpperCase()`, literal defaults and line-numbered anonymous functions as authors, and its digest was machine-dependent (CRLF vs LF), which CI caught. |
+
+**What the instrument got wrong, kept here because it is the point.** A dealer
+cutting a price was booked as our defect (10 "failures" at Silverhill Acura were
+price cuts between an 08-20 key and a 09-15 page; our extraction matched every
+statement on the newer page). 18 delisted units were reported as extraction
+failures. Twelve phantom "missed MSRP" points were scored for a value the layer
+under test never produces. Five listings were reported as "page advertises
+$30,990, report has none" because the harness read `quotedPrice` and the
+extractor returns `price` -- two names for one fact, inside the tool built to
+catch exactly that.
+
+**Scope, so no one reads the green line as more than it is.** `night-watch`
+grades EXTRACTION only, on 41 of 120 pool pages (both D2C hosts answer 403 to
+any client; robots.txt allows those paths, so the refusal is a WAF, not a rule),
+with n=23 -- which bounds the true failure rate under 13% at 95% confidence.
+Nowhere near 99%. Reaching 1% needs 300 clean gradings.
+
 ## 2026-09-14 (later) - a source that reports success while shipping 1.5% of itself
 
 Building the reported-faults catalogue meant reading someone else's data for the
