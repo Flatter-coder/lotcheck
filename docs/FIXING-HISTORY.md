@@ -23,6 +23,62 @@ the next instance.
 
 ---
 
+## 2026-09-15 - a claim stronger than the record behind it
+
+A Quote Check report on a 2026 Toyota 4Runner told the buyer that the dealer's
+$999 admin fee was "exactly Toyota's own published maximum dealer fee". The
+number was right. The record was not: `fee-schedule.ts` sourced it to
+
+    "Toyota Canada Build & Price - 2026 RAV4 (Alberta)"
+
+a line item on ONE model's configurator, captured 2026-08-15. Nothing in that
+capture mentions a 4Runner and nothing in it says "maximum" - the report was
+making a brand-wide claim off single-model evidence. The catalog's own comment
+asserted the ceiling was a "NATIONAL manufacturer policy", and that assertion
+had never been checked against a national source.
+
+Chasing it to Toyota Canada's own regional storefronts settled the figure and
+turned up what the old row could not have known:
+
+- **Prairies (AB/SK/MB) and Ontario publish $999** - brand-level wording, "fees
+  for documentation, administration and other products such as undercoat, which
+  range $0 to $999", corroborated in the per-model footnotes on eight model
+  lines (4Runner SR5, GR86, Camry, RAV4, Tundra, Tacoma, Highlander Hybrid,
+  Prius). The 2026 4Runner SR5 (VA5BRT A) Alberta footnote prices that exact
+  vehicle with the $999 inside, which is the one that settles this report.
+- **British Columbia & Yukon publish $990.** Toyota does not publish one number.
+  BC is an all-in province in `docfee.ts`, so this was reachable: a BC listing at
+  $995 would have been told in writing that it sat at "Toyota's published
+  maximum" of $999. It does not, there - and $995 is over BC's actual $990.
+- Toyota states the scope, and we had not: the $0-$999 caps "documentation,
+  administration **and other products such as undercoat**", not a doc fee alone.
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| ceiling provenance | a brand-wide "published maximum" claim evidenced by one model's build sheet | **A guard that cannot fail** - nothing in the catalog could contradict a source string | `check:fee-ceiling-provenance`: a row tagged `provenance: "policy"` must quote the brand's own "up to $X" wording in `source`, and the dollar figure inside that quote must equal the row's `amount` |
+| region resolution | `dealerFeeCeiling` used `find(f => !f.region || f.region === r)`, so the first matching row won - a BC reader got $999 because the national row was written first | **A happy path that hides a branch** - correct only by array order, untested because no region row existed yet | exact region match is searched first, then the unqualified row; four cases pin BC $990 / SK $999 / the region tag / the national row's absent region |
+| claim strength | every ceiling was equally quotable regardless of how it was evidenced | **A count read as a classification** - "we hold a ceiling" answered "we may call it the brand's maximum" | `provenance` is now part of the `dealerFeeCeiling` and `assessDealerFeeVsCeiling` return; an untagged row defaults to `"single-model"`, the WEAKEST reading |
+
+**The gate found one more the same run, and it is left visible rather than
+quietly fixed:** Lexus $995 is still sourced to a single 2026 ES 350h Build &
+Price. Searched for a Lexus Canada brand-level "up to $X" statement and did not
+find one. The figure stays - a fee above it is still a backed flag - but it is
+tagged `single-model`, the gate prints it every run, and no caller may call it
+"Lexus's own published maximum" until that sentence is found.
+
+**Still open, and named so it is not mistaken for done:** `deal.ts` on `main`
+still writes "<Make>'s own published maximum dealer fee" without consulting
+`provenance`. The data now refuses to over-claim; the copy does not yet read it.
+That sentence is being rewritten in the open fee-at-ceiling PR, which is where
+the consumption belongs - changing it here would have collided with that branch.
+
+The first run of the new gate parsed **zero** rows and its blindness guard failed
+the build: the array scan started at the first `[` after the declaration, which
+is the one in `Fee[]`, so it brace-matched an empty pair. A gate that reads
+nothing passes everything. That guard is the only reason this is a footnote and
+not a fourth false green.
+---
+
 ## 2026-09-15 - five findings against the product, five defects in the measuring
 
 An instrument was built to estimate the real error rate, because every accuracy
