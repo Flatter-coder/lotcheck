@@ -6,7 +6,7 @@
 // business. Every "expect null" case below is a claim we must NOT make.
 
 import { readFileSync } from "node:fs";
-import { matchLicensee, classifyStatus, nameScore, pageDomains, normHost } from "../supabase/functions/_shared/amvic-match.js";
+import { matchLicensee, classifyStatus, nameScore, pageDomains, normHost, licenceProbes } from "../supabase/functions/_shared/amvic-match.js";
 
 // Real shapes from AMVIC's registry (values observed live 2026-08-10).
 const ROWS = [
@@ -258,6 +258,103 @@ const check = (label, cond, detail) => {
     "the matcher to see");
 }
 
+
+
+// ── the city is the haystack, not the lead ─────────────────────────
+// A signed report (LC-DEDF-526, 2026-09-16) told a buyer that Lexus of Edmonton
+// held AMVIC licence B1021023. That licence belongs to CITY OF EDMONTON, the
+// municipality. The probe was the LONGEST token of the dealer name -- 'edmonton',
+// not 'lexus' -- so the read matched hundreds of Edmonton businesses, was capped
+// at 60, and HERBLENS MOTORS INC. (trading as LEXUS OF EDMONTON) was not in the
+// rows the matcher got to judge.
+{
+  check("the city's own name is not used to search for a dealer in that city",
+    JSON.stringify(licenceProbes("Lexus of Edmonton", "Edmonton, AB")) === JSON.stringify(["lexus"]),
+    JSON.stringify(licenceProbes("Lexus of Edmonton", "Edmonton, AB")));
+  check("the longest token does not win when it is the city",
+    licenceProbes("Lexus of Edmonton", "Edmonton, AB")[0] !== "edmonton",
+    "'edmonton' is 8 characters and 'lexus' is 5; length is not selectivity");
+  check("a dealer named after its city still gets a usable probe",
+    licenceProbes("City of Edmonton", "Edmonton").length > 0,
+    "an empty probe list means no name query at all");
+  check("remaining tokens are ordered longest-first, and deterministically",
+    JSON.stringify(licenceProbes("Lexus South Pointe", "Edmonton, AB")) === JSON.stringify(["pointe", "lexus", "south"]),
+    JSON.stringify(licenceProbes("Lexus South Pointe", "Edmonton, AB")));
+  check("a dealer outside the city keeps every token",
+    licenceProbes("Advantage Ford", "Calgary, AB").length === 2,
+    JSON.stringify(licenceProbes("Advantage Ford", "Calgary, AB")));
+
+  // The matcher was never the problem. Given the right rows it prefers the
+  // exact host; this pins that it still does, with the municipality present.
+  const ROWS = [
+    { name: "CITY OF EDMONTON", trade_name: "N/A", city: "Edmonton", facility_status: "Issued", registration_number: "B1021023", expiry_date: "Nov-30-2026", website: "N/A" },
+    { name: "HERBLENS MOTORS INC.", trade_name: "LEXUS OF EDMONTON/CARDEALSTODAY.CA", city: "Edmonton", facility_status: "Issued", registration_number: "B1026602", expiry_date: "Mar-31-2027", website: "www.lexusofedmonton.ca" },
+  ];
+  const hit = matchLicensee(ROWS, { dealerName: "Lexus of Edmonton", dealerCity: "Edmonton, AB",
+    domains: ["lexusofedmonton.ca"], website: "https://www.lexusofedmonton.ca/inventory/x/" });
+  check("the dealer's own domain beats a municipality that shares its city name",
+    hit && hit.row.registration_number === "B1026602", JSON.stringify(hit && hit.row));
+  check("...and the municipality is never the answer for a car dealer",
+    !hit || hit.row.name !== "CITY OF EDMONTON", JSON.stringify(hit && hit.row));
+
+  // FOUND BY MUTATION: deleting the +500 exact-host bonus (the 2026-09-12 guard)
+  // left every test green, because in the two-row fixture above HERBLENS already
+  // wins on trade-name score alone. A test that passes for the wrong reason is
+  // not protecting the thing it names. Here the NAME favours the wrong company
+  // and only the registered domain can separate them.
+  const RIVALS = [
+    { name: "LEXUS OF EDMONTON LTD.", trade_name: "N/A", city: "Edmonton", facility_status: "Issued", registration_number: "B9999999", expiry_date: "Dec-31-2027", website: "N/A" },
+    { name: "HERBLENS MOTORS INC.", trade_name: "LEXUS OF EDMONTON/CARDEALSTODAY.CA", city: "Edmonton", facility_status: "Issued", registration_number: "B1026602", expiry_date: "Mar-31-2027", website: "www.lexusofedmonton.ca" },
+  ];
+  const byHost = matchLicensee(RIVALS, { dealerName: "Lexus of Edmonton", dealerCity: "Edmonton, AB",
+    domains: ["lexusofedmonton.ca"], website: "https://www.lexusofedmonton.ca/inventory/x/" });
+  check("a registered domain outranks a better-looking name",
+    byHost && byHost.row.registration_number === "B1026602",
+    "a name is typed by whoever filled the form; a domain is registered. " + JSON.stringify(byHost && byHost.row));
+
+  // FOUND BY MUTATION, ROUND TWO: the fixtures above are all resolved by the
+  // EARLY exact-host short-circuit, which returns before any scoring happens --
+  // so removing the host bonuses inside the scorer changed nothing and the
+  // suite stayed green over a real regression. The short-circuit needs exactly
+  // ONE live host match to fire, and the registry holds TWO rows for this
+  // dealer (B1026602 and B2019050, same legal name, same website). That is the
+  // real shape, and it falls through to the scorer, where the host bonus is the
+  // only thing standing between the buyer and the municipality.
+  const REAL = [
+    { name: "CITY OF EDMONTON", trade_name: "N/A", city: "Edmonton", facility_status: "Issued", registration_number: "B1021023", expiry_date: "Nov-30-2026", website: "N/A" },
+    { name: "HERBLENS MOTORS INC.", trade_name: "LEXUS OF EDMONTON/CARDEALSTODAY.CA", city: "Edmonton", facility_status: "Issued", registration_number: "B1026602", expiry_date: "Mar-31-2027", website: "www.lexusofedmonton.ca" },
+    { name: "HERBLENS MOTORS INC.", trade_name: "LEXUS OF EDMONTON/CARDEALSTODAY.CA", city: "Edmonton", facility_status: "Issued", registration_number: "B2019050", expiry_date: "Mar-31-2027", website: "www.lexusofedmonton.ca" },
+  ];
+  const real = matchLicensee(REAL, { dealerName: "Lexus of Edmonton", dealerCity: "Edmonton, AB",
+    domains: ["lexusofedmonton.ca"], website: "https://www.lexusofedmonton.ca/inventory/x/" });
+  check("two licences for one dealer still never resolve to the municipality",
+    real && real.row.name === "HERBLENS MOTORS INC.", JSON.stringify(real && real.row));
+  check("...and the answer is the same whichever order the rows arrive in",
+    JSON.stringify(matchLicensee(REAL.slice().reverse(), { dealerName: "Lexus of Edmonton", dealerCity: "Edmonton, AB",
+      domains: ["lexusofedmonton.ca"], website: "https://www.lexusofedmonton.ca/inventory/x/" })?.row?.registration_number)
+      === JSON.stringify(real?.row?.registration_number),
+    "a stable wrong answer is still wrong, but an unstable one cannot even be audited");
+}
+
+// ── a capped read must be ordered ────────────────────────────────
+// aa77a97 fixed exactly this in scripts/lib/amvic-hosts.mjs. The runtime lookup
+// in analyze-listing-url never got it, so it kept returning an arbitrary slice.
+{
+  const src = readFileSync("supabase/functions/analyze-listing-url/index.ts", "utf8");
+  const fn = src.slice(src.indexOf("async function checkDealerLicence"), src.indexOf("async function checkDealerLicence") + 6000);
+  const limits = (fn.match(/\.limit\(/g) || []).length;
+  const orders = (fn.match(/\.order\(/g) || []).length;
+  check("every capped read in the licence lookup is ordered",
+    limits > 0 && orders >= limits,
+    `${limits} .limit( call(s) and only ${orders} .order( call(s) -- an unordered capped read returns whichever rows Postgres felt like`);
+  check("the domain query is not OR'd into the name query's row budget",
+    fn.includes("website.ilike") && fn.includes("hosts.map("),
+    "the website clause shares a capped result set with hundreds of name matches, so the one " +
+    "decisive signal we hold can be truncated away");
+  check("the probe is chosen by selectivity, not by length",
+    fn.includes("licenceProbes(") && !fn.includes("b.length - a.length"),
+    "the longest token of 'Lexus of Edmonton' is the city it sits in");
+}
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);

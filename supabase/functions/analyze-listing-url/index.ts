@@ -61,7 +61,7 @@ import { lookupRecalls } from "../_shared/recalls.ts";
 import { rescueListingViaScrapfly, mergeRescued, scrapflyEnabled, attachSealedScreenshot, captureListingScreenshot, scrapflyRender, lastScrapflyError, type RenderResult } from "../_shared/scrapfly.ts";
 import { resolvePageSource } from "../_shared/page-source.js";
 import { matchTradeInWidget } from "../_shared/tradein-detect.js";
-import { matchLicensee, domainsFromText, classifyStatus, normName as amvicNorm } from "../_shared/amvic-match.js";
+import { matchLicensee, domainsFromText, classifyStatus, licenceProbes, normName as amvicNorm } from "../_shared/amvic-match.js";
 import { reputationChecked } from "../_shared/place-match.js";
 import { extractJsonLdVehicle, jsonLdVehicleVins, jsonLdVehicles } from "../_shared/jsonld-vehicle.js";
 import { distinctValidVins, vinOccurrences, classifyVehiclePage, subjectMismatch, identityMismatch, vinFromUrl, urlVinMismatch } from "../_shared/multi-vehicle.ts";
@@ -122,7 +122,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-13k";  // 13k: the report leads with what it found in DOLLARS instead of a 0-10 negotiation-leverage gauge, on screen and in the PDF; canonical v13 seals that total as lvd. // 13j: the model-written verdict stops sending a buyer to ask the dealer for an itemisation we already hold, and stops using US paperwork terms ("title/tags", "DMV") in a Canadian report. // 13i: a NEW vehicle with no published VIN is told what the VIN would actually settle -- which build is being sold -- instead of a used car's recall-history reason, and the price card names that same VIN as the one ask that would let it compare. // 13h: the Price-vs-MSRP card no longer calls a DEALER-STATED figure one we hold, and offers the published starting price when we have it -- but it only SUBTRACTS that figure from the asking price when the two are on the same basis, because an all-in ask minus an ex-freight MSRP counts about $3,000 of mandatory fees as markup. // 13g: a dealer fee sitting EXACTLY on the manufacturer published maximum now says so, instead of saying nothing and leaving the summary to invent a range -- and the sentence that names it only calls a figure the brand's OWN published maximum when the record is brand-level, naming the region where the figure is region-specific. // 13f: a bare schema.org Product is no longer read as a vehicle, so a Build and Price configurator stops producing a vehicle report. // 13e: Toyota's dealer-fee ceiling is region-published, not one national number -- BC & Yukon resolve to Toyota's own $990 instead of the Prairies' $999, so a BC fee between the two now reads differently. // 13d: canonical v12 seals the VIN check digit beside the VIN. validateVin computed it on every scan and only admin telemetry ever saw it; /verify printed the VIN as a bare fact. // 13c: "price verified" is STRICT wherever it is a CLAIM; VIN shape decided once in _shared/vin.ts. // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
+const CACHE_VER = "2026-09-13l";  // 13l: the AMVIC lookup stops searching on the dealer's CITY and stops letting hundreds of name matches crowd the domain match out of a capped read -- "Lexus of Edmonton" resolved to CITY OF EDMONTON's licence on a signed report. // 13k: the report leads with what it found in DOLLARS instead of a 0-10 negotiation-leverage gauge, on screen and in the PDF; canonical v13 seals that total as lvd. // 13j: the model-written verdict stops sending a buyer to ask the dealer for an itemisation we already hold, and stops using US paperwork terms ("title/tags", "DMV") in a Canadian report. // 13i: a NEW vehicle with no published VIN is told what the VIN would actually settle -- which build is being sold -- instead of a used car's recall-history reason, and the price card names that same VIN as the one ask that would let it compare. // 13h: the Price-vs-MSRP card no longer calls a DEALER-STATED figure one we hold, and offers the published starting price when we have it -- but it only SUBTRACTS that figure from the asking price when the two are on the same basis, because an all-in ask minus an ex-freight MSRP counts about $3,000 of mandatory fees as markup. // 13g: a dealer fee sitting EXACTLY on the manufacturer published maximum now says so, instead of saying nothing and leaving the summary to invent a range -- and the sentence that names it only calls a figure the brand's OWN published maximum when the record is brand-level, naming the region where the figure is region-specific. // 13f: a bare schema.org Product is no longer read as a vehicle, so a Build and Price configurator stops producing a vehicle report. // 13e: Toyota's dealer-fee ceiling is region-published, not one national number -- BC & Yukon resolve to Toyota's own $990 instead of the Prairies' $999, so a BC fee between the two now reads differently. // 13d: canonical v12 seals the VIN check digit beside the VIN. validateVin computed it on every scan and only admin telemetry ever saw it; /verify printed the VIN as a bare fact. // 13c: "price verified" is STRICT wherever it is a CLAIM; VIN shape decided once in _shared/vin.ts. // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -1967,33 +1967,68 @@ async function checkDealerLicence(analysis: any): Promise<void> {
     // registry in behind this same dealerLicence field -- OMVIC, VSA, etc.).
     const city = String(analysis.dealerCity || "");
 
-    // Candidate fetch: the most distinctive token of the dealer name, so a
-    // single indexed query returns a small set for the matcher to judge.
-    const toks = amvicNorm(name).split(" ").filter((t: string) => t.length > 2);
-    const probe = toks.sort((a: string, b: string) => b.length - a.length)[0] || "";
-    // CANDIDATES BY NAME **OR** BY WEBSITE. Querying on the name probe alone
-    // meant a website match could never be found when the name was missing or
-    // spelled differently from the registry — the matcher would have resolved
-    // it, but the row was never fetched for it to look at.
-    // PostgREST wildcard is `*`, not `%`: a raw % inside an or() filter is a
-    // URL escape character and the request is rejected outright (HTTP 1101),
-    // so every licence lookup silently found nothing. Verified 2026-08-11.
-    const clauses: string[] = [];
-    if (probe) clauses.push(`name_key.ilike.*${probe}*`, `trade_key.ilike.*${probe}*`);
-    // The registry stores websites inconsistently (bare host, with www, with a
-    // scheme, and sometimes an e-mail address), so match the domain anywhere in
-    // the field and let matchLicensee's exact normalised compare decide.
-    for (const d of domains.slice(0, 4)) {
-      if (/^[a-z0-9.-]+$/.test(d)) clauses.push(`website.ilike.*${d}*`);
+    // CANDIDATE FETCH. Two queries, on purpose.
+    //
+    // WHAT WENT WRONG. This took the LONGEST token of the dealer name as its
+    // probe. For "Lexus of Edmonton" that is `edmonton`, not `lexus` -- a city
+    // shared with every business in it. The name clauses matched hundreds of
+    // rows, the website clause sat in the SAME `or()` competing for the same
+    // capped 60, and PostgREST returned 60 arbitrary Edmonton rows without
+    // HERBLENS MOTORS INC. (trading as LEXUS OF EDMONTON, website
+    // lexusofedmonton.ca -- an exact match for the listing's own host) among
+    // them. matchLicensee then judged what it was given and returned CITY OF
+    // EDMONTON, the municipality, licence B1021023. That reached a buyer on a
+    // signed report (LC-DEDF-526, 2026-09-16).
+    //
+    // The 2026-09-12 ranking guard was never at fault and is untouched: given
+    // the right rows it awards an exact host +500 and picks HERBLENS. A guard
+    // cannot rank a row it never sees. [[ai-defamation-entity-match-lesson]]
+    //
+    // 1. THE DOMAIN QUERY RUNS ALONE, so the single most identifying signal we
+    //    hold can never be crowded out of a shared row budget.
+    // 2. The name query searches the DISTINCTIVE token (licenceProbes drops
+    //    whatever the city already contains), and falls through the remaining
+    //    tokens if one finds nothing.
+    // 3. Both are ORDERED. An unordered capped read returns an arbitrary slice
+    //    -- the same defect aa77a97 fixed in the AMVIC host prober, in a
+    //    different file, which never reached this one. [[repeat-fix-pattern]]
+    const rows: any[] = [];
+    const seen = new Set<string>();
+    const take = (list: any[] | null) => {
+      for (const r of list ?? []) {
+        const k = String(r.registration_number || "") + "|" + String(r.name || "") + "|" + String(r.trade_name || "");
+        if (seen.has(k)) continue;
+        seen.add(k); rows.push(r);
+      }
+    };
+    const COLS = "name, trade_name, city, facility_status, registration_number, expiry_date, website";
+
+    // 1. By domain, on its own budget.
+    // PostgREST wildcard is `*`, not `%`: a raw % inside an or() filter is a URL
+    // escape character and the request is rejected outright (HTTP 1101), so every
+    // licence lookup silently found nothing. Verified 2026-08-11.
+    const hosts = domains.slice(0, 4).filter((d) => /^[a-z0-9.-]+$/.test(d));
+    if (hosts.length) {
+      const { data, error } = await supabase.from("amvic_licensees").select(COLS)
+        .or(hosts.map((d) => `website.ilike.*${d}*`).join(","))
+        .order("registration_number", { ascending: true }).limit(40);
+      if (error) console.warn("AMVIC domain lookup failed:", error.message); else take(data);
     }
-    if (!clauses.length) return;
-    const { data, error } = await supabase
-      .from("amvic_licensees")
-      .select("name, trade_name, city, facility_status, registration_number, expiry_date, website")
-      .or(clauses.join(","))
-      .limit(60);
-    if (error) { console.warn("AMVIC lookup failed:", error.message); return; }
-    if (!data || !data.length) return;
+
+    // 2. By the distinctive name token(s).
+    for (const probe of licenceProbes(name, city)) {
+      if (rows.length >= 80) break;
+      const { data, error } = await supabase.from("amvic_licensees").select(COLS)
+        .or(`name_key.ilike.*${probe}*,trade_key.ilike.*${probe}*`)
+        .order("registration_number", { ascending: true }).limit(60);
+      if (error) { console.warn("AMVIC name lookup failed:", error.message); continue; }
+      take(data);
+      if ((data ?? []).length) break;   // the first probe that finds anything is the selective one
+    }
+    // Nothing matched either query: a gap, never an all-clear. The card renders
+    // "couldn't confirm - verify at AMVIC yourself".
+    if (!rows.length) return;
+    const data = rows;
 
     const hit = matchLicensee(data, { dealerName: name, dealerCity: city, domains, website: analysis.sourceUrl || "" });
     if (!hit) { console.log(`AMVIC: no confident match for "${name}" -- reporting unverified.`); return; }
