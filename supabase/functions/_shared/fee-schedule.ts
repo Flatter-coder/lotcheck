@@ -143,9 +143,26 @@ const DEALER_FEE_CEILING: Fee[] = [
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $990)", amount: 990, applies: "always", scope: "brand", make: "Toyota", region: "BC",
     source: "Toyota Canada BC & Yukon storefront legal page (shoptoyota.ca/british-columbia/en/legal) — \"additional fees for documentation, administration, and other products such as undercoat up to $990\"; the same $990 in the 2025 RAV4 LE AWD footnote", capturedOn: "2026-09-15", provenance: "policy",
     note: "British Columbia & Yukon only. Toyota publishes $999 in the Prairies and Ontario." },
+  // Lexus — SINGLE-MODEL, and checked again on 2026-09-15 rather than left as a
+  // gap nobody had looked at. Lexus Canada does NOT publish a dealer-fee maximum
+  // the way Toyota does. Its own Alberta-scoped offer footnotes itemise the
+  // mandatory adds — "$2,205 Delivery and Destination charge; $100 A/C charge;
+  // regulatory fees (up to $46.28); lien registration fees (up to $79.00,
+  // including lien registering agent fee); as well as all other applicable fees,
+  // levies and duties (all of which may vary by region and dealer)" — with NO
+  // administration-fee line at all, where every equivalent Toyota footnote reads
+  // "up to $999 retailer administration fee". Same corporate entity (Lexus is a
+  // division of Toyota Canada Inc.), different disclosure, so the $999 cannot be
+  // carried across and no brand-level Lexus sentence exists to quote.
+  //
+  // The $995 stays: it is a real figure Lexus's own configurator applied to a
+  // build, and a fee above it is still a backed comparison. It is tagged
+  // single-model so no caller calls it "Lexus's own published maximum", and this
+  // note records that the brand-level source was looked for and is not there —
+  // an answered question, not an open one.
   { component: "dealer_fee_ceiling", label: "Dealer Fees", amount: 995, applies: "always", scope: "brand", make: "Lexus",
     source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25", provenance: "single-model",
-    note: "Published maximum dealer fee." },
+    note: "A figure from ONE build summary, not a published brand maximum. Checked 2026-09-15: Lexus Canada's own offer fine print itemises delivery, A/C, regulatory and lien fees and carries no administration-fee line, so there is no brand-level \"up to $X\" to cite." },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $799)", amount: 799, applies: "always", scope: "brand", make: "Hyundai",
     source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "\"Fees may vary by dealer.\" Some models publish $599; $799 is the highest published figure, used as the max." },

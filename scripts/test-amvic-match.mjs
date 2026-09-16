@@ -10,7 +10,16 @@ import { matchLicensee, classifyStatus, nameScore, pageDomains, normHost } from 
 
 // Real shapes from AMVIC's registry (values observed live 2026-08-10).
 const ROWS = [
-  { name: "OKOTOKS TOYOTA LTD.", trade_name: "N/A", city: "Okotoks", facility_status: "Issued", registration_number: "B1001234", website: "www.okotokstoyota.ca" },
+  // THE REAL REGISTRY ROW, read from our own snapshot on 2026-09-15. It used to
+  // be a fiction here -- `name: "OKOTOKS TOYOTA LTD."` with
+  // `website: "www.okotokstoyota.ca"` -- which is the EASY shape: the legal name
+  // is the dealer name and the domain matches. AMVIC actually records this
+  // business as HRT MOTORS INC. trading as OKOTOKS TOYOTA, with website "N/A".
+  // So the only route to it is the trade name: the legal name shares no token
+  // with "Okotoks Toyota" and there is no domain to fall back on. The fixture
+  // had been passing against a row the registry does not contain.
+  { name: "HRT MOTORS INC.", trade_name: "OKOTOKS TOYOTA", city: "Okotoks", facility_status: "Issued", registration_number: "B1023322", expiry_date: "Apr-30-2027", website: "N/A" },
+  { name: "CANYON CREEK HOLDINGS INC.", trade_name: "CANYON CREEK TOYOTA", city: "Calgary", facility_status: "Closed - Voluntarily", registration_number: "B1009900", website: "www.canyoncreektoyota.com" },
   { name: "CROWFOOT DODGE CHRYSLER INC.", trade_name: "N/A", city: "Calgary", facility_status: "Closed - Voluntarily", registration_number: "B1002222" },
   { name: "North American EV Inc", trade_name: "N/A", city: "Mountain View County", facility_status: "Expired - Required to Reapply", registration_number: "B2035585", website: "www.northamericanev.com", expiry_date: "Jun-30-2022" },
   { name: "ADVANCED AUTOMOTIVE REPAIR INC.", trade_name: "N/A", city: "Calgary", facility_status: "Expired - Required to Reapply", registration_number: "B1012209" },
@@ -36,12 +45,20 @@ const ROWS = [
 
 const CASES = [
   // --- must match (confident) ---
-  ["Exact-ish legal name + city", { dealerName: "Okotoks Toyota", dealerCity: "Okotoks, AB" }, "OKOTOKS TOYOTA LTD."],
-  ["Word-order flip", { dealerName: "Toyota of Okotoks", dealerCity: "Okotoks" }, "OKOTOKS TOYOTA LTD."],
+  // The dealer name matches the TRADE name only. The legal name is a holding
+  // company sharing no token with it, and the registry records no website, so
+  // the trade name is the only route in. This is the real shape of the record.
+  ["Trade name is the only route in (legal name is a holding company)", { dealerName: "Okotoks Toyota", dealerCity: "Okotoks, AB" }, "HRT MOTORS INC."],
+  ["Word-order flip, against the trade name", { dealerName: "Toyota of Okotoks", dealerCity: "Okotoks" }, "HRT MOTORS INC."],
   ["Corporate suffix in the query", { dealerName: "Kramer Mazda Ltd.", dealerCity: "Calgary" }, "KRAMER MAZDA LTD."],
   ["Closed dealer still matches (status is the point)", { dealerName: "Crowfoot Dodge Chrysler", dealerCity: "Calgary" }, "CROWFOOT DODGE CHRYSLER INC."],
   ["Expired dealer with live website", { dealerName: "North American EV", dealerCity: "Mountain View County" }, "North American EV Inc"],
-  ["Website host clinches it", { dealerName: "Okotoks Toyota", website: "https://www.okotokstoyota.ca/new/inventory/x.html" }, "OKOTOKS TOYOTA LTD."],
+  // The website path needs a row that HAS a website; the Okotoks record does
+  // not, which is why it can no longer carry this case. Canyon Creek can: its
+  // legal name is unrelated and the domain is the only strong signal.
+  ["Website host clinches it", { dealerName: "Canyon Creek Toyota", website: "https://www.canyoncreektoyota.com/new/inventory/x.html" }, "CANYON CREEK HOLDINGS INC."],
+  // ...and with no city and no domain, the trade name still carries it.
+  ["Trade-name match with no city and no website", { dealerName: "Okotoks Toyota" }, "HRT MOTORS INC."],
   ["Punctuation + ampersand noise", { dealerName: "Kramer Mazda", dealerCity: "Calgary" }, "KRAMER MAZDA LTD."],
   ["Duplicate records, same status -> still matches", { dealerName: "Advantage Ford", dealerCity: "Calgary, AB" }, "ADVANTAGE FORD SALES LTD."],
   // The regression that mattered: never report a superseded "Closed" record for

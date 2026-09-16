@@ -68,7 +68,7 @@ for (const m of block.matchAll(/\{\s*component:\s*"dealer_fee_ceiling"[\s\S]*?\}
     return s ? s[1].replace(/\\"/g, '"') : null;
   };
   const amount = Number((t.match(/(?:^|[\s,{])amount:\s*(-?\d+(?:\.\d+)?)/) || [])[1]);
-  rows.push({ make: field("make"), region: field("region"), amount, source: field("source") || "", provenance: field("provenance") });
+  rows.push({ make: field("make"), region: field("region"), amount, source: field("source") || "", provenance: field("provenance"), note: field("note") || "" });
 }
 
 // A blindness guard, the same one check:lineage carries: a regex that silently
@@ -93,7 +93,23 @@ for (const r of rows) {
     );
     continue;
   }
-  if (r.provenance === "single-model") { singleModel.push(`${who} — ${r.source.slice(0, 90)}`); continue; }
+  if (r.provenance === "single-model") {
+    // A single-model row is allowed, but it must say whether anyone has LOOKED
+    // for the brand-level wording. Without that the printed list is
+    // indistinguishable from a backlog nobody has touched, and it stops being
+    // read. "Checked <date>: ..." in the note turns an open question into an
+    // answered one.
+    if (!/checked\s+\d{4}-\d{2}-\d{2}/i.test(r.note)) {
+      failures.push(
+        `${who}: provenance "single-model" with no record of looking for the brand-level source.\n` +
+        `    Add "Checked <YYYY-MM-DD>: ..." to the note saying what you found — including\n` +
+        `    finding nothing, which is an answer. Lexus's note is the worked example.`,
+      );
+      continue;
+    }
+    singleModel.push(`${who} — ${r.source.slice(0, 80)}\n       ${r.note.replace(/\s+/g, " ").slice(0, 320)}`);
+    continue;
+  }
   if (r.provenance !== "policy") {
     failures.push(`${who}: unknown provenance "${r.provenance}" (expected "policy" or "single-model").`);
     continue;

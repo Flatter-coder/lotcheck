@@ -346,5 +346,48 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
 }
 
 console.log("");
+// ── no VIN and no trim are the SAME gap, and the report has to say so ────
+// The 2026 4Runner Hybrid listing published neither. The VIN card explained the
+// absence in terms of "recalls or history on this exact car" -- on a car nobody
+// has owned, a reason that does not apply -- while the Price vs MSRP card
+// separately said it could not pin a configuration. One ask closes both: the VIN
+// is what identifies the build, and the build is what the price rests on.
+{
+  const card = (a, key) => reportBands(a).find((b) => b.key === key);
+  const newNoVin = { quotedPrice: 72371, make: "Toyota", model: "4Runner Hybrid", year: 2026,
+    priceVerified: true, allInPricing: true, vehicleCondition: "new", feesRead: true,
+    msrp: 72371, msrpBasis: "dealer_stated",
+    msrpReference: { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" } };
+
+  const vin = card(newNoVin, "vin");
+  check("a NEW car's missing VIN is not explained with used-car history",
+    !/recalls or history/i.test(vin.note), vin.note);
+  check("...it names what the VIN would actually settle: which build this is",
+    /which one you are buying|exact trim, package and options/i.test(vin.note), vin.note);
+  check("...and tells the buyer what to ask for, before money moves",
+    /build sheet/i.test(vin.note) && /deposit/i.test(vin.note), vin.note);
+
+  const price = card(newNoVin, "price_vs_msrp");
+  check("the price card names the VIN as the thing that would close it",
+    /publishes no VIN/i.test(price.note), price.note);
+  check("...rather than leaving 'we could not pin it' as a dead end",
+    /identifies the exact build/i.test(price.note), price.note);
+
+  // A USED car keeps the history sentence -- that IS the right reason there.
+  const usedNoVin = { ...newNoVin, vehicleCondition: "used", year: 2021 };
+  const uvin = card(usedNoVin, "vin");
+  check("a USED car's missing VIN still points at recalls and history",
+    /recalls or history/i.test(uvin.note), uvin.note);
+  check("...and the used price card does not talk about a new car's VIN",
+    !/publishes no VIN/i.test(card(usedNoVin, "price_vs_msrp").note),
+    card(usedNoVin, "price_vs_msrp").note);
+
+  // When the VIN IS published there is nothing to ask for.
+  const withVin = { ...newNoVin, vinCheck: { present: true, valid: true, vin: "JTEBU5JR0N5123456" } };
+  check("a published VIN removes the ask from the price card",
+    !/publishes no VIN/i.test(card(withVin, "price_vs_msrp").note),
+    card(withVin, "price_vs_msrp").note);
+}
+
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }
 console.log("all checks passed");
