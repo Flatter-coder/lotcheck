@@ -81,7 +81,15 @@ export interface DocFeeAssessment {
   mfrCeiling?: number;        // the published maximum (e.g. Lexus $995, Toyota $999)
   mfrCeilingOverBy?: number;  // observed doc fee − ceiling
   mfrCeilingMake?: string;    // whose ceiling this is
-  mfrCeilingSource?: string;  // provenance (manufacturer Build & Price)
+  mfrCeilingSource?: string;  // where the figure was read, verbatim
+  // HOW STRONG THE RECORD IS, so copy can match the strength of its claim:
+  //   "policy"       the brand's own "up to $X" wording, quoted in the source.
+  //                  Safe to call "<Make>'s own published maximum".
+  //   "single-model" one model's build sheet. Real, and a fee ABOVE it is still
+  //                  a backed flag, but it does not evidence a brand-wide
+  //                  maximum and must not be described as one.
+  mfrCeilingProvenance?: "policy" | "single-model";
+  mfrCeilingRegion?: string | null;  // set when the figure is region-specific (Toyota BC $990 vs $999)
 }
 
 // All-in advertised-pricing authority for a listing's jurisdiction (Canada).
@@ -117,8 +125,29 @@ export function assessDocFee(analysis: any): DocFeeAssessment | null {
   const mfr = (analysis?.vehicleCondition === "new" && analysis?.make)
     ? assessDealerFeeVsCeiling(analysis.make, code, doc.price)
     : null;
-  const ceiling = (mfr && mfr.over)
-    ? { mfrCeiling: mfr.ceiling, mfrCeilingOverBy: mfr.overBy, mfrCeilingMake: String(analysis.make), mfrCeilingSource: mfr.source }
+  // A FEE SITTING EXACTLY ON THE CEILING IS A FINDING, NOT A NON-EVENT. This
+  // used to attach the ceiling only when `over`, so a dealer charging precisely
+  // the manufacturer's published maximum produced NOTHING -- and "missing beats
+  // wrong" was the stated reason. Missing beats wrong for a fee UNDER the
+  // ceiling, where there is nothing to say. At the ceiling there is: the buyer
+  // is being charged the most this manufacturer permits.
+  //
+  // Found on a real report (2026 4Runner Hybrid, Okotoks Toyota, $999 admin).
+  // We hold Toyota's published Alberta maximum at $999 and said nothing about
+  // it, while the model-written summary filled the silence with a "$300-$700
+  // typical range" that exists in no catalogue of ours. The backed fact was
+  // both truer and better leverage than the invented one.
+  const atCeiling = !!mfr && !mfr.over && mfr.observed === mfr.ceiling;
+  const ceiling = (mfr && (mfr.over || atCeiling))
+    ? {
+        mfrCeiling: mfr.ceiling,
+        mfrCeilingOverBy: mfr.overBy,
+        mfrCeilingAt: atCeiling,
+        mfrCeilingMake: String(analysis.make),
+        mfrCeilingSource: mfr.source,
+        mfrCeilingProvenance: mfr.provenance,
+        mfrCeilingRegion: mfr.ceilingRegion,
+      }
     : {};
 
   if (b.type === "allin") {

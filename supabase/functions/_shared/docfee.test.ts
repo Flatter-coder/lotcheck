@@ -17,6 +17,7 @@ const check = (label: string, got: any, want: Record<string, unknown>) => {
   ok ? pass++ : fail++;
 };
 const isNull = (label: string, got: unknown) => { const ok = got === null; console.log(`${ok ? "PASS" : "FAIL"}  ${label}`); ok ? pass++ : fail++; };
+const ok = (label: string, cond: boolean) => { console.log(`${cond ? "PASS" : "FAIL"}  ${label}`); cond ? pass++ : fail++; };
 
 const listing = (over: Record<string, unknown>) => ({
   dealerCity: "Okotoks, AB",
@@ -67,6 +68,60 @@ check("missing make -> no ceiling",
 // ── Fail-safe: no doc-fee line / no jurisdiction -> no assessment at all ─────
 isNull("no doc-fee line item -> null", assessDocFee(listing({ addOns: [{ name: "Cargo Liner", price: 220 }] })));
 isNull("no resolvable jurisdiction -> null", assessDocFee(listing({ dealerCity: "" })));
+
+// ── a fee sitting EXACTLY on the manufacturer's published maximum ───────────
+// The ceiling used to attach only when `over`, so a dealer charging precisely
+// the most the manufacturer permits produced nothing at all. Found on a real
+// report: 2026 4Runner Hybrid, Okotoks Toyota, $999 admin. Our catalogue holds
+// Toyota's published Alberta maximum at $999, said nothing, and the
+// model-written summary filled the silence with a "$300-$700 typical range"
+// that exists in no catalogue of ours.
+check("a fee AT the published ceiling reports it",
+  assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 999 }] })),
+  { kind: "allin", mfrCeiling: 999, mfrCeilingAt: true, mfrCeilingOverBy: 0, mfrCeilingMake: "Toyota" });
+
+check("a fee OVER the ceiling still reports the overage",
+  assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 1200 }] })),
+  { kind: "allin", mfrCeiling: 999, mfrCeilingAt: false, mfrCeilingOverBy: 201 });
+
+// UNDER the ceiling there is genuinely nothing to say, and inventing a
+// comparison is exactly what went wrong in the first place.
+{
+  const under: any = assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 650 }] }));
+  const silent = under !== null && under.mfrCeiling === undefined;
+  console.log(`${silent ? "PASS" : "FAIL"}  a fee UNDER the ceiling claims no comparison`);
+  if (silent) pass++; else fail++;
+}
+
+// ── the claim may not outrun the record ────────────────────────────
+// fee-schedule.ts tags each ceiling with how it is evidenced. A "policy" row
+// quotes the brand's own "up to $X" wording; a "single-model" row was read off
+// one model's build sheet. deal.ts may write "<Make>'s own published maximum"
+// only for the former. Toyota's row WAS single-model while that sentence said
+// otherwise -- a 4Runner buyer was told $999 was Toyota's published maximum on
+// the strength of a RAV4 configurator.
+{
+  const toyota: any = assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 999 }] }));
+  const lexus: any = assessDocFee(listing({}));
+  ok("a brand-level ceiling is tagged policy", toyota?.mfrCeilingProvenance === "policy");
+  ok("a single-model ceiling says so, so copy cannot call it a brand maximum",
+    lexus?.mfrCeilingProvenance === "single-model");
+  ok("a national ceiling carries no region", toyota?.mfrCeilingRegion === null);
+}
+
+// Toyota does not publish one number: $999 in the Prairies and Ontario, $990 in
+// BC & Yukon. A $995 fee is UNDER the ceiling in Alberta and OVER it in BC, and
+// the assessment has to say which province's figure it is holding.
+{
+  const bc: any = assessDocFee(listing({ make: "Toyota", dealerCity: "Vancouver, BC",
+    addOns: [{ name: "Admin fee", price: 995 }] }));
+  ok("a BC Toyota fee is judged against BC's published $990", bc?.mfrCeiling === 990);
+  ok("...and is over by $5 there", bc?.mfrCeilingOverBy === 5);
+  ok("...and names BC as the region the figure speaks for", bc?.mfrCeilingRegion === "BC");
+  const ab: any = assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 995 }] }));
+  ok("the same $995 in Alberta is UNDER the $999 published there, so nothing is claimed",
+    ab !== null && ab.mfrCeiling === undefined);
+}
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);
