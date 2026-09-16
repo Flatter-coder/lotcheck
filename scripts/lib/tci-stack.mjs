@@ -147,6 +147,169 @@ async function fetchModel(host, brandFolder, seriesCode, year, modelCode) {
   return out;
 }
 
+// A BASE PACKAGE'S PUBLISHED NAME IS SOMETIMES A STUB, NOT A TRIM NAME.
+//
+// "Standard Package" is Adobe AEM's DEFAULT LABEL for a base package that
+// carries no distinct name of its own. It is not a Canadian showroom trim and
+// no dealer or buyer ever writes it. Measured live 2026-09-16: 27 catalog rows
+// across Toyota and Lexus were stored under that label.
+//
+// WHAT IT COST. The trim string is part of the identity key that carry-forward
+// and supersede both run on (catKey in catalog-io.mjs is year|model|trim), so a
+// base trim stored under a stub name does not match the row it should have
+// replaced. Three things follow from that one rename, and all three were live:
+//   1. supersede never fires, so the correctly-named row survives every refresh
+//      and freezes at its original capture date -- the 2026 Crown Signia sat at
+//      its 2026-08-16 read while a second row for the same car was rewritten
+//      daily beside it;
+//   2. carry-forward finds no predecessor, so drivetrain and source_url come
+//      back NULL -- on 2026-09-16 the three 4Runner trims whose names did NOT
+//      change kept their source_url through the same run that blanked the one
+//      that did;
+//   3. both rows persist, so which MSRP a listing resolves against is decided
+//      by whichever row the matcher reaches first.
+//
+// The real trim is the fragment's own `grade`. Measured across all 27 models,
+// grade is a usable Canadian trim name for 16 of them (RAV4 LE, Camry SE,
+// 4Runner SR5, Sienna LE, Tundra SR5, Highlander XLE ...) and an internal code
+// or a stub for 11 (Crown Signia HI, Land Cruiser BX, LC NONE, ES STD).
+// Where grade cannot name the car, the stub is KEPT rather than replaced with a
+// guess -- and for Crown and GR86 the stub row is the only row that model has,
+// so refusing it would remove the model from the catalogue entirely.
+export const GENERIC_PACKAGE_LABELS = new Set([
+  "standard package", "standard", "base package", "base", "base model", "standard model",
+]);
+export const isGenericPackageLabel = (name) =>
+  GENERIC_PACKAGE_LABELS.has(String(name || "").trim().toLowerCase());
+
+// Grades that are NOT trim names, measured off the live fragments 2026-09-16.
+// These are separate from looksLikeInternalCode because that predicate has
+// other callers whose behaviour must not shift: it lets "LTD" and "BASE"
+// through via REAL_SHORT_TRIMS (they are genuine trims elsewhere) and its regex
+// cannot see a single character, so "N" passes. All three are internal grades
+// here -- Crown's grade is LTD, GR86's is BASE, Corolla Hatchback's is N -- and
+// publishing any of them would put a code on a window sticker.
+const GRADE_STUBS = new Set(["none", "std", "base", "ltd", "n", "tbd", "na", "n/a", ""]);
+
+// A trailing drivetrain token belongs in the drivetrain column, not in the trim.
+// Toyota publishes the 2027 bZ's grade as "XLE FWD"; stored whole it is a trim
+// no listing says, and it hides a fact the report has a field for.
+const DRIVETRAIN_TOKEN = /\s+(AWD|FWD|RWD|4WD|4X4|2WD)$/i;
+
+export function usableGradeName(grade) {
+  const g = String(grade || "").trim();
+  if (!g) return false;
+  if (GRADE_STUBS.has(g.toLowerCase())) return false;
+  // Strip a drivetrain suffix before judging: "XLE FWD" is usable, and what
+  // makes it usable is the "XLE".
+  const core = g.replace(DRIVETRAIN_TOKEN, "").trim();
+  if (!core || GRADE_STUBS.has(core.toLowerCase())) return false;
+  return !looksLikeInternalCode(core);
+}
+
+// A TRIM MUST NOT REPEAT THE MODEL IT SITS UNDER. "Sienna / Sienna XLE Mobility
+// Package" renders as "Sienna Sienna XLE Mobility Package" wherever the two are
+// concatenated, and an exact-trim match against a listing's "XLE" can never
+// fire. Only a leading model name followed by more words is stripped: a trim
+// that IS exactly its model name ("4Runner / 4Runner") is left alone, because
+// stripping it would leave an empty trim, which satisfies no match at all and
+// collides with every other trim-less row for that model.
+export function stripModelPrefix(trim, model) {
+  const t = String(trim || "").trim();
+  const m = String(model || "").trim();
+  if (!t || !m) return t;
+  if (t.toLowerCase() === m.toLowerCase()) return t;
+  if (!t.toLowerCase().startsWith(m.toLowerCase() + " ")) return t;
+  const rest = t.slice(m.length).trim();
+  return rest || t;
+}
+
+// The single place a row's trim is decided. Pure and exported so the rules can
+// be tested without a network or a database (scripts/test-trim-identity.mjs).
+//
+// Returns { trim, drivetrain, refused, reason }. `refused` true means the
+// package must not be published at all -- the caller counts it and moves on.
+export function resolveTrim({ publishedName, grade, model, isBase }) {
+  const published = publishedName ? String(publishedName).trim() : "";
+  const generic = isGenericPackageLabel(published);
+  let trim = "";
+  let reason = "";
+
+  if (published && !generic && !looksLikeInternalCode(published)) {
+    // THE 2026-08-27 LEXUS NX FIX, PRESERVED. A base package with a real
+    // published name keeps it: NX 350h package P is `isBase: true, name:
+    // "Premium"` while grade reads "LUXURY", and storing it as LUXURY put a
+    // $70,878 ladder against a car asking $62,005. A published name always
+    // wins; the rule below fires only on a STUB.
+    trim = published;
+    reason = "published";
+  } else if (generic || !published) {
+    if (usableGradeName(grade)) {
+      trim = String(grade).trim();
+      reason = generic ? "grade (published name was a stub)" : "grade (no published name)";
+    } else if (generic) {
+      // Nothing can name this car. KEEP the stub rather than drop the row --
+      // for Crown and GR86 it is the only row that model has -- and never
+      // invent a name. The caller logs it so the gap stays visible.
+      trim = published;
+      reason = "unnamed base trim: published name is a stub and grade is not a trim name";
+    } else if (!isBase) {
+      return { trim: "", drivetrain: null, refused: true, reason: "non-base package has no usable published name" };
+    } else {
+      return { trim: "", drivetrain: null, refused: true, reason: "base package has neither a published name nor a usable grade" };
+    }
+  } else if (!isBase) {
+    return { trim: "", drivetrain: null, refused: true, reason: "non-base package has no usable published name" };
+  } else if (usableGradeName(grade)) {
+    trim = String(grade).trim();
+    reason = "grade (published name was an internal code)";
+  } else {
+    return { trim: "", drivetrain: null, refused: true, reason: `grade "${grade}" is an internal code, not a Canadian trim name` };
+  }
+
+  let drivetrain = null;
+  const dt = trim.match(DRIVETRAIN_TOKEN);
+  if (dt) {
+    const core = trim.replace(DRIVETRAIN_TOKEN, "").trim();
+    // Only split when something is left to be the trim. "AWD" alone is a trim
+    // on some lineups and must not become an empty name.
+    if (core) { drivetrain = dt[1].toUpperCase(); trim = core; }
+  }
+
+  trim = stripModelPrefix(trim, model);
+  return { trim, drivetrain, refused: false, reason };
+}
+
+// A STUB-NAMED ROW MUST NOT SIT BESIDE THE SAME CAR UNDER ITS REAL NAME.
+//
+// Where the fragment's grade could not name a base trim, the row keeps its stub
+// ("Standard Package"). That is the honest answer when nothing can name the car
+// -- but it is the WRONG answer when the very same car is already in the batch
+// under a real trim name at the identical MSRP. Measured 2026-09-16: the 2026
+// GR Corolla was in the catalogue twice at $50,295, once as "Core" and once as
+// "Standard Package", because two model codes resolve to one car and only one
+// of them publishes a package name.
+//
+// The price match is what makes this safe. A stub is never a real trim, so a
+// named row at the same year/model/price is the same vehicle better described.
+// Two DIFFERENT trims colliding on price is common and legitimate -- Jeep
+// Gladiator Rubicon and Mojave are both $65,495 -- but neither of those is a
+// stub, so this rule cannot reach them.
+export function dropStubDuplicates(rows) {
+  const named = new Set();
+  for (const r of rows || []) {
+    if (!isGenericPackageLabel(r.trim)) named.add(`${r.year}|${r.model}|${r.msrp}`);
+  }
+  const dropped = [];
+  const kept = (rows || []).filter((r) => {
+    if (!isGenericPackageLabel(r.trim)) return true;
+    if (!named.has(`${r.year}|${r.model}|${r.msrp}`)) return true;   // the only row for this car
+    dropped.push(`${r.year} ${r.model} "${r.trim}" $${r.msrp}`);
+    return false;
+  });
+  return { rows: kept, dropped };
+}
+
 // Toyota's own `grade` field is sometimes an INTERNAL code rather than the
 // Canadian marketing trim: the Land Cruiser's grades are "BX" and "WX" where
 // the showroom names are "1958" and "Cruiser", and GR86, C-HR, bZ Woodland,
@@ -179,9 +342,10 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   if (filterSeries) series = series.filter(s => s.seriesCode === filterSeries);
   console.log(`[${makeName}] series to scrape: ${series.length}${filterSeries ? ` (filtered to ${filterSeries})` : ""}`);
 
-  const msrpRows = [], financeRows = [], leaseRows = [];
+  let msrpRows = []; const financeRows = [], leaseRows = [];
   const skipped = { noGrade: 0, refused: 0 };
   const refusals = [];
+  const unnamedBase = [];
 
   // The published national MSRP table, pulled once per cross-check province.
   // Fetched up front because every series reads from the same payload.
@@ -285,22 +449,23 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           // `grade` remains the fallback for a package with no published name,
           // which is the only case it was ever right for. A non-base package
           // with no name is still refused rather than invented.
-          let trim = "";
-          const published = info && info.name ? String(info.name).trim() : "";
-          if (published && !looksLikeInternalCode(published)) {
-            trim = published;
-          } else if (info && !info.isBase) {
+          const named = resolveTrim({
+            publishedName: info && info.name ? info.name : null,
+            grade: model.grade,
+            model: s.name,
+            isBase: !!(info && info.isBase),
+          });
+          if (named.refused) {
             skipped.refused++;
-            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: non-base package has no usable published name`);
+            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: ${named.reason}`);
             continue;
-          } else {
-            trim = String(model.grade).trim();
           }
-          trim = trim.trim();
-          if (looksLikeInternalCode(trim)) {
-            skipped.refused++;
-            refusals.push(`${s.name} ${modelCode}/${pk.packageCode}: grade "${trim}" is an internal code, not a Canadian trim name`);
-            continue;
+          const trim = named.trim;
+          if (named.reason.startsWith("unnamed base trim")) {
+            // NOT a refusal: the row still carries a real, cross-province-proven
+            // MSRP and dropping it would remove the model's only price. It is
+            // logged because a row nobody can match is a gap, not a success.
+            unnamedBase.push(`${s.name} ${year} (grade "${model.grade}")`);
           }
           // The all-in figure a dealer's advertised price is actually
           // comparable to. AMVIC (and ON/BC/QC) require the advertised price to
@@ -322,6 +487,10 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           const breakdown = feeStack ? allInBreakdown(feeStack) : null;
           msrpRows.push({
             year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel,
+            // A drivetrain the manufacturer stated in the grade ("XLE FWD"), not
+            // one inferred from a name. Left null when the grade did not say, so
+            // carry-forward can still supply the hand-verified value.
+            ...(named.drivetrain ? { drivetrain: named.drivetrain } : {}),
             fetched_at: new Date().toISOString(),
             ...(feeTotal != null ? { all_in_price: Math.round((msrp + feeTotal) * 100) / 100 } : {}),
             ...(breakdown ? { attrs: {
@@ -330,6 +499,14 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
               all_in_basis: "series base configuration; freight and levies do not vary by trim",
               captured_from: `${host}/bin/api/price_calculation/from_prices.${brand}.${ALL_IN_PROVINCE}.json (${s.seriesCode}/${year}/${feeStack.modelCode})`,
               captured_on: today,
+              // The page a buyer can open to check this figure. It goes in attrs,
+              // NOT in the source_url COLUMN: replaceRows' DELETE carries
+              // "&source_url=is.null", so that column means "hand-verified, spare
+              // me" to the refresh. Writing it on every scraped row would make the
+              // DELETE spare the whole make and leave the UNIQUE(year,make,model,
+              // trim) collision to be avoided by the supersede probe, which is
+              // wrapped in a catch and explicitly best-effort.
+              source_page: `${host}/en/build-price/${s.seriesCode.toLowerCase()}/`,
             } } : {}),
           });
         }
@@ -350,11 +527,25 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
   }
 
   console.log(`[${makeName}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
+  if (unnamedBase.length) {
+    console.log(`  ${unnamedBase.length} base trim(s) published under a stub name -- the fragment's grade is an internal code, so nothing can name them:`);
+    for (const u of unnamedBase.slice(0, 8)) console.log(`    - ${u}`);
+    if (unnamedBase.length > 8) console.log(`    - … +${unnamedBase.length - 8} more`);
+  }
   if (skipped.noGrade || skipped.refused) {
     console.log(`  refused: ${skipped.noGrade} missing-grade, ${skipped.refused} unprovable MSRP`);
     for (const r of refusals.slice(0, 8)) console.log(`    - ${r}`);
     if (refusals.length > 8) console.log(`    - … +${refusals.length - 8} more`);
   }
+  // Rule: a stub-named row is dropped when the same car is present under a real
+  // trim name at the same price. Runs BEFORE dedupeBy, because dedupeBy keys on
+  // the trim string and so cannot see that two different strings name one car.
+  const stub = dropStubDuplicates(msrpRows);
+  if (stub.dropped.length) {
+    console.log(`  dropped ${stub.dropped.length} stub-named row(s) already present under a real trim name: ${stub.dropped.slice(0, 3).join("; ")}`);
+  }
+  msrpRows = stub.rows;
+
   // A grade can appear under two modelCodes (same year/model/trim) — collapse to
   // the lowest MSRP so we don't violate msrp_catalog's UNIQUE(year,make,model,trim).
   return {
