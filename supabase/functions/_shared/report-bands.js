@@ -185,9 +185,60 @@ function priceBand(a) {
   }
 
   if (ms > 0 && qp > 0) {
-    // We hold a figure but not one we may measure against.
+    // WHOSE NUMBER IS THIS? The old copy said "the nearest figure we hold is
+    // $X" for whatever sat in a.msrp -- and when the basis is dealer_stated,
+    // a.msrp IS THE DEALER'S OWN NUMBER, read off their page. On a 2026 4Runner
+    // Hybrid at Okotoks Toyota the card read "the nearest figure we hold is
+    // $72,371, and this listing asks $72,371": the dealer's figure compared
+    // against itself, with our name on one side. The catalogue holds no 4Runner
+    // row at $72,371 at all.
+    //
+    // A reference we did not establish is not a reference. [[reference-point-model]]
+    const dealerStated = a?.msrpBasis === "dealer_stated";
+    const ref = a?.msrpReference;
+    const refMsrp = num(ref?.msrp);
+    const maker = ref?.make || a?.make || "the manufacturer";
+
+    // What we DO hold, when we hold it: the manufacturer's published starting
+    // figure for this model. Withholding it while saying "not checked" leaves
+    // the buyer with nothing, and we had $69,207 on file the whole time.
+    //
+    // BUT THE SUBTRACTION NEEDS A MATCHING BASIS, and this is where the first
+    // draft of this card was wrong. An Alberta advertised price is ALL-IN --
+    // freight, A/C, levies and the dealer fee are inside it. The catalogue row
+    // behind `msrpReference` is ex-freight unless `msrp_all_in` was captured.
+    // Subtracting one from the other counts about $3,000 of mandatory fees as
+    // markup. On the 2026 4Runner Hybrid that produced "asks $3,164 above that
+    // published starting price" against $69,207 -- and Toyota's own Alberta
+    // page prices a 4Runner with $1,930 delivery, $100 A/C, $20 tire levy, $10
+    // AMVIC and up to $999 retailer admin INSIDE the advertised figure. Nearly
+    // the whole $3,164 is those lines. The dealer had not marked it up; we
+    // would have said in writing that they had.
+    //
+    // msrp-claim.ts already refuses this exact comparison (`allInPricing &&
+    // !allIn` -> refusal). This card must not route around it. So: SHOW the
+    // published starting price, which is a labelled fact either way, and do the
+    // arithmetic only when the two sides are on the same basis.
+    // [[amvic-all-in-pricing]] [[reference-point-model]] [[msrp-exact-must-pin-config]]
+    const refAllIn = num(ref?.allIn ?? ref?.msrpAllIn ?? ref?.all_in_price ?? a?.msrpAllIn);
+    const sameBasis = !a?.allInPricing || refAllIn > 0;
+    const compareTo = a?.allInPricing && refAllIn > 0 ? refAllIn : refMsrp;
+    const published = refMsrp > 0
+      ? ` ${maker} publishes ${ref?.trim ? `the ${ref.trim}` : "this model"} from ${fmtMoney(refMsrp)}${
+          sameBasis && qp > compareTo
+            ? `, so this listing asks ${fmtMoney(qp - compareTo)} above that published${refAllIn > 0 ? " all-in" : ""} price`
+            : !sameBasis
+              ? `, before the freight, levies and dealer fee this province requires inside an advertised price — so the two figures are not on the same basis and we are not subtracting one from the other`
+              : ""
+        }.`
+      : "";
+
+    if (dealerStated) {
+      return gap("price_vs_msrp", "01", "DEALER'S OWN MSRP",
+        `The ${fmtMoney(ms)} MSRP on this listing is the dealer's own figure, and we could not match it to a published ${maker} configuration, so we are not measuring the ${fmtMoney(qp)} asking price against it.${published} Ask for the factory build sheet showing how the sticker is made up.`);
+    }
     return gap("price_vs_msrp", "01", "NO EXACT MSRP MATCH",
-      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain. Ask the dealer which configuration this is.`);
+      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain.${published} Ask the dealer which configuration this is.`);
   }
   if (qp > 0 && pv) {
     return gap("price_vs_msrp", "01", "MSRP NOT MATCHED",
