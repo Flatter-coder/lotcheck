@@ -310,3 +310,34 @@ export function classifyStatus(status) {
   if (/closed|deceased/i.test(s)) return "closed";
   return "unknown";                                   // incl. "N/A" -- no claim
 }
+
+/**
+ * WHICH TOKEN DO WE SEARCH THE REGISTRY ON?
+ *
+ * The caller used to take the LONGEST token of the dealer name. For "Lexus of
+ * Edmonton" that is `edmonton` — a city shared with every other business in the
+ * city — rather than `lexus`, which identifies the dealer. The registry returned
+ * hundreds of Edmonton rows, the read was capped at 60, and HERBLENS MOTORS INC.
+ * (trading as LEXUS OF EDMONTON, website lexusofedmonton.ca) was not among them.
+ * matchLicensee then did exactly what it was built to do with what it was given
+ * and returned CITY OF EDMONTON — the municipality — with licence B1021023.
+ * That number reached a buyer on a signed report.
+ *
+ * The ranking guard from 2026-09-12 (`4ba3e5a`) was never the problem and is
+ * untouched: given the right rows it prefers an exact host by +500 and would
+ * have chosen HERBLENS. A guard cannot rank a row it never sees.
+ * [[ai-defamation-entity-match-lesson]] [[repeat-fix-pattern]]
+ *
+ * So: drop tokens the CITY already contains, and search on what is left. The
+ * city is not a lead — it is the haystack. Returns tokens longest-first, and
+ * never returns nothing: a dealer literally named after its city still gets its
+ * own token back rather than an empty query.
+ */
+export function licenceProbes(name, city) {
+  const cityWords = new Set(normName(city || "").split(" ").filter(Boolean));
+  const toks = normName(name || "").split(" ").filter((t) => t.length > 2);
+  const byLength = (a, b) => b.length - a.length || a.localeCompare(b);
+  const distinctive = toks.filter((t) => !cityWords.has(t)).sort(byLength);
+  if (distinctive.length) return distinctive;
+  return toks.slice().sort(byLength);       // named after the city; use it anyway
+}

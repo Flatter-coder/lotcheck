@@ -24,6 +24,76 @@ the next instance.
 
 ---
 
+## 2026-09-16 - we told a buyer the city hall held the dealer's licence
+
+Report `LC-DEDF-526`, a 2026 Lexus NX 350 F SPORT 3 at Lexus of Edmonton,
+signed and sealed, carried:
+
+    Dealer licence   Issued
+    CITY OF EDMONTON - B1021023 - expiry Nov-30-2026
+
+B1021023 belongs to the **municipality**. Lexus of Edmonton is in the registry
+as HERBLENS MOTORS INC., trading as LEXUS OF EDMONTON, website
+`lexusofedmonton.ca` - an exact match for the host the listing came from. We had
+the right record and attached the wrong one, with a licence number, to a named
+business. [[ai-defamation-entity-match-lesson]]
+
+**HAD THIS BEEN FIXED BEFORE? Twice, and neither fix could reach it.**
+
+  `4ba3e5a` (2026-09-12) fixed the RANKING. "Auto House" over its 21 real
+  candidates produced seven different businesses across 200 shuffles; the
+  matcher now scores on name, awards an exact host +500, and refuses when two
+  legal entities tie. That guard is correct, is untouched by this fix, and
+  given the right rows picks HERBLENS. **A guard cannot rank a row it never
+  sees.**
+
+  `aa77a97` fixed an unordered capped read of this very table - `.range()` with
+  no `.order()`, returning an arbitrary slice - in `scripts/lib/amvic-hosts.mjs`.
+  The runtime lookup in `analyze-listing-url` has the identical shape and never
+  got the fix. [[repeat-fix-pattern]]
+
+**THE ACTUAL CAUSE, which is neither of those.** The candidate query took the
+LONGEST token of the dealer name as its search probe. For "Lexus of Edmonton"
+that is `edmonton` - not `lexus`. The name clauses matched hundreds of Edmonton
+businesses; the website clause sat in the SAME `or()`, competing for the same
+capped 60 rows; and the 60 that came back did not include HERBLENS. The one
+decisive signal we hold was truncated away by the least selective one.
+
+The city is not a lead. It is the haystack.
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| probe selection | the longest token of the dealer name was used to search a registry indexed by that same city | **A guard bound to spelling, not substance** - length was standing in for selectivity | `licenceProbes(name, city)` drops whatever the city already contains and returns what is left, longest-first; a dealer genuinely named after its city still gets a usable probe rather than an empty query |
+| candidate fetch | the domain clause shared a capped row budget with hundreds of name matches | **A happy path that hides a branch** - the website path worked in every test where the name was also selective | the domain query runs ALONE on its own budget, before the name query, and its rows are merged in |
+| unordered capped read | `.limit(60)` with no `.order()`, so the 60 returned were whichever Postgres felt like | **Green signal, no check** - the same defect `aa77a97` had already fixed in another file | every capped read in the lookup is ordered; `test:amvic-match` counts `.limit(` against `.order(` in that function and fails if any read is unordered |
+
+Replayed against the live registry, five real dealers, all correct:
+Lexus of Edmonton -> HERBLENS MOTORS INC. B1026602 (was CITY OF EDMONTON),
+Okotoks Toyota -> HRT MOTORS INC. B1023322, Lexus South Pointe -> LSP AUTO LTD.,
+Advantage Ford, Charlesglen Toyota.
+
+**MUTATION RUN, AND WHAT IT HONESTLY SHOWED.** Dropping the city filter, removing
+the `.order()` calls and removing the name probe each fail the suite. Removing
+the two host BONUSES inside the scorer does not - and that is not a hole in the
+tests. For this dealer HERBLENS's trade name already scores 0.750 against the
+municipality's 0.667, so the bonuses are redundant here rather than unprotected.
+The thing that decides this case is whether HERBLENS is in the candidate set at
+all, which is what the three passing mutations pin. Recorded rather than papered
+over with a fixture invented to make a number look better.
+
+An earlier round of the same run DID find a real hole: every fixture was being
+resolved by the early exact-host short-circuit, which returns before any scoring
+happens, so the scorer was untested. The registry holds TWO live rows for this
+dealer with the same website, which is exactly the case that falls through. That
+fixture is now in the suite.
+
+**Still open from the same report:** `msrp` sealed as `null` on a car whose exact
+configuration we hold - the listing normalises to model `NX 350` and the
+catalogue row is model `NX`, so nothing bridged them and the whole price
+comparison was declined. Asking $72,010 against Lexus's published $71,985.18
+all-in is $24.82 over, and the report said nothing.
+
+---
 ## 2026-09-16 - a stub package label was forking every base trim into two rows
 
 **Shape: a key built on a mutable name.** Also, in the migration half: *green
