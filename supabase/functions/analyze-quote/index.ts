@@ -79,6 +79,7 @@ import { qualifyMsrpClaim, qualifyCeilingClaim } from "../_shared/msrp-claim.ts"
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
+import { sanitiseSummary } from "../_shared/settled-claims.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1597,6 +1598,27 @@ function buildAnalysis(extracted: any, msrpLookup: any) {
     summary +=
       (summary ? " " : "") +
       `For reference, ${decided.reference.make || make || "the manufacturer"} publishes this model${decided.reference.trim ? ` (${decided.reference.trim})` : ""} from $${Number(decided.reference.msrp).toLocaleString()} -- trim, options and drivetrain sit above that, so this isn't a like-for-like comparison with the quoted figure.`;
+  }
+
+  // SAME TREATMENT AS THE LISTING REPORT. This function also asks the model
+  // for a free-text `summary` and, until now, ran nothing over it -- while
+  // analyze-listing-url had been stripping settled contradictions out of its
+  // own summary since the RAV4 PHEV rebate defect. One surface fixed, the
+  // other left, which is the shape the fixing history keeps naming.
+  //
+  // It cleans US-only terminology too ("title/tags", "DMV"), which reached a
+  // buyer in Edmonton on a 2026 Lexus NX verdict describing paperwork Alberta
+  // does not issue.
+  {
+    const cleaned = sanitiseSummary(summary, {
+      make, msrpBasis: decided.basis ?? null,
+      msrpAllIn: msrpLookup.allInPrice ?? null,
+      evapRebate: null, recalls: null,
+    });
+    if (cleaned.removed.length || cleaned.swapped.length) {
+      summary = cleaned.text;
+      console.log(`quote summary: removed ${cleaned.removed.length}, swapped ${cleaned.swapped.length} US term(s)`);
+    }
   }
 
   const addOns = Array.isArray(extracted.addOns) ? extracted.addOns : [];
