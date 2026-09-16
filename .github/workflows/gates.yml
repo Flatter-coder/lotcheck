@@ -239,6 +239,13 @@ jobs:
       # RAV4 financed adds = $3,078, so a silent edit to any component fails here.
       - name: Fee catalog (sourced fee constants; no fabricated brand fees)
         run: npm run test:fee-schedule
+      # A brand-wide claim needs brand-wide evidence. A ceiling row may only be
+      # called "<Make>'s own published maximum" when `source` quotes the brand's
+      # own "up to $X" wording AND that quoted figure equals the row's amount.
+      # Added after a report told a 4Runner buyer that $999 was Toyota's published
+      # maximum on the strength of a 2026 RAV4 configurator line.
+      - name: Fee-ceiling provenance (no claim stronger than its record)
+        run: npm run check:fee-ceiling-provenance
       # The dealer-fee-ceiling flag: fires ONLY for a new vehicle of a captured
       # make in-province; never a used car, an uncaptured make, or a fee under
       # the ceiling. A wrong fee claim against a named dealer is what this guards.

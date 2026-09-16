@@ -16,6 +16,7 @@
     "test:condition": "node --experimental-strip-types supabase/functions/_shared/condition.test.ts",
     "test:msrp-basis": "node --experimental-strip-types scripts/test-msrp-basis-condition.mjs",
     "check:citations": "node scripts/check-source-citations.mjs",
+    "check:fee-ceiling-provenance": "node scripts/check-fee-ceiling-provenance.mjs",
     "check:copy": "node scripts/check-copy-compliance.mjs",
     "check:parity": "node scripts/check-report-parity.mjs",
     "check:undef": "node scripts/check-undefined-identifiers.mjs",

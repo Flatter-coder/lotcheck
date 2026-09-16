@@ -47,6 +47,31 @@ check("Volvo XC60 freight is $2,770",           freightFor("Volvo", "XC60")?.amo
 check("Infiniti QX60 freight is $2,495",        freightFor("Infiniti", "QX60")?.amount, 2495);
 check("Toyota dealer-fee ceiling is $999", dealerFeeCeiling("Toyota", "AB")?.amount, 999);
 check("Lexus dealer-fee ceiling is $995",  dealerFeeCeiling("Lexus", "AB")?.amount, 995);
+
+// ── Region beats national, and provenance limits the claim (2026-09-15) ──────
+// Toyota Canada does NOT publish one number: its Prairies/Ontario storefronts say
+// $999 and BC & Yukon says $990. Before this, a BC listing resolved to $999 —
+// correct only because the national row happened to be written first — and would
+// have been told $999 was "Toyota's published maximum" for it. It is not, there.
+check("Toyota in BC resolves to BC's OWN published $990, not the Prairies' $999",
+  dealerFeeCeiling("Toyota", "BC")?.amount, 990);
+check("Toyota in SK falls back to the unqualified $999 (no SK-specific row)",
+  dealerFeeCeiling("Toyota", "SK")?.amount, 999);
+ok("the BC row is tagged with its region, so a caller can say whose figure it is",
+  dealerFeeCeiling("Toyota", "BC")?.region === "BC");
+ok("the national Toyota row carries no region", dealerFeeCeiling("Toyota", "AB")?.region === undefined);
+
+// Provenance: how strong the evidence is, so copy can match it.
+ok("Toyota's ceiling is backed by Toyota's OWN policy wording, not one build sheet",
+  dealerFeeCeiling("Toyota", "AB")?.provenance === "policy");
+ok("Toyota's source quotes the sentence verbatim",
+  (dealerFeeCeiling("Toyota", "AB")?.source ?? "").includes("which range $0 to $999"));
+ok("Toyota's source is no longer a single model's Build & Price",
+  !/Build & Price — 2026 RAV4/.test(dealerFeeCeiling("Toyota", "AB")?.source ?? ""));
+ok("Lexus is still single-model evidence and says so — no brand-wide claim off it",
+  dealerFeeCeiling("Lexus", "AB")?.provenance === "single-model");
+ok("an untagged row would default to the WEAKEST reading, never the strongest",
+  ["policy", "single-model"].includes(dealerFeeCeiling("GMC")?.provenance ?? ""));
 // Newly captured, verified verbatim at each official source (2026-08-25).
 check("Hyundai dealer-fee ceiling is $799",    dealerFeeCeiling("Hyundai")?.amount, 799);
 check("Mazda dealer-fee ceiling is $795",      dealerFeeCeiling("Mazda")?.amount, 795);
@@ -82,7 +107,16 @@ check("Toyota RAV4 financed adds reproduce the proven $3,078", rav4Adds, 3078);
 // ── Dealer-fee-vs-ceiling: backed, neutral, fail-safe ───────────────────────
 check("Lexus $1,295 admin fee is $300 over the $995 published max",
   assessDealerFeeVsCeiling("Lexus", "AB", 1295),
-  { ceiling: 995, observed: 1295, over: true, overBy: 300, source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25" });
+  { ceiling: 995, observed: 1295, over: true, overBy: 300, source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25", ceilingRegion: null, provenance: "single-model" });
+// The assessment carries the same two qualifiers, so the caller never has to go
+// back to the catalog to find out whether it may say "published maximum" and
+// whose region's figure it is holding.
+ok("a national ceiling reports ceilingRegion null", assessDealerFeeVsCeiling("Hyundai", "ON", 1000)?.ceilingRegion === null);
+ok("a BC Toyota fee is judged against BC's $990", assessDealerFeeVsCeiling("Toyota", "BC", 995)?.ceiling === 990);
+ok("...and is therefore OVER by $5 there, where $995 is UNDER the $999 Alberta publishes",
+  assessDealerFeeVsCeiling("Toyota", "BC", 995)?.overBy === 5 && assessDealerFeeVsCeiling("Toyota", "AB", 995)?.over === false);
+ok("a BC Toyota assessment names BC as the region it speaks for",
+  assessDealerFeeVsCeiling("Toyota", "BC", 995)?.ceilingRegion === "BC");
 ok("a fee at the ceiling is not flagged over", assessDealerFeeVsCeiling("Toyota", "AB", 999)?.over === false);
 ok("Hyundai $1,000 admin fee is $201 over the $799 max", assessDealerFeeVsCeiling("Hyundai", "AB", 1000)?.overBy === 201);
 ok("Chevrolet $500 is under the $699 max -> not flagged (GM's $350 default is fine)", assessDealerFeeVsCeiling("Chevrolet", "AB", 500)?.over === false);

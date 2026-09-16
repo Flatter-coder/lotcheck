@@ -46,6 +46,15 @@ export interface Fee {
   model?: string;
   source: string;      // where the figure was read
   capturedOn: string;  // ISO date it was read
+  // BRAND-SCOPE ROWS ONLY — how strong the evidence is, so a caller can match
+  // the strength of its CLAIM to it:
+  //   "policy"       the brand's own published policy statement ("dealer fees
+  //                  of up to $X"), quoted verbatim in `source`. Safe to
+  //                  describe as "<Make>'s own published maximum".
+  //   "single-model" a figure itemised on ONE model's build/price sheet. Real,
+  //                  and safe to flag a fee ABOVE it, but it does not evidence
+  //                  a brand-wide maximum and must not be called one.
+  provenance?: "policy" | "single-model";
   note?: string;
 }
 
@@ -89,61 +98,97 @@ const PROVINCE: Record<string, Fee[]> = {
 // ── Brand — the manufacturer's OWN published maximum dealer fee ──────────────
 // Not every OEM publishes one; absence here means "no sourced ceiling", never
 // "no fee" (Ford, GMC, Honda, Jeep, Kia, Ram, Subaru confirmed to publish none).
-// The cap is a NATIONAL manufacturer policy ("dealer fees of up to $X"), so rows
-// carry no region and apply wherever docfee.ts fires (the all-in provinces). Each
-// figure is the published MAXIMUM ("up to $X") read verbatim from an official
-// source on the date shown; the flag fires only ABOVE it, so a dealer charging
-// within "up to $X" is never flagged.
+// Most OEMs publish ONE national string ("dealer fees of up to $X"), so those
+// rows carry no region and apply wherever docfee.ts fires (the all-in provinces).
+// Each figure is the published MAXIMUM ("up to $X") read verbatim from an
+// official source on the date shown; the flag fires only ABOVE it, so a dealer
+// charging within "up to $X" is never flagged.
+//
+// A ROW MAY BE REGION-QUALIFIED. Toyota is the proven case: Toyota Canada runs
+// separate regional storefronts and they do NOT publish the same number — the
+// Prairies and Ontario pages say $999, British Columbia & Yukon says $990. A
+// region-qualified row always beats the unqualified one for that province (see
+// dealerFeeCeiling), so a reader is told their own region's figure and never a
+// neighbouring province's.
+//
+// PROVENANCE RULE (2026-09-15). A ceiling is a claim about the BRAND, so it has
+// to be read from a source that speaks for the brand. Until today Toyota's row
+// was sourced to "Build & Price — 2026 RAV4", one model's configurator, and the
+// report then told a 4Runner buyer that $999 was "Toyota's own published
+// maximum". The figure turned out to be right, but the record could not carry
+// the claim — it evidenced one model. Every brand-scope row now cites either a
+// brand-level disclaimer or a capture corroborated across model lines, and says
+// in `source` which of the two it is.
 const DEALER_FEE_CEILING: Fee[] = [
-  { component: "dealer_fee_ceiling", label: "Dealer Fees (maximum)", amount: 999, applies: "always", scope: "brand", make: "Toyota",
-    source: "Toyota Canada Build & Price — 2026 RAV4 (Alberta)", capturedOn: "2026-08-15",
-    note: "Published maximum dealer fee. In an all-in province it must already be inside the advertised price." },
+  // Toyota — the Prairies (AB/SK/MB) and Ontario publish $999. Read verbatim
+  // from Toyota Canada's own regional storefront legal page, which is
+  // brand-level ("Your Dealer may charge additional fees for documentation,
+  // administration and other products such as undercoat, which range $0 to
+  // $999"), and corroborated in the per-model footnotes on EIGHT separate model
+  // lines — 4Runner SR5, GR86, Camry, RAV4, Tundra, Tacoma, Highlander Hybrid,
+  // Prius — each reading "up to $999 retailer administration fee". The 2026
+  // 4Runner SR5 (VA5BRT A) Alberta footnote is the one that settles the report
+  // that exposed this: Toyota itself prices that vehicle with $999 inside.
+  //
+  // NOTE THE SCOPE TOYOTA STATES: the $0–$999 covers "documentation,
+  // administration AND OTHER PRODUCTS SUCH AS UNDERCOAT". It caps that whole
+  // bundle, not a documentation fee on its own.
+  { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $999)", amount: 999, applies: "always", scope: "brand", make: "Toyota",
+    source: "Toyota Canada regional storefront legal page (shoptoyota.ca/alberta/en/legal) — \"additional fees for documentation, administration and other products such as undercoat, which range $0 to $999\"; the same $999 in the per-model footnotes for 4Runner SR5, GR86, Camry, RAV4, Tundra, Tacoma, Highlander Hybrid and Prius, and on the Ontario storefront", capturedOn: "2026-09-15", provenance: "policy",
+    note: "Published maximum. Covers documentation, administration and add-on products, not documentation alone. In an all-in province it must already be inside the advertised price. British Columbia & Yukon publish $990 — see the BC row." },
+  // Toyota — British Columbia & Yukon publish a LOWER maximum. Same wording,
+  // different figure, on Toyota Canada's own BC storefront. Without this row a
+  // BC listing at $995 would have been told $999 was "Toyota's own published
+  // maximum" for it, which is not what Toyota publishes there.
+  { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $990)", amount: 990, applies: "always", scope: "brand", make: "Toyota", region: "BC",
+    source: "Toyota Canada BC & Yukon storefront legal page (shoptoyota.ca/british-columbia/en/legal) — \"additional fees for documentation, administration, and other products such as undercoat up to $990\"; the same $990 in the 2025 RAV4 LE AWD footnote", capturedOn: "2026-09-15", provenance: "policy",
+    note: "British Columbia & Yukon only. Toyota publishes $999 in the Prairies and Ontario." },
   { component: "dealer_fee_ceiling", label: "Dealer Fees", amount: 995, applies: "always", scope: "brand", make: "Lexus",
-    source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25",
+    source: "Lexus Canada Build & Price — 2026 ES 350h (Alberta)", capturedOn: "2026-08-25", provenance: "single-model",
     note: "Published maximum dealer fee." },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $799)", amount: 799, applies: "always", scope: "brand", make: "Hyundai",
-    source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25",
+    source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "\"Fees may vary by dealer.\" Some models publish $599; $799 is the highest published figure, used as the max." },
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $795)", amount: 795, applies: "always", scope: "brand", make: "Mazda",
-    source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25" },
+    source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $750)", amount: 750, applies: "always", scope: "brand", make: "Volkswagen",
-    source: "Volkswagen Canada (vw.ca/offers) — \"representative dealer admin fee (actual fee is set by dealers and varies, up to $750)\"", capturedOn: "2026-08-25",
+    source: "Volkswagen Canada (vw.ca/offers) — \"representative dealer admin fee (actual fee is set by dealers and varies, up to $750)\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "Framed as a \"representative\" fee, but explicitly capped at \"up to $750\"." },
   { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Chevrolet",
-    source: "Chevrolet Canada Build & Price disclaimer (chevrolet.ca) — \"up to $699 dealer fee\"", capturedOn: "2026-08-25",
+    source: "Chevrolet Canada Build & Price disclaimer (chevrolet.ca) — \"up to $699 dealer fee\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "GM's B&P applies a $350 default in-build, but the published maximum is $699; we flag only ABOVE $699 to stay conservative." },
   { component: "dealer_fee_ceiling", label: "dealer fees (up to $621)", amount: 621, applies: "always", scope: "brand", make: "Nissan",
-    source: "Nissan Canada (canada.nissannews.com, 2026 Rogue pricing) — \"dealer fees (up to $621)\"", capturedOn: "2026-08-25",
+    source: "Nissan Canada (canada.nissannews.com, 2026 Rogue pricing) — \"dealer fees (up to $621)\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "\"May vary by region and dealer.\"" },
   // Batch 2 (2026-08-26). MINI read verbatim in-session; BMW is the same BMW Group
   // policy (identical wording, verified via MINI); Buick/Cadillac carry GM's one
   // national B&P disclaimer, the same "up to $699 dealer fee" string as Chevrolet.
   { component: "dealer_fee_ceiling", label: "retailer administration fees (up to $595)", amount: 595, applies: "always", scope: "brand", make: "MINI",
-    source: "MINI Canada (mini.ca/en/special-offers) — \"retailer administration fees (up to $595)\"", capturedOn: "2026-08-26" },
+    source: "MINI Canada (mini.ca/en/special-offers) — \"retailer administration fees (up to $595)\"", capturedOn: "2026-08-26", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "retailer administration fees (up to $595)", amount: 595, applies: "always", scope: "brand", make: "BMW",
-    source: "BMW Canada (bmw.ca) — \"retailer administration fees (up to $595)\"; same BMW Group policy verified verbatim on MINI", capturedOn: "2026-08-26" },
+    source: "BMW Canada (bmw.ca) — \"retailer administration fees (up to $595)\"; same BMW Group policy verified verbatim on MINI", capturedOn: "2026-08-26", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Buick",
-    source: "GM Canada Build & Price disclaimer (buick.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26",
+    source: "GM Canada Build & Price disclaimer (buick.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26", provenance: "policy",
     note: "Flag only ABOVE $699 (GM applies a lower default in-build)." },
   { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Cadillac",
-    source: "GM Canada Build & Price disclaimer (cadillaccanada.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26",
+    source: "GM Canada Build & Price disclaimer (cadillaccanada.ca) — \"up to $699 dealer fee\" (GM's national string, same as Chevrolet)", capturedOn: "2026-08-26", provenance: "policy",
     note: "Flag only ABOVE $699 (GM applies a lower default in-build)." },
   // Held-list cleared 2026-08-26: verified verbatim at the official source.
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "Volvo",
-    source: "Volvo Car Canada (volvocars.com/en-ca/offers) — \"retailer administration fee (up to $699)\"", capturedOn: "2026-08-26",
+    source: "Volvo Car Canada (volvocars.com/en-ca/offers) — \"retailer administration fee (up to $699)\"", capturedOn: "2026-08-26", provenance: "policy",
     note: "May vary by region and retailer." },
   { component: "dealer_fee_ceiling", label: "dealer fees (up to $921)", amount: 921, applies: "always", scope: "brand", make: "Infiniti",
-    source: "Infiniti Canada (canada.infinitinews.com, 2025 QX60 pricing) — \"dealer fees (up to $921)\"", capturedOn: "2026-08-26",
+    source: "Infiniti Canada (canada.infinitinews.com, 2025 QX60 pricing) — \"dealer fees (up to $921)\"", capturedOn: "2026-08-26", provenance: "policy",
     note: "Premium division — NOT Nissan's $621. May vary by region and dealer." },
   { component: "dealer_fee_ceiling", label: "Dealer/administrative fees of up to $799", amount: 799, applies: "always", scope: "brand", make: "Mitsubishi",
-    source: "Mitsubishi Canada Build & Price disclaimer (mitsubishi-motors.ca) — \"Dealer/administrative fees of up to $799\"", capturedOn: "2026-08-26" },
+    source: "Mitsubishi Canada Build & Price disclaimer (mitsubishi-motors.ca) — \"Dealer/administrative fees of up to $799\"", capturedOn: "2026-08-26", provenance: "policy" },
   // GMC: GM's Build & Price is Akamai-blocked to every tool, so no GMC-specific
   // capture was possible. GM's dealer-fee disclaimer is corporate-GENERAL ("up to
   // $699 dealer fee"), verified verbatim on three sibling brands (Chevrolet, Buick,
   // Cadillac) that run the identical GM B&P engine. Added on that deduction; flag
   // only ABOVE $699. If GMC ever needs its own verbatim, it stays un-crawlable.
   { component: "dealer_fee_ceiling", label: "dealer fee (up to $699)", amount: 699, applies: "always", scope: "brand", make: "GMC",
-    source: "GM Canada national B&P disclaimer — \"up to $699 dealer fee\" (verified on Chevrolet/Buick/Cadillac; GMC B&P Akamai-blocked from direct capture)", capturedOn: "2026-08-26",
+    source: "GM Canada national B&P disclaimer — \"up to $699 dealer fee\" (verified on Chevrolet/Buick/Cadillac; GMC B&P Akamai-blocked from direct capture)", capturedOn: "2026-08-26", provenance: "policy",
     note: "Inferred from GM's corporate-wide disclaimer, not a GMC-specific page. Flag only ABOVE $699." },
 ];
 
@@ -213,15 +258,24 @@ export function feeAmount(
 }
 
 /** The manufacturer's published maximum dealer fee, or null if we have not
- *  captured one for this make (never guessed). */
+ *  captured one for this make (never guessed).
+ *
+ *  REGION BEATS NATIONAL, by search order and not by array order. Toyota
+ *  publishes $999 in the Prairies/Ontario and $990 in BC & Yukon, so a BC
+ *  listing must resolve to the BC row even though the unqualified $999 row is
+ *  written first. The old `find` took whichever row came first in the array —
+ *  correct only by accident, and silently wrong the moment someone reordered
+ *  the catalog or added a second region. Look for an exact region match, then
+ *  fall back to the brand's unqualified row. */
 export function dealerFeeCeiling(
   make: string,
   region = "AB",
-): { amount: number; source: string; capturedOn: string; note?: string } | null {
+): { amount: number; source: string; capturedOn: string; region?: string; provenance: "policy" | "single-model"; note?: string } | null {
   const m = norm(make);
   const r = String(region ?? "").toUpperCase();
-  const row = DEALER_FEE_CEILING.find((f) => norm(f.make) === m && (!f.region || f.region === r));
-  return row ? { amount: row.amount, source: row.source, capturedOn: row.capturedOn, note: row.note } : null;
+  const forMake = DEALER_FEE_CEILING.filter((f) => norm(f.make) === m);
+  const row = forMake.find((f) => f.region === r) ?? forMake.find((f) => !f.region);
+  return row ? { amount: row.amount, source: row.source, capturedOn: row.capturedOn, region: row.region, provenance: row.provenance ?? "single-model", note: row.note } : null;
 }
 
 /** Freight for a make+model, or null if not captured (never guessed). */
@@ -250,12 +304,15 @@ export function assessDealerFeeVsCeiling(
   make: string,
   region: string,
   observedFee: number,
-): { ceiling: number; observed: number; over: boolean; overBy: number; source: string; capturedOn: string } | null {
+): { ceiling: number; observed: number; over: boolean; overBy: number; source: string; capturedOn: string; ceilingRegion: string | null; provenance: "policy" | "single-model" } | null {
   const c = dealerFeeCeiling(make, region);
   const fee = Number(observedFee);
   if (!c || !Number.isFinite(fee) || fee <= 0) return null;
   const over = fee > c.amount;
-  return { ceiling: c.amount, observed: round2(fee), over, overBy: over ? round2(fee - c.amount) : 0, source: c.source, capturedOn: c.capturedOn };
+  // `ceilingRegion` says whether this figure is the brand's ONE national
+  // published maximum (null) or a region-specific one the caller must not
+  // restate outside that region (e.g. Toyota BC's $990 against $999 elsewhere).
+  return { ceiling: c.amount, observed: round2(fee), over, overBy: over ? round2(fee - c.amount) : 0, source: c.source, capturedOn: c.capturedOn, ceilingRegion: c.region ?? null, provenance: c.provenance };
 }
 
 /** An itemised view of what sits inside an all-in price, for buyer
