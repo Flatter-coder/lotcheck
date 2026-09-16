@@ -458,6 +458,11 @@ jobs:
         run: npm run test:reachable
       - name: Report truth (never a claim the pipeline did not check)
         run: npm run test:report-truth
+      # The report's headline must be actionable. A 0-10 leverage score was the
+      # largest element on both the screen and the PDF and a buyer could do
+      # nothing with it. This pins the dollars-and-facts shape that replaced it.
+      - name: Leverage headline (dollars and facts, never a score)
+        run: npm run test:leverage
       - name: Vision image limits (never post an image the API will refuse)
         run: npm run test:vision-limits
       - name: Scrapfly render degrades instead of losing the HTML

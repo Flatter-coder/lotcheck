@@ -92,6 +92,7 @@
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
     "test:catalog-quality": "node scripts/test-catalog-quality.mjs",
     "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts",
+    "test:leverage": "node --experimental-strip-types scripts/test-leverage-headline.mjs",
     "test:vision-limits": "node --experimental-strip-types supabase/functions/_shared/vision-limits.test.ts",
     "test:scrapfly-render": "node --experimental-strip-types supabase/functions/_shared/scrapfly-render.test.ts",
     "test:ref-financing": "node --experimental-strip-types supabase/functions/_shared/reference-financing.test.ts",
