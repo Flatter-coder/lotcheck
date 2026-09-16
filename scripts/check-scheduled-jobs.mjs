@@ -116,8 +116,33 @@ for (const f of yamls) {
   }
 }
 
+// ---- 4. a job may not gate itself on the wall-clock hour ------------------
+//
+// Two DST cron lines were de-duplicated by asking "is it 6am in Edmonton?" and
+// skipping otherwise. That is correct only if GitHub runs a cron at its cron
+// time, and it does not: measured 2026-09-16, api-key-health fired between
+// 09:00 and 12:00 Edmonton on twelve consecutive runs, so the gate said SKIP on
+// every one. Twelve green runs across six days, zero keys checked -- while the
+// Scrapfly key answered HTTP 401 the whole time and fifteen MSRP captures died
+// on it.
+//
+// A gate whose false branch exits 0 does not fail, it disappears. Dedupe on
+// something that survives being late -- a date, a marker, an idempotent write --
+// or let both cron lines run.
+const HOUR_EQ = /\$\{?HOUR\}?"?\s*=\s*"?[0-9]/;
+for (const f of yamls) {
+  const rel = relative(".", f).replace(/\\/g, "/");
+  if (!rel.startsWith(LIVE_DIR + "/")) continue;
+  const src = readFileSync(f, "utf8");
+  if (!HOUR_EQ.test(src)) continue;
+  problems.push(
+    `${rel}\n      Gates its own steps on an exact wall-clock hour. GitHub fires crons hours late,\n` +
+    `      so the hour never matches, the job skips, and it reports SUCCESS having done nothing.\n` +
+    `      Dedupe on a date or a marker, or let both DST cron lines run.`);
+}
+
 if (!problems.length) {
-  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+.`);
+  console.log(`✅ scheduled-jobs: every workflow is in ${LIVE_DIR}/, every third-party fetch identifies itself, and every Supabase job runs Node ${NODE_FLOOR}+, and no job gates itself on the clock.`);
   process.exit(0);
 }
 console.error(`❌ scheduled-jobs: ${problems.length} job(s) cannot reliably do their work.\n`);
