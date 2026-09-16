@@ -71,6 +71,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { dealerLicenceLine, warrantyLine } from "../supabase/functions/_shared/report-lines.js";
 import { brandedTitleLine } from "../supabase/functions/_shared/branded-title.js";
+import { reportBands } from "../supabase/functions/_shared/report-bands.js";
+import { REPORT_POINTS } from "../supabase/functions/_shared/report-points.js";
 import { dealerReputationPoint } from "../supabase/functions/_shared/point-state.ts";
 import { POINT_TITLES } from "../supabase/functions/_shared/report-points.js";
 
@@ -107,6 +109,21 @@ const VOCAB = {
   // -- price ---------------------------------------------------------------
   "HIDDEN BY DEALER":  { asserts: "dealer",  backed: true,  why: "priceDisclosure === 'contact_for_price' is the page's own words, positively read" },
   "AT MSRP":           { asserts: "result",  backed: true },
+  // ── declared 2026-09-16, when part 5 first drove the model itself ────────
+  // Every one of these names OUR failure to look, which is exactly what an
+  // unchecked point is allowed to say. They existed in report-bands.js from the
+  // day it was written and no layer had ever read them: the literal scan only
+  // covered the two hand-built assemblers, and both have now been replaced by
+  // this file. Undeclared is a FAILURE by design, so they surfaced the moment
+  // the model was driven rather than scraped.
+  "COULDN'T REACH REGISTRY": { asserts: "us", backed: false,
+    why: "Recalls. We could not reach Transport Canada. Explicitly not a clean bill -- the note tells the buyer to check it themselves." },
+  "COULDN'T READ":     { asserts: "us",      backed: false,
+    why: "Fees and VIN. The page itself could not be read, so nothing is claimed about what it does or does not list." },
+  "DRIVETRAIN NOT READ": { asserts: "us",    backed: false,
+    why: "EV rebate. Replaced the old \"N/A (GAS)\", which reported an unread drivetrain as a gasoline car and could cost a buyer the federal rebate outright." },
+  "NOT CONFIRMED":     { asserts: "us",      backed: false,
+    why: "Warranty. The catalogue row was hedged or absent, so the remaining cover is not asserted." },
   "MSRP UNVERIFIED":   { asserts: "us",      backed: false },
   "PRICE READ ONCE":   { asserts: "us",      backed: false },
   "UNVERIFIED":        { asserts: "us",      backed: false },
@@ -232,10 +249,6 @@ function inspectUnchecked(value, line) {
 // read as wider coverage than it has, which is the same dishonesty the gate
 // exists to stop.
 const QUARANTINE = new Map([
-  ["value:NOT PUBLISHED",       "2026-09-13 audit #20 -- VIN, emailed PDF"],
-  ["value:NOT LISTED",          "2026-09-13 audit #19 -- odometer, emailed PDF"],
-  ["value:NO TERMS QUOTED",     "2026-09-13 audit #18 -- financing math"],
-  ["value:N/A (GAS)",           "2026-09-13 audit #25/#43/#44 -- EV rebate"],
   // report-bands.js no longer calls dealerLicenceLine -- amvicBand() replaced
   // it for the on-screen ten. It stays quarantined because the EMAILED PDF
   // still calls it directly, so "NOT ON QUOTE" is reachable there.
@@ -493,12 +506,26 @@ function functionBody(src, header) {
 }
 
 const ASSEMBLERS = [
+  // report-bands.js IS THE LIST NOW. Both ten-point surfaces render it, so every
+  // point-value literal a buyer can read lives in this one file -- which means
+  // the literal scan has to cover it or it covers nothing. It was NOT here
+  // until 2026-09-16, and an injection proved the cost: restoring the exact
+  // defect this ledger closed today (an unread drivetrain rendering as
+  // "N/A (GAS)") passed every assertion. Removing the two old assemblers
+  // without adding their replacement would have retired the check, not the bug.
+
   // src/App.jsx IS DELIBERATELY ABSENT, and that is the result rather than a
   // gap: it renders reportBands() and contains no point-value literals at all,
   // so a literal scan has nothing to classify. Part 1 drives that model
   // directly, which is stronger than reading strings out of JSX. check:points
   // guards that the app has not grown its own second copy again.
-  { file: "supabase/functions/email-quote-report/index.ts", fn: "function tenPoints(" },
+  // supabase/functions/email-quote-report/index.ts LEFT THIS LIST on
+  // 2026-09-16, and that is the result rather than a gap: tenPoints() now
+  // renders reportBands() and holds no point-value literals for the ten, so
+  // a literal scan has nothing to classify. Part 1 drives that model
+  // directly, which is stronger than reading strings out of a template.
+  // Both ten-point surfaces are now the same file, and check:points guards
+  // that neither has grown its own copy again.
 ];
 
 const titles = new Set(POINT_TITLES);
@@ -575,6 +602,54 @@ console.log("\npart 4 -- the quarantine ledger");
   }
   console.log(`      ${QUARANTINE.size} known defect(s) outstanding. This number must only go down.`);
 }
+
+/* ── 5. the shared model, DRIVEN with nothing checked ─────────────────────── */
+//
+// report-bands.js is now the single author for BOTH ten-point surfaces, so
+// every point value a buyer can read comes out of this one file. The literal
+// scan cannot cover it: that extractor reads `v:` object keys and these values
+// are positional arguments to band().
+//
+// Removing the two old assemblers without replacing their coverage would have
+// retired the check rather than the bug. Proved on 2026-09-16 by restoring the
+// exact defect this ledger closed the same day -- an unread drivetrain
+// rendering as "N/A (GAS)" -- which passed every remaining assertion.
+//
+// So the model is CALLED with an analysis in which nothing was checked, and
+// every value it returns is classified by the same VOCAB. Stronger than a
+// literal scan: it reads what a buyer would actually be shown.
+console.log("\npart 5 -- every band, driven with an analysis where nothing was checked");
+{
+  const bands = reportBands({});
+  if (bands.length !== REPORT_POINTS.length) {
+    fail(`only ${bands.length} of ${REPORT_POINTS.length} points render with nothing checked`);
+  } else {
+    pass(`all ${REPORT_POINTS.length} points render with nothing checked`);
+  }
+
+  let bad = 0;
+  for (const b of bands) {
+    // A point that genuinely resolved from an empty analysis is not an
+    // unchecked state and is not this layer's business. Only gaps are.
+    if (b.state !== "unchecked" && b.state !== "noted") continue;
+    for (const f of inspectUnchecked(b.value, b.note)) {
+      bad++;
+      fail(`${b.n} ${b.title}: ${f}`,
+        "nothing was checked on this analysis, so this value cannot assert anything");
+    }
+  }
+  if (bad === 0) pass("no band asserts a fact when nothing was checked");
+
+  // AND GREEN STAYS A CLAIM. reportBands() throws when a CLEAR band carries no
+  // source. Drive it, rather than trusting the comment above it.
+  try {
+    reportBands({ recalls: { checked: true, count: 0, confirmed: true } });
+    pass("a legitimately clear band still builds -- the source throw does not misfire");
+  } catch (e) {
+    fail("the CLEAR-needs-a-source throw fired on a legitimately clear band", e.message);
+  }
+}
+
 
 console.log("");
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }

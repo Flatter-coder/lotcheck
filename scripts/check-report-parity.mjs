@@ -195,7 +195,17 @@ const SURFACES = [
     },
     email: {
       "shared line builder import": "dealerLicenceLine",
-      "tenPoints core row":         'P.push({ t: "AMVIC"',
+      // Was 'P.push({ t: "AMVIC"'. The PDF no longer hand-builds the ten --
+      // it renders reportBands(), so the AMVIC point ships to the emailed
+      // document by construction. The parity property is stronger now: a point
+      // cannot exist on one surface and not the other, because after
+      // 2026-09-16 there is exactly one builder for both.
+      // THE WHOLE RESULT, UNFILTERED. An earlier version of this anchor was the
+      // bare substring "reportBands(a)" -- and an injection that filtered AMVIC
+      // straight back out of the loop still contained it, so the gate passed
+      // while the point vanished from the emailed document. Parity is the one
+      // property this file exists to hold; a substring cannot hold it.
+      "tenPoints core row":         "for (const b of reportBands(a)) {",
       "emailed HTML deck":          'deck.push({ label: "AMVIC"',
       "emailed PDF point explain":  'case "AMVIC"',
       "emailed PDF supplementary":  'kicker("DEALER LICENCE - AMVIC PUBLIC REGISTRY")',
