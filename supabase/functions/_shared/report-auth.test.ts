@@ -226,6 +226,41 @@ check("the body cap leaves room for a real capture but is bounded",
     "if this ever fails, canonicalReport() grew — good, update this case");
 }
 
+// ── v12: the VIN's check digit rides in the seal ────────────────────────────
+// validateVin computed this on every scan and nothing showed it to a buyer:
+// deriveCheckpoints raised an admin-only error row while /verify printed the
+// VIN as a bare fact. These pin that the doubt is now SEALED, so /verify can
+// render it from the signed bytes rather than re-deriving it.
+{
+  const { validateVin } = await import("./invariants.ts");
+  const GOOD = "YV4ED3UR3M2605626";
+  const BAD = "YV4ED3UR3X2605626"; // same VIN, one character transposed
+
+  const sealed = (vin: string | null) =>
+    canonicalReport({ vin, vinCheck: validateVin(vin), quotedPrice: 1 }).vck;
+
+  const g = sealed(GOOD);
+  check("v12: a valid VIN seals ok:true", g?.ok === true, JSON.stringify(g));
+  check("v12: a valid VIN carries no doubt text", g?.why === null, JSON.stringify(g));
+
+  const b = sealed(BAD);
+  check("v12: a failing check digit seals ok:false", b?.ok === false, JSON.stringify(b));
+  check("v12: and carries the reason a buyer can read",
+    typeof b?.why === "string" && b.why.length > 20, JSON.stringify(b));
+  // no-accusation-language: the copy must not blame the dealer for a VIN that
+  // is far more often our mis-read than their error.
+  check("v12: the reason does not accuse the dealer",
+    !/dealer (?:published|entered|faked|lied)/i.test(String(b?.why ?? "")), String(b?.why));
+
+  check("v12: no VIN seals null, not a false all-clear", sealed(null) === null, JSON.stringify(sealed(null)));
+
+  // Additive-only: everything v11 carried must still be carried.
+  const full = canonicalReport({ vin: GOOD, vinCheck: validateVin(GOOD), quotedPrice: 42475, msrp: 50000 });
+  check("v12: version bumped", full.v === 12, String(full.v));
+  check("v12: vin still projected beside it", full.vin === GOOD, String(full.vin));
+  check("v12: price still projected", full.price?.asking === 42475, JSON.stringify(full.price));
+}
+
 console.log(failures === 0
   ? "\nreport-auth: all checks passed"
   : `\nreport-auth: ${failures} FAILED`);
