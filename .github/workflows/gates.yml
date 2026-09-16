@@ -246,6 +246,15 @@ jobs:
       # maximum on the strength of a 2026 RAV4 configurator line.
       - name: Fee-ceiling provenance (no claim stronger than its record)
         run: npm run check:fee-ceiling-provenance
+      # Both of these existed and neither ran. test-catalog-quality.mjs is the
+      # gate that rejects the fractional/gradeless rows which corrupted ~17% of
+      # the catalog on 2026-08-11 -- it had no npm script and no workflow step at
+      # all. test:reachable had a script and no step. A gate nobody runs is a
+      # gate that is green in every world, including the broken one.
+      - name: Catalog row quality (rejects the 2026-08-11 corruption shape)
+        run: npm run test:catalog-quality
+      - name: Catalog model names resolve (no nameplate inherits a sibling powertrain)
+        run: npm run test:reachable
       # The dealer-fee-ceiling flag: fires ONLY for a new vehicle of a captured
       # make in-province; never a used car, an uncaptured make, or a fee under
       # the ceiling. A wrong fee claim against a named dealer is what this guards.
