@@ -117,8 +117,27 @@ export function assessDocFee(analysis: any): DocFeeAssessment | null {
   const mfr = (analysis?.vehicleCondition === "new" && analysis?.make)
     ? assessDealerFeeVsCeiling(analysis.make, code, doc.price)
     : null;
-  const ceiling = (mfr && mfr.over)
-    ? { mfrCeiling: mfr.ceiling, mfrCeilingOverBy: mfr.overBy, mfrCeilingMake: String(analysis.make), mfrCeilingSource: mfr.source }
+  // A FEE SITTING EXACTLY ON THE CEILING IS A FINDING, NOT A NON-EVENT. This
+  // used to attach the ceiling only when `over`, so a dealer charging precisely
+  // the manufacturer's published maximum produced NOTHING -- and "missing beats
+  // wrong" was the stated reason. Missing beats wrong for a fee UNDER the
+  // ceiling, where there is nothing to say. At the ceiling there is: the buyer
+  // is being charged the most this manufacturer permits.
+  //
+  // Found on a real report (2026 4Runner Hybrid, Okotoks Toyota, $999 admin).
+  // We hold Toyota's published Alberta maximum at $999 and said nothing about
+  // it, while the model-written summary filled the silence with a "$300-$700
+  // typical range" that exists in no catalogue of ours. The backed fact was
+  // both truer and better leverage than the invented one.
+  const atCeiling = !!mfr && !mfr.over && mfr.observed === mfr.ceiling;
+  const ceiling = (mfr && (mfr.over || atCeiling))
+    ? {
+        mfrCeiling: mfr.ceiling,
+        mfrCeilingOverBy: mfr.overBy,
+        mfrCeilingAt: atCeiling,
+        mfrCeilingMake: String(analysis.make),
+        mfrCeilingSource: mfr.source,
+      }
     : {};
 
   if (b.type === "allin") {

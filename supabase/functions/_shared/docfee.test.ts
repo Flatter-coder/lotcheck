@@ -68,5 +68,29 @@ check("missing make -> no ceiling",
 isNull("no doc-fee line item -> null", assessDocFee(listing({ addOns: [{ name: "Cargo Liner", price: 220 }] })));
 isNull("no resolvable jurisdiction -> null", assessDocFee(listing({ dealerCity: "" })));
 
+// ── a fee sitting EXACTLY on the manufacturer's published maximum ───────────
+// The ceiling used to attach only when `over`, so a dealer charging precisely
+// the most the manufacturer permits produced nothing at all. Found on a real
+// report: 2026 4Runner Hybrid, Okotoks Toyota, $999 admin. Our catalogue holds
+// Toyota's published Alberta maximum at $999, said nothing, and the
+// model-written summary filled the silence with a "$300-$700 typical range"
+// that exists in no catalogue of ours.
+check("a fee AT the published ceiling reports it",
+  assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 999 }] })),
+  { kind: "allin", mfrCeiling: 999, mfrCeilingAt: true, mfrCeilingOverBy: 0, mfrCeilingMake: "Toyota" });
+
+check("a fee OVER the ceiling still reports the overage",
+  assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 1200 }] })),
+  { kind: "allin", mfrCeiling: 999, mfrCeilingAt: false, mfrCeilingOverBy: 201 });
+
+// UNDER the ceiling there is genuinely nothing to say, and inventing a
+// comparison is exactly what went wrong in the first place.
+{
+  const under: any = assessDocFee(listing({ make: "Toyota", addOns: [{ name: "Admin fee", price: 650 }] }));
+  const silent = under !== null && under.mfrCeiling === undefined;
+  console.log(`${silent ? "PASS" : "FAIL"}  a fee UNDER the ceiling claims no comparison`);
+  if (silent) pass++; else fail++;
+}
+
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);

@@ -206,9 +206,17 @@ export function buildCounterScript(analysis: any): CounterScript {
     // fee. Only present when the fee exceeds it on a new vehicle of that make
     // (docfee.ts guards the scope), so this is a fact-with-authority, never an
     // accusation (no-accusation-language, make-it-dispute-proof).
-    const ceiling = (df.mfrCeiling && df.mfrCeilingOverBy)
-      ? ` It's also ${money(df.mfrCeilingOverBy)} above ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — ask them to bring it to the manufacturer's cap.`
+    // AT the ceiling is a finding too. `overBy` is 0 there, so this condition
+    // used to render nothing for a dealer charging precisely the most the
+    // manufacturer permits -- the case that actually turned up in the wild
+    // (Okotoks Toyota, $999 admin, Toyota's published Alberta maximum $999).
+    // Stated as a fact with an authority behind it, never as an accusation.
+    const atCeiling = (df.mfrCeiling && df.mfrCeilingAt)
+      ? ` That is exactly ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — the most they allow a dealer to add.`
       : "";
+    const ceiling = atCeiling || ((df.mfrCeiling && df.mfrCeilingOverBy)
+      ? ` It's also ${money(df.mfrCeilingOverBy)} above ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — ask them to bring it to the manufacturer's cap.`
+      : "");
     if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.${ceiling}` });
     else if (df.kind === "over_cap") moves.push({ topic: "Doc fee", say: `Your ${money(df.docFee)} doc fee is above ${df.jurisdiction}'s ~${money(df.benchmark)} cap — please bring it down.${ceiling}` });
     else if (df.kind === "over_norm") moves.push({ topic: "Doc fee", say: `A ${money(df.docFee)} doc fee is on the high side — can you reduce it?${ceiling}` });
