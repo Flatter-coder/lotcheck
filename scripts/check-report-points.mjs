@@ -109,14 +109,28 @@ console.log("\nthe emailed report");
   // code is never mistaken for the code itself.
   const start = src.indexOf("function tenPoints");
   const body = src.slice(start, src.indexOf("\n}", start)).replace(/\/\/[^\n]*/g, "");
+  const code = body;   // comments already stripped; a gate must not pass on prose
   const titles = uniqInOrder([...body.matchAll(/P\.push\(\{\s*t:\s*"([^"]+)"/g)].map((m) => m[1]));
   // A branch may QUALIFY a title ("Financing APR (this dealer)") but must not
   // rename the point.
   const canonical = uniqInOrder(titles.map((t) => POINT_TITLES.find((c) => t === c || t.startsWith(c + " ")) || t));
   const core = canonical.slice(0, 10), extras = canonical.slice(10);
-  check("tenPoints() opens with the canonical ten, in order",
-    JSON.stringify(core) === JSON.stringify(POINT_TITLES),
-    `email: ${JSON.stringify(core)}\n         canon: ${JSON.stringify(POINT_TITLES)}`);
+  // THE PDF NO LONGER HAND-BUILDS THE TEN EITHER, so scraping ten titles out of
+  // ten literal pushes is checking an implementation that is gone. It renders
+  // reportBands(), which derives the ten from REPORT_POINTS and THROWS on a
+  // count or order mismatch -- enforced in the model, and driven directly by
+  // test:report-bands, rather than re-asserted here by reading strings.
+  //
+  // What this gate has to check is that the PDF still goes through the model
+  // and has not grown a second copy. That second copy is exactly what produced
+  // "NOT DETERMINED" on screen and "N/A (GAS)" in the emailed document for one
+  // unread drivetrain. [[two-authors-per-fact]]
+  check("the emailed PDF renders the shared band model",
+    /\breportBands\s*\(/.test(code),
+    "the ten in the PDF must come from report-bands.js, not be hand-built here");
+  check("the emailed PDF does NOT hand-build the ten any more",
+    !new RegExp('P\\.push\\(\\{\\s*t:\\s*"(' + POINT_TITLES.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ')"').test(code),
+    "a second author for the ten points is what report-bands.js replaced");
   // Ten is a FLOOR. Extras are expected and must reach the PDF in full (Vic,
   // 2026-08-27: "yes add them to pdf file all 14") — they must simply not be
   // presented as points.

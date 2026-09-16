@@ -864,6 +864,7 @@ import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
 import { dealerReputationPoint } from "../_shared/point-state.ts";
 import { POINT_TITLES } from "../_shared/report-points.js";
+import { reportBands } from "../_shared/report-bands.js";
 import { recallDigest, recallsShownNote, warrantyLine, dealerLicenceLine, priceMovesLine, daysOnLotLine, sameVinElsewhereLine, priceCheckState, financingMathNote, marketCountLine, pageDefaultLine, marketCompareLine, olderYearsLine, financeCoverageLine, financeCoverageApplies, insurancePremiumLine, fmtDateEn } from "../_shared/report-lines.js";
 import { brandedTitleLine } from "../_shared/branded-title.js";
 import { lotDateLines } from "../_shared/lot-dates.js";
@@ -1006,75 +1007,34 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
   const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
   const pv = resolvePriceVerified(a).sourceVerified;
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
-  const msrpExactTp = ms > 0 && a.msrpBasis === "exact";
-  if (!qp && a.priceDisclosure === "contact_for_price") P.push({ t: "Price vs MSRP", v: "HIDDEN BY DEALER", tone: "flag" });
-  else if (ms && pv && msrpExactTp && delta !== 0) P.push({ t: "Price vs MSRP", v: (delta < 0 ? money(-delta) + " UNDER" : money(delta) + " OVER"), tone: delta <= 0 ? "pass" : "flag" });
-  else if (ms && pv && msrpExactTp && delta === 0) P.push({ t: "Price vs MSRP", v: "AT MSRP", tone: "pass" });
-  // No over/under claim on a non-exact basis -- but the WORDING has to match the
-  // basis too. "FROM $68,400" on a used car's original-when-new figure implies
-  // you could buy one from that price, which is its own false claim.
-  else if (ms && !msrpExactTp) P.push({ t: "Price vs MSRP",
-    v: a.msrpBasis === "original_when_new" ? money(ms) + " WHEN NEW"
-     : a.msrpBasis === "dealer_stated"     ? money(ms) + " AS STATED BY DEALER"
-     : a.msrpBasis === "starting_at"       ? "FROM " + money(ms)
-     :                                       money(ms) + " UNVERIFIED",
-    tone: "muted" });
-  else if (pv && qp) P.push({ t: "Price vs MSRP", v: "MSRP UNVERIFIED", tone: "muted" });
-  // Not a flag: being unable to read the price a second way is a fact about
-  // OUR read, not a finding against the listing. The label now says which.
-  else P.push({ t: "Price vs MSRP", v: "PRICE READ ONCE", tone: "muted" });
-  // NOTE: the market comparison ("How this vehicle compares with the Alberta
-  // market", report-lines.js marketCompareLine) is NOT one of the fixed 10
-  // audit points -- it is a context module (like days-on-lot) and renders as
-  // its own deck card + a PDF narrative section. Pushing it here would overflow
-  // P.slice(0,10) and silently drop the last real point (Dealer reputation).
-  // Kept out on purpose.
-  if (a.recalls?.checked && a.recalls.count > 0) P.push({ t: "Transport Canada recalls", v: a.recalls.count + " OPEN", tone: "flag" });
-  else if (a.recalls?.checked && a.recalls.count === 0 && a.recalls.confirmed !== false) P.push({ t: "Transport Canada recalls", v: "NONE OPEN", tone: "pass" });
-  else if (a.recalls?.checked) P.push({ t: "Transport Canada recalls", v: "UNCONFIRMED", tone: "muted" });
-  else P.push({ t: "Transport Canada recalls", v: "COULDN'T VERIFY", tone: "muted" });
-  if ((a.addOns || []).length) { const fl = a.addOns.filter((x: any) => x.verdict === "flagged").length; P.push({ t: "Add-ons & fee audit", v: fl ? fl + " FLAGGED" : "TRANSPARENT", tone: fl ? "flag" : "pass" }); }
-  // A dealer who publishes their own breakdown is TRANSPARENT, not "none
-  // listed". This keyed only on addOns, which never carried the listing's own
-  // itemisation, so the 2025 Mazda CX-90's openly-stated $795 Admin. Fee
-  // reported as nothing at all.
-  else if (dealerFeeTotal(a) > 0) P.push({ t: "Add-ons & fee audit", v: "ITEMIZED", tone: "muted" });
-  // AND "WE LOOKED" IS NOT "WE COULD NOT LOOK". The Advantage Ford Acadia was
-  // reported to a buyer as "NONE LISTED -- no dealer extras were itemized" on a
-  // page printing Doc Fee +$899 and an AMVIC levy, because that report came off
-  // the JSON-LD path and a fee box is rendered html, not schema.org markup. The
-  // report knew it was incomplete -- its own bottom line said so -- and still
-  // published the gap as a finding. Now the absence is only claimed when the
-  // page was actually read. [[report-never-empty]] means backed, not filled in.
-  else if (a.feesRead === true) P.push({ t: "Add-ons & fee audit", v: "NONE LISTED", tone: "muted" });
-  else P.push({ t: "Add-ons & fee audit", v: "NOT READ", tone: "muted" });
-  // AMVIC (point 4): real dealer-licence data, not financing APR. Retitled
-  // "AMVIC" 2026-09-09 but left wired to the old APR fields until 2026-09-10
-  // (Vic: "make it real AMVIC data"), after a live PDF showed point 4 titled
-  // AMVIC with a 4.9% financing rate as its value. Worded once in
-  // report-lines.js so this value can never read differently than the app's
-  // point card or this same email's deck card.
-  { const dl = dealerLicenceLine(a); P.push({ t: "AMVIC", v: dl.value, tone: dl.tone }); }
-  if (a.financingCheck?.checked) P.push({ t: "Financing math", v: a.financingCheck.consistent ? "RECONCILES" : "DOESN'T ADD UP", tone: a.financingCheck.consistent ? "pass" : "flag" });
-  // No dealer terms is not "nothing to say": we hold the manufacturer's own
-  // published rate and price, so the payment is arithmetic we can do ourselves.
-  else if (a.referenceFinancing?.atAsking) P.push({ t: "Financing math", v: "$" + Math.round(a.referenceFinancing.atAsking.monthly).toLocaleString() + "/MO REF", tone: "muted" });
-  else P.push({ t: "Financing math", v: "NO TERMS QUOTED", tone: "muted" });
-  if (a.odometerCheck?.checked) P.push({ t: "Odometer", v: Number(a.odometerCheck.km).toLocaleString() + " km" + (a.odometerCheck.flag ? " FLAG" : ""), tone: a.odometerCheck.flag ? "flag" : "pass" });
-  else P.push({ t: "Odometer", v: a.vehicleCondition === "new" ? "N/A (NEW)" : "NOT LISTED", tone: "muted" });
-  if (a.vinCheck?.present) P.push({ t: "VIN check", v: a.vinCheck.valid ? "VALID" : "CHECK PATTERN", tone: a.vinCheck.valid ? "pass" : "flag" });
-  else P.push({ t: "VIN check", v: "NOT PUBLISHED", tone: "muted" });
-
-  if (a.evapRebate?.eligible) P.push({ t: "EV / PHEV rebate", v: money(a.evapRebate.total) + " ELIGIBLE", tone: "pass" });
-  else if (a.evapRebate && a.evapRebate.ineligibleReason) P.push({ t: "EV / PHEV rebate", v: "NOT ELIGIBLE", tone: "muted" });
-  else if (a.fuelType === "BEV" || a.fuelType === "PHEV") { const over = (Number(a.quotedPrice) || Number(a.msrp) || 0) > 50000; P.push({ t: "EV / PHEV rebate", v: over ? "OVER $50K CAP" : "CHECK ELIGIBILITY", tone: "muted" }); }
-  else P.push({ t: "EV / PHEV rebate", v: "N/A (GAS)", tone: "muted" });
-  { const wl = warrantyLine(a); P.push({ t: "Included warranty", v: wl.value, tone: wl.tone }); }
-
-  // THREE states, not two. "NOT FOUND" used to cover a lookup that never ran,
-  // which printed "No public reviews were found" about Charlesglen Toyota --
-  // a dealer with 4.7 stars from 5,930 Google reviews.
-  { const dr = dealerReputationPoint(a.dealerSentiment); P.push({ t: "Dealer reputation", v: dr.value, tone: dr.tone }); }
+  // ── THE CANONICAL TEN, FROM THE SAME FILE THE SCREEN READS ────────────────
+  //
+  // Seventy lines of hand-written pushes used to live here, deciding the same
+  // ten points the on-screen report decided separately from the same analysis
+  // object. They disagreed in production: an unread drivetrain printed
+  // "NOT DETERMINED" on screen and "N/A (GAS)" in this document -- a fabricated
+  // fact about the car, in the artifact the buyer carries INTO the dealership.
+  //
+  // PR #455 moved the screen onto report-bands.js and left this file as the
+  // second author. That was the whole remaining exposure: the PDF is the
+  // surface that gets printed, forwarded and argued over, and it was the one
+  // still deciding for itself. [[two-authors-per-fact]] [[report-features-all-views]]
+  //
+  // THE TITLES ARE UNCHANGED. report-bands.js was written from this file's own
+  // canonical ten, so every heading a buyer already recognises is identical --
+  // this swaps the author, not the wording. What it does change is that the
+  // four states now agree across surfaces: a check that did not run renders as
+  // "not checked" in both places instead of one of them inventing a value.
+  //
+  // Extras below are untouched: they already read shared builders, and the ten
+  // is a FLOOR we advertise, never a cap. [[ten-point-claim-policy]]
+  for (const b of reportBands(a)) {
+    P.push({
+      t: b.title,
+      v: b.value,
+      tone: b.state === "raise" ? "flag" : b.state === "clear" ? "pass" : "muted",
+    });
+  }
   // TITLE STATUS — salvage / rebuilt / reconstructed.
   //
   // Placed here, immediately AFTER the canonical ten, so it lands first among

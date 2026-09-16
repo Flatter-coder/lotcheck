@@ -140,7 +140,12 @@ console.log("\nevery surface says it, and none of them says 'added on top'");
   check("the on-screen card still renders the breakdown component",
     /<DealerLineItems\s+items=\{/.test(app),
     "the itemised table is a React node, so it cannot live in the shared model");
-  check("the emailed point stops reading NONE LISTED", /dealerFeeTotal\(a\) > 0\) P\.push\(\{ t: "Add-ons & fee audit", v: "ITEMIZED"/.test(email));
+  // The emailed point's VALUE now comes from the same model branch the screen
+  // reads -- checked above against report-bands.js. What the PDF owes is that
+  // it renders that model rather than deciding for itself.
+  check("the emailed PDF takes the fee point from the shared model",
+    /\breportBands\s*\(/.test(email),
+    "the PDF decided this separately until 2026-09-16");
   check("the PDF prints the breakdown", /kicker\("THE DEALER'S OWN PRICE BREAKDOWN"\)/.test(email));
   check("the share link carries it", /dli:a\.dealerLineItems/.test(app) && /dealerLineItems:c\.dli/.test(app));
 
