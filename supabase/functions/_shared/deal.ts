@@ -211,11 +211,29 @@ export function buildCounterScript(analysis: any): CounterScript {
     // manufacturer permits -- the case that actually turned up in the wild
     // (Okotoks Toyota, $999 admin, Toyota's published Alberta maximum $999).
     // Stated as a fact with an authority behind it, never as an accusation.
+    //
+    // "<Make>'s OWN PUBLISHED MAXIMUM" IS A CLAIM ABOUT THE BRAND, and it may
+    // only be made when the record behind it is a brand-level one. fee-schedule.ts
+    // tags each ceiling: "policy" quotes the manufacturer's own "up to $X"
+    // wording, "single-model" was read off one model's build sheet. Toyota's row
+    // used to be the latter while this sentence said the former -- a 4Runner buyer
+    // was told $999 was "Toyota's own published maximum" on the strength of a RAV4
+    // configurator. Lexus $995 is still single-model today, so this is live.
+    //
+    // A single-model ceiling still yields real leverage; it just gets named for
+    // what it is. And where the figure is region-specific (Toyota publishes $999
+    // in the Prairies and $990 in BC & Yukon), the sentence says which province's
+    // figure it holds, so it is never restated as a national one.
+    const brandBacked = df.mfrCeilingProvenance !== "single-model";
+    const where = df.mfrCeilingRegion ? ` in ${df.mfrCeilingRegion}` : "";
+    const maxPhrase = brandBacked
+      ? `${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)}${where}`
+      : `the ${money(df.mfrCeiling)} maximum ${df.mfrCeilingMake} publishes on its own build sheet for this model line`;
     const atCeiling = (df.mfrCeiling && df.mfrCeilingAt)
-      ? ` That is exactly ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — the most they allow a dealer to add.`
+      ? ` That is exactly ${maxPhrase} — the most they allow a dealer to add.`
       : "";
     const ceiling = atCeiling || ((df.mfrCeiling && df.mfrCeilingOverBy)
-      ? ` It's also ${money(df.mfrCeilingOverBy)} above ${df.mfrCeilingMake}'s own published maximum dealer fee of ${money(df.mfrCeiling)} — ask them to bring it to the manufacturer's cap.`
+      ? ` It's also ${money(df.mfrCeilingOverBy)} above ${maxPhrase} — ask them to bring it to the manufacturer's cap.`
       : "");
     if (df.kind === "allin") moves.push({ topic: "Doc fee", say: `${df.jurisdiction} requires all-in advertised pricing — why is the ${money(df.docFee)} doc fee separate? It should already be in the advertised price.${ceiling}` });
     else if (df.kind === "over_cap") moves.push({ topic: "Doc fee", say: `Your ${money(df.docFee)} doc fee is above ${df.jurisdiction}'s ~${money(df.benchmark)} cap — please bring it down.${ceiling}` });

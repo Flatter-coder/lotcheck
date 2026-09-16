@@ -33,6 +33,7 @@
 // Run (Node 24+, from repo root):
 //   node --experimental-strip-types supabase/functions/_shared/deal.test.ts
 import { buildCounterScript, computeFinancingTrap } from "./deal.ts";
+import { assessDocFee } from "./docfee.ts";
 
 let pass = 0, fail = 0;
 const fails: string[] = [];
@@ -153,6 +154,47 @@ const BASE = {
   record(trap != null && trap.mode === "quantified" && trap.dealerApr === 9.99 && trap.extraInterest! > 0,
     "an sm360_feed-evidenced rate above the promo rate DOES quantify the trade-off",
     JSON.stringify(trap));
+}
+
+// ---- the ceiling sentence may not outrun the record behind it -------------
+// "<Make>'s own published maximum dealer fee" is a claim about the BRAND.
+// fee-schedule.ts tags each ceiling: "policy" quotes the manufacturer's own
+// "up to $X" wording; "single-model" was read off one model's build sheet.
+// Toyota's row was single-model while this sentence said otherwise, and a 2026
+// 4Runner buyer was told $999 was "Toyota's own published maximum" on the
+// strength of a RAV4 configurator. Lexus $995 is still single-model, so the
+// distinction is live, not hypothetical.
+{
+  const docFeeMove = (make: string, fee: number, dealerCity = "Okotoks, AB") => {
+    const listing: any = { vehicleCondition: "new", make, dealerCity,
+      addOns: [{ name: "Admin fee", price: fee }] };
+    listing.docFeeCheck = assessDocFee(listing);
+    const moves: any = buildCounterScript(listing);
+    const list = Array.isArray(moves) ? moves : (moves?.moves ?? []);
+    return String(list.find((m: any) => /doc fee/i.test(m?.topic ?? ""))?.say ?? "");
+  };
+
+  const toyota = docFeeMove("Toyota", 999);
+  record(toyota.includes("Toyota's own published maximum dealer fee of $999"),
+    "a POLICY-backed ceiling may be called the brand's own published maximum", toyota);
+
+  const lexus = docFeeMove("Lexus", 1295);
+  record(!lexus.includes("Lexus's own published maximum"),
+    "a SINGLE-MODEL ceiling is never called the brand's own published maximum", lexus);
+  record(lexus.includes("publishes on its own build sheet for this model line"),
+    "...it is named for what it actually is, and still yields the $300 leverage", lexus);
+  record(lexus.includes("$300 above"),
+    "...so the backed overage is not lost to the weaker wording", lexus);
+
+  // Toyota publishes $999 in the Prairies/Ontario and $990 in BC & Yukon. The
+  // same $995 fee is UNDER the ceiling in Alberta and OVER it in BC, and the
+  // sentence has to say whose region's figure it is holding.
+  const bc = docFeeMove("Toyota", 995, "Vancouver, BC");
+  record(bc.includes("$5 above Toyota's own published maximum dealer fee of $990 in BC"),
+    "a region-specific ceiling names its region, so it is not read as national", bc);
+  const ab = docFeeMove("Toyota", 995);
+  record(!ab.includes("published maximum"),
+    "the same $995 in Alberta is under the $999 published there, so nothing is claimed", ab);
 }
 
 if (fail) { console.error(`\n${fail} failure(s):\n` + fails.map((f) => `  - ${f}`).join("\n")); process.exit(1); }

@@ -81,7 +81,15 @@ export interface DocFeeAssessment {
   mfrCeiling?: number;        // the published maximum (e.g. Lexus $995, Toyota $999)
   mfrCeilingOverBy?: number;  // observed doc fee − ceiling
   mfrCeilingMake?: string;    // whose ceiling this is
-  mfrCeilingSource?: string;  // provenance (manufacturer Build & Price)
+  mfrCeilingSource?: string;  // where the figure was read, verbatim
+  // HOW STRONG THE RECORD IS, so copy can match the strength of its claim:
+  //   "policy"       the brand's own "up to $X" wording, quoted in the source.
+  //                  Safe to call "<Make>'s own published maximum".
+  //   "single-model" one model's build sheet. Real, and a fee ABOVE it is still
+  //                  a backed flag, but it does not evidence a brand-wide
+  //                  maximum and must not be described as one.
+  mfrCeilingProvenance?: "policy" | "single-model";
+  mfrCeilingRegion?: string | null;  // set when the figure is region-specific (Toyota BC $990 vs $999)
 }
 
 // All-in advertised-pricing authority for a listing's jurisdiction (Canada).
@@ -137,6 +145,8 @@ export function assessDocFee(analysis: any): DocFeeAssessment | null {
         mfrCeilingAt: atCeiling,
         mfrCeilingMake: String(analysis.make),
         mfrCeilingSource: mfr.source,
+        mfrCeilingProvenance: mfr.provenance,
+        mfrCeilingRegion: mfr.ceilingRegion,
       }
     : {};
 
