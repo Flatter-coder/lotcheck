@@ -83,7 +83,25 @@ export function dealerReputationPoint(sentiment: any | null | undefined): {
  * truth may be that we could not read the page. Kept as separate copy so the
  * distinction is visible at the call site.
  */
-export function pageAbsenceCopy(kind: "addons" | "apr" | "vin", readable: boolean): { value: string; explain: string } {
+/**
+ * A NEW vehicle's missing VIN is not the same absence as a used one's, and the
+ * copy used to treat them alike: "without one you cannot check recalls or
+ * history on this exact car". On a car nobody has owned there is no history to
+ * check, so the sentence gave a buyer a reason to care that did not apply, and
+ * stayed silent on the one that did.
+ *
+ * Found on a real report (2026 Toyota 4Runner Hybrid, 2026-09-15). The listing
+ * published no VIN and no trim we could pin, and the two gaps were reported as
+ * if unrelated -- the VIN card talked about recall history while the Price vs
+ * MSRP card separately said it could not pin a configuration. They are the SAME
+ * gap: the VIN is what identifies the build, and the build is what the price
+ * comparison rests on. One ask closes both, and the report should say so.
+ */
+export function pageAbsenceCopy(
+  kind: "addons" | "apr" | "vin",
+  readable: boolean,
+  opts: { isNew?: boolean } = {},
+): { value: string; explain: string } {
   if (!readable) {
     return {
       value: "COULDN'T READ",
@@ -93,6 +111,11 @@ export function pageAbsenceCopy(kind: "addons" | "apr" | "vin", readable: boolea
   switch (kind) {
     case "addons": return { value: "NONE LISTED", explain: "This listing discloses no add-ons or extra fees. Get that confirmed in writing before you sign - fees added later are the most common surprise." };
     case "apr":    return { value: "NONE ADVERTISED", explain: "This dealer advertises no financing rate on the listing, so there is nothing of theirs to compare." };
-    case "vin":    return { value: "NOT PUBLISHED", explain: "This listing doesn't publish a VIN. Ask for it - without one you cannot check recalls or history on this exact car." };
+    case "vin":    return {
+      value: "NOT PUBLISHED",
+      explain: opts.isNew === true
+        ? "This listing doesn't publish a VIN. On a new vehicle that is the number that says WHICH ONE you are buying - the exact trim, package and options on the window sticker. Without it we cannot pin the configuration, which is why this report will not compare the price against a manufacturer MSRP. Ask for the VIN and the factory build sheet before any deposit, and check they describe the car you were shown."
+        : "This listing doesn't publish a VIN. Ask for it - without one you cannot check recalls or history on this exact car.",
+    };
   }
 }

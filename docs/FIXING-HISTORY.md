@@ -23,6 +23,66 @@ the next instance.
 
 ---
 
+## 2026-09-15 - the three things the 4Runner audit left open
+
+The previous entry closed with three open items. Chasing each one down produced
+a different kind of answer, and one of the three was my own reporting error.
+
+**1. "Okotoks Toyota's AMVIC status is unverified - that table isn't
+anon-readable." THAT WAS WRONG, and the correction is the finding.** The table
+IS anon-readable (the 2026-08-10 migration creates the policy), the snapshot is
+current, and the matcher resolves the dealer at confidence 1.08:
+
+    HRT MOTORS INC. trading as OKOTOKS TOYOTA, Okotoks
+    Issued - B1023322 - expiry Apr-30-2027
+
+The report said nothing about the licence because the page was a Build & Price
+configurator with no dealer name on it - the `Product` misclassification, closed
+by #477. Nothing was broken in the AMVIC path.
+
+But chasing it turned up something that was: **the test fixture for this exact
+dealer was a fiction.** It carried
+
+    name: "OKOTOKS TOYOTA LTD.", website: "www.okotokstoyota.ca"
+
+which is the EASY shape - legal name equals dealer name, domain matches. The
+registry actually records `HRT MOTORS INC.` trading as `OKOTOKS TOYOTA` with
+website `N/A`: the legal name shares no token with the dealer name and there is
+no domain to fall back on, so the trade name is the only route in. The suite had
+been green for weeks against a row the registry does not contain.
+
+**2. "No VIN, and we can't tell which trim this is."** Two cards were reporting
+one gap as if they were unrelated. The VIN card explained the absence as "without
+one you cannot check recalls or history on this exact car" - on a vehicle nobody
+has owned, a reason that does not apply - while the Price vs MSRP card separately
+said it could not pin a configuration. They are the same gap: the VIN identifies
+the build, and the build is what the price comparison rests on. One ask closes
+both, and neither card was making it.
+
+**3. "Lexus $995 is still single-model evidence."** Looked for Lexus Canada's
+brand-level wording and there isn't one - which is itself the answer. Lexus's own
+Alberta-scoped offer footnotes itemise "$2,205 Delivery and Destination charge;
+$100 A/C charge; regulatory fees (up to $46.28); lien registration fees (up to
+$79.00...)" and carry **no administration-fee line at all**, where every
+equivalent Toyota footnote reads "up to $999 retailer administration fee". Same
+corporate entity (Lexus is a division of Toyota Canada Inc.), different
+disclosure - so Toyota's $999 cannot be carried across, and there is no Lexus
+sentence to quote. The $995 stays, correctly labelled.
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| AMVIC fixture | the pinned row for this dealer was invented, and modelled the easy shape instead of the real one | **A guard that cannot fail** - it asserted a match against a record that does not exist | the fixture is the registry's own values; the case now reads "trade name is the only route in", and a separate row carries the website-clinch case since the real one has no website |
+| new-car VIN copy | a used car's reason given for a new car's missing VIN | **A one-surface fix** - `pageAbsenceCopy` had one VIN sentence for two different vehicles | `pageAbsenceCopy(kind, readable, { isNew })`; eight cases pin the new wording, the used wording, and that a published VIN removes the ask |
+| unlooked-at gaps | a `single-model` ceiling was indistinguishable from a backlog nobody had touched | **Absence read as knowledge** - in the other direction: "not yet found" read as "still to do" forever | `check:fee-ceiling-provenance` now REQUIRES a dated `Checked YYYY-MM-DD:` line on every single-model row and prints it, so the list says what was looked for and what was found |
+
+Mutation-tested, all five reverts caught: the new-car VIN copy falling back to
+the used sentence; the price card dropping the VIN ask; the ask showing when a
+VIN IS published; the trade name removed from the AMVIC row; and a single-model
+row with no dated check.
+
+CACHE_VER 2026-09-13i.
+
+---
 ## 2026-09-15 - the Toyota 4Runner audit: five fixes, all merged
 
 One real report -- a 2026 Toyota 4Runner Hybrid at Okotoks Toyota -- audited

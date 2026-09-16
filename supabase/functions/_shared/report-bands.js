@@ -194,6 +194,11 @@ function priceBand(a) {
     // row at $72,371 at all.
     //
     // A reference we did not establish is not a reference. [[reference-point-model]]
+    //
+    // AND SAY WHAT WOULD CLOSE IT. "We could not pin this listing to an exact
+    // manufacturer configuration" leaves the buyer with a dead end. On a new
+    // vehicle with no published VIN, the VIN is exactly the thing that would pin
+    // it -- so the card names the ask instead of just the gap.
     const dealerStated = a?.msrpBasis === "dealer_stated";
     const ref = a?.msrpReference;
     const refMsrp = num(ref?.msrp);
@@ -223,6 +228,13 @@ function priceBand(a) {
     const refAllIn = num(ref?.allIn ?? ref?.msrpAllIn ?? ref?.all_in_price ?? a?.msrpAllIn);
     const sameBasis = !a?.allInPricing || refAllIn > 0;
     const compareTo = a?.allInPricing && refAllIn > 0 ? refAllIn : refMsrp;
+    // The listing publishes no VIN and it is a new car: name the ONE ask that
+    // closes this card, rather than leaving "we could not pin it" hanging.
+    const newNoVin = String(a?.vehicleCondition || "").toLowerCase() === "new" && a?.vinCheck?.present !== true;
+    const noVin = newNoVin
+      ? " This listing publishes no VIN, and on a new vehicle the VIN is what identifies the exact build — with it we could pin the configuration instead of declining to."
+      : "";
+
     const published = refMsrp > 0
       ? ` ${maker} publishes ${ref?.trim ? `the ${ref.trim}` : "this model"} from ${fmtMoney(refMsrp)}${
           sameBasis && qp > compareTo
@@ -235,10 +247,10 @@ function priceBand(a) {
 
     if (dealerStated) {
       return gap("price_vs_msrp", "01", "DEALER'S OWN MSRP",
-        `The ${fmtMoney(ms)} MSRP on this listing is the dealer's own figure, and we could not match it to a published ${maker} configuration, so we are not measuring the ${fmtMoney(qp)} asking price against it.${published} Ask for the factory build sheet showing how the sticker is made up.`);
+        `The ${fmtMoney(ms)} MSRP on this listing is the dealer's own figure, and we could not match it to a published ${maker} configuration, so we are not measuring the ${fmtMoney(qp)} asking price against it.${published}${noVin} Ask for the factory build sheet showing how the sticker is made up.`);
     }
     return gap("price_vs_msrp", "01", "NO EXACT MSRP MATCH",
-      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain.${published} Ask the dealer which configuration this is.`);
+      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain.${published}${noVin} Ask the dealer which configuration this is.`);
   }
   if (qp > 0 && pv) {
     return gap("price_vs_msrp", "01", "MSRP NOT MATCHED",
@@ -420,7 +432,11 @@ function vinBand(a) {
           "The VIN on this listing does not decode cleanly against the advertised year, make and model. Ask the dealer to confirm it against the dash plate and the registration.");
   }
   const readable = a?.feesRead === true;
-  const c = pageAbsenceCopy("vin", readable);
+  // A new car has no history to check; what its missing VIN costs the buyer is
+  // the IDENTITY of the build -- which is also why the price card below cannot
+  // pin a configuration. Same gap, one ask.
+  const isNew = String(a?.vehicleCondition || "").toLowerCase() === "new";
+  const c = pageAbsenceCopy("vin", readable, { isNew });
   return readable
     ? band("vin", "07", RAISE, c.value, c.explain)
     : gap("vin", "07", c.value, c.explain);
