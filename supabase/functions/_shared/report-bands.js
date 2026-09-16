@@ -185,9 +185,35 @@ function priceBand(a) {
   }
 
   if (ms > 0 && qp > 0) {
-    // We hold a figure but not one we may measure against.
+    // WHOSE NUMBER IS THIS? The old copy said "the nearest figure we hold is
+    // $X" for whatever sat in a.msrp -- and when the basis is dealer_stated,
+    // a.msrp IS THE DEALER'S OWN NUMBER, read off their page. On a 2026 4Runner
+    // Hybrid at Okotoks Toyota the card read "the nearest figure we hold is
+    // $72,371, and this listing asks $72,371": the dealer's figure compared
+    // against itself, with our name on one side. The catalogue holds no 4Runner
+    // row at $72,371 at all.
+    //
+    // A reference we did not establish is not a reference. [[reference-point-model]]
+    const dealerStated = a?.msrpBasis === "dealer_stated";
+    const ref = a?.msrpReference;
+    const refMsrp = num(ref?.msrp);
+    const maker = ref?.make || a?.make || "the manufacturer";
+
+    // What we DO hold, when we hold it: the manufacturer's published starting
+    // figure for this model. Withholding it while saying "not checked" leaves
+    // the buyer with nothing, and we had $69,207 on file the whole time.
+    const published = refMsrp > 0
+      ? ` ${maker} publishes ${ref?.trim ? `the ${ref.trim}` : "this model"} from ${fmtMoney(refMsrp)}${
+          qp > refMsrp ? `, so this listing asks ${fmtMoney(qp - refMsrp)} above that published starting price` : ""
+        }.`
+      : "";
+
+    if (dealerStated) {
+      return gap("price_vs_msrp", "01", "DEALER'S OWN MSRP",
+        `The ${fmtMoney(ms)} MSRP on this listing is the dealer's own figure, and we could not match it to a published ${maker} configuration, so we are not measuring the ${fmtMoney(qp)} asking price against it.${published} Ask for the factory build sheet showing how the sticker is made up.`);
+    }
     return gap("price_vs_msrp", "01", "NO EXACT MSRP MATCH",
-      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain. Ask the dealer which configuration this is.`);
+      `We could not pin this listing to an exact manufacturer configuration, so we are not making an over-or-under claim. The nearest figure we hold is ${fmtMoney(ms)}, and this listing asks ${fmtMoney(qp)} — the two may not describe the same trim or drivetrain.${published} Ask the dealer which configuration this is.`);
   }
   if (qp > 0 && pv) {
     return gap("price_vs_msrp", "01", "MSRP NOT MATCHED",

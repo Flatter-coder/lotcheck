@@ -277,6 +277,42 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
     JSON.stringify(exact.scale));
 }
 
+// ── whose MSRP is it? ───────────────────────────────────────────────────────
+// Found by auditing a real report: a 2026 4Runner Hybrid at Okotoks Toyota read
+// "The nearest figure we hold is $72,371, and this listing asks $72,371" -- the
+// dealer's own stated MSRP, compared against itself, with our name on one side.
+// The catalogue holds NO 4Runner row at $72,371. It does hold the hybrid ladder
+// from $69,207, and the card offered none of it.
+{
+  const base = { quotedPrice: 72371, make: "Toyota", model: "4Runner Hybrid", year: 2026, priceVerified: true };
+  const card = (a) => reportBands(a).find((b) => b.key === "price_vs_msrp");
+
+  const stated = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated",
+    msrpReference: { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" } });
+  check("a dealer-stated MSRP is never called a figure WE hold",
+    !/figure we hold/i.test(stated.note), stated.note);
+  check("it says whose number it is", /dealer's own figure/i.test(stated.note), stated.note);
+  check("and offers the published reference we DO hold",
+    /publishes the 4Runner Hybrid from \$69,207/.test(stated.note), stated.note);
+  check("with the gap worked out", /\$3,164 above that published/.test(stated.note), stated.note);
+
+  // Never invent a reference we do not have.
+  const noRef = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated" });
+  check("no catalogue reference -> claims none", !/publishes/i.test(noRef.note), noRef.note);
+
+  // An ask BELOW the published base is not an overage.
+  const below = card({ ...base, quotedPrice: 67000, msrp: 72371, msrpBasis: "dealer_stated",
+    msrpReference: { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" } });
+  check("asking under the published base claims no overage",
+    !/above that published/i.test(below.note), below.note);
+  check("but still names the published figure", /from \$69,207/.test(below.note), below.note);
+
+  // A figure we genuinely hold may still be described as ours.
+  const ours = card({ ...base, msrp: 69207, msrpBasis: "starting_at" });
+  check("a catalogue figure is still 'the nearest figure we hold'",
+    /nearest figure we hold/i.test(ours.note), ours.note);
+}
+
 console.log("");
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }
 console.log("all checks passed");
