@@ -35,29 +35,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Is it actually 6am in Edmonton?
-        id: gate
-        run: |
-          HOUR=$(TZ=America/Edmonton date +%-H)
-          echo "Edmonton local hour: $HOUR"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
-            echo "run=yes" >> "$GITHUB_OUTPUT"
-          elif [ "$HOUR" = "6" ]; then
-            echo "run=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=no" >> "$GITHUB_OUTPUT"
-            echo "Not 6am in Edmonton - this is the other DST cron line. Skipping."
-          fi
+      # THE DST HOUR-GATE IS GONE, because it was silently switching the job off.
+      #
+      # It existed to stop the two DST cron lines both firing on the same day:
+      # each line is a different UTC hour, and only one of them is 06:00 in
+      # Edmonton, so the job asked "is it 6 o'clock here?" and skipped if not.
+      #
+      # That works only if GitHub runs a cron at its cron time. It does not.
+      # Measured 2026-09-16: api-key-health fires between 09:00 and 12:00
+      # Edmonton -- never 6 -- so the gate said "skip" on EVERY run and the job
+      # exited 0. Twelve consecutive green runs, six days, zero keys checked.
+      # The Scrapfly key had been answering HTTP 401 the whole time, and the
+      # daily check that exists to catch exactly that reported success daily.
+      #
+      # A gate that turns the job off and reports success is worse than no gate.
+      # Both cron lines now run. These jobs are idempotent by construction -- a
+      # second pass re-reads and re-writes the same rows -- so two runs cost a
+      # few polite requests, and the gate cost the entire job.
+      # [[no-single-point-of-failure]] [[daily-api-key-health-check]]
 
       - uses: actions/checkout@v4
-        if: steps.gate.outputs.run == 'yes'
       - uses: actions/setup-node@v4
-        if: steps.gate.outputs.run == 'yes'
         with:
           node-version: "24"
 
       - name: Check every API key, both stores
-        if: steps.gate.outputs.run == 'yes'
         env:
           SCRAPFLY_API_KEY: ${{ secrets.SCRAPFLY_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
