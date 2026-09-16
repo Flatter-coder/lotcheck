@@ -80,6 +80,7 @@ import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { recordCheckpoints } from "../_shared/verification-checkpoints.ts";
 import { gateRequest } from "../_shared/region-gate.js";
 import { sanitiseSummary } from "../_shared/settled-claims.ts";
+import { leverageHeadline } from "../_shared/leverage.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1511,6 +1512,11 @@ function computeLeverageScore(analysis: any): void {
       ? `Computed only from the verified findings above (${basis.join("; ")}) — not an opinion.`
       : `No pricing red flags, flagged fees, or open recalls surfaced, so this report alone gives limited documented leverage.`,
   };
+  // THE HEADLINE IS DOLLARS, NOT A SCORE. `score` stays on the object and in
+  // the signed canonical because reports already issued carry it and /verify
+  // must still read them -- it simply stops being what the buyer sees first.
+  // [[design-must-be-self-explanatory]]
+  analysis.leverageScore.headline = leverageHeadline(analysis);
 }
 
 // Combines Claude's read with the verified MSRP into EXACTLY the shape

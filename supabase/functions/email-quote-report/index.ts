@@ -1594,46 +1594,42 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   }
   rule();
 
-  // ---- LEVERAGE GAUGE (vector semicircle) ----
-  if (a.leverageScore) {
-    need(160);
-    const score = Math.max(0, Math.min(10, Number(a.leverageScore.score) || 0));
-    kicker("NEGOTIATION LEVERAGE");
-    const cx = M + 92, gy = y - 96, r = 78, seg = 64;
-    const pt = (ang: number): [number, number] => [cx + r * Math.cos(ang), gy + r * Math.sin(ang)];
-    for (let i = 0; i < seg; i++) { const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI); page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: RAIL }); }
-    // Gradient fill (concept #7): coral -> amber -> teal across the WHOLE 0-10
-    // scale, not just the filled portion, so a low score still reads as "low
-    // on a red-to-green scale" rather than "a short grey arc" -- the colour
-    // itself carries the verdict the way the gauge's numbers already do.
-    // These three were carried over from the cream theme (#D04B2F / #D3A528 /
-    // #177569) and read as muddy brown-to-bottle-green on a near-black page.
-    // The gauge is the report's signature instrument, so it takes the diorama
-    // accents themselves: coral -> amber -> teal. [[gauges-divide-into-multiple-things]]
-    const GRAD: [number, number, number][] = [[0.725, 0.220, 0.082], [0.631, 0.384, 0.027], [0.043, 0.478, 0.437]];
-    const lerp3 = (t: number): [number, number, number] => {
-      const seg2 = t <= 0.5 ? 0 : 1, lt = t <= 0.5 ? t * 2 : (t - 0.5) * 2;
-      const a0 = GRAD[seg2], a1 = GRAD[seg2 + 1];
-      return [a0[0] + (a1[0] - a0[0]) * lt, a0[1] + (a1[1] - a0[1]) * lt, a0[2] + (a1[2] - a0[2]) * lt];
-    };
-    const f = score / 10, nAng = Math.PI - f * Math.PI, vSeg = Math.max(1, Math.round(seg * f));
-    for (let i = 0; i < vSeg; i++) {
-      const [x0, y0] = pt(Math.PI - (i / seg) * Math.PI), [x1, y1] = pt(Math.PI - ((i + 1) / seg) * Math.PI);
-      const [gr, gg, gb] = lerp3(i / seg);
-      page.drawLine({ start: { x: x0, y: y0 }, end: { x: x1, y: y1 }, thickness: 7, color: rgb(gr, gg, gb) });
+  // ---- WHAT THE REPORT FOUND, IN DOLLARS ----
+  //
+  // This was a vector semicircle gauge reading "LEVERAGE / OUT OF 10" with a
+  // needle, a red-to-green sweep and a 38pt score. It was the report's
+  // signature instrument and the buyer could do nothing with it: 2.7 out of 10
+  // on a 2026 Lexus NX cannot be checked, quoted to a dealer, or read as good
+  // or bad news. design-must-be-self-explanatory is a hard rule -- real dollars
+  // and their basis, never an abstract score -- and this broke it in the most
+  // prominent position the PDF has.
+  //
+  // The SAME headline the on-screen report now leads with, from the same
+  // author (_shared/leverage.ts). Two surfaces, one sentence: the emailed PDF
+  // and the screen disagreeing about the same car is the defect this report's
+  // whole history keeps repeating.
+  const lh = (a.leverageScore && (a.leverageScore as any).headline) || null;
+  if (lh) {
+    need(96);
+    if (lh.total != null) {
+      kicker("ON THE TABLE");
+      T(money(Math.round(Number(lh.total))), { size: 30, font: sansB, color: CORAL });
+      y -= 30;
+      for (const d of lh.dollars) {
+        need(16);
+        T(`${money(Math.round(Number(d.amount)))}  ${d.label}`, { size: 10, font: sans, color: INK });
+        y -= 13;
+        if (d.detail) { T(String(d.detail), { size: 8.5, font: serifI, color: SOFT }); y -= 12; }
+      }
+    } else {
+      kicker("WHAT THESE CHECKS FOUND");
+      T(lh.state === "noted" ? "Nothing priced" : "Nothing flagged", { size: 18, font: sansB, color: INK });
+      y -= 22;
     }
-    center("0", gy - 4, { size: 8.5, font: monoB, color: SOFT, cx: cx - r });
-    center("5", gy + r + 7, { size: 8.5, font: monoB, color: SOFT, cx });
-    center("10", gy - 4, { size: 8.5, font: monoB, color: SOFT, cx: cx + r });
-    const [nx, ny] = [cx + r * 0.72 * Math.cos(nAng), gy + r * 0.72 * Math.sin(nAng)];
-    page.drawLine({ start: { x: cx, y: gy }, end: { x: nx, y: ny }, thickness: 2.6, color: INK });
-    page.drawCircle({ x: cx, y: gy, size: 5, color: INK });
-    center(score.toFixed(1), gy - 36, { size: 38, font: sansB, color: INK, cx });
-    center("LEVERAGE  /  OUT OF 10", gy - 49, { size: 7.5, font: sansB, color: FAINT, cx });
-    if (ms) { const refLbl = msrpExact ? "MSRP " + money(ms) : "CATALOG MSRP " + money(ms); const refAsk = (msrpExact && qp) ? "   -   ASKING " + money(qp) : ""; center(refLbl + refAsk, gy - 65, { size: 8.5, font: mono, color: SOFT, cx }); }
-    const noteX = cx + r + 26, noteW = M + W - noteX;
-    if (a.leverageScore.note) { let ny2 = y - 20; for (const ln of wrap(a.leverageScore.note, serifI, 11, noteW)) { page.drawText(ln, { x: noteX, y: ny2 - 11, size: 11, font: serifI, color: SOFT }); ny2 -= 16; } }
-    y = gy - 78;
+    for (const f of lh.facts) { need(14); T("• " + String(f), { size: 10, font: sans, color: INK }); y -= 13; }
+    // The one sentence, so a reader who skips the list still gets the finding.
+    para(String(lh.line), { size: 8.5, font: serifI, color: SOFT, lead: 3, maxW: W });
+    advance(6);
     rule();
   }
 

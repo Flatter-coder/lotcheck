@@ -256,7 +256,15 @@ check("the body cap leaves room for a real capture but is bounded",
 
   // Additive-only: everything v11 carried must still be carried.
   const full = canonicalReport({ vin: GOOD, vinCheck: validateVin(GOOD), quotedPrice: 42475, msrp: 50000 });
-  check("v12: version bumped", full.v === 12, String(full.v));
+  // The pin is deliberate: a canonical bump has to be a decision somebody
+  // made, not a diff that slid through. v13 adds `lvd`, the dollar total the
+  // report now leads with in place of the 0-10 leverage gauge. Additive --
+  // `leverage` and `lvn` are still projected, below.
+  check("canonical version is the current one", full.v === 13, String(full.v));
+  check("v12: the VIN check digit is still sealed", full.vck !== undefined, JSON.stringify(full.vck));
+  check("v13: the dollar headline is sealed as lvd", "lvd" in full, JSON.stringify(Object.keys(full).slice(0, 8)));
+  check("v13: the old leverage score is still projected, for reports already issued",
+    "leverage" in full && "lvn" in full, JSON.stringify({ leverage: full.leverage, lvn: full.lvn }));
   check("v12: vin still projected beside it", full.vin === GOOD, String(full.vin));
   check("v12: price still projected", full.price?.asking === 42475, JSON.stringify(full.price));
 }

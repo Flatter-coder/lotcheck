@@ -67,12 +67,16 @@ export function canonicalReport(a: any): any {
     // v11 (2026-09-03): a missing odometer now seals as null, where it used to
     // seal as 0 and print "Odometer 0 km" on /verify. Not additive, so it gets
     // a version the way the v7 projection change did.
-    v: 12,
+    v: 13,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: resolvePriceVerified(a).sourceVerified },
     leverage: a.leverageScore && a.leverageScore.score != null ? Number(a.leverageScore.score) : null,
     lvn: a.leverageScore?.note || null,
+    // v13 (2026-09-16): `lvd` -- the dollar total the report leads with, now
+    // that the 0-10 gauge is no longer the headline. Additive; `leverage`
+    // stays so reports already issued still read.
+    lvd: a.leverageScore?.headline?.total != null ? Number(a.leverageScore.headline.total) : null,
     recalls: a.recalls && a.recalls.checked ? { count: a.recalls.count || 0, confirmed: a.recalls.confirmed !== false, items: (a.recalls.items || []).map((it: any) => ({ system: it.system || null, date: it.date || null })) } : null,
     addOns: (a.addOns || []).map((x: any) => ({ name: x.name || null, price: num(x.price), verdict: x.verdict || null, reason: x.reason || null })),
     finance: a.financeRates ? { dealer: a.financeRates.dealer && a.financeRates.dealer.apr != null ? a.financeRates.dealer.apr : null, manufacturer: a.financeRates.manufacturer && a.financeRates.manufacturer.apr != null ? a.financeRates.manufacturer.apr : null, math: a.financingCheck && a.financingCheck.checked ? !!a.financingCheck.consistent : null } : null,

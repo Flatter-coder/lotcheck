@@ -9053,12 +9053,13 @@ function canonicalReport(a){
     // prove the paper and the page agree.
     // v10 (2026-09-03): marks reports issued with "Your premium after this
     // purchase". Mirrors report-sign.ts.
-    v:12,
+    v:13,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:resolvePriceVerified(a).sourceVerified},
     leverage:a.leverageScore&&a.leverageScore.score!=null?Number(a.leverageScore.score):null,
     lvn:a.leverageScore?.note||null,
+    lvd:a.leverageScore?.headline?.total!=null?Number(a.leverageScore.headline.total):null,
     recalls:a.recalls&&a.recalls.checked?{count:a.recalls.count||0,confirmed:a.recalls.confirmed!==false,items:(a.recalls.items||[]).map(it=>({system:it.system||null,date:it.date||null}))}:null,
     addOns:(a.addOns||[]).map(x=>({name:x.name||null,price:num(x.price),verdict:x.verdict||null,reason:x.reason||null})),
     finance:a.financeRates?{dealer:a.financeRates.dealer&&a.financeRates.dealer.apr!=null?a.financeRates.dealer.apr:null,manufacturer:a.financeRates.manufacturer&&a.financeRates.manufacturer.apr!=null?a.financeRates.manufacturer.apr:null,math:a.financingCheck&&a.financingCheck.checked?!!a.financingCheck.consistent:null}:null,
@@ -11751,6 +11752,15 @@ function QuoteCheckPage(){
                 ].filter(Boolean);
 
                 const score=(analysis.leverageScore&&analysis.leverageScore.score!=null)?Math.max(0,Math.min(10,Number(analysis.leverageScore.score)||0)):null;
+                // WHAT THE REPORT FOUND, IN DOLLARS. The 0-10 gauge that used to
+                // sit here was the largest element on the page and a buyer could
+                // do nothing with it -- not check it, not quote it, not tell
+                // whether 2.7 was good news. design-must-be-self-explanatory is a
+                // hard rule and the score had been breaking it in the report's
+                // most prominent position since it shipped. `score` is still
+                // sealed and still on the object for reports already issued; it
+                // is no longer what the buyer reads first.
+                const lh=analysis.leverageScore&&analysis.leverageScore.headline?analysis.leverageScore.headline:null;
                 const gaugeDash=score!=null?(score*10).toFixed(1):0;
                 const moves=Array.isArray(analysis.counterScript?.moves)?analysis.counterScript.moves:[];
 
@@ -11842,20 +11852,31 @@ function QuoteCheckPage(){
 
                     {/* hero: gauge + verdict */}
                     <div style={{display:"grid",gridTemplateColumns:"minmax(180px,220px) 1fr",gap:24,alignItems:"center",padding:"clamp(16px,2.4vw,26px)",borderRadius:20,background:C.tealBg,border:`1px solid ${C.line}`,marginBottom:20}}>
-                      <div style={{position:"relative",width:"100%",maxWidth:220,margin:"0 auto"}}>
-                        <svg viewBox="0 0 220 132" style={{width:"100%",display:"block",overflow:"visible"}}>
-                          <defs><linearGradient id="lcgcGaugeGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor={C.teal}/><stop offset="100%" stopColor={C.tealInk}/></linearGradient></defs>
-                          <path d="M30,112 A80,80 0 0 1 190,112" stroke={C.line} strokeWidth="13" fill="none" strokeLinecap="round" pathLength="100"/>
-                          {score!=null&&<path className="lcgc-arc-fg" d="M30,112 A80,80 0 0 1 190,112" stroke="url(#lcgcGaugeGrad)" strokeWidth="13" fill="none" strokeLinecap="round" pathLength="100"/>}
-                          <text x="30" y="126" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>0</text>
-                          <text x="110" y="20" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>5</text>
-                          <text x="190" y="126" textAnchor="middle" style={{font:"8.5px ui-monospace,monospace",fill:C.inkFaint}}>10</text>
-                        </svg>
-                        <div style={{position:"absolute",left:"50%",top:"58%",transform:"translate(-50%,-38%)",textAlign:"center"}}>
-                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:"clamp(30px,4vw,40px)",color:C.tealInk,lineHeight:1}}>{score!=null?score.toFixed(1):"—"}{score!=null&&<small style={{fontSize:".42em",color:C.inkFaint,fontWeight:600,marginLeft:2}}>/10</small>}</div>
-                          <div style={{marginTop:5,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".12em",color:C.inkFaint,textTransform:"uppercase"}}>Negotiation Leverage</div>
-                          <div style={{marginTop:4,fontSize:10,color:C.inkFaint,opacity:.8}}>{score!=null?"Higher = more room to negotiate":"Score isn't available"}</div>
-                        </div>
+                      <div style={{position:"relative",width:"100%",maxWidth:260,margin:"0 auto"}}>
+                        {lh&&lh.total!=null?(
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:"clamp(30px,4.4vw,44px)",color:C.coralInk,lineHeight:1,letterSpacing:"-.01em"}}>${Number(lh.total).toLocaleString("en-CA")}</div>
+                            <div style={{marginTop:7,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".12em",color:C.inkFaint,textTransform:"uppercase"}}>On the table</div>
+                            <div style={{marginTop:7,display:"grid",gap:5,textAlign:"left"}}>
+                              {lh.dollars.map((d,i)=>(
+                                <div key={i} style={{fontSize:11.5,lineHeight:1.4,color:C.inkSoft}}>
+                                  <b style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",color:C.coralInk}}>${Number(d.amount).toLocaleString("en-CA")}</b> {d.label}
+                                  {d.detail&&<div style={{fontSize:10,color:C.inkFaint,opacity:.85}}>{d.detail}</div>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ):(
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:700,fontSize:"clamp(17px,2.2vw,22px)",color:C.inkSoft,lineHeight:1.25}}>{lh&&lh.state==="noted"?"Nothing priced":"Nothing flagged"}</div>
+                            <div style={{marginTop:7,fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:9.5,letterSpacing:".12em",color:C.inkFaint,textTransform:"uppercase"}}>What these checks found</div>
+                            {lh&&lh.facts.length>0&&(
+                              <div style={{marginTop:7,display:"grid",gap:4,textAlign:"left"}}>
+                                {lh.facts.map((f,i)=>(<div key={i} style={{fontSize:11.5,lineHeight:1.4,color:C.inkSoft}}>{f}</div>))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div style={{minWidth:0}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
