@@ -91,6 +91,8 @@ const AUTHORITIES = new Set([
   "normalizeVin", "isVinShape", "isPlausibleVin", "plausibleVinOrNull", "vinShapeOrNull",
   // _shared/price-verified.ts — "is this price verified", decided once.
   "resolvePriceVerified", "isVerifiedPriceSource",
+  // _shared/invariants.ts — whether a VIN passes its own ISO 3779 check digit.
+  "validateVin",
 ]);
 
 // Normalising a forwarded value is not authoring it. `String(ctx.vin).toUpperCase()`

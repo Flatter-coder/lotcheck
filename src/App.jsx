@@ -7819,7 +7819,7 @@ function encodeReport(a){
     // mv   -- the market-value band.
     // src  -- the dated capture provenance [[make-it-dispute-proof]] rests on.
     // fm   -- the financing-math check.
-    vin:a.vin||null,
+    vin:a.vin||null,vck:a.vinCheck?.present?{ok:a.vinCheck.valid?1:0,why:a.vinCheck.valid?null:(a.vinCheck.reason||null)}:null,
     // `Number.isFinite(Number(a.odometerKm))` is TRUE for a null odometer,
     // because Number(null) is 0 -- so a listing that published no reading was
     // encoded as 0 km and every forwarded copy of the report read
@@ -7901,7 +7901,7 @@ function decodeReport(s){
       listingShotSha256:c.sh||null,
       dealerLineItems:c.dli?{fees:(c.dli.f||[]).map(x=>({name:x.n,amount:x.a})),incentives:(c.dli.d||[]).map(x=>({name:x.n,amount:x.a})),
         insideAdvertisedPrice:c.dli.i===1?true:(c.dli.i===0?false:null),source:c.dli.s||"the dealer's own price breakdown on the listing"}:null,
-      vin:c.vin||null,
+      vin:c.vin||null,vinCheck:c.vck?{present:true,valid:c.vck.ok===1,vin:c.vin||null,reason:c.vck.why||null}:undefined,
       // The ENCODER was fixed to emit null; this line turned it straight back
       // into 0 km, because Number(null) is 0 and 0 is finite. Half a two-step
       // is not a fix. [[read-num]]
@@ -9053,7 +9053,7 @@ function canonicalReport(a){
     // prove the paper and the page agree.
     // v10 (2026-09-03): marks reports issued with "Your premium after this
     // purchase". Mirrors report-sign.ts.
-    v:11,
+    v:12,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:resolvePriceVerified(a).sourceVerified},
@@ -9067,6 +9067,7 @@ function canonicalReport(a){
     summary:a.summary||null,
     shot:a.listingShotSha256||null,
     vin:a.vin||null,
+    vck:a.vinCheck?.present?{ok:!!a.vinCheck.valid,why:a.vinCheck.valid?null:(a.vinCheck.reason||null)}:null,
     // nn, not num -- see report-sign.ts. [[read-num]]
     odo:nn(a.odometerKm),
     dol:a.daysOnLot&&Number(a.daysOnLot.days)>0?{d:Math.round(Number(a.daysOnLot.days)),s:a.daysOnLot.since||null}:null,
@@ -9514,7 +9515,12 @@ function VerifyPage(){
                   {o.price?.msrp&&<Row t={vclaim.label} v={money(o.price.msrp)} c={vclaim.comparable?"#34d399":T.soft}/>}
                   {vclaim.comparable&&delta!==0&&<Row t="Price vs MSRP" v={delta<0?money(-delta)+" under":money(delta)+" over"} c={delta<=0?"#34d399":"#f0997b"}/>}
                   {!vclaim.comparable&&vclaim.refusal&&<div style={{fontSize:12,color:T.soft,lineHeight:1.5,marginTop:6}}>{vclaim.refusal}</div>}
-                  <Row t="VIN" v={o.vin||"Not published — ask the dealer"} c={o.vin?undefined:T.soft}/>
+                  <Row t="VIN" v={o.vin||"Not published — ask the dealer"} c={o.vin?(o.vck&&o.vck.ok===false?"#f2836b":undefined):T.soft}/>
+                  {/* The doubt was always computed and never shown. A VIN that
+                      fails its own check digit is most often a typo on the page
+                      or a mis-read by us -- never stated as the dealer's fault,
+                      and never silently presented as the vehicle's identity. */}
+                  {o.vck&&o.vck.ok===false&&<div style={{fontSize:12,color:T.soft,lineHeight:1.5,marginTop:6}}>This VIN does not pass its own check digit{o.vck.why?` — ${o.vck.why}`:""}. Check it against the plate on the dash or the driver's door before relying on it.</div>}
                   {(Number(o.v)>=11?o.odo!=null:Number(o.odo)>0)&&<Row t="Odometer" v={`${Number(o.odo).toLocaleString()} km`}/>}
                   {o.dol&&<Row t="Days on lot" v={`${Number(o.dol.d).toLocaleString()} days${o.dol.s?` · since ${o.dol.s}`:""}`} c={o.dol.d>=90?"#f0997b":o.dol.d>=31?"#eab308":"#34d399"}/>}
                   {o.fcx&&<Row t="Price conditions" v="Tied to dealer financing" c="#f0997b"/>}

@@ -67,7 +67,7 @@ export function canonicalReport(a: any): any {
     // v11 (2026-09-03): a missing odometer now seals as null, where it used to
     // seal as 0 and print "Odometer 0 km" on /verify. Not additive, so it gets
     // a version the way the v7 projection change did.
-    v: 11,
+    v: 12,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: resolvePriceVerified(a).sourceVerified },
@@ -88,6 +88,18 @@ export function canonicalReport(a: any): any {
     // Full-report verify: everything the report claims travels in the signed
     // payload so /verify can display it all (compact keys keep the QR small).
     vin: a.vin || null,
+    // v12: the VIN's own check digit, sealed beside the VIN it judges.
+    //
+    // validateVin has computed this on every scan since it was written and
+    // NOTHING EVER SHOWED IT TO A BUYER. deriveCheckpoints raises an error row
+    // -- admin telemetry -- while /verify printed the VIN as a bare fact. So a
+    // report could seal a VIN failing its own ISO 3779 digit, most likely a
+    // typo or a mis-read, and present it as the vehicle's identity with the
+    // doubt computed and discarded. The same shape as a price called "verified"
+    // because nothing had checked it.
+    //
+    // Additive: links signed under v1..v11 keep verifying exactly as issued.
+    vck: a.vinCheck?.present ? { ok: !!a.vinCheck.valid, why: a.vinCheck.valid ? null : (a.vinCheck.reason || null) } : null,
     // nn, not num: num(null) is 0, which would SEAL a reading the page never
     // showed and print it on /verify. [[read-num]]
     odo: nn(a.odometerKm),
