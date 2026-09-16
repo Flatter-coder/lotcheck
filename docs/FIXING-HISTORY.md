@@ -23,6 +23,92 @@ the next instance.
 
 ---
 
+## 2026-09-15 - the Toyota 4Runner audit: five fixes, all merged
+
+One real report -- a 2026 Toyota 4Runner Hybrid at Okotoks Toyota -- audited
+against our own catalogues. Four defects came out of it, plus one gate for a
+class no check in this repo could see. All five are on `main`.
+
+| # | what the report did wrong | merge |
+|---|---|---|
+| 474 | nothing -- a GATE, for the class that had no check: the whole report shipped resting on `rotateX(6deg) rotateY(-9deg)` because `animation: ... both` holds the final frame. Every figure on the page was read at an angle, the build was green, and it was only wrong when looked at | `976cbd6` |
+| 477 | a Build & Price CONFIGURATOR produced a vehicle report. Its JSON-LD `Product` node carries name/image/sku/brand/offers and nothing else -- no VIN, no odometer, no engine, no body type, and zero 17-character VIN tokens in 1.09 MB. A real VDP's `Car` node carries all of them | `bce4509` |
+| 478 | told the buyer $999 was "Toyota's own published maximum dealer fee" on the strength of a **2026 RAV4 configurator line**. See the entry below | `bbe4a2e` |
+| 476 | said NOTHING about a fee sitting exactly on that maximum, and the model-written summary filled the silence with a fabricated "$300-$700 typical range" that exists in no catalogue of ours. Also: the sentence naming the ceiling now reads `provenance` before calling any figure a brand's own published maximum | `474be41` |
+| 475 | called the DEALER'S own stated MSRP "the nearest figure we hold" and compared it against itself ($72,371 vs $72,371). The fix then nearly shipped a second defect -- see below | `de7651c` |
+
+**The fee question, answered from Toyota's own pages.** Toyota Canada does not
+publish one number. The Prairies (AB/SK/MB) and Ontario say $999; British
+Columbia & Yukon say $990. The Alberta wording is brand-level -- "fees for
+documentation, administration and other products such as undercoat, which range
+$0 to $999" -- and the same $999 appears in the per-model footnotes for 4Runner
+SR5, GR86, Camry, RAV4, Tundra, Tacoma, Highlander Hybrid and Prius. The 2026
+4Runner SR5 (VA5BRT A) Alberta footnote prices that exact vehicle with the $999
+inside. So the $999 on this listing is at Toyota's published ceiling, and we can
+now prove it from a page about 4Runners rather than one about RAV4s.
+
+**475 nearly shipped a second defect while fixing the first**, and this is the
+part worth keeping. Its new sentence read:
+
+    Toyota publishes the 4Runner Hybrid from $69,207, so this listing asks
+    $3,164 above that published starting price.
+
+Alberta advertised prices are ALL-IN. The catalogue row behind that $69,207 is
+ex-freight -- `msrp_all_in` is null for it. Toyota's own Alberta page advertises
+a 4Runner with $1,930 delivery, $100 A/C, $20 tire levy, $10 AMVIC and up to
+$999 retailer admin INSIDE the figure: about $3,059 of the $3,164. We would have
+told a buyer in writing that a named dealer had marked the car up by roughly the
+fees the dealer does not set. `msrp-claim.ts` already refuses exactly this
+comparison and calls it "the single largest source of a wrong over/under claim";
+the new card reached around that rule by doing its own arithmetic. It now shows
+the published figure -- a labelled fact -- and subtracts only on a matching
+basis, saying so when the bases do not match.
+
+| fix | what broke | class | guard now in place |
+|---|---|---|---|
+| 475 basis | an all-in ask minus an ex-freight MSRP, published as markup | **One-surface fix** - the rule lived in msrp-claim.ts and the new card did its own arithmetic beside it | `test:report-bands` fixture now carries `allInPricing: true` (the real listing is in Alberta; leaving it off is what let the first draft pass), plus cases for the refusal, the matched-basis comparison and the ex-fees province |
+| 475 assertions | five checks written as `/...$69,207/` - a bare `# Fixing history
+
+A running log of what broke, why, and the guard that now stops the **class** of
+it recurring. Newest first.
+
+The point of this file is not the list. It is the **class** column: nearly every
+entry below is one of four recurring shapes, and naming the shape is what stops
+the next instance.
+
+| shape | what it looks like |
+|---|---|
+| **Green signal, no check** | a step reports success without verifying it did the thing |
+| **Absence read as knowledge** | "we didn't look" rendered as "there is none" |
+| **One-surface fix** | a shared bug fixed in one consumer, left in the others |
+| **Optional step, fatal failure** | something non-essential takes down the whole request |
+| **A count read as a classification** | a surface feature counted, and the tally answered a question it cannot answer |
+| **Not attempted, reading as passed** | a per-item guard driven by a hand-maintained list reports "N of N passed", blind to whatever is not on the list |
+| **A guard that cannot fail** | a gate whose assertion is true by construction, so it is green in every world including the broken one |
+| **A deleted surface passes its own negative checks** | every "this surface must NOT say X" assertion is satisfied by removing the thing that could say it, so a gate protecting copy goes half-green when that copy is deleted rather than corrupted |
+| **A guard bound to spelling, not substance** | a gate anchored on a local variable name or a caption's exact words, so a rename fails it while the behaviour is intact - and a gate that cries wolf gets overridden |
+| **A guard calibrated from imagination** | a threshold invented rather than measured, so it fires on healthy data the first time it runs and gets switched off before it ever catches anything real |
+| **A happy path that hides a branch** | an assertion written for the fallback never reaches it, because the primary path answers first in every test fixture - the branch is untested and the gate looks complete |
+
+---
+
+ in a regex is end-of-string, so each had been passing against something other than the figure it named | **A guard that cannot fail** | substring checks; two of the five were the assertions that would have caught the basis defect |
+| 476 copy | the ceiling sentence said "<Make>'s own published maximum" regardless of how the ceiling was evidenced | **A guard bound to spelling, not substance** - every data-level test stayed green while the rendered words over-claimed | six assertions in `test:deal` read the RENDERED sentence; mutation-tested by forcing `brandBacked` true and by dropping the region label |
+
+**Left open, named rather than closed quietly:** Lexus $995 is still evidenced by
+a single 2026 ES 350h Build & Price. I searched for a Lexus Canada brand-level
+"up to $X" statement and did not find one. The figure stays and a fee above it is
+still a backed flag, but it is tagged `single-model`, `check:fee-ceiling-provenance`
+prints it every run, and the buyer-facing sentence now reads "the $995 maximum
+Lexus publishes on its own build sheet for this model line" instead of calling it
+the brand's maximum.
+
+**Also still open from this audit, not addressed by any of the five:** the
+listing carries no VIN and no trim we can pin, so the report cannot say which
+4Runner this is. And Okotoks Toyota's AMVIC licence status is unverified -- the
+table is not anon-readable.
+
+---
 ## 2026-09-15 - a claim stronger than the record behind it
 
 A Quote Check report on a 2026 Toyota 4Runner told the buyer that the dealer's
