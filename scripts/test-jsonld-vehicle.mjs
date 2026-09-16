@@ -64,6 +64,35 @@ const CASES = [
   ["malformed block doesn't sink a good one", `<script type="application/ld+json">{oops</script>${wrap(SIMPLE)}`, { price: 38995 }],
   ["no vehicle node -> null", wrap(NO_VEHICLE), null],
   ["no json-ld at all -> null", "<html><body>nothing here</body></html>", null],
+
+  // ── a bare `Product` is not a vehicle ─────────────────────────────────────
+  // Okotoks Toyota's 2026 4Runner Hybrid Build & Price page is a bare Product
+  // carrying only name/image/description/sku/mpn/brand/offers. We produced a
+  // full vehicle report from it: no VIN and no trim because there was no
+  // vehicle, and the configurator's starting price read as both "MSRP" and
+  // "your price" -- the same number twice. [[establish-page-before-report]]
+  ["a Build & Price model page is refused",
+    wrap({ "@context": "https://schema.org", "@graph": [{ "@type": "Product",
+      name: "2026 Toyota 4Runner Hybrid", sku: "4RUNNER", mpn: "x",
+      brand: { "@type": "Brand", name: "Toyota" },
+      offers: { "@type": "Offer", price: 72371, priceCurrency: "CAD" } }] }),
+    null],
+
+  // EDealer tags REAL VDPs as ["Product","Car"]. That is why Product was
+  // accepted at all, and it has to keep working.
+  ["an EDealer [Product,Car] VDP still reads",
+    wrap({ "@context": "https://schema.org", "@graph": [{ "@type": ["Product", "Car"],
+      name: "2021 Volvo XC40", vehicleIdentificationNumber: "YV4ED3UR3M2605626",
+      vehicleModelDate: "2021",
+      offers: { "@type": "Offer", price: 30249, priceCurrency: "CAD" } }] }),
+    { vin: "YV4ED3UR3M2605626", price: 30249 }],
+
+  // A bare Product that actually shows a vehicle IS a vehicle.
+  ["a bare Product carrying a VIN still reads",
+    wrap({ "@context": "https://schema.org", "@graph": [{ "@type": "Product",
+      name: "Used 2020 Honda", vehicleIdentificationNumber: "1HGCV1F30LA000000",
+      offers: { "@type": "Offer", price: 25000, priceCurrency: "CAD" } }] }),
+    { vin: "1HGCV1F30LA000000", price: 25000 }],
 ];
 
 // ── Fuel type is identity ────────────────────────────────────────────────────
@@ -213,4 +242,5 @@ for (const [label, extra, wantDays, wantSince] of DOL_CASES) {
 }
 
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
+
 process.exit(fail ? 1 : 0);

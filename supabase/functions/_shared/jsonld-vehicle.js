@@ -40,7 +40,7 @@ export function jsonLdVehicles(html, pageUrl) {
     const t = n?.["@type"];
     return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
   };
-  const isVehicle = (n) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
+  const isVehicle = (n) => looksLikeAVehicleNode(n);
   const vinOf = (n) => {
     // Four fields real dealer schemas use for it, in decreasing directness.
     const vin = n.vehicleIdentificationNumber ?? n.vin ?? n.sku ?? n.mpn;
@@ -79,6 +79,38 @@ export function jsonLdVehicleVins(html) {
   return jsonLdVehicles(html, null).vins;
 }
 
+// A BARE `Product` IS NOT A VEHICLE. `Product` is here because EDealer tags real
+// VDPs as ["Product","Car"] -- but on its own it is the type every dealer site
+// uses for a model landing page, an accessory and a service plan.
+//
+// Okotoks Toyota's 2026 4Runner Hybrid Build & Price page is a bare `Product`:
+//
+//   keys: @context @type name image description sku mpn brand offers
+//
+// No VIN, no odometer, no engine, no body type -- because there is no vehicle,
+// only a configurator. We produced a full vehicle report from it anyway, with
+// no VIN and no trim because none existed, and read the configurator's starting
+// price as both "MSRP" and "your price" -- the same number twice.
+//
+// A real VDP's Car node carries vehicleIdentificationNumber, mileageFromOdometer,
+// vehicleEngine, driveWheelConfiguration, bodyType and the rest. So classify on
+// EVIDENCE rather than on the type name: an explicit Car/Vehicle type is
+// enough, and a bare Product must show at least one property that only an
+// actual vehicle has. [[establish-page-before-report]]
+const VEHICLE_EVIDENCE = [
+  "vehicleIdentificationNumber", "mileageFromOdometer", "vehicleEngine",
+  "vehicleTransmission", "vehicleConfiguration", "driveWheelConfiguration",
+  "bodyType", "numberOfDoors", "vehicleModelDate", "itemCondition",
+  "fuelType", "vehicleSeatingCapacity", "color", "vehicleInteriorColor",
+];
+
+function looksLikeAVehicleNode(n) {
+  const types = ([]).concat(n?.["@type"] ?? []).map(String);
+  if (types.some((t) => /^(Car|Vehicle|MotorizedVehicle)$/i.test(t))) return true;
+  if (!types.some((t) => /^Product$/i.test(t))) return false;
+  return VEHICLE_EVIDENCE.some((k) => n?.[k] != null && n[k] !== "");
+}
+
 export function extractJsonLdVehicle(html) {
   const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
     .map((m) => m[1].trim());
@@ -97,7 +129,7 @@ export function extractJsonLdVehicle(html) {
     const t = n?.["@type"];
     return Array.isArray(t) ? t.map(String) : (t ? [String(t)] : []);
   };
-  const isVehicle = (n) => typeOf(n).some((t) => /^(Car|Vehicle|MotorizedVehicle|Product)$/i.test(t));
+  const isVehicle = (n) => looksLikeAVehicleNode(n);
   const firstOffer = (n) => {
     const o = n?.offers;
     if (!o) return null;
