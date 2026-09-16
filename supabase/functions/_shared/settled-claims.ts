@@ -31,6 +31,8 @@
 // mislabelled fuel type on a spec sheet is exactly the kind of thing they
 // should raise. What it must NOT do is dress it up as an open rebate question.
 
+import { canadianiseTerms } from "./canada-terms.ts";
+
 export type SettledTopic = { topic: string; verdict: string; matcher: RegExp };
 
 /**
@@ -64,6 +66,42 @@ export function settledTopics(a: any): SettledTopic[] {
       // Both directions: the verb can precede or follow the noun, and only
       // matching one way is how "confirm the recall status" slipped through.
       matcher: /recall[^.]{0,160}?\b(confirm|verif|check with|ask the dealer)\b|\b(confirm|verif|check with|ask the dealer)\b[^.]{0,160}?recall/i,
+    });
+  }
+
+
+  // THE ITEMISATION WE ALREADY HOLD.
+  //
+  // A 2026 Lexus NX 350 F SPORT 3 at a dealer in Edmonton, advertised at
+  // $72,010, reached a buyer with this verdict:
+  //
+  //   "...no separate base MSRP or discount was shown on the page, so ask
+  //    the dealer to itemize MSRP, freight/PDI, and any fees ... before
+  //    signing."
+  //
+  // We hold that itemisation. Lexus publishes the configuration at
+  // $71,985.18 all-in in Alberta -- $55,080 base, the $13,573 F SPORT 3
+  // package, $2,205 freight, $100 A/C, $10 AMVIC, $20 tire levy, $2.18
+  // environmental and the $995 dealer fee -- and the $13,573 the listing
+  // called 'Installed Options' is that package, already inside the price.
+  // The report sent the buyer to the sales desk to ask for a number it was
+  // holding, and framed a published package price as an unexplained add-on.
+  //
+  // Fires ONLY when the configuration is pinned exactly AND we hold the
+  // manufacturer's own all-in for it. With no exact match the summary is
+  // right to send them asking, and this stays silent.
+  const exact = a?.msrpBasis === "exact";
+  const allIn = Number(a?.msrpAllIn);
+  if (exact && Number.isFinite(allIn) && allIn > 0) {
+    const make = String(a?.make || "the manufacturer").trim() || "the manufacturer";
+    const money = "$" + allIn.toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    out.push({
+      topic: "msrp_itemisation",
+      verdict: `${make} publishes this exact configuration at ${money} all-in for this province, and it is in the Price vs MSRP section above - the base MSRP, freight, levies and the dealer fee are already inside that figure, so there is nothing here to ask the dealer to itemise.`,
+      // Narrow: the sentence has to be ASKING for the breakdown, not merely
+      // mentioning MSRP or freight. Both word orders, because matching one
+      // way is how the recall version slipped through.
+      matcher: /\b(itemi[sz]e|break\s?down)\b[^.]{0,160}?\b(msrp|freight|pdi|fees?)\b|\b(msrp|freight|pdi)\b[^.]{0,160}?\b(ask|request|confirm|get)\b[^.]{0,80}?\bdealer\b|\b(ask|request)\b[^.]{0,80}?\bdealer\b[^.]{0,120}?\b(itemi[sz]e|msrp|freight|pdi)\b/i,
     });
   }
 
@@ -104,4 +142,27 @@ export function stripSettledContradictions(summary: string, a: any): {
   }
 
   return { text: kept.join(" ").replace(/\s+/g, " ").trim(), removed };
+}
+
+/**
+ * THE ONE PLACE A MODEL-WRITTEN SUMMARY IS CLEANED, so both analyze
+ * functions get the same treatment.
+ *
+ * analyze-listing-url ran stripSettledContradictions; analyze-quote, which
+ * also asks the model for a `summary` field, ran nothing at all. Same class
+ * of defect, one surface fixed -- the shape the fixing history calls a
+ * one-surface fix. Both call this now.
+ *
+ * Order matters: terminology is repaired FIRST, so a sentence that survives
+ * the settled-topic pass is already in Canadian terms, and a sentence that
+ * gets removed was matched on its meaning rather than on its spelling.
+ */
+export function sanitiseSummary(summary: unknown, a: any): {
+  text: string;
+  removed: Array<{ topic: string; sentence: string }>;
+  swapped: Array<{ from: string; to: string; why: string }>;
+} {
+  const ca = canadianiseTerms(summary);
+  const settled = stripSettledContradictions(ca.text, a);
+  return { text: settled.text, removed: settled.removed, swapped: ca.swapped };
 }

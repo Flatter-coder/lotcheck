@@ -90,7 +90,7 @@ import { msrpIsPresentTense, applyConditionToMsrp } from "../_shared/msrp-basis.
 import { isAllInJurisdiction } from "../_shared/jurisdiction.ts";
 import { computeReferenceFinancing } from "../_shared/reference-financing.ts";
 import { resolveCity, resolveJurisdiction } from "../_shared/jurisdiction.ts";
-import { stripSettledContradictions } from "../_shared/settled-claims.ts";
+import { sanitiseSummary } from "../_shared/settled-claims.ts";
 import { assessDisclaimer } from "../_shared/disclaimer.ts";
 import { pickTrimMsrp } from "../_shared/trim-match.js";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
@@ -121,7 +121,7 @@ const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 // the deploy failed. That happened on 2026-08-15: the all-in comparison, the
 // ceiling claim, priceVerified and the powertrain guard all shipped against a
 // stale key and a re-run returned the identical LC-DD3D-16F.
-const CACHE_VER = "2026-09-13i";  // 13i: a NEW vehicle with no published VIN is told what the VIN would actually settle -- which build is being sold -- instead of a used car's recall-history reason, and the price card names that same VIN as the one ask that would let it compare. // 13h: the Price-vs-MSRP card no longer calls a DEALER-STATED figure one we hold, and offers the published starting price when we have it -- but it only SUBTRACTS that figure from the asking price when the two are on the same basis, because an all-in ask minus an ex-freight MSRP counts about $3,000 of mandatory fees as markup. // 13g: a dealer fee sitting EXACTLY on the manufacturer published maximum now says so, instead of saying nothing and leaving the summary to invent a range -- and the sentence that names it only calls a figure the brand's OWN published maximum when the record is brand-level, naming the region where the figure is region-specific. // 13f: a bare schema.org Product is no longer read as a vehicle, so a Build and Price configurator stops producing a vehicle report. // 13e: Toyota's dealer-fee ceiling is region-published, not one national number -- BC & Yukon resolve to Toyota's own $990 instead of the Prairies' $999, so a BC fee between the two now reads differently. // 13d: canonical v12 seals the VIN check digit beside the VIN. validateVin computed it on every scan and only admin telemetry ever saw it; /verify printed the VIN as a bare fact. // 13c: "price verified" is STRICT wherever it is a CLAIM; VIN shape decided once in _shared/vin.ts. // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
+const CACHE_VER = "2026-09-13j";  // 13j: the model-written verdict stops sending a buyer to ask the dealer for an itemisation we already hold, and stops using US paperwork terms ("title/tags", "DMV") in a Canadian report. // 13i: a NEW vehicle with no published VIN is told what the VIN would actually settle -- which build is being sold -- instead of a used car's recall-history reason, and the price card names that same VIN as the one ask that would let it compare. // 13h: the Price-vs-MSRP card no longer calls a DEALER-STATED figure one we hold, and offers the published starting price when we have it -- but it only SUBTRACTS that figure from the asking price when the two are on the same basis, because an all-in ask minus an ex-freight MSRP counts about $3,000 of mandatory fees as markup. // 13g: a dealer fee sitting EXACTLY on the manufacturer published maximum now says so, instead of saying nothing and leaving the summary to invent a range -- and the sentence that names it only calls a figure the brand's OWN published maximum when the record is brand-level, naming the region where the figure is region-specific. // 13f: a bare schema.org Product is no longer read as a vehicle, so a Build and Price configurator stops producing a vehicle report. // 13e: Toyota's dealer-fee ceiling is region-published, not one national number -- BC & Yukon resolve to Toyota's own $990 instead of the Prairies' $999, so a BC fee between the two now reads differently. // 13d: canonical v12 seals the VIN check digit beside the VIN. validateVin computed it on every scan and only admin telemetry ever saw it; /verify printed the VIN as a bare fact. // 13c: "price verified" is STRICT wherever it is a CLAIM; VIN shape decided once in _shared/vin.ts. // 13b: a cached place_id can now resolve a dealer that name+city could not, so point 10 can say something where it previously said nothing. Same-day as 13a, so the practical cost is one invalidation, not two.  // 13a: point 10 stops attaching another company's reviews to this dealer. Places identity is verified against the listing's own domain or name+city instead of taking searchData.places[0], and a Places OUTAGE no longer renders as "NONE FOUND -- we searched and found no public reviews". Both change what the card says, so a replayed cache would show the old wrong answer.  // 12e: the AMVIC website path is finally WIRED -- it shipped in 12c with the matcher built and unit-tested and the caller never passing it the domains, so every licence card that depended on it still read "No dealer name was confirmed".  // 12d: all four of the dealer platform's own listing dates are read, not just date_on_lot -- date_updated (is the asking price current or months stale) and date_sold (a sale recorded on a still-live listing) are new report lines.
 
 // The one and only "we couldn't build you a report" message. Both the cached
 // and the fresh-scrape paths return it, so the buyer never sees two different
@@ -3206,12 +3206,18 @@ async function enrichAnalysisInner(analysis: any, deadline?: number): Promise<vo
   // as a PHEV for rebate-eligibility purposes -- worth confirming with the
   // dealer". The prompt itself asked for that second sentence, so a prompt
   // cannot be the fix; this runs after generation and is deterministic.
+  // AND THE REPORT IS CANADIAN. sanitiseSummary repairs US-only terminology
+  // before it judges the sentences -- a 2026 Lexus NX verdict reached a buyer
+  // in Edmonton telling them "GST/title/tags are explicitly excluded", terms
+  // that describe paperwork Alberta does not issue. Nothing in this repo
+  // writes them; the model did, at request time. [[locale-abstraction-rule]]
   if (typeof analysis.summary === "string" && analysis.summary) {
-    const s = stripSettledContradictions(analysis.summary, analysis);
-    if (s.removed.length) {
+    const s = sanitiseSummary(analysis.summary, analysis);
+    if (s.removed.length || s.swapped.length) {
       analysis.summary = s.text;
-      analysis.summaryRedactions = s.removed;
-      console.log(`summary: removed ${s.removed.length} sentence(s) reopening settled topics: ${s.removed.map((r) => r.topic).join(", ")}`);
+      if (s.removed.length) analysis.summaryRedactions = s.removed;
+      if (s.swapped.length) analysis.summaryTermSwaps = s.swapped;
+      console.log(`summary: removed ${s.removed.length} sentence(s) [${s.removed.map((r) => r.topic).join(", ")}], swapped ${s.swapped.length} US term(s) [${s.swapped.map((r) => r.from).join(", ")}]`);
     }
   }
 
