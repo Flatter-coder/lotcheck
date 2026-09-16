@@ -480,6 +480,11 @@ jobs:
       # nothing with it. This pins the dollars-and-facts shape that replaced it.
       - name: Leverage headline (dollars and facts, never a score)
         run: npm run test:leverage
+      # The desk card is a VIEW of findings computed elsewhere. These pin that it
+      # never invents one, never prices a recall, prints the count it found
+      # rather than the three a mockup wanted, and never certifies the car.
+      - name: Before you sign (a view, never a second author)
+        run: npm run test:before-you-sign
       - name: Vision image limits (never post an image the API will refuse)
         run: npm run test:vision-limits
       - name: Scrapfly render degrades instead of losing the HTML
