@@ -202,9 +202,34 @@ function priceBand(a) {
     // What we DO hold, when we hold it: the manufacturer's published starting
     // figure for this model. Withholding it while saying "not checked" leaves
     // the buyer with nothing, and we had $69,207 on file the whole time.
+    //
+    // BUT THE SUBTRACTION NEEDS A MATCHING BASIS, and this is where the first
+    // draft of this card was wrong. An Alberta advertised price is ALL-IN --
+    // freight, A/C, levies and the dealer fee are inside it. The catalogue row
+    // behind `msrpReference` is ex-freight unless `msrp_all_in` was captured.
+    // Subtracting one from the other counts about $3,000 of mandatory fees as
+    // markup. On the 2026 4Runner Hybrid that produced "asks $3,164 above that
+    // published starting price" against $69,207 -- and Toyota's own Alberta
+    // page prices a 4Runner with $1,930 delivery, $100 A/C, $20 tire levy, $10
+    // AMVIC and up to $999 retailer admin INSIDE the advertised figure. Nearly
+    // the whole $3,164 is those lines. The dealer had not marked it up; we
+    // would have said in writing that they had.
+    //
+    // msrp-claim.ts already refuses this exact comparison (`allInPricing &&
+    // !allIn` -> refusal). This card must not route around it. So: SHOW the
+    // published starting price, which is a labelled fact either way, and do the
+    // arithmetic only when the two sides are on the same basis.
+    // [[amvic-all-in-pricing]] [[reference-point-model]] [[msrp-exact-must-pin-config]]
+    const refAllIn = num(ref?.allIn ?? ref?.msrpAllIn ?? ref?.all_in_price ?? a?.msrpAllIn);
+    const sameBasis = !a?.allInPricing || refAllIn > 0;
+    const compareTo = a?.allInPricing && refAllIn > 0 ? refAllIn : refMsrp;
     const published = refMsrp > 0
       ? ` ${maker} publishes ${ref?.trim ? `the ${ref.trim}` : "this model"} from ${fmtMoney(refMsrp)}${
-          qp > refMsrp ? `, so this listing asks ${fmtMoney(qp - refMsrp)} above that published starting price` : ""
+          sameBasis && qp > compareTo
+            ? `, so this listing asks ${fmtMoney(qp - compareTo)} above that published${refAllIn > 0 ? " all-in" : ""} price`
+            : !sameBasis
+              ? `, before the freight, levies and dealer fee this province requires inside an advertised price — so the two figures are not on the same basis and we are not subtracting one from the other`
+              : ""
         }.`
       : "";
 

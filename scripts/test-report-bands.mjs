@@ -284,28 +284,60 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
 // The catalogue holds NO 4Runner row at $72,371. It does hold the hybrid ladder
 // from $69,207, and the card offered none of it.
 {
-  const base = { quotedPrice: 72371, make: "Toyota", model: "4Runner Hybrid", year: 2026, priceVerified: true };
+  // The REAL listing is in Alberta, so its advertised price is all-in. The
+  // fixture carries that, because leaving it off is what let the first draft of
+  // this card subtract an ex-freight catalogue figure from an all-in ask.
+  const base = { quotedPrice: 72371, make: "Toyota", model: "4Runner Hybrid", year: 2026,
+    priceVerified: true, allInPricing: true };
   const card = (a) => reportBands(a).find((b) => b.key === "price_vs_msrp");
+  const REF = { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" };
 
-  const stated = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated",
-    msrpReference: { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" } });
+  const stated = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated", msrpReference: REF });
   check("a dealer-stated MSRP is never called a figure WE hold",
     !/figure we hold/i.test(stated.note), stated.note);
   check("it says whose number it is", /dealer's own figure/i.test(stated.note), stated.note);
   check("and offers the published reference we DO hold",
-    /publishes the 4Runner Hybrid from \$69,207/.test(stated.note), stated.note);
-  check("with the gap worked out", /\$3,164 above that published/.test(stated.note), stated.note);
+    stated.note.includes("publishes the 4Runner Hybrid from $69,207"), stated.note);
+
+  // ── THE BASIS RULE ────────────────────────────────────────────────────────
+  // $72,371 all-in minus $69,207 ex-freight = $3,164, and Toyota's own Alberta
+  // page shows a 4Runner advertised with $1,930 delivery, $100 A/C, $20 tire
+  // levy, $10 AMVIC and up to $999 retailer admin INSIDE the figure -- about
+  // $3,059 of the $3,164. Publishing that subtraction would have told the buyer
+  // in writing that a dealer had marked the car up by mandatory fees they did
+  // not set. msrp-claim.ts refuses this comparison; this card must not route
+  // around it.
+  check("an ALL-IN ask is NOT subtracted from an ex-freight catalogue figure",
+    !stated.note.includes("$3,164 above"), stated.note);
+  check("...and the refusal says WHY, so silence is not read as 'no gap'",
+    /not on the same basis/.test(stated.note), stated.note);
+
+  // Same car, but we hold the manufacturer's OWN all-in for it: now the two
+  // sides match and the subtraction is sound.
+  const allIn = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated",
+    msrpReference: { ...REF, allIn: 72266 } });
+  check("with an all-in reference the gap IS worked out",
+    allIn.note.includes("$105 above that published all-in price"), allIn.note);
+  check("...and it is labelled all-in, so nobody re-reads it as ex-freight",
+    /published all-in price/.test(allIn.note), allIn.note);
+
+  // Outside an all-in province the advertised price is ex-fees, so the
+  // ex-freight reference is the matching one and the subtraction stands.
+  const exFees = card({ ...base, allInPricing: false, msrp: 72371,
+    msrpBasis: "dealer_stated", msrpReference: REF });
+  check("where the ask is NOT all-in, the ex-freight comparison is sound",
+    exFees.note.includes("$3,164 above that published price"), exFees.note);
 
   // Never invent a reference we do not have.
   const noRef = card({ ...base, msrp: 72371, msrpBasis: "dealer_stated" });
   check("no catalogue reference -> claims none", !/publishes/i.test(noRef.note), noRef.note);
 
   // An ask BELOW the published base is not an overage.
-  const below = card({ ...base, quotedPrice: 67000, msrp: 72371, msrpBasis: "dealer_stated",
-    msrpReference: { msrp: 69207, trim: "4Runner Hybrid", make: "Toyota" } });
+  const below = card({ ...base, allInPricing: false, quotedPrice: 67000, msrp: 72371,
+    msrpBasis: "dealer_stated", msrpReference: REF });
   check("asking under the published base claims no overage",
     !/above that published/i.test(below.note), below.note);
-  check("but still names the published figure", /from \$69,207/.test(below.note), below.note);
+  check("but still names the published figure", below.note.includes("from $69,207"), below.note);
 
   // A figure we genuinely hold may still be described as ours.
   const ours = card({ ...base, msrp: 69207, msrpBasis: "starting_at" });
