@@ -76,6 +76,13 @@ jobs:
       # Ram, Dodge and Chrysler with SyntaxError.
       - name: Every script parses
         run: npm run check:syntax
+      # check:syntax parses each file ALONE. A file whose own syntax is perfect
+      # still throws on its first line if a module it imports has nothing by
+      # that name -- which is exactly how night-watch.mjs landed on main unable
+      # to load, with every gate green, because the scripts it breaks are not
+      # run in CI at all.
+      - name: Imports resolve (a named import that does not exist)
+        run: npm run check:imports
       - name: Invariants (analysis object)
         run: npm run test:invariants
       - name: Sealed capture (parse/magic-byte/page-count gates)

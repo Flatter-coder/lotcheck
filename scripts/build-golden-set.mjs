@@ -26,7 +26,7 @@
 //   writes scripts/fixtures/golden/answer-keys.json
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { vinValid } from "./lib/golden.mjs";
+import { vinValid, refuseAsKeySource } from "./lib/golden.mjs";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 LotCheckGoldenSet/1.0";
 const POOL = "scripts/fixtures/golden/url-pool.json";
@@ -221,6 +221,32 @@ function urlIdentity(url) {
 // ── reconcile one listing ────────────────────────────────────────────────────
 function buildKey(url, html, status) {
   const host = new URL(url).hostname.replace(/^www\./, "");
+  // REFUSE BEFORE EXTRACTING. If the dealer served the inventory index at this
+  // URL — because the unit sold, or because the URL never resolved to one — then
+  // there is no vehicle here to be the truth about. Reading one out of the
+  // results list and recording it as this listing's answer is the wrong-entity
+  // error, committed inside the instrument that defines what "correct" means.
+  //
+  // It had already happened. Seven pool URLs were serving search pages on
+  // 2026-08-20 and this function wrote a VIN, asking price, year, make, model
+  // and condition for every one of them. Five were caught later by the
+  // verification pass; two stayed live and gradable. An excluded key with NO
+  // fields is the honest record: we looked, and there was nothing of this
+  // listing to read.
+  const refusal = refuseAsKeySource(html, url);
+  if (refusal) {
+    return {
+      url, host,
+      platform: "not_a_vdp",
+      httpStatus: status,
+      pageTitle: (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").replace(/\s+/g, " ").trim(),
+      excluded: true,
+      exclusionReason: refusal,
+      fields: {},
+      conflicts: [],
+    };
+  }
+
   const ld = fromJsonLd(jsonLdNodes(html));
   const blob = fromBlob(inlineBlob(html));
   const text = pageText(html);
@@ -350,7 +376,7 @@ function buildKey(url, html, status) {
 // refresh wiping hand-verified enrichment (test:carry-forward's lesson). Never
 // destroy a verified key file silently: demand --force, and after any forced
 // rebuild re-run the verify workflow + scripts/apply-golden-verification.mjs.
-if (existsSync(OUT) && !process.argv.includes("--force")) {
+if (existsSync(OUT) && !process.argv.includes("--force") && !process.argv.includes("--from-snapshot")) {
   try {
     const prev = JSON.parse(readFileSync(OUT, "utf8").replace(/^﻿/, ""));
     if (prev?.meta?.verifiedAt) {
@@ -360,6 +386,109 @@ if (existsSync(OUT) && !process.argv.includes("--force")) {
     }
   } catch { /* unreadable previous file — overwriting it is fine */ }
 }
+// ── --from-snapshot ──────────────────────────────────────────────────────────
+// Build keys from the STORED pages instead of fetching, and merge them into the
+// existing key file rather than replacing it.
+//
+// WHY. A key and the page it grades must come from the same day, or the grade
+// measures the market instead of us. On 2026-09-15 night-watch reported 10
+// price failures at Silverhill Acura that were all price cuts between an 08-20
+// key and a 09-15 page; our extraction had matched every statement on the newer
+// page exactly. Re-fetching to fix that has three costs: 79 of the 120 pool
+// URLs now answer 403, so a live rebuild would replace 120 keys with ~41 and
+// lose every D2C key; the fetched bytes would be a THIRD set, not the ones
+// night-watch grades; and it discards the 08-20 adversarial verification.
+//
+// Reading the snapshot has none of those. The key is derived from the exact
+// bytes being graded, so drift is zero BY CONSTRUCTION rather than by warning,
+// and each listing is stamped with that page's own fetchedAt.
+//
+// This still does not import a single pipeline parser. The independence rule is
+// about who reads the page, not where the page came from.
+if (process.argv.includes("--from-snapshot")) {
+  const DIR = "scripts/fixtures/golden/pages";
+  const MAN = `${DIR}/manifest.json`;
+  if (!existsSync(MAN)) {
+    console.error(`--from-snapshot: no corpus at ${MAN}. Run scripts/snapshot-golden-pages.mjs first.`);
+    process.exit(1);
+  }
+  const man = JSON.parse(readFileSync(MAN, "utf8").replace(/^﻿/, ""));
+  const prev = existsSync(OUT) ? JSON.parse(readFileSync(OUT, "utf8").replace(/^﻿/, "")) : { meta: {}, listings: [] };
+
+  // Backfill a per-listing builtAt so a merged file cannot make an old key look
+  // fresh. One timestamp on the file stopped being true the moment part of it
+  // was rebuilt.
+  const byUrl = new Map();
+  for (const l of prev.listings || []) {
+    byUrl.set(l.url, l.builtAt ? l : { ...l, builtAt: prev.meta?.builtAt || null });
+  }
+
+  let rebuilt = 0, carried = 0, dropped = 0, failed = 0;
+  for (const p of Object.values(man.pages || {})) {
+    if (p.blocked || !p.file) continue;
+    let html;
+    try { html = readFileSync(`${DIR}/${p.file}`, "utf8"); } catch { continue; }
+    let key;
+    try { key = buildKey(p.url, html, 200); } catch (e) {
+      failed++;
+      console.error(`extract failed: ${p.url} (${String(e?.message || e).slice(0, 70)})`);
+      continue;
+    }
+    key.builtAt = p.fetchedAt || null;
+    key.pageSha256 = p.sha256 || null;
+
+    // CARRY FORWARD adversarial verification, but only where it is still true
+    // of these bytes. A rebuild wiping hand-verified enrichment is the exact
+    // failure test:carry-forward exists for; a rebuild KEEPING a promotion
+    // whose value has since changed is worse, because it launders a stale
+    // figure as verified. So: same value, keep the promotion; different value,
+    // drop it and let the automatic confidence stand.
+    const old = byUrl.get(p.url);
+    if (old?.fields) {
+      for (const [name, f] of Object.entries(old.fields)) {
+        if (f?.confidence !== "agent") continue;
+        const now = key.fields?.[name];
+        if (now && String(now.value) === String(f.value)) {
+          key.fields[name] = { ...now, confidence: "agent", source: f.source, evidence: f.evidence, carriedFrom: old.builtAt };
+          carried++;
+        } else dropped++;
+      }
+    }
+    byUrl.set(p.url, key);
+    rebuilt++;
+  }
+
+  const merged = [...byUrl.values()];
+  // A refresh that shrinks the key set is a refresh that ate it.
+  if (merged.length < (prev.listings || []).length) {
+    console.error(`--from-snapshot: merge would leave ${merged.length} keys, down from ${prev.listings.length}. Refusing.`);
+    process.exit(1);
+  }
+
+  const out = {
+    meta: {
+      ...prev.meta,
+      version: 1,
+      // The file no longer has ONE build date. Per-listing builtAt is the truth;
+      // this records the last partial rebuild so the change is legible.
+      builtAt: prev.meta?.builtAt || null,
+      lastSnapshotRebuildAt: new Date().toISOString(),
+      snapshotRebuild: { pages: rebuilt, carriedAgentFields: carried, droppedStaleAgentFields: dropped, extractFailures: failed },
+      // Verification was file-level and is now only partly true, so the
+      // file-level stamp is removed rather than left to imply more than it does.
+      // Surviving promotions are marked per field with carriedFrom.
+      verifiedAt: undefined,
+      previousVerifiedAt: prev.meta?.verifiedAt || null,
+    },
+    listings: merged,
+  };
+  writeFileSync(OUT, JSON.stringify(out, null, 1));
+  console.error(`--from-snapshot: rebuilt ${rebuilt} keys from stored pages, ${merged.length} total.`);
+  console.error(`  carried ${carried} verified fields whose value still matches; dropped ${dropped} whose value had changed.`);
+  if (failed) console.error(`  ${failed} pages failed extraction.`);
+  process.exit(0);
+}
+
 const pool = JSON.parse(readFileSync(POOL, "utf8").replace(/^﻿/, ""));
 const listings = [];
 const fetchFailures = [];
