@@ -20,7 +20,120 @@ the next instance.
 | **A guard bound to spelling, not substance** | a gate anchored on a local variable name or a caption's exact words, so a rename fails it while the behaviour is intact - and a gate that cries wolf gets overridden |
 | **A guard calibrated from imagination** | a threshold invented rather than measured, so it fires on healthy data the first time it runs and gets switched off before it ever catches anything real |
 | **A happy path that hides a branch** | an assertion written for the fallback never reaches it, because the primary path answers first in every test fixture - the branch is untested and the gate looks complete |
+| **A key built on a mutable name** | an identity key includes a human-readable label, so renaming the label forks the record instead of updating it - and every mechanism keyed on it (dedupe, carry-forward, supersede) stops firing at once, silently |
 
+---
+
+## 2026-09-16 - a stub package label was forking every base trim into two rows
+
+**Shape: a key built on a mutable name.** Also, in the migration half: *green
+signal, no check*.
+
+Fixed in `c60bb01` - `scripts/lib/tci-stack.mjs` (resolveTrim, dropStubDuplicates),
+`scripts/check-migration-row-identity.mjs`, `scripts/test-trim-identity.mjs`, and both
+20260916 migrations rewritten to natural-key addressing.
+
+Asked to apply the unapplied migrations, I found two from PR #482 outstanding.
+Applying the first one is what exposed everything below.
+
+### The migration that reported success over work it never did
+
+`20260916a_catalog_backfill_and_rename.sql` applied at 16:03 and printed
+`✅ 1/1 applied`. Four of its seven statements did what they said. **The other
+three matched zero rows and changed nothing:**
+
+```sql
+update public.msrp_catalog set trim = 'XLE Mobility Package'
+ where id = 47978 and trim = 'Sienna XLE Mobility Package';
+```
+
+The ids were correct when the PR was written at 14:34. The daily catalog
+refresh ran at 15:27 - 53 minutes after the merge - and `replaceRows()` deletes
+a make's rows and re-inserts them, so every id in that block was reassigned.
+47978 had become 49444. **An UPDATE that matches no rows is not an error in
+Postgres**, so the run went green and the Sienna trims stayed wrong.
+
+Its sibling `20260916b` was never applied, and that is the only reason it did no
+damage: six of its eight delete targets no longer existed. Running it would have
+deleted two rows, silently missed six, and reported success.
+
+### The defect underneath, which is not a migration bug at all
+
+`"Standard Package"` is **Adobe AEM's default label for a base package with no
+distinct name of its own.** It is not a Canadian showroom trim - no dealer and
+no buyer writes it - and 27 `msrp_catalog` rows were stored under it.
+
+The trim string is half the identity key that carry-forward and supersede both
+run on (`catKey` is `year|model|trim`). So a base trim under a stub name does not
+match the row it should have replaced. **One cause, three symptoms:**
+
+1. **supersede never fires**, so the correctly-named row survives every refresh,
+   frozen at its original capture date. The 2026 Crown Signia `"Limited"` sat at
+   its 2026-08-16 read for a month while a second row for the same car - same
+   $58,555, same $62,336 all-in - was rewritten beside it daily. This is the
+   "Toyota and Lexus are frozen since August" observation, explained.
+2. **carry-forward finds no predecessor**, so `drivetrain` and `source_url` come
+   back NULL. The proof is inside a single run: on 2026-09-16 the 4Runner's TRD
+   Sport, TRD Off Road Premium and Limited 7 Passenger rows kept their
+   `source_url` through the same refresh that blanked the one row whose name had
+   changed.
+3. **both rows persist**, so which MSRP a listing resolves against is decided by
+   whichever the matcher reaches first.
+
+### What the manufacturer actually says
+
+The real trim is the fragment's own `grade`, read live from toyota.ca and
+lexus.ca for all 27 models:
+
+- **15 give a usable name** - RAV4 `LE`, Camry `SE`, 4Runner `SR5`, Sienna `LE`,
+  Tundra `SR5`, Highlander `XLE`, bZ `XLE FWD`.
+- **11 give an internal code** - Crown Signia `HI`, Land Cruiser `BX`, LC `NONE`,
+  ES `STD`, Corolla Hatchback `N`. Those **keep the stub and are logged**, never
+  replaced with a guess. For Crown and GR86 the stub row is the only row that
+  model has, so refusing it would have removed the model from the catalogue.
+
+### Two corrections I owe the record
+
+**I was going to write `source_url` from the scraper, and it would have broken
+the refresh.** `replaceRows`' DELETE carries `&source_url=is.null`, so that
+column means *"hand-verified, spare me"*. Writing it on every scraped row would
+make the DELETE spare an entire make and leave the `UNIQUE(year,make,model,trim)`
+collision to be avoided by a supersede probe that is wrapped in a `catch` and
+explicitly best-effort. The page goes in `attrs.source_page` instead - and fixing
+the trim name restores the column anyway, through carry-forward.
+
+**The blank-trim duplicates are not a historical pair.** `20260916b` described
+the Trax as two rows and deleted the one it had pinned as older. By 2026-09-16 it
+was at **three** - a third landed that morning. `UNIQUE(year, make, model, trim)`
+**does not constrain NULL trims**; Postgres treats every NULL as distinct, so the
+constraint that prevents this everywhere else is silent here. The rewrite keeps
+`max(fetched_at)`, which is correct at any count.
+
+### The guards
+
+- **`check:row-identity`** - a migration may not address a refresh-owned table by
+  surrogate id, and every UPDATE/DELETE written from 2026-09-16 must sit inside a
+  block that raises on `ROW_COUNT = 0`. **Measured before it was written:** all
+  143 migrations contained exactly 15 id-pinned statements, and all 15 were in
+  those two files. So there is no allowlist - there was nothing legitimate to
+  exempt. Verified to fail on an id-pinned delete, on an unasserted update, and
+  on a DO block that wraps without asserting; verified to ignore the same
+  statement quoted inside a comment.
+- **`test:trim-identity`** - pins the naming rules against all 27 measured cases,
+  the 2026-08-27 NX `Premium`-beats-`LUXURY` fix, the model-prefix strip, the
+  drivetrain split, and the invariant that a published row is never nameless.
+  Verified to fail on a reverted NX fix and on a batch rule let loose on real
+  trims.
+
+### Still open
+
+Four 2026 4Runner rows carry `fuel_type 'Hybrid'` at gas prices ($55,520-$69,644)
+while the 4Runner Hybrid line starts at $69,207, and the hand-verified row for
+the same nameplate says **Gas**. `flagAllOnePowertrain` could not prove it because
+it only reads the current scrape batch and `4Runner Hybrid` was not in it.
+**Not fixed here on purpose:** the obvious widening would also refuse the 2026
+RAV4, which is genuinely hybrid-only, and deleting a real lineup is worse than
+the mis-tag. It needs its own change.
 ---
 
 ## 2026-09-15 - the three things the 4Runner audit left open

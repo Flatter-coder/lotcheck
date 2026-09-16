@@ -454,6 +454,23 @@ jobs:
         run: npm run test:dealer-place
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
+      # 20260916a was applied on 2026-09-16 and reported success. Three of its
+      # seven statements matched ZERO rows, because they addressed rows by
+      # surrogate id and the daily catalog refresh rotated every id in that
+      # range 53 minutes after the PR merged. An UPDATE that matches nothing is
+      # not an error in Postgres, so the run went green over work that never
+      # happened. A migration against a table a scraper rewrites must address
+      # rows by their natural key and must raise when it changes nothing.
+      - name: A data migration addresses rows by natural key, and cannot no-op
+        run: npm run check:row-identity
+      # "Standard Package" is Adobe AEM’s default label for a base package with
+      # no distinct name -- never a Canadian showroom trim. Publishing it as one
+      # forked 27 cars into two permanent catalog rows each: the trim string is
+      # part of the carry-forward and supersede key, so a renamed base trim
+      # stops superseding its own predecessor and comes back with drivetrain and
+      # source_url NULL. Pins the naming rules that keep the key stable.
+      - name: A base trim is named by the manufacturer, not by a package stub
+        run: npm run test:trim-identity
       - name: Every seeded model is reachable by the lookup
         run: npm run test:reachable
       - name: Report truth (never a claim the pipeline did not check)
