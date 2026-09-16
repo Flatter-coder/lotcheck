@@ -96,6 +96,7 @@
     "test:pg-timestamp": "node scripts/test-pg-timestamp.mjs",
     "test:icons3d": "node scripts/test-icons3d.mjs",
     "check:no-emoji": "node scripts/check-no-emoji-ui.mjs",
+    "check:resting-transform": "node scripts/check-resting-transform.mjs",
     "test:alberta-dealers": "node scripts/test-alberta-dealers.mjs",
     "check:jobs": "node scripts/check-scheduled-jobs.mjs",
     "test:live-dot": "node scripts/test-live-dot.mjs",

@@ -83,6 +83,15 @@ jobs:
       # run in CI at all.
       - name: Imports resolve (a named import that does not exist)
         run: npm run check:imports
+      # The whole report shipped on a 3D tilt on 2026-09-15 -- lcgcReveal ended
+      # at rotateX(6deg) rotateY(-9deg) and the panel held the final frame, so
+      # every figure on the page was sheared for as long as it was on screen.
+      # No gate could see it: the code was valid, the build was green, and it
+      # was only wrong when looked at. This is not pixel diffing -- it checks
+      # one geometric invariant, that a surface holding its animation's last
+      # frame comes to rest without rotating or skewing what it holds.
+      - name: Surfaces come to rest square (no held rotate/skew)
+        run: npm run check:resting-transform
       - name: Invariants (analysis object)
         run: npm run test:invariants
       - name: Sealed capture (parse/magic-byte/page-count gates)
