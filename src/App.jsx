@@ -11751,7 +11751,7 @@ function QuoteCheckPage(){
                 return (
                 <div>
                   <style>{`
-                    @keyframes lcgcReveal{0%{opacity:0;transform:perspective(2200px) rotateX(20deg) rotateY(-18deg) translateY(36px) scale(.96);}100%{opacity:1;transform:perspective(2200px) rotateX(6deg) rotateY(-9deg) translateY(0) scale(1);}}
+                    @keyframes lcgcReveal{0%{opacity:0;transform:perspective(2200px) rotateX(6deg) rotateY(-4deg) translateY(28px) scale(.985);}100%{opacity:1;transform:perspective(2200px) rotateX(0deg) rotateY(0deg) translateY(0) scale(1);}}
                     @keyframes lcgcDraw{from{stroke-dasharray:0 100;}to{stroke-dasharray:${gaugeDash} 100;}}
                     @keyframes lcgcPulse{0%{box-shadow:0 0 0 0 ${C.teal}88;}70%{box-shadow:0 0 0 7px ${C.teal}00;}100%{box-shadow:0 0 0 0 ${C.teal}00;}}
                     .lcgc-panel{animation:lcgcReveal 1s cubic-bezier(.16,.9,.24,1) both;}
