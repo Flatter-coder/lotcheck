@@ -102,8 +102,19 @@ through `reportBands()` **and** `qualifyMsrpClaim()` together, so a rule that
 holds on one surface and not the other fails the build - which is the only kind
 of test that would have caught the original. 8/8 mutations caught.
 
-No `CACHE_VER` bump: both callers derive bands at render time, so a stored
-analysis re-renders through the corrected code.
+**`CACHE_VER` 2026-09-13o.** I first shipped this claiming no bump was needed,
+because both band callers derive at render time. That was right about the
+bands and wrong about `deal.ts`: `counterScript` is computed server-side and
+**stored in the analysis**, so a cached report replays move S14 verbatim -
+*"This is about $3,164 over MSRP"* - to a named dealer long after the fix is
+deployed. `check:cache-ver` caught it in CI.
+
+It did not catch it in the local sweep, and the reason is its own small
+lesson: the gate diffs **committed** changes against the merge base, and the
+sweep ran while every change was still uncommitted. It had nothing to look at
+and reported green. **A guard that cannot fail in the window you run it in is
+not a guard you have run** - the same shape as *a guard that cannot fail*
+above, produced by the order of operations rather than by the assertion.
 
 **Still open:** the coverage this refuses on. Only Toyota (122) and Lexus (57)
 have any `all_in_price` - 179 of 1,497 rows, 12%. Restoring the comparison for
