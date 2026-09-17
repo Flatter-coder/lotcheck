@@ -100,15 +100,56 @@ const strip = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g,
 // name: nav chrome, section headings, body-style labels, model years.
 const NOISE = /^(price|prices|view|inventory|learn|more|models?|model|vehicle|details|detail|drive|driven|choose|your|also|like|explore|build|compare|starting|from|new|the|all|small|compact|mid-?size|full-?size|suv|suvs|truck|trucks|car|cars|electric|remarkably|20\d{2})$/i;
 
-function cleanTrim(raw) {
+// WHAT A FAILED COMPUTATION LOOKS LIKE ON SOMEBODY ELSE'S PAGE.
+//
+// On 2026-09-16 msrp_catalog held a 2026 Cadillac LYRIQ whose TRIM read
+// "NaN 2026 LYRIQ". Nobody typed that. cadillaccanada.ca rendered a literal
+// "NaN" where its own script failed to format a number, this extractor took the
+// nearest preceding text as the trim name, and the row shipped with a
+// source_url -- which meant the refresh DELETE spared it and it would have sat
+// in the catalogue indefinitely, under a name no dealer and no buyer will ever
+// write.
+//
+// A trim built out of one of these is not a weak name, it is evidence that the
+// text we read was not a trim at all. The pair is DROPPED rather than stored
+// under a null trim, because a null-trim row cannot satisfy an exact-config
+// match and, on the upsert path this file writes through
+// (on_conflict=year,make,model,trim), a NULL never conflicts -- so it inserts a
+// fresh copy on every run. That is how the 2027 Chevrolet Trax reached three
+// identical rows. Missing beats wrong, and beats multiplying.
+const PARSE_ARTIFACT = /^(nan|undefined|null|nil|n\/?a|tbd|infinity|-?\d+e[+-]?\d+)$/i;
+
+/**
+ * Reads a trim name out of the text preceding a price.
+ *
+ * Returns { trim, artifact }:
+ *   artifact true  -> the text carried a failed computation; the CALLER must
+ *                     drop the pair entirely, price included.
+ *   trim null      -> no usable name, but the reading is sound (this is the
+ *                     model's own starting price).
+ */
+export function cleanTrim(raw, model = null) {
   let words = String(raw || "").split(/\s+/).filter(Boolean);
-  // Strip noise from the FRONT (headings precede the card) and the back.
-  while (words.length && NOISE.test(words[0])) words.shift();
-  while (words.length && NOISE.test(words[words.length - 1])) words.pop();
+  if (words.some((w) => PARSE_ARTIFACT.test(w))) return { trim: null, artifact: true };
+
+  // NOISE IS STRIPPED FROM ANYWHERE, NOT JUST THE ENDS. It used to shift() from
+  // the front and pop() from the back, so a noise word with real words on both
+  // sides survived: "NaN 2026 LYRIQ" kept its model year because "2026" was in
+  // the middle. A model year is never part of a trim name wherever it sits.
+  words = words.filter((w) => !NOISE.test(w));
+
+  // The model name is not a trim of itself. The caller already nulls a trim that
+  // EQUALS the model; this also removes it when it is one word among several,
+  // which is how "LYRIQ" survived into the stored name.
+  if (model) {
+    const mw = new Set(String(model).toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean));
+    if (mw.size) words = words.filter((w) => !mw.has(w.toLowerCase().replace(/[^a-z0-9]/g, "")));
+  }
+
   // A real trim is short. Anything longer is a sentence we misread.
-  if (!words.length || words.length > 3) return null;
+  if (!words.length || words.length > 3) return { trim: null, artifact: false };
   const out = words.join(" ");
-  return /^[A-Za-z0-9][A-Za-z0-9 .\-+]{0,26}$/.test(out) ? out : null;
+  return { trim: /^[A-Za-z0-9][A-Za-z0-9 .\-+]{0,26}$/.test(out) ? out : null, artifact: false };
 }
 
 export function extractStartingPrices(html, { model = null, otherModels = [] } = {}) {
@@ -134,7 +175,12 @@ export function extractStartingPrices(html, { model = null, otherModels = [] } =
     before = before.replace(/(starting\s+at|starting\s+from|from|as\s+configured)\s*:?\s*\$\s?[0-9,]+(?:\.\d{2})?\*?/gi, " ")
                    .replace(/[|•·—–*]/g, " ").replace(/\s+/g, " ").trim();
     const tail = before.match(/([A-Za-z0-9][A-Za-z0-9.\-+]*(?: [A-Za-z0-9][A-Za-z0-9.\-+]*){0,4})\s*$/);
-    const trim = cleanTrim(tail ? tail[1] : "");
+    const read = cleanTrim(tail ? tail[1] : "", model);
+    // A failed computation in the page's own text means we were not reading a
+    // trim card at all. Drop the price with it rather than attach it to a name
+    // we invented or to no name at all.
+    if (read.artifact) continue;
+    const trim = read.trim;
     // Cross-model contamination: these pages cross-link the rest of the lineup
     // ("Small SUV Encore GX $34,192" on the Envista page), and storing those
     // under the target model would be simply wrong. Drop them.
