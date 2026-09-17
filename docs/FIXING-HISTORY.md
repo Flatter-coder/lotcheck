@@ -21,7 +21,104 @@ the next instance.
 | **A guard calibrated from imagination** | a threshold invented rather than measured, so it fires on healthy data the first time it runs and gets switched off before it ever catches anything real |
 | **A happy path that hides a branch** | an assertion written for the fallback never reaches it, because the primary path answers first in every test fixture - the branch is untested and the gate looks complete |
 | **A key built on a mutable name** | an identity key includes a human-readable label, so renaming the label forks the record instead of updating it - and every mechanism keyed on it (dedupe, carry-forward, supersede) stops firing at once, silently |
+| **A check run at the wrong moment** | the check is correct, the answer is true, and it answers a question nobody asked - a diff taken before a long test run, a cache gate consulted before anything was staged. Green here means "nothing had changed yet", not "nothing is wrong" |
 
+---
+
+## 2026-09-17 - a mandatory charge nobody was watching, and two checks run too early
+
+**Shape: a check run at the wrong moment** (mine, twice). The freight work
+itself is a build, not a fix - it is logged here for the BMW finding and for
+the two mistakes made shipping it.
+
+Merged in `47d9bf7` (PR #494).
+
+### What Vic saw
+
+A 2026 BMW X3 at BMW Royal Oak:
+
+    MSRP              $60,400.00
+    Freight and PDI    $4,395.00
+
+7.3% of MSRP. His read: freight differs drastically between makers and nobody
+is watching it. Both halves were right. The catalogue held **12 figures across
+35 makes** and had **no refresh job of any kind** - not stale, never checked.
+
+It matters because in an all-in province that charge sits INSIDE the advertised
+price the report compares against MSRP. Comparing an ex-freight MSRP to an
+all-in advertised price is what told a buyer a dealer had marked a 4Runner up
+by $3,164 when they had not (PR #492, the same day). Freight is the largest
+line inside that gap.
+
+### The finding: a ceiling is not a price, and freight varies by DEALER
+
+BMW Canada publishes **"freight and PDI (up to $2,955)"** - a maximum. The page
+it was quoted from itemised **OMVIC**, the Ontario regulator, so it was the
+Ontario rendering of a province-selected disclaimer. Real listings for the same
+nameplate:
+
+    $2,995  Montreal
+    $3,380  Aurora
+    $4,395  Calgary   <- Vic's listing, $1,440 over BMW's own published maximum
+
+**BMW is deliberately absent from the catalogue because of it.** Storing $2,955
+as a fixed Alberta freight and subtracting it from an all-in price that contains
+$4,395 would bill the $1,440 difference to the dealer as markup - the exact
+false accusation PR #492 had just finished removing.
+
+Six makes were added instead, each read off an official Canadian page and then
+confirmed by an independent second read: Porsche $2,950, Polestar $2,800, Acura
+$2,595, Lincoln $2,595, Mitsubishi $2,125, Honda $2,000. Fourteen returned a
+figure; seven survived the second read. Ten makes publish none at all.
+
+### A figure nobody can re-read is a figure nobody can check
+
+All twelve pre-existing rows name their source in PROSE - "Nissan Canada
+(canada.nissannews.com)" - which no job can fetch. None had been verified since
+the day it was typed. Fee rows now carry `sourceUrl`; the six new ones have one,
+and the verifier reports the other twelve as **our backlog**, not as drift.
+Six of eighteen figures can currently be checked at all.
+
+### The two mistakes, and they are the same mistake
+
+**1. `git diff` before a long test run is not `git diff` before `git add`.** I
+checked the diff, saw only my line, ran 118 gates for several minutes, then
+staged `package.json` wholesale. In that window a concurrent session added a
+`test:sample-report` script without its file. My commit wired a gate to a file
+that does not exist in the repo: green locally, `MODULE_NOT_FOUND` in CI.
+
+**2. `check:cache-ver` consulted before anything was committed.** It reads
+committed history, found nothing staged, and truthfully reported "no
+analysis-output files changed". CI caught it. My fix then wrote `13o` - the
+version main ALREADY carried from a concurrent session - so the key did not
+change, **and it overwrote that session's note** explaining the 4Runner fix.
+Rebuilt from main's line: their note intact, mine prepended, version at `13p`.
+
+Both are the same shape. The check was right. The answer was true. It answered
+a question I had not asked, because I asked it at a moment when nothing had
+happened yet. **In a shared working directory the only check that counts is the
+one taken immediately before the irreversible step**, and paths must be staged
+individually, never wholesale.
+
+### And the guard I wrote had the defect it was written to catch
+
+`test:freight-catalog` asserted "the A/C charge and the tire levy are not
+freight" - and an injection widening the plausibility band from $900 to $5
+**still passed**. The small fees are excluded by the money pattern requiring
+four digits, not by the band, so the band was never exercised. The assertion was
+true for a reason it did not name. Corrected to pin what the band actually
+protects against: an MSRP sitting beside the freight wording.
+
+Also de-decayed a fixture in `fee-schedule.test.ts` that used **Honda** as its
+example of an uncaptured make. Capturing Honda's freight made the catalogue
+better and the test read it as a regression.
+
+### Still open
+
+Ten makes publish no Canadian freight figure at all, including all four GM
+brands, Jeep, Dodge, Audi, Land Rover, Genesis and Tesla. Twelve rows still
+cannot be re-read. `explainAllIn()` remains wired to no report surface, so the
+catalogue is still not visible to a buyer.
 ---
 
 ## 2026-09-17 - 854 catalogue rows had no basis, and nobody had ever decided that
