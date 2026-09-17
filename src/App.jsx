@@ -23,6 +23,7 @@ import { resolvePriceVerified } from "../supabase/functions/_shared/price-verifi
 // like a different product on Android than on macOS.
 import { Icon3D } from "./icons3d.jsx";
 import { beforeYouSign } from "../supabase/functions/_shared/before-you-sign.ts";
+import { SAMPLE_ANALYSIS } from "./lib/sample-report.js";
 // A lit dot is a claim — one decision function, testable, with no way to force
 // a lit result without a timestamp from a read that actually returned.
 import { liveState } from "./lib/live-state.js";
@@ -11288,55 +11289,70 @@ function QuoteCheckPage(){
                 </div>
               </div>
 
-              {/* GAUGE CLUSTER -- sample only, static RAV4 XLE numbers,
-                  labelled SAMPLE throughout, never presented as live data. */}
-              <div className="qc-cluster" style={{...cardStyle,marginBottom:0}}>
-                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:6}}>
-                  <div>
-                    <div style={{fontWeight:900,fontSize:13,color:C.ink}}>Sample LotCheck Report</div>
-                    <div style={{fontSize:11.5,color:C.inkFaint,marginTop:2}}>What a finished check looks like</div>
+              {/* THE SAMPLE IS GENERATED, NOT WRITTEN.
+                  This card used to be three hand-written dials: LEVERAGE 8.2 of
+                  10, a fee needle at $899 against a marker reading "TYP $499",
+                  and a recall dial. It carried a SAMPLE badge, and the badge was
+                  doing less work than it looked like -- by the time PR #486
+                  replaced the 0-10 leverage score with the dollars themselves,
+                  the only leverage gauge left in the entire product was this
+                  one, in the advert for it. A visitor saw a gauge, paid, and got
+                  a different instrument. The "typical $499" was worse: the real
+                  report never compares a fee to a market average, it compares it
+                  to the manufacturer's own published maximum, a figure we hold
+                  with a source and a capture date.
+                  SAMPLE is a claim about the NUMBERS, not a licence about the
+                  PRODUCT. So the numbers stay invented -- they live in
+                  src/lib/sample-report.js -- and everything a visitor reads is
+                  composed by beforeYouSign(), the same builder the real report
+                  calls. The advert cannot drift from the product again, because
+                  it is the product. Guarded by test:sample-report. */}
+              {(()=>{
+                const s=beforeYouSign(SAMPLE_ANALYSIS);
+                return (
+                <div className="qc-cluster" style={{...cardStyle,marginBottom:0}}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,marginBottom:6}}>
+                    <div>
+                      <div style={{fontWeight:900,fontSize:13,color:C.ink}}>Sample LotCheck Report</div>
+                      <div style={{fontSize:11.5,color:C.inkFaint,marginTop:2}}>What a finished check looks like</div>
+                    </div>
+                    <span style={{fontSize:10.5,fontWeight:800,letterSpacing:".08em",color:"#181205",background:C.butter,padding:"5px 9px",borderRadius:6,whiteSpace:"nowrap"}}>SAMPLE</span>
                   </div>
-                  <span style={{fontSize:10.5,fontWeight:800,letterSpacing:".08em",color:"#181205",background:C.butter,padding:"5px 9px",borderRadius:6,whiteSpace:"nowrap"}}>SAMPLE</span>
-                </div>
 
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:14}}>
-                  <div style={{textAlign:"center"}}>
-                    <GaugeDial id="leverage" C={C} value={8.2} min={0} max={10} tickCount={5} tickFormat={v=>v.toFixed(0)}
-                      bands={[{from:0,to:4,color:C.coral},{from:4,to:7,color:C.butter},{from:7,to:10,color:C.teal}]}
-                      needleColor={C.butter}/>
-                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Leverage</div>
-                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
-                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#3ae0ff",textShadow:"0 0 12px rgba(58,224,255,.5)"}}>8.2</div>
-                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>of 10 · leverage</div>
-                    </div>
-                  </div>
-                  <div style={{textAlign:"center"}}>
-                    <GaugeDial id="fees" C={C} value={899} min={0} max={1200} tickCount={4} tickFormat={v=>v===0?"$0":v>=1000?`$${(v/1000).toFixed(v%1000===0?0:1)}k`:`$${Math.round(v)}`}
-                      marker={499} markerLabel="TYP $499"
-                      bands={[{from:0,to:499,color:C.teal},{from:499,to:750,color:C.butter},{from:750,to:1200,color:C.coral}]}
-                      needleColor={C.coral}/>
-                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Fees flagged</div>
-                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
-                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#ff8f7a",textShadow:"0 0 12px rgba(255,93,115,.5)"}}>$899</div>
-                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>doc fee · typical $499</div>
-                    </div>
-                  </div>
-                  <div style={{textAlign:"center"}}>
-                    <GaugeDial id="recalls" C={C} value={2} min={0} max={5} tickCount={5} tickFormat={v=>v.toFixed(0)}
-                      bands={[{from:0,to:1,color:C.teal},{from:1,to:3,color:C.butter},{from:3,to:5,color:C.coral}]}
-                      needleColor={C.butter}/>
-                    <div style={{fontSize:10,fontWeight:800,letterSpacing:".07em",textTransform:"uppercase",color:C.inkFaint,marginTop:2}}>Recalls</div>
-                    <div style={{marginTop:6,background:"#0a0b10",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"7px 5px 6px"}}>
-                      <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontWeight:800,fontSize:17,color:"#ffb130",textShadow:"0 0 12px rgba(255,177,48,.5)"}}>2 OPEN</div>
-                      <div style={{fontSize:9,color:"#7d8aa8",fontFamily:"ui-monospace,Menlo,Consolas,monospace",marginTop:1}}>Transport Canada, by VIN</div>
-                    </div>
-                  </div>
-                </div>
+                  <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".16em",color:C.inkFaint,textTransform:"uppercase",marginTop:16}}>Before you sign</div>
+                  <div style={{fontWeight:700,fontSize:"clamp(16px,2.6vw,19px)",lineHeight:1.3,color:C.ink,marginTop:6}}>{s.line}</div>
+                  {s.total!=null&&(
+                    <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:"clamp(24px,4.4vw,31px)",fontWeight:700,color:C.coralInk,marginTop:8,lineHeight:1}}>${Number(s.total).toLocaleString("en-CA")}</div>
+                  )}
 
-                <div style={{marginTop:18,paddingTop:14,borderTop:`1px solid ${C.line}`,fontSize:12.5,color:C.inkSoft}}>
-                  Sample vehicle: <strong style={{color:C.ink}}>2024 Toyota RAV4 XLE</strong>
+                  {s.items.length>0&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:9,marginTop:15}}>
+                      {s.items.map((it,i)=>(
+                        <div key={i} style={{padding:"11px 13px",borderRadius:12,background:it.tone==="raise"?C.coralBg:C.card,borderLeft:`3px solid ${it.tone==="raise"?C.coral:C.line}`}}>
+                          <div style={{fontWeight:700,fontSize:13,color:C.ink}}>{it.label}</div>
+                          <div style={{fontSize:12.5,lineHeight:1.5,color:C.inkSoft,marginTop:3}}>{it.detail}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {s.questions.length>0&&(
+                    <div style={{marginTop:18}}>
+                      <div style={{fontWeight:700,fontSize:13,color:C.ink,marginBottom:9}}>Ask them this</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                        {s.questions.map((q,i)=>(
+                          <div key={i} style={{fontStyle:"italic",fontSize:12.5,lineHeight:1.5,color:C.ink,padding:"10px 12px",borderRadius:12,background:C.card}}>&ldquo;{q}&rdquo;</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{marginTop:18,paddingTop:14,borderTop:`1px solid ${C.line}`,fontSize:12,color:C.inkSoft,lineHeight:1.55}}>
+                    Sample vehicle: <strong style={{color:C.ink}}>2024 Toyota RAV4 XLE</strong> — an invented car with invented findings, laid out by the same code that builds a real report. Yours is built from the listing you give us.
+                  </div>
                 </div>
-              </div>
+                );
+              })()}
             </div>
 
             {/* The "every report checks all 10" list was removed 2026-09-10

@@ -96,6 +96,7 @@
     "test:report-truth": "node --experimental-strip-types supabase/functions/_shared/report-truth.test.ts",
     "test:leverage": "node --experimental-strip-types scripts/test-leverage-headline.mjs",
     "test:before-you-sign": "node --experimental-strip-types scripts/test-before-you-sign.mjs",
+    "test:sample-report": "node --experimental-strip-types scripts/test-sample-report.mjs",
     "test:vision-limits": "node --experimental-strip-types supabase/functions/_shared/vision-limits.test.ts",
     "test:scrapfly-render": "node --experimental-strip-types supabase/functions/_shared/scrapfly-render.test.ts",
     "test:ref-financing": "node --experimental-strip-types supabase/functions/_shared/reference-financing.test.ts",

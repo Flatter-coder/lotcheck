@@ -58,12 +58,22 @@ export function beforeYouSign(a: any): BeforeYouSign {
   if (df && num(df.mfrCeiling) > 0) {
     const brandBacked = df.mfrCeilingProvenance !== "single-model";
     const where = df.mfrCeilingRegion ? ` in ${df.mfrCeilingRegion}` : "";
+    // TWO PHRASINGS, because one of them must NOT carry the figure. The
+    // at-the-cap branch already opens with the fee, and there the fee and the
+    // ceiling are the SAME NUMBER, so folding the amount into the authority
+    // printed "$999 is exactly Toyota's published maximum in AB of $999" -- the
+    // same figure twice in nine words, which reads like two different figures
+    // that happen to match. Caught on 2026-09-17 by the generated sample, the
+    // first surface that ever ran this branch with docFee === mfrCeiling.
+    const authority = brandBacked
+      ? `${df.mfrCeilingMake}'s published maximum${where}`
+      : `the maximum ${df.mfrCeilingMake} publishes for this model line`;
     const max = brandBacked
       ? `${df.mfrCeilingMake}'s published maximum${where} of ${money(num(df.mfrCeiling))}`
       : `the ${money(num(df.mfrCeiling))} maximum ${df.mfrCeilingMake} publishes for this model line`;
     items.push(num(df.mfrCeilingOverBy) > 0
       ? { tone: "raise", label: "Dealer fee over the cap", detail: `${money(num(df.docFee))} is ${money(num(df.mfrCeilingOverBy))} above ${max}.` }
-      : { tone: "note", label: "Dealer fee at the cap", detail: `${money(num(df.docFee))} is exactly ${max} — the most they allow a dealer to add.` });
+      : { tone: "note", label: "Dealer fee at the cap", detail: `${money(num(df.docFee))} is exactly ${authority} — the most they allow a dealer to add.` });
   }
 
   // Open recalls. A fact, never a price: the remedy is free.
