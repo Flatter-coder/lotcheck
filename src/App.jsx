@@ -22,6 +22,7 @@ import { resolvePriceVerified } from "../supabase/functions/_shared/price-verifi
 // rendered as whatever glyph the device shipped, so the same report looked
 // like a different product on Android than on macOS.
 import { Icon3D } from "./icons3d.jsx";
+import { beforeYouSign } from "../supabase/functions/_shared/before-you-sign.ts";
 // A lit dot is a claim — one decision function, testable, with no way to force
 // a lit result without a timestamp from a read that actually returned.
 import { liveState } from "./lib/live-state.js";
@@ -9997,6 +9998,16 @@ function QuoteCheckPage(){
   const [emailErr,setEmailErr]=useState("");
   const [verifyCopied,setVerifyCopied]=useState(false);
   const [scriptCopied,setScriptCopied]=useState(false);
+  // BEFORE YOU SIGN. A MODE of this page rather than a route, because the
+  // analysis only exists in state after a scan -- and the share link (#r=)
+  // already reconstructs it, so a buyer can run the check on a laptop, copy
+  // the link, and open this on their phone at the desk.
+  const [deskMode,setDeskMode]=useState(false);
+  const [deskCopied,setDeskCopied]=useState(false);
+  function copyDeskQuestions(qs){
+    if(!qs||!qs.length) return;
+    try{ navigator.clipboard.writeText(qs.map((q,i)=>`${i+1}. ${q}`).join(String.fromCharCode(10,10))).then(()=>{setDeskCopied(true);setTimeout(()=>setDeskCopied(false),2200);}); }catch(e){}
+  }
   function copyCounterScript(){
     const cs=analysis?.counterScript; if(!cs?.moves?.length) return;
     const text=cs.moves.map((m,i)=>`${i+1}. ${m.say}`).join("\n");
@@ -11761,6 +11772,11 @@ function QuoteCheckPage(){
                 // sealed and still on the object for reports already issued; it
                 // is no longer what the buyer reads first.
                 const lh=analysis.leverageScore&&analysis.leverageScore.headline?analysis.leverageScore.headline:null;
+                // BEFORE YOU SIGN -- the same findings, at the desk.
+                // Built by _shared/before-you-sign.ts, which is a VIEW of what the
+                // report already computed. Nothing on this card is derived here, so
+                // the short surface can never disagree with the long one.
+                const bys=beforeYouSign(analysis);
                 const gaugeDash=score!=null?(score*10).toFixed(1):0;
                 const moves=Array.isArray(analysis.counterScript?.moves)?analysis.counterScript.moves:[];
 
@@ -11802,6 +11818,7 @@ function QuoteCheckPage(){
                             <DroneSentBeat compact body={C.inkFaint} accent={C.teal}/> Emailed
                           </span>
                         )}
+                        <button onClick={()=>setDeskMode(v=>!v)} style={{background:deskMode?C.coralBg:"transparent",border:`1px solid ${deskMode?C.coral:C.line}`,borderRadius:999,padding:"7px 12px",color:deskMode?C.coralInk:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>{deskMode?"FULL REPORT":"BEFORE YOU SIGN"}</button>
                         <button onClick={copyShareLink} style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"7px 12px",color:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>{linkCopied?"LINK COPIED":"COPY LINK"}</button>
                         <button onClick={()=>{const el=document.querySelector(".lcgc-panel");if(!el)return;el.classList.remove("lcgc-replay");void el.offsetWidth;el.classList.add("lcgc-replay");setTimeout(()=>el.classList.remove("lcgc-replay"),2200);}}
                           style={{background:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"7px 12px",color:C.inkFaint,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"ui-monospace,Menlo,Consolas,monospace"}}>REPLAY</button>
@@ -11849,6 +11866,47 @@ function QuoteCheckPage(){
                         </div>
                       );
                     })()}
+
+                    {/* BEFORE YOU SIGN -- the desk card. Phone-first: one
+                        column, large type, no chrome, nothing to scroll past.
+                        Everything on it was computed by the module that owns
+                        it; this surface only arranges. */}
+                    {deskMode&&(
+                      <div style={{borderRadius:20,background:C.paper2,border:`1px solid ${C.line}`,padding:"clamp(18px,3vw,28px)",marginBottom:20,maxWidth:560,marginLeft:"auto",marginRight:"auto"}}>
+                        <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:10,letterSpacing:".16em",color:C.inkFaint,textTransform:"uppercase"}}>Before you sign</div>
+                        <div style={{fontWeight:700,fontSize:"clamp(19px,3.4vw,25px)",lineHeight:1.25,color:C.ink,marginTop:8}}>{bys.line}</div>
+                        {bys.total!=null&&(
+                          <div style={{fontFamily:"ui-monospace,Menlo,Consolas,monospace",fontSize:"clamp(26px,5vw,36px)",fontWeight:700,color:C.coralInk,marginTop:10,lineHeight:1}}>${Number(bys.total).toLocaleString("en-CA")}</div>
+                        )}
+
+                        {bys.items.length>0&&(
+                          <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:18}}>
+                            {bys.items.map((it,i)=>(
+                              <div key={i} style={{padding:"13px 15px",borderRadius:12,background:it.tone==="raise"?C.coralBg:C.card,borderLeft:`3px solid ${it.tone==="raise"?C.coral:C.line}`}}>
+                                <div style={{fontWeight:700,fontSize:14,color:C.ink}}>{it.label}</div>
+                                <div style={{fontSize:13,lineHeight:1.5,color:C.inkSoft,marginTop:3}}>{it.detail}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {bys.questions.length>0&&(
+                          <div style={{marginTop:22}}>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
+                              <div style={{fontWeight:700,fontSize:14,color:C.ink}}>Ask them this</div>
+                              <button onClick={()=>copyDeskQuestions(bys.questions)} style={{background:deskCopied?C.tealBg:"transparent",border:`1px solid ${C.line}`,borderRadius:999,padding:"7px 14px",color:deskCopied?C.tealInk:C.inkSoft,fontSize:12,fontWeight:700,cursor:"pointer"}}>{deskCopied?"Copied":"Copy questions"}</button>
+                            </div>
+                            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                              {bys.questions.map((q,i)=>(
+                                <div key={i} style={{fontStyle:"italic",fontSize:14,lineHeight:1.55,color:C.ink,padding:"11px 14px",borderRadius:12,background:C.card}}>&ldquo;{q}&rdquo;</div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{fontSize:11.5,color:C.inkFaint,marginTop:20,lineHeight:1.5}}>This is the short version. Every figure here is explained, with its source, in the full report.</div>
+                      </div>
+                    )}
 
                     {/* hero: gauge + verdict */}
                     <div style={{display:"grid",gridTemplateColumns:"minmax(180px,220px) 1fr",gap:24,alignItems:"center",padding:"clamp(16px,2.4vw,26px)",borderRadius:20,background:C.tealBg,border:`1px solid ${C.line}`,marginBottom:20}}>
