@@ -24,6 +24,94 @@ the next instance.
 
 ---
 
+## 2026-09-17 - the hero number told a buyer a dealer had marked a car up, and they had not
+
+The first figure in a LotCheck report is the Price vs MSRP band. On the 4Runner
+shape - an Alberta advertised price of $72,371 against the $69,207 ex-freight
+figure we hold, exact trim match, no captured `all_in_price` - it published:
+
+    +$3,164 OVER
+    "$72,371 asking against the $69,207 this configuration carries
+     from the manufacturer."
+
+`undefined`
+
+Toyota's own Alberta pricing puts $1,930 delivery, $100 A/C, $20 tire levy, $10
+AMVIC and up to $999 retailer admin **inside** the advertised figure. Nearly the
+whole $3,164 is those mandatory lines. The dealer had not marked the car up, and
+the report said in writing that they had. [[no-accusation-language]]
+[[amvic-all-in-pricing]]
+
+**Class: one-surface fix - on the headline.** This exact defect was found and
+fixed once already. `report-bands.js` still carries the paragraph explaining it,
+and a `sameBasis` guard implementing it - in the branch that says *"We could not
+pin this listing to an exact manufacturer configuration"*. The branch that
+prints the hero number is thirty lines earlier and went from
+`msrpBasis === "exact"` straight to `qp - ms`, consulting nothing. The fix
+landed in the path that declines to make a claim and not in the path that makes
+one. Every test written for it passed, because they were written against the
+path that was fixed.
+
+**FOUR surfaces subtract, and they did not agree.** Grepping for the
+subtraction rather than reading the one file found it in four places:
+
+| surface | what it did |
+|---|---|
+| `report-bands.js` hero band | `qp - ms`, no basis check - printed **+$3,164 OVER** |
+| `App.jsx` gap bar | `qp - ms`, no basis check - painted a coral bar and **+$3,164 OVER MSRP** |
+| `deal.ts` S14 move | `qp - msrp`, checked only `msrpBasis` - **scripted the buyer to say it out loud to a named licensee** |
+| `msrp-claim.ts` | refused correctly |
+
+So one report could show the gap three ways and decline to make the claim in
+the fourth. The counter-script is the worst of them: it puts a figure in the
+buyer's mouth to recite to a named business, and roughly $3,000 of that
+figure was Toyota's own freight and Alberta's own levies.
+`deal.ts:135` guards a NEIGHBOURING move on `msrpPriceBasis`, eight lines
+below the one that did not - the guard was written, and applied to the wrong
+sentence. [[two-authors-per-fact]]
+
+**The second half: 854 rows we cannot read.** Measured on the live catalogue the
+same day: 1,497 rows, of which **854 carry no `price_basis` at all** and **1,016
+carry no `source_url`**. `writeCatalogs()` stamps a basis only when a scraper
+passes `opts.priceBasis`, and just 5 of 31 sources do - so 17 makes write fresh
+rows daily with neither. `catalog-io.mjs` says of an unstamped row that *"silence
+is honest: an unstamped row makes the report show the freight caveat rather than
+imply a precision we don't have."* **No such caveat existed anywhere in the
+codebase.** Outside an all-in province those 854 rows were subtracted from
+directly. [[msrp-100-percent-accuracy]] [[archived-msrp-gap]]
+
+**Guard:** `supabase/functions/_shared/msrp-basis.js` is now the single answer to
+"can this MSRP carry a subtraction", imported by both the hero band and
+`msrp-claim.ts`:
+
+| situation | result |
+|---|---|
+| all-in province + captured `all_in_price` | compare, all-in vs all-in |
+| all-in province + no `all_in_price` | **refuse** |
+| elsewhere + `excl_freight` | compare, ex-freight vs ex-freight |
+| elsewhere + `incl_freight` | **refuse** |
+| elsewhere + no basis recorded | **refuse** |
+
+A refusal renders NOTED, never CLEAR - an absence is not a clean bill
+[[traffic-column-report-direction]] - keeps the asking price on screen, and says
+the gap is **ours**: *"That is a gap in our catalogue, not a finding about the
+price."*
+
+`scripts/test-msrp-freight-basis.mjs`, 15 checks in `gates.yml`. Every case runs
+through `reportBands()` **and** `qualifyMsrpClaim()` together, so a rule that
+holds on one surface and not the other fails the build - which is the only kind
+of test that would have caught the original. 8/8 mutations caught.
+
+No `CACHE_VER` bump: both callers derive bands at render time, so a stored
+analysis re-renders through the corrected code.
+
+**Still open:** the coverage this refuses on. Only Toyota (122) and Lexus (57)
+have any `all_in_price` - 179 of 1,497 rows, 12%. Restoring the comparison for
+the other 28 makes means capturing each manufacturer's own all-in figure; the
+fee stack may not be summed to invent one [[fee-catalog]]. 444 model-lines.
+
+---
+
 ## 2026-09-17 - the advert kept selling an instrument the report no longer had
 
 The Quote Check page carried a card headed **Sample LotCheck Report / What a
