@@ -487,6 +487,16 @@ jobs:
       # source_url, so the refresh DELETE spared it indefinitely.
       - name: A failed computation on a maker page never becomes a trim name
         run: npm run test:published-price
+      # A 2026 BMW X3 charges $4,395 Freight and PDI -- 7.3% of its $60,400 MSRP,
+      # $1,625 above the highest freight figure the catalogue held for any make and
+      # 2.3x the lowest. In an all-in province that charge sits INSIDE the
+      # advertised price, so an ex-freight MSRP compared against it invents a
+      # markup that is not there (PR #492, $3,164 on a 4Runner). Pins the
+      # catalogue and the daily verifier: an A/C charge is never read as freight,
+      # a silent page is not drift, a 403 is the maker refusing us, and a backlog
+      # of missing source URLs is reported without turning the run red.
+      - name: A freight charge is defensible, and a silent page is not drift
+        run: npm run test:freight-catalog
       - name: Every seeded model is reachable by the lookup
         run: npm run test:reachable
       - name: Report truth (never a claim the pipeline did not check)

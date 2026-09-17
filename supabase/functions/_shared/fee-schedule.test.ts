@@ -126,7 +126,14 @@ check("no ceiling for the make -> no claim (fail-safe)", assessDealerFeeVsCeilin
 check("uncaptured freight is null, not invented", freightFor("Honda", "Civic"), null);
 check("uncaptured ceiling is null, not invented", dealerFeeCeiling("Honda", "AB"), null);
 ok("hasBrandFees is true for a captured make",   hasBrandFees("Lexus") === true);
-ok("hasBrandFees is false for an uncaptured make", hasBrandFees("Honda") === false);
+// A FIXTURE THAT NAMES A REAL MAKE DECAYS THE MOMENT THAT MAKE IS CAPTURED.
+// This assertion used Honda, and it failed on 2026-09-17 when Honda's freight
+// was captured from hondanews.ca -- the catalogue got better and the test read
+// it as a regression. The rule under test is "a make we hold nothing for
+// returns false", so the fixture is a make no catalogue will ever hold rather
+// than whichever real brand happened to be missing the day it was written.
+ok("hasBrandFees is false for an uncaptured make", hasBrandFees("Wuling") === false);
+ok("and for a make that does not exist at all",    hasBrandFees("Nonesuch Motors") === false);
 
 // ── explainAllIn: an estimate that NEVER claims to be authoritative ─────────
 const ex = explainAllIn({ make: "Lexus", model: "ES", region: "AB", financed: true, msrp: 59900 });
