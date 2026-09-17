@@ -41,6 +41,6 @@ async function main() {
   }
   const msrpRows = [...byModel.values()];
   console.log(`[${MAKE}] ${msrpRows.length} MSRP rows`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows: [], leaseRows: [] });
+  await writeCatalogs(MAKE, { msrpRows, financeRows: [], leaseRows: [] }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
 }
 main().catch(e => { console.error(e); process.exit(1); });

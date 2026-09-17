@@ -516,6 +516,16 @@ jobs:
       # msrp-claim together, so a rule that holds on one surface only fails here.
       - name: A price is never compared across two bases
         run: npm run test:freight-basis
+      # A CATALOGUE WRITE MUST DECLARE ITS FREIGHT BASIS, OR SAY WHY IT CANNOT.
+      # price_basis says whether a captured MSRP already contains freight/PDI.
+      # Nothing that subtracted ever read it until 2026-09-17, and writeCatalogs
+      # stamped one only when a scraper happened to pass it -- 5 of 31 sources
+      # did, leaving 854 of 1,497 rows unreadable and rewritten fresh daily.
+      # Silence is no longer a legal answer. A GUESS IS NOT EITHER: an unknown
+      # basis passes this gate, a wrong one re-enables the subtraction that
+      # accuses a dealer.
+      - name: Every catalogue write declares its freight basis
+        run: npm run test:price-basis
       - name: Vision image limits (never post an image the API will refuse)
         run: npm run test:vision-limits
       - name: Scrapfly render degrades instead of losing the HTML

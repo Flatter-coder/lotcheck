@@ -8,6 +8,32 @@ import { writeCatalogs, parseArgs, UA } from "./lib/catalog-io.mjs";
 
 const MAKE = "Kia";
 const PROV = "ON";
+const SOURCE_URL = "https://www.kia.ca/en/shopping-tools/build-and-price";
+
+// EX-FREIGHT, AND KIA SAYS SO ITSELF -- this is evidence, not inference.
+//
+// priceDetails[PROV] carries the figure and its fees as SEPARATE fields:
+//
+//   { msrp: 42445, msrpGross: 42445, dnd: 2185, adminFee: 699, acTax: 100,
+//     otherTaxes: 145.75, regulatoryFees: 22, tireRecyclingFee: 22.5,
+//     oilFilterFee: 1.25, ppsa: 126, ... }        (2026 Carnival LX, ON)
+//
+// `dnd` is delivery and destination -- freight and PDI -- and it sits BESIDE
+// msrp rather than inside it. Kia's own fine print on the same page agrees:
+// "Excludes delivery and destination charges, levies, applicable taxes,
+//  registration, insurance, license fees and dealer fees of up to..."
+// Captured 2026-09-17.
+//
+// Until today this scraper wrote 107 rows a day with no basis recorded, and
+// nothing that subtracted could tell them from a freight-inclusive figure.
+// [[msrp-100-percent-accuracy]] [[fee-catalog]]
+//
+// WORTH TAKING NEXT, AND DELIBERATELY NOT TAKEN HERE: those sibling fields are
+// Kia's own itemisation, so an all_in_price for all 107 rows is within reach
+// without inventing anything. It needs the AB keys rather than ON (fees differ
+// by province even where msrp does not) and a decision on which components an
+// Alberta advertised price must contain. That is a capture, not a stamp, and
+// it belongs in its own change.
 
 // String-aware matcher: given the index of an opening bracket, return the index
 // of its balanced close (ignores brackets inside JSON strings).
@@ -54,11 +80,11 @@ async function main() {
       const fuel = (t.isPhev || t.isPackagePhev) ? "PHEV" : (t.isHev || t.isPackageHev) ? "Hybrid" : /\bEV\d?\b|electric|niro ev/i.test(`${model} ${trim}`) ? "BEV" : null;
       const key = `${year}|${model}|${trim}`;
       const prev = byKey.get(key);
-      if (!prev || msrp < prev.msrp) byKey.set(key, { year, make: MAKE, model, trim, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+      if (!prev || msrp < prev.msrp) byKey.set(key, { year, make: MAKE, model, trim, msrp, fuel_type: fuel, source_url: SOURCE_URL, fetched_at: new Date().toISOString() });
     }
   }
   const msrpRows = [...byKey.values()];
   console.log(`[${MAKE}] ${msrpRows.length} MSRP rows across ${new Set(msrpRows.map(r => r.model)).size} models`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows: [], leaseRows: [] });
+  await writeCatalogs(MAKE, { msrpRows, financeRows: [], leaseRows: [] }, { priceBasis: "excl_freight" });
 }
 main().catch(e => { console.error(e); process.exit(1); });

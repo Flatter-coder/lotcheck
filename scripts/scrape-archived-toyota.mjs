@@ -247,7 +247,7 @@ async function main() {
 
   // upsert: archived years merge BESIDE the current catalogue, never replacing
   // it. replaceRows is keyed (year, make, model, trim).
-  await writeCatalogs(MAKE, { msrpRows: rows }, { upsert: true, label: "archived MSRP" });
+  await writeCatalogs(MAKE, { msrpRows: rows }, { upsert: true, label: "archived MSRP", priceBasisUnknown: "a newsroom launch release prints a grade ladder, and whether those figures carry freight/PDI is not stated there - the live Toyota stack's verified excl_freight does NOT transfer to a press release written years earlier" });
 }
 
 // Run as a script, importable as a module. `process.argv[1]` is undefined when

@@ -76,5 +76,5 @@ export async function run(cfg) {
   }
   const msrpRows = [...byTrim.values()];
   console.log(`[${cfg.make}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows across ${new Set(msrpRows.map(r => r.model)).size} models (SM360 dealer feed${cfg.ratesOnly ? ", rates-only" : ""}).`);
-  await writeCatalogs(cfg.make, { msrpRows, financeRows, leaseRows }, { ratesOnly: cfg.ratesOnly });
+  await writeCatalogs(cfg.make, { msrpRows, financeRows, leaseRows }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17", ratesOnly: cfg.ratesOnly });
 }

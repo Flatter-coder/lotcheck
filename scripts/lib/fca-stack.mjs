@@ -152,7 +152,7 @@ export async function run() {
         msrpRows: all.msrpRows.filter(r => r.make === make),
         financeRows: all.financeRows.filter(r => r.make === make),
         leaseRows: all.leaseRows.filter(r => r.make === make),
-      });
+      }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
     } catch (e) {
       makeFailures.push(`${make}: ${e.message}`);
     }

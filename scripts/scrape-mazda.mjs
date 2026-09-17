@@ -57,6 +57,6 @@ async function main() {
     await sleep(80);
   }
   console.log(`[${MAKE}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows });
+  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
 }
 main().catch(e => { console.error(e); process.exit(1); });

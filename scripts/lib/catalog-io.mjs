@@ -337,10 +337,47 @@ export function dedupeBy(rows, keyFn, lowerField) {
 
 export async function writeCatalogs(make, { msrpRows = [], financeRows = [], leaseRows = [] }, opts = {}) {
   msrpRows = gateMsrpRows(msrpRows, make);
-  // Stamp the freight/PDI convention when the scraper knows it (see
-  // supabase/migrations/20260811_msrp_price_basis.sql). Silence is honest:
-  // an unstamped row makes the report show the freight caveat rather than
-  // imply a precision we don't have.
+  // THE BASIS IS NOT OPTIONAL ANY MORE. It is a required DECISION.
+  //
+  // This used to read: stamp price_basis when the scraper passes one, and the
+  // comment below it said silence was honest because an unstamped row makes
+  // the report show a freight caveat instead. Two things were wrong with that.
+  //
+  // First, no caveat existed - nothing that subtracted ever read price_basis,
+  // so an unstamped row was subtracted from exactly like a stamped one. Fixed
+  // on 2026-09-17 in _shared/msrp-basis.js, which now refuses.
+  //
+  // Second, silence is not a decision anyone MADE. 5 of 31 sources passed a
+  // basis and 26 did not, and nothing anywhere recorded whether that was
+  // considered and unknown or simply never thought about. The result was 854
+  // of 1,497 live rows with no basis, written FRESH every day by 17 makes.
+  //
+  // So a caller must now say one of two things, and saying nothing throws:
+  //
+  //   priceBasis: "excl_freight" | "incl_freight"
+  //       Verified against the maker's OWN published wording or payload. Kia,
+  //       for instance, returns msrp and dnd (delivery and destination) as
+  //       separate fields and its page says the price excludes them - that is
+  //       evidence, not inference.
+  //
+  //   priceBasisUnknown: "<why>"
+  //       We have not established it. The rows write with a null basis exactly
+  //       as before and the report declines to subtract - but the reason is in
+  //       the source, in a string somebody had to type, instead of being the
+  //       absence of an argument.
+  //
+  // A WRONG BASIS IS WORSE THAN NONE: it re-enables the subtraction on a false
+  // premise, and the subtraction is what accuses a dealer. Never guess one to
+  // clear this check. [[msrp-100-percent-accuracy]] [[no-accusation-language]]
+  const BASES = ["excl_freight", "incl_freight"];
+  if (msrpRows.length && !opts.ratesOnly && process.env.CATALOG_RATES_ONLY !== "1") {
+    if (opts.priceBasis && !BASES.includes(opts.priceBasis)) {
+      throw new Error(`writeCatalogs(${make}): priceBasis must be one of ${BASES.join(" | ")}, got ${JSON.stringify(opts.priceBasis)}`);
+    }
+    if (!opts.priceBasis && !opts.priceBasisUnknown) {
+      throw new Error(`writeCatalogs(${make}): pass priceBasis ("excl_freight"/"incl_freight", verified against the maker's own wording) or priceBasisUnknown: "<why>". A missing basis is why 854 of 1,497 catalogue rows cannot be compared against.`);
+    }
+  }
   if (opts.priceBasis) msrpRows = msrpRows.map(r => ({ price_basis: opts.priceBasis, ...r }));
   msrpRows = dedupeBy(msrpRows, r => `${r.year}|${r.make}|${r.model}|${r.trim ?? ""}`, "msrp");
   financeRows = dedupeBy(financeRows, r => `${r.make}|${r.model}|${r.term_months}`, "apr");
