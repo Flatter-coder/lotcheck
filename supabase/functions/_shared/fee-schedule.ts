@@ -226,6 +226,29 @@ const FREIGHT: Fee[] = [
   //    lets verify-freight-catalog.mjs re-read them daily. The twelve rows
   //    below them name their source in prose only, so nothing can check them;
   //    the verifier reports that as a backlog rather than as drift.
+  // CAPTURED FROM BMW CANADA'S OWN CONFIGURATOR WITH PROVINCE = ALBERTA, and the
+  // province is provable from the page itself: it itemises a "Motor Vehicle
+  // Industry Council Fee" of $10, which is AMVIC. An earlier capture quoted BMW
+  // at "up to $2,955" and was REFUSED for this catalogue because that page
+  // itemised OMVIC -- it was the Ontario rendering of a province-selected
+  // disclaimer, and the figure was a CEILING rather than a price.
+  //
+  // The same page prices the retailer administration fee at "(up to) $595",
+  // which is exactly the BMW ceiling already in DEALER_FEE_CEILING -- an
+  // independent confirmation of a figure captured weeks earlier elsewhere.
+  //
+  // WHY IT MATTERS BEYOND COVERAGE. A Calgary listing for the same nameplate at
+  // the same $60,400 MSRP charges $4,395 freight and PDI -- $925 above what BMW
+  // itself publishes for Alberta -- and prices its admin line at $989.75 against
+  // BMW's published $595 maximum. Freight reads to a buyer as a fact of the car
+  // rather than a number anyone chose, which makes it the easiest line in the
+  // stack to load. This figure is what lets the report say so from the
+  // manufacturer's own page instead of from an inference.
+  { component: "freight", label: "Freight & PDI", amount: 3470, applies: "always", scope: "model", make: "BMW", model: "X3",
+    region: "AB",
+    sourceUrl: "https://www.bmw.ca/en/ssl/build-your-own.html",
+    // freight and PDI together, MY2026, Alberta-scoped price overview.
+    source: "BMW Canada configurator, Price Overview with Province = Alberta, captured 2026-09-17 -- \"MSRP $60,400 / Freight & PDI $3,470 / Retailer Administration Fee (up to) $595 / Air Conditioning Levy $100 / Tire Recycling Fee $20 / Motor Vehicle Industry Council Fee $10 / Total Selling Price $64,595\"", capturedOn: "2026-09-17" },
   { component: "freight", label: "Destination Charge", amount: 2950, applies: "always", scope: "model", make: "Porsche", model: "Macan",
     sourceUrl: "https://configurator.porsche.com/en-CA/3061/mode/model/95BAU1/exclusive-manufaktur",
     // freight/destination only, PDI not included. MY2026. Confirmed against a second source: https://configurator.porsche.com/en-CA/mode/model/95BBV1/group/26026

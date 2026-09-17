@@ -55,6 +55,7 @@ import { fmtMoney, warrantyLine } from "./report-lines.js";
 import { dealerReputationPoint, pageAbsenceCopy } from "./point-state.ts";
 
 import { marketCompareLine } from "./report-lines.js";
+import { freightLine } from "./freight-line.ts";
 
 // FOUR STATES, because green is a claim.
 //
@@ -304,17 +305,35 @@ function feesBand(a) {
   const dli = a?.dealerLineItems;
   const dliTotal = dli && Array.isArray(dli.fees) ? dli.fees.reduce((t, f) => t + num(f?.amount), 0) : 0;
 
+  // FREIGHT IS PART OF THIS POINT, not an eleventh one. The canonical ten is a
+  // contract and reportBands throws on any other count, and freight belongs
+  // here anyway: it is a fee line on the listing.
+  //
+  // A listing charging more than the manufacturer publishes for the same model
+  // must NOT render "TRANSPARENT". CLEAR is a verification claim -- it says we
+  // checked and there is nothing to question -- and a freight line $925 above
+  // BMW's own Alberta figure is exactly something to question. So an `above`
+  // reading raises the point even when no add-on was flagged, and the sentence
+  // names the manufacturer's page rather than accusing the dealer of anything.
+  const fr = freightLine(a);
+
   if (flagged.length) {
     const total = num(a?.totalFlaggedCost) || flagged.reduce((s, x) => s + num(x.price), 0);
     return band("fees", "03", RAISE, `${flagged.length} flagged · ${fmtMoney(total)}`,
-      `${flagged.length === 1 ? "One line item" : `${flagged.length} line items`} on this quote ${flagged.length === 1 ? "is" : "are"} worth questioning at the table.`);
+      `${flagged.length === 1 ? "One line item" : `${flagged.length} line items`} on this quote ${flagged.length === 1 ? "is" : "are"} worth questioning at the table.`
+      + (fr.state === "above" ? ` ${fr.explain}` : ""), { freight: fr });
+  }
+  if (fr.state === "above") {
+    return band("fees", "03", RAISE, fr.headline, fr.explain, { freight: fr });
   }
   if (list.length) return band("fees", "03", CLEAR, "TRANSPARENT",
-    "The extras on this listing are itemised and nothing in them was flagged.",
-    { source: "the dealer's own itemised list of extras, audited line by line" });
+    "The extras on this listing are itemised and nothing in them was flagged."
+    + (fr.state === "compared" ? ` ${fr.explain}` : ""),
+    { source: "the dealer's own itemised list of extras, audited line by line", freight: fr });
   if (dliTotal > 0) return band("fees", "03", CLEAR, "ITEMIZED",
-    `The dealer publishes their own breakdown, totalling ${fmtMoney(dliTotal)}. Check it against the final bill of sale.`,
-    { source: "the dealer's own published fee breakdown" });
+    `The dealer publishes their own breakdown, totalling ${fmtMoney(dliTotal)}. Check it against the final bill of sale.`
+    + (fr.state === "compared" ? ` ${fr.explain}` : ""),
+    { source: "the dealer's own published fee breakdown", freight: fr });
   if (a?.feesRead === true) {
     // We read a priced page and saw no itemised extras. That is an ABSENCE, and
     // an absence is not a verification -- a fee box we failed to parse looks
