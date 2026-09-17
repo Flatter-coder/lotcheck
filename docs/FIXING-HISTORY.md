@@ -24,6 +24,93 @@ the next instance.
 
 ---
 
+## 2026-09-16 - the car was filed under two model names, so it was compared against nothing
+
+**Shape: a key built on a mutable name** - the second instance in one day, one
+table over. Also *absence read as knowledge* in the copy.
+
+Fixed in `51354d0` - `_shared/model-identity.js` (baseNameplate),
+`_shared/marketvalue.ts` (fetchCompsWidened), `_shared/market-count.js`
+(rowModel), `scripts/test-comps-nameplate.mjs`.
+
+### What the buyer saw
+
+A report on a 2026 Lexus NX 350 F SPORT 3 AWD at Lexus of Royal Oak printed:
+
+> **Other listings read:** None read
+> *"No listings filed as '2026 Lexus NX 350' were among those LotCheck read from
+> Alberta dealers' own pages in the 30 days to Sep 16, 2026."*
+
+**We were holding ninety-five 2026 Lexus NX listings in Alberta at that moment.**
+Fifty-one were gas NX 350s, from $54,830 to $72,146. The car asks **$72,241** -
+the top of the range, and the single most useful thing the report could have
+said. Vic found the listings himself and called it a clear failure. He was right.
+
+### The cause
+
+One line in `fn_market_comps`:
+
+```sql
+and lower(vl.model) = lower(p_model)
+```
+
+Exact string equality, and the two sides do not spell the car the same way. The
+subject page parses as model `NX 350`; the crawled listings are stored as model
+`NX` with `NX 350` in the TRIM, because that is how the dealer pages write them.
+`"NX 350"` never equals `"NX"`, so the candidate set came back empty and every
+card downstream honestly reported having nothing - **which a buyer reads as
+"there are none out there"**.
+
+### The fix, and the rule that keeps it safe
+
+Every comps fetch now asks twice: the exact model, then - ONLY when that matched
+nothing - the nameplate. It cannot change a result that already works.
+
+`baseNameplate()` strips a trailing 2-3 digit engine designation and powertrain
+markers, and refuses everything else. **Two and three digits, never four**, and
+the difference is load-bearing: `Silverado 1500`, `Sierra 1500` and `Ram 2500`
+are separate trucks, not engine variants of one line. `Corolla Cross` is not a
+Corolla, `Grand Highlander` is not a Highlander, and `Model 3` would widen to a
+word that names nothing.
+
+### The latent bug the widening surfaced, which the new test caught
+
+The powertrain wall built each row's identity by prepending the **subject's**
+model. That was harmless only while the candidate set came from an exact model
+match - both sides then carried the same string by construction.
+
+With a widened pool the assumption is gone, and the subject's own marker gets
+injected into every row. A hybrid `NX 350h` subject made every gas row read as
+`"NX 350h NX 350"`, the marker sets matched, and **the wall passed the entire gas
+market into a hybrid's comparison**. That is the IONIQ 9 false anchor,
+[[powertrain-identity-rule]], reached from a new direction.
+
+The wall now reads the model the POOL was fetched under. `rowModel` defaults to
+the subject's model, so an un-widened pool behaves exactly as before. Test 7
+asserts the parameter is actually READ, so it cannot be quietly dropped later.
+
+### The guard
+
+**`test:comps-nameplate`** - fixtures are real rows returned by `fn_market_comps`
+on 2026-09-16, not invented. Verified to fail three ways: widening disabled;
+widening loosened to four digits (which names `Silverado 1500` and `Ram 2500` as
+engine variants); and `rowModel` dropped.
+
+### Also
+
+The report's **"TRUST & DEALER"** section is now **"PUBLIC RECORD"**. "Trust" is a
+verdict word - it read as LotCheck vouching for the dealer, which is not
+something we do or could defend. The blurb still names both bases, because one of
+the two sources is a public RATING rather than a register entry.
+
+### Still open
+
+**All 95 comparables are in Edmonton. Zero Calgary Lexus listings are crawled at
+all.** Fixing the query got the buyer a real comparison; it did not fix the
+coverage hole underneath it. The crawl cron is still commented out pending legal
+counsel (day 41), and the last manual run was 2026-09-07.
+---
+
 ## 2026-09-16 - we told a buyer the city hall held the dealer's licence
 
 Report `LC-DEDF-526`, a 2026 Lexus NX 350 F SPORT 3 at Lexus of Edmonton,
