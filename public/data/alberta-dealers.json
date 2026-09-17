@@ -1,7 +1,7 @@
 {
   "source": "OpenStreetMap (shop=car), via Overpass",
-  "generatedAt": "2026-09-16",
-  "totalDealers": 411,
+  "generatedAt": "2026-09-17",
+  "totalDealers": 412,
   "cities": [
     {
       "name": "Calgary",
@@ -31,7 +31,7 @@
     },
     {
       "name": "Edmonton",
-      "count": 88,
+      "count": 89,
       "sample": [
         "Car Corner Inc.",
         "Alberta Honda",
