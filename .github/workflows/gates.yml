@@ -497,6 +497,16 @@ jobs:
       # of missing source URLs is reported without turning the run red.
       - name: A freight charge is defensible, and a silent page is not drift
         run: npm run test:freight-catalog
+      # BMW Canada publishes $3,470 freight and PDI for a 2026 X3 in ALBERTA; a
+      # Calgary listing for the same car at the same $60,400 MSRP charges $4,395,
+      # and prices its admin line $394.75 over BMW own published maximum. Freight
+      # is the easiest line in the stack to load because it reads as a fact of the
+      # car. The report now says so -- and the guard is against the OPPOSITE error:
+      # we once told a buyer to demand removal of a $3,330 line that was 70%
+      # manufacturer freight and government levies. State the figures, name the
+      # maker page, never assert an act, and refuse when either number is missing.
+      - name: Freight names two published figures and accuses nobody
+        run: npm run test:freight-line
       - name: Every seeded model is reachable by the lookup
         run: npm run test:reachable
       - name: Report truth (never a claim the pipeline did not check)

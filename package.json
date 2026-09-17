@@ -94,6 +94,7 @@
     "test:comps-nameplate": "node scripts/test-comps-nameplate.mjs",
     "test:published-price": "node scripts/test-published-price.mjs",
     "test:freight-catalog": "node --experimental-strip-types scripts/test-freight-catalog.mjs",
+    "test:freight-line": "node --experimental-strip-types scripts/test-freight-line.mjs",
     "verify:freight": "node --experimental-strip-types scripts/verify-freight-catalog.mjs",
     "test:reachable": "node --experimental-strip-types scripts/test-catalog-reachable.mjs",
     "test:catalog-quality": "node scripts/test-catalog-quality.mjs",
