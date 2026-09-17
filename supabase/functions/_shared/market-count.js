@@ -242,6 +242,7 @@ export function computeMarketCount(rows, ctx = {}) {
   const price = Number(ctx.price);
   const hasPrice = Number.isFinite(price) && price > 0;
   const model = ctx.model ?? null;
+  const rowModel = ctx.rowModel ?? model;
   const trim = dropModelWords(ctx.trim ?? null, model);
   const out = emptyMarketCount({
     province: ctx.province || null, year: ctx.year ?? null, make: ctx.make ?? null, model,
@@ -260,7 +261,25 @@ export function computeMarketCount(rows, ctx = {}) {
   const wall = resolvePowertrainWall(model, ctx.trim ?? null, ctx.powertrainHint || "", inWindow);
   out.powertrain = powertrainLabel(model, `${ctx.trim || ""} ${wall.hint}`) || null;
   out.powertrainSeparated = wall.separated;
-  const compatible = inWindow.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
+  // THE ROW'S OWN MODEL, NOT THE SUBJECT'S.
+  //
+  // The powertrain wall reads a row's powertrain from the model AND the trim,
+  // because crawl rows carry it in either. It used to build the row's identity
+  // by prepending the SUBJECT's model, which was harmless only while the
+  // candidate set came from an exact model match -- both sides then carried the
+  // same model string by construction.
+  //
+  // The comps fetch now falls back to the nameplate when the exact model matches
+  // nothing (a subject filed as "NX 350" against rows filed as "NX"), and that
+  // assumption is gone. Prepending the subject's model INJECTS the subject's own
+  // powertrain marker into every row: a hybrid "NX 350h" subject made every gas
+  // row read as "NX 350h NX 350", the marker sets matched, and the wall passed
+  // the whole gas market into a hybrid's comparison. That is the IONIQ 9 false
+  // anchor. [[powertrain-identity-rule]]
+  //
+  // `rowModel` is the model the pool was actually FETCHED under. It defaults to
+  // the subject's model, so an un-widened pool behaves exactly as it did before.
+  const compatible = inWindow.filter((r) => powertrainCompatible(wall.subjectPt, `${rowModel || ""} ${r.trim || ""}`));
   out.unpriced = compatible.filter((r) => !(Number(r.price) > 0)).length;
   const pool = compatible.filter((r) => Number(r.price) > 0);
 
@@ -307,7 +326,7 @@ export function computeMarketCount(rows, ctx = {}) {
 // Anything looser is not like-for-like and returns `insufficient` with how
 // many rows WERE read, so the card can say so instead of printing a number.
 export function likeForLikePool(rows, ctx = {}) {
-  const { model, trim: rawTrim, year, condition, odometerKm, minRows = 5, yearSteps = [0, 1], today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "" } = ctx;
+  const { model, trim: rawTrim, year, condition, odometerKm, minRows = 5, yearSteps = [0, 1], today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", rowModel = ctx.model } = ctx;
   const trim = dropModelWords(rawTrim ?? null, model);
   // The count line's recency window (30 days to `today`), applied here too: a
   // row last seen months ago may be a car that sold without a delisting, and
@@ -318,7 +337,9 @@ export function likeForLikePool(rows, ctx = {}) {
   const eligible = (Array.isArray(rows) ? rows : []).filter((r) => r && Number(r.price) > 0
     && (!cutoff || !r.asOf || String(r.asOf) >= cutoff));
   const wall = resolvePowertrainWall(model, rawTrim, powertrainHint, eligible);
-  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
+  // Built from the model the POOL was fetched under, not the subject's -- see
+  // the note in computeMarketCount above.
+  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${rowModel || ""} ${r.trim || ""}`));
   const y = Number(year);
   const used = String(condition || "").toLowerCase() === "used";
   // An odometer that was never read (null) or reads 0 -- which the pipeline
@@ -406,7 +427,7 @@ function seenOf(set) {
   };
 }
 export function olderYearsLadder(rows, ctx = {}) {
-  const { model, trim: rawTrim, year, minRows = 5, maxRungs = 3, today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", lowerMult = 0.4, upperMult = 2.0, truncated = false } = ctx;
+  const { model, trim: rawTrim, year, minRows = 5, maxRungs = 3, today = null, windowDays = MARKET_COUNT_WINDOW_DAYS, powertrainHint = "", lowerMult = 0.4, upperMult = 2.0, truncated = false, rowModel = ctx.model } = ctx;
   const y = Number(year);
   const trim = dropModelWords(rawTrim ?? null, model);
   const out = {
@@ -426,7 +447,9 @@ export function olderYearsLadder(rows, ctx = {}) {
   const wall = resolvePowertrainWall(model, rawTrim, powertrainHint, eligible);
   out.powertrain = powertrainLabel(model, `${rawTrim || ""} ${wall.hint}`) || null;
   out.powertrainSeparated = wall.separated;
-  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${model || ""} ${r.trim || ""}`));
+  // Built from the model the POOL was fetched under, not the subject's -- see
+  // the note in computeMarketCount above.
+  const compatible = eligible.filter((r) => powertrainCompatible(wall.subjectPt, `${rowModel || ""} ${r.trim || ""}`));
   out.nRead = compatible.length;
   Object.assign(out, seenOf(compatible));
   out.asOf = out.seenMax;
