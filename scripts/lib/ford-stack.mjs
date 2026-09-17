@@ -72,5 +72,5 @@ export async function run(cfg) {
   }
   const msrpRows = [...byTrim.values()];
   console.log(`[${cfg.make}] ${msrpRows.length} MSRP rows`);
-  await writeCatalogs(cfg.make, { msrpRows, financeRows: [], leaseRows: [] });
+  await writeCatalogs(cfg.make, { msrpRows, financeRows: [], leaseRows: [] }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
 }

@@ -24,6 +24,76 @@ the next instance.
 
 ---
 
+## 2026-09-17 - 854 catalogue rows had no basis, and nobody had ever decided that
+
+`msrp_catalog.price_basis` records whether a captured MSRP already contains
+freight/PDI. Measured on the live catalogue: **1,497 rows, 854 with no basis at
+all**, rewritten **fresh every day** by 17 makes. After `msrp-basis.js` landed
+earlier the same day, those rows correctly stop supporting a subtraction - so
+the Price vs MSRP card, the reason the report is bought, cannot speak for 57% of
+the catalogue.
+
+`8025376`
+
+**The cause was not a bug. It was an optional argument.** `writeCatalogs()`
+stamped a basis when a scraper passed `opts.priceBasis` and said nothing when it
+did not, under a comment calling that silence honest. **5 of 31 sources passed
+one.** Nothing recorded whether the other 26 had considered the question and
+could not answer it, or had simply never been asked - two completely different
+states that looked identical from the table.
+
+**Class: not attempted, reading as passed.** A field nobody filled in is
+indistinguishable from a field somebody weighed and left empty, and the daily
+refresh reported success either way.
+
+**Guard:** the argument is required. A caller declares
+`priceBasis: "excl_freight" | "incl_freight"` - verified against the maker's own
+wording - or `priceBasisUnknown: "<why>"`. Saying neither throws. A declared
+unknown writes exactly as before; the difference is that the reason is a string
+somebody had to type.
+
+**Kia is stamped, and not by inference.** kia.ca returns the figure and its fees
+as separate fields:
+
+    { msrp: 42445, msrpGross: 42445, dnd: 2185, adminFee: 699, acTax: 100,
+      otherTaxes: 145.75, regulatoryFees: 22, tireRecyclingFee: 22.5, ... }
+
+`dnd` is delivery and destination, and it sits **beside** `msrp`, not inside it.
+Kia's own fine print agrees: *"Excludes delivery and destination charges, levies,
+applicable taxes, registration, insurance, license fees and dealer fees of up
+to..."*. Captured 2026-09-17. **107 rows can be compared against again**, and
+they now carry a `source_url`, which was also null.
+
+**The other 16 are declared unknown on purpose.** A wrong basis is worse than
+none - it re-enables the subtraction on a false premise, and the subtraction is
+what accuses a dealer. Guessing to clear a gate would walk straight back into
+the defect fixed hours earlier. [[no-accusation-language]]
+
+Two of the sixteen reasons are findings in their own right:
+
+| writer | why it cannot say |
+|---|---|
+| `scrape-published-msrp.mjs` | spans many makes, each publishing its own convention beside its own *"Starting at"* figure - one basis here would stamp one maker's convention onto all of them |
+| `scrape-archived-toyota.mjs` | a newsroom launch release prints a grade ladder and never states whether those figures carry freight; the live Toyota stack's verified `excl_freight` does **not** transfer to a press release written years earlier |
+
+`scripts/test-catalog-price-basis.mjs`, 9 checks, pins all 22 call sites
+statically **and** exercises `writeCatalogs` directly. 7/7 mutations caught.
+
+**Two of those checks were themselves the defect they police.** They began as
+assertions that `catalog-io.mjs` *contained* the throw. Mutating the condition to
+`if (false)` left the message string sitting in the file, so both stayed green
+over a writer that enforced nothing - **a guard bound to spelling, not
+substance, inside the suite written to prevent that.** They now call the
+function. Separately, the file-exclusion regexes had their backslash escapes
+eaten twice in transit, each time silently disabling an exclusion and producing
+a check that could not fail; the path tests use `basename()` and no character
+class at all.
+
+**Still open:** 16 makes, ~1,211 rows. Each needs that maker's own published
+wording read against the exact field its scraper reads. Kia took one probe.
+
+---
+
 ## 2026-09-17 - the hero number told a buyer a dealer had marked a car up, and they had not
 
 The first figure in a LotCheck report is the Price vs MSRP band. On the 4Runner

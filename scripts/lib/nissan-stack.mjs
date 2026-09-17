@@ -52,5 +52,5 @@ export async function run(cfg) {
   }
   const msrpRows = [...byKey.values()];
   console.log(`[${cfg.make}] ${msrpRows.length} MSRP rows across ${new Set(msrpRows.map(r => r.model)).size} models`);
-  await writeCatalogs(cfg.make, { msrpRows, financeRows: [], leaseRows: [] });
+  await writeCatalogs(cfg.make, { msrpRows, financeRows: [], leaseRows: [] }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
 }

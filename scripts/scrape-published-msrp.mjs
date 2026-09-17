@@ -86,7 +86,7 @@ async function main() {
   for (const [make, rows] of byMake) {
     // Published prices are hand-checkable and carry source_url, so they are the
     // rows the API scrapers must never overwrite (catalog-io guards on that).
-    await writeCatalogs(make, { msrpRows: rows }, { upsert: true });
+    await writeCatalogs(make, { msrpRows: rows }, { upsert: true, priceBasisUnknown: "this writer spans many makes and each publishes its own convention beside its own Starting at figure, so one basis here would stamp one maker's convention onto all the others" });
   }
   // A capture run that produced nothing should fail loudly rather than look green.
   if (!byMake.size) { console.error("No published prices captured — nothing written."); process.exit(1); }
