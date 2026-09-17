@@ -1,0 +1,78 @@
+# Freight + PDI catalogue verification — daily.
+#
+# Vic, 2026-09-17, on a 2026 BMW X3 at BMW Royal Oak:
+#
+#     MSRP              $60,400.00
+#     Freight and PDI    $4,395.00
+#
+# That is 7.3% of MSRP. It is $1,625 above the highest freight charge the
+# catalogue held for ANY make (Volvo XC60, $2,770) and 2.3x the lowest (Toyota
+# RAV4, $1,930). His read was that freight differs drastically between makers and
+# nobody is watching it. He was right: the catalogue covered 12 rows across 35
+# makes and had no refresh job of any kind — not stale, never checked.
+#
+# WHY A MANDATORY CHARGE IS WORTH A DAILY JOB. Freight and PDI is not an add-on a
+# buyer can decline, and in an all-in-pricing province it sits INSIDE the
+# advertised price the report compares against MSRP. Comparing an ex-freight MSRP
+# to an all-in advertised price told a buyer a dealer had marked a 4Runner up by
+# $3,164 when they had not — freight, A/C, the levies and the retailer admin fee
+# were all inside the advertised figure (PR #492). Freight is the largest of
+# those lines, so the freight figure is what turns a refusal into an honest
+# comparison. A figure that decides that must not go a day unchecked.
+#
+# IT VERIFIES, IT NEVER REWRITES. Drift is reported and recorded in
+# freight_verification; no amount is ever auto-corrected. The figures live in
+# fee-schedule.ts as reviewed constants because they feed a markup claim a buyer
+# makes to a dealer's face, and a regex confident enough to overwrite a freight
+# charge is confident enough to invent one.
+#
+# IT REPORTS, IT DOES NOT SEND. Nothing here emails anyone. The red run IS the
+# report. [[never-send-without-approval]]
+#
+# THERE IS NO WALL-CLOCK GATE, AND THAT IS DELIBERATE. The warranty verifier
+# re-checks the Edmonton hour and exits 0 when it does not match; eight of its
+# last twelve runs reported success while skipping every step. The daily key
+# check had the identical defect and reported success twelve times while never
+# running (PR #483). A gate whose false branch exits 0 does not fail, it
+# disappears. This job does its work whenever it is invoked, and the cron below
+# is the only thing that decides when that is. [[repeat-fix-pattern]]
+#
+# COST: one request per catalogued figure — about a dozen today, growing with
+# coverage — through the shared rate limiter, which sends an honest User-Agent,
+# honours Retry-After and breaks the circuit on a host that refuses. A 403 is
+# recorded as the manufacturer's refusal and never answered by pretending to be
+# Chrome. [[dealer-tos-daily-checks]]
+name: Freight catalogue verification (daily)
+
+on:
+  schedule:
+    # 13:40 UTC = 07:40 Calgary (MDT) / 06:40 (MST). An off-peak minute on
+    # purpose: GitHub drops queued runs at the top of the hour, and the MSRP
+    # refresh measured a mean delay of 3.9 hours on a ":00" schedule.
+    - cron: "40 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm ci
+
+      # The offline gate first: if the catalogue itself is malformed, re-reading
+      # manufacturer pages proves nothing about it.
+      - name: The catalogue is defensible before anything is re-read
+        run: npm run test:freight-catalog
+
+      - name: Re-read every freight figure against the page it cites
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node --experimental-strip-types scripts/verify-freight-catalog.mjs

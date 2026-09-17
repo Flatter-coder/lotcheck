@@ -45,6 +45,12 @@ export interface Fee {
   make?: string;
   model?: string;
   source: string;      // where the figure was read
+  // THE PAGE, NOT THE PROSE. `source` describes where a figure came from;
+  // this is the URL a job can actually re-fetch. A figure whose source is
+  // only a sentence cannot be re-read by anything, which is how eleven
+  // freight charges sat unchecked from the day they were typed.
+  // verify-freight-catalog.mjs reports a row without one as `no_source`.
+  sourceUrl?: string;
   capturedOn: string;  // ISO date it was read
   // BRAND-SCOPE ROWS ONLY — how strong the evidence is, so a caller can match
   // the strength of its CLAIM to it:
@@ -211,6 +217,59 @@ const DEALER_FEE_CEILING: Fee[] = [
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────
 const FREIGHT: Fee[] = [
+  // ── Captured 2026-09-17, each figure read off an official Canadian page and
+  //    then CONFIRMED by a second independent read of a different page. Seven
+  //    more makes returned a figure that the second read could not corroborate
+  //    and are deliberately absent -- see the note at the end of this block.
+  //
+  //    These are the first freight rows carrying a `sourceUrl`, which is what
+  //    lets verify-freight-catalog.mjs re-read them daily. The twelve rows
+  //    below them name their source in prose only, so nothing can check them;
+  //    the verifier reports that as a backlog rather than as drift.
+  { component: "freight", label: "Destination Charge", amount: 2950, applies: "always", scope: "model", make: "Porsche", model: "Macan",
+    sourceUrl: "https://configurator.porsche.com/en-CA/3061/mode/model/95BAU1/exclusive-manufaktur",
+    // freight/destination only, PDI not included. MY2026. Confirmed against a second source: https://configurator.porsche.com/en-CA/mode/model/95BBV1/group/26026
+    source: "Porsche Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"Estimated Total Price* $73,535 | Base price $67,700 | Price for Equipment $0 | Estimated Maximum Dealer Fee $2,750 | Est\"", capturedOn: "2026-09-17" },
+  { component: "freight", label: "Freight and PDI", amount: 2000, applies: "always", scope: "model", make: "Honda", model: "CR-V",
+    sourceUrl: "https://hondanews.ca/en-CA/hci-automobiles/releases/release-04150531cb93adf566aca863300f8f08-rugged-electrified-and-refreshed-best-selling-honda-cr-v-hybrid-gains-new-trailsport-hybrid-trim-and-more-standard-tech",
+    // freight and PDI together. MY2026. Confirmed against a second source: https://www.honda.ca/en/stretch-lease
+    source: "Honda Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"Selling Price includes MSRP, $2000 for freight and PDI, a $100 A/C charge, Dealer Fees as determined by the dealer (whic\"", capturedOn: "2026-09-17" },
+  { component: "freight", label: "Freight and PDI", amount: 2595, applies: "always", scope: "model", make: "Acura", model: "RDX",
+    sourceUrl: "https://www.acura.ca/special-offers/",
+    // freight and PDI together. MY2026. Confirmed against a second source: https://www.acura.ca/special-offers/alberta
+    source: "Acura Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"Monthly lease payment is $838.69 – which includes: $2,595.00 Freight and PDI; $100 A/C charge; Regulatory Fees (up to $1\"", capturedOn: "2026-09-17" },
+  { component: "freight", label: "PDI Charge and freight (printed itemised: PDI $250 + freight", amount: 2125, applies: "always", scope: "model", make: "Mitsubishi", model: "Outlander",
+    sourceUrl: "https://www.mitsubishi-motors-pr.ca/wp-content/uploads/2026/03/MY26-Outlander-1-Page-EN.pdf",
+    // freight and PDI together. MY2026. Confirmed against a second source: https://www.mitsubishi-motors-pr.ca/wp-content/uploads/2026/03/MY26-Outlander-PHEV-Price-Guide-E
+    source: "Mitsubishi Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"PDI Charge $250, freight $1,875 May require body colour paint charge depending on colour.\"", capturedOn: "2026-09-17" },
+  { component: "freight", label: "Destination & Delivery", amount: 2595, applies: "always", scope: "model", make: "Lincoln", model: "Nautilus",
+    sourceUrl: "https://www.windowsticker.forddirect.com/windowsticker.pdf?vin=5LMPJ8KA0TJ051716",
+    // freight/destination only, PDI not included. MY2026. Confirmed against a second source: https://www.windowsticker.forddirect.com/windowsticker.pdf?vin=5LMPJ8JA1TJ046803
+    source: "Lincoln Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"PRICE INFORMATION BASE PRICE $70,650.00 TOTAL OPTIONS/OTHER 10,550.00 TOTAL VEHICLE & OPTIONS/OTHER 81,200.00 DESTINATIO\"", capturedOn: "2026-09-17" },
+  { component: "freight", label: "Freight and PDI", amount: 2800, applies: "always", scope: "model", make: "Polestar", model: "Polestar 2",
+    sourceUrl: "https://www.polestar.com/en-ca/offers/new/polestar-2/",
+    // freight and PDI together. MY2027. Confirmed against a second source: https://www.polestar.com/en-ca/polestar-2
+    source: "Polestar Canada, captured 2026-09-17 and confirmed by an independent second read \u2014 \"Selling price is $72,800 which includes $69,900 MSRP, $2,800 Freight and PDI and $100 air conditioning charge (where app\"", capturedOn: "2026-09-17" },
+  //
+  // WHAT IS DELIBERATELY NOT HERE, and why. Seven makes returned a figure that
+  // an independent second read could not corroborate, and ten published none at
+  // all on any official Canadian page. Both are recorded as gaps rather than
+  // filled with a plausible number, because a freight charge that is wrong by
+  // a few hundred dollars turns into a markup accusation against a named dealer.
+  //
+  // BMW is the one worth reading twice. The figure on offer is "freight and PDI
+  // (UP TO $2,955)" -- a ceiling, not a price -- and the page it was quoted from
+  // itemised OMVIC, the ONTARIO regulator, so it was the Ontario rendering of a
+  // province-selected disclaimer. Meanwhile real listings for the same nameplate
+  // show $2,995 in Montreal, $3,380 in Aurora and $4,395 at BMW Royal Oak in
+  // Calgary -- $1,440 above BMW's own published maximum. Storing $2,955 as a
+  // fixed Alberta freight and subtracting it from an all-in price that actually
+  // contains $4,395 would attribute the $1,440 difference to the dealer as
+  // markup. That is the exact false accusation this catalogue exists to prevent,
+  // so BMW stays absent until an Alberta-rendered capture settles it.
+  //
+  // Jaguar returned $2,345 and it is not here either: the figure is MY2023 and
+  // for the F-TYPE, and a 2023 charge applied to a current car is stale.
   { component: "freight", label: "Delivery and Destination Charge", amount: 1930, applies: "always", scope: "model", make: "Toyota", model: "RAV4",
     source: "Toyota Canada Build & Price — 2026 RAV4", capturedOn: "2026-08-15" },
   { component: "freight", label: "Delivery and Destination Charge", amount: 2205, applies: "always", scope: "model", make: "Lexus", model: "ES",
@@ -304,6 +363,16 @@ export function freightFor(
   const md = norm(model);
   const row = FREIGHT.find((f) => norm(f.make) === m && norm(f.model) === md);
   return row ? { amount: row.amount, source: row.source, capturedOn: row.capturedOn } : null;
+}
+
+/**
+ * Every freight figure we hold, so the daily verifier can walk them.
+ *
+ * Returns copies: the catalogue is reviewed source, and a caller that could
+ * mutate it could change what a report claims without a code review.
+ */
+export function freightCatalog(): Fee[] {
+  return FREIGHT.map((f) => ({ ...f }));
 }
 
 /** True when we hold ANY per-brand fee (ceiling or freight) for this make. */
