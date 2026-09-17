@@ -24,6 +24,7 @@ import { resolvePriceVerified } from "../supabase/functions/_shared/price-verifi
 import { Icon3D } from "./icons3d.jsx";
 import { beforeYouSign } from "../supabase/functions/_shared/before-you-sign.ts";
 import { SAMPLE_ANALYSIS } from "./lib/sample-report.js";
+import { referenceBasis } from "../supabase/functions/_shared/msrp-basis.js";
 // A lit dot is a claim — one decision function, testable, with no way to force
 // a lit result without a timestamp from a read that actually returned.
 import { liveState } from "./lib/live-state.js";
@@ -11721,9 +11722,17 @@ function QuoteCheckPage(){
               {(()=>{
                 const a=analysis; // same alias ReportViews used -- some gates pin the literal `isExactMsrp(a)` call
                 const money=(n)=>{const v=Number(n);return(!n||Number.isNaN(v))?"—":"$"+Math.round(v).toLocaleString("en-CA");};
-                const qp=Number(analysis.quotedPrice)||0, ms=Number(analysis.msrp)||0, delta=(qp&&ms)?qp-ms:0;
+                // THE GAP BAR IS THE SAME CLAIM IN PICTURE FORM, and it was drawn
+                // from a raw qp - ms. On an Alberta all-in price against an
+                // ex-freight MSRP it painted a coral bar and printed +$3,164 OVER
+                // MSRP while the band beside it declined to make the claim.
+                // referenceBasis() decides here too. [[two-authors-per-fact]]
+                const qp=Number(analysis.quotedPrice)||0, ms=Number(analysis.msrp)||0;
+                const rbG=referenceBasis(analysis);
+                const refG=rbG.comparable?Number(rbG.compareTo)||0:0;
+                const delta=(qp&&refG)?qp-refG:0;
                 const msrpExact=isExactMsrp(a);
-                const deltaOkG=!!(qp&&ms&&msrpExact);
+                const deltaOkG=!!(qp&&refG&&msrpExact);
                 const priceGatedG=!qp&&analysis.priceDisclosure==="contact_for_price";
                 const priceVerifiedG=resolvePriceVerified(analysis).sourceVerified;
 
@@ -11857,6 +11866,10 @@ function QuoteCheckPage(){
                         never a decorative curve between the two points.
                         [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]] */}
                     {deltaOkG&&(()=>{
+                      // Shadowed on purpose: every figure in this panel is the
+                      // reference we are ALLOWED to compare against, not the raw
+                      // ex-freight column.
+                      const ms=refG;
                       const lo=Math.min(qp,ms),hi=Math.max(qp,ms),pad=Math.max((hi-lo)*0.2,60);
                       const lo2=lo-pad,hi2=hi+pad,span=(hi2-lo2)||1;
                       const pct=(v)=>((v-lo2)/span)*100;

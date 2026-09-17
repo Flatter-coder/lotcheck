@@ -129,7 +129,7 @@ console.log("\npart 2 -- the five that reached a paying customer");
 console.log("\npart 3 -- a fully-checked listing still says something");
 {
   const full = {
-    quotedPrice: 38988, msrp: 37405, msrpBasis: "exact", priceVerified: true, feesRead: true,
+    quotedPrice: 38988, msrp: 37405, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: true, feesRead: true,
     recalls: { checked: true, count: 1, items: [{ system: "Lights And Instruments" }] },
     addOns: [{ verdict: "flagged", price: 1847 }], totalFlaggedCost: 1847,
     dealerLicence: { status: "Issued", state: "valid", registration_number: "B2036047" },
@@ -261,7 +261,7 @@ console.log("\npart 5 -- green carries its evidence, or it is not green");
   // An exact manufacturer figure still wins: comps are the fallback, not the
   // replacement. [[reference-point-model]]
   const exact = reportBands({
-    quotedPrice: 52000, msrp: 49000, msrpBasis: "exact", priceVerified: true, marketValue: MV,
+    quotedPrice: 52000, msrp: 49000, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: true, marketValue: MV,
   }).find((b) => b.n === "01");
   check("an exact MSRP still outranks the comparison set",
     /OVER/.test(String(exact.value)), String(exact.value));
@@ -390,4 +390,25 @@ console.log("");
 }
 
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }
+
+/* part N -- the hero band may not compare across two bases.
+ *
+ * Every exact-MSRP fixture above declares msrpPriceBasis, because a figure
+ * whose freight convention we never captured cannot carry a subtraction. The
+ * case below is the one that shipped: an Alberta ALL-IN advertised price
+ * against an ex-freight catalogue MSRP, which printed +$3,164 OVER on a car
+ * nobody had marked up. It is here as well as in test:freight-basis because
+ * this suite is where the hero band is read. */
+{
+  const allIn = reportBands({
+    make: "Toyota", quotedPrice: 72371, msrp: 69207, msrpBasis: "exact", priceVerified: true,
+    msrpAllIn: null, allInPricing: { body: "AMVIC" }, vehicleCondition: "new", vinCheck: { present: true },
+  }).find((b) => b.n === "01");
+  check("the hero band refuses an all-in ask against an ex-freight MSRP",
+    allIn.state !== "raise" && !/OVER/.test(String(allIn.value)), `${allIn.state} ${allIn.value}`);
+  check("...and never prints the phantom $3,164",
+    !allIn.note.includes("3,164"), allIn.note);
+  check("...and is NOTED, never CLEAR", allIn.state === "noted", allIn.state);
+}
+
 console.log("all checks passed");

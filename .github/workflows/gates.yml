@@ -508,6 +508,14 @@ jobs:
       # survived in the shop window because nothing tested the shop window.
       - name: The sample report is generated, never written
         run: npm run test:sample-report
+      # A SUBTRACTION NEEDS BOTH SIDES ON ONE BASIS, on every surface that
+      # subtracts. report-bands.js had the guard in the branch that declines to
+      # make a claim and not in the branch that prints the hero number, so an
+      # Alberta all-in ask against an ex-freight MSRP published +$3,164 OVER on a
+      # car nobody had marked up. These cases run through the hero band AND
+      # msrp-claim together, so a rule that holds on one surface only fails here.
+      - name: A price is never compared across two bases
+        run: npm run test:freight-basis
       - name: Vision image limits (never post an image the API will refuse)
         run: npm run test:vision-limits
       - name: Scrapfly render degrades instead of losing the HTML
