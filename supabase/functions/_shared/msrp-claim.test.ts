@@ -18,10 +18,19 @@ function check(ok: boolean, label: string, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}${ok ? "" : `\n        ${detail}`}`);
 }
 
+// THESE FIXTURES NOW DECLARE A FREIGHT BASIS, and that is not bookkeeping.
+// msrp_catalog.price_basis says whether a captured MSRP already contains
+// freight/PDI, and until 2026-09-17 nothing that subtracts ever read it: 854
+// of 1,497 live rows carry no basis at all and were subtracted from anyway.
+// A fixture with no basis describes a figure whose meaning we never captured,
+// so it is no longer comparable -- see the case at the bottom of this file,
+// which pins exactly that. The cars these four describe are ex-freight; they
+// now say so. [[msrp-100-percent-accuracy]]
+
 // ---- the ONLY basis that may support a comparison -------------------------
 {
   const c = qualifyMsrpClaim({
-    msrp: 58405, quotedPrice: 85995, msrpBasis: "exact", priceVerified: true,
+    msrp: 58405, quotedPrice: 85995, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: true,
     make: "Toyota", msrpTrim: "GR SPORT AWD",
   });
   check(c.comparable && c.delta === 27590 && c.over,
@@ -31,11 +40,11 @@ function check(ok: boolean, label: string, detail = "") {
   check(c.label === "MSRP · GR SPORT AWD", "the label names the trim", c.label);
 }
 {
-  const c = qualifyMsrpClaim({ msrp: 45000, quotedPrice: 42000, msrpBasis: "exact", priceVerified: true });
+  const c = qualifyMsrpClaim({ msrp: 45000, quotedPrice: 42000, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: true });
   check(c.comparable && c.delta === -3000 && !c.over, "under-MSRP is a signed delta, not a separate case", JSON.stringify(c));
 }
 {
-  const c = qualifyMsrpClaim({ msrp: 45000, quotedPrice: 45000, msrpBasis: "exact", priceVerified: true });
+  const c = qualifyMsrpClaim({ msrp: 45000, quotedPrice: 45000, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: true });
   check(c.comparable && c.delta === 0 && !c.over, "exactly at MSRP is comparable with a zero delta", JSON.stringify(c));
 }
 
@@ -80,7 +89,7 @@ function check(ok: boolean, label: string, detail = "") {
 
 // ---- a verified MSRP still needs a verified price -------------------------
 {
-  const c = qualifyMsrpClaim({ msrp: 58405, quotedPrice: 85995, msrpBasis: "exact", priceVerified: false });
+  const c = qualifyMsrpClaim({ msrp: 58405, quotedPrice: 85995, msrpBasis: "exact", msrpPriceBasis: "excl_freight", priceVerified: false });
   check(!c.comparable && c.delta === null,
     "an exact MSRP against an UNVERIFIED price is not a verified comparison",
     JSON.stringify(c));
@@ -116,8 +125,11 @@ for (const [input, label] of [
 // If this ever fails, some basis has quietly acquired the right to accuse.
 {
   const bases = ["exact", "starting_at", "original_when_new", "dealer_stated", "", "EXACT", "Exact", null, undefined];
+  // The freight basis is held CONSTANT here on purpose: this invariant asks
+  // which msrpBasis may support a claim, and leaving it out would make every
+  // basis fail for the other reason and the sweep would pass vacuously.
   const comparable = bases.filter((b) =>
-    qualifyMsrpClaim({ msrp: 50000, quotedPrice: 60000, msrpBasis: b, priceVerified: true }).comparable);
+    qualifyMsrpClaim({ msrp: 50000, quotedPrice: 60000, msrpBasis: b, priceVerified: true, msrpPriceBasis: "excl_freight" }).comparable);
   check(comparable.length === 1 && comparable[0] === "exact",
     `EXACTLY ONE basis may ever support a claim, and it is "exact" (case-sensitive)`,
     `comparable bases: ${JSON.stringify(comparable)}`);
@@ -211,6 +223,23 @@ check(!qualifyCeilingClaim({ quotedPrice: 85995, msrpCeiling: CEIL }).exceeds,
   "an ex-freight quote is never measured against an all-in ceiling");
 for (const bad of [{}, null, { quotedPrice: 85995 }, { quotedPrice: 85995, msrpCeiling: {} }] as any[]) {
   check(!qualifyCeilingClaim(bad).exceeds, `no ceiling claim from ${JSON.stringify(bad)}`);
+}
+
+
+// ---- a figure whose MEANING we never captured ------------------------------
+// price_basis records whether a captured MSRP already includes freight/PDI.
+// 854 of the 1,497 rows in the live catalogue on 2026-09-17 carried none, and
+// every one of them was subtracted from. An unlabelled figure must not acquire
+// authority by default -- the same principle as the msrpBasis sweep above.
+{
+  const noBasis = qualifyMsrpClaim({ msrp: 50000, quotedPrice: 60000, msrpBasis: "exact", priceVerified: true });
+  check(!noBasis.comparable && noBasis.delta === null,
+    "an MSRP with no recorded freight basis supports no claim", JSON.stringify(noBasis));
+  check(/gap in our catalogue/i.test(noBasis.refusal || ""),
+    "...and the refusal names the gap as ours, not the dealer's", String(noBasis.refusal));
+  const inclFreight = qualifyMsrpClaim({ msrp: 50000, quotedPrice: 60000, msrpBasis: "exact", priceVerified: true, msrpPriceBasis: "incl_freight" });
+  check(!inclFreight.comparable,
+    "a freight-inclusive MSRP supports no claim against an unstated asking basis", JSON.stringify(inclFreight));
 }
 
 console.log(`\n${fail === 0 ? "✅" : "❌"} msrp claim gate: ${pass} passed, ${fail} failed`);

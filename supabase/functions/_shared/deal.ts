@@ -56,6 +56,7 @@ const DISCOUNT_RE = /\b(discount|rebate|savings|incentive|loyalty|conquest)\b/;
 
 // Whether an MSRP may back a claim is decided in ONE place. This file used to
 // answer it twice, differently, and both answers were wrong.
+import { referenceBasis } from "./msrp-basis.js";
 import { qualifyMsrpClaim, isManufacturerFigure } from "./msrp-claim.ts";
 import { isBundledFeeCaption, bundledItemisationAsk } from "./fee-caption.ts";
 import { assessCertifiedClaim } from "./cpo.ts";
@@ -124,7 +125,14 @@ export function buildCounterScript(analysis: any): CounterScript {
   // Only a VERIFIED exact-trim MSRP earns a price move. A base-model floor
   // ("starting_at") or the dealer's own stated sticker ("dealer_stated") is not
   // a manufacturer figure, and quoting one at the desk would be indefensible.
-  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100 && analysis?.msrpBasis === "exact") {
+  // AND THE BASIS, WHICH THIS MOVE NEVER CHECKED. S14 puts a number in the
+  // buyer's mouth to say to a named licensee, and it was computed as a raw
+  // qp - msrp. On an Alberta all-in price against an ex-freight MSRP that is
+  // roughly $3,000 of mandatory freight and levies recited as dealer markup --
+  // the worst surface for this defect to reach. The Freight & PDI move below
+  // already consulted msrpPriceBasis; this one did not.
+  // [[no-accusation-language]] [[two-authors-per-fact]]
+  if (qp != null && msrp != null && msrp > 0 && qp > msrp + 100 && analysis?.msrpBasis === "exact" && referenceBasis(analysis).comparable) {
     // S14 — one dealer's price isn't "the market"; the market is real deals across dealers.
     moves.push({ topic: "Price", say: `This is about ${money(qp - msrp)} over MSRP (${money(msrp)}). "Market value" is set by real deals across many dealers, not one store's number — I'd need this at MSRP to move forward.` });
   }

@@ -29,6 +29,7 @@
 //                     themselves and calling it verification.
 
 import { resolvePriceVerified } from "./price-verified.ts";
+import { referenceBasis, basisRefusal } from "./msrp-basis.js";
 
 export type MsrpBasis = "exact" | "starting_at" | "original_when_new" | "dealer_stated";
 
@@ -256,15 +257,22 @@ export function qualifyMsrpClaim(analysis: any): MsrpClaim {
     };
   }
 
-  // An all-in asking price with NO all-in reference cannot be compared soundly:
-  // measuring it against the ex-freight MSRP invents the freight as markup.
-  // Refuse rather than overstate — the ceiling claim still has something to say.
-  if (a.allInPricing && !allIn) {
-    return {
-      ...base,
-      label: labelFor(basis, a),
-      refusal: `This price is advertised all-in, but we hold only ${make}'s ex-freight MSRP for this trim — comparing the two would count freight and fees as markup, so no over/under-MSRP claim is made.`,
-    };
+  // ONE ANSWER TO ONE QUESTION, IMPORTED.
+  //
+  // This module refused an all-in-vs-ex-freight comparison correctly and had
+  // done since #475. report-bands.js did not: its hero branch went from
+  // msrpBasis === exact straight to qp - ms and printed +$3,164 OVER on the
+  // 4Runner shape. deal.ts guarded its counter-script move on msrpPriceBasis,
+  // a third rule again. Three authors, three answers, one report.
+  // referenceBasis() is now the only one. [[two-authors-per-fact]]
+  //
+  // It also closes the case this module never covered: a catalogue row with NO
+  // recorded price_basis outside an all-in province. 854 of 1,497 live rows
+  // are in that state, and this module used to subtract against every one of
+  // them. [[msrp-100-percent-accuracy]]
+  const rb = referenceBasis(a);
+  if (!rb.comparable) {
+    return { ...base, label: labelFor(basis, a), refusal: basisRefusal(rb.why, make) };
   }
 
   const delta = asking - reference;

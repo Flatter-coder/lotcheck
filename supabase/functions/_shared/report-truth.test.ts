@@ -137,8 +137,12 @@ check("...and never the $11,173 the shipped report printed",
   correct.delta !== 11173, "68,673 - 57,500 counts Toyota's own freight as dealer markup");
 
 const noAllIn = qualifyMsrpClaim({ ...charlesglen, allInPricing: { code: "AB" }, msrpAllIn: null });
+// ASSERT THE SUBSTANCE, NOT THE SENTENCE. This pinned the exact phrase
+// "freight and fees as markup", so rewording the refusal failed a gate whose
+// behaviour was unchanged - and a gate that cries wolf gets overridden. What
+// matters is that no delta is published and the refusal names the gap as OURS.
 check("an all-in province with no all-in reference still refuses",
-  !noAllIn.comparable && /freight and fees as markup/i.test(noAllIn.refusal || ""),
+  !noAllIn.comparable && noAllIn.delta === null && /markup/i.test(noAllIn.refusal || "") && /gap in our catalogue/i.test(noAllIn.refusal || ""),
   JSON.stringify(noAllIn.refusal));
 
 // ---------------------------------------------------------------------------

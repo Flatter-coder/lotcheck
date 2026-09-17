@@ -81,6 +81,8 @@ import { marketCompareLine } from "./report-lines.js";
 // was verified against, and reportBands() THROWS if one does not -- so green
 // cannot be constructed without its evidence attached.
 // [[make-it-dispute-proof]] [[claims-must-stay-backed]]
+import { referenceBasis, basisRefusal } from "./msrp-basis.js";
+
 export const RAISE = "raise", CLEAR = "clear", NOTED = "noted", UNCHECKED = "unchecked";
 
 /** The word printed beside every band, so the verdict survives greyscale. */
@@ -132,16 +134,34 @@ function priceBand(a) {
       "This listing does not publish a price — the page says to contact the dealer. You cannot compare what you cannot see; ask for the all-in price in writing before you go in.",
       { hero: true });
   }
+  // THE SUBTRACTION NEEDS A BASIS, AND THIS BRANCH NEVER ASKED FOR ONE.
+  // Thirty lines below, the could-not-pin-it path carries a careful paragraph
+  // about all-in pricing and a sameBasis guard. This branch -- the one that
+  // prints the hero number -- went from msrpBasis === exact straight to qp - ms.
+  // On the 4Runner shape it published +$3,164 OVER against an Alberta all-in
+  // price whose freight, levies and dealer fee are inside the asking figure.
+  // The fix had landed in the path that declines to make a claim, and not in
+  // the path that makes one. referenceBasis() is now the only answer, shared
+  // with msrp-claim.ts. [[two-authors-per-fact]] [[no-accusation-language]]
   if (exact && qp > 0) {
-    const d = qp - ms;
+    const rb = referenceBasis(a);
+    if (!rb.comparable) {
+      return band("price_vs_msrp", "01", NOTED, "BASIS NOT MATCHED",
+        `${fmtMoney(qp)} asking. ${basisRefusal(rb.why, a?.make)}`,
+        { hero: true, scale });
+    }
+    const ref = rb.compareTo;
+    const allIn = rb.mode === "all_in";
+    const d = qp - ref;
+    const what = allIn ? "all-in" : "before freight";
     if (d > 0) return band("price_vs_msrp", "01", RAISE, `+${fmtMoney(d)} OVER`,
-      `${fmtMoney(qp)} asking against the ${fmtMoney(ms)} this configuration carries from the manufacturer.`,
+      `${fmtMoney(qp)} asking against the ${fmtMoney(ref)} this configuration carries from the manufacturer, ${what}.`,
       { hero: true, scale });
     if (d < 0) return band("price_vs_msrp", "01", CLEAR, `${fmtMoney(-d)} UNDER`,
-      `${fmtMoney(qp)} asking, below the ${fmtMoney(ms)} manufacturer figure for this configuration.`,
+      `${fmtMoney(qp)} asking, below the ${fmtMoney(ref)} manufacturer figure for this configuration, ${what}.`,
       { hero: true, scale, source: "the manufacturer's published price for this exact configuration" });
     return band("price_vs_msrp", "01", CLEAR, "AT MSRP",
-      `${fmtMoney(qp)} asking, level with the manufacturer's figure for this configuration.`,
+      `${fmtMoney(qp)} asking, level with the manufacturer's ${what} figure for this configuration.`,
       { hero: true, scale, source: "the manufacturer's published price for this exact configuration" });
   }
   /* USED CARS: MEASURE AGAINST THE MARKET, BECAUSE THERE IS NO STICKER.
