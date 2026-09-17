@@ -24,6 +24,82 @@ the next instance.
 
 ---
 
+## 2026-09-17 - the advert kept selling an instrument the report no longer had
+
+The Quote Check page carried a card headed **Sample LotCheck Report / What a
+finished check looks like**. Inside it, three hand-written dials:
+
+    LEVERAGE      8.2   of 10
+    FEES FLAGGED  $899  marker: TYP $499
+    RECALLS       2     open
+
+`8d99a84`
+
+**The leverage gauge had been deleted from the product eight days earlier.**
+PR #486 (2026-09-15) replaced the 0-10 score with the dollars themselves,
+because an abstract score is a number a buyer cannot act on
+[[design-must-be-self-explanatory]]. After that merge `GaugeDial` had exactly
+one caller left in the entire codebase, and it was this advert. A visitor read
+the sample, paid, and received a different instrument.
+
+The fee dial was wrong in a second way. It pointed at $899 against a marker
+labelled **"TYP $499"**, and the report has never compared a fee to a market
+average - it compares it to the **manufacturer's own published maximum**, a
+figure we hold with a source and a capture date [[fee-catalog]]. So the advert
+did not merely show stale numbers, it showed a **method we do not use**.
+
+**Why the SAMPLE badge did not save it.** The block was labelled SAMPLE
+throughout, and that label is true: the numbers were invented. But nobody reads
+SAMPLE as "the format is invented too", because showing the format is the entire
+purpose of the card. The badge scoped the claim to the figures and left the
+shape unguarded, and hand-writing the shape made the advert a **second author**
+of what a LotCheck report is. [[two-authors-per-fact]]
+
+**Class: one-surface fix.** The 0-10 score was removed from the consumer
+everybody was looking at and left standing in the one nobody tests. It is also
+[[run-every-gate-before-done]] inverted - 117 gates were green the whole time,
+because not one of them had anything to say about the marketing surface.
+
+**The fix is not better sample numbers; it is to stop writing the sample.**
+`src/lib/sample-report.js` now holds only INPUTS - an invented vehicle with
+invented findings - and the page renders them through `beforeYouSign()`, the
+same builder the real report calls. The advert cannot drift from the product
+again, because it **is** the product, run on made-up inputs.
+
+**It found a live defect in #489 within a minute of existing.** The generated
+card is the first surface ever to render the fee branch with
+`docFee === mfrCeiling`, and it printed:
+
+    $999 is exactly Toyota's published maximum in AB of $999
+
+- the same figure twice in nine words, which reads like two figures that happen
+to coincide. And `test-before-you-sign.mjs` had **pinned that duplicate as
+correct** (`/Toyota's published maximum of \$999/`), so the suite was green over
+it. The at-the-cap branch now names the authority without the amount, and the
+assertion counts the occurrences instead of matching the old string. That is a
+**guard bound to spelling, not substance**, caught by a second surface rather
+than by review.
+
+**Guard:** `scripts/test-sample-report.mjs`, 16 checks in `gates.yml`. The block
+must call `beforeYouSign(SAMPLE_ANALYSIS)`; **no dollar sign in the rendered
+markup may be followed by a digit** (a hand-typed figure); no `of 10` gauge may
+return anywhere in `App.jsx`; no invented "typical" fee; the fixture must yield
+at least three items, one raise, a dollar total and two questions, so a
+half-filled advert fails the build; and the fixture must carry no dealer name
+and no VIN, so a sample can never resolve to a real business or a real car
+[[ai-defamation-entity-match-lesson]]. The sample fee sits exactly **on**
+Toyota's published cap rather than above it - using a real marque to illustrate
+misconduct nobody committed is not a thing a sample gets to do
+[[no-accusation-language]]. 7/7 mutations caught.
+
+No `CACHE_VER` bump: `beforeYouSign()` runs on the client at render time, so a
+stored analysis re-renders through the corrected code.
+
+**Still open:** `GaugeDial` is now defined and called nowhere. Left in place
+rather than removed, pending a decision. [[always-ask-before-deleting]]
+
+---
+
 ## 2026-09-16 - the car was filed under two model names, so it was compared against nothing
 
 **Shape: a key built on a mutable name** - the second instance in one day, one

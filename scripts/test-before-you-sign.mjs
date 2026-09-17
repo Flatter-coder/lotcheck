@@ -46,7 +46,15 @@ const all = (r) => r.items.map((i) => `${i.label} ${i.detail}`).join(" | ");
 {
   const policy = beforeYouSign({ vinCheck: { present: true }, docFeeCheck: { docFee: 999, mfrCeiling: 999, mfrCeilingAt: true, mfrCeilingOverBy: 0, mfrCeilingMake: "Toyota", mfrCeilingProvenance: "policy" } });
   check("a policy-backed ceiling may be called the brand's published maximum",
-    /Toyota's published maximum of \$999/.test(all(policy)), all(policy));
+    /Toyota's published maximum/.test(all(policy)), all(policy));
+  // THE FEE AND THE CEILING ARE THE SAME NUMBER HERE, so the sentence must
+  // name it ONCE. It used to read "$999 is exactly Toyota's published maximum
+  // of $999", which a buyer reads as two figures that happen to coincide. The
+  // assertion this replaced PINNED THAT DUPLICATE AS CORRECT, so the suite was
+  // green over it -- it took the generated marketing sample, the first surface
+  // ever to render docFee === mfrCeiling, to show it.
+  check("...and names the figure once, not twice",
+    all(policy).split("$999").length - 1 === 1, all(policy));
   const single = beforeYouSign({ vinCheck: { present: true }, docFeeCheck: { docFee: 1295, mfrCeiling: 995, mfrCeilingOverBy: 300, mfrCeilingMake: "Lexus", mfrCeilingProvenance: "single-model" } });
   check("a single-model ceiling is never called the brand's maximum",
     !/Lexus's published maximum/.test(all(single)), all(single));
