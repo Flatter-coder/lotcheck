@@ -102,3 +102,78 @@ export function powertrainCompatible(listingModel, catalogModel) {
   for (const m of a) if (!b.has(m)) return false;
   return true;
 }
+
+// THE SAME CAR, FILED UNDER TWO MODEL NAMES.
+//
+// WHAT BROKE. A real report on a 2026 Lexus NX 350 F SPORT 3 at Lexus of
+// Royal Oak said "Other listings read: None read" and "Not enough similar
+// listings to compare". We were holding NINETY-FIVE 2026 Lexus NX listings in
+// Alberta at the time, 51 of them gas NX 350s between $54,830 and $72,146 --
+// against a car asking $72,241, at the very top of that range. The buyer was
+// shown nothing.
+//
+// The cause is one line of SQL in fn_market_comps:
+//
+//     and lower(vl.model) = lower(p_model)
+//
+// The subject page parses as model "NX 350". The crawled listings are stored
+// as model "NX" with "NX 350" in the TRIM, because that is how the dealer
+// pages name them. "NX 350" never equals "NX", so the candidate set came back
+// empty and every card downstream correctly reported having nothing -- which a
+// buyer reads as "there are none out there".
+//
+// Same shape as the trim-name fork fixed on 2026-09-16: an identity built on a
+// name that two sides spell differently.
+//
+// WHAT THIS FUNCTION IS FOR, AND WHAT IT IS NOT FOR. It returns a WIDER
+// candidate key for a second fetch, used only when the exact match found
+// nothing. It never decides what is comparable -- likeForLikePool() does that,
+// and it still applies the powertrain wall and the trim scope to whatever
+// comes back. Widening the fetch cannot therefore blur a hybrid into a gas
+// set: dropping the marker here only puts the row in front of the wall.
+//
+// Returns "" when there is nothing safe to widen to.
+
+// An engine designation: 2-3 digits, optionally carrying a hybrid/EV suffix
+// and optionally prefixed by a drive-system word. Lexus "NX 350", "RX 350h",
+// "NX 450h+"; BMW "X3 xDrive30i"; Mercedes "GLC 300".
+//
+// TWO AND THREE DIGITS, NEVER FOUR, and the difference is load-bearing:
+// "Silverado 1500", "Sierra 1500" and "Ram 2500" are SEPARATE TRUCKS, not
+// engine variants of one line. Stripping those would put a 2500 in a 1500's
+// comparison set, and the trim scope downstream has no idea they differ.
+const ENGINE_DESIGNATION = /^(?:[a-z]*\d{2,3}[a-z]*\+?)$/i;
+
+// A remainder that names no vehicle. "Model 3" must not widen to "Model" --
+// and it does not reach here anyway, because "3" is one digit, not two.
+// These are the words that would survive the strip and mean nothing.
+const EMPTY_NAMEPLATES = new Set(["model", "series", "class", "type", "grand", "the"]);
+
+export function baseNameplate(model) {
+  const raw = String(model || "").trim();
+  if (!raw) return "";
+  const words = raw.split(/\s+/).filter(Boolean);
+  // A single token is the nameplate itself. "RAV4", "Mazda3", "CX-5", "F-150"
+  // and "Q50" all carry their digits inside the name and must never be cut.
+  if (words.length < 2) return "";
+
+  // Drop trailing engine designations and powertrain markers, in any order:
+  // "NX 350h" and "NX Hybrid 350" both widen to "NX".
+  const kept = [...words];
+  let dropped = 0;
+  while (kept.length > 1) {
+    const last = kept[kept.length - 1];
+    const isEngine = ENGINE_DESIGNATION.test(last);
+    const isPowertrain = powertrainMarkers(last).size > 0;
+    if (!isEngine && !isPowertrain) break;
+    kept.pop();
+    dropped++;
+  }
+  if (!dropped) return "";                       // nothing to widen to
+
+  const out = kept.join(" ");
+  if (out.toLowerCase() === raw.toLowerCase()) return "";
+  if (EMPTY_NAMEPLATES.has(out.toLowerCase())) return "";
+  if (out.replace(/[^a-z0-9]/gi, "").length < 2) return "";
+  return out;
+}

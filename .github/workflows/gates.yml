@@ -471,6 +471,22 @@ jobs:
       # source_url NULL. Pins the naming rules that keep the key stable.
       - name: A base trim is named by the manufacturer, not by a package stub
         run: npm run test:trim-identity
+      # A report on a 2026 Lexus NX 350 said "Other listings read: None read"
+      # while we held 95 Alberta NX listings -- 51 gas NX 350s from $54,830 to
+      # $72,146, against a car asking $72,241. fn_market_comps matches the model
+      # by exact string equality and the subject was filed "NX 350" while the
+      # crawl files those rows under "NX". Pins the nameplate fallback, and the
+      # powertrain wall that must still separate 350 / 350h / 450h+ after it.
+      - name: A comps fetch finds the car the crawl filed under another name
+        run: npm run test:comps-nameplate
+      # THIS SUITE EXISTED AND WAS GREEN 8/8 WHILE THE DEFECT IT COVERS SHIPPED,
+      # because it was wired into nothing and never ran here. A 2026 Cadillac
+      # LYRIQ reached msrp_catalog with the trim "NaN 2026 LYRIQ" -- cadillaccanada
+      # .ca rendered a literal NaN where its own script failed to format a number,
+      # and the extractor read the nearest text as a trim name. It carried a
+      # source_url, so the refresh DELETE spared it indefinitely.
+      - name: A failed computation on a maker page never becomes a trim name
+        run: npm run test:published-price
       - name: Every seeded model is reachable by the lookup
         run: npm run test:reachable
       - name: Report truth (never a claim the pipeline did not check)

@@ -1831,7 +1831,13 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   const clusters: Array<{ key: string; label: string; dot: any; blurb: string }> = [
     { key: "money", label: "PRICE & FINANCING", dot: TEAL, blurb: "What this vehicle costs against the manufacturer's own numbers, and what's added on top." },
     { key: "safety", label: "SAFETY & COVERAGE", dot: CORAL, blurb: "Open recalls and how much factory protection is left on this specific vehicle." },
-    { key: "trust", label: "TRUST & DEALER", dot: AMBER, blurb: "Who you'd be dealing with, by the public record." },
+    // "TRUST" was a verdict word: it read as LotCheck vouching for the dealer,
+    // which is not something we do or could defend. This section reports what
+    // two public sources say and nothing more -- AMVIC's licence register, and
+    // the dealer's own publicly posted customer rating. The blurb keeps naming
+    // the basis, because one of the two is a public RATING rather than a
+    // register entry and the heading must not flatten that. [[no-accusation-language]]
+    { key: "trust", label: "PUBLIC RECORD", dot: AMBER, blurb: "Who you'd be dealing with, by the public record and the dealer's own published rating." },
   ];
   for (const cl of clusters) {
     const points = CORE.filter((p) => p.t !== "Price vs MSRP" && clusterOf(p.t) === cl.key);

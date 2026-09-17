@@ -27,7 +27,7 @@
 import { vinShapeOrNull } from "./vin.ts";
 
 import { likeForLikePool, fuelPowertrainHint, todayLocal, olderYearsLadder, POOL_CAP } from "./market-count.js";
-import { powertrainCompatible } from "./model-identity.js";
+import { powertrainCompatible, baseNameplate } from "./model-identity.js";
 
 export interface MarketValue {
   average: number | null;     // the median asking price — the headline number
@@ -332,6 +332,71 @@ export function computeMarketCpoPremium(rows: CompRow[], opts: BandOpts = {}): C
   return { premium, nonCertifiedMedian: base.median, certifiedMedian, nNonCertified: base.n, nCertified: certified.length, basis };
 }
 
+// EVERY COMPS FETCH GOES THROUGH HERE, AND IT ASKS TWICE.
+//
+// WHAT BROKE. A real report on a 2026 Lexus NX 350 F SPORT 3 at Lexus of Royal
+// Oak said "Other listings read: None read" and "Not enough similar listings to
+// compare". We were holding NINETY-FIVE 2026 Lexus NX listings in Alberta at
+// that moment -- 51 of them gas NX 350s from $54,830 to $72,146, against a car
+// asking $72,241, the top of the range. The buyer was shown nothing, and "None
+// read" reads as "there are none out there".
+//
+// THE CAUSE is one line of SQL in fn_market_comps:
+//
+//     and lower(vl.model) = lower(p_model)
+//
+// Exact string equality, and the two sides do not spell the car the same way.
+// A subject page parses as model "NX 350"; the crawled listings are stored as
+// model "NX" with "NX 350" in the TRIM, because that is how the dealer pages
+// write them. "NX 350" never equals "NX", so the candidate set came back empty
+// and every card downstream honestly reported having nothing to say.
+//
+// Same shape as the trim-name fork fixed earlier on 2026-09-16: an identity
+// built on a name that two sides spell differently.
+//
+// WHY THE SECOND ASK IS SAFE. It runs ONLY when the exact match returned zero
+// rows, so it cannot change any result that already works. It cannot blur a
+// powertrain either: widening only puts rows in front of the walls that were
+// always there -- likeForLikePool / computeBand / the powertrainCompatible
+// filter still reject a hybrid row for a gas subject, reading the model AND the
+// trim string. And baseNameplate() refuses to widen where widening would mean a
+// different vehicle: "Silverado 1500" and "Ram 2500" are separate trucks, not
+// engine variants, so their four-digit series numbers are never stripped.
+type CompsFetch = { ok: boolean; status: number; rows: any[]; model: string };
+async function fetchCompsWidened(
+  url: string,
+  key: string,
+  params: Record<string, unknown>,
+  label: string,
+  signal?: AbortSignal,
+): Promise<CompsFetch> {
+  const ask = (m: string) =>
+    fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
+      ...(signal ? { signal } : {}),
+      body: JSON.stringify({ ...params, p_model: m }),
+    });
+
+  const model = String(params.p_model ?? "");
+  const res = await ask(model);
+  if (!res.ok) return { ok: false, status: res.status, rows: [], model };
+  const raw = await res.json();
+  const rows = Array.isArray(raw) ? (raw as any[]) : [];
+  if (rows.length) return { ok: true, status: res.status, rows, model };
+
+  const wide = baseNameplate(model);
+  if (!wide) return { ok: true, status: res.status, rows, model };
+  // A failed retry is not a failed fetch: the first ask succeeded and honestly
+  // found nothing, which is still a truthful answer.
+  const r2 = await ask(wide);
+  if (!r2.ok) { console.warn(`${label} market_comps nameplate retry: HTTP`, r2.status); return { ok: true, status: res.status, rows, model }; }
+  const raw2 = await r2.json();
+  const rows2 = Array.isArray(raw2) ? (raw2 as any[]) : [];
+  if (rows2.length) console.log(`${label} market_comps: "${model}" matched nothing, "${wide}" matched ${rows2.length}`);
+  return { ok: true, status: res.status, rows: rows2, model: rows2.length ? wide : model };
+}
+
 async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx): Promise<MarketValue | null> {
   const url = env("SUPABASE_URL");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_ANON_KEY");
@@ -343,22 +408,17 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
   const prov = String(ctx.province || "").toUpperCase();
   if (!servesComps(prov)) return null;
   try {
-    const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
-      method: "POST",
-      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
-        p_condition: String(ctx.condition), p_exclude_vin: vin || null,
-        p_province: prov,
-        // +/-1 model year: likeForLikePool tries the subject's year, then one
-        // either side, and nothing wider is like-for-like -- rows two years out
-        // were fetched and discarded.
-        p_year_span: 1,
-      }),
-    });
-    if (!res.ok) { console.warn("lotcheck market_comps: HTTP", res.status); return null; }
-    const rows = await res.json();
-    const all = Array.isArray(rows) ? (rows as any[]) : [];
+    const got = await fetchCompsWidened(url, key, {
+      p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
+      p_condition: String(ctx.condition), p_exclude_vin: vin || null,
+      p_province: prov,
+      // +/-1 model year: likeForLikePool tries the subject's year, then one
+      // either side, and nothing wider is like-for-like -- rows two years out
+      // were fetched and discarded.
+      p_year_span: 1,
+    }, "lotcheck");
+    if (!got.ok) { console.warn("lotcheck market_comps: HTTP", got.status); return null; }
+    const all = got.rows;
     // LIKE-FOR-LIKE FIRST (market-count.js likeForLikePool): same powertrain,
     // same model year (then +/-1), a mileage window for a used subject, then the
     // same trim / trim family / all trims -- each labelled. The RPC's +/-2-year
@@ -367,7 +427,7 @@ async function lotcheckValue(vin: string, mileage: number | null, ctx: MarketCtx
     // the two cards on one report share one 30-day window.
     const today = ctx.today || todayLocal();
     const pool = likeForLikePool(all, {
-      model: ctx.model, trim: ctx.trim ?? null, year: ctx.year, condition: String(ctx.condition),
+      model: ctx.model, rowModel: got.model, trim: ctx.trim ?? null, year: ctx.year, condition: String(ctx.condition),
       odometerKm: mileage, minRows: COMP_FLOOR, today, powertrainHint: fuelPowertrainHint(ctx.fuelType),
     });
     const dealersOf = (set: any[]): number | null => {
@@ -513,20 +573,15 @@ export async function fetchOlderYears(ctx: MarketCtx & { vin?: string | null }):
     // the request budget the MSRP point needs.
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 4_000);
-    let res: Response;
+    let got: CompsFetch;
     try {
-      res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
-        method: "POST",
-        headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
-        signal: ac.signal,
-        body: JSON.stringify({
-          // Years y-3 .. y-1: centre on y-2 with a span of 1. Condition "used":
-          // an older model year on a lot is a used car.
-          p_year: y - 2, p_make: String(ctx.make), p_model: String(ctx.model),
-          p_condition: "used", p_exclude_vin: vinShapeOrNull(vin),
-          p_province: prov, p_year_span: 1, p_limit: POOL_CAP,
-        }),
-      });
+      got = await fetchCompsWidened(url, key, {
+        // Years y-3 .. y-1: centre on y-2 with a span of 1. Condition "used":
+        // an older model year on a lot is a used car.
+        p_year: y - 2, p_make: String(ctx.make), p_model: String(ctx.model),
+        p_condition: "used", p_exclude_vin: vinShapeOrNull(vin),
+        p_province: prov, p_year_span: 1, p_limit: POOL_CAP,
+      }, "older years", ac.signal);
     } catch (e) {
       clearTimeout(timer);
       const timedOut = (e as Error)?.name === "AbortError";
@@ -534,11 +589,10 @@ export async function fetchOlderYears(ctx: MarketCtx & { vin?: string | null }):
       return { ...base, reason: timedOut ? "timeout" : "rpc_error" };
     }
     clearTimeout(timer);
-    if (!res.ok) { console.warn("older years: fn_market_comps HTTP", res.status); return { ...base, reason: "rpc_error" }; }
-    const rows = await res.json();
-    const all = Array.isArray(rows) ? (rows as any[]) : [];
+    if (!got.ok) { console.warn("older years: fn_market_comps HTTP", got.status); return { ...base, reason: "rpc_error" }; }
+    const all = got.rows;
     const lad = olderYearsLadder(all, {
-      model: ctx.model, trim: ctx.trim ?? null, year: y, minRows: COMP_FLOOR, maxRungs: OLDER_YEARS_MAX_RUNGS,
+      model: ctx.model, rowModel: got.model, trim: ctx.trim ?? null, year: y, minRows: COMP_FLOOR, maxRungs: OLDER_YEARS_MAX_RUNGS,
       today: ctx.today || todayLocal(), powertrainHint: fuelPowertrainHint(ctx.fuelType),
       truncated: all.length >= POOL_CAP,
     });
@@ -574,19 +628,18 @@ export async function lotcheckValueBand(
   const prov = String(ctx.province || "").toUpperCase();
   if (!servesComps(prov)) return null; // Alberta-only crawl coverage today
   try {
-    const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
-      method: "POST",
-      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
-        p_condition: String(ctx.condition), p_exclude_vin: vin || null,
-        p_province: prov, p_year_span: 2,
-      }),
-    });
-    if (!res.ok) { console.warn("lotcheckValueBand market_comps: HTTP", res.status); return null; }
-    const rowsRaw = await res.json();
+    const got = await fetchCompsWidened(url, key, {
+      p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
+      p_condition: String(ctx.condition), p_exclude_vin: vin || null,
+      p_province: prov, p_year_span: 2,
+    }, "lotcheckValueBand");
+    if (!got.ok) { console.warn("lotcheckValueBand market_comps: HTTP", got.status); return null; }
+    const rowsRaw = got.rows;
     // Powertrain wall (2026-09-02): a hybrid never sits in a gas car's set.
-    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).filter((r: any) => powertrainCompatible(`${ctx.model || ""} ${ctx.trim || ""}`, `${ctx.model || ""} ${r?.trim || ""}`));
+    // The row side is built from the model the pool was FETCHED under, not the
+    // subject's -- prepending the subject's model injects its own powertrain
+    // marker into every row and the wall stops separating anything.
+    const rows = (Array.isArray(rowsRaw) ? rowsRaw : []).filter((r: any) => powertrainCompatible(`${ctx.model || ""} ${ctx.trim || ""}`, `${got.model || ""} ${r?.trim || ""}`));
     const band = computeBand(rows as CompRow[], {
       odometerKm: mileage ?? null, trim: ctx.trim ?? null, condition: String(ctx.condition),
     });
@@ -772,17 +825,12 @@ export async function lotcheckValueReport(
   const prov = String(ctx.province || "").toUpperCase();
   if (!servesComps(prov)) return null;
   try {
-    const res = await fetch(`${url}/rest/v1/rpc/fn_market_comps`, {
-      method: "POST",
-      headers: { "content-type": "application/json", apikey: key, authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
-        p_condition: String(ctx.condition), p_exclude_vin: vin || null, p_province: prov, p_year_span: 2,
-      }),
-    });
-    if (!res.ok) { console.warn("lotcheckValueReport market_comps: HTTP", res.status); return null; }
-    const raw = await res.json();
-    const comps: ValueComp[] = Array.isArray(raw) ? raw : [];
+    const got = await fetchCompsWidened(url, key, {
+      p_year: Number(ctx.year), p_make: String(ctx.make), p_model: String(ctx.model),
+      p_condition: String(ctx.condition), p_exclude_vin: vin || null, p_province: prov, p_year_span: 2,
+    }, "lotcheckValueReport");
+    if (!got.ok) { console.warn("lotcheckValueReport market_comps: HTTP", got.status); return null; }
+    const comps: ValueComp[] = got.rows as ValueComp[];
     const band = computeBand(comps as CompRow[], { odometerKm: mileage ?? null, trim: ctx.trim ?? null, condition: String(ctx.condition) });
     if (band.insufficient || band.n < COMP_FLOOR) {
       console.warn(`lotcheckValueReport: thin coverage (${band.n} < ${COMP_FLOOR}) — suppressing value`);
