@@ -22,6 +22,155 @@ the next instance.
 | **A happy path that hides a branch** | an assertion written for the fallback never reaches it, because the primary path answers first in every test fixture - the branch is untested and the gate looks complete |
 | **A key built on a mutable name** | an identity key includes a human-readable label, so renaming the label forks the record instead of updating it - and every mechanism keyed on it (dedupe, carry-forward, supersede) stops firing at once, silently |
 | **A check run at the wrong moment** | the check is correct, the answer is true, and it answers a question nobody asked - a diff taken before a long test run, a cache gate consulted before anything was staged. Green here means "nothing had changed yet", not "nothing is wrong" |
+| **A field read from the wrong node** | the document really does carry the field, the selector really did match, and the count is full - but it describes a DIFFERENT entity. A dealer's logo answering "what does this car look like", a similar-vehicles rail card answering "which car is this page about", a registry returning a real licence that belongs to somebody else. The guard is never a blocklist of bad values; it is making the wrong node unreachable |
+
+---
+
+## 2026-09-18 - the photo on the report, and the three times I nearly printed the wrong one
+
+**Shape: a field read from the wrong node** (new, and it is not new). Vic asked
+for the vehicle's picture on the emailed PDF. The picture is on the page. Three
+separate times, the obvious way to get it would have printed something that was
+not this car - and each time the read SUCCEEDED, the field was present, and the
+count looked complete.
+
+### What I said first, and what was true
+
+I told Vic the listing's JSON-LD carried a vehicle photo on **100%** of real
+captured pages. It does not. I had matched the first `"image"` in the markup
+without checking whose node it sat on, and those were dealer logos -
+`wolfe-chevrolet-edmonton-horizontal`. Corrected to 80% against `Vehicle`-typed
+nodes. That was still wrong. Measured properly against the 41 captured pages,
+through the extractor itself:
+
+```
+pages: 41
+with a Vehicle-typed node carrying an image:  23   (56%)
+with no vehicle node at all:                  18
+  ...of those, publishing an og:image:        10
+  ...whose og:image is the dealer's logo:     10  (all of them)
+image URLs on those 18 pages containing the page's own VIN:  0
+```
+
+So og:image is not a fallback - it would have printed a dealership banner where
+the car goes, on one report in four. And "the biggest picture on the page" is not
+a fallback either: nothing in that markup ties a loose `<img>` to this VIN, so
+picking one would be a guess about which car a buyer is looking at.
+
+### The third one, which nothing on the page would have revealed
+
+`extractJsonLdVehicle()` returns the FIRST priced vehicle node and stops. It
+takes no `pageUrl` and does not anchor to the page's subject - the machinery to
+do that exists in `jsonLdVehicles()` and this function does not use it. **8 of
+the 41 pages declare more than one vehicle**, because platforms mark up their
+similar-vehicles rail. On those, the node it settles on can be a neighbour.
+
+Every other field off a wrong node is a figure the report can qualify in prose. A
+photograph cannot be qualified. It is a different car, printed in colour on page
+1 of a signed document, under this car's VIN.
+[[ai-defamation-entity-match-lesson]]
+
+The fix is an anchor, not a heuristic: the photo travels attached to the VIN read
+off the SAME node, and prints only when that VIN is the one the report is about.
+All 23 photo-bearing nodes also publish a VIN, so it costs nothing - 23 of 41
+either way - and closes a one-in-five risk.
+
+### The shape, named
+
+A field read from the wrong node looks exactly like a field read correctly. The
+document has it, the selector matched, the count is full. What is wrong is the
+ENTITY it describes. This is the same shape as 2026-09-17's "Lexus of Edmonton"
+resolving to **CITY OF EDMONTON**'s AMVIC licence: the registry answered, the
+record was real, and it was about somebody else.
+
+The guard is never a blocklist of bad values - it is making the wrong node
+unreachable. `vehiclePhotoUrl()` is only ever handed the node already accepted as
+the vehicle, and reads `image` only, never `logo`. The dealer's logo is not
+filtered out; it is never offered.
+
+### And the part that had nothing to do with photographs
+
+`email-quote-report` is unauthenticated and gated only on the report signature,
+and `report-auth.test.ts` already PINS the residual that fields outside
+`canonicalReport()` are not bound by it. A photo URL carried outside the seal
+would have let anyone holding one genuine report choose an address for the edge
+function to fetch and print inside a DKIM-signed lotcheck.ca document.
+
+So the URL is sealed as `ph` in canonical **v14**, the handler compares sealed
+VIN against sealed VIN, and `buildReportPdf()` receives bytes rather than a URL -
+it resolves nothing. Same rule `SealedShot` has followed since August.
+
+`CACHE_VER` moves with it, and that is load-bearing rather than tidy:
+`report-auth.ts` recomputes the canonical from the submitted body, so a cached
+analysis replayed under a v13 signature would be refused as `signature_mismatch`
+and **every email would fail silently for the cache TTL**. `check:cache-ver`
+already forces the move because `report-sign.ts` is on its output-shaping list -
+the gate demanded exactly what the defect required.
+
+### Nothing here had ever fetched a dealer's URL before
+
+Everything else this codebase fetches is a URL the user typed or one a vendor's
+API returned. This is the first URL taken out of a dealer's own page content, so
+`_shared/vehicle-photo.ts` carries the perimeter that never existed: https only,
+no IP-literal or non-public hosts, 3 MB cap, 6 s timeout, and the file's own
+magic bytes believed over the `content-type` header - pdf-lib embeds PNG and JPEG
+only, and CDNs content-negotiate WEBP into responses still labelled
+`image/jpeg`.
+
+What it does **not** stop is written beside it rather than left to be
+discovered: DNS rebinding passes a hostname check, and Deno gives no hook to pin
+resolution. What bounds that instead is that nothing comes back - the response is
+never returned to the caller, never logged, and discarded unless it really is an
+image - and that the URL is sealed, so choosing it means controlling the dealer
+page we read, not merely holding a report.
+
+### The function nobody could look at
+
+`buildReportPdf()` is the single author of the PDF a customer receives, and until
+today nothing outside Deno could reach it: not exported, pdf-lib pulled over
+https, `Deno.serve()` at module load. **Every change to the emailed PDF has
+shipped unseen.** The harness now reads the LIVE source on each run and rewrites
+three things mechanically - the two esm.sh specifiers, the relative `_shared`
+imports, and an added export - so what renders is what ships, and it is not a
+copy that can drift.
+
+Layout verified from the PDF's own text positions rather than by eye: zero glyphs
+inside the photo box in either state, 23pt of clearance on the longest headline
+tested. My first version of that check had the box in the wrong place - it
+assumed the page top instead of the cursor after the masthead - and reported
+three collisions that were the masthead. **A check run at the wrong moment**,
+again, this time inside my own instrument.
+
+### What stops the class
+
+`test:vehicle-photo` - 33 assertions, wired into `gates.yml` AND into the
+deploy-edge-functions barrier, because this code ships inside the function that
+decides whether an unauthenticated endpoint fetches a URL. Proved to fail on six
+injected defects before being trusted: removing the VIN requirement, removing the
+VIN comparison, admitting IP literals, trusting the content-type, taking `ph` out
+of the seal, and passing the anchor on a mismatch. All six caught.
+
+The PDF's layout is **not** covered by it - rendering needs pdf-lib and the
+offline gates job cannot install it - and the test says so in its own header
+rather than letting a green line imply coverage it does not have.
+[[run-every-gate-before-done]]
+
+Merged as `6254a56`.
+
+### Still open
+
+- The photo appears on the emailed PDF only. The shared-link view renders from a
+  compact projection that deliberately does not carry it, recorded as an EXEMPT
+  entry in `check-canonical-parity.mjs` with that reason.
+- 44% of listings publish no vehicle photo in their page data. The report says so
+  rather than guessing; whether a second honest source exists for those is not
+  answered here.
+- Whether printing a dealer's photograph in a private report needs more than the
+  attribution line it now carries is a legal question, not an engineering one,
+  and it sits with the same unanswered counsel brief as the crawl. The narrower
+  argument is on the record: this report already embeds their entire page as a
+  sealed screenshot, so one 150pt thumbnail from that same page is strictly less
+  reproduction than what has shipped since August.
 
 ---
 

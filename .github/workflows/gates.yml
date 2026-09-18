@@ -566,6 +566,15 @@ jobs:
         run: npm run test:report-lines
       - name: JSON-LD vehicle extraction + scrapfly-rescue merge (structured-data fallback)
         run: npm run test:jsonld-vehicle
+      # The emailed PDF prints the dealer's own photograph of the car. Three
+      # ways that goes wrong and one gate for all three: the picture is of a
+      # DIFFERENT car (the extractor takes the first priced vehicle node and
+      # does not anchor, and 8 of our 41 captured pages declare more than one),
+      # the picture is the DEALER'S LOGO (10 of those 41 publish an og:image
+      # and all ten are a banner), or the URL was chosen by the CALLER -- this
+      # endpoint is unauthenticated and only the canonical is signature-bound.
+      - name: Vehicle photo -- VIN-anchored, sealed, and proven to be an image
+        run: npm run test:vehicle-photo
       # Go Auto is 70+ dealerships across AB and BC behind ONE endpoint, and
       # every one was invisible to us: the probe guesses /new/, they serve
       # /vehicles. Each card names its dealership AND city -- the attribution

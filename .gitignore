@@ -12,3 +12,7 @@ scripts/out/
 .DS_Store
 *.log
 .gstack/
+
+# scripts/render-report-pdf.mjs writes the rewritten buildReportPdf here so a
+# bare `pdf-lib` specifier resolves against this repo's node_modules.
+.pdfrender-*/

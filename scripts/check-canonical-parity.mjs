@@ -140,6 +140,8 @@ function shareLinkCarriesEverything() {
     ["verifyPayload", "carried verbatim as `vp` -- it IS the signed canonical, not a projection of it"],
     ["sig",           "carried verbatim as `sg`"],
     ["keyId",         "carried verbatim as `kid`"],
+    ["vehiclePhotoUrl", "the photo is drawn on ONE surface, the emailed PDF, from bytes the server fetches itself after the signature verifies. The share view has no photo and renders none, so carrying the URL would put a field in the fragment that nothing reads. It is sealed as `ph` regardless, because that is what makes the PDF safe to fetch it. If the shared view ever shows the car, this entry comes out."],
+    ["vehiclePhotoVin", "travels with vehiclePhotoUrl and is meaningless without it -- same reason"],
   ]);
 
   // WHAT THIS DOES NOT CATCH, stated plainly so nobody reads its green line as

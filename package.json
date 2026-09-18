@@ -49,6 +49,7 @@
     "test:report-auth": "node --experimental-strip-types supabase/functions/_shared/report-auth.test.ts",
     "test:flywheel": "node --experimental-strip-types supabase/functions/_shared/fee-vocab.test.ts",
     "test:jsonld-vehicle": "node scripts/test-jsonld-vehicle.mjs",
+    "test:vehicle-photo": "node --experimental-strip-types scripts/test-vehicle-photo.mjs",
     "test:goauto": "node scripts/test-goauto-inventory.mjs",
     "test:convertus-vms": "node scripts/test-convertus-vms.mjs",
     "test:convertus-crawl": "node --experimental-strip-types scripts/test-convertus-crawl.mjs",

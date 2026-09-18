@@ -46,6 +46,10 @@ jobs:
       - run: npm run test:dealer-place
       # msrp/price-gate/consent-overlay fixes ship INSIDE these functions too.
       - run: npm run check:scan-accuracy
+      # vehicle-photo.ts ships INSIDE email-quote-report and decides whether an
+      # unauthenticated endpoint will fetch a URL and print the result in a
+      # DKIM-signed document. That is a deploy-blocking gate, not a PR note.
+      - run: npm run test:vehicle-photo
 
   deploy:
     needs: gates

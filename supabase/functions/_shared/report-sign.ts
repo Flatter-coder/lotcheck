@@ -67,7 +67,7 @@ export function canonicalReport(a: any): any {
     // v11 (2026-09-03): a missing odometer now seals as null, where it used to
     // seal as 0 and print "Odometer 0 km" on /verify. Not additive, so it gets
     // a version the way the v7 projection change did.
-    v: 13,
+    v: 14,
     vehicle: a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || null,
     dealer: { name: a.dealerName || null, city: a.dealerCity || null },
     price: { asking: num(a.quotedPrice), msrp: num(a.msrp), verified: resolvePriceVerified(a).sourceVerified },
@@ -129,6 +129,18 @@ export function canonicalReport(a: any): any {
     // v8 (2026-09-02): `oy` -- what older model years ask today (the ladder's
     // basis and every rung), sealed like mc/dflt/marketValue. Additive.
     oy: a.olderYears ? { st: a.olderYears.state || null, rs: a.olderYears.reason || null, sy: nn(a.olderYears.subjectYear), mk: a.olderYears.make || null, md: a.olderYears.model || null, pv: a.olderYears.province || null, cd: a.olderYears.condition || null, sc: a.olderYears.scope || null, tl: a.olderYears.trimLabel || null, pt: a.olderYears.powertrain || null, nr: nn(a.olderYears.nRead), nd: nn(a.olderYears.need), as: a.olderYears.asOf || null, from: a.olderYears.seenMin || null, to: a.olderYears.seenMax || null, r: (a.olderYears.rungs || []).map((x: any) => ({ y: nn(x.year), n: nn(x.n), rd: nn(x.nRead), m: nn(x.median), lo: nn(x.low), hi: nn(x.high), kn: nn(x.kmKnown), kl: nn(x.kmLow), kh: nn(x.kmHigh), d: nn(x.dealers), from: x.seenMin || null, to: x.seenMax || null })), ms: (a.olderYears.missing || []).map((x: any) => ({ y: nn(x.year), rd: nn(x.nRead), k: nn(x.nKept) })) } : null,
+    // v14 (2026-09-18): `ph` -- the listing's own photograph of this car, and
+    // the VIN it is anchored to. Additive.
+    //
+    // IT HAS TO BE IN HERE. email-quote-report is unauthenticated and gated
+    // only on this signature, and report-auth.test.ts pins the residual that
+    // fields OUTSIDE this projection are not bound by it. A photo URL carried
+    // outside the seal would let anyone holding one genuine report choose an
+    // address for the edge function to fetch and print inside a DKIM-signed
+    // lotcheck.ca document. Sealed, the URL is one WE read off the dealer's
+    // page, and the VIN beside it is checked against the sealed `vin` before
+    // a single byte is fetched -- sealed compared against sealed.
+    ph: (a.vehiclePhotoUrl && a.vehiclePhotoVin) ? { u: String(a.vehiclePhotoUrl), vin: String(a.vehiclePhotoVin) } : null,
     source: (a.sourceUrl || a.capturedAt) ? { url: a.sourceUrl || null, capturedAt: a.capturedAt || null } : null,
     issuedAt: a.issuedAt || null,
   };
