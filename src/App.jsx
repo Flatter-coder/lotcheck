@@ -9056,7 +9056,7 @@ function canonicalReport(a){
     // prove the paper and the page agree.
     // v10 (2026-09-03): marks reports issued with "Your premium after this
     // purchase". Mirrors report-sign.ts.
-    v:13,
+    v:14,
     vehicle:a.vehicle||[a.year,a.make,a.model].filter(Boolean).join(" ")||null,
     dealer:{name:a.dealerName||null,city:a.dealerCity||null},
     price:{asking:num(a.quotedPrice),msrp:num(a.msrp),verified:resolvePriceVerified(a).sourceVerified},
@@ -9085,6 +9085,9 @@ function canonicalReport(a){
     dflt:a.pageDefault?{st:a.pageDefault.state||null,t:nn(a.pageDefault.termMonths),f:a.pageDefault.paymentFrequency||null,a:nn(a.pageDefault.apr),d:nn(a.pageDefault.downPayment),p:nn(a.pageDefault.paymentAmount),src:a.pageDefault.source||null,at:a.pageDefault.readAt||null,pm:a.pageDefault.purchaseMethod||null,rs:a.pageDefault.reason||null,q:a.pageDefault.qualifier||null,cob:nn(a.pageDefault.costOfBorrowing)}:null,
     // v8: `oy` (what older model years ask today). Mirrors report-sign.ts.
     oy:a.olderYears?{st:a.olderYears.state||null,rs:a.olderYears.reason||null,sy:nn(a.olderYears.subjectYear),mk:a.olderYears.make||null,md:a.olderYears.model||null,pv:a.olderYears.province||null,cd:a.olderYears.condition||null,sc:a.olderYears.scope||null,tl:a.olderYears.trimLabel||null,pt:a.olderYears.powertrain||null,nr:nn(a.olderYears.nRead),nd:nn(a.olderYears.need),as:a.olderYears.asOf||null,from:a.olderYears.seenMin||null,to:a.olderYears.seenMax||null,r:(a.olderYears.rungs||[]).map(x=>({y:nn(x.year),n:nn(x.n),rd:nn(x.nRead),m:nn(x.median),lo:nn(x.low),hi:nn(x.high),kn:nn(x.kmKnown),kl:nn(x.kmLow),kh:nn(x.kmHigh),d:nn(x.dealers),from:x.seenMin||null,to:x.seenMax||null})),ms:(a.olderYears.missing||[]).map(x=>({y:nn(x.year),rd:nn(x.nRead),k:nn(x.nKept)}))}:null,
+    // v14: `ph` (the listing's own photo of this car + the VIN it is anchored
+    // to). Mirrors report-sign.ts -- same key, same position, same shape.
+    ph:(a.vehiclePhotoUrl&&a.vehiclePhotoVin)?{u:String(a.vehiclePhotoUrl),vin:String(a.vehiclePhotoVin)}:null,
     source:(a.sourceUrl||a.capturedAt)?{url:a.sourceUrl||null,capturedAt:a.capturedAt||null}:null,
     issuedAt:a.issuedAt||null,
   };

@@ -111,6 +111,48 @@ function looksLikeAVehicleNode(n) {
   return VEHICLE_EVIDENCE.some((k) => n?.[k] != null && n[k] !== "");
 }
 
+// THE PHOTO MUST COME OFF THE CAR'S OWN NODE.
+//
+// Measured on the 41 real captured Alberta listing pages we hold (2026-09-18):
+// 23 publish an `image` on a Vehicle-typed node, and all 23 are a JPEG of the
+// car. The other 18 publish no vehicle node at all -- and 10 of those DO
+// publish an og:image, which in all ten is the DEALER'S horizontal logo
+// (wolfe-chevrolet-edmonton-horizontal.png). Not one image URL anywhere on
+// those 18 pages contains the page's own VIN, so nothing in that markup ties a
+// loose <img> to THIS car.
+//
+// That leaves exactly one publishable source: `image` on the node we already
+// decided is the vehicle. og:image, the Organization node's `logo`, and "the
+// largest picture on the page" are excluded BY CONSTRUCTION rather than by a
+// blocklist somebody has to maintain -- this function is never handed anything
+// but the vehicle node. Printing another car's photograph inside a signed
+// report is the wrong-entity-stated-as-fact failure
+// [[ai-defamation-entity-match-lesson]]; saying no photo was published costs
+// nothing and is always true when we say it.
+const PHOTO_REJECT = /(?:^|[\/_-])(?:logo|placeholder|no-?image|coming-?soon|photo-?coming|sprite)(?:[\/_.-]|$)/i;
+
+export function vehiclePhotoUrl(node) {
+  const first = (v) => {
+    if (v == null) return null;
+    if (typeof v === "string") return v.trim() || null;
+    if (Array.isArray(v)) { for (const x of v) { const s = first(x); if (s) return s; } return null; }
+    // schema.org ImageObject
+    if (typeof v === "object") return first(v.url ?? v.contentUrl ?? null);
+    return null;
+  };
+  // `image` ONLY. Never `logo` -- on a dealer's own node that is precisely the
+  // wrong picture, and it is the one this codebase already got wrong once.
+  const raw = first(node?.image);
+  if (!raw) return null;
+  let u;
+  try { u = new URL(raw); } catch { return null; } // relative or malformed: not publishable
+  // http(s) only. A data: or blob: URL cannot be re-fetched and re-checked by
+  // the buyer, which is the test every figure in this report has to pass.
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  if (PHOTO_REJECT.test(u.pathname)) return null;
+  return u.href;
+}
+
 export function extractJsonLdVehicle(html) {
   const blocks = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)]
     .map((m) => m[1].trim());
@@ -236,7 +278,23 @@ export function extractJsonLdVehicle(html) {
     if (/gas|petrol|unleaded/.test(f)) return "Gas";
     return null;
   })();
-  return { year, make, model, trim, vin, odometerKm, price, currency, condition, listedSince, fuelType, dealerName: str(seller?.name), dealerCity };
+  // THE PHOTO IS ANCHORED TO A VIN, OR IT IS NOT PUBLISHED.
+  //
+  // This function returns the FIRST priced vehicle node and stops -- it takes
+  // no pageUrl and does not anchor, the way jsonLdVehicles() does. On the 8 of
+  // 41 captured pages that declare more than one vehicle (a similar-vehicles
+  // rail), the node it settles on can be a NEIGHBOUR. Every other field that
+  // comes back from the wrong node is a figure the report can qualify; a
+  // photograph is not -- it is a picture of a different car, printed in a
+  // signed document as this car. That is the wrong-entity-as-fact failure
+  // [[ai-defamation-entity-match-lesson]].
+  //
+  // So the photo only travels attached to a VIN read off the SAME node, and
+  // downstream refuses it if that VIN disagrees with the report's. Measured on
+  // the captured corpus: all 23 nodes that publish an image also publish a VIN,
+  // so this costs nothing -- 23 of 41 pages either way.
+  const vehiclePhotoUrlAnchored = vin ? vehiclePhotoUrl(node) : null;
+  return { year, make, model, trim, vin, odometerKm, price, currency, condition, listedSince, fuelType, vehiclePhotoUrl: vehiclePhotoUrlAnchored, vehiclePhotoVin: vehiclePhotoUrlAnchored ? vin : null, dealerName: str(seller?.name), dealerCity };
 }
 
 // Fill blanks in a Claude-extracted analysis object (`parsed`) using a
@@ -264,6 +322,19 @@ export function fillFromJsonLd(parsed, jsonLd) {
   if (!parsed.trim && jsonLd.trim) parsed.trim = jsonLd.trim;
   if (!parsed.vehicleCondition && jsonLd.condition) parsed.vehicleCondition = jsonLd.condition;
   if (!parsed.fuelType && jsonLd.fuelType) parsed.fuelType = jsonLd.fuelType;
+  // THE LISTING'S OWN PHOTOGRAPH OF THIS CAR -- and the second half of the
+  // anchor. The extractor already refuses to hand back a photo without a VIN
+  // off the same node; here we refuse it when that VIN disagrees with the VIN
+  // the report is actually about, which is the case where the extractor
+  // settled on a similar-vehicles rail card instead of the subject.
+  // Fills only, never clobbers, same rule as every line above.
+  if (!parsed.vehiclePhotoUrl && jsonLd.vehiclePhotoUrl && jsonLd.vehiclePhotoVin) {
+    const mine = String(parsed.vin || "").trim().toUpperCase();
+    if (!mine || mine === jsonLd.vehiclePhotoVin) {
+      parsed.vehiclePhotoUrl = jsonLd.vehiclePhotoUrl;
+      parsed.vehiclePhotoVin = jsonLd.vehiclePhotoVin;
+    }
+  }
   if (!parsed.dealerName && jsonLd.dealerName) parsed.dealerName = jsonLd.dealerName;
   if (!parsed.dealerCity && jsonLd.dealerCity) parsed.dealerCity = jsonLd.dealerCity;
   // DAYS ON LOT, from the listing's own inventory date.

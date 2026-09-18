@@ -839,6 +839,13 @@ function buildEmailHtml(analysis: any, reportUrl?: string, verifyUrl?: string, s
 }
 
 // ── PDF attachment ──────────────────────────────────────────────────────────
+// THE CAR'S OWN PHOTOGRAPH is a PARAMETER of buildReportPdf, not something it
+// resolves. This endpoint is unauthenticated and gated only on the report
+// signature, so the decision "may this picture be printed, and from where" is
+// made once, in the handler, after verifyReportAuthenticity() has passed -- the
+// same rule SealedShot already follows. The rules themselves live in
+// _shared/vehicle-photo.ts so they can be imported by a test.
+
 // Builds a clean, printable one-to-few-page PDF of the report with pdf-lib
 // (server-side, nothing stored). Text is sanitized to WinAnsi (StandardFonts
 // only encode that set) so an odd glyph can never crash the generator. Callers
@@ -859,6 +866,7 @@ function u8ToB64(u8: Uint8Array): string {
 // Sealed listing capture — shape/size/magic-byte validation lives in the pure,
 // tested module (_shared/capture.ts, pinned by capture.test.ts).
 import { parseListingShot, pngPixelCount, capturePageCount, bytesToHex, PNG_PIXEL_BUDGET, SHOT_PDF_EMBED_CAP, type ParsedShot } from "../_shared/capture.ts";
+import { fetchVehiclePhoto, photoAnchorOk, type VehiclePhoto } from "../_shared/vehicle-photo.ts";
 import { resolvePriceVerified } from "../_shared/price-verified.ts";
 import { verifyReportAuthenticity, originAllowed, corsOrigin, REPORT_PUBLIC_KEYS, MAX_BODY_BYTES } from "../_shared/report-auth.ts";
 import { qualifyMsrpClaim } from "../_shared/msrp-claim.ts";
@@ -1247,7 +1255,7 @@ function guillocheRings(seed: number, cx: number, cy: number, R: number, steps: 
   return [ring(1, 0), ring(1, 2.4), ring(0.66, 0), ring(0.66, 1.9)];
 }
 
-async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedShot | null): Promise<Uint8Array> {
+async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedShot | null, vehiclePhoto?: VehiclePhoto | null): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import("https://esm.sh/pdf-lib@1.17.1");
   const doc = await PDFDocument.create();
   // Poppins throughout — the StandardFonts set (Times/Helvetica) rendered too
@@ -1479,13 +1487,80 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   y -= 22;
 
   // ---- HEADLINE ----
+  // THE CAR, BESIDE ITS OWN NAME.
+  //
+  // A buyer reads this PDF with the dealer's listing open in another tab, and
+  // until now nothing on page 1 let them confirm at a glance that the two are
+  // the same car -- the sealed capture proves it, but it is pages away and it
+  // is a screenshot of a web page, not a picture of a vehicle.
+  //
+  // The photograph is the dealer's own, published in their listing's
+  // schema.org markup, on the node that also carries this VIN. It is drawn to
+  // FIT its box, never cropped and never stretched: a crop would be us
+  // choosing which part of their photograph to show, and a stretch would
+  // misrepresent the car's proportions. The caption names whose picture it is.
+  //
+  // WHEN THERE IS NO PHOTO the box says so in words. Measured on the 41 real
+  // captured pages we hold, 23 publish one (56%) -- so this is the common
+  // case, not an edge case, and it must never render as an empty rectangle a
+  // reader has to interpret. [[report-never-empty]]
+  // [[present-without-creating-questions]]
+  // 4:3, because that is what the listings actually serve: both CDNs in the
+  // captured corpus (content.homenetiol.com at 640x480, autoscout24 at
+  // 1600x1200) publish 1.333, so the box holds them with no letterbox bars.
+  // The fit-scale below still handles anything else without cropping.
+  const PHOTO_W = 150, PHOTO_H = 112.5, PHOTO_GAP = 16, PHOTO_CAP = 13;
+  let photoImg: any = null;
+  if (vehiclePhoto) {
+    try {
+      photoImg = vehiclePhoto.kind === "png"
+        ? await doc.embedPng(vehiclePhoto.bytes)
+        : await doc.embedJpg(vehiclePhoto.bytes);
+    } catch (e) {
+      // Bytes that passed the magic-byte check can still be a malformed or
+      // progressive JPEG pdf-lib declines. The report is not worth a picture.
+      console.warn("Vehicle photo embed failed:", (e as Error)?.message);
+      photoImg = null;
+    }
+  }
+  // Captured BEFORE the status line moves y, so the photo's top edge is fixed
+  // whatever the headline does below it. Nothing here can break the page (y is
+  // at the top of page 1 and need() cannot fire), so the box and the text are
+  // guaranteed to be on the same page.
+  const photoTop = y - 2;
+  const photoX = M + W - PHOTO_W;
   T(priceVerified ? "STATUS  -  VERIFIED QUOTE" : "STATUS  -  PRICE READ ONCE", { size: 8.5, font: sansB, color: priceVerified ? TEAL : CORAL });
   y -= 20;
+  // The headline gives up the photo's width and gap. Everything else on this
+  // band keeps the full measure.
+  const headW = W - PHOTO_W - PHOTO_GAP;
   const headline = a.vehicle || [a.year, a.make, a.model].filter(Boolean).join(" ") || "Your Quote";
-  for (const ln of wrap(headline, serifB, 26, W)) { need(30); T(ln, { size: 26, font: serifB, color: INK }); y -= 30; }
+  for (const ln of wrap(headline, serifB, 26, headW)) { need(30); T(ln, { size: 26, font: serifB, color: INK }); y -= 30; }
   y -= 2;
   const dek = [a.dealerName, a.dealerCity].filter(Boolean).join(", ");
-  if (dek) { T(dek + "   -   " + reportDate, { size: 10.5, font: serifI, color: SOFT }); y -= 18; }
+  // Wrapped, not just narrowed: T() does not measure, and a long dealer name
+  // ("Lexus of Royal Oak Calgary, Calgary") would have run under the photo.
+  if (dek) { for (const ln of wrap(dek + "   -   " + reportDate, serifI, 10.5, headW)) { T(ln, { size: 10.5, font: serifI, color: SOFT }); y -= 15; } y -= 3; }
+
+  if (photoImg) {
+    rrect(photoX, photoTop, PHOTO_W, PHOTO_H, 6, { color: PANEL2, borderColor: HAIR, borderWidth: 0.7 });
+    const sc = Math.min((PHOTO_W - 2) / photoImg.width, (PHOTO_H - 2) / photoImg.height);
+    const dw = photoImg.width * sc, dh = photoImg.height * sc;
+    page.drawImage(photoImg, {
+      x: photoX + (PHOTO_W - dw) / 2,
+      y: photoTop - PHOTO_H + (PHOTO_H - dh) / 2,
+      width: dw, height: dh,
+    });
+    // Whose photograph this is, said plainly. [[make-it-dispute-proof]]
+    center("The dealer's own listing photo", photoTop - PHOTO_H - 9, { cx: photoX + PHOTO_W / 2, size: 7.5, font: serifI, color: FAINT });
+  } else {
+    rrect(photoX, photoTop, PHOTO_W, PHOTO_H, 6, { color: TRACK, borderColor: HAIR, borderWidth: 0.7 });
+    center("NO PHOTO PUBLISHED", photoTop - PHOTO_H / 2 + 3, { cx: photoX + PHOTO_W / 2, size: 8, font: sansB, color: FAINT });
+    center("in this listing's own page data", photoTop - PHOTO_H / 2 - 9, { cx: photoX + PHOTO_W / 2, size: 8, font: sans, color: FAINT });
+  }
+  // Whichever column is longer sets the rule. A one-line headline used to leave
+  // the photo hanging past it; taking the lower of the two can never collide.
+  y = Math.min(y, photoTop - PHOTO_H - PHOTO_CAP);
   rule(HAIR, 0.7, 6);
 
   // ---- THE DEAL ----
@@ -2668,6 +2743,39 @@ Deno.serve(async (req: Request) => {
       console.error("Capture verification skipped:", e);
     }
 
+    // THE CAR'S PHOTOGRAPH -- taken from the SEAL, never from the request.
+    //
+    // verifyReportAuthenticity() above recomputed canonicalReport() from THIS
+    // body and checked the signature over it. `ph` is inside that projection as
+    // of v14, so by the time we reach here analysis.vehiclePhotoUrl is a URL WE
+    // read off the dealer's page and signed -- not one the caller chose. That is
+    // the whole reason it was put in the canonical.
+    //
+    // Then the anchor, sealed against sealed: the VIN the photo was published
+    // beside must be the VIN this report is about. extractJsonLdVehicle()
+    // returns the FIRST priced vehicle node and does not anchor to the page's
+    // subject, so on a page carrying a similar-vehicles rail it can hand back a
+    // neighbour's picture. Every other field off a wrong node is a figure we can
+    // qualify; a photograph is a different car presented as this one.
+    // [[ai-defamation-entity-match-lesson]]
+    //
+    // Measured on the 41 captured pages we hold: 23 publish a photo on a vehicle
+    // node, all 23 publish a VIN on that same node, and 8 of the 41 declare more
+    // than one vehicle. The anchor therefore costs no coverage and closes a
+    // one-in-five risk.
+    let vehiclePhoto: VehiclePhoto | null = null;
+    try {
+      if (photoAnchorOk(analysis)) {
+        vehiclePhoto = await fetchVehiclePhoto(String(analysis.vehiclePhotoUrl).trim());
+        if (!vehiclePhoto) console.warn("Vehicle photo dropped: not fetchable as a JPEG or PNG within the caps.");
+      } else if (analysis.vehiclePhotoUrl) {
+        console.warn("Vehicle photo dropped: not anchored to this report's VIN.");
+      }
+    } catch (e) {
+      // A picture is never worth the report. [[no-single-point-of-failure]]
+      console.warn("Vehicle photo skipped:", (e as Error)?.message);
+    }
+
     // The PDF IS the report, so it is FATAL — never "best effort".
     //
     // This used to swallow the error and send the email anyway. That is the
@@ -2690,7 +2798,7 @@ Deno.serve(async (req: Request) => {
     let pdfErr: unknown = null;
     for (let attempt = 1; attempt <= 2 && !pdfBytes; attempt++) {
       try {
-        const bytes = await buildReportPdf(analysis, verifyUrl, sealedShot);
+        const bytes = await buildReportPdf(analysis, verifyUrl, sealedShot, vehiclePhoto);
         if (!bytes || bytes.byteLength < MIN_PDF_BYTES) {
           throw new Error(`PDF built but is implausibly small (${bytes?.byteLength ?? 0} bytes)`);
         }

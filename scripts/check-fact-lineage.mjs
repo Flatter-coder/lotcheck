@@ -123,7 +123,7 @@ const EXTRACTORS = new Set([
 const BASELINE = {
   addOns: [
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
-    "supabase/functions/analyze-listing-url/index.ts::anon#f2ca81be",
+    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
@@ -166,7 +166,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
   ],
   financeRates: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#f2ca81be",
+    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
   ],
   financingCheck: [
     "supabase/functions/analyze-listing-url/index.ts::computeFinancingCheck",
@@ -213,7 +213,7 @@ const BASELINE = {
   ],
   pageDefault: [
     "supabase/functions/_shared/invariants.ts::repair",
-    "supabase/functions/analyze-listing-url/index.ts::anon#f2ca81be",
+    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::anon#106a73e9",
@@ -233,7 +233,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
   ],
   priceVerified: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#f2ca81be",
+    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
   ],
   quotedPrice: [
     "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",
@@ -255,6 +255,15 @@ const BASELINE = {
   sourceUrl: [
     "supabase/functions/_shared/msrp-authority.js::resolveMsrpAuthority",
     "supabase/functions/email-quote-report/index.ts::verifySealedShot",
+  ],
+  // The VIN a listing photo was published beside -- the anchor that decides
+  // whether the photo may be printed at all. ONE author on purpose: it is read
+  // off the same schema.org node as the photo, in the same pass, so the two can
+  // never disagree about which car they describe. A second author here would be
+  // a second opinion about whose picture this is, which is the whole thing this
+  // fact exists to prevent.
+  vehiclePhotoVin: [
+    "supabase/functions/_shared/jsonld-vehicle.js::extractJsonLdVehicle",
   ],
   vin: [
     "src/App.jsx::UnlockModal",

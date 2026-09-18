@@ -974,7 +974,13 @@ export function mergeRescued(analysis: any, rescued: any): void {
     // those fields was dropped here, so on any rescue path the report fell back
     // to the neutral "Photo of the listing" and the coverage sentence never
     // rendered. listingShotKind has been stripped here since PR #342 shipped it.
-    "listingShotKind", "listingShotWidthPx", "listingShotHeightPx", "listingShotPageHeightPx"];
+    "listingShotKind", "listingShotWidthPx", "listingShotHeightPx", "listingShotPageHeightPx",
+    // The car's own photograph, and the VIN it is anchored to. These travel as
+    // a PAIR -- the URL is meaningless without the VIN that says which car it
+    // is of, and the PDF refuses to draw one without the other. A hand-written
+    // key list is exactly how listingShotKind above went missing for a release,
+    // so: both, together, or neither.
+    "vehiclePhotoUrl", "vehiclePhotoVin"];
   for (const k of fillKeys) {
     if ((analysis[k] == null || analysis[k] === "") && rescued[k] != null && rescued[k] !== "") analysis[k] = rescued[k];
   }
