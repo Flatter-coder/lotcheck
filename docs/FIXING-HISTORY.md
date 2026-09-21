@@ -26,6 +26,74 @@ the next instance.
 
 ---
 
+## 2026-09-21 — a car advertised "New" at 6,675 km was read as new
+
+*class: Two authors per fact*
+
+A 2026 Land Rover Defender on an iPacket page: badged **New**, **6,675
+Kilometers**, CAD$112,153. No demo flag, no `sale_class`, no hint — so
+`deriveSaleCondition` returned `"new"`. The odometer was printed directly
+beside the word "New" on the page the whole time.
+
+`condition.ts` says in its own header that a demo *"was dealer-registered and
+its warranty clock already started"*, and that `vehicleCondition === "new"` is
+what drives *"the new-only dealer-fee ceiling"*. Both of those are wrong on a
+demo, so the two most expensive facts on the page were both wrong.
+
+Three defects producing one symptom:
+
+1. `condition.ts` never consulted the odometer. Every input it had was a word
+   somebody chose to write, and a badge is exactly what is unreliable here.
+2. `msrp-basis.ts` kept a private `DELIVERY_KM = 1000` while `condition.ts` had
+   none. "Is this car new" had two authors, and they disagreed: one used
+   kilometres, the other could not see them. `DELIVERY_KM` is now exported from
+   `condition.ts` and imported by `msrp-basis.ts`.
+3. Both production callers passed **2 of the 5 inputs**. `isDemo` and
+   `saleClass` were never handed over, so demo detection that already existed,
+   and was already unit-tested, could not fire outside the Convertus hint path.
+   *Built, tested, and unwired.*
+
+**The threshold was measured rather than chosen.** 1,000 was a judgement that
+had replaced an earlier 5,000 after a 3,800 km unit kept a present-tense
+sticker, and swapping one invented number for another is not calibration.
+`scripts/measure-new-odometer.mjs` read 8,281 odometer readings across 221
+Alberta year/make/model combinations of dealer-labelled new listings, through
+the already-deployed `fn_market_comps` — no new production surface for a
+measurement:
+
+| band | share | cumulative |
+|---|---|---|
+| 0 km | 8.8% | 8.8% |
+| 1–50 | 72.5% | 81.3% |
+| 51–100 | 12.0% | **93.3%** |
+| 101–250 | 1.1% | 94.4% |
+| 251–500 | 0.7% | 95.1% |
+| **501–1000** | **0.3%** | 95.4% |
+| 1001–2000 | 0.7% | 96.1% |
+| 2001–5000 | **2.1%** | 98.2% |
+| 5001–10000 | 1.1% | 99.2% |
+| 10001+ | 0.8% | 100% |
+
+p50 10 km, p90 90 km. The distribution is **bimodal**: genuine new cars pile up
+under 100 km, the middle empties into a valley at 501–1000 holding 0.3%, and a
+second population rises above 2,000 km. 1,000 sits at the floor of that valley,
+so the line separates two real populations instead of cutting through one.
+
+**The measurement kept the number it was testing.** That is the point of
+measuring — the defect was never the value, it was that the file making the
+decision could not see it.
+
+Unknown stays unknown: a missing, unparseable or negative reading leaves the
+badge alone, and kilometres with no stated condition stay `null`, because they
+cannot separate a demo from a used car.
+
+7 of 8 mutations caught. The eighth — `Number.isFinite(km) && km > DELIVERY_KM`
+mutated to `Number(km) > DELIVERY_KM` — is an **equivalent mutant**: `Number(null)`
+is `0` and `NaN > 1000` is false, so both return "new" and no test can tell them
+apart. Recorded as equivalent rather than papered over with a test that pretends
+to catch it.
+
+
 ## 2026-09-21 — two blind spots in the daily report, one of them four days old
 
 **`e87e211` — a make that refreshes 100 of 134 rows was green.**
