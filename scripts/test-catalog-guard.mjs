@@ -9,7 +9,7 @@
 //
 // Run: node scripts/test-catalog-guard.mjs
 
-import { evaluateMake } from "./catalog-refresh-guard.mjs";
+import { evaluateMake, rowIsStale } from "./catalog-refresh-guard.mjs";
 
 let pass = 0, fail = 0;
 function check(label, cond, detail) {
@@ -56,6 +56,45 @@ v = evaluateMake({ level: "required", pre: undefined, post: undefined, tableMiss
 check("missing table fails a required check", v.status === "fail" && /does not exist/.test(v.reasons.join(" ")), `got ${v.status}: ${v.reasons}`);
 v = evaluateMake({ level: "optional", pre: undefined, post: undefined, tableMissing: true });
 check("missing table warns an optional check", v.status === "warn", `got ${v.status}`);
+
+// ---- the partial-refresh class ------------------------------------------
+// max(id) advancing proves SOME row was written, never that this make's rows
+// were refreshed. On 2026-09-21 the daily FULL refresh had been green for four
+// days while 73 rows sat unrewritten for 74h+ (Toyota 34, Lexus 23, Cadillac 8,
+// Chevrolet 5, Hyundai 2, Buick 1). Each is a denominator under a live price
+// claim, so a make that refreshes 100 of 134 rows is not a pass.
+v = evaluateMake({ level: "required", pre: { count: 134, maxId: 900 }, post: { count: 134, maxId: 940, staleCount: 34, oldestFetchedAt: "2026-09-17T11:00:00Z" } });
+check("fresh write that leaves rows unrewritten fails", v.status === "fail", `got ${v.status}: ${v.reasons}`);
+check("the failure names how many rows and how old", v.reasons.join(" ").includes("34 of 134") && v.reasons.join(" ").includes("2026-09-17"), `reasons: ${v.reasons}`);
+
+// Every row rewritten is the only shape that passes.
+v = evaluateMake({ level: "required", pre: { count: 134, maxId: 900 }, post: { count: 134, maxId: 940, staleCount: 0 } });
+check("every row rewritten passes", v.status === "ok", `got ${v.status}: ${v.reasons}`);
+
+// Optional makes warn rather than fail, same as every other check here.
+v = evaluateMake({ level: "optional", pre: { count: 134, maxId: 900 }, post: { count: 134, maxId: 940, staleCount: 34 } });
+check("partial refresh of an optional make warns", v.status === "warn", `got ${v.status}`);
+
+// finance/lease carry no fetched_at, so staleness is UNKNOWN there — null must
+// not be read as zero. Number(null) === 0 is how this family of defect returns.
+v = evaluateMake({ level: "required", pre: { count: 40, maxId: 10 }, post: { count: 40, maxId: 20, staleCount: null } });
+check("unknown staleness is not treated as zero stale", v.status === "ok" && !v.reasons.join(" ").includes("not rewritten"), `got ${v.status}: ${v.reasons}`);
+
+// Caught even when the run ALSO wrote nothing new, and the two reasons are
+// reported separately rather than one masking the other.
+v = evaluateMake({ level: "required", pre: { count: 134, maxId: 940 }, post: { count: 134, maxId: 940, staleCount: 34 } });
+check("stale rows and no fresh write are reported as two reasons", v.status === "fail" && v.reasons.length === 2, `reasons: ${v.reasons}`);
+
+// ---- the staleness COUNTER, not just the verdict built on it -------------
+// Testing evaluateMake alone would pass over a counter that always returns 0 —
+// the verdict is only as good as the number handed to it.
+const SINCE = Date.parse("2026-09-21T11:23:00Z");
+check("a row written before the run is stale", rowIsStale("2026-09-17T11:00:00Z", SINCE) === true);
+check("a row written during the run is not stale", rowIsStale("2026-09-21T11:40:00Z", SINCE) === false);
+check("a row with no fetched_at is stale, not assumed fresh", rowIsStale(null, SINCE) === true);
+check("an unparseable fetched_at is stale, not assumed fresh", rowIsStale("not-a-date", SINCE) === true);
+check("a row exactly at the cutoff counts as fresh", rowIsStale("2026-09-21T11:23:00Z", SINCE) === false);
+check("with no cutoff nothing is judged stale", rowIsStale(null, NaN) === false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
