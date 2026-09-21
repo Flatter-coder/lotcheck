@@ -26,6 +26,62 @@ the next instance.
 
 ---
 
+## 2026-09-21 — two blind spots in the daily report, one of them four days old
+
+**`e87e211` — a make that refreshes 100 of 134 rows was green.**
+*class: Green signal, no check*
+
+The daily FULL catalog refresh had reported success every night while 73 rows
+went unrewritten for more than 74 hours — Toyota 34, Lexus 23, Cadillac 8,
+Chevrolet 5, Hyundai 2, Buick 1. The staleness was visible in the daily report
+on 09-18 and again on 09-21 with the identical count, which is what made it
+obvious it was not transient.
+
+`catalog-refresh-guard.mjs` carried a header saying *"Green now means 'every
+make wrote fresh rows'"*. The code said something weaker: `q.maxId > p.maxId`.
+max(id) advancing proves that **some** row was written. One new row out of 134
+passed, and a scraper that refreshes most of a make and drops the tail passes
+every night forever. The data needed to catch it was already being fetched —
+`fetchTableState` read `fetched_at` and then collapsed it to a per-make
+maximum, so a single fresh row made the entire make look current.
+
+Rows are now counted individually against the snapshot timestamp. A row with no
+`fetched_at` counts as stale: it cannot be shown to be fresh, and an absence is
+not a pass.
+
+`rowIsStale` is exported and tested on its own. Testing `evaluateMake` alone
+would have passed over a counter that always returned zero — the verdict is
+only ever as good as the number handed to it. 22 gates; 8 of 8 mutations
+caught, including "never stale" and "missing date reads as fresh".
+
+**`306a68b` — the report could not see inventory at all.**
+*class: Absence read as knowledge*
+
+Every daily report ended with the same paragraph: no listing counts, no price
+changes, no delistings. `vehicle_listing` and `listing_price_history` return
+42501 to anon and should — they hold dealer inventory row by row. But an
+absence reported honestly is still an absence, and it had been reported
+honestly for weeks while the answer was a function call away.
+
+`inventory_daily_counts()` returns seven aggregates and nothing else. Nothing
+in the returns clause identifies a vehicle. SECURITY DEFINER, pinned
+search_path, default grant revoked before execute is granted to anon.
+
+**A delisting is not a sale**, and the gate enforces it rather than trusting
+anyone to remember: the build fails if a returned column or alias is ever named
+`sold`. `newest_observation` ships beside the counts because a frozen crawl and
+a quiet day produce identical numbers, and the caller refuses to print zeros
+when the function is absent — "not deployed" and "nothing happened" look the
+same in a table.
+
+Two things the gates caught in their own author. The `sold` check first matched
+the prose explaining the rule, so it failed the migration it was written for.
+Then commenting out the `revoke` line survived a mutation, because `indexOf` on
+raw text still found the string inside the comment — *a guard bound to
+spelling, not substance*. The structural checks now run against comment-stripped
+SQL.
+
+
 ## 2026-09-18 - the photo on the report, and the three times I nearly printed the wrong one
 
 **Shape: a field read from the wrong node** (new, and it is not new). Vic asked
