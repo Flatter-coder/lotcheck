@@ -17,6 +17,7 @@
 //
 // Verdicts per make × table:
 //   • no fresh rows written           -> FAIL (required) / WARN (optional)
+//   • some rows left unrewritten      -> FAIL / WARN  (the partial-refresh class)
 //   • row count collapsed by half+    -> FAIL / WARN  (the Ford 78 -> 7 class)
 //   • table absent from API schema    -> FAIL / WARN  (the lease_rate_catalog
 //     class: writes 404 "PGRST205" forever and fatal:false swallows it)
@@ -48,12 +49,23 @@ const PAGE = 1000; // Supabase REST caps a single response at 1000 rows
 
 const creds = () => ({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY });
 
+// Was this row left behind by the run that just finished? A row is stale when
+// its fetched_at predates the snapshot, AND when it has no fetched_at at all —
+// a row that cannot be shown to be fresh is not fresh. Exported so the offline
+// test reaches the counter and not only the verdict built on top of it.
+export function rowIsStale(fetchedAt, sinceMs) {
+  if (!Number.isFinite(sinceMs)) return false;   // no cutoff -> nothing to judge
+  const t = fetchedAt ? Date.parse(fetchedAt) : NaN;
+  return !Number.isFinite(t) || t < sinceMs;
+}
+
 // Whole-table scan (few thousand small rows), aggregated per lower-cased make.
 // Paginated with a stable order because unordered offset pages can skip rows.
-async function fetchTableState(table, withFetchedAt) {
+async function fetchTableState(table, withFetchedAt, since) {
   const { url, key } = creds();
   const headers = { apikey: key, Authorization: `Bearer ${key}` };
   const cols = withFetchedAt ? "make,id,fetched_at" : "make,id";
+  const sinceMs = since ? Date.parse(since) : NaN;
   const byMake = new Map();
   for (let offset = 0, page = 0; page < 40; page++, offset += PAGE) {
     const res = await fetch(`${url}/rest/v1/${table}?select=${cols}&order=id.asc&limit=${PAGE}&offset=${offset}`, { headers });
@@ -65,10 +77,21 @@ async function fetchTableState(table, withFetchedAt) {
     const rows = await res.json();
     for (const r of rows) {
       const k = String(r.make || "").toLowerCase();
-      const m = byMake.get(k) || { make: r.make, count: 0, maxId: 0, maxFetchedAt: null };
+      const m = byMake.get(k) || { make: r.make, count: 0, maxId: 0, maxFetchedAt: null, staleCount: null, oldestFetchedAt: null };
       m.count++;
       if (Number(r.id) > m.maxId) m.maxId = Number(r.id);
       if (withFetchedAt && r.fetched_at && (!m.maxFetchedAt || r.fetched_at > m.maxFetchedAt)) m.maxFetchedAt = r.fetched_at;
+      // PER-ROW freshness, not the make's newest row. A row whose fetched_at
+      // predates this run was not rewritten by the scraper that just ran, and a
+      // row with no fetched_at at all cannot be shown to be fresh — an absence
+      // is not a pass. Only meaningful when a cutoff was supplied.
+      if (withFetchedAt && Number.isFinite(sinceMs)) {
+        if (m.staleCount === null) m.staleCount = 0;
+        if (rowIsStale(r.fetched_at, sinceMs)) {
+          m.staleCount++;
+          if (r.fetched_at && (!m.oldestFetchedAt || r.fetched_at < m.oldestFetchedAt)) m.oldestFetchedAt = r.fetched_at;
+        }
+      }
       byMake.set(k, m);
     }
     if (rows.length < PAGE) break;
@@ -84,12 +107,23 @@ export function evaluateMake({ level, pre, post, tableMissing }) {
     return { status: escalate, reasons: ["table does not exist in the API schema — every write to it fails (PGRST205) and fatal:false swallows it"] };
   }
   const p = pre || { count: 0, maxId: 0, maxFetchedAt: null };
-  const q = post || { count: 0, maxId: 0, maxFetchedAt: null };
+  const q = post || { count: 0, maxId: 0, maxFetchedAt: null, staleCount: null };
   const reasons = [];
   let status = "ok";
   if (!(q.maxId > p.maxId)) {
     status = escalate;
     reasons.push(`no fresh rows written (max id ${q.maxId} unchanged since snapshot; newest row ${q.maxFetchedAt || "n/a"})`);
+  }
+  // A PARTIAL refresh is the hole this check closes. max(id) advancing proves
+  // that SOME row was written, not that this make's rows were refreshed — one
+  // new row out of 134 satisfied it. On 2026-09-21 the daily FULL refresh had
+  // reported success for four days straight while 73 rows had not been touched
+  // in over 74 hours: Toyota 34, Lexus 23, Cadillac 8, Chevrolet 5, Hyundai 2,
+  // Buick 1. Every one of those rows is a denominator under a live price claim.
+  if (Number.isFinite(q.staleCount) && q.staleCount > 0) {
+    status = escalate;
+    const oldest = q.oldestFetchedAt ? `, oldest ${q.oldestFetchedAt.slice(0, 10)}` : "";
+    reasons.push(`${q.staleCount} of ${q.count} row(s) not rewritten by this run${oldest} — the scraper refreshed part of this make and left the rest`);
   }
   // A halved catalog is a wipe wearing a green checkmark (Ford went 78 -> 7
   // this way). Only meaningful above a floor — 3 -> 2 is model churn.
@@ -106,7 +140,7 @@ function summaryLine(cells) {
   let empty = true;
   try { empty = statSync(f).size === 0; } catch { /* treat as empty */ }
   if (empty) {
-    appendFileSync(f, "### Catalog fresh-write guard\n\n| Step | Make | Table | Rows pre → post | Fresh write | Verdict |\n|---|---|---|---|---|---|\n");
+    appendFileSync(f, "### Catalog fresh-write guard\n\n| Step | Make | Table | Rows pre → post | Fresh write | Not rewritten | Verdict |\n|---|---|---|---|---|---|---|\n");
   }
   appendFileSync(f, `| ${cells.join(" | ")} |\n`);
 }
@@ -140,7 +174,9 @@ async function verify(args) {
     const level = args[short];
     if (!level || level === "skip") continue;
     if (level !== "required" && level !== "optional") { console.error(`guard verify: --${short} must be required|optional|skip`); process.exit(1); }
-    const post = await fetchTableState(table, short === "msrp");
+    // snap.takenAt is the cutoff: anything not rewritten since the snapshot
+    // was not refreshed by the scraper this step just ran.
+    const post = await fetchTableState(table, short === "msrp", snap.takenAt);
     const preTable = snap.tables[table] || { missing: false, makes: {} };
     for (const make of makes) {
       const pre = preTable.makes[make.toLowerCase()];
@@ -148,8 +184,9 @@ async function verify(args) {
       const v = evaluateMake({ level, pre, post: cur, tableMissing: post.missing });
       const preC = pre ? pre.count : 0, postC = cur ? cur.count : 0;
       const freshTxt = post.missing ? "—" : (cur && (!pre || cur.maxId > pre.maxId) ? "yes" : "NO");
+      const staleTxt = (cur && Number.isFinite(cur.staleCount)) ? (cur.staleCount > 0 ? `${cur.staleCount} of ${cur.count}` : "0") : "—";
       const icon = v.status === "ok" ? "✅ ok" : v.status === "warn" ? "⚠️ warn" : "❌ FAIL";
-      summaryLine([step, make, table, `${preC} → ${postC}`, freshTxt, icon]);
+      summaryLine([step, make, table, `${preC} → ${postC}`, freshTxt, staleTxt, icon]);
       if (v.status === "ok") {
         console.log(`  ok    ${make} / ${table}: ${preC} -> ${postC} rows, fresh write confirmed`);
       } else {
