@@ -38,12 +38,13 @@
 // CLAIM switches off.
 // ============================================================================
 
-import { deriveSaleCondition } from "./condition.ts";
+import { deriveSaleCondition, DELIVERY_KM } from "./condition.ts";
 
 export type MsrpBasis = "exact" | "starting_at" | "dealer_stated" | "original_when_new";
 
-/** Delivery kilometres. Above this, a car with no condition flag is not "new". */
-const DELIVERY_KM = 1000;
+// DELIVERY_KM is imported from condition.ts. It used to be declared here too,
+// which gave "is this car new" two authors that could drift apart — and did:
+// condition.ts never consulted kilometres at all.
 
 export interface ConditionCtx {
   vehicleCondition?: string | null;   // binary "new" | "used" | null
@@ -63,6 +64,7 @@ export function msrpIsPresentTense(ctx: ConditionCtx): boolean {
   const sale = deriveSaleCondition({
     vehicleCondition: ctx.vehicleCondition ?? null,
     saleCondition: ctx.saleCondition ?? ctx.saleConditionHint ?? null,
+    odometerKm: ctx.odometerKm ?? null,
   });
 
   if (sale === "new" || sale === "demo") return true;
