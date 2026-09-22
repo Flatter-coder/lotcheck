@@ -312,6 +312,38 @@ console.log("\npart 7 -- thousands separators and dashes");
   check("an en dash is a hyphen", normalizePage("4–year").includes("4-year"));
 }
 
+
+console.log("");
+console.log("part 8 -- our own stored value gets the same vocabulary as their page");
+// Honda holds "5-year/no distance limit" and Subaru "5-year/no km limit".
+// pairOnPage had understood those exact words on a MANUFACTURER'S page since
+// the Lexus fix; parseTerm, reading OUR OWN value, had not -- so both makes
+// came back as "could not read our own stored value as a term". Same
+// vocabulary, two readers, one ignorant of it. [[distance-vocab]]
+for (const t of ["5-year/no distance limit", "5-year/no km limit", "5-year/unlimited km", "6-year/regardless of distance travelled"]) {
+  const r = parseTerm(t);
+  check(`"${t}" parses as an explicit no-limit term`,
+    !r.unparsed && r.pairs.length >= 1 && r.pairs[0].km === "unlimited", JSON.stringify(r));
+}
+check("a stated distance still parses to its number", parseTerm("3-year/60,000 km").pairs[0].km === 60000);
+
+console.log("");
+console.log("part 9 -- a term may state YEARS AND NO DISTANCE AT ALL");
+// MINI publishes "12-year Rust Perforation Warranty" and Polestar "12 years
+// after delivery". Neither gives a kilometre figure and neither says there is
+// no limit. Reading that as unparsed reports our own correct value as a
+// defect; reading it as unlimited asserts a limit nobody published.
+{
+  const r = parseTerm("12-year rust perforation");
+  check("a years-only term parses", !r.unparsed && r.pairs.length === 1, JSON.stringify(r));
+  check("a years-only term is NOT read as unlimited", r.pairs[0].km === "not_stated", JSON.stringify(r.pairs[0]));
+  const MINI = "our standard 4-year/80,000 km New Car Limited Warranty and 12-year Rust Perforation Warranty";
+  check("the years-only pair is confirmed on MINI's real page", pairOnPage({ years: 12, km: "not_stated" }, MINI) === true);
+  check("a wrong year is not confirmed on that page", pairOnPage({ years: 9, km: "not_stated" }, MINI) === false);
+  check("years alone on an unrelated page is not a confirmation",
+    pairOnPage({ years: 12, km: "not_stated" }, "the 12 year old car was sold at auction") === false);
+}
+
 console.log("");
 if (failed) { console.error(`${failed} failure(s)`); process.exit(1); }
 console.log("all checks passed");

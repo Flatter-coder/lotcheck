@@ -48,6 +48,8 @@ const WORD_NUM = {
 };
 
 /** Numbers only. "80,000" and "80000" and "80 000" are the same distance. */
+import { NO_DISTANCE_LIMIT_PATTERN } from "../../supabase/functions/_shared/distance-vocab.js";
+
 export function normalizePage(text) {
   return String(text || "")
     .toLowerCase()
@@ -88,10 +90,25 @@ export function parseTerm(term) {
   if (!t) return { pairs: [], unparsed: true };
   const pairs = [];
   // "<n>-year" / "<n> year" / "<n> yr", then a distance before the next pair.
-  const re = /(\d{1,2})\s*-?\s*(?:year|yr)s?\s*[\/,: ]\s*(unlimited|\d{2,7})\s*(?:km|kilometre|kilometer|mile)?/g;
+  const re = new RegExp(`(\\d{1,2})\\s*-?\\s*(?:year|yr)s?\\s*[\\/,: ]\\s*(${NO_DISTANCE_LIMIT_PATTERN}|\\d{2,7})\\s*(?:km|kilometre|kilometer|mile)?`, "g");
   let m;
   while ((m = re.exec(t))) {
-    pairs.push({ years: Number(m[1]), km: m[2] === "unlimited" ? "unlimited" : Number(m[2]) });
+    // OUR OWN STORED VALUE GETS THE SAME VOCABULARY AS THEIR PAGE. Honda holds
+    // "5-year/no distance limit" and Subaru "5-year/no km limit"; both read as
+    // "could not read our own stored value as a term" while pairOnPage had
+    // understood those exact words all along.
+    const n = Number(m[2]);
+    pairs.push({ years: Number(m[1]), km: Number.isFinite(n) ? n : "unlimited" });
+  }
+
+  // A TERM MAY STATE YEARS AND NO DISTANCE AT ALL. MINI publishes "12-year Rust
+  // Perforation Warranty" and Polestar "12 years after delivery" -- neither
+  // gives a kilometre figure and neither says there is no limit. Treating that
+  // as unreadable would report our own correct value as a defect; treating it
+  // as unlimited would assert a limit nobody published. It is its own case.
+  if (!pairs.length) {
+    const yOnly = t.match(new RegExp(`(\\d{1,2})\\s*-?\\s*(?:year|yr)s?`));
+    if (yOnly) pairs.push({ years: Number(yOnly[1]), km: "not_stated" });
   }
   return { pairs, unparsed: pairs.length === 0 };
 }
@@ -117,11 +134,16 @@ export function pairOnPage(pair, page) {
   // travelled" -- the word "unlimited" appears NOWHERE on that page. Matching
   // only our own vocabulary reported a correct row as drifted, which is an
   // accusation against the manufacturer produced by our own word choice.
+  // A term with no distance is confirmed by its YEARS sitting beside warranty
+  // vocabulary. Requiring a distance that was never published would report
+  // drift on a figure the manufacturer still states.
+  if (pair.km === "not_stated") {
+    const y = `(?:${pair.years}\\s*-?\\s*(?:year|yr)s?|${pair.years * 12}\\s*months?)`;
+    return new RegExp(`${y}[^;]{0,60}?(?:warrant|coverage|perforation|corrosion|rust)`).test(p)
+        || new RegExp(`(?:warrant|coverage|perforation|corrosion|rust)[^;]{0,60}?${y}`).test(p);
+  }
   const dist = pair.km === "unlimited"
-    ? "(?:unlimited\\s*(?:km|kilometre|kilometer|mileage|distance)?"
-      + "|regardless of (?:the )?(?:distance|mileage|kilometre|kilometer)[a-z ]*"
-      + "|(?:no|without) (?:a )?(?:distance|mileage|kilometre|kilometer) (?:limit|restriction)"
-      + "|whatever the (?:distance|mileage))"
+    ? NO_DISTANCE_LIMIT_PATTERN
     : `${pair.km}\\s*(?:km|kilometre|kilometer)`;
   const yrs = `(?:${pair.years}\\s*-?\\s*(?:year|yr)s?|${pair.years * 12}\\s*months?)`;
   // PERIODS ARE ALLOWED INSIDE THE WINDOW. Acura writes its rust-perforation

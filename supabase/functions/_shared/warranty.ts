@@ -14,13 +14,17 @@
 // km null means "no distance ceiling applies", which arrives two different
 // ways: the source SAID unlimited, or the source said nothing about distance.
 // Those are not the same claim and kmExplicitlyUnlimited keeps them apart.
+import { statesNoDistanceLimit } from "./distance-vocab.js";
+
 export interface ParsedCoverage { years: number | null; km: number | null; kmExplicitlyUnlimited: boolean; }
 
 export function parseCoverage(str: string | null | undefined): ParsedCoverage | null {
   if (!str) return null;
   const y = str.match(/(\d+)\s*-?\s*year/i);
   const kmMatch = str.match(/([\d,]+)\s*km/i);
-  const unlimited = /unlimited/i.test(str);
+  // "unlimited" is our word; Honda writes "no distance limit" and Subaru "no
+  // km limit". Both affirmatively state there is no ceiling. [[distance-vocab]]
+  const unlimited = statesNoDistanceLimit(str);
   const years = y ? Number(y[1]) : null;
   if (years == null) return null;
   return {
