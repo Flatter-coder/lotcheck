@@ -486,6 +486,16 @@ jobs:
       # post-condition; this gate proves a failing one fails the run.
       - name: A migration can prove its own effect, and a false post-condition fails
         run: npm run test:migration-assert
+      # 22 migrations open by clearing the catalogue they then seed by hand.
+      # Each was correct the day it ran; re-running one today throws away the
+      # scraped, trim-pinned, basis-bearing rows that replaced it and puts
+      # August's NULL-trim base models back. Measured 2026-09-22: between them
+      # they target 1,506 of the 1,512 live rows, and `--all-since 20260808`
+      # would do it in one call that looks exactly like a legitimate one. The
+      # guard counts LIVE rows the statement would remove, so an already-run
+      # purge passes and a seed re-run refuses, with no filename list to rot.
+      - name: A migration that would delete live catalogue rows is refused
+        run: npm run test:migration-destructive
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that
