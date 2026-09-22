@@ -93,3 +93,16 @@ cross join (values
 ) as v(control_key, description, implementation, evidence_url, status, last_verified_at, verified_by, owner)
 where r.rule_key = 'crawl_scope_dealer_sites_only'
 on conflict (control_key) do nothing;
+
+-- POST-CONDITIONS. Re-runnable, and checked by scripts/apply-migrations.mjs after
+-- the statements above have run. Every insert here is `on conflict do nothing`,
+-- which prints the same green tick whether it wrote a row or skipped one — so
+-- without these, "applied" would mean only "parsed".
+-- @assert: (select count(*) from public.legal_source where citation like 'Counsel review of the LotCheck business model%') = 1
+-- @assert: (select count(*) from public.legal_rule where rule_key = 'crawl_scope_dealer_sites_only') = 1
+-- @assert: (select status from public.legal_rule where rule_key = 'crawl_scope_dealer_sites_only') = 'draft'
+-- @assert: (select excerpt like '%Vic Todorovic%' from public.legal_rule where rule_key = 'crawl_scope_dealer_sites_only')
+-- @assert: (select verification from public.legal_source where short_name = 'Crawl clearance (verbal)') = 'unverified'
+-- @assert: (select count(*) from public.legal_control c join public.legal_rule r on r.id = c.rule_id where r.rule_key = 'crawl_scope_dealer_sites_only') = 6
+-- @assert: (select count(*) from public.legal_control c join public.legal_rule r on r.id = c.rule_id where r.rule_key = 'crawl_scope_dealer_sites_only' and c.status = 'implemented') = 5
+-- @assert: (select count(*) from public.legal_control where control_key = 'crawl_written_scope_outstanding' and status = 'planned') = 1
