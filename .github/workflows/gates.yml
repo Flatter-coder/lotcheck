@@ -286,6 +286,8 @@ jobs:
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
         run: npm run test:catalog-guard
+      - name: "APR benchmark: a dollar figure needs both halves, and never a monthly figure alone"
+        run: npm run test:apr-reference
       - name: "Inventory counts RPC: aggregates only, and a delisting is never a sale"
         run: npm run test:inventory-counts
       # Two rules about how catalog data reaches Supabase. Every scraper must
