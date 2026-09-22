@@ -123,6 +123,105 @@ function blameMissingRelation(message) {
     : `"${rel}" is not created by any migration in ${DIR}/ — check the name.`;
 }
 
+// ---------------------------------------------------------------------------
+// REFUSING TO RE-RUN A HISTORICAL SEED MIGRATION.
+//
+// 22 migrations in this repo begin by clearing the catalogue they are about to
+// seed — `delete from msrp_catalog where make in (...)`, then a block of
+// hand-typed INSERTs. Each was correct on the day it ran. Re-running one today
+// is not "idempotent": the scrapers have replaced that make's rows with sourced,
+// trim-pinned, basis-bearing data, and the DELETE would throw all of it away and
+// put August's hand-typed base models back — NULL trim, NULL price_basis, no
+// source_url. Between them those 22 files target 1,506 of the 1,512 live rows.
+//
+// Nothing stopped that. `--all-since 20260808` would have done it in one call,
+// and naming one file by hand looks exactly like the legitimate call that
+// applied the legal register. The run would print a green tick, because the
+// statements execute perfectly well.
+//
+// One of them is worse than destructive: 20260808_euro_british_msrp_catalog.sql
+// reinstates the Jaguar and Land Rover rows that 20260912b_purge_unsourced_jlr
+// deliberately removed for producing false accusations against dealers.
+//
+// So: before executing anything, count what the migration would actually delete
+// from the live database, and REFUSE if it is more than the migration itself
+// says it should be. A migration that means to delete declares it:
+//
+//   -- @deletes-at-most: 8
+//
+// The purge migrations do; the seed migrations do not, so they refuse. This is
+// a REFUSAL, not a warning — a warning printed above a green tick is how the
+// catalogue gets emptied by someone reading the last line.
+// ---------------------------------------------------------------------------
+
+// Tables whose contents are earned — scraped, sourced, and depended on by a
+// report a buyer hands to a dealer. Losing rows here is not recoverable by
+// re-running something; it takes a full re-crawl, and until then the product
+// answers "no MSRP" for whole makes.
+const PROTECTED = [
+  "msrp_catalog", "vehicle_listing", "listing_price_history", "listing_observation",
+  "warranty_catalog", "fee_catalog", "freight_catalog", "dealer_source",
+];
+
+/** `-- @deletes-at-most: N` — how many rows this migration is allowed to remove. */
+function deleteBudget(sql) {
+  const m = /^\s*--\s*@deletes-at-most:\s*(\d+)\s*$/im.exec(sql || "");
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * Every `delete from <protected>` / `truncate <protected>` in the file, with the
+ * WHERE clause kept so we can ask the database how many LIVE rows it matches.
+ *
+ * A `truncate` has no WHERE and takes everything, so it is reported with a null
+ * predicate and always refused.
+ */
+function destructiveStatements(sql) {
+  const out = [];
+  const stripped = String(sql || "")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")          // block comments
+    .replace(/^\s*--.*$/gm, " ");                // line comments — a commented-out
+                                                 // delete is not a delete
+  const tables = PROTECTED.join("|");
+  const del = new RegExp(`\\bdelete\\s+from\\s+(?:public\\.)?(${tables})\\b([\\s\\S]*?);`, "gi");
+  for (const m of stripped.matchAll(del)) {
+    const tail = m[2].trim();
+    const where = /^where\b/i.test(tail) ? tail.replace(/^where\b/i, "").trim() : null;
+    out.push({ table: m[1].toLowerCase(), where, kind: "delete" });
+  }
+  const trunc = new RegExp(`\\btruncate\\s+(?:table\\s+)?(?:public\\.)?(${tables})\\b`, "gi");
+  for (const m of stripped.matchAll(trunc)) {
+    out.push({ table: m[1].toLowerCase(), where: null, kind: "truncate" });
+  }
+  return out;
+}
+
+/**
+ * Ask the LIVE database how many rows each destructive statement would remove.
+ * We count before touching anything: a count taken afterwards is an autopsy.
+ */
+async function liveDeleteCount(stmts) {
+  let total = 0;
+  const detail = [];
+  for (const s of stmts) {
+    if (s.kind === "truncate") {
+      const rows = await runSql(`select count(*)::int as n from public.${s.table};`);
+      const n = (Array.isArray(rows) && rows[0] && rows[0].n) || 0;
+      detail.push({ ...s, n, note: "TRUNCATE takes every row" });
+      total += n;
+      continue;
+    }
+    const q = s.where
+      ? `select count(*)::int as n from public.${s.table} where ${s.where};`
+      : `select count(*)::int as n from public.${s.table};`;
+    const rows = await runSql(q);
+    const n = (Array.isArray(rows) && rows[0] && rows[0].n) || 0;
+    detail.push({ ...s, n });
+    total += n;
+  }
+  return { total, detail };
+}
+
 async function main() {
   if (process.argv.includes("--list")) {
     for (const f of allMigrations()) console.log("  " + f);
@@ -144,6 +243,30 @@ async function main() {
     catch { console.error(`  ✗ ${f} — file not found`); failed++; continue; }
 
     const asserts = assertionsIn(sql);
+    // PRE-FLIGHT. Count what this migration would remove from the LIVE database
+    // before executing a single statement. A count taken afterwards is an autopsy.
+    const destructive = destructiveStatements(sql);
+    if (destructive.length) {
+      const budget = deleteBudget(sql);
+      const { total, detail } = await liveDeleteCount(destructive);
+      for (const d of detail) {
+        console.log(`      · ${d.kind} from ${d.table}`
+          + (d.where ? ` where ${d.where.replace(/\s+/g, " ").slice(0, 90)}` : "")
+          + ` → ${d.n} live row(s)${d.note ? " — " + d.note : ""}`);
+      }
+      if (total > budget) {
+        failed++;
+        console.error(`  ✗ ${f} — REFUSED. It would delete ${total} live row(s); `
+          + `it declares a budget of ${budget}.`);
+        console.error(`      These rows were scraped, sourced and trim-pinned. A seed `
+          + `migration re-run today replaces them with the hand-typed rows it shipped with.`);
+        console.error(`      If the deletion is genuinely intended, the migration must say so:`);
+        console.error(`        -- @deletes-at-most: ${total}`);
+        continue;
+      }
+      console.log(`      ✓ ${total} deletion(s) within the declared budget of ${budget}`);
+    }
+
     if (DRY) {
       console.log(`  · ${f} (${sql.length} chars) — not executed`
         + (asserts.length ? `, ${asserts.length} post-condition(s) not checked` : ""));
