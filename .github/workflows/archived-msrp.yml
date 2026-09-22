@@ -45,6 +45,13 @@ jobs:
       - run: npm run test:archived-msrp
       - name: Capture archived Toyota MSRP
         run: node scripts/scrape-archived-toyota.mjs --from=${{ inputs.from || '2018' }} --to=${{ inputs.to || '2024' }}
+      # HYUNDAI, VIA THE INTERNET ARCHIVE. Toyota's newsroom keeps its own
+      # launch releases up permanently; Hyundai does not, so the only copy of
+      # /en/showroom/2016/veloster is the archive's. Same rule either way: the
+      # model year comes from the page, never from the URL folder or the
+      # capture date, and a page that disagrees with its own URL is dropped.
+      - name: Capture archived Hyundai MSRP
+        run: node scripts/scrape-archived-hyundai.mjs
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
