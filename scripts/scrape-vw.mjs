@@ -21,6 +21,41 @@ async function fetchFinance(year, salesCode, cache) {
   return out;
 }
 
+// VW ITEMISES EVERY FEE IN ITS OFFER FINE PRINT, and the fine print is
+// province-specific. An Alberta offer reads, verbatim:
+//
+//   "...having a cash selling price of $29,956.00, including $26 PPSA
+//    registration fee (including third-party registering agent fee), $2,050
+//    freight and PDI, $100 air conditioning levy, $25 tire recycling levy,
+//    $10 AMVIC fee and $750 representative dealer admin fee (actual fee is set
+//    by dealers and varies...)"
+//
+// So the advertised price INCLUDES all of it, and the components are named.
+// The $10 AMVIC fee is what makes this an Alberta figure -- the Ontario text
+// names OMVIC instead, which is why this scraper must not ask Ontario.
+//
+// PARSED CONSERVATIVELY: each pattern must match its own label, so a stray
+// dollar figure elsewhere in the sentence cannot be read as freight. A figure
+// that does not match is left out rather than guessed.
+function feesFromLegal(legal) {
+  const t = String(legal || "").replace(/\s+/g, " ");
+  const money = (re) => { const m = t.match(re); if (!m) return null; const n = Number(String(m[1]).replace(/,/g, "")); return Number.isFinite(n) ? n : null; };
+  const out = {
+    freight_and_pdi:       money(/\$([\d,]+)\s*(?:\.\d{2})?\s+freight and PDI/i),
+    air_conditioning_levy: money(/\$([\d,]+)\s+air conditioning levy/i),
+    tire_recycling_levy:   money(/\$([\d,]+)\s+tire recycling levy/i),
+    amvic_fee:             money(/\$([\d,]+)\s+AMVIC fee/i),
+    ppsa_fee:              money(/\$([\d,]+)\s+PPSA registration fee/i),
+    dealer_admin_fee:      money(/\$([\d,]+)\s+(?:representative )?dealer admin(?:istration)? fee/i),
+  };
+  // THE HEDGE IS EVIDENCE, NOT NOISE. VW calls its admin fee "representative"
+  // and says the actual one is set by the dealer. A buyer shown $750 without
+  // that caveat would take it for a fixed charge.
+  if (/actual fee is set by dealers/i.test(t)) out.dealer_admin_fee_is_representative = true;
+  for (const k of Object.keys(out)) if (out[k] === null) delete out[k];
+  return out;
+}
+
 async function main() {
   const args = parseArgs();
   const today = new Date().toISOString().slice(0, 10);
@@ -28,6 +63,7 @@ async function main() {
   const years = args.year ? [Number(args.year)] : [y, y + 1];
 
   const msrpRows = [], financeRows = [], leaseRows = [];
+  const freightSeen = new Map();
   const finSeen = new Set(), leaseSeen = new Set(), finCache = new Map();
 
   for (const year of years) {
@@ -55,7 +91,15 @@ async function main() {
         // all-in advertised price can say what the difference contains.
         const msrp = advPrice > 0 ? advPrice - freight : 0;
         const trim = (t.trimline || "").trim() || null;
-        if (msrp > 0) msrpRows.push({ year, make: MAKE, model, trim, msrp, fuel_type: inferFuelFromName(`${model} ${trim || ""}`) || (/\bid\.?\d?\b|buzz/i.test(model) ? "BEV" : null), fetched_at: new Date().toISOString() });
+        const legalText = ((t.offers || []).map((o) => o?.legal).filter(Boolean))[0] || null;
+        const vwFees = feesFromLegal(legalText);
+        if (vwFees.freight_and_pdi) freightSeen.set(model, vwFees.freight_and_pdi);
+        if (msrp > 0) msrpRows.push({
+          year, make: MAKE, model, trim, msrp,
+          fuel_type: inferFuelFromName(`${model} ${trim || ""}`) || (/\bid\.?\d?\b|buzz/i.test(model) ? "BEV" : null),
+          attrs: Object.keys(vwFees).length ? { ...vwFees, price_components_province: "AB" } : undefined,
+          fetched_at: new Date().toISOString(),
+        });
         // rate ladders (model-level; VW rates are set per sales_code but stored per model)
         const fv = fin?.fv || {};
         for (const [term, rate] of Object.entries(fv.apr || {})) {
@@ -72,5 +116,10 @@ async function main() {
   }
   console.log(`[${MAKE}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
   await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasis: "excl_freight" });
+
+  if (freightSeen.size) {
+    console.log(`[${MAKE}] freight and PDI from VW's own offer fine print (Alberta):`);
+    for (const [model, amt] of [...freightSeen].sort((a, b) => b[1] - a[1])) console.log(`    ${String(amt).padStart(5)}  ${model}`);
+  }
 }
 main().catch(e => { console.error(e); process.exit(1); });

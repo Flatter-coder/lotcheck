@@ -396,6 +396,28 @@ const FREIGHT: Fee[] = [
     source: "Ram Canada (official capture)", capturedOn: "2026-08-25" },
   { component: "freight", label: "Freight & PDI", amount: 2295, applies: "always", scope: "model", make: "Subaru", model: "Outback",
     source: "Subaru Canada (official capture)", capturedOn: "2026-08-25" },
+  // VW ITEMISES ITS FEES IN THE OFFER FINE PRINT, per province. An Alberta
+  // offer names "$2,050 freight and PDI, $100 air conditioning levy, $25 tire
+  // recycling levy, $10 AMVIC fee and $750 representative dealer admin fee
+  // (actual fee is set by dealers and varies)". The AMVIC line is what makes
+  // it an Alberta figure; the Ontario text names OMVIC.
+  //
+  // The Tiguan row below was captured by hand and this parse returns 2200 for
+  // it independently, which is why the rest are trusted.
+  { component: "freight", label: "Freight & PDI", amount: 2250, applies: "always", scope: "model", make: "Volkswagen", model: "Atlas",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,250 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2250, applies: "always", scope: "model", make: "Volkswagen", model: "Atlas Cross Sport",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,250 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2175, applies: "always", scope: "model", make: "Volkswagen", model: "Taos",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,175 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Jetta",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Jetta GLI",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Golf GTI",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Golf R",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
   { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Volkswagen", model: "Tiguan",
     source: "Volkswagen Canada (official capture)", capturedOn: "2026-08-25" },
 ];

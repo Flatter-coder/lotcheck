@@ -45,7 +45,13 @@ const YEARS = [2026, 2025, 2027];
 // MSRP is national -- the same figure came back for ON, AB, BC and QC on
 // 2026-09-02 -- so the province only decides the levy lines we do not store.
 // ON matches the rates request below.
-const PROVINCE = "ON";
+// ALBERTA. LotCheck serves Alberta buyers, and a maker's build-and-price
+// answers per province: Mazda returns AMVIC 10 for Alberta and OMVIC 22 for
+// Ontario, Hyundai returns different PPSA fees, Genesis a different fee
+// table. Asking Ontario and reporting to an Alberta buyer is indefensible
+// even where today's figures happen to match. scripts/test-province.mjs
+// fails the build if any scraper asks for another province.
+const PROVINCE = "AB";
 
 const dash = g => (g && g.length === 32)
   ? `${g.slice(0,8)}-${g.slice(8,12)}-${g.slice(12,16)}-${g.slice(16,20)}-${g.slice(20)}`.toLowerCase() : g;
@@ -99,46 +105,86 @@ function parseModels(html) {
 // the fix exists to rescue — the scrape then gets QUIETER and still exits 0.
 // Only calling the builder can tell the two apart.
 export function paymentBody({ province, year, modelKey, trimKey, transmissionKey, exteriorColorKey, interiorColorKey, paymentOptions }) {
-  return {
-      ProvinceKey: province, ModelYear: year, ModelKey: modelKey, TrimKey: trimKey,
-      TransmissionKey: transmissionKey, ExteriorColorKey: exteriorColorKey,
-      // A CARET IN THE BODY GETS THE WHOLE REQUEST 403'd BY THE GATEWAY.
-      //
-      // Honda's default interior colour keys look like
-      // "bkblack_fabric_^2020_crv". An Azure Application Gateway WAF rule
-      // refuses any request body containing a "^" byte — verified in
-      // isolation: {"ProvinceKey":"A^B"} -> 403 HTML, {"ProvinceKey":"AB"}
-      // -> the application's own 422. It decodes ^ too, so escaping
-      // does not help. Nothing about this is Honda's intent; it is a
-      // generic injection rule matching a character Honda itself puts in
-      // its own identifiers.
-      //
-      // 9 of Honda's 13 models and 4 of 4 configurable Acura models carry a
-      // caret in that default key. Rate rows dedupe on `model|term`, so the
-      // 4 surviving models x 5 finance terms = 20 rows against 60 held and
-      // x 4 lease terms = 16 against 48 — the exact one-third that made the
-      // collapse guard refuse both tables since 2026-08-21. Two tables
-      // landing on the same fraction was never a coincidence: it is one
-      // per-trim loop split by PaymentMethod, both deduping to a
-      // model-level key.
-      //
-      // The field is required-for-presence but INERT in the response:
-      // real key / garbage key / empty string return byte-identical
-      // PaymentMethod/Term/Apr/Msrp on every caret-free trim tested. The
-      // configuration still resolves from Trim+Transmission+Exterior, so
-      // no price or rate moves.
-      //
-      // SUBSTITUTED HERE, IN THE BODY — NOT where interiorColorKey is read
-      // twenty lines up. The guard on the next line up from the body is
-      // `if (!trimKey || … || !interiorColorKey) continue;` and an empty
-      // string is falsy, so substituting at the read site makes the loop
-      // skip exactly the trims this exists to rescue. The real key must
-      // survive that guard so a trim with genuinely no interior colour is
-      // still skipped.
-      InteriorColorKey: /\^/.test(interiorColorKey) ? "" : interiorColorKey,
-      IncludeFees: true, IncludeTaxes: false,
-      Accessories: [], Protections: [], ProtectionAddOns: [], OwnerPrograms: [], OfferKeys: [], WarrantyKey: "",
-      PaymentOptions: paymentOptions,
+  return {
+
+      ProvinceKey: province, ModelYear: year, ModelKey: modelKey, TrimKey: trimKey,
+
+      TransmissionKey: transmissionKey, ExteriorColorKey: exteriorColorKey,
+
+      // A CARET IN THE BODY GETS THE WHOLE REQUEST 403'd BY THE GATEWAY.
+
+      //
+
+      // Honda's default interior colour keys look like
+
+      // "bkblack_fabric_^2020_crv". An Azure Application Gateway WAF rule
+
+      // refuses any request body containing a "^" byte — verified in
+
+      // isolation: {"ProvinceKey":"A^B"} -> 403 HTML, {"ProvinceKey":"AB"}
+
+      // -> the application's own 422. It decodes ^ too, so escaping
+
+      // does not help. Nothing about this is Honda's intent; it is a
+
+      // generic injection rule matching a character Honda itself puts in
+
+      // its own identifiers.
+
+      //
+
+      // 9 of Honda's 13 models and 4 of 4 configurable Acura models carry a
+
+      // caret in that default key. Rate rows dedupe on `model|term`, so the
+
+      // 4 surviving models x 5 finance terms = 20 rows against 60 held and
+
+      // x 4 lease terms = 16 against 48 — the exact one-third that made the
+
+      // collapse guard refuse both tables since 2026-08-21. Two tables
+
+      // landing on the same fraction was never a coincidence: it is one
+
+      // per-trim loop split by PaymentMethod, both deduping to a
+
+      // model-level key.
+
+      //
+
+      // The field is required-for-presence but INERT in the response:
+
+      // real key / garbage key / empty string return byte-identical
+
+      // PaymentMethod/Term/Apr/Msrp on every caret-free trim tested. The
+
+      // configuration still resolves from Trim+Transmission+Exterior, so
+
+      // no price or rate moves.
+
+      //
+
+      // SUBSTITUTED HERE, IN THE BODY — NOT where interiorColorKey is read
+
+      // twenty lines up. The guard on the next line up from the body is
+
+      // `if (!trimKey || … || !interiorColorKey) continue;` and an empty
+
+      // string is falsy, so substituting at the read site makes the loop
+
+      // skip exactly the trims this exists to rescue. The real key must
+
+      // survive that guard so a trim with genuinely no interior colour is
+
+      // still skipped.
+
+      InteriorColorKey: /\^/.test(interiorColorKey) ? "" : interiorColorKey,
+
+      IncludeFees: true, IncludeTaxes: false,
+
+      Accessories: [], Protections: [], ProtectionAddOns: [], OwnerPrograms: [], OfferKeys: [], WarrantyKey: "",
+
+      PaymentOptions: paymentOptions,
+
     };
 }
 
