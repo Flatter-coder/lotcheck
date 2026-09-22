@@ -468,6 +468,15 @@ jobs:
         run: npm run test:dealer-place
       - name: Migration columns exist (a 42703 must not reach the SQL editor)
         run: npm run check:migrations
+      # A missing relation is almost always a migration nobody applied. On the
+      # day the standing crawl went on, 20260922f failed on legal_source — a
+      # table whose own migration had sat unapplied since 20260810 — and the
+      # error named neither the file nor the fact that re-running it is safe.
+      # The helper that fixes that did NOT fire on the real message until this
+      # gate caught it: the API body is unparsed, so the quotes arrive escaped,
+      # and the pattern matched only the message a person types into a test.
+      - name: A failed migration names the one that was never applied
+        run: npm run test:migration-blame
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that

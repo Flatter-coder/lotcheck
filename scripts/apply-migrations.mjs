@@ -51,6 +51,34 @@ async function reloadSchemaCache() {
   await runSql("notify pgrst, 'reload schema';");
 }
 
+/**
+ * A missing relation is almost always a migration that was never applied, not
+ * a fault in the one being run. The Management API can only say the relation
+ * is absent; it cannot know which file would create it. We can — so name it.
+ *
+ * This cost a diagnosis round-trip the day the standing crawl went on:
+ * 20260922f wrote the clearance into legal_source, and legal_source had sat
+ * unapplied since 20260810. The error was accurate and told you nothing about
+ * what to do next.
+ */
+function blameMissingRelation(message) {
+  // The body arrives UNPARSED, so the quotes around the name are escaped:
+  //   ...ERROR:  42P01: relation \"public.legal_source\" does not exist
+  // A pattern expecting bare quotes matches the message you would write by
+  // hand in a test and never the one the API actually sends.
+  const m = /relation \\?"(?:public\.)?([a-z0-9_]+)\\?" does not exist/i.exec(message || "");
+  if (!m) return null;
+  const rel = m[1];
+  const creates = new RegExp(
+    "create\\s+(?:or\\s+replace\\s+)?(?:table|view|materialized\\s+view)\\s+" +
+    "(?:if\\s+not\\s+exists\\s+)?(?:public\\.)?" + rel + "\\b", "i");
+  const creator = allMigrations().find(
+    (f) => creates.test(readFileSync(join(DIR, f), "utf8")));
+  return creator
+    ? `"${rel}" is created by ${creator}, which has not been applied. Apply that first — the migrations are idempotent, so naming both in order is safe.`
+    : `"${rel}" is not created by any migration in ${DIR}/ — check the name.`;
+}
+
 async function main() {
   if (process.argv.includes("--list")) {
     for (const f of allMigrations()) console.log("  " + f);
@@ -79,6 +107,8 @@ async function main() {
     } catch (e) {
       failed++;
       console.error(`  ✗ ${f}\n      ${e.message}`);
+      const blame = blameMissingRelation(e.message);
+      if (blame) console.error(`      → ${blame}`);
     }
   }
 
