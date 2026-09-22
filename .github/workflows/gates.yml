@@ -286,6 +286,8 @@ jobs:
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
         run: npm run test:catalog-guard
+      - name: "Crawl scope: marketplaces refused in code, not by what is in a table"
+        run: npm run test:crawl-blocklist
       - name: "Archive: the maker's own page only, and publication year is not model year"
         run: npm run test:wayback
       - name: "Inventory discovery: read the dealer's links, do not guess paths"

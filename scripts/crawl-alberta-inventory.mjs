@@ -36,6 +36,7 @@
 import { validateVin } from "../supabase/functions/_shared/invariants.ts";
 import { extractJsonLdVehicles, discoverCategoryPages, findNextPage, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
 import { parseRobots, isPathAllowed } from "./lib/robots.mjs";
+import { partitionByScope } from "./lib/crawl-blocklist.mjs";
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { extractConvertusVmsRoot } from "../supabase/functions/_shared/convertus-vms.js";
 import { pathToFileURL } from "node:url";
@@ -505,6 +506,30 @@ async function main() {
     if (error) { console.error("could not read dealer_source:", error.message); process.exit(1); }
     dealers = data || [];
     if (HOST_ARG && !dealers.length) { console.error(`no active dealer matches --host ${HOST_ARG}`); process.exit(1); }
+
+    // SCOPE OF THE CLEARANCE, CHECKED BEFORE ANYTHING IS FETCHED. The standing
+    // crawl was cleared for dealer websites only — no Facebook, AutoTrader,
+    // Kijiji or CarGurus. Until this ran, that condition held only because
+    // those hosts happen not to be in dealer_source, which is a guard that
+    // cannot fail: one discovery run seeding a marketplace and the crawl
+    // breaches its own terms with nothing to stop it.
+    //
+    // Reported out loud, never silent: a dropped host and a missing adapter
+    // look identical from the outside.
+    {
+      const { allowed, blocked } = partitionByScope(dealers);
+      if (blocked.length) {
+        console.log(`${blocked.length} host(s) OUT OF SCOPE for this crawl and skipped: `
+          + blocked.map((d) => d.host).join(", "));
+        console.log("  The clearance covers dealer websites only. See scripts/lib/crawl-blocklist.mjs.");
+      }
+      dealers = allowed;
+      if (HOST_ARG && !dealers.length) {
+        console.error(`--host ${HOST_ARG} is out of scope for this crawl.`);
+        process.exit(1);
+      }
+    }
+
     // The bound, applied here so --host still re-crawls exactly one dealer.
     if (!HOST_ARG && dealers.length > MAX_DEALERS) {
       const skipped = dealers.length - MAX_DEALERS;

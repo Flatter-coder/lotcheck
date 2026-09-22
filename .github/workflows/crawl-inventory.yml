@@ -37,8 +37,25 @@ on:
         description: "Re-crawl one dealer only, e.g. https://www.citygm.com (blank = all)"
         type: string
         default: ""
-  # schedule:
-  #   - cron: "0 11 * * *"   # 5am Calgary — after dealers' overnight inventory sync
+  schedule:
+    # 5am Calgary — after dealers' overnight inventory sync.
+    #
+    # ENABLED 2026-09-22, after the sign-off this header asked for. The record
+    # is in the legal register: legal_rule.rule_key = crawl_scope_dealer_sites_only,
+    # with six legal_control rows naming the safeguards (migration 20260922f).
+    #
+    # THE CLEARANCE IS VERBAL and the rule row says so — its excerpt quotes Vic,
+    # not counsel, because there is no written opinion to quote and inventing
+    # one would be worse than the gap. The row stays status=draft until a
+    # written scope arrives.
+    #
+    # THE SCOPE IS DEALER WEBSITES ONLY. Facebook, AutoTrader, Kijiji and
+    # CarGurus are refused in code before any request is made
+    # (scripts/lib/crawl-blocklist.mjs), the run prints what it dropped, and
+    # scripts/test-crawl-blocklist.mjs fails the build if the crawler stops
+    # consulting the list. A condition enforced only by what happens to be in
+    # dealer_source is a condition with nothing behind it.
+    - cron: "0 11 * * *"
   #   ENABLE ONLY AFTER LEGAL SIGN-OFF (see header)
 
 jobs:
