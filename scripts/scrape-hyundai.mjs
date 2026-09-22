@@ -11,7 +11,12 @@ import { getJson, sleep, inferFuelFromName, writeCatalogs, parseArgs } from "./l
 
 const MAKE = "Hyundai";
 const BASE = "https://www.hyundaicanada.com/api/backendservice/buildandprice";
-const PROV = "ON";
+// ALBERTA, BECAUSE THAT IS WHO THE PRODUCT IS FOR. This read "ON" from the
+// first commit. The msrp and delivery figures happen to be identical across
+// the two provinces, so it was never the reason a price was wrong -- but
+// ppsaFees differs (104 in Ontario, 86 in Alberta) and asking the wrong
+// province for an Alberta buyer is indefensible regardless of today's parity.
+const PROV = "AB";
 // Hyundai sits behind an Imperva WAF that rejects bare requests; a real
 // browser header set (Referer + client hints) passes it.
 const HDR = {
@@ -33,6 +38,8 @@ async function main() {
   console.log(`[${MAKE}] ${modelIds.length} unique models`);
 
   const msrpRows = [], financeRows = [], leaseRows = [];
+  const adminSeen = new Map();
+  const freightSeen = new Map();   // model -> Hyundai's own delivery charge
   const finSeen = new Set(), leaseSeen = new Set();
 
   for (const modelId of modelIds) {
@@ -50,7 +57,50 @@ async function main() {
       catch { await sleep(70); continue; }
       const msrp = Number(d?.msrp);
       if (!(msrp > 0)) { await sleep(70); continue; }
-      msrpRows.push({ year, make: MAKE, model, trim: trimName, msrp, fuel_type: inferFuelFromName(`${model} ${trimName || ""}`), fetched_at: new Date().toISOString() });
+
+      // WE WERE HANDED FIVE NUMBERS AND KEPT ONE. This payload carries, beside
+      // msrp: delivery (Hyundai's own freight and PDI), dealerAdminFee,
+      // fedAirTax and ppsaFees. All four were parsed and thrown away, and the
+      // write then declared the price basis UNKNOWN -- while the object it had
+      // just read contained a field called `delivery`.
+      //
+      // The cost of that was a client asking what a 2027 IONIQ 9 Preferred AWD
+      // costs and the catalogue answering $64,999 with no basis, when Hyundai's
+      // own Alberta configurator says $68,128 all-in. The components were in
+      // this response the whole time.
+      const delivery = Number(d?.delivery);
+      // dealerAdminFee / fedAirTax / ppsaFees sit on every purchase option and
+      // are identical across them; the first one that carries them answers.
+      const opts = (d.purchaseOptions || []).flatMap((po) => po.options || []);
+      const firstWith = (k) => { for (const o of opts) { const v = Number(o?.[k]); if (Number.isFinite(v) && v > 0) return v; } return null; };
+      const adminFee = firstWith("dealerAdminFee");
+      const airTax = firstWith("fedAirTax");
+      const ppsa = firstWith("ppsaFees");
+
+      // CAPTURED COMPONENTS, NEVER A COMPUTED ALL-IN. fee-schedule.ts is
+      // explicit: the authoritative all-in is the manufacturer's CAPTURED
+      // figure, never the sum of parts. msrp + delivery + admin + airTax comes
+      // to $68,098 on the trim above where Hyundai's own total is $68,128, so
+      // a sum published as "the all-in price" would be wrong by $30 and carry
+      // the authority of a captured figure. all_in_price stays null until we
+      // capture Hyundai's own total.
+      const priceAttrs = {};
+      if (Number.isFinite(delivery) && delivery > 0) priceAttrs.delivery_charge = delivery;
+      if (adminFee !== null) priceAttrs.dealer_admin_fee = adminFee;
+      if (airTax !== null) priceAttrs.federal_air_tax = airTax;
+      if (ppsa !== null) priceAttrs.ppsa_fee = ppsa;
+      priceAttrs.price_components_province = PROV;
+
+      msrpRows.push({
+        year, make: MAKE, model, trim: trimName, msrp,
+        fuel_type: inferFuelFromName(`${model} ${trimName || ""}`),
+        attrs: Object.keys(priceAttrs).length ? priceAttrs : undefined,
+        fetched_at: new Date().toISOString(),
+      });
+      // Hyundai's freight, per model, from the maker's own field. The freight
+      // catalogue held ONE Hyundai figure -- Tucson $2,200, captured by hand.
+      if (Number.isFinite(delivery) && delivery > 0) freightSeen.set(model, delivery);
+      if (adminFee !== null) adminSeen.set(model, adminFee);
 
       for (const po of (d.purchaseOptions || [])) {
         const type = (po.type || "").toUpperCase();
@@ -72,6 +122,22 @@ async function main() {
     }
   }
   console.log(`[${MAKE}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
+  // THE BASIS IS NOW EVIDENCED, NOT UNKNOWN. msrp and delivery arrive as
+  // SEPARATE fields in the same object, so msrp demonstrably excludes freight.
+  // That is the maker's own structure, which is stronger evidence than the
+  // published wording this previously waited for.
+  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasis: "excl_freight" });
+
+  // Report the freight Hyundai states per model, so the gap between what we
+  // hold in the freight catalogue and what the maker charges is visible rather
+  // than assumed. Printed, not written: the freight catalogue is reviewed.
+  if (adminSeen.size) {
+    console.log(`[${MAKE}] dealer admin fee published per model (prov=${PROV}):`);
+    for (const [model, amt] of [...adminSeen].sort((a, b) => b[1] - a[1])) console.log(`    ${String(amt).padStart(5)}  ${model}`);
+  }
+  if (freightSeen.size) {
+    console.log(`[${MAKE}] delivery charge published per model (Hyundai's own field, prov=${PROV}):`);
+    for (const [model, amt] of [...freightSeen].sort((a, b) => b[1] - a[1])) console.log(`    ${String(amt).padStart(5)}  ${model}`);
+  }
 }
 main().catch(e => { console.error(e); process.exit(1); });

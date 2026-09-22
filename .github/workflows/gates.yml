@@ -286,6 +286,8 @@ jobs:
         run: npm run test:carry-forward
       - name: Catalog guard verdicts (green must mean "wrote fresh rows")
         run: npm run test:catalog-guard
+      - name: "Province: every scraper asks Alberta, not Ontario"
+        run: npm run test:province
       - name: "Documents: a figure in a PDF is re-readable, and an unreadable one is never absent"
         run: npm run test:pdf-text
       - name: "APR benchmark: a dollar figure needs both halves, and never a monthly figure alone"

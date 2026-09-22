@@ -19,13 +19,17 @@ import { getJson, sleep, inferFuelFromName, writeCatalogs, parseArgs } from "./l
 
 const MAKE = "Genesis";
 const BASE = "https://acquisition.genesis.ca/api/genesisbackend/GenesisShowroom";
-const PROV = "ON";
+// Alberta. Genesis returns a PER-PROVINCE fee table (trimTaxes), so the
+// province is not cosmetic here: Alberta gets AMVICFee 10 and OMVICFee 0,
+// Ontario the reverse.
+const PROV = "AB";
 
 async function main() {
   const args = parseArgs();
   const today = new Date().toISOString().slice(0, 10);
   const models = (await getJson(`${BASE}/GetLatestYearModelsJson?province=${PROV}`)).models || [];
   const msrpRows = [], financeRows = [], leaseRows = [];
+  let sawAllInclusive = false;
   const finSeen = new Set(), leaseSeen = new Set();
 
   for (const m of models) {
@@ -42,7 +46,44 @@ async function main() {
     for (const t of trims) {
       const msrp = Number(t.msrp);
       if (!(msrp > 0)) continue;
-      msrpRows.push({ year, make: MAKE, model, trim: (t.trimName || "").trim() || null, msrp, fuel_type: fuel, fetched_at: new Date().toISOString() });
+
+      // GENESIS PRICES ARE ALL-INCLUSIVE, AND GENESIS SAYS SO. Every trim
+      // carries vehiclePricingLegal.legalDescription, verbatim:
+      //   "Vehicle price is all-inclusive, premium paint charges may apply and
+      //    will be disclosed in the colour step of build and order process.
+      //    Applicable license fees, insurance, registration, and taxes extra"
+      // That is the maker's own published wording, which is exactly what the
+      // basis was waiting for -- and it is the OPPOSITE of its sibling brand.
+      // Hyundai's msrp excludes freight; Genesis's includes it. Treating the
+      // two the same, or guessing from the shared parent, would have added a
+      // freight charge on top of a price that already contains it.
+      const legal = String(t?.vehiclePricingLegal?.legalDescription || "")
+        .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const allInclusive = /price is all-inclusive/i.test(legal);
+
+      // trimTaxes is a per-province, per-jurisdiction fee table. Alberta shows
+      // AMVICFee 10 (PROVINCIAL) and DealerAdminFee 0 (DEALER).
+      const feeAttrs = {};
+      for (const f of (t.trimTaxes || [])) {
+        const amt = Number(f?.amount);
+        if (!Number.isFinite(amt)) continue;          // null is "not stated", not zero
+        if (f?.provinceCode && f.provinceCode !== PROV) continue;
+        feeAttrs[`fee_${String(f.name || "").replace(/[^A-Za-z0-9]+/g, "_").toLowerCase()}`] = amt;
+      }
+      if (allInclusive) feeAttrs.price_is_all_inclusive = true;
+      feeAttrs.price_components_province = PROV;
+
+      msrpRows.push({
+        year, make: MAKE, model, trim: (t.trimName || "").trim() || null, msrp,
+        fuel_type: fuel,
+        // A CAPTURED all-in, not a sum: Genesis's own price IS the all-in
+        // figure, which is what fee-schedule.ts requires before anything may
+        // be published as one.
+        all_in_price: allInclusive ? msrp : undefined,
+        attrs: Object.keys(feeAttrs).length ? feeAttrs : undefined,
+        fetched_at: new Date().toISOString(),
+      });
+      if (allInclusive) sawAllInclusive = true;
 
       if (t.extTrimId != null) {
         try {
@@ -67,6 +108,11 @@ async function main() {
     console.log(`  ${model} @${year}: ${trims.length} trims`);
   }
   console.log(`[${MAKE}] ${msrpRows.length} MSRP, ${financeRows.length} finance, ${leaseRows.length} lease rows.`);
-  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, { priceBasisUnknown: "not established against the maker's own published wording - see docs/FIXING-HISTORY.md 2026-09-17" });
+  // incl_freight, on the maker's own words rather than an assumption. If a
+  // run ever comes back without that sentence the basis is NOT stamped --
+  // silently falling back to a guess is how a brand gets the wrong basis.
+  await writeCatalogs(MAKE, { msrpRows, financeRows, leaseRows }, sawAllInclusive
+    ? { priceBasis: "incl_freight" }
+    : { priceBasisUnknown: "Genesis did not return vehiclePricingLegal.legalDescription stating the price is all-inclusive on this run - not assuming it" });
 }
 main().catch(e => { console.error(e); process.exit(1); });

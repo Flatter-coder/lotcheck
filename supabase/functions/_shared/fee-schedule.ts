@@ -172,6 +172,40 @@ const DEALER_FEE_CEILING: Fee[] = [
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $799)", amount: 799, applies: "always", scope: "brand", make: "Hyundai",
     source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "\"Fees may vary by dealer.\" Some models publish $599; $799 is the highest published figure, used as the max." },
+  // HYUNDAI'S ELECTRIC MODELS BILL $599, NOT $799. The brand row above carries
+  // $799 and notes "some models publish $599" without saying which. Hyundai's
+  // own Build & Price API, asked for Alberta on 2026-09-22, answers
+  // dealerAdminFee per trim: $799 on VENUE, KONA, TUCSON, SANTA FE, PALISADE,
+  // ELANTRA, ELANTRA N and SONATA -- and $599 on IONIQ 5, IONIQ 9 and KONA
+  // Electric. Every one of them, every trim.
+  //
+  // It matters because the brand ceiling is what a fee gets measured against.
+  // A $799 administration fee on an IONIQ 9 reads as "at the cap" against the
+  // brand row while Hyundai's own configurator bills $599 for that car -- $200
+  // a buyer would have no reason to question. A model-scoped row outranks the
+  // brand one, so these three are now measured against their own figure.
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every IONIQ 9 trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every IONIQ 5 trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every KONA Electric trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  // Hyundai's own delivery charge, per model, from the same API. The catalogue
+  // previously held ONE Hyundai freight figure (Tucson $2,200, hand-captured
+  // 2026-08-25) -- which this capture returns identically, and which is why
+  // these are trusted.
+  // MAZDA ITEMISES FREIGHT AND PDE SEPARATELY, and the report's "Freight & PDI"
+  // is the two together. Mazda Canada's Trims API returns, per model and per
+  // province: Freight, PDE, Administration Fee, A/C Tax, AMVIC (Alberta) or
+  // OMVIC (Ontario), and a tire stewardship fee. The catalogue held no Mazda
+  // freight figure at all before this.
+  //
+  // The same response carries Administration Fee 795, which independently
+  // confirms the brand ceiling row below -- captured from marketing copy on
+  // 2026-08-25, and reached again by a different route on 2026-09-22.
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $795)", amount: 795, applies: "always", scope: "brand", make: "Mazda",
     source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $750)", amount: 750, applies: "always", scope: "brand", make: "Volkswagen",
@@ -217,6 +251,50 @@ const DEALER_FEE_CEILING: Fee[] = [
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────
 const FREIGHT: Fee[] = [
+  // Captured 2026-09-22 from each maker's own build-and-price API. These were
+  // first written into DEALER_FEE_CEILING by mistake, which made Mazda's fee
+  // ceiling read 2195 -- a freight figure answering a question about an
+  // administration fee. test:fee-schedule caught it; Hyundai's rows had gone to
+  // the same wrong array and passed only because find() reached the real
+  // ceiling row first.
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "PALISADE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "SANTA FE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "VENUE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2100, applies: "always", scope: "model", make: "Hyundai", model: "SONATA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2100", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 1900, applies: "always", scope: "model", make: "Hyundai", model: "ELANTRA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 1900", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-5",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-30",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-70 MHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-70 PHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-90 MHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-90 PHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MAZDA3",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MAZDA3-SPORT",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MX-5",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MX-5 RF",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
   // ── Captured 2026-09-17, each figure read off an official Canadian page and
   //    then CONFIRMED by a second independent read of a different page. Seven
   //    more makes returned a figure that the second read could not corroborate
@@ -318,6 +396,28 @@ const FREIGHT: Fee[] = [
     source: "Ram Canada (official capture)", capturedOn: "2026-08-25" },
   { component: "freight", label: "Freight & PDI", amount: 2295, applies: "always", scope: "model", make: "Subaru", model: "Outback",
     source: "Subaru Canada (official capture)", capturedOn: "2026-08-25" },
+  // VW ITEMISES ITS FEES IN THE OFFER FINE PRINT, per province. An Alberta
+  // offer names "$2,050 freight and PDI, $100 air conditioning levy, $25 tire
+  // recycling levy, $10 AMVIC fee and $750 representative dealer admin fee
+  // (actual fee is set by dealers and varies)". The AMVIC line is what makes
+  // it an Alberta figure; the Ontario text names OMVIC.
+  //
+  // The Tiguan row below was captured by hand and this parse returns 2200 for
+  // it independently, which is why the rest are trusted.
+  { component: "freight", label: "Freight & PDI", amount: 2250, applies: "always", scope: "model", make: "Volkswagen", model: "Atlas",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,250 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2250, applies: "always", scope: "model", make: "Volkswagen", model: "Atlas Cross Sport",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,250 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2175, applies: "always", scope: "model", make: "Volkswagen", model: "Taos",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,175 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Jetta",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Jetta GLI",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Golf GTI",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2050, applies: "always", scope: "model", make: "Volkswagen", model: "Golf R",
+    source: "Volkswagen Canada special-offers API — offer legal text (Alberta): \"$2,050 freight and PDI\"", capturedOn: "2026-09-22" },
   { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Volkswagen", model: "Tiguan",
     source: "Volkswagen Canada (official capture)", capturedOn: "2026-08-25" },
 ];

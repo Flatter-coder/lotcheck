@@ -7,7 +7,13 @@
 import { writeCatalogs, parseArgs, UA } from "./lib/catalog-io.mjs";
 
 const MAKE = "Kia";
-const PROV = "ON";
+// ALBERTA. LotCheck serves Alberta buyers, and a maker's build-and-price
+// answers per province: Mazda returns AMVIC 10 for Alberta and OMVIC 22 for
+// Ontario, Hyundai returns different PPSA fees, Genesis a different fee
+// table. Asking Ontario and reporting to an Alberta buyer is indefensible
+// even where today's figures happen to match. scripts/test-province.mjs
+// fails the build if any scraper asks for another province.
+const PROV = "AB";
 const SOURCE_URL = "https://www.kia.ca/en/shopping-tools/build-and-price";
 
 // EX-FREIGHT, AND KIA SAYS SO ITSELF -- this is evidence, not inference.

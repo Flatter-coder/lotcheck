@@ -23,7 +23,13 @@ import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
-const PROVINCE = "ON"; // MSRP is national; ON is canonical for rate lookups
+// ALBERTA. LotCheck serves Alberta buyers, and a maker's build-and-price
+// answers per province: Mazda returns AMVIC 10 for Alberta and OMVIC 22 for
+// Ontario, Hyundai returns different PPSA fees, Genesis a different fee
+// table. Asking Ontario and reporting to an Alberta buyer is indefensible
+// even where today's figures happen to match. scripts/test-province.mjs
+// fails the build if any scraper asks for another province.
+const PROVINCE = "AB"; // MSRP is national for this stack; the province still decides the fee and rate lookups
 // The fee stack is PROVINCE-scoped, so one has to be chosen to store. Alberta,
 // because that is the market these reports serve; every row stamps it in
 // attrs.province so a consumer can never read it as a national figure.
