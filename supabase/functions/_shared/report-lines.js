@@ -1101,6 +1101,10 @@ export function warrantyLine(a) {
       const yrs = Math.max(0, Math.round(t.yearsLeft * 10) / 10);
       const yTxt = yrs >= 1 ? `about ${yrs % 1 === 0 ? yrs : yrs.toFixed(1)} year${yrs === 1 ? "" : "s"}` : "under a year";
       if (t.kmUnlimited) return `${yTxt} (distance unlimited)`;
+      // The maker gave a term and no distance. Saying "unlimited" here would be
+      // us telling the buyer something no manufacturer told us -- and on a
+      // rust-through line, overstating cover is the expensive direction.
+      if (t.kmNotStated) return `${yTxt} — ${rw.make || "the manufacturer"} publishes no kilometre limit for this one, so confirm the terms with the dealer`;
       if (!t.odometerKnown) return `${yTxt}; the distance left cannot be worked out because this listing publishes no odometer reading`;
       const km = Math.max(0, Math.round(t.kmLeft));
       return `${yTxt} or about ${km.toLocaleString()} km, whichever comes first`;

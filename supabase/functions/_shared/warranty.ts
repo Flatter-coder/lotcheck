@@ -11,7 +11,10 @@
 // cleanly and never touches the DB.
 // ============================================================================
 
-export interface ParsedCoverage { years: number | null; km: number | null; } // km null = unlimited
+// km null means "no distance ceiling applies", which arrives two different
+// ways: the source SAID unlimited, or the source said nothing about distance.
+// Those are not the same claim and kmExplicitlyUnlimited keeps them apart.
+export interface ParsedCoverage { years: number | null; km: number | null; kmExplicitlyUnlimited: boolean; }
 
 export function parseCoverage(str: string | null | undefined): ParsedCoverage | null {
   if (!str) return null;
@@ -20,7 +23,11 @@ export function parseCoverage(str: string | null | undefined): ParsedCoverage | 
   const unlimited = /unlimited/i.test(str);
   const years = y ? Number(y[1]) : null;
   if (years == null) return null;
-  return { years, km: unlimited ? null : (kmMatch ? Number(kmMatch[1].replace(/,/g, "")) : null) };
+  return {
+    years,
+    km: unlimited ? null : (kmMatch ? Number(kmMatch[1].replace(/,/g, "")) : null),
+    kmExplicitlyUnlimited: unlimited,
+  };
 }
 
 export interface RemainingTerm {
@@ -29,7 +36,13 @@ export interface RemainingTerm {
   termKm: number | null;   // null = unlimited distance
   yearsLeft: number;       // may be <= 0
   kmLeft: number | null;   // null = unlimited distance or odometer unknown
-  kmUnlimited: boolean;
+  kmUnlimited: boolean;       // the source SAID unlimited
+  // The source gave no distance at all. MINI publishes "12-year Rust
+  // Perforation Warranty" and Polestar "Coverage lasts for the first 12 years
+  // after delivery" -- neither states a kilometre limit, and neither says
+  // unlimited. Rendering that as "(distance unlimited)" tells a buyer something
+  // no manufacturer told us.
+  kmNotStated: boolean;
   odometerKnown: boolean;
   active: boolean;
   // A term whose own text says it varies. See HEDGE below: when true, NOTHING
@@ -83,7 +96,8 @@ function remainingFor(cov: string | null | undefined, modelYear: number, odo: nu
     termKm: p.km,
     yearsLeft,
     kmLeft,
-    kmUnlimited: p.km == null,
+    kmUnlimited: p.km == null && p.kmExplicitlyUnlimited,
+    kmNotStated: p.km == null && !p.kmExplicitlyUnlimited,
     odometerKnown,
     active: timeOk && kmOk,
     hedged: !!hedgeHit,
