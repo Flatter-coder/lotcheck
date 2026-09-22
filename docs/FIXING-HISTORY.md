@@ -26,6 +26,65 @@ the next instance.
 
 ---
 
+## 2026-09-22 — the rate went unexamined, and the monthly figure hid it
+
+**`7e8296b` — what the rate costs, stated over the whole loan.**
+*class: Absence read as knowledge, plus a new one — a true number in a frame
+that prevents it being understood.*
+
+`computeFinancingTrap()` compared the quoted rate to a manufacturer promo only
+**inside** the discount-vs-subvented-financing trap. Outside that branch — most
+deals — the report said nothing about the rate at all. A dealership finance
+manager, asked on the record whether he would present 5.74% at a small flat or
+6.09% at 4% reserve, said he would *"present the 6.09 more than likely"*, and
+that the dealership *"does make money by marking up rate"*. That is a
+structure, not an accusation, and we were silent on it.
+
+**THE MONTHLY FIGURE IS THE DEFECT.** In that same exchange the 0.30-point
+spread was called **"$2 a month"** by the finance manager and **"$500"** by the
+consultant arguing with him. On $30,000 over 72 months it is **$4.25 a month
+and $306 over the loan**. Two professionals, arguing about their own trade,
+live, both wrong — because nobody can check a per-month figure in their head.
+$4.25 sounds like nothing; $306 does not; and on a $112,153 vehicle over 84
+months a two-point markup is **$9,210**.
+
+So `money-over-term.ts` is now the only sanctioned renderer. `extraPerMonth` is
+derived from the same total so the two cannot disagree, and the module cannot
+emit a string that fails its own `statesMonthlyWithoutTotal()` detector.
+
+**REFUSALS, BECAUSE HALF A COMPARISON IS THE 2026-08-19 DEFECT.** That day a
+rate existing only in an LLM's read of a page became *"20.01% above Ford's
+advertised 4.99% — about $23,275 more over 60 months"*, printed against a named
+dealer that advertised no rate. So both halves must be evidenced: the quote
+from `sm360_feed`/`convertus_vms`/`page_text`, the reference named, under 30
+days old, and posted for **this loan's term**. A rate posted for 60 months says
+nothing about an 84-month loan, and comparing across them would invent a gap
+out of a term difference — the same error as an all-in asking price measured
+against an ex-freight MSRP. Most deals refuse, and that is correct.
+
+**THE BENCHMARK I DESIGNED FOR DOES NOT EXIST.** The reference should be a rate
+the buyer can get without us. Thirteen Canadian lender pages were checked:
+Servus's rates page is 327KB of **deposit** rates in which "vehicle", "car
+loan" and "term loan" appear nowhere and "Auto" appears only as *Auto
+Insurance*; ATB served 85KB with no rate figures; Vancity rate-limited and the
+circuit opened correctly; Bank of Canada's valet API publishes mortgage and
+deposit series, not consumer auto. **Canadian lenders quote on application.**
+So the manufacturer's published rate is the only benchmark today and the gap is
+named rather than filled with something dealer-facing.
+
+**Three gates caught faults in this work.** `overTerm(null, 72)` rendered
+*"$0 over 72 months"* — `Number(null)` is 0, the family `read-num.js` exists to
+close, reproduced by hand in a new file. `check:coercion` then refused the
+local number reader outright and sent it to `readNum()`. And an undated
+reference was being labelled *"we hold nothing"* when the truth is *"we cannot
+show it is current"* — two refusals collapsed into the wrong one.
+
+63 gates; 13 of 14 mutations caught. The survivor — deleting the explicit
+`term === null` guard — is **equivalent**, because `null < 60` coerces to true
+and the band check below catches it anyway. Recorded as equivalent rather than
+papered over: the guard is documentation, not behaviour.
+
+
 ## 2026-09-21 — a car advertised "New" at 6,675 km was read as new
 
 *class: Two authors per fact*
