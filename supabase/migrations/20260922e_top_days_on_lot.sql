@@ -34,7 +34,9 @@ returns table (
   year           integer,
   make           text,
   model          text,
-  trim           text,
+  -- NOT `trim`: it is a reserved word in Postgres (the trim() function) and a
+  -- bare RETURNS TABLE column of that name is a syntax error.
+  trim_name      text,
   days_observed  integer,
   first_seen     date,
   last_seen      date,
@@ -46,7 +48,7 @@ set search_path = public
 stable
 as $$
   select ds.city,
-         vl.year, vl.make, vl.model, vl.trim,
+         vl.year, vl.make, vl.model, vl.trim as trim_name,
          (vl.last_seen_on - vl.first_seen_on)::integer as days_observed,
          vl.first_seen_on,
          vl.last_seen_on,
