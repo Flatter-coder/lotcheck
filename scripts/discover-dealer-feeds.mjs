@@ -33,6 +33,7 @@
 //   node scripts/discover-dealer-feeds.mjs --limit 40           # probe a sample first
 import { writeFileSync } from "node:fs";
 import { extractJsonLdVehicles, discoverCategoryPages, extractEdealerVehicles } from "./lib/structured-inventory.mjs";
+import { discoverInventoryPages, discoverFromSitemap } from "./lib/inventory-discovery.mjs";
 // ONE definition of what a dealer website reduces to. The scanner keys the
 // catalogue on this and the probe files hosts by it; two copies would drift,
 // and then a host the probe catalogued would be one the scanner cannot find.
@@ -401,6 +402,56 @@ async function probeOrigin(host, trace) {
   if (jl) return jl;
   const ed = await tryEdealer(host, trace);
   if (ed) return ed;
+  // EVERY DETECTOR ABOVE GUESSES THE SAME FIVE PATHS. When they all 404 on a
+  // site that is plainly working, the conclusion "no feed" is about our URL
+  // list, not about the dealer. So: read the dealer's own links, find where
+  // their inventory actually lives, and run the SAME detectors against a page
+  // that exists. No new platform knowledge, one more place to look.
+  return await tryDiscoveredPages(host, trace);
+}
+
+// Ask the site where its inventory is, then re-run the HTML detectors there.
+async function tryDiscoveredPages(host, trace) {
+  let candidates = [];
+  try {
+    const res = await fetch(host, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+    if (res.ok) candidates = discoverInventoryPages(await res.text(), host);
+  } catch (e) { note(trace, "discover", `homepage unreadable: ${String(e.message).slice(0, 60)}`); }
+
+  // Some dealers render their menu in JS and link nothing in the HTML. The
+  // sitemap is the site's own statement of what it contains.
+  if (!candidates.length) {
+    try {
+      const sm = await fetch(new URL("/sitemap.xml", host).href, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+      if (sm.ok) candidates = discoverFromSitemap(await sm.text(), host);
+    } catch { /* no sitemap is not a finding */ }
+  }
+  if (!candidates.length) { note(trace, "discover", "no inventory-shaped link on the homepage or sitemap"); return null; }
+
+  // Bounded. This runs across the whole AMVIC roster and a dealer who links
+  // forty filtered views must not cost forty requests.
+  for (const url of candidates.slice(0, 3)) {
+    try {
+      const r = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+      if (!r.ok) { note(trace, "discover", `${url} HTTP ${r.status}`); continue; }
+      const html = await r.text();
+      const vehicles = extractJsonLdVehicles(html);
+      if (vehicles && vehicles.length) {
+        note(trace, "discover", `${url} -> ${vehicles.length} JSON-LD vehicle(s)`);
+        return { platform: "jsonld_itemlist", feed: url, count: vehicles.length, viaDiscovery: true };
+      }
+      const ed = extractEdealerVehicles(html);
+      if (ed && ed.length) {
+        note(trace, "discover", `${url} -> ${ed.length} eDealer vehicle(s)`);
+        return { platform: "edealer", feed: url, count: ed.length, viaDiscovery: true };
+      }
+      if (/convertus-vms|convertus\.rocks/i.test(html)) {
+        note(trace, "discover", `${url} -> convertus marker`);
+        return { platform: "convertus", feed: url, count: null, viaDiscovery: true };
+      }
+      note(trace, "discover", `${url} 200, no vehicles extractable (${Math.round(html.length / 1024)}KB)`);
+    } catch (e) { note(trace, "discover", `${url} ${String(e.message).slice(0, 50)}`); }
+  }
   return null;
 }
 
