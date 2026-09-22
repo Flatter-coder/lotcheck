@@ -32,7 +32,9 @@ async function main() {
 
   for (const year of years) {
     let data;
-    try { data = await (await fetch(`https://globalapi.vwtools.ca/special-offers?province=ON&year=${year}`, { headers: HDRS })).json(); }
+    // Alberta, not Ontario. VW's special offers are province-scoped and this
+    // call asked ON while the product serves AB.
+    try { data = await (await fetch(`https://globalapi.vwtools.ca/special-offers?province=AB&year=${year}`, { headers: HDRS })).json(); }
     catch { continue; }
     const yd = data[year] || data[String(year)] || {};
     for (const modelKey of Object.keys(yd)) {

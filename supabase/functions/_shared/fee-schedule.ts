@@ -197,24 +197,15 @@ const DEALER_FEE_CEILING: Fee[] = [
   // previously held ONE Hyundai freight figure (Tucson $2,200, hand-captured
   // 2026-08-25) -- which this capture returns identically, and which is why
   // these are trusted.
-  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "PALISADE",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "SANTA FE",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "VENUE",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 2100, applies: "always", scope: "model", make: "Hyundai", model: "SONATA",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2100", capturedOn: "2026-09-22" },
-  { component: "freight", label: "Freight & PDI", amount: 1900, applies: "always", scope: "model", make: "Hyundai", model: "ELANTRA",
-    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 1900", capturedOn: "2026-09-22" },
+  // MAZDA ITEMISES FREIGHT AND PDE SEPARATELY, and the report's "Freight & PDI"
+  // is the two together. Mazda Canada's Trims API returns, per model and per
+  // province: Freight, PDE, Administration Fee, A/C Tax, AMVIC (Alberta) or
+  // OMVIC (Ontario), and a tire stewardship fee. The catalogue held no Mazda
+  // freight figure at all before this.
+  //
+  // The same response carries Administration Fee 795, which independently
+  // confirms the brand ceiling row below -- captured from marketing copy on
+  // 2026-08-25, and reached again by a different route on 2026-09-22.
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $795)", amount: 795, applies: "always", scope: "brand", make: "Mazda",
     source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $750)", amount: 750, applies: "always", scope: "brand", make: "Volkswagen",
@@ -260,6 +251,50 @@ const DEALER_FEE_CEILING: Fee[] = [
 
 // ── Model — freight / Delivery & Destination, per make AND model ────────────
 const FREIGHT: Fee[] = [
+  // Captured 2026-09-22 from each maker's own build-and-price API. These were
+  // first written into DEALER_FEE_CEILING by mistake, which made Mazda's fee
+  // ceiling read 2195 -- a freight figure answering a question about an
+  // administration fee. test:fee-schedule caught it; Hyundai's rows had gone to
+  // the same wrong array and passed only because find() reached the real
+  // ceiling row first.
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "PALISADE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "SANTA FE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "VENUE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2100, applies: "always", scope: "model", make: "Hyundai", model: "SONATA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2100", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 1900, applies: "always", scope: "model", make: "Hyundai", model: "ELANTRA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 1900", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-5",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-30",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-70 MHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-70 PHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-90 MHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2195, applies: "always", scope: "model", make: "Mazda", model: "CX-90 PHEV",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1455 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MAZDA3",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MAZDA3-SPORT",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MX-5",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2095, applies: "always", scope: "model", make: "Mazda", model: "MX-5 RF",
+    source: "Mazda Canada Trims API (financial.fees, prov_code=AB) — Freight 1355 + PDE 740, itemised separately by Mazda", capturedOn: "2026-09-22" },
   // ── Captured 2026-09-17, each figure read off an official Canadian page and
   //    then CONFIRMED by a second independent read of a different page. Seven
   //    more makes returned a figure that the second read could not corroborate
