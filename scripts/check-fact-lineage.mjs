@@ -93,6 +93,12 @@ const AUTHORITIES = new Set([
   "resolvePriceVerified", "isVerifiedPriceSource",
   // _shared/invariants.ts — whether a VIN passes its own ISO 3779 check digit.
   "validateVin",
+  // _shared/read-num.js — what this car's odometer reads, decided once.
+  // readNum is already exempt as a coercion; odometerReading IS readNum plus a
+  // non-negative check, and it exists so a missing reading cannot arrive as 0
+  // and certify a driven car as new. Passing it into deriveSaleCondition is a
+  // read from the authority, not a second author.
+  "odometerReading",
 ]);
 
 // Normalising a forwarded value is not authoring it. `String(ctx.vin).toUpperCase()`
@@ -188,7 +194,7 @@ const BASELINE = {
   marketCount: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::captureMarketCount",
-    "supabase/functions/analyze-quote/index.ts::anon#106a73e9",
+    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
   ],
   marketValue: [
     "supabase/functions/_shared/invariants.ts::repair",
@@ -209,14 +215,14 @@ const BASELINE = {
   olderYears: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
-    "supabase/functions/analyze-quote/index.ts::anon#106a73e9",
+    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
   ],
   pageDefault: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
-    "supabase/functions/analyze-quote/index.ts::anon#106a73e9",
+    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
   ],
   priceDisclosure: [
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
@@ -249,7 +255,7 @@ const BASELINE = {
   ],
   recalls: [
     "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
-    "supabase/functions/analyze-quote/index.ts::anon#106a73e9",
+    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
     "supabase/functions/value-report/index.ts::anon#831ecb02",
   ],
   sourceUrl: [

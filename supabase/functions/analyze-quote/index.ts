@@ -813,7 +813,15 @@ Deno.serve(async (req: Request) => {
     // the default). Needs the VIN (to exclude the subject) plus ymm + condition
     // to build the comparable set; returns null on thin coverage and the report
     // omits the module.
-    analysis.saleCondition = deriveSaleCondition({ vehicleCondition: analysis.vehicleCondition, saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null });
+    analysis.saleCondition = deriveSaleCondition({
+    vehicleCondition: analysis.vehicleCondition,
+    saleCondition: analysis.saleCondition ?? analysis.saleConditionHint ?? null,
+    isDemo: analysis.isDemo ?? null,
+    saleClass: analysis.saleClass ?? null,
+    // odometerReading(), not Number(analysis.odometerKm): a missing
+    // reading must not arrive as 0 and certify the car as new.
+    odometerKm: odometerReading(analysis),
+  });
     if (analysis.vin) {
       const mv = await fetchMarketValue(
         analysis.vin,
