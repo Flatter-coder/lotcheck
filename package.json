@@ -71,6 +71,7 @@
     "test:model-identity": "node --experimental-strip-types supabase/functions/_shared/model-identity.test.ts",
     "test:region-gate": "node scripts/test-region-gate.mjs",
     "test:catalog-guard": "node scripts/test-catalog-guard.mjs",
+    "test:wayback": "node scripts/test-wayback.mjs",
     "test:inventory-discovery": "node scripts/test-inventory-discovery.mjs",
     "test:province": "node scripts/test-province.mjs",
     "test:pdf-text": "node scripts/test-pdf-text.mjs",
