@@ -97,6 +97,7 @@
     "test:amvic-match": "node scripts/test-amvic-match.mjs",
     "test:lot-dates": "node scripts/test-lot-dates.mjs",
     "check:migrations": "node scripts/check-migration-columns.mjs",
+    "test:migration-blame": "node scripts/test-migration-blame.mjs",
     "check:row-identity": "node scripts/check-migration-row-identity.mjs",
     "test:trim-identity": "node scripts/test-trim-identity.mjs",
     "test:comps-nameplate": "node scripts/test-comps-nameplate.mjs",

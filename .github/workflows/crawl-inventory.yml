@@ -56,7 +56,6 @@ on:
     # consulting the list. A condition enforced only by what happens to be in
     # dealer_source is a condition with nothing behind it.
     - cron: "0 11 * * *"
-  #   ENABLE ONLY AFTER LEGAL SIGN-OFF (see header)
 
 jobs:
   crawl:
