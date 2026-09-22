@@ -32,7 +32,7 @@
 //
 // Run: npm run test:warranty-labels
 
-import { computeRemainingWarranty } from "../supabase/functions/_shared/warranty.ts";
+import { computeRemainingWarranty, parseCoverage } from "../supabase/functions/_shared/warranty.ts";
 import { warrantyLine } from "../supabase/functions/_shared/report-lines.js";
 
 let failed = 0;
@@ -150,6 +150,52 @@ if (!failed) pass("every hedge phrasing refuses");
   if (!/comprehensive cover looks to have run out|comprehensive and/i.test(w.line)) {
     fail("the expired comprehensive cover is not named", "what has gone is a finding, not an omission");
   } else pass("the expired coverage is named alongside what remains");
+}
+
+
+// ---- 4. "NO DISTANCE STATED" IS NOT "DISTANCE UNLIMITED" ----------------
+// MINI publishes "12-year Rust Perforation Warranty" and Polestar "Coverage
+// lasts for the first 12 years after delivery" -- neither states a kilometre
+// limit, and neither says unlimited. parseCoverage returned km = null for BOTH
+// that and an explicit "unlimited km", and the report rendered km == null as
+// "(distance unlimited)". So the report told buyers something no manufacturer
+// told us, on a rust-through line, in the expensive direction.
+{
+  const explicit = parseCoverage("12-year/unlimited km");
+  const silent = parseCoverage("12-year rust perforation");
+  const stated = parseCoverage("5-year/100,000 km");
+  explicit.kmExplicitlyUnlimited === true
+    ? pass("an explicit 'unlimited km' is flagged as explicit")
+    : fail("an explicit 'unlimited km' is flagged as explicit", JSON.stringify(explicit));
+  silent.kmExplicitlyUnlimited === false
+    ? pass("a term with no distance is NOT read as unlimited")
+    : fail("a term with no distance is NOT read as unlimited", JSON.stringify(silent));
+  stated.km === 100000 && stated.kmExplicitlyUnlimited === false
+    ? pass("a stated distance still parses to its number")
+    : fail("a stated distance still parses to its number", JSON.stringify(stated));
+  // Both give km null. The BASIS is what separates them, and dropping the
+  // distinction is how the defect returns.
+  (explicit.km === null && silent.km === null && explicit.kmExplicitlyUnlimited !== silent.kmExplicitlyUnlimited)
+    ? pass("both shapes give km null and are still told apart")
+    : fail("both shapes give km null and are still told apart");
+
+  // End to end: the rendered line must not claim unlimited distance for MINI.
+  const out = line({ make: "MINI", corrosion_coverage: "12-year rust perforation" }, 2022, 40000, "MINI");
+  const text = `${out?.line || ""} ${out?.value || ""}`;
+  !/distance unlimited/i.test(text)
+    ? pass("the MINI line does not claim distance unlimited")
+    : fail("the MINI line does not claim distance unlimited", text.slice(0, 200));
+  /no kilometre limit/i.test(text)
+    ? pass("the MINI line says the maker publishes no kilometre limit")
+    : fail("the MINI line says the maker publishes no kilometre limit", text.slice(0, 220));
+
+  // And an explicit unlimited must STILL say unlimited -- the fix must not
+  // silence a term the manufacturer really did publish as unlimited.
+  const out2 = line({ make: "Audi", corrosion_coverage: "12-year/unlimited km" }, 2022, 40000, "Audi");
+  const text2 = `${out2?.line || ""} ${out2?.value || ""}`;
+  /distance unlimited/i.test(text2)
+    ? pass("an explicitly unlimited term still reads as unlimited")
+    : fail("an explicitly unlimited term still reads as unlimited", text2.slice(0, 220));
 }
 
 console.log("");
