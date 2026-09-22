@@ -172,6 +172,49 @@ const DEALER_FEE_CEILING: Fee[] = [
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $799)", amount: 799, applies: "always", scope: "brand", make: "Hyundai",
     source: "Hyundai Canada (hyundaicanada.com/en/special-offers/vehicles) — \"dealer admin. fees of up to $799\"", capturedOn: "2026-08-25", provenance: "policy",
     note: "\"Fees may vary by dealer.\" Some models publish $599; $799 is the highest published figure, used as the max." },
+  // HYUNDAI'S ELECTRIC MODELS BILL $599, NOT $799. The brand row above carries
+  // $799 and notes "some models publish $599" without saying which. Hyundai's
+  // own Build & Price API, asked for Alberta on 2026-09-22, answers
+  // dealerAdminFee per trim: $799 on VENUE, KONA, TUCSON, SANTA FE, PALISADE,
+  // ELANTRA, ELANTRA N and SONATA -- and $599 on IONIQ 5, IONIQ 9 and KONA
+  // Electric. Every one of them, every trim.
+  //
+  // It matters because the brand ceiling is what a fee gets measured against.
+  // A $799 administration fee on an IONIQ 9 reads as "at the cap" against the
+  // brand row while Hyundai's own configurator bills $599 for that car -- $200
+  // a buyer would have no reason to question. A model-scoped row outranks the
+  // brand one, so these three are now measured against their own figure.
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every IONIQ 9 trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every IONIQ 5 trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  { component: "dealer_fee_ceiling", label: "dealer admin fee", amount: 599, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — dealerAdminFee 599 on every KONA Electric trim", capturedOn: "2026-09-22", provenance: "single-model",
+    note: "Checked 2026-09-22: Hyundai DOES publish 599 at brand level, but as an unlabelled positional list -- \"admin fees of $799 /$799 /$799 /$799 /$799 /$799 /$799 /$599 /$599/ $599 /$599 are included\" -- with no model named against any figure. Seven at 799 and four at 599, and the sentence does not say which is which. The mapping comes from Hyundai's own Build & Price API, which answers 599 on every trim of this model and 799 on every gas and hybrid model. Brand wording exists; brand wording naming THIS model does not." },
+  // Hyundai's own delivery charge, per model, from the same API. The catalogue
+  // previously held ONE Hyundai freight figure (Tucson $2,200, hand-captured
+  // 2026-08-25) -- which this capture returns identically, and which is why
+  // these are trusted.
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 9",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2400, applies: "always", scope: "model", make: "Hyundai", model: "PALISADE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2400", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "SANTA FE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2300, applies: "always", scope: "model", make: "Hyundai", model: "IONIQ 5",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2300", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "KONA Electric",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2200, applies: "always", scope: "model", make: "Hyundai", model: "VENUE",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2200", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 2100, applies: "always", scope: "model", make: "Hyundai", model: "SONATA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 2100", capturedOn: "2026-09-22" },
+  { component: "freight", label: "Freight & PDI", amount: 1900, applies: "always", scope: "model", make: "Hyundai", model: "ELANTRA",
+    source: "Hyundai Canada Build & Price API (trimallpurchaseOptions, prov=AB) — delivery 1900", capturedOn: "2026-09-22" },
   { component: "dealer_fee_ceiling", label: "retailer administration fee (up to $795)", amount: 795, applies: "always", scope: "brand", make: "Mazda",
     source: "Mazda Canada (mazda.ca/en/vehicles/cx-5) — \"retailer administration fee (up to $795)\"", capturedOn: "2026-08-25", provenance: "policy" },
   { component: "dealer_fee_ceiling", label: "dealer admin fee (up to $750)", amount: 750, applies: "always", scope: "brand", make: "Volkswagen",
