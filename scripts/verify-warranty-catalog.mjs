@@ -21,6 +21,7 @@
 //      node scripts/verify-warranty-catalog.mjs --dry-run  (fetch + report, no writes)
 
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
+import { pdfText, looksLikePdf } from "./lib/pdf-text.mjs";
 import { verifyRow } from "./lib/warranty-verify.mjs";
 
 const PROJECT_REF = "debigtyjhjamipooajhk";
@@ -64,7 +65,24 @@ async function readPage(url) {
   try {
     const res = await politeFetch(url, { timeoutMs: 25_000 });
     if (!res.ok) return { page: null, http: res.status, why: `HTTP ${res.status}` };
-    const text = htmlToText(await res.text());
+
+    // A FIGURE PUBLISHED IN A DOCUMENT IS STILL PUBLISHED. Toyota's hybrid terms
+    // are not on its warranty landing page at all -- that page shows only BEV
+    // and Electric Vehicle tiles -- they are in the Owner's Manual Supplement
+    // PDF. On 2026-09-21 that produced a DRIFT on figures that were correct, and
+    // acting on it would have cut two years and 80,000 km off the hybrid battery
+    // term in every Toyota hybrid report. Ford, Nissan and Subaru report "cites
+    // a printed booklet" for the same reason: the booklet is online, we just
+    // could not open one.
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (looksLikePdf(res.headers.get("content-type"), buf)) {
+      const pdf = pdfText(buf);
+      // A PDF whose text is an image extracts to nothing. That is "could not be
+      // read" -- never "the manufacturer no longer says this".
+      if (pdf.length < 600) return { page: null, http: res.status, why: `PDF carried no extractable text (${pdf.length} chars) -- likely scanned images` };
+      return { page: pdf, http: res.status, why: null };
+    }
+    const text = htmlToText(buf.toString("utf8"));
     // A page that renders its warranty table in JS gives us a shell. Treating a
     // shell as "the manufacturer no longer says this" would manufacture drift
     // out of our own inability to read, which is the defect this codebase keeps
