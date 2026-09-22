@@ -477,6 +477,15 @@ jobs:
       # and the pattern matched only the message a person types into a test.
       - name: A failed migration names the one that was never applied
         run: npm run test:migration-blame
+      # "2/2 applied" means the statements parsed, not that they did anything.
+      # Every migration here is idempotent, which is what makes re-running safe
+      # and also what makes a no-op invisible: on-conflict-do-nothing, an UPDATE
+      # matching no rows, an INSERT...SELECT over an empty source — all print the
+      # same green tick as real work. 20260916a reported success while three of
+      # its seven statements matched zero rows. A migration may now state its own
+      # post-condition; this gate proves a failing one fails the run.
+      - name: A migration can prove its own effect, and a false post-condition fails
+        run: npm run test:migration-assert
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that

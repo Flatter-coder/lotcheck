@@ -61,6 +61,50 @@ async function reloadSchemaCache() {
  * unapplied since 20260810. The error was accurate and told you nothing about
  * what to do next.
  */
+/**
+ * A migration that ran without error has not necessarily DONE anything.
+ *
+ * Every migration here is idempotent, which is what makes re-running safe — and
+ * also what makes a no-op invisible. `on conflict do nothing` against a row that
+ * already exists, an UPDATE whose WHERE matches nothing, an INSERT ... SELECT
+ * whose source is empty: all three print the same green tick as real work. That
+ * is not hypothetical. 20260916a reported success while three of its seven
+ * statements matched zero rows, and it took a live report being wrong to notice.
+ *
+ * So a migration may state its own post-condition, as a trailing comment:
+ *
+ *   -- @assert: select count(*) = 6 from legal_control where rule_id = ...
+ *
+ * The runner executes each assertion AFTER the migration and fails the run if
+ * one does not come back true. The assertion is SQL, evaluated by the database,
+ * against the state the migration claims to have produced — not a re-reading of
+ * the file that just ran.
+ *
+ * Assertions are optional. A migration with none behaves exactly as before, so
+ * this cannot retroactively break anything already applied.
+ */
+function assertionsIn(sql) {
+  return [...sql.matchAll(/^\s*--\s*@assert:\s*(.+?)\s*$/gim)].map((m) => m[1]);
+}
+
+/**
+ * Run one post-condition. It must return a single row whose single column is
+ * true; anything else — false, no rows, an error — fails the migration.
+ *
+ * A post-condition that cannot fail is worse than none, so an assertion that
+ * does not evaluate to a boolean is itself an error rather than a pass.
+ */
+async function runAssertion(expr) {
+  const rows = await runSql(`select (${expr}) as ok;`);
+  const first = Array.isArray(rows) ? rows[0] : null;
+  if (!first || !("ok" in first)) {
+    return { ok: false, why: "returned no 'ok' column — an assertion must be a single boolean expression" };
+  }
+  if (first.ok === null) return { ok: false, why: "evaluated to NULL, which is not a passing post-condition" };
+  if (first.ok !== true) return { ok: false, why: `evaluated to ${JSON.stringify(first.ok)}` };
+  return { ok: true };
+}
+
 function blameMissingRelation(message) {
   // The body arrives UNPARSED, so the quotes around the name are escaped:
   //   ...ERROR:  42P01: relation \"public.legal_source\" does not exist
@@ -99,11 +143,30 @@ async function main() {
     try { sql = readFileSync(path, "utf8"); }
     catch { console.error(`  ✗ ${f} — file not found`); failed++; continue; }
 
-    if (DRY) { console.log(`  · ${f} (${sql.length} chars) — not executed`); continue; }
+    const asserts = assertionsIn(sql);
+    if (DRY) {
+      console.log(`  · ${f} (${sql.length} chars) — not executed`
+        + (asserts.length ? `, ${asserts.length} post-condition(s) not checked` : ""));
+      continue;
+    }
 
     try {
       await runSql(sql);
-      console.log(`  ✓ ${f}`);
+      // A green tick must mean the migration DID something, not merely that it
+      // parsed. Post-conditions run against the database, after the fact.
+      let bad = 0;
+      for (const a of asserts) {
+        const r = await runAssertion(a).catch((e) => ({ ok: false, why: e.message }));
+        if (r.ok) console.log(`      ✓ ${a}`);
+        else { bad++; console.error(`      ✗ ${a}\n        ${r.why}`); }
+      }
+      if (bad) {
+        failed++;
+        console.error(`  ✗ ${f} — applied, but ${bad} post-condition(s) FAILED. `
+          + `The statements ran; they did not do what the migration claims.`);
+      } else {
+        console.log(`  ✓ ${f}${asserts.length ? ` (${asserts.length} post-condition(s) held)` : ""}`);
+      }
     } catch (e) {
       failed++;
       console.error(`  ✗ ${f}\n      ${e.message}`);
