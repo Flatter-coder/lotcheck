@@ -16,7 +16,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dedupeBy, writeCatalogs } from "./catalog-io.mjs";
+import { dedupeBy, writeCatalogs, readPowertrainHistory } from "./catalog-io.mjs";
 import { CROSS_CHECK_PROVINCES, deriveSeriesMsrp, baseModelCode } from "./tci-msrp.mjs";
 import { parseFeeStack, feeStackTotal, allInBreakdown } from "./tci-fees.mjs";
 import { applyTciOverrides, flagAllOnePowertrain } from "./tci-overrides.mjs";
@@ -602,10 +602,17 @@ export async function run(config) {
   // it still warns, so a real new mis-tag stays loud. Missing beats wrong: a
   // dropped model shows as "no catalog figure", which every surface already
   // handles honestly; a mis-tagged one produces a confident wrong number.
-  const powertrainFlags = flagAllOnePowertrain(msrpRows);
+  // The guard reads OUR catalogue, not just this morning's batch. See
+  // readPowertrainHistory: the sibling proof used to evaporate whenever the
+  // feed stopped returning the marked sibling, which is exactly when the
+  // mis-tag arrived.
+  const history = await readPowertrainHistory(config.makeName);
+  const powertrainFlags = flagAllOnePowertrain(msrpRows, {
+    knownNameplates: history.nameplates, priorFuels: history.fuels,
+  });
   const refusedKeys = new Set(powertrainFlags.filter((s) => s.proven).map((s) => s.key));
   for (const s of powertrainFlags) {
-    if (s.proven) console.error(`  REFUSED: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel} while a powertrain-marked sibling nameplate exists; this is a series-level fuel mis-tag. Rows dropped. Add a tci-override or fix inferFuel.`);
+    if (s.proven) console.error(`  REFUSED: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; ${s.why === "flipped_away_from_gas" ? "the catalogue already holds Gas rows for this nameplate, so the batch flips its powertrain wholesale" : "a powertrain-marked sibling nameplate exists"}. This is a series-level fuel mis-tag. Rows dropped. Add a tci-override or fix inferFuel.`);
     else console.warn(`  WARN: ${s.key} — ${s.trims} trims ALL tagged ${s.fuel}; likely a series-level fuel mis-tag. Add a tci-override or fix inferFuel.`);
   }
   const keptMsrpRows = refusedKeys.size

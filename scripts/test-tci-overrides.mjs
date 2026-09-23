@@ -6,6 +6,7 @@
 // TX 350 Luxury listing resolved to $81,484 (F SPORT 3). These overrides run on
 // every refresh; if one drifts, this fails before it reaches the catalog.
 
+import { readFileSync } from "node:fs";
 import { TCI_OVERRIDES, applyTciOverrides, flagAllOnePowertrain } from "./lib/tci-overrides.mjs";
 
 let pass = 0, fail = 0;
@@ -87,5 +88,106 @@ const allRows = TCI_OVERRIDES.flatMap((o) => o.rows);
 check("every override MSRP is a positive whole dollar", allRows.every((r) => Number.isInteger(r.msrp) && r.msrp > 0));
 check("every override fuel is Gas/Hybrid/PHEV/BEV", allRows.every((r) => ["Gas", "Hybrid", "PHEV", "BEV"].includes(r.fuel_type)));
 
+
+// ---------------------------------------------------------------------------
+// THE 2026-09-22 4RUNNER WRITE. The guard's evidence must not be the batch.
+//
+// Toyota's feed returned "4Runner" that morning WITHOUT "4Runner Hybrid" — the
+// hybrid rows survive only as carry-forward, which the guard cannot see. The
+// sibling proof evaporated, `proven` went false, the refusal degraded to a
+// warning, and four gasoline trims were written to msrp_catalog tagged Hybrid.
+//
+// The catalogue's own history proves the mis-tag twice over: it already held
+// the nameplate "4Runner Hybrid", and it already held a Gas row for the
+// identical $55,520 base, captured 2026-08-16. Either fact alone is enough.
+//
+// These are the rows as they actually landed. Do not tidy them.
+const RUNNER_2026_09_22 = [
+  { make: "Toyota", model: "4Runner", year: 2026, trim: "SR5", msrp: 55520, fuel_type: "Hybrid" },
+  { make: "Toyota", model: "4Runner", year: 2026, trim: "TRD Sport", msrp: 60322, fuel_type: "Hybrid" },
+  { make: "Toyota", model: "4Runner", year: 2026, trim: "TRD Off Road Premium", msrp: 65462, fuel_type: "Hybrid" },
+  { make: "Toyota", model: "4Runner", year: 2026, trim: "Limited 7 Passenger", msrp: 69644, fuel_type: "Hybrid" },
+];
+
+{
+  const batchOnly = flagAllOnePowertrain(RUNNER_2026_09_22);
+  check("4Runner: the batch alone still cannot prove it (this is the defect)",
+    batchOnly.length === 1 && batchOnly[0].proven === false);
+
+  const bySibling = flagAllOnePowertrain(RUNNER_2026_09_22, {
+    knownNameplates: ["Toyota|2026|4runner hybrid"],
+  });
+  check("4Runner: a sibling the CATALOGUE holds proves it",
+    bySibling[0]?.proven === true && bySibling[0]?.why === "powertrain_marked_sibling",
+    JSON.stringify(bySibling[0]));
+
+  const byFlip = flagAllOnePowertrain(RUNNER_2026_09_22, {
+    priorFuels: new Map([["Toyota|4Runner|2026", new Set(["Gas"])]]),
+  });
+  check("4Runner: a nameplate flipping away from Gas proves it independently",
+    byFlip[0]?.proven === true && byFlip[0]?.why === "flipped_away_from_gas",
+    JSON.stringify(byFlip[0]));
+
+  // Either proof alone must be sufficient: a fix that needs both is a fix that
+  // fails whenever one source of evidence is missing, which is how we got here.
+  check("4Runner: each proof is sufficient on its own",
+    bySibling[0]?.proven === true && byFlip[0]?.proven === true);
+}
+
+// ---- the flip proof must not fire on honest data -------------------------
+{
+  // Sienna is genuinely hybrid-only and its nameplate carries no marker. The
+  // catalogue has always held it as Hybrid, so there is nothing to contradict.
+  const sienna = ["LE", "XLE", "Limited", "Woodland", "Platinum"]
+    .map((t) => ({ make: "Toyota", model: "Sienna", year: 2026, trim: t, fuel_type: "Hybrid" }));
+  const f = flagAllOnePowertrain(sienna, {
+    priorFuels: new Map([["Toyota|Sienna|2026", new Set(["Hybrid"])]]),
+  });
+  check("Sienna: hybrid-only line warns but is NEVER refused",
+    f.length === 1 && f[0].proven === false,
+    "refusing it would cost real coverage on a correctly-tagged line");
+
+  // A line that legitimately gains hybrid trims stays mixed, so it is not even
+  // flagged — the guard only looks at all-one-fuel groups.
+  const camry = [{ make: "Toyota", model: "Camry", year: 2026, trim: "LE", fuel_type: "Gas" },
+    ...["SE", "XLE", "XSE"].map((t) => ({ make: "Toyota", model: "Camry", year: 2026, trim: t, fuel_type: "Hybrid" }))];
+  check("a mixed line is not flagged at all",
+    flagAllOnePowertrain(camry, { priorFuels: new Map([["Toyota|Camry|2026", new Set(["Gas", "Hybrid"])]]) }).length === 0);
+
+  // No history at all (a make's first-ever scrape) must not refuse everything.
+  check("an empty history falls back to batch-only, never to refusing all",
+    flagAllOnePowertrain(RUNNER_2026_09_22, { knownNameplates: [], priorFuels: new Map() })[0].proven === false);
+}
+
+// ---- the caller must actually pass the history ---------------------------
+// A guard that CAN see the catalogue and is never given it is the same defect.
+{
+  const stack = readFileSync(new URL("./lib/tci-stack.mjs", import.meta.url), "utf8");
+  check("tci-stack reads the catalogue's powertrain history",
+    /readPowertrainHistory\(/.test(stack));
+  check("tci-stack passes BOTH proofs to the guard",
+    /knownNameplates:\s*history\.nameplates/.test(stack) && /priorFuels:\s*history\.fuels/.test(stack),
+    "passing one and not the other silently halves the evidence");
+  // A PROVEN MIS-TAG MUST WITHHOLD THE ROWS, not merely print. The original
+  // defect was exactly this: the guard fired, console.warn ran, and the rows
+  // were written anyway. Asserting that the guard FLAGS is not the same as
+  // asserting that the caller REFUSES.
+  check("a proven flag builds the refused set",
+    stack.includes("refusedKeys = new Set(powertrainFlags.filter((s) => s.proven)"),
+    "refusedKeys must be derived from proven — an empty Set here writes the rows");
+  check("the refused rows are actually withheld from the write",
+    /keptMsrpRows\s*=\s*refusedKeys\.size/.test(stack) && stack.includes("!refusedKeys.has("),
+    "the filtered set, not msrpRows, must reach writeCatalogs");
+  check("it is writeCatalogs that receives the FILTERED rows",
+    /msrpRows:\s*keptMsrpRows/.test(stack),
+    "passing msrpRows here would write the very rows the guard refused");
+  check("the read happens BEFORE the guard runs",
+    stack.indexOf("readPowertrainHistory(") < stack.indexOf("flagAllOnePowertrain(msrpRows"));
+}
+
+// The summary belongs at the END. It sat at line 91 with 60 lines of
+// assertions appended below it, so those assertions never ran and the suite
+// reported 18/18 green over untested code — the same shape as the gate that
+// exits before its own checks.
 console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
 process.exit(fail ? 1 : 0);

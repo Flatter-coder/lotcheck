@@ -110,7 +110,17 @@ export function applyTciOverrides(scrapedRows, makeName, overrides = TCI_OVERRID
 // warn (and the override, if any, has already corrected them). Conservative:
 // only flags groups of >=4 trims that are 100% Hybrid/PHEV/BEV — a genuine
 // hybrid-only nameplate is small, a whole gas+hybrid line mis-tagged is not.
-export function flagAllOnePowertrain(rows, { minTrims = 4 } = {}) {
+/**
+ * @param {object[]} rows                  the incoming scrape batch
+ * @param {object}   opts
+ * @param {string[]} opts.knownNameplates  `make|year|model` already in the catalogue,
+ *                                         lower-cased model. The sibling proof used to
+ *                                         read the BATCH alone, so a sibling that fell
+ *                                         out of the feed stopped proving anything.
+ * @param {Map<string,Set<string>>} opts.priorFuels  `make|model|year` -> the fuel_types
+ *                                         the catalogue currently holds for it.
+ */
+export function flagAllOnePowertrain(rows, { minTrims = 4, knownNameplates = [], priorFuels = new Map() } = {}) {
   const groups = new Map();
   for (const r of rows || []) {
     const k = `${r.make}|${r.model}|${r.year}`;
@@ -128,7 +138,23 @@ export function flagAllOnePowertrain(rows, { minTrims = 4 } = {}) {
   // row was stored fuel_type 'Hybrid', which is what let a gas ladder be
   // offered to a hybrid buyer. Same defect a migration hand-fixed for the
   // Lexus TX on 2026-08-26 and left unfixed for the NX.
-  const nameplates = new Set((rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`));
+  //
+  // THE BATCH IS NOT THE WHOLE TRUTH. This set used to be built from `rows`
+  // alone, so the proof held only while the sibling happened to be in the same
+  // scrape. On 2026-09-22 Toyota's feed returned "4Runner" without
+  // "4Runner Hybrid" — the hybrid rows survive only as carry-forward, which the
+  // guard cannot see — so the proof evaporated, the refusal degraded to a
+  // warning, and four gas trims were written tagged Hybrid: SR5 $55,520,
+  // TRD Sport $60,322, TRD Off Road Premium $65,462, Limited 7 Passenger
+  // $69,644. The catalogue's own August row proves the mis-tag: the identical
+  // $55,520 base was stored Gas on 08-16.
+  //
+  // A nameplate that had a powertrain-marked sibling yesterday still proves the
+  // mis-tag today, so the catalogue's nameplates count too.
+  const nameplates = new Set([
+    ...(rows || []).map((r) => `${r.make}|${r.year}|${String(r.model || "").toLowerCase()}`),
+    ...(knownNameplates || []),
+  ]);
   const hasPowertrainSibling = (make, year, model) => {
     const base = String(model || "").toLowerCase();
     return ["hybrid", "plug-in hybrid", "plug in hybrid", "phev", "ev", "prime", "recharge"]
@@ -140,10 +166,26 @@ export function flagAllOnePowertrain(rows, { minTrims = 4 } = {}) {
     const fuels = new Set(rs.map((r) => r.fuel_type));
     if (fuels.size === 1 && !fuels.has("Gas") && !fuels.has(null)) {
       const r0 = rs[0];
+      const sibling = hasPowertrainSibling(r0.make, r0.year, r0.model);
+      // A SECOND, INDEPENDENT PROOF: a nameplate does not change powertrain.
+      //
+      // If the catalogue already holds Gas rows for this exact nameplate and
+      // the whole incoming batch is one non-gas fuel, the batch is wrong — our
+      // own dated capture says so, and no sibling nameplate is needed to see
+      // it. This catches the case the sibling proof cannot: a feed that stops
+      // returning the marked sibling at the same moment it mis-tags the base.
+      //
+      // It is deliberately narrow. It fires only on a WHOLESALE flip away from
+      // Gas, never on a line gaining a hybrid trim, never on a genuinely
+      // single-powertrain nameplate the catalogue has always held as hybrid
+      // (Sienna), and never when the catalogue holds nothing to contradict.
+      const prior = priorFuels.get(k);
+      const flipped = !!prior && prior.has("Gas");
       flagged.push({
         key: k, trims: rs.length, fuel: [...fuels][0],
         // Only a proven mis-tag may be refused; the rest stay a warning.
-        proven: hasPowertrainSibling(r0.make, r0.year, r0.model),
+        proven: sibling || flipped,
+        why: sibling ? "powertrain_marked_sibling" : flipped ? "flipped_away_from_gas" : null,
       });
     }
   }
