@@ -118,7 +118,7 @@ check("only excl_freight or incl_freight may ever be stamped", bad.length === 0,
   const { writeCatalogs } = await import("../scripts/lib/catalog-io.mjs");
   const rows = [{ year: 2026, make: "Testmake", model: "Testmodel", trim: "Base", msrp: 40000 }];
   const threw = async (opts) => {
-    try { await writeCatalogs("Testmake", { msrpRows: rows }, opts); return false; }
+    try { await writeCatalogs("Testmake", { msrpRows: rows }, { allowNoWrite: true, ...opts }); return false; }
     catch { return true; }
   };
   check("writeCatalogs refuses a write that declares neither",
@@ -128,6 +128,26 @@ check("only excl_freight or incl_freight may ever be stamped", bad.length === 0,
   check("...and allows a declared unknown through",
     !(await threw({ priceBasisUnknown: "a reason long enough to be a real one" })),
     "an honest unknown is the whole point; it must still write");
+
+  // AND THE NO-WRITE REFUSAL, EXERCISED FOR THE SAME REASON AS THE ONES ABOVE.
+  // archived-msrp.yml ran a scraper with no env: block at all. catalog-io read
+  // the missing credential as "you wanted a dry run", dumped the rows to a file
+  // on the runner and exited 0 -- a green monthly job that had never written a
+  // row. Under Actions that absence is now a bug and it throws.
+  //
+  // Only meaningful when no credentials are present, which is every gates run
+  // and every workstation. If someone runs this suite WITH credentials the
+  // branch is unreachable and there is nothing to assert.
+  if (!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+    const wasCI = process.env.GITHUB_ACTIONS;
+    process.env.GITHUB_ACTIONS = "true";
+    let refused = false;
+    try { await writeCatalogs("Testmake", { msrpRows: rows }, { priceBasisUnknown: "a reason long enough to be a real one" }); }
+    catch { refused = true; }
+    if (wasCI === undefined) delete process.env.GITHUB_ACTIONS; else process.env.GITHUB_ACTIONS = wasCI;
+    check("...and under Actions, refuses to call a missing credential a dry run",
+      refused, "a forgotten env: block would otherwise be a green job that writes nothing");
+  }
 }
 
 // Kia is the one verified today, and it must keep its evidence beside it.

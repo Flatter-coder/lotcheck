@@ -23,7 +23,18 @@ jobs:
       - name: Check StatCan for a new release and update the data file
         run: node scripts/update-statcan-zev.mjs
 
-      - name: Commit if the file changed
+      # THE FILE CHANGES ON EVERY RUN, ON PURPOSE. update-statcan-zev.mjs
+      # rewrites last_checked_at even when StatCan has published nothing new,
+      # because "we confirmed today that we still hold the latest release" is a
+      # claim the map makes and has to be able to back. So this condition is a
+      # safety net, not a filter -- it is expected to commit daily, and the
+      # quiet branch only fires if the script ever stops recording the check.
+      #
+      # What protects the CONTENT is in the script: it refuses to write at all
+      # if a new release parses to zero regions or a backwards model year,
+      # rather than pushing a blank map to main. Nothing reaches this step
+      # unless the script exited 0.
+      - name: Commit the daily check record (the file changes every run)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

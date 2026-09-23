@@ -847,6 +847,14 @@ jobs:
       # first exposed the need for it.
       - name: Alberta daily inventory aggregation and its plausibility cap
         run: npm run test:inventory-daily
+      # public/data/statcan-zev.json is what statcan-zev-map.html draws, and a
+      # daily job rebuilds it and pushes straight to main. The parser matches
+      # StatCan column headers and row labels by exact string, so a rename
+      # upstream filters every row out rather than throwing: year "0", zero
+      # provinces, a blank public map stamped with a fresh last_checked_at.
+      # Nine mutations of the floor were each proved to turn this suite red.
+      - name: The StatCan ZEV refresh refuses to publish a collapse
+        run: npm run test:statcan-floor
       - name: The shared reader keeps absences (read-num)
         run: npm run test:read-num
       # Two promises to the buyer that are control flow, not data: a report

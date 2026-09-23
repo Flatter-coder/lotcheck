@@ -159,6 +159,7 @@
     "test:share-round-trip": "node scripts/test-share-round-trip.mjs",
     "test:archived-msrp": "node scripts/test-archived-msrp.mjs",
     "test:inventory-daily": "node scripts/test-inventory-daily.mjs",
+    "test:statcan-floor": "node scripts/test-statcan-floor.mjs",
     "test:warranty-labels": "node --experimental-strip-types scripts/test-warranty-labels.mjs",
     "test:unchecked-states": "node --experimental-strip-types scripts/test-unchecked-states.mjs",
     "test:report-bands": "node --experimental-strip-types scripts/test-report-bands.mjs",
