@@ -129,7 +129,7 @@ const EXTRACTORS = new Set([
 const BASELINE = {
   addOns: [
     "supabase/functions/_shared/verification-checkpoints.ts::deriveCheckpoints",
-    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#4bd4971c",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
@@ -176,7 +176,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
   ],
   financeRates: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#4bd4971c",
   ],
   financingCheck: [
     "supabase/functions/analyze-listing-url/index.ts::computeFinancingCheck",
@@ -223,7 +223,7 @@ const BASELINE = {
   ],
   pageDefault: [
     "supabase/functions/_shared/invariants.ts::repair",
-    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#4bd4971c",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::anon#93163b77",
@@ -243,7 +243,7 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::earlyStructuredFacts",
   ],
   priceVerified: [
-    "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
+    "supabase/functions/analyze-listing-url/index.ts::anon#4bd4971c",
   ],
   quotedPrice: [
     "supabase/functions/_shared/d2c-vdp.js::extractD2cVdpVehicle",

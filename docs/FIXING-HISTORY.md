@@ -27,6 +27,143 @@ the next instance.
 ---
 ---
 
+## 2026-09-22 — the deploy said SUCCESS without ever asking what it shipped
+
+**Shapes:** Green signal, no check
+
+### The step
+
+`.github/workflows/deploy-edge-functions.yml` has deployed every edge function
+on every push to `main` that touches them:
+
+```yaml
+for i in 1 2 3; do
+  supabase functions deploy --project-ref debigtyjhjamipooajhk && exit 0
+  echo "Deploy attempt $i failed; retrying in 25s..."
+  sleep 25
+done
+exit 1
+```
+
+Three tries, exit 0, green check. **Exit 0 says the CLI finished.** It does not
+say which bundle the gateway is now serving, and nothing downstream ever asked.
+
+### Why that is load-bearing on this function and not just untidy
+
+Cached analyses are keyed on `CACHE_VER`. At `analyze-listing-url/index.ts:3608`:
+
+```ts
+if (cached?.analysis && cached.analysis._cacheVer !== CACHE_VER) { /* re-scan */ }
+```
+
+That comparison is the **only** thing that makes a stored analysis re-scan. Read
+the constant's own comment: the inflated-sticker accusation, the powertrain
+confirmation, the PDF's over/under figure, the all-in refusal — each one is
+annotated **THE BUMP IS MANDATORY**, because each is computed server-side and
+*stored*. Every one of those fixes reaches a buyer only if the new string
+reaches the running function.
+
+So a deploy that silently shipped an older bundle produced exactly this: stored
+analyses replay, the report keeps printing the pre-fix claim, **the report id
+does not change**, and the deploy log says SUCCESS. Indistinguishable from a
+working deploy from the outside — which is the same half hour already lost on
+2026-08-15 hunting a bug that was already fixed.
+
+`check:cache-ver` guards the other half of this: it refuses a logic change that
+ships without a bump. Nothing checked that the bump arrived.
+
+### What it does now
+
+A `GET` on `analyze-listing-url` returns `{ cacheVer }` and nothing else. The
+deploy job reads it back and compares it against the value parsed out of the
+committed `index.ts`.
+
+**It fails the run on a mismatch — and equally on a non-200, on a response
+carrying no version, and on absent credentials.** "Could not check" must not
+read as "checked and fine"; there is no path through the verifier that exits 0
+without a matched value in hand.
+
+**The readback is free and exposes nothing.** It returns before
+`resolveCreditUser` and before every `fetch` in the file: no Scrapfly, Nimble or
+Anthropic call, no credit hold, no database round trip. It is GET-only and reads
+neither the body nor the query string, so it cannot be handed a URL to scan. The
+response is one constant that is already public in this repo. It returns *before*
+the vendor-key check deliberately — the moment you most need to know which bundle
+is live is the moment the function is misconfigured.
+
+The **Supabase Management API** alternative (`/v1/projects/{ref}/functions`) was
+evaluated and rejected. An `updated_at` that advanced proves a write happened,
+not *which bundle* it wrote — the same class of evidence as the CLI's exit code,
+one layer further out.
+
+The readback also has to come from `analyze-listing-url` **itself**, never from
+`key-health` beside it. Functions deploy independently, and a fresh sibling next
+to a stale `analyze-listing-url` is precisely the failure being guarded against.
+
+### The gate does not grep for good intentions
+
+A verification step is easy to delete, easy to reorder above the deploy it
+checks, and easiest of all to neuter with `|| true` on a red day — and every one
+of those leaves the workflow green, the state it was already wrong in.
+
+`check:deploy-verified` pins the branch as pure and ordered ahead of the paid
+path, pins the workflow step as present, after the deploy, un-swallowed — and
+then **runs the verifier** against a loopback stub on six outcomes: a match
+passes; a mismatch, a missing version, an error, an error echoing the right
+version, and absent credentials all fail. Offline, no vendor call.
+
+**11 mutations, 10 caught.** The survivor is recorded in the code rather than
+papered over: deleting the `!ver` early return changes the failure *message* and
+never the verdict, because a null can never equal the committed string — the
+comparison catches everything that check misses. An equivalent mutant, named.
+
+Three of the gate's own first-draft assertions were wrong, and the mutation run
+is what found them: it compared the GET branch against `resolveCreditUser`'s
+**declaration** instead of its call site 194,000 characters later, so the branch
+read as too late wherever it sat; it matched the script *filename* where the
+workflow names the npm alias `verify:deployed-cache-ver`, so a missing step read
+as present; and it used `spawnSync`, which blocks the very event loop the stub
+server needs to answer, so every probe timed out. A gate written from
+imagination, corrected by being run. [[audit-your-own-fix-same-night]]
+
+### The bump, and what it costs
+
+`CACHE_VER` 18l → **18m**. **This bump changes nothing a report says**, and it
+is not free: it discards every cached analysis, so each previously-checked URL
+re-runs the full paid read path on its next open.
+
+It was taken rather than exempted. `check:cache-ver` is blunt **on purpose** —
+"only a health branch" is not a property a regex can prove about a diff to
+`index.ts`, and an exemption that cannot be proved is the hole the next real miss
+walks through. It also buys the one thing a first deploy of a readback cannot
+otherwise have: a value that is **new**, so the first green proves the new bundle
+is live rather than restating what was already there.
+[[cost-exploit-guards]] [[billing-honesty-rules]]
+
+### Landed
+
+| | |
+|---|---|
+| `f432323` | the deploy reads back what it shipped, and fails on a mismatch (PR #528) |
+
+All **137** gates declared in `gates.yml` pass. `check:lineage` was re-pinned
+`anon#11f75de3` → `anon#4bd4971c`: that gate names anonymous functions by a
+content hash, so editing the `Deno.serve` handler renames it, and all four
+affected facts kept the same author **count** (6/6, 1/1, 5/5, 1/1) — one handler
+re-hashed, not a new author.
+
+### Still open
+
+The readback proves the **bundle** is live. It does not prove the *behaviour* is
+— a bundle can carry the new `CACHE_VER` and still be wrong. And it covers
+`analyze-listing-url` only: the same deploy ships every other edge function with
+no version any workflow can read back, so `email-quote-report`, `analyze-quote`
+and the rest still land on the CLI's exit code alone.
+[[verify-in-production-before-done]]
+
+---
+---
+
 ## 2026-09-22 — the freight was the accusation, and 22 migrations were holding a knife
 
 **Shapes:** One-surface fix · A guard that cannot fail · Green signal, no check ·

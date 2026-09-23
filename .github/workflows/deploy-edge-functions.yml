@@ -50,6 +50,10 @@ jobs:
       # unauthenticated endpoint will fetch a URL and print the result in a
       # DKIM-signed document. That is a deploy-blocking gate, not a PR note.
       - run: npm run test:vehicle-photo
+      # The deploy step below reports success on the CLI's exit code. This gate
+      # is what keeps the readback that checks it wired, ordered after the
+      # deploy, and unable to swallow its own failure.
+      - run: npm run check:deploy-verified
 
   deploy:
     needs: gates
@@ -75,3 +79,26 @@ jobs:
           exit 1
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      # WHAT DID THAT ACTUALLY SHIP?
+      #
+      # `supabase functions deploy` exiting 0 says the CLI finished. It does not
+      # say which bundle the gateway now serves, and until this step existed
+      # nothing asked. Cached analyses are keyed on CACHE_VER -- it is the only
+      # thing that makes a stored analysis re-scan -- so a deploy that silently
+      # shipped an older bundle left every cached report replaying the pre-fix
+      # claim while this workflow showed green. "Green signal, no check", on the
+      # one step that puts code in front of buyers.
+      #
+      # This GETs the deployed function, reads the CACHE_VER it reports, and
+      # FAILS THE RUN on any mismatch -- and equally on a non-200, a response
+      # carrying no version, or absent credentials, because "could not check"
+      # must not read as "checked and fine". It costs nothing: the branch it
+      # calls performs no scrape, no database read and no vendor request.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify the deployed bundle is the one in this commit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run verify:deployed-cache-ver
