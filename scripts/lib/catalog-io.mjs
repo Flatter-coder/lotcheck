@@ -106,6 +106,28 @@ export function mergeCarryForward(rows, prevRows, cols = CARRY_FORWARD) {
         merged[c] = union;
       }
     }
+    // A CLAIM ABOUT AN ALL-IN PRICE DOES NOT OUTLIVE THE PRICE.
+    //
+    // attrs is carried forward, and `all_in_basis` states what the row's all-in
+    // figure IS ("the manufacturer's published all-in price for THIS
+    // configuration"). When tci-stack stopped writing a synthesised
+    // all_in_price for sibling trims, those rows arrived without it — and
+    // carry-forward would have restored the previous run's basis string,
+    // leaving a row that describes a number it no longer has. The union branch
+    // above makes that worse, not better: "fresh wins per key" cannot remove a
+    // key the fresh row omits.
+    //
+    // ONLY THE CLAIM IS STRIPPED, NEVER THE EVIDENCE. `all_in_breakdown` is the
+    // captured fee itemisation — nothing buyer-facing reads it, 38 rows carry a
+    // HAND-SEEDED one (tci-fees.mjs), and deleting captured provenance because
+    // a derived figure went away would cost real data to fix a wording problem.
+    // The first version of this stripped both and was caught by test:fee-stack,
+    // whose fixture is one of those hand-seeded rows.
+    if (merged.all_in_price == null && isPlainObject(merged.attrs)
+        && merged.attrs.all_in_basis !== undefined) {
+      const { all_in_basis, ...rest } = merged.attrs;
+      merged.attrs = Object.keys(rest).length ? rest : null;
+    }
     return merged;
   });
   return { rows: out, carried };

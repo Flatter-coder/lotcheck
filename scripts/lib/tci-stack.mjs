@@ -489,8 +489,34 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
           // levy can, so `all_in_basis` records that this is the series' base
           // stack applied to this trim's MSRP rather than a per-trim figure.
           const feeStack = feeByProv[ALL_IN_PROVINCE] || null;
-          const feeTotal = feeStack ? feeStackTotal(feeStack) : null;
-          const breakdown = feeStack ? allInBreakdown(feeStack) : null;
+          //
+          // THE STACK BELONGS TO ONE CONFIGURATION, SO THE ALL-IN PRICE DOES TOO.
+          //
+          // from_prices publishes one model code per series — the base
+          // configuration — and that stack was being added to EVERY sibling
+          // trim's MSRP. Measured on the live catalogue 2026-09-22: 39 of 40
+          // multi-row series carried a perfectly constant delta, 136 rows in
+          // all. A constant is the signature of a borrowed stack, and it is
+          // arithmetically impossible for anything price-dependent:
+          //
+          //   Lexus LC 2026   118,180 / 133,546 / 140,410   all +7,634.62
+          //   Lexus LX 2026   124,300 / 143,134 / 148,600   all +8,864.62
+          //
+          // The federal luxury surcharge alone is the lesser of 10% of the price
+          // or 20% of the amount over $100,000 — on that LC ladder it runs
+          // roughly $5,200 to $9,600, a spread of ~$4,400 that the stored figure
+          // holds flat. The header above worried about the tire levy varying by
+          // trim and never noticed the surcharge, which is the large one.
+          //
+          // The rule is not ours to bend: we never sum components into an all-in
+          // price. A basis is declared by the source or it is absent. So the
+          // all-in figure is stored for the configuration the manufacturer
+          // actually published it for, and omitted everywhere else — where
+          // msrp-basis.js already refuses the subtraction and prints the caveat.
+          // Missing beats wrong. [[manufacturer-publishes-all-in-price]]
+          const stackIsForThisConfig = !!feeStack && feeStack.modelCode === modelCode;
+          const feeTotal = stackIsForThisConfig ? feeStackTotal(feeStack) : null;
+          const breakdown = stackIsForThisConfig ? allInBreakdown(feeStack) : null;
           msrpRows.push({
             year, make: makeName, model: s.name, trim, msrp, fuel_type: fuel,
             // A drivetrain the manufacturer stated in the grade ("XLE FWD"), not
@@ -502,7 +528,11 @@ export async function scrapeBrand({ host, brand, brandFolder, makeName, seriesPa
             ...(breakdown ? { attrs: {
               province: ALL_IN_PROVINCE,
               all_in_breakdown: breakdown,
-              all_in_basis: "series base configuration; freight and levies do not vary by trim",
+              // Says what is TRUE of the stored row, not what we wish were true
+              // of the series. It used to read "freight and levies do not vary
+              // by trim" on rows the stack had merely been ADDED to, which is
+              // both the wrong claim and the reason nobody questioned it.
+              all_in_basis: "the manufacturer's published all-in price for THIS configuration",
               captured_from: `${host}/bin/api/price_calculation/from_prices.${brand}.${ALL_IN_PROVINCE}.json (${s.seriesCode}/${year}/${feeStack.modelCode})`,
               captured_on: today,
               // The page a buyer can open to check this figure. It goes in attrs,
