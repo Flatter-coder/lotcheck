@@ -138,8 +138,44 @@ function statedDrive(s) {
 // column (Land Cruiser, all 4WD) gets labelled "starting at" even though its
 // figure is right. That costs a precise label on a figure the report still
 // shows; the alternative cost a named dealer a false accusation.
+// POWERTRAIN IS PART OF THE CONFIGURATION, AND IT WAS NEVER CHECKED HERE.
+//
+// The fuel partition above keeps hybrid, gas, bev and phev apart — until the
+// pool holds no row of the listing's powertrain, at which point it discards the
+// partition entirely ("fuel unknown/mismatch -> keep all") and every row of
+// every powertrain becomes a candidate. Nothing downstream re-checked it,
+// because this function only ever asked about drivetrain. So a hybrid listing
+// matched to a gas row of the same trim name came back basis "exact", and
+// "exact" is the label that authorises an over-MSRP accusation.
+//
+// Reproduced against a gas-only ladder, RAV4 Limited:
+//
+//   hybrid listing, hybrid row MISSING -> exact, msrp 45,990 -> "$4,910 OVER"
+//   hybrid listing, hybrid row present -> exact, msrp 50,900 -> "$0"
+//
+// Same dealer, same car. The accusation existed only because a row was missing.
+// That is the IONIQ 9 incident with a different column, and the hard rule is
+// explicit: a nameplate never inherits a sibling powertrain's MSRP or ladder.
+//
+// IT MATTERS ON HALF THE CATALOGUE, not just where the fuel genuinely differs.
+// fuelKind(null) returns "gas", and 757 of 1,512 live rows carry no fuel_type
+// at all — so a hybrid listing against rows of UNKNOWN powertrain was also
+// being labelled exact. Unknown is not a match; it is the reason there is no
+// claim.
+//
+// Conservative in the same direction as the drivetrain rule above: the figure
+// is still shown, as a floor. Only the label is withheld, and only when the
+// listing actually stated a powertrain.
 function rowConfirmsConfig(r, s) {
   const stated = statedDrive(s);
+  const statedFuel = s && s.fuelType ? fuelKind(s.fuelType) : null;
+  if (statedFuel) {
+    // The row must SAY which powertrain it is. A null fuel_type reads as "gas"
+    // to fuelKind, which would let an unlabelled row confirm a gas listing it
+    // knows nothing about — so the raw column has to be present too.
+    if (!r || r.fuel_type == null || String(r.fuel_type).trim() === "") return false;
+    if (fuelKind(r.fuel_type) !== statedFuel) return false;
+  }
   if (!stated) return true;            // nothing claimed -> nothing to confirm
   return rowDrive(r) === stated;       // the row must pin the same configuration
 }

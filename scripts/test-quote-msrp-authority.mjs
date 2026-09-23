@@ -154,8 +154,6 @@ const check = (label, cond, detail = "") => {
     basisFor("used", 61000, "exact") !== "exact");
 }
 
-console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
-process.exit(fail ? 1 : 0);
 
 // 10. THE QUOTE PATH'S OWN FREIGHT TRAP.
 //
@@ -190,3 +188,10 @@ process.exit(fail ? 1 : 0);
   check("genuine padding on a shared basis is still named on the quote path",
     !!d.inflation && d.inflation.overBy === 21500, JSON.stringify(d.inflation));
 }
+
+// The summary belongs at the END. It sat at line 157 with the freight-trap
+// block appended below it, so those assertions never ran and this suite
+// reported 24/24 green over untested code — and the PR that added them said
+// "24 -> 27".
+console.log(`\n${pass}/${pass + fail} passed${fail ? "  -- FAILING" : "  all green"}`);
+process.exit(fail ? 1 : 0);

@@ -144,12 +144,72 @@ const CX90 = [
   { trim: "MAZDA CX-90 MILD HYBRID INLINE 6 TURBO Signature", msrp: 63650, fuel_type: "Hybrid" },
 ];
 
+const GAS_LADDER = [{ trim: "XLE", msrp: 39990, fuel_type: "Gas", drivetrain: "AWD" },
+                    { trim: "Limited", msrp: 45990, fuel_type: "Gas", drivetrain: "AWD" }];
+const MIXED_LADDER = [...GAS_LADDER, { trim: "Limited", msrp: 50900, fuel_type: "Hybrid", drivetrain: "AWD" }];
+// Half the live catalogue is in this state, and fuelKind(null) reads it as gas.
+const NOFUEL_LADDER = [{ trim: "XLE", msrp: 39990, fuel_type: null, drivetrain: "AWD" },
+                       { trim: "Limited", msrp: 45990, fuel_type: null, drivetrain: "AWD" }];
 const COMPASS = [{ trim: null, msrp: 34700, fuel_type: "Gas" }];
 const RZ      = [{ trim: null, msrp: 59990, fuel_type: "BEV" }];
 const CX90PH  = [{ trim: null, msrp: 49999, fuel_type: "PHEV" }];
 
 // ---- Cases: [label, rows, signals, expectedMsrp] -----------------------------
 const CASES = [
+  // ---- POWERTRAIN CROSSOVER -------------------------------------------------
+  // The fuel partition discards itself when the pool holds no row of the
+  // listing's powertrain ("fuel unknown/mismatch -> keep all"), and nothing
+  // downstream re-checked it: rowConfirmsConfig only ever asked about
+  // drivetrain. So a hybrid listing matched a GAS row of the same trim name and
+  // came back "exact" — the label that authorises an over-MSRP accusation.
+  //
+  //   hybrid listing, hybrid row MISSING -> exact, 45,990 -> "$4,910 OVER"
+  //   hybrid listing, hybrid row present -> exact, 50,900 -> "$0"
+  //
+  // Same dealer, same car; the accusation existed only because a row was
+  // missing. That is the IONIQ 9 incident in a different column.
+  //
+  // It is NOT only about genuinely-gas rows: fuelKind(null) returns "gas" and
+  // 757 of 1,512 live rows carry no fuel_type, so unlabelled rows were
+  // confirming powertrains they knew nothing about.
+  ["hybrid listing, catalogue holds only GAS -> figure shown, never exact", GAS_LADDER,
+    { trim: "Limited", fuelType: "hybrid", drivetrain: "AWD", quotedPrice: 50900 }, 45990, "starting_at"],
+  ["hybrid listing, rows carry NO fuel_type -> never exact", NOFUEL_LADDER,
+    { trim: "Limited", fuelType: "hybrid", drivetrain: "AWD", quotedPrice: 50900 }, 45990, "starting_at"],
+  ["BEV listing against a gas ladder -> never exact", GAS_LADDER,
+    { trim: "Limited", fuelType: "BEV", drivetrain: "AWD" }, 45990, "starting_at"],
+  ["PHEV listing against a gas ladder -> never exact", GAS_LADDER,
+    { trim: "Limited", fuelType: "PHEV", drivetrain: "AWD", quotedPrice: 56400 }, 45990, "starting_at"],
+  // A lone row is the likeliest place to over-claim, and it takes the same path.
+  ["single gas row, hybrid listing -> never exact", [{ trim: "Limited", msrp: 45990, fuel_type: "Gas", drivetrain: "AWD" }],
+    { trim: "Limited", fuelType: "hybrid", drivetrain: "AWD" }, 45990, "starting_at"],
+  // ...and the honest cases must KEEP the label, or the fix costs every correct
+  // comparison in order to prevent the wrong ones.
+  ["hybrid listing WITH a hybrid row -> exact, and the right figure", MIXED_LADDER,
+    { trim: "Limited", fuelType: "hybrid", drivetrain: "AWD", quotedPrice: 50900 }, 50900, "exact"],
+  ["gas listing with a gas row -> exact", GAS_LADDER,
+    { trim: "Limited", fuelType: "Gas", drivetrain: "AWD", quotedPrice: 45990 }, 45990, "exact"],
+  // A row that never stated its powertrain cannot confirm one. fuelKind(null)
+  // returns "gas", so without an explicit presence check an unlabelled row
+  // would silently confirm a GAS listing — and 757 of 1,512 live rows are in
+  // exactly that state. Same trade the drivetrain rule already makes: the
+  // figure still shows, only the label is withheld.
+  ["gas listing vs rows with NO fuel_type -> figure shown, never exact", NOFUEL_LADDER,
+    { trim: "Limited", fuelType: "Gas", drivetrain: "AWD", quotedPrice: 45990 }, 45990, "starting_at"],
+  // ...but when the LISTING states nothing either, there is nothing to confirm
+  // and nothing to withhold. Firing here would downgrade half the catalogue for
+  // no reason.
+  // An empty string is not a stated powertrain either. Scrapers write "" as
+  // readily as null, and String("").trim() would otherwise reach fuelKind and
+  // come back "gas".
+  ["gas listing vs an EMPTY-STRING fuel_type -> never exact",
+    [{ trim: "Limited", msrp: 45990, fuel_type: "", drivetrain: "AWD" },
+     { trim: "XLE", msrp: 39990, fuel_type: "", drivetrain: "AWD" }],
+    { trim: "Limited", fuelType: "Gas", drivetrain: "AWD", quotedPrice: 45990 }, 45990, "starting_at"],
+  ["no powertrain stated on EITHER side -> still exact", NOFUEL_LADDER,
+    { trim: "Limited", drivetrain: "AWD", quotedPrice: 45990 }, 45990, "exact"],
+  ["listing states NO powertrain -> unchanged, nothing claimed", GAS_LADDER,
+    { trim: "Limited", drivetrain: "AWD", quotedPrice: 45990 }, 45990, "exact"],
   // THE JC FAILURE — bZ XLE AWD showed $45,990; must be $56,463.
   ["bZ XLE AWD (word-order 'AWD XLE' + AWD + price)", BZ,
     { trim: "AWD XLE", drivetrain: "AWD", fuelType: "BEV", quotedPrice: 54888 }, 56463],
