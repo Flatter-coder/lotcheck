@@ -496,6 +496,18 @@ jobs:
       # purge passes and a seed re-run refuses, with no filename list to rot.
       - name: A migration that would delete live catalogue rows is refused
         run: npm run test:migration-destructive
+      # An over/under-MSRP figure is a CLAIM: it needs the right reference (an
+      # all-in advertised price measured against the manufacturer's ALL-IN
+      # figure), a recorded price_basis on both sides, and a verified price.
+      # qualifyMsrpClaim owns all three. That subtraction has had FOUR authors:
+      # the 2026-08-15 "+$3,164 OVER MSRP" on a car nobody marked up; 13o, which
+      # removed it from three surfaces and said "ANY surface"; msrp-authority.js
+      # (PR #513); and the PDF's page-1 range bar and "Price vs MSRP" prose,
+      # gated on msrpBasis === "exact" alone. Exact means the right ROW, not the
+      # same basis. On identical inputs the PDF printed "+$3,164 OVER" where the
+      # gate returns -$29 — a sign flip on the headline of a signed report.
+      - name: No surface subtracts an MSRP by hand; guarded ones keep their guard
+        run: npm run test:no-raw-msrp-delta
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that

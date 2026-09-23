@@ -70,8 +70,13 @@ export function resolveMsrpAuthority({ statedMsrp, ref, make = null, statedBasis
     // The size of the gap is necessary but never sufficient. Comparability comes
     // first, because a gap between two figures measured differently is not a gap.
     const comparable = basesComparable(ref.priceBasis, statedBasis);
-    const gapIsMaterial = hasStated && stated > Number(ref.msrp) * 1.03 && stated - Number(ref.msrp) > 800;
+    const gap = hasStated ? stated - Number(ref.msrp) : 0;
+    const gapIsMaterial = hasStated && stated > Number(ref.msrp) * 1.03 && gap > 800;
     const materiallyHigher = comparable && gapIsMaterial;
+    // Computed HERE, beside the guard, rather than inline in the returned
+    // object twenty lines below. A subtraction that sits far from the check
+    // that authorises it is a subtraction someone will later reuse without it.
+    const overBy = materiallyHigher ? Math.round(gap) : null;
     // An absence is NOTED, never green: when the gap is material but we cannot
     // compare, say so rather than staying silent or accusing.
     const inflationRefused = !comparable && gapIsMaterial
@@ -94,7 +99,7 @@ export function resolveMsrpAuthority({ statedMsrp, ref, make = null, statedBasis
       // should see both numbers and which one we trust.
       dealerStatedMsrp: hasStated && stated !== Number(ref.msrp) ? stated : null,
       // Only an inflated sticker gets NAMED as a tactic.
-      inflation: materiallyHigher ? { dealerStated: stated, manufacturer: Number(ref.msrp), overBy: Math.round(stated - Number(ref.msrp)) } : null,
+      inflation: materiallyHigher ? { dealerStated: stated, manufacturer: Number(ref.msrp), overBy } : null,
       inflationRefused,
       reference: null,
     };

@@ -1012,7 +1012,7 @@ function dealerFeeTotal(a: any): number {
 
 function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
-  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0;
   const pv = resolvePriceVerified(a).sourceVerified;
   const P: Array<{ t: string; v: string; tone: "pass" | "flag" | "muted" }> = [];
   // ── THE CANONICAL TEN, FROM THE SAME FILE THE SCREEN READS ────────────────
@@ -1125,7 +1125,7 @@ function tenPoints(a: any): Array<{ t: string; v: string; tone: "pass" | "flag" 
 // print. Returns null when a point needs no gloss.
 function pointExplain(t: string, a: any): string | null {
   const money = (n: unknown) => { const v = Number(n); return (!n || Number.isNaN(v)) ? "-" : "$" + v.toLocaleString("en-CA"); };
-  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = (qp && ms) ? qp - ms : 0;
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0;
   const exact = ms > 0 && a.msrpBasis === "exact";
   switch (t) {
     case "Price vs MSRP": {
@@ -1152,11 +1152,28 @@ function pointExplain(t: string, a: any): string | null {
         : "";
       if (!qp && a.priceDisclosure === "contact_for_price") return `The dealer chose not to publish a price - the page says "contact us" instead. That's a lead-capture tactic.${ms ? ` Your anchor: the manufacturer's MSRP starts at ${money(ms)}.` : ""} Get their full all-in price in writing before you visit.`;
       if (!qp) return "No asking price could be read from this listing. Get the full price in writing before anything else.";
-      if (qp && ms && exact) return gatedNote + (delta > 0
-        ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(delta)} more than sticker - anything over sticker is pure negotiation room.`
-        : delta === 0
-          ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
-          : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-delta)} below sticker - a real discount; confirm nothing was added back in fees.`);
+      // EXACT IS NOT ENOUGH TO SUBTRACT. An exact-trim match says we found the
+      // right row; it says nothing about whether the two figures are measured
+      // the same way. In AB/ON/BC/QC the advertised price is all-in by law, and
+      // half the catalogue is ex-freight or records no basis, so `qp - ms` on
+      // an exact match still counted roughly $3,000 of mandatory freight and
+      // levies as the dealer's markup. That is the same subtraction 13o removed
+      // from the hero band, the on-screen gap bar and counter-script move S14 --
+      // this prose was its fourth author, and it reached the PDF a buyer hands
+      // across the desk. qualifyMsrpClaim owns reference selection (all-in vs
+      // ex-freight), the basis check and the delta. Never recompute it.
+      const claim = qualifyMsrpClaim(a);
+      if (qp && ms && exact && claim.comparable && claim.delta !== null) {
+        const d = claim.delta;
+        return gatedNote + (d > 0
+          ? `MSRP is the manufacturer's own sticker for this exact version. The dealer is asking ${money(d)} more than sticker - anything over sticker is pure negotiation room.`
+          : d === 0
+            ? "MSRP is the manufacturer's own sticker for this exact version. This asks exactly sticker - not a markup, but not a deal either."
+            : `MSRP is the manufacturer's own sticker for this exact version. This asks ${money(-d)} below sticker - a real discount; confirm nothing was added back in fees.`);
+      }
+      // Exact trim, but the two figures are not comparable. The gate's own
+      // sentence says why -- an absence is NOTED, never rendered as agreement.
+      if (qp && ms && exact && claim.refusal) return gatedNote + claim.refusal;
       // Was hardcoded to the "starting at" story, which is wrong prose for a used
       // car's original MSRP or a dealer-stated figure. The gate owns the reason.
       if (ms) return gatedNote + (qualifyMsrpClaim(a).refusal
@@ -1454,7 +1471,7 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     });
   };
 
-  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0, delta = qp && ms ? qp - ms : 0;
+  const qp = Number(a.quotedPrice) || 0, ms = Number(a.msrp) || 0;
   // MSRP basis, NOT quotedPrice verification -- "VERIFIED" must mean exact-trim
   // match, never a base-trim "starting at" floor, or the header makes an
   // over/under claim the audit detail below it explicitly disclaims.
@@ -1605,10 +1622,27 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
   // between the two points was decorative, not data -- nothing else on this
   // listing backs a curve, so only the two real marks and the real gap are
   // drawn. [[no-llm-generated-valuation-numbers]] [[design-must-be-self-explanatory]]
-  if (delta && a.msrpBasis === "exact") {
+  //
+  // THE BAR IS A CLAIM, SO IT ASKS THE GATE. It used to draw on `delta &&
+  // msrpBasis === "exact"` with delta = qp - ms. An exact trim match means we
+  // found the right row; it says nothing about whether the two figures are
+  // measured the same way. In AB/ON/BC/QC the advertised price is all-in by
+  // law while half the catalogue is ex-freight or records no basis, so this bar
+  // printed "+$3,164 OVER MSRP" on a car nobody had marked up -- about $3,000
+  // of it Toyota's own freight and Alberta's own levies, which sit INSIDE an
+  // advertised price by law. The on-screen report refused that same comparison
+  // while the PDF drew it, and the PDF is the artifact that gets forwarded to
+  // the dealer. qualifyMsrpClaim picks the right reference (all-in against
+  // all-in), checks the basis, and owns the delta.
+  const barClaim = qualifyMsrpClaim(a);
+  const barDelta = barClaim.comparable ? barClaim.delta : null;
+  const barRef = Number(barClaim.reference) || 0;
+  if (barDelta !== null && barDelta !== 0 && barRef > 0 && a.msrpBasis === "exact") {
     need(58);
     const barH = 10, barY = y - 4;
-    const lo = Math.min(qp, ms), hi = Math.max(qp, ms);
+    // Rail against the figure the delta was actually measured against, not the
+    // ex-freight MSRP -- otherwise the marks and the number disagree.
+    const lo = Math.min(qp, barRef), hi = Math.max(qp, barRef);
     const pad = Math.max((hi - lo) * 0.2, 60);
     const lo2 = lo - pad, hi2 = hi + pad, span = (hi2 - lo2) || 1;
     const xFor = (v: number) => M + ((v - lo2) / span) * W;
@@ -1622,10 +1656,10 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     // the page: the first light build used the same ~0.9-luminance tint as the
     // rail and the shaded gap disappeared. This is a stronger tint of the same
     // accent, chosen to read against RAIL rather than against white.
-    const over = delta > 0, gapColor = over ? CORAL : TEAL,
+    const over = barDelta > 0, gapColor = over ? CORAL : TEAL,
           gapBg = over ? rgb(0.953, 0.769, 0.690) : rgb(0.655, 0.871, 0.839);
     page.drawRectangle({ x: M, y: barY - barH, width: W, height: barH, color: RAIL });
-    const xMsrp = xFor(ms), xAsk = xFor(qp);
+    const xMsrp = xFor(barRef), xAsk = xFor(qp);
     const gx0 = Math.min(xMsrp, xAsk), gx1 = Math.max(xMsrp, xAsk);
     page.drawRectangle({ x: gx0, y: barY - barH, width: Math.max(gx1 - gx0, 1), height: barH, color: gapBg });
     page.drawLine({ start: { x: xMsrp, y: barY + 5 }, end: { x: xMsrp, y: barY - barH - 5 }, thickness: 1.6, color: INK });
@@ -1633,8 +1667,8 @@ async function buildReportPdf(a: any, verifyUrl?: string, sealedShot?: SealedSho
     page.drawLine({ start: { x: xAsk, y: barY + 5 }, end: { x: xAsk, y: barY - barH - 5 }, thickness: 2.2, color: gapColor });
     page.drawCircle({ x: xAsk, y: barY - barH / 2, size: 3.6, color: gapColor });
     y = barY - barH - 16;
-    const label = (over ? "+" : "-") + money(Math.abs(delta)) + (over ? " OVER MSRP" : " UNDER MSRP");
-    const pct = ms ? ` -- ${Math.abs(delta / ms * 100).toFixed(1)}%` : "";
+    const label = (over ? "+" : "-") + money(Math.abs(barDelta)) + (over ? " OVER MSRP" : " UNDER MSRP");
+    const pct = barRef ? ` -- ${Math.abs(barDelta / barRef * 100).toFixed(1)}%` : "";
     T(label + pct, { size: 12.5, font: sansB, color: gapColor });
     if (!priceVerified) { const wl = wSafe(sansB, label + pct, 12.5); Tat("(vs catalog MSRP - listing price not yet verified)", y - 12, { x: M + wl + 8, size: 8.5, font: sans, color: FAINT }); }
     y -= 24;
