@@ -164,6 +164,118 @@ and the rest still land on the CLI's exit code alone.
 ---
 ---
 
+## 2026-09-23 — the JPEG reader had never been shown a JPEG
+
+**Shapes:** A guard that cannot fail · A happy path that hides a branch
+
+The replica audit of `scripts/test-*.mjs` (2026-09-22, PR #527) asked one
+question: does this suite test production, or its own copy of it? The same
+question, asked of the 24 edge-function suites in `supabase/functions/_shared`.
+
+**None of them is a replica.** All 24 import the module they are named for and
+call it — 23 statically, and `scrapfly-render.test.ts` through
+`await import("./scrapfly.ts")`, because it has to install the `Deno` global
+and the `fetch` stub before the module body runs. A first pass that scanned
+only static imports called that one "imports nothing", which is the wrong
+conclusion about the right file; the scan was fixed rather than the file.
+
+`test:recalls` is the one suite not in `gates.yml`. That is deliberate and
+documented at the top of the workflow — it queries Transport Canada live — and
+the workflow already records the cost in its own words: *"it sat red on main
+for a week after aa6183a — nothing was watching the one gate nothing runs."*
+Left alone.
+
+### What mutation found that reading would not
+
+Since no suite was a replica, the instrument had to measure something finer:
+**for each suite, flip real decisions in the module it covers and see whether
+it notices.** 360 mutations across 22 suites, 188 caught — 52%.
+
+A raw score is not a defect. Most surviving mutants anywhere are equivalent, or
+sit in code a narrowly-scoped suite never claimed to cover;
+`test:scrapfly-render` scored 0% until the mutations were restricted to the
+render budget it actually pins, because `scrapfly.ts` is 992 lines and the
+sample kept landing in `rescueListingViaScrapfly`. The score is a place to
+look, not a verdict.
+
+**`test:vision-limits` was the lowest, and the reason was specific.**
+
+`vision-limits.ts` exists because of one failure: a Stampede Toyota listing
+that came back *"This dealer site may be blocking automated access"* when the
+dealer was blocking nothing. The real cause was an HTTP 400 from Anthropic — a
+malformed request, ours — from posting an oversized screenshot. The module
+decides, before the request, whether an image will be refused.
+
+`jpegDimensions` is the 35 lines inside it that walk a JPEG's marker chain.
+It was added because the guard measured PNGs only, **and Scrapfly returns JPEG
+by default** — so the guard written to stop a 17,729px capture was blind to the
+only format we ever produce.
+
+Every case in the suite used a PNG, or `"A".repeat(n)`. `"A".repeat(n)` is not
+a JPEG: it fails the SOI test on its first two bytes and lands on the byte
+ceiling. **So the function had no case exercising it at all.** Its SOI test,
+its marker walk, its DHT trap and its scan budget could each be broken with the
+suite green — inverting the SOI comparison survived.
+
+The file's own comment still read *"the gate that fires on a JPEG, where
+dimensions aren't cheap"*. That describes the module **before** `jpegDimensions`
+existed. The prose and the checks beneath it had both outlived the behaviour —
+the same shape as the replica's *"Mirrors the gate in tci-stack.mjs"*, except
+here the sentence was true once.
+
+**Production is correct.** Checked against real JPEG headers before anything was
+edited: a 1280x17729 JPEG is refused on dimensions today. This was coverage, not
+a live bug, and saying which is the difference between a fix and a false alarm.
+
+### The one-character version of the original failure
+
+`len < 2` guards the segment-length read, written against a length of 0 that
+would never advance the walk. Moved to `len <= 2`, an empty segment ends the
+walk instead of being stepped over: the frame header behind it is never reached,
+the dimensions come back unreadable, and the verdict falls through to the byte
+ceiling — where a tall page, which compresses well, passes. A 17,729px capture
+reaches Anthropic, 400s, and the buyer is told the dealer is blocking us.
+
+One character, and the suite was green either way.
+
+10 checks became 39: real JPEG fixtures (plain, behind filler segments,
+progressive SOF2, SOF15, restart markers, zero-payload segment), the DHT/JPG/DAC
+traps, the bounded scan, zero-dimension headers, and the exact edges of the
+byte, pixel and long-edge limits. **14% → 97%**, the single survivor equivalent
+(at `i+9 === head.length` every index read is still valid, so the mutant is
+strictly more permissive and equally safe).
+
+### Still open
+
+The other low scorers are recorded rather than fixed, because a low score on a
+whole module is a place to look and not yet a finding. Worth working down, in
+this order — `marketvalue.ts` first, since it is 890 lines that decide dollar
+figures, and `no-llm-generated-valuation-numbers` means those figures have no
+second author to catch them:
+
+| suite | score | module |
+|---|---|---|
+| `test:market-value` | 14% | `marketvalue.ts` (890 lines) |
+| `test:deal` | 29% | `deal.ts`, `docfee.ts` |
+| `test:model-identity` | 36% | `model-identity.js` |
+| `test:multi-vehicle` | 39% | `multi-vehicle.ts`, `jsonld-vehicle.js` |
+| `test:report-auth` | 40% | `report-auth.ts`, `report-sign.ts` |
+| `test:value-canonical` | 43% | `report-sign.ts` |
+| `test:scrapfly-render` | 13% scoped | `scrapfly.ts` render budget + `attachSealedScreenshot` |
+
+No blanket coverage threshold was added. A number chosen to make today's suites
+pass is *a guard calibrated from imagination*, and the shape it would encourage
+— cases written to move a percentage — is worse than the gap.
+
+### Landed
+
+| | |
+|---|---|
+| `3b23f4e` | the JPEG reader is tested with an actual JPEG |
+
+---
+---
+
 ## 2026-09-22 — the freight was the accusation, and 22 migrations were holding a knife
 
 **Shapes:** One-surface fix · A guard that cannot fail · Green signal, no check ·
