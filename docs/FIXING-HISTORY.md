@@ -295,9 +295,18 @@ listing names a grade, the row must name one that overlaps it.
 did".** Some models really are sold as one trim split by drivetrain, and the
 catalogue stores that row as `"AWD"`. `test:trim` already pinned that, and the
 first version of this fix broke it — **the existing suite caught the
-over-correction before it shipped**, which is the first time in this log a gate
-has stopped a fix rather than a regression. There is no better-named row such a
-row could have lost to, so it still identifies the car.
+over-correction before it shipped**. There is no better-named row such a row
+could have lost to, so it still identifies the car.
+
+*(Correction, same day: this entry first called that the first time in this log
+a gate had stopped a FIX rather than a regression. It was the second time that
+day. Hours earlier, `test:fee-stack` refused the first version of the
+`all_in_price` fix in PR #517, which stripped `attrs.all_in_breakdown` along
+with the claim — its fixture is one of the 38 hand-seeded rows, so deleting the
+evidence with the assertion failed immediately. The claim was written from
+memory of this entry's own session rather than checked against the log, which is
+the thing this file exists to stop. Left in place and corrected rather than
+edited away: entries are never deleted.)*
 
 The figure is untouched throughout; this decides the LABEL, the way
 `hasMoreSpecificSibling` does. A row we cannot confirm is still the best answer
