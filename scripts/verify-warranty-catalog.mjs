@@ -22,7 +22,7 @@
 
 import { politeFetch, requestLedger } from "./lib/polite-fetch.mjs";
 import { pdfText, looksLikePdf } from "./lib/pdf-text.mjs";
-import { verifyRow, htmlToText } from "./lib/warranty-verify.mjs";
+import { verifyRowFields, rowSourceUrls, htmlToText, VERIFY_FIELDS } from "./lib/warranty-verify.mjs";
 
 const PROJECT_REF = "debigtyjhjamipooajhk";
 const DRY = process.argv.includes("--dry-run");
@@ -84,7 +84,7 @@ async function readPage(url) {
 async function main() {
   const sel = await runSql(
     `select make, basic_coverage, powertrain_coverage, corrosion_coverage,
-            roadside_assistance, hybrid_ev_coverage, source_url,
+            roadside_assistance, hybrid_ev_coverage, source_url, field_sources,
             verify_status as prev_status
        from public.manufacturer_warranties order by make;`);
   const rows = Array.isArray(sel) ? sel : [];
@@ -93,22 +93,40 @@ async function main() {
 
   const results = [];
   for (const row of rows) {
-    let page = null, http = null, why = null;
-    if (row.source_url) ({ page, http, why } = await readPage(row.source_url));
-    // The HTTP code travels with the page, so a refusal (403) can be told apart
+    // A row may cite a different document per figure (field_sources). Each
+    // DISTINCT url is fetched once, so a make with two sources costs two
+    // requests and a make with one still costs one.
+    const urls = rowSourceUrls(row);
+    const fetched = {};
+    let firstWhy = null, firstHttp = null;
+    for (const u of urls) {
+      const got = await readPage(u);
+      fetched[u] = { page: got.page, http: got.http };
+      if (firstHttp == null) firstHttp = got.http;
+      if (!firstWhy && got.page == null && got.why) firstWhy = got.why;
+      await sleep(PAUSE_MS);
+    }
+    // The HTTP code travels with each page, so a refusal (403) can be told apart
     // from a dead link (404) and from a network that simply failed.
-    const v = verifyRow(row, page, http);
-    const note = page == null && why ? `${v.note} (${why})` : v.note;
-    results.push({ make: row.make, status: v.status, note, http, url: row.source_url, prev: row.prev_status || null });
-    const mark = { confirmed: "ok  ", drifted: "DRIFT", unreachable: "....", blocked: "BLOCK", dead_link: "DEAD ", cites_document: "PAPER", bad_url: "BADURL", no_source: "NOSRC", unparsed: "?????", empty_row: "empty" }[v.status] || "?";
+    const v = verifyRowFields(row, fetched);
+    const note = firstWhy && v.status !== "confirmed" ? `${v.note} (${firstWhy})` : v.note;
+    // Figures, not rows. A partial row is partly read and partly not, and the
+    // threshold in finish() has to see both halves.
+    const live = VERIFY_FIELDS.filter((f) => v.fields[f] && v.fields[f].state !== "absent");
+    const unread = live.filter((f) => v.fields[f].state === "unread");
+    results.push({
+      make: row.make, status: v.status, note, http: firstHttp,
+      url: urls.join(" , ") || row.source_url, prev: row.prev_status || null,
+      live: live.length, unread: unread.length,
+    });
+    const mark = { confirmed: "ok  ", partial: "PART ", drifted: "DRIFT", unreachable: "....", blocked: "BLOCK", dead_link: "DEAD ", cites_document: "PAPER", bad_url: "BADURL", no_source: "NOSRC", unparsed: "?????", empty_row: "empty" }[v.status] || "?";
     console.log(`  ${mark}  ${row.make.padEnd(16)} ${v.status === "confirmed" ? "" : note}`);
-    if (row.source_url) await sleep(PAUSE_MS);
   }
 
   const by = (s) => results.filter((r) => r.status === s);
   // Counted separately on purpose. Lumping them under one word hid that only
   // four of twenty were ours to fix.
-  console.log(`\n  confirmed ${by("confirmed").length}  ·  drifted ${by("drifted").length}` +
+  console.log(`\n  confirmed ${by("confirmed").length}  ·  partly confirmed ${by("partial").length}  ·  drifted ${by("drifted").length}` +
     `  ·  blocked by the maker ${by("blocked").length}  ·  cites paper ${by("cites_document").length}` +
     `  ·  dead link ${by("dead_link").length}  ·  bad url ${by("bad_url").length}` +
     `  ·  unreachable ${by("unreachable").length}  ·  no source ${by("no_source").length}  ·  unparsed ${by("unparsed").length}`);
@@ -153,6 +171,24 @@ function finish(results) {
   const NOT_READ = ["unreachable", "blocked", "dead_link", "bad_url", "cites_document", "no_source"];
   const unreachable = results.filter((r) => NOT_READ.includes(r.status));
   const noSource = results.filter((r) => r.status === "no_source");
+
+  /* AND THE SAME TRAP A SECOND TIME, FOR THE SAME REASON.
+   *
+   * The comment above records that splitting one status into five nearly
+   * loosened this threshold silently. field_sources splits it again, along a
+   * different axis: a row is no longer read or unread, it can be BOTH. Lexus
+   * verifies three figures against one page and its roadside figure against
+   * another, and if that second page fails, counting ROWS scores the make as
+   * fully read.
+   *
+   * So the count moves to FIGURES, which is what the message always claimed
+   * to be counting and was not. Each row reports how many figures it holds
+   * and how many went unread, and the threshold reads those. With one source
+   * per row the two are identical, so nothing about the current catalogue
+   * changes. [[no-single-point-of-failure]]
+   */
+  const figuresLive = results.reduce((n, r) => n + (r.live || 0), 0);
+  const figuresUnread = results.reduce((n, r) => n + (r.unread || 0), 0);
 
   // A RED RUN IS THE REPORT. Nothing here emails anyone.
   //
@@ -199,9 +235,12 @@ function finish(results) {
   // A catalogue we could not check is not a verified catalogue. Tolerate a few
   // client-rendered or flaky pages; refuse to call a run green when most of the
   // makes went unread, because "0 drifted" would then mean "0 examined".
-  if (unreachable.length > results.length / 2) {
-    console.error(`\n${unreachable.length} of ${results.length} figures were not re-read (blocked, dead, unfetchable or uncited). "No drift" here means "nothing was checked" — treating that as green is the defect this job exists to prevent.`);
+  if (figuresUnread > figuresLive / 2) {
+    console.error(`\n${figuresUnread} of ${figuresLive} figures were not re-read (blocked, dead, unfetchable or uncited). "No drift" here means "nothing was checked" — treating that as green is the defect this job exists to prevent.`);
     process.exit(1);
+  }
+  if (figuresUnread) {
+    console.log(`\n${figuresLive - figuresUnread} of ${figuresLive} figures re-read against the document that states them.`);
   }
   if (noSource.length) console.warn(`\n${noSource.length} row(s) cite no source_url: ${noSource.map((r) => r.make).join(", ")}`);
   // A dead citation is its own problem: the figure may be right, but the page we
