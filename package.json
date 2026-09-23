@@ -101,6 +101,7 @@
     "test:migration-assert": "node scripts/test-migration-assert.mjs",
     "test:migration-destructive": "node scripts/test-migration-destructive.mjs",
     "test:no-raw-msrp-delta": "node scripts/test-no-raw-msrp-delta.mjs",
+    "test:all-in-not-synthesised": "node scripts/test-all-in-not-synthesised.mjs",
     "check:row-identity": "node scripts/check-migration-row-identity.mjs",
     "test:trim-identity": "node scripts/test-trim-identity.mjs",
     "test:comps-nameplate": "node scripts/test-comps-nameplate.mjs",

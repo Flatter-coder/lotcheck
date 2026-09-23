@@ -508,6 +508,17 @@ jobs:
       # gate returns -$29 — a sign flip on the headline of a signed report.
       - name: No surface subtracts an MSRP by hand; guarded ones keep their guard
         run: npm run test:no-raw-msrp-delta
+      # all_in_price is the manufacturer's own all-in figure, and the report
+      # PREFERS it over msrp because an Alberta advertised price is all-in by
+      # law. from_prices publishes ONE model code per series — the base config —
+      # and that fee stack was being added to every sibling trim. Measured
+      # 2026-09-22: 39 of 40 multi-row series carried a perfectly constant
+      # delta, 136 rows. A constant cannot represent the federal luxury
+      # surcharge, which runs ~$5,200 to $9,600 across the 2026 Lexus LC ladder.
+      # We never sum components into an all-in price; a basis is declared by its
+      # source or it is absent.
+      - name: all_in_price is published by the maker, never assembled by us
+        run: npm run test:all-in-not-synthesised
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that
