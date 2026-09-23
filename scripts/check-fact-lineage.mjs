@@ -135,8 +135,12 @@ const BASELINE = {
     "supabase/functions/analyze-listing-url/index.ts::buildSm360FallbackAnalysis",
     "supabase/functions/analyze-quote/index.ts::buildAnalysis",
   ],
+  // Was an inline block in enrichAnalysisInner, and a SECOND inline block in
+  // analyze-quote that had drifted — the quote copy collapsed "could not tell"
+  // into "not all-in" and subtracted. One shared resolver now, so this fact has
+  // exactly one author by construction rather than by pin.
   allInPricing: [
-    "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
+    "supabase/functions/_shared/jurisdiction.ts::applyAllInResolution",
   ],
   capturedAt: [
     "src/App.jsx::EvidenceCard",
@@ -194,7 +198,7 @@ const BASELINE = {
   marketCount: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::captureMarketCount",
-    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
+    "supabase/functions/analyze-quote/index.ts::anon#93163b77",
   ],
   marketValue: [
     "supabase/functions/_shared/invariants.ts::repair",
@@ -215,14 +219,14 @@ const BASELINE = {
   olderYears: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
-    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
+    "supabase/functions/analyze-quote/index.ts::anon#93163b77",
   ],
   pageDefault: [
     "supabase/functions/_shared/invariants.ts::repair",
     "supabase/functions/analyze-listing-url/index.ts::anon#11f75de3",
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
     "supabase/functions/analyze-listing-url/index.ts::buildJsonLdFallbackAnalysis",
-    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
+    "supabase/functions/analyze-quote/index.ts::anon#93163b77",
   ],
   priceDisclosure: [
     "supabase/functions/analyze-listing-url/index.ts::buildConvertusVmsFallbackAnalysis",
@@ -255,7 +259,7 @@ const BASELINE = {
   ],
   recalls: [
     "supabase/functions/analyze-listing-url/index.ts::enrichAnalysisInner",
-    "supabase/functions/analyze-quote/index.ts::anon#9b9ed010",
+    "supabase/functions/analyze-quote/index.ts::anon#93163b77",
     "supabase/functions/value-report/index.ts::anon#831ecb02",
   ],
   sourceUrl: [
