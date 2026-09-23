@@ -539,6 +539,16 @@ jobs:
       # canada-terms.ts:45 records "the the provincial registry".
       - name: A refusal reads correctly even with no make
         run: npm run test:refusal-copy
+      # Whether the dealer's province advertises all-in decides whether freight
+      # and levies sit INSIDE the asking price. resolveAllInAuthority returns
+      # null for three different situations — city unresolved, province not
+      # all-in, no benchmark — and analyze-quote's `if (ai)` collapsed all three
+      # into an absent allInPricing, which qualifyMsrpClaim reads as "not all-in"
+      # and subtracts against. That is the Charlesglen defect ($11,173 printed
+      # against a real $8,095 gap), whose fix landed on analyze-listing-url only.
+      # One shared resolver now, so the two cannot drift again.
+      - name: '"Could not tell" never renders as "not an all-in province"'
+        run: npm run test:quote-basis-unknown
       # 20260916a was applied on 2026-09-16 and reported success. Three of its
       # seven statements matched ZERO rows, because they addressed rows by
       # surrogate id and the daily catalog refresh rotated every id in that

@@ -64,7 +64,7 @@ import { computeReconciliation, computeFinancingTrap, buildCounterScript } from 
 import { normaliseBundledAddOns } from "../_shared/fee-caption.ts";
 import { assessDocFee, resolveAllInAuthority } from "../_shared/docfee.ts";
 import { deriveSaleCondition } from "../_shared/condition.ts";
-import { resolveJurisdiction } from "../_shared/jurisdiction.ts";
+import { resolveJurisdiction, applyAllInResolution } from "../_shared/jurisdiction.ts";
 import { validateVin, assertInvariants } from "../_shared/invariants.ts";
 import { resolveMsrpAuthority } from "../_shared/msrp-authority.js";
 // Whether a manufacturer MSRP may be read as THIS car's sticker today. The rule
@@ -868,7 +868,22 @@ Deno.serve(async (req: Request) => {
     { const df = assessDocFee(analysis); if (df) analysis.docFeeCheck = df; }
     // S25 — all-in label + safeguard: fires on any all-in-province listing, even a
     // clean one, so the report labels the price all-in and the script states the anchor.
-    { const ai = resolveAllInAuthority(analysis.dealerCity); if (ai) analysis.allInPricing = ai; }
+    // "COULD NOT TELL" IS NOT "NOT ALL-IN". resolveAllInAuthority returns null
+    // for three different situations — the city did not resolve, the province
+    // resolved but does not advertise all-in, and we hold no benchmark for it —
+    // and `if (ai)` collapsed all three into an absent allInPricing, which
+    // qualifyMsrpClaim reads as "not an all-in province" and subtracts against.
+    //
+    // That is the Charlesglen defect exactly: an Alberta RAV4 PHEV GR SPORT
+    // whose city failed to extract printed "$11,173 over MSRP" against a real
+    // gap of $8,095, because Toyota's own $3,078 of freight and levies became
+    // the dealer's markup. The fix for it landed on analyze-listing-url ONLY;
+    // this path kept the two-state resolver and so kept the defect.
+    //
+    // isAllInJurisdiction is the shared three-state answer and has been all
+    // along: true / false / null-for-unknown. An absent field is not evidence.
+    applyAllInResolution(analysis);
+
     // Moved here (was right after resolveLeaseRates, before allInPricing
     // above was even resolved) -- same fix as analyze-listing-url:
     // computeLeverageScore's over-MSRP delta needs allInPricing/msrpAllIn

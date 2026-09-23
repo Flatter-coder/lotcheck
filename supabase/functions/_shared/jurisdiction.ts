@@ -150,3 +150,44 @@ export function resolveCity(a: any): string | null {
   return null;
 }
 
+
+/**
+ * Record the all-in basis on an analysis — the SAME way on every path.
+ *
+ * WHY THIS IS A FUNCTION AND NOT A BLOCK IN EACH CALLER. It was a block, twice,
+ * and the two copies disagreed. analyze-listing-url used the three-state
+ * isAllInJurisdiction and set `basisUnknown` when it could not tell.
+ * analyze-quote used `resolveAllInAuthority(city)` behind an `if (ai)`, which
+ * returns null for three different situations — the city did not resolve, the
+ * province does not advertise all-in, and we hold no benchmark — and collapsed
+ * all three into an absent allInPricing. qualifyMsrpClaim reads that as "not an
+ * all-in province" and subtracts.
+ *
+ * That is the Charlesglen defect: a RAV4 PHEV GR SPORT printed "$11,173 over
+ * MSRP" against a real gap of $8,095, because Alberta advertises all-in, the
+ * city failed to extract, and Toyota's own $3,078 of freight and levies became
+ * the dealer's markup. The fix landed on one path and not the other.
+ *
+ * AN ABSENT FIELD IS NOT EVIDENCE. "We could not tell" is a positive finding
+ * and must be recorded as one, so the claim refuses instead of guessing in the
+ * direction that accuses the dealer.
+ *
+ * Mutates and returns `a`, so a caller can keep its one-line shape.
+ */
+export function applyAllInResolution(a: any): any {
+  const { allIn, jurisdiction } = isAllInJurisdiction(a);
+  if (allIn === true) {
+    a.allInPricing = {
+      code: jurisdiction.code,
+      body: jurisdiction.code === "AB" ? "AMVIC" : "provincial regulator",
+      source: `resolved from ${jurisdiction.source}`,
+    };
+  } else if (allIn === false) {
+    a.allInPricing = null;
+    a.allInResolved = jurisdiction;
+  } else {
+    a.basisUnknown = true;
+    a.allInResolved = jurisdiction;
+  }
+  return a;
+}

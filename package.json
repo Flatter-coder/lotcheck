@@ -104,6 +104,7 @@
     "test:all-in-not-synthesised": "node scripts/test-all-in-not-synthesised.mjs",
     "check:assertions-reachable": "node scripts/check-assertions-reachable.mjs",
     "test:refusal-copy": "node scripts/test-refusal-copy.mjs",
+    "test:quote-basis-unknown": "node scripts/test-quote-basis-unknown.mjs",
     "check:row-identity": "node scripts/check-migration-row-identity.mjs",
     "test:trim-identity": "node scripts/test-trim-identity.mjs",
     "test:comps-nameplate": "node scripts/test-comps-nameplate.mjs",
